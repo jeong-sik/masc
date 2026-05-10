@@ -704,7 +704,7 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       | _ -> []
     ) files
 
-let read_cost_entries ~base_path ~since_unix : raw_entry list =
+let read_cost_entries_legacy ~base_path ~since_unix : raw_entry list =
   let path =
     Filename.concat (Common.masc_dir_from_base_path ~base_path) "costs.jsonl"
   in
@@ -735,6 +735,49 @@ let read_cost_entries ~base_path ~since_unix : raw_entry list =
         let bt = Printexc.get_raw_backtrace () in
         Printexc.raise_with_backtrace exn bt
     | _ -> []
+
+(** Format a Unix timestamp (UTC) as ["YYYY-MM-DD"] for [Dated_jsonl.read_range]. *)
+let date_string_of_unix ts =
+  let open Unix in
+  let tm = gmtime ts in
+  Printf.sprintf "%04d-%02d-%02d"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+
+let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
+  let dir =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path) "costs"
+  in
+  if not (Sys.file_exists dir) then []
+  else
+    let store = Dated_jsonl.create ~base_dir:dir () in
+    let now = Unix.gettimeofday () in
+    let since = date_string_of_unix since_unix in
+    let until = date_string_of_unix now in
+    try
+      Dated_jsonl.read_range store ~since ~until
+      |> List.filter_map (fun json ->
+        try parse_cost_entry json ~since_unix
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Printexc.raise_with_backtrace exn bt
+    | _ -> []
+
+(** Read cost ledger entries from both the legacy single-file
+    [masc_root/costs.jsonl] and the date-split
+    [masc_root/costs/YYYY-MM/DD.jsonl] tree, merging the two streams.
+
+    The migration to [Dated_jsonl] (Tier A T4) keeps the legacy file
+    readable so historic 14k+ entries are not dropped from
+    cost-summary reports.  Operators may archive the legacy file at
+    any time once they are satisfied that all queries that mattered to
+    them only touch dates after the cut-over. *)
+let read_cost_entries ~base_path ~since_unix : raw_entry list =
+  let legacy = read_cost_entries_legacy ~base_path ~since_unix in
+  let dated = read_cost_entries_dated ~base_path ~since_unix in
+  legacy @ dated
 
 let same_int_opt a b =
   match a, b with

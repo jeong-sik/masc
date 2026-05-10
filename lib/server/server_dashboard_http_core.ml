@@ -420,41 +420,64 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     let mode =
       if lightweight_summary then Inline_shared else Offloaded_readonly
     in
-    match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
-      Ok
-        (run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock
-           ~config:state.Mcp_server.room_config
-           (fun ~config ~sw ->
-             let ctx : _ Operator_control.context =
-               {
-                 config;
-                 agent_name = Option.value ~default:"dashboard" actor;
-                 sw;
-                 clock;
-                 proc_mgr = state.Mcp_server.proc_mgr;
-                 net = state.Mcp_server.net;
-                 mcp_session_id = None;
-               }
-             in
-            Operator_control.snapshot_json ?actor ?view
-               ~include_messages ~include_keepers
-               ~include_summary_fields:(not lightweight_summary)
-               ~lightweight_summary
-               ctx))
-    ) with
-    | Ok json ->
-        with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
-          ~extra:
-            [
-              ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
-            ]
-          json
-    | Error `Timeout ->
-        `Assoc [
-          ("error", `String "timeout");
-          ("message", `String "Operator snapshot timed out after 30s");
-          ("generated_at", `String (Masc_domain.now_iso ()));
-        ]
+    let compute () =
+      match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
+        Ok
+          (run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock
+             ~config:state.Mcp_server.room_config
+             (fun ~config ~sw ->
+               let ctx : _ Operator_control.context =
+                 {
+                   config;
+                   agent_name = Option.value ~default:"dashboard" actor;
+                   sw;
+                   clock;
+                   proc_mgr = state.Mcp_server.proc_mgr;
+                   net = state.Mcp_server.net;
+                   mcp_session_id = None;
+                 }
+               in
+              Operator_control.snapshot_json ?actor ?view
+                 ~include_messages ~include_keepers
+                 ~include_summary_fields:(not lightweight_summary)
+                 ~lightweight_summary
+                 ctx))
+      ) with
+      | Ok json ->
+          with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
+            ~extra:
+              [
+                ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
+              ]
+            json
+      | Error `Timeout ->
+          `Assoc [
+            ("error", `String "timeout");
+            ("message", `String "Operator snapshot timed out after 30s");
+            ("generated_at", `String (Masc_domain.now_iso ()));
+          ]
+    in
+    (* Tier-A perf: parameterized [/api/v1/dashboard/operator/snapshot]
+       requests previously bypassed the cache entirely — every keeper
+       filter / actor view triggered a fresh [run_dashboard_compute]
+       with a 30s timeout.  Under multi-tab dashboard load this was
+       the single largest dashboard-side compute fan-out.  Wrap with
+       a 5s SWR cache keyed on the full parameter tuple so rapid
+       polling (Bond-Web 3s default) hits the cache; mutations
+       continue to invalidate via the existing
+       [Coord_hooks.on_task_mutation_fn] path. *)
+    let cache_key =
+      Printf.sprintf "operator_snapshot:param:%s|%s|%b|%b|%b"
+        (Option.value ~default:"" actor)
+        (Option.value ~default:"" view)
+        include_messages
+        include_keepers
+        lightweight_summary
+    in
+    Dashboard_cache.get_or_compute_with_timeout cache_key
+      ~ttl:5.0 ~clock
+      ~timeout_sec:dashboard_request_timeout_s
+      compute
   end
 
 let operator_digest_http_json ~state ~sw ~clock request =
@@ -490,53 +513,71 @@ let operator_digest_http_json ~state ~sw ~clock request =
     let effective_target_type =
       Option.value ~default:"root" target_type
     in
-    match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
-      Ok
-        (run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
-           ~clock
-           ~config:state.Mcp_server.room_config
-           (fun ~config ~sw ->
-             let ctx : _ Operator_control.context =
-               {
-                 config;
-                 agent_name = Option.value ~default:"dashboard" actor;
-                 sw;
-                 clock;
-                 proc_mgr = state.Mcp_server.proc_mgr;
-                 net = state.Mcp_server.net;
-                 mcp_session_id = None;
-               }
-             in
-             match
-               Operator_control.digest_json ?actor ~target_type:effective_target_type
-                 ?target_id ?include_workers
-                 ctx
-             with
-             | Ok json -> json
-             | Error err ->
-                 `Assoc
-                   [
-                     ("error", `String "validation_error");
-                     ("message", `String err);
-                     ("generated_at", `String (Masc_domain.now_iso ()));
-                   ]))
-    ) with
-    | Ok json ->
+    let compute () =
+      match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
         Ok
-          (with_projection_diagnostics ~surface:"operator_digest" ~started_at
-             ~extra:
-               [
-                 ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
-               ]
-             json)
-    | Error `Timeout ->
-        Ok
-          (`Assoc
+          (run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
+             ~clock
+             ~config:state.Mcp_server.room_config
+             (fun ~config ~sw ->
+               let ctx : _ Operator_control.context =
+                 {
+                   config;
+                   agent_name = Option.value ~default:"dashboard" actor;
+                   sw;
+                   clock;
+                   proc_mgr = state.Mcp_server.proc_mgr;
+                   net = state.Mcp_server.net;
+                   mcp_session_id = None;
+                 }
+               in
+               match
+                 Operator_control.digest_json ?actor ~target_type:effective_target_type
+                   ?target_id ?include_workers
+                   ctx
+               with
+               | Ok json -> json
+               | Error err ->
+                   `Assoc
+                     [
+                       ("error", `String "validation_error");
+                       ("message", `String err);
+                       ("generated_at", `String (Masc_domain.now_iso ()));
+                     ]))
+      ) with
+      | Ok json ->
+          with_projection_diagnostics ~surface:"operator_digest" ~started_at
+            ~extra:
+              [
+                ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
+              ]
+            json
+      | Error `Timeout ->
+          `Assoc
             [
               ("error", `String "timeout");
               ("message", `String "Operator digest timed out after 30s");
               ("generated_at", `String (Masc_domain.now_iso ()));
-            ])
+            ]
+    in
+    (* See [operator_snapshot_http_json] above for the parameterized-cache
+       rationale.  Same 5s SWR window applies to operator/digest views. *)
+    let cache_key =
+      Printf.sprintf "operator_digest:param:%s|%s|%s|%s|%s"
+        (Option.value ~default:"" actor)
+        effective_target_type
+        (Option.value ~default:"" target_id)
+        (match include_workers with
+         | None -> ""
+         | Some true -> "1"
+         | Some false -> "0")
+        ""
+    in
+    Ok
+      (Dashboard_cache.get_or_compute_with_timeout cache_key
+         ~ttl:5.0 ~clock
+         ~timeout_sec:dashboard_request_timeout_s
+         compute)
 
 (* --- Mission proactive refresh ----------------------------------------
    A background fiber recomputes the mission snapshot periodically.

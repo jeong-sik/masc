@@ -16,5 +16,10 @@
  (public_name masc_mcp.cdal)
  (wrapped false)
  (libraries
+  eio
   yojson
-  masc_core))
+  masc_core
+  masc_mcp.config
+  masc_mcp.masc_exec
+  masc_mcp.dated_jsonl
+  masc_mcp.cdal_runtime))

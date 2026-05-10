@@ -41,20 +41,10 @@ let keeper_masc_path_blocked
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  match Keeper_registry.find_by_name keeper_name with
+  match find_registry_meta ~keeper_name ~source_layer:"masc_path_resolver" with
   | None ->
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
-      ~labels:[ "source_layer", "masc_path_resolver"; "field", "registry_missing" ]
-      ();
     Some (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
-  | Some entry ->
-    if not (String.equal entry.meta.name keeper_name) then
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
-        ~labels:[ "source_layer", "masc_path_resolver"; "field", "name_mismatch" ]
-        ();
-    let meta = entry.meta in
+  | Some meta ->
     let is_read_only = Tool_dispatch.is_read_only name in
     let effective_paths =
       if is_read_only

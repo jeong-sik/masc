@@ -6,5 +6,6 @@
 
 val spawn_subscriber
   :  sw:Eio.Switch.t
+  -> clock:[> float Eio.Time.clock_ty ] Eio.Std.r
   -> bus:Agent_sdk.Event_bus.t
   -> unit

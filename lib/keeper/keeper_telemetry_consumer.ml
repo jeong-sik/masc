@@ -15,7 +15,11 @@
 let telemetry_event_counter = "masc_keeper_telemetry_events_consumed_total"
 let telemetry_event_drop_counter = "masc_keeper_telemetry_events_dropped_total"
 
-let spawn_subscriber ~sw ~bus =
+(* drain is non-blocking; loop must yield or it pins the Eio domain and
+   starves co-located fibers (HTTP handlers, lazy startup tasks). *)
+let drain_interval_s = 0.1
+
+let spawn_subscriber ~sw ~clock ~bus =
   let sub =
     Agent_sdk_metrics_bridge.subscribe
       ~purpose:"telemetry_consumer"
@@ -58,6 +62,7 @@ let spawn_subscriber ~sw ~bus =
            Log.Keeper.warn
              "telemetry_consumer: drain iteration failed: %s"
              (Printexc.to_string exn));
+      Eio.Time.sleep clock drain_interval_s;
       loop ()
     in
     loop ())

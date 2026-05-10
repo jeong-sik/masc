@@ -200,7 +200,7 @@ type catalog_entry = {
   name : string;
   keeper_assignable : bool;
   fallback_cascade : string option;
-  required_capability_profile : Cascade_capability_profile.profile option;
+  required_capability_profile : string option;
 }
 
 module StringMap = Map.Make (String)
@@ -263,7 +263,7 @@ let split_catalog_key key =
    when multiple profiles are misconfigured. *)
 type capability_profile_parse =
   | Cp_unset
-  | Cp_set of Cascade_capability_profile.profile
+  | Cp_set of string
   | Cp_invalid of string
 
 type catalog_builder = {
@@ -491,7 +491,6 @@ let load_catalog ~config_path =
                       (known: %s)"
                      name raw
                      (Cascade_capability_profile.all_profiles
-                      |> List.map Cascade_capability_profile.profile_to_string
                       |> String.concat ", "))
             | _ -> None)
           active_builders

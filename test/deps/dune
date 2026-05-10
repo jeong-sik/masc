@@ -42,6 +42,8 @@
    ;; test_cdal_types / test_labeling / test_adversarial_eval and other
    ;; consumers keep resolving these unprefixed module names.
    (re_export masc_mcp.cdal)
+   ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
+   (re_export masc_mcp.cascade_decl)
    (re_export masc_mcp.ag_ui)
    (re_export masc_mcp.config)
    (re_export masc_mcp.fs_compat)

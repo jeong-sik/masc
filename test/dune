@@ -32,6 +32,7 @@
         test_keeper_turn_disposition
         test_keeper_turn_terminal_disposition_field
         test_attempt_state
+        test_actor_mailbox
         test_sse test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -269,6 +270,7 @@
           test_keeper_turn_disposition
           test_keeper_turn_terminal_disposition_field
           test_attempt_state
+          test_actor_mailbox
           test_sse test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn

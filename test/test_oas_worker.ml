@@ -2074,7 +2074,7 @@ let leaking_test_transport_factory ~sw : Llm_provider.Llm_transport.t =
         leak_one_pipe ();
         { Llm_provider.Llm_transport.response; latency_ms = Some 0 });
     complete_stream =
-      (fun ~on_event:_ _req ->
+      (fun ?on_telemetry:_ ~on_event:_ _req ->
         leak_one_pipe ();
         response);
   }

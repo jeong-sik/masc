@@ -24,19 +24,36 @@ open Tool_schemas_specs_types
    SSOT. *)
 
 let config_category_enum_strings =
-  [ "server"; "auth"; "transport"; "storage"; "runtime"
-  ; "rate_limiting"; "inference"; "keeper"; "keeper_execution"
-  ; "keeper_guardrails"; "autonomy"; "level2"; "dashboard"
-  ; "economy"; "governance"; "channel"; "process"; "worker"
-  ; "web_search"; "session"
+  [ "server"
+  ; "auth"
+  ; "transport"
+  ; "storage"
+  ; "runtime"
+  ; "rate_limiting"
+  ; "inference"
+  ; "keeper"
+  ; "keeper_execution"
+  ; "keeper_guardrails"
+  ; "autonomy"
+  ; "level2"
+  ; "dashboard"
+  ; "economy"
+  ; "governance"
+  ; "channel"
+  ; "process"
+  ; "worker"
+  ; "web_search"
+  ; "session"
   ]
+;;
 
 let masc_config_spec : tool_spec =
   { name = "masc_config"
   ; description =
-      "Return the effective runtime configuration with source attribution (env var or default) for each setting. \
-Sensitive values (tokens, passwords) are masked. Use to inspect or verify the server config without restarting. \
-Pass category to filter results to a single section."
+      "Return the effective runtime configuration with source attribution (env var or \
+       default) for each setting. Sensitive values (tokens, passwords) are masked. Use \
+       to inspect or verify the server config without restarting. Pass category to \
+       filter results to a single section."
   ; parameters =
       [ { p_name = "category"
         ; p_type = T_string { enum = Some config_category_enum_strings }
@@ -46,12 +63,13 @@ Pass category to filter results to a single section."
       ]
   ; additional_properties = false
   }
+;;
 
 let masc_code_read_spec : tool_spec =
   { name = "masc_code_read"
   ; description =
-      "Read a file with offset/limit pagination for large files. \
-Use when inspecting source code during task execution without loading the entire file into context."
+      "Read a file with offset/limit pagination for large files. Use when inspecting \
+       source code during task execution without loading the entire file into context."
   ; parameters =
       [ { p_name = "path"
         ; p_type = T_string { enum = None }
@@ -71,11 +89,13 @@ Use when inspecting source code during task execution without loading the entire
       ]
   ; additional_properties = false
   }
+;;
 
 let masc_tool_help_spec : tool_spec =
   { name = "masc_tool_help"
   ; description =
-      "Return canonical help text, parameters, and metadata for a specific MASC tool by name."
+      "Return canonical help text, parameters, and metadata for a specific MASC tool by \
+       name."
   ; parameters =
       [ { p_name = "tool_name"
         ; p_type = T_string { enum = None }
@@ -85,33 +105,38 @@ let masc_tool_help_spec : tool_spec =
       ]
   ; additional_properties = false
   }
+;;
 
 let phase2_specs : tool_spec list =
   [ masc_config_spec; masc_code_read_spec; masc_tool_help_spec ]
+;;
 
 (* === Emit helpers ==================================================== *)
 
 let buf_addf buf fmt = Printf.ksprintf (Buffer.add_string buf) fmt
 
 let emit_header buf =
-  Buffer.add_string buf
+  Buffer.add_string
+    buf
     "(* GENERATED - DO NOT EDIT.\n\
     \   Source: bin/gen_tool_descriptors.ml (RFC-0057 Phase 1).\n\
-    \   To regenerate: dune build *)\n\
-     \n\
-     open Masc_domain\n\
-     \n"
+    \   To regenerate: dune build *)\n\n\
+     open Masc_domain\n\n"
+;;
 
 let emit_enum_list buf strings =
   Buffer.add_string buf "`List [";
-  List.iteri (fun i s ->
-    if i > 0 then Buffer.add_string buf "; ";
-    buf_addf buf "`String %S" s
-  ) strings;
+  List.iteri
+    (fun i s ->
+       if i > 0 then Buffer.add_string buf "; ";
+       buf_addf buf "`String %S" s)
+    strings;
   Buffer.add_string buf "]"
+;;
 
 let emit_param_property buf p =
-  let type_label = match p.p_type with
+  let type_label =
+    match p.p_type with
     | T_string _ -> "string"
     | T_int _ -> "integer"
     | T_bool -> "boolean"
@@ -126,20 +151,23 @@ let emit_param_property buf p =
    | _ -> ());
   buf_addf buf "          (\"description\", `String %S);\n" p.p_description;
   Buffer.add_string buf "        ]);\n"
+;;
 
 let emit_required buf params =
-  let req = List.filter_map
-    (fun p -> if p.p_required then Some p.p_name else None) params
+  let req =
+    List.filter_map (fun p -> if p.p_required then Some p.p_name else None) params
   in
   match req with
   | [] -> ()
   | _ ->
     Buffer.add_string buf "      (\"required\", `List [";
-    List.iteri (fun i name ->
-      if i > 0 then Buffer.add_string buf "; ";
-      buf_addf buf "`String %S" name
-    ) req;
+    List.iteri
+      (fun i name ->
+         if i > 0 then Buffer.add_string buf "; ";
+         buf_addf buf "`String %S" name)
+      req;
     Buffer.add_string buf "]);\n"
+;;
 
 let emit_tool_schema buf spec =
   Buffer.add_string buf "  {\n";
@@ -148,22 +176,22 @@ let emit_tool_schema buf spec =
   Buffer.add_string buf "    input_schema = `Assoc [\n";
   Buffer.add_string buf "      (\"type\", `String \"object\");\n";
   (match spec.parameters with
-   | [] ->
-     Buffer.add_string buf "      (\"properties\", `Assoc []);\n"
+   | [] -> Buffer.add_string buf "      (\"properties\", `Assoc []);\n"
    | params ->
      Buffer.add_string buf "      (\"properties\", `Assoc [\n";
      List.iter (emit_param_property buf) params;
      Buffer.add_string buf "      ]);\n");
   emit_required buf spec.parameters;
-  buf_addf buf "      (\"additionalProperties\", `Bool %b);\n"
-    spec.additional_properties;
+  buf_addf buf "      (\"additionalProperties\", `Bool %b);\n" spec.additional_properties;
   Buffer.add_string buf "    ];\n";
   Buffer.add_string buf "  };\n"
+;;
 
 let emit_schemas_list buf specs =
   Buffer.add_string buf "let schemas : tool_schema list = [\n";
   List.iter (emit_tool_schema buf) specs;
   Buffer.add_string buf "]\n"
+;;
 
 (* === Entry point ===================================================== *)
 
@@ -172,3 +200,4 @@ let () =
   emit_header buf;
   emit_schemas_list buf phase2_specs;
   print_string (Buffer.contents buf)
+;;

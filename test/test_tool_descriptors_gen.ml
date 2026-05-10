@@ -101,10 +101,7 @@ let () =
     [ ( "masc_config field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_config_name_matches
         ; Alcotest.test_case "description" `Quick test_masc_config_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_config_input_schema_matches
+        ; Alcotest.test_case "input_schema" `Quick test_masc_config_input_schema_matches
         ] )
     ; ( "masc_code_read field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_code_read_name_matches

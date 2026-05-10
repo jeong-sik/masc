@@ -10,7 +10,10 @@
 
 type param_type =
   | T_string of { enum : string list option }
-  | T_int of { min : int option; max : int option }
+  | T_int of
+      { min : int option
+      ; max : int option
+      }
   | T_bool
 
 type param =

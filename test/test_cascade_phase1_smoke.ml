@@ -4,9 +4,7 @@
     [load_catalog] when the JSON contains a ["profiles"] section, and that
     the declared profile resolves and satisfies correctly.
 
-    Uses a test cascade config ([.tmp/phase1-smoke/cascade.json]) that
-    declares a [strict_plus] profile requiring [inline_tools] +
-    [runtime_mcp_tools].
+    Generates a minimal cascade config fixture at runtime under [.tmp/].
 
     @since RFC-0058 Phase 1 *)
 
@@ -15,7 +13,8 @@ module CP = Masc_mcp.Cascade_capability_profile
 module CCL = Masc_mcp.Cascade_config_loader
 module PTS = Masc_mcp.Provider_tool_support
 
-let config_path = ".tmp/phase1-smoke/cascade.json"
+let config_dir = ".tmp/phase1-smoke"
+let config_path = config_dir ^ "/cascade.json"
 
 let make_caps ~it ~itc ~rmt ~rte ~rmh : PTS.capabilities =
   { PTS.supports_inline_tools = it;
@@ -35,6 +34,35 @@ let all_on =
 
 let all_off =
   make_caps ~it:false ~itc:false ~rmt:false ~rte:false ~rmh:false
+
+(** Minimal JSON fixture: two catalog entries + a declared profile. *)
+let write_fixture () =
+  let json = {|
+{
+  "profiles": {
+    "strict_plus": {
+      "required_capabilities": ["inline_tools", "runtime_mcp_tools"]
+    }
+  },
+  "big_three_models": ["test:model-a"],
+  "big_three_temperature": 0.5,
+  "big_three_max_tokens": 1024,
+  "big_three_thinking_enabled": false,
+  "big_three_keeper_assignable": true,
+  "big_three_fallback_cascade": null,
+  "test_strict_plus_models": ["test:model-b"],
+  "test_strict_plus_temperature": 0.7,
+  "test_strict_plus_max_tokens": 2048,
+  "test_strict_plus_thinking_enabled": false,
+  "test_strict_plus_keeper_assignable": true,
+  "test_strict_plus_required_capability_profile": "strict_plus"
+}
+|} in
+  (try Unix.mkdir ".tmp" 0o755 with Unix.Unix_error _ -> ());
+  (try Unix.mkdir config_dir 0o755 with Unix.Unix_error _ -> ());
+  let oc = open_out config_path in
+  output_string oc json;
+  close_out oc
 
 let test_load_catalog_succeeds () =
   match CCL.load_catalog ~config_path with
@@ -88,6 +116,7 @@ let test_builtin_profiles_unaffected () =
     (CP.provider_satisfies_named_profile "local" all_off)
 
 let () =
+  write_fixture ();
   let _ = CCL.load_catalog ~config_path in
   run "RFC-0058 Phase 1 smoke"
     [

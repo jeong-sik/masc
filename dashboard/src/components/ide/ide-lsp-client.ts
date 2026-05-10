@@ -8,8 +8,12 @@
  * Only `textDocument/publishDiagnostics` is a server-push notification.
  */
 
-import { EditorView, ViewPlugin, GutterMarker, gutter, type ViewUpdate } from '@codemirror/view'
-import { StateField, StateEffect, type Extension } from '@codemirror/state'
+import {
+  EditorView, ViewPlugin, GutterMarker, gutter,
+  Decoration, type DecorationSet, WidgetType,
+  type ViewUpdate,
+} from '@codemirror/view'
+import { StateField, StateEffect, RangeSetBuilder, type Extension } from '@codemirror/state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -177,6 +181,75 @@ const inlayHintTheme = EditorView.theme({
     marginLeft: '4px',
   },
 })
+
+// ── Inlay Hint Widget ────────────────────────────────────────────
+
+class InlayHintWidget extends WidgetType {
+  constructor(
+    private readonly label: string,
+    private readonly tooltip: string | undefined,
+  ) { super() }
+
+  toDOM() {
+    const span = document.createElement('span')
+    span.className = 'cm-inlayHint'
+    span.textContent = this.label
+    if (this.tooltip) span.title = this.tooltip
+    return span
+  }
+
+  eq(other: InlayHintWidget): boolean {
+    return this.label === other.label && this.tooltip === other.tooltip
+  }
+
+  ignoreEvent(): boolean { return false }
+}
+
+const inlayHintDecorator = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet
+
+    constructor(view: EditorView) {
+      this.decorations = this.build(view)
+    }
+
+    update(update: ViewUpdate) {
+      if (update.startState.field(inlayHintField) !== update.state.field(inlayHintField)
+        || update.docChanged || update.viewportChanged) {
+        this.decorations = this.build(update.view)
+      }
+    }
+
+    private build(view: EditorView): DecorationSet {
+      const hints = view.state.field(inlayHintField)
+      const builder = new RangeSetBuilder<Decoration>()
+      for (const { from, to } of view.visibleRanges) {
+        let pos = from
+        while (pos <= to) {
+          const line = view.state.doc.lineAt(pos)
+          const lineHints = hints.get(line.number)
+          if (lineHints && lineHints.length > 0) {
+            const charOffset = lineHints[0]?.position?.character ?? 0
+            const insertPos = Math.min(line.from + charOffset, line.to)
+            for (const hint of lineHints) {
+              const labelText = typeof hint.label === 'string' ? hint.label : hint.label.value
+              builder.add(
+                insertPos, insertPos,
+                Decoration.widget({
+                  widget: new InlayHintWidget(labelText, hint.tooltip),
+                  side: 1,
+                }),
+              )
+            }
+          }
+          pos = line.to + 1
+        }
+      }
+      return builder.finish()
+    }
+  },
+  { decorations: (v) => v.decorations },
+)
 
 // ── Diagnostic Gutter ────────────────────────────────────────────
 
@@ -564,6 +637,7 @@ export function lspExtension(opts: LspExtensionOpts): Extension {
     codeLensGutter,
     diagnosticGutter,
     inlayHintTheme,
+    inlayHintDecorator,
     lspViewPlugin,
   ]
 }

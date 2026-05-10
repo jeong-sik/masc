@@ -429,15 +429,15 @@ let invoke_disconnect_hook_for session_id =
 
 (** Register a new SSE client.
     Returns (client_id, event_stream, evicted_session_id option).
-    The caller should spawn a fiber that drains [event_stream] and
-    writes events to the transport.  Evicts the oldest client when at
-    capacity.  The client stream/id are allocated once; map installation
-    is linearized via CAS over the immutable registry state.
-    [kind] defaults to [Coordinator] for backward compatibility. *)
-let register ?(kind = Coordinator) session_id ~last_event_id =
+    [?on_disconnect], if supplied, is installed BEFORE the client is
+    published to [clients] — closes the race window where a concurrent
+    [broadcast] could observe the new entry, hit queue overflow, fire
+    [unregister], and find no hook to wake the drain fiber. *)
+let register ?(kind = Coordinator) ?on_disconnect session_id ~last_event_id =
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
   let last_event_id = Atomic.make last_event_id in
   let event_stream = Eio.Stream.create stream_capacity in
+  Option.iter (fun hook -> set_disconnect_hook session_id hook) on_disconnect;
   let base_client = {
     id = client_id;
     kind;

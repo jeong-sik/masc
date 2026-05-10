@@ -736,13 +736,6 @@ let read_cost_entries_legacy ~base_path ~since_unix : raw_entry list =
         Printexc.raise_with_backtrace exn bt
     | _ -> []
 
-(** Format a Unix timestamp (UTC) as ["YYYY-MM-DD"] for [Dated_jsonl.read_range]. *)
-let date_string_of_unix ts =
-  let open Unix in
-  let tm = gmtime ts in
-  Printf.sprintf "%04d-%02d-%02d"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-
 let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
   let dir =
     Filename.concat
@@ -752,8 +745,8 @@ let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
   else
     let store = Dated_jsonl.create ~base_dir:dir () in
     let now = Unix.gettimeofday () in
-    let since = date_string_of_unix since_unix in
-    let until = date_string_of_unix now in
+    let since = Log.format_utc_date_of since_unix in
+    let until = Log.format_utc_date_of now in
     try
       Dated_jsonl.read_range store ~since ~until
       |> List.filter_map (fun json ->

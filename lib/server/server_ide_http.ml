@@ -85,8 +85,8 @@ let build_presence_snapshot state =
   ]
 
 let add_routes router =
-  let router1 =
-    Http.Router.get "/api/v1/ide/annotations" (fun request reqd ->
+  router
+  |> Http.Router.get "/api/v1/ide/annotations" (fun request reqd ->
       with_public_read
         (fun state _req reqd ->
           let uri = Uri.of_string request.target in
@@ -117,10 +117,7 @@ let add_routes router =
           Http.Response.json ~compress:true ~request:request
             (Yojson.Safe.to_string (json_ok json)) reqd)
         request reqd)
-    router
-  in
-  let router2 =
-    Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
+  |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
       with_public_read
         (fun state req reqd ->
           let uri = Uri.of_string request.target in
@@ -176,10 +173,7 @@ let add_routes router =
                   (Yojson.Safe.to_string (json_error "Missing required fields"))
                   reqd))
         request reqd)
-    router1
-  in
-  let router3 =
-    Http.Router.any "/api/v1/ide/annotations/:id" (fun request reqd ->
+  |> Http.Router.any "/api/v1/ide/annotations/:id" (fun request reqd ->
       with_public_read
         (fun state _req reqd ->
           let uri = Uri.of_string request.target in
@@ -206,10 +200,7 @@ let add_routes router =
                 Http.Response.json ~status:`Forbidden ~request:request
                   (Yojson.Safe.to_string (json_error msg)) reqd)
         request reqd)
-    router2
-  in
-  let router4 =
-    Http.Router.get "/api/v1/ide/regions" (fun request reqd ->
+  |> Http.Router.get "/api/v1/ide/regions" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
         let uri = Uri.of_string request.target in
@@ -237,20 +228,16 @@ let add_routes router =
         Http.Response.json ~compress:true ~request:request
           (Yojson.Safe.to_string (json_ok json)) reqd)
       request reqd)
-    router3
-  in
-  let router5 =
-    Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
+  (* [build_presence_snapshot] extracted in main — conflict resolved by taking
+     main's helper call instead of our inline construction. *)
+  |> Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
       with_public_read
         (fun state _req reqd ->
           let snapshot = build_presence_snapshot state in
           Http.Response.json ~compress:true ~request:request
             (Yojson.Safe.to_string (json_ok snapshot)) reqd)
         request reqd)
-    router4
-  in
-  let router6 =
-    Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
+  |> Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
     with_public_read
       (fun state _req inner_reqd ->
         let origin = get_origin request in
@@ -297,6 +284,3 @@ let add_routes router =
         | _ ->
             Httpun.Body.Writer.close writer)
       request reqd)
-    router5
-  in
-  router6

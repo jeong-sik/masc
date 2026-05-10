@@ -52,8 +52,13 @@ val buffer_ttl_seconds : float
 (** {1 Session Management} *)
 
 val register :
-  ?kind:session_kind -> string -> last_event_id:int ->
+  ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
+  string -> last_event_id:int ->
   int * string Eio.Stream.t * string option
+(** [?on_disconnect] is installed atomically with registration via
+    {!set_disconnect_hook} before the client becomes broadcast-visible,
+    so a concurrent queue-overflow [unregister] always finds the hook. *)
+
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit
 

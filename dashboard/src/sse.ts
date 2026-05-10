@@ -15,6 +15,7 @@ import {
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
 import { appendAuditEntry } from './live-store'
 import { parseSSEMessage } from './schemas/sse'
+import { updateKeeperPresenceFromSSE } from './components/ide/keeper-presence-store'
 import { RingBuffer } from './lib/ring-buffer'
 
 import {

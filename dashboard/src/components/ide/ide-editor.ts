@@ -11,6 +11,7 @@ import {
   type LineOwnership,
 } from './keeper-line-ownership-store'
 import type { UnifiedDiffRow } from '../../api/workspace'
+import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import {
   readOnlyExt,
   themeExt,
@@ -42,6 +43,7 @@ interface IdeEditorProps {
   readonly onFindOpen?: () => void
   readonly onFindClose?: () => void
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
+  readonly annotations?: ReadonlyArray<IdeAnnotation>
 }
 
 export interface FindOptions {
@@ -78,6 +80,7 @@ export function IdeEditor({
   onFindOpen,
   onFindClose,
   onKeeperLineSelect,
+  annotations = [],
 }: IdeEditorProps) {
   const [, forceRender] = useState(0)
 
@@ -456,6 +459,7 @@ function CodeMirrorEditor({
   readonly showBlame: boolean
   readonly keepers: ReadonlyArray<string>
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
+  readonly annotations?: ReadonlyArray<IdeAnnotation>
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
@@ -542,7 +546,7 @@ function CodeMirrorEditor({
 
   return html`
     <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>
-      ${showBlame ? BlameTimeline(ownership, keepers) : null}
+      ${showBlame ? BlameTimeline(ownership, keepers, annotations) : null}
       <div ref=${containerRef} class="ide-codemirror-host" />
     </div>
   `
@@ -563,7 +567,9 @@ function syncEditorDocument(view: EditorView, content: string): void {
 function BlameTimeline(
   ownership: ReadonlyMap<number, LineOwnership>,
   keepers: ReadonlyArray<string>,
+  annotations: ReadonlyArray<IdeAnnotation>,
 ) {
+  const annotationCount = annotations.length
   const latestEdit = latestEditMs(ownership)
   const stats = keeperOwnershipStats(ownership, keepers)
   return html`
@@ -595,7 +601,9 @@ function LayerOverlaySummary(
   activeLayerKinds: ReadonlyArray<IdeLayerKind>,
   ownership: ReadonlyMap<number, LineOwnership>,
   keepers: ReadonlyArray<string>,
+  annotations: ReadonlyArray<IdeAnnotation>,
 ) {
+  const annotationCount = annotations.length
   const latestEdit = latestEditMs(ownership)
   return html`
     <div
@@ -629,7 +637,7 @@ function LayerOverlaySummary(
           }}
         >
           <span>${layerLabel(kind)}</span>
-          <span style=${{ color: 'var(--color-fg-muted)' }}>${layerSummary(kind, latestEdit, keepers)}</span>
+          <span style=${{ color: 'var(--color-fg-muted)' }}>${layerSummary(kind, latestEdit, keepers, annotationCount)}</span>
         </span>
       `)}
     </div>
@@ -693,12 +701,12 @@ function layerLabel(kind: IdeLayerKind): string {
   return LAYER_LABEL[kind]
 }
 
-function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>): string {
+function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>, annotationCount: number = 0): string {
   if (kind === 'time') return latestEdit === null ? 'no edits' : `latest ${formatTime(latestEdit)}`
   if (kind === 'parallel') return `${keepers.length} keepers`
   if (kind === 'tools') return '0 anchored'
   if (kind === 'approve') return '0 approval'
-  if (kind === 'notes') return '0 note'
+  if (kind === 'notes') return annotationCount === 1 ? '1 note' : `${annotationCount} notes`
   if (kind === 'cascade') return '0 hits'
   if (kind === 'keeper-trace') return 'stitched trace'
   if (kind === 'explode') return 'exclusive ghost view'

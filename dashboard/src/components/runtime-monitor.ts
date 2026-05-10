@@ -17,6 +17,7 @@ import { Select } from './common/select'
 import { StatTile } from './common/stat-tile'
 import { StatusChip } from './common/status-chip'
 import { TextInput } from './common/input'
+import { Table, type TableColumn } from './common/table'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
@@ -288,6 +289,34 @@ function recentEntryDetail(
   ].filter((value): value is string => Boolean(value))
   return parts.length > 0 ? parts.join(' · ') : null
 }
+
+type RecentEntry = NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number]
+
+const recentEntryColumns: TableColumn<RecentEntry>[] = [
+  {
+    key: 'time',
+    header: 'time',
+    render: (re) => {
+      const detail = recentEntryDetail(re)
+      return html`
+        <div>
+          <div>${re.ts_unix > 0 ? formatTimeHms(re.ts_unix) : '--'}</div>
+          ${detail ? html`<div class="text-3xs text-[var(--color-fg-muted)] mt-0.5">${detail}</div>` : null}
+        </div>
+      `
+    },
+  },
+  { key: 'input_tokens', header: 'in tok', render: (re) => fmtRecentEntryNumber(re, re.input_tokens) },
+  { key: 'output_tokens', header: 'out tok', render: (re) => fmtRecentEntryNumber(re, re.output_tokens) },
+  {
+    key: 'latency_ms',
+    header: 'latency',
+    render: (re) => re.latency_ms == null ? recentEntryMissingLabel(re) : `${formatNumber(re.latency_ms, 0)}ms`,
+  },
+  { key: 'prompt_tok_per_sec', header: 'prefill tok/s', render: (re) => fmtRecentEntryNumber(re, re.prompt_tok_per_sec, 1) },
+  { key: 'cost_usd', header: 'cost', render: (re) => fmtRecentEntryCost(re, re.cost_usd) },
+  { key: 'tools_count', header: 'tools', render: (re) => String(re.tools_count) },
+]
 
 function metricCoverageText(metric: DashboardRuntimeModelMetric): string | null {
   if (metric.coverage_status === 'full' && metric.primary_coverage_reason == null) return null
@@ -579,28 +608,11 @@ export function RuntimeMonitor() {
                       </button>
                       ${expandedModel.value === metric.model_id
                         ? html`<div class="mt-1 border-t border-card-border/50 pt-2">
-                            <div class="grid grid-cols-7 gap-1 text-3xs text-[var(--color-fg-muted)] font-medium mb-1">
-                              <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>prefill tok/s</div><div>cost</div><div>tools</div>
-                            </div>
-                            ${metric.recent_entries?.map(re => {
-                              const detail = recentEntryDetail(re)
-                              return html`
-                                <div class="mb-1">
-                                  <div class="grid grid-cols-7 gap-1 text-2xs text-[var(--color-fg-primary)]">
-                                    <div>${re.ts_unix > 0 ? formatTimeHms(re.ts_unix) : '--'}</div>
-                                    <div>${fmtRecentEntryNumber(re, re.input_tokens)}</div>
-                                    <div>${fmtRecentEntryNumber(re, re.output_tokens)}</div>
-                                    <div>${re.latency_ms == null ? recentEntryMissingLabel(re) : `${formatNumber(re.latency_ms, 0)}ms`}</div>
-                                    <div>${fmtRecentEntryNumber(re, re.prompt_tok_per_sec, 1)}</div>
-                                    <div>${fmtRecentEntryCost(re, re.cost_usd)}</div>
-                                    <div>${re.tools_count}</div>
-                                  </div>
-                                  ${detail
-                                    ? html`<div class="text-3xs text-[var(--color-fg-muted)]">${detail}</div>`
-                                    : null}
-                                </div>
-                              `
-                            })}
+                            <${Table}
+                              columns=${recentEntryColumns}
+                              rows=${metric.recent_entries ?? []}
+                              getRowId=${(re: RecentEntry) => `${metric.model_id}-${re.ts_unix}`}
+                            />
                           </div>`
                         : null}
                     `

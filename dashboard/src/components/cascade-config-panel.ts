@@ -902,7 +902,7 @@ function SloCard({ slo }: { slo: CascadeSloResponse }) {
           ? html`<span class="text-xs text-[var(--bad-light)]">violating: ${slo.violations.join(', ')}</span>`
           : null}
       </div>
-      <div class="grid grid-cols-3 gap-3">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <${StatCell}
           label="정렬 비율"
           value=${`${ratioPct}%`}
@@ -1274,7 +1274,7 @@ export function CascadeConfigPanel() {
               )
               return html`
                 <${CascadeValidationBanner} config=${config} />
-                <div class="grid grid-cols-3 gap-3 mb-3">
+                <div class="grid grid-cols-1 gap-3 md:grid-cols-2 mb-3">
                   <${StatCell}
                     label="프로파일"
                     value=${config.profiles.length}
@@ -1322,7 +1322,7 @@ export function CascadeConfigPanel() {
       <${Card} title="헬스 트래커">
         ${health
           ? html`
-            <div class="grid grid-cols-3 gap-3 mb-3">
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 mb-3">
               <${StatCell}
                 label="윈도우"
                 value=${`${health.window_sec}s`}

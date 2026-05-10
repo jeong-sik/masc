@@ -6,6 +6,27 @@
 open Masc_domain
 open Coord_utils
 
+(** RFC-0061: closed variants for broadcast envelope observability.
+    rewrite_reason tracks why the original content was rewritten.
+    msg_type_typed is an internal closed variant; the external [msg_type]
+    field remains [string] for backward compatibility. *)
+type rewrite_reason =
+  | Cache_invalidated of { task_id : string; status : string }
+  | Task_cache_rewrite
+
+type rewrite_event = {
+  reason : rewrite_reason;
+  module_name : string;
+}
+
+type msg_type_typed =
+  | Broadcast
+  | Cache_invalidated of { task_id : string; status : string }
+
+let string_of_msg_type_typed = function
+  | Broadcast -> "broadcast"
+  | Cache_invalidated _ -> "cache_invalidated"
+
 let emit_message_activity config ~from_agent ~content ~mention
     ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =
   let evidence_refs = Coord_state.normalized_string_list evidence_refs in
@@ -72,12 +93,19 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
   in
   ensure_initialized config;
+
+  (* RFC-0061: preserve original content and extract mention tokens BEFORE
+     any fleet-wide invariant rewrite. This prevents stage-1 wake signal loss
+     when [cache_invalidated] replaces the original broadcast text. *)
+  let original_content = content in
+  let pre_extract_mention = Mention.extract original_content in
+
   (* Fleet-wide invariant (PR-B): if the broadcasting agent's current_task is
      terminal in the backlog, replace the original broadcast with a single
      cache_invalidated notice and clear the stale state (issue #13397).
      Only applied to regular "broadcast" messages to avoid recursion. *)
-  let content, msg_type =
-    if task_cache_invariant_checked then (content, msg_type)
+  let content, msg_type, _rewrites =
+    if task_cache_invariant_checked then (content, msg_type, [])
     else if String.equal msg_type "broadcast" then
       let agent_file =
         Filename.concat (agents_dir config) (safe_filename from_agent ^ ".json")
@@ -98,26 +126,60 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
                          — stale broadcast suppressed"
                         task_id (Masc_domain.task_status_to_string status)
                     in
-                    (inv_content, "cache_invalidated")
+                    ( inv_content,
+                      "cache_invalidated",
+                      [
+                        {
+                          reason =
+                            Cache_invalidated
+                              {
+                                task_id;
+                                status =
+                                  Masc_domain.task_status_to_string status;
+                              };
+                          module_name = "coord_broadcast";
+                        };
+                      ] )
                 | _ ->
                     ( Coord_task_cache_invariant.rewrite_broadcast_content
                         ~config ~from_agent ~module_name:"coord_broadcast"
                         ~content,
-                      msg_type ))
+                      msg_type,
+                      [
+                        {
+                          reason = Task_cache_rewrite;
+                          module_name = "coord_broadcast";
+                        };
+                      ] ))
             | None ->
                 ( Coord_task_cache_invariant.rewrite_broadcast_content
                     ~config ~from_agent ~module_name:"coord_broadcast"
                     ~content,
-                  msg_type ))
+                  msg_type,
+                  [
+                    {
+                      reason = Task_cache_rewrite;
+                      module_name = "coord_broadcast";
+                    };
+                  ] ))
         | Error _ ->
             ( Coord_task_cache_invariant.rewrite_broadcast_content
                 ~config ~from_agent ~module_name:"coord_broadcast" ~content,
-              msg_type )
+              msg_type,
+              [
+                {
+                  reason = Task_cache_rewrite;
+                  module_name = "coord_broadcast";
+                };
+              ] )
       else
         ( Coord_task_cache_invariant.rewrite_broadcast_content
             ~config ~from_agent ~module_name:"coord_broadcast" ~content,
-          msg_type )
-    else (content, msg_type)
+          msg_type,
+          [
+            { reason = Task_cache_rewrite; module_name = "coord_broadcast" };
+          ] )
+    else (content, msg_type, [])
   in
   (* RFC-0040: sender-side mention dedup.  When [Mention.extract]
      finds an [@target] and the same (from_agent, target, content_hash)
@@ -127,12 +189,13 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
      [Mention.any_mentioned]) re-reads the board on every turn, so a
      spammy resender otherwise floods the recipient's inbox.  Set
      [~bypass_dedup:true] to override for system-level alerts. *)
-  let pre_extract_mention = Mention.extract content in
   let dedup_skipped =
     (not bypass_dedup)
     && (match pre_extract_mention with
         | Some target when String.trim target <> "" ->
-            let content_hash = Mention_dedup.content_topic_hash content in
+            let content_hash =
+              Mention_dedup.content_topic_hash original_content
+            in
             Mention_dedup.should_skip ~from_agent ~target ~content_hash
               ~now:(Time_compat.now ())
         | _ ->

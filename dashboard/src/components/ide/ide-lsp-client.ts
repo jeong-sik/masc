@@ -47,11 +47,24 @@ export interface LspDiagnostic {
   message: string
 }
 
+export interface SelectedAnnotation {
+  readonly id: string
+  readonly keeper_id: string
+  readonly kind: string
+  readonly content: string
+  readonly goal_id: string | null
+  readonly task_id: string | null
+  readonly file_path: string
+  readonly line_start: number
+  readonly line_end: number
+}
+
 // ── State Effects ────────────────────────────────────────────────
 
 const setCodeLenses = StateEffect.define<ReadonlyMap<number, LspCodeLens[]>>()
 const setInlayHints = StateEffect.define<ReadonlyMap<number, LspInlayHint[]>>()
 const setDiagnostics = StateEffect.define<ReadonlyMap<number, LspDiagnostic[]>>()
+const setSelectedAnnotation = StateEffect.define<SelectedAnnotation | null>()
 
 // ── State Fields ─────────────────────────────────────────────────
 
@@ -85,6 +98,16 @@ const diagnosticField = StateField.define<ReadonlyMap<number, LspDiagnostic[]>>(
   },
 })
 
+const selectedAnnotationField = StateField.define<SelectedAnnotation | null>({
+  create() { return null },
+  update(state, tr) {
+    for (const eff of tr.effects) {
+      if (eff.is(setSelectedAnnotation)) return eff.value
+    }
+    return state
+  },
+})
+
 // ── CodeLens Gutter ──────────────────────────────────────────────
 
 class CodeLensMarker extends GutterMarker {
@@ -107,7 +130,11 @@ class CodeLensMarker extends GutterMarker {
         el.addEventListener('click', (e) => {
           e.preventDefault()
           e.stopPropagation()
-          console.log('[LSP] annotation:', lens.command!.arguments)
+          const detail = lens.command!.arguments![0] as SelectedAnnotation
+          el.dispatchEvent(new CustomEvent('masc-annotation-select', {
+            bubbles: true,
+            detail,
+          }))
         })
       }
       container.appendChild(el)
@@ -452,6 +479,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
     private conn: LspConnection
     private filePath: string
     private refreshTimer: ReturnType<typeof setTimeout> | null = null
+    private onAnnotationSelect: ((e: Event) => void) | null = null
 
     constructor(private readonly view: EditorView) {
       const filePath = view.state.field(lspConfigField).filePath
@@ -461,6 +489,11 @@ const lspViewPlugin = ViewPlugin.fromClass(
         (err) => console.error('[LSP] connection error:', err),
       )
       this.conn.connect()
+      this.onAnnotationSelect = (e: Event) => {
+        const detail = (e as CustomEvent).detail as SelectedAnnotation
+        this.dispatch(setSelectedAnnotation.of(detail))
+      }
+      this.view.dom.addEventListener('masc-annotation-select', this.onAnnotationSelect)
       this.scheduleRefresh()
     }
 
@@ -500,6 +533,9 @@ const lspViewPlugin = ViewPlugin.fromClass(
 
     destroy() {
       if (this.refreshTimer) clearTimeout(this.refreshTimer)
+      if (this.onAnnotationSelect) {
+        this.view.dom.removeEventListener('masc-annotation-select', this.onAnnotationSelect)
+      }
       this.conn.notifyDidClose(this.filePath)
       this.conn.dispose()
     }
@@ -524,6 +560,7 @@ export function lspExtension(opts: LspExtensionOpts): Extension {
     codeLensField,
     inlayHintField,
     diagnosticField,
+    selectedAnnotationField,
     codeLensGutter,
     diagnosticGutter,
     inlayHintTheme,
@@ -533,4 +570,12 @@ export function lspExtension(opts: LspExtensionOpts): Extension {
 
 export function updateLspFilePath(view: EditorView, filePath: string): void {
   view.dispatch({ effects: [setLspConfig.of({ filePath })] })
+}
+
+export function getSelectedAnnotation(view: EditorView): SelectedAnnotation | null {
+  return view.state.field(selectedAnnotationField)
+}
+
+export function clearSelectedAnnotation(view: EditorView): void {
+  view.dispatch({ effects: [setSelectedAnnotation.of(null)] })
 }

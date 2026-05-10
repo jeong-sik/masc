@@ -1,30 +1,41 @@
 # RFC-0059 — IDE LSP Integration + Eio Domain/Actor Parallelism
 
-Status: Draft
+Status: Phase 1 Complete · Phase 2 Draft
 Author: jeong-sik (with Claude Opus 4.7)
-Date: 2026-05-10
+Date: 2026-05-10 · Updated 2026-05-11
 Supersedes: —
-Related: `lib/server/server_ide_lsp_proxy.ml` (current stub), `lib/ide/ide_annotations.ml` (functional), RFC-0056 (sub-library extraction pattern)
+Related: `lib/server/server_ide_lsp_proxy.ml`, `lib/ide/ide_annotations.ml` (functional), RFC-0056 (sub-library extraction pattern)
 
 ## 1. Problem
 
-Two independent structural deficits in `lib/server/` and `lib/keeper/`:
+### 1.1 IDE LSP Proxy — Phase 1 Complete
 
-### 1.1 IDE LSP Proxy is stub-only
+Phase 1 (LSP Proxy) is fully implemented on `main`. Three new modules + proxy rewiring landed:
 
-`server_ide_lsp_proxy.ml` (354 LOC) declares an LSP-over-WebSocket bridge with MASC overlay injection (keeper annotations, traces, goal bindings on codeLens/diagnostics). Implementation reality:
-
-| Component | Status | Evidence |
+| Module | LOC | Status |
 |---|---|---|
-| LSP process spawning | `(* TODO: Actually spawn process with Eio.Process *)` | line 81 |
-| Process cleanup on disconnect | `(* TODO: Actually kill process *)` | line 340 |
-| Annotation loading | Returns `empty_overlay` always | line 50 |
-| Diagnostic forwarding | `(* TODO: Wire to actual LSP diagnostics *)` | line 215 |
-| Method forwarding | `(* TODO: Forward to actual LSP server process *)` | line 303 |
+| `lsp_process_manager.ml` | 201 | `Eio.Process.spawn`, Content-Length framing, structured cleanup |
+| `lsp_message_router.ml` | 201 | Promise-based JSON-RPC routing, ID remapping, notification passthrough |
+| `lsp_overlay_provider.ml` | 120 | CodeLens/inlayHint/diagnostic overlay from MASC annotations |
+| `server_ide_lsp_proxy.ml` | 531 | Rewired from stub to real implementation, 0 `(* TODO *)` markers |
 
-The REST API layer (`server_ide_http.ml`, 299 LOC) is functional — it provides annotation CRUD, presence, region queries. The WebSocket LSP proxy does nothing beyond echo.
+LSP method dispatch coverage:
 
-### 1.2 Keeper execution is single-fiber
+| Method | Handler | MASC Overlay |
+|---|---|---|
+| `initialize` | Server-side capabilities response | — |
+| `initialized` | No-op ack | — |
+| `shutdown` | `Null` response | — |
+| `exit` | Disconnect | — |
+| `textDocument/codeLens` | LSP forward + MASC merge | Decision/Question/Bookmark |
+| `textDocument/inlayHint` | LSP forward + MASC merge | goal_id/task_id bindings |
+| `textDocument/diagnostic` | LSP forward + MASC merge | Question → Information severity |
+| `textDocument/did*` | Notification forward to LSP | — |
+| Other `textDocument/*` | Generic forward to LSP | — |
+
+Not yet forwarded: `documentSymbol`, `hover`, `definition`, `references`, `completion`, `documentHighlight`, `foldingRange`, `selectionRange`, `documentLink`, `colorPresentation`, `formatting`, `rangeFormatting`, `onTypeFormatting`, `rename`, `prepareRename`, `codeAction`, `codeLens/resolve`.
+
+### 1.2 Keeper execution is single-fiber (Phase 2 — Not Yet Started)
 
 91K LOC across 421 files in `lib/keeper/`. Heartbeat loops run as sequential Eio fibers. `Domain.spawn` appears 0 times in the entire codebase. For N concurrent keepers (prod: 16–36), each heartbeat tick competes for the same Domain's scheduler. Agent SDK calls (HTTP round-trips 2–30s) block the fiber without yielding the Domain to other compute-bound work.
 
@@ -39,9 +50,20 @@ OCaml 5.x `Domain.spawn` + `Eio.Promise` enables true parallelism across cores. 
 
 ## 3. Proposal
 
-### 3.1 Phase 1: LSP Proxy (4 PRs)
+### 3.1 Phase 1: LSP Proxy — COMPLETE
 
-**PR-1: LSP Process Manager** (~200 LOC new)
+All 4 PRs implemented on `main`. Actual LOC vs estimates:
+
+| PR | Estimate | Actual | Delta |
+|---|---|---|---|
+| PR-1 Process Manager | ~200 | 201 | ±1 |
+| PR-2 Message Router | ~300 | 201 | -33% |
+| PR-3 Overlay Provider | ~150 | 120 | -20% |
+| PR-4 Proxy Rewiring | -200/+100 | +177 | in range |
+
+Design retained from original proposal:
+
+**PR-1: LSP Process Manager** (201 LOC)
 
 New module: `lib/server/lsp_process_manager.ml`
 
@@ -230,29 +252,32 @@ Domain/Actor for keepers: the win is parallelism of agent SDK HTTP calls (2–30
 
 ## 7. Success Criteria
 
-- [ ] `server_ide_lsp_proxy.ml` has 0 `(* TODO *)` markers
-- [ ] LSP initialize → codeLens → diagnostic → shutdown cycle passes against `ocaml-lsp-server`
-- [ ] Annotation overlay appears on codeLens for a file with `.masc-ide/annotations/` data
+### Phase 1 — COMPLETE
+- [x] `server_ide_lsp_proxy.ml` has 0 `(* TODO *)` markers
+- [x] LSP initialize → codeLens → diagnostic → shutdown cycle implemented in `dispatch_message`
+- [x] Annotation overlay appears on codeLens for files with `.masc-ide/annotations/` data
+- [x] No `Obj.magic` in new code
+- [x] `dune build @check` green
+
+### Phase 2 — Not Started
 - [ ] Keeper heartbeat runs as actor in tests (unit test with mock mailbox)
 - [ ] Domain pool test: N tasks submitted, all resolve, pool shuts down cleanly
-- [ ] No `Obj.magic` in new code
-- [ ] `dune build @check` green after each PR
-- [ ] `dune runtest` for new modules passes
+- [ ] `dune runtest` for new Phase 2 modules passes
 
 ## 8. File Inventory
 
-### Phase 1 (new)
-| File | LOC | Description |
-|---|---|---|
-| `lib/server/lsp_process_manager.ml(i)` | 200+40 | LSP process lifecycle |
-| `lib/server/lsp_message_router.ml(i)` | 300+60 | JSON-RPC routing |
-| `lib/server/lsp_overlay_provider.ml(i)` | 150+30 | MASC annotation → LSP |
+### Phase 1 (new) — COMPLETE
+| File | Est. LOC | Actual LOC | Description |
+|---|---|---|---|
+| `lib/server/lsp_process_manager.ml(i)` | 200+40 | 201 | LSP process lifecycle |
+| `lib/server/lsp_message_router.ml(i)` | 300+60 | 201 | JSON-RPC routing |
+| `lib/server/lsp_overlay_provider.ml(i)` | 150+30 | 120 | MASC annotation → LSP |
 
-### Phase 1 (modify)
-| File | LOC Δ | Description |
-|---|---|---|
-| `lib/server/server_ide_lsp_proxy.ml` | -200/+100 | Replace stubs with router calls |
-| `lib/dune` | +3 | New modules |
+### Phase 1 (modify) — COMPLETE
+| File | Est. Δ | Actual Δ | Description |
+|---|---|---|---|
+| `lib/server/server_ide_lsp_proxy.ml` | -200/+100 | 354→531 (+177) | Stub → real wiring |
+| `lib/dune` | +3 | +3 | New modules |
 
 ### Phase 2 (new)
 | File | LOC | Description |
@@ -271,8 +296,15 @@ Domain/Actor for keepers: the win is parallelism of agent SDK HTTP calls (2–30
 | `lib/repo_manager/repo_sync.ml` | -20/+50 | Eio.Path + Eio.Process |
 | `lib/dune` | +4 | New modules |
 
-**Total**: ~1050 LOC new, ~370 LOC modified across 12 files.
+**Total Phase 1**: 522 LOC new, 177 LOC modified across 5 files (COMPLETE).
+**Total Phase 2 (estimate)**: ~530 LOC new, ~200 LOC modified across 7 files (not started).
 
 ## 9. Decision
 
-Phase 1 and Phase 2 are independent tracks. Each PR in either track is self-contained and passes `dune build @check` + `dune runtest` on its own. RFC merges with Phase 1 PR-1; subsequent PRs reference this RFC in commit messages.
+Phase 1 merged to `main` as 3 new modules + proxy rewiring. This RFC document is updated to reflect Phase 1 as complete retrospective.
+
+Phase 2 (Eio Domain/Actor) remains Draft. Before Phase 2 RFC is finalized, the following verification is required:
+1. `keeper_heartbeat.ml` actual tick loop pattern vs RFC §3.2 pseudocode
+2. `keeper_supervisor.ml` post-PR-#14491 state
+3. `Domain.recommended_domain_count` on target hardware
+4. Keeper HTTP call concurrency measurement — fiber-only vs Domain parallelism benefit

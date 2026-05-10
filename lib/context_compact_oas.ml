@@ -254,7 +254,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.t =
     MASC's Dynamic takes a {i world-state} observation (context ratio,
     active agent count, model family, task topology) and returns a
     {i composed} list of MASC strategies.  Each strategy is then mapped
-    to an OAS [Custom] closure and applied in sequence.
+    to an OAS built-in reducer and applied in sequence.
 
     {2 Why both exist}
 
@@ -268,7 +268,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.t =
     - MASC Dynamic: per-keeper-turn, strategy list, before [compact]
 
     MASC Dynamic resolves to concrete MASC strategies, which are then
-    mapped to OAS [Custom] closures.  OAS Dynamic is not called.
+    mapped to OAS built-in reducers.  OAS Dynamic is not called.
     The two do not interact at runtime. *)
 
 (* ================================================================ *)

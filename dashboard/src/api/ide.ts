@@ -97,6 +97,16 @@ export async function fetchIdeRegions(
   return parseIdeCodeRegions(raw.data)
 }
 
+export async function fetchIdePresence(
+  opts: IdeApiOptions = {},
+): Promise<unknown> {
+  const params = new URLSearchParams()
+  appendWorkspaceParams(params, opts)
+  const raw = await get<unknown>(`/api/v1/ide/presence?${params.toString()}`, opts)
+  if (!isRecord(raw) || raw.ok !== true) return null
+  return raw.data
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

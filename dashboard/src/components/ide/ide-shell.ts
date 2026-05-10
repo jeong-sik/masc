@@ -227,6 +227,7 @@ export function IdeShell() {
             onFindOpen=${handleFindOpen}
             onFindClose=${handleFindClose}
             onKeeperLineSelect=${pinInspectorKeeper}
+            annotations=${coordinator.annotations}
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
         </div>

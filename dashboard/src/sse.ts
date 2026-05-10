@@ -959,6 +959,26 @@ function handleEvent(event: SSEEvent): void {
       })
       break
     }
+    case 'ide:presence': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const runtimeId = asString(p.runtime_id) ?? 'unknown'
+      const branch = asString(p.branch) ?? 'unknown'
+      const supervisor = asString(p.supervisor) ?? 'unknown'
+      const connected = p.connected === true
+      const entries = Array.isArray(p.entries) ? p.entries.length : 0
+      addTypedJournalEntry(
+        agent,
+        `IDE presence · ${runtimeId} · ${branch} · ${entries} keepers`,
+        'system',
+        'unknown',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `IDE presence snapshot ${runtimeId}/${branch} (${entries} keepers, connected=${connected})`,
+        },
+      )
+      break
+    }
     default:
       addTypedJournalEntry(agent, type, 'system', 'unknown', {
         narrativeText: `${actorLabel(agent)} 이벤트: ${type}`,

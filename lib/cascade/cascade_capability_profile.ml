@@ -1,85 +1,28 @@
-type profile =
-  | Tool_strict
-  | Inline_tools
-  | Lite
-  | Local
+(** RFC-0058: Declarative capability profile (v2).
 
-let profile_to_string = function
-  | Tool_strict -> "tool_strict"
-  | Inline_tools -> "inline_tools"
-  | Lite -> "lite"
-  | Local -> "local"
+    Replaces the closed variant with config-driven profile lookup via
+    {!Cascade_capability_schema}.  Profiles are string-named; capability
+    requirements live in the schema registry.
 
-let profile_of_string = function
-  | "tool_strict" -> Some Tool_strict
-  | "inline_tools" -> Some Inline_tools
-  | "lite" -> Some Lite
-  | "local" -> Some Local
-  | _ -> None
+    Migration note: callers that previously used [profile] variant values
+    now use string profile names directly.  [catalog_entry] stores
+    [required_capability_profile] as [string option]. *)
 
-let all_profiles = [ Tool_strict; Inline_tools; Lite; Local ]
+let profile_to_string name = name
 
-type requirement =
-  | Required
-  | Optional
+let profile_of_string name =
+  if Cascade_capability_schema.is_known_profile name then Some name else None
 
-type required_capabilities = {
-  inline_tools : requirement;
-  inline_tool_choice : requirement;
-  runtime_mcp_tools : requirement;
-  runtime_tool_events : requirement;
-  runtime_mcp_http_headers : requirement;
-}
+let all_profiles =
+  Cascade_capability_schema.all_profile_names
 
-let required_capabilities_of = function
-  | Tool_strict ->
-      (* Keeper-bound MCP requires per-request HTTP headers carried
-         to the provider; inline tools are NOT required because CLI
-         runtimes (claude_code, kimi_cli) carry tools through runtime
-         MCP, not inline.  The 2026-05-05 incident keepers needed
-         exactly this: runtime MCP + HTTP headers, no inline. *)
-      {
-        inline_tools = Optional;
-        inline_tool_choice = Optional;
-        runtime_mcp_tools = Required;
-        runtime_tool_events = Required;
-        runtime_mcp_http_headers = Required;
-      }
-  | Inline_tools ->
-      {
-        inline_tools = Required;
-        inline_tool_choice = Required;
-        runtime_mcp_tools = Optional;
-        runtime_tool_events = Optional;
-        runtime_mcp_http_headers = Optional;
-      }
-  | Lite ->
-      {
-        inline_tools = Optional;
-        inline_tool_choice = Optional;
-        runtime_mcp_tools = Required;
-        runtime_tool_events = Required;
-        runtime_mcp_http_headers = Optional;
-      }
-  | Local ->
-      {
-        inline_tools = Optional;
-        inline_tool_choice = Optional;
-        runtime_mcp_tools = Optional;
-        runtime_tool_events = Optional;
-        runtime_mcp_http_headers = Optional;
-      }
-
-let satisfies req has =
-  match req with Optional -> true | Required -> has
-
-let provider_satisfies_profile p (caps : Provider_tool_support.capabilities) =
-  let req = required_capabilities_of p in
-  satisfies req.inline_tools caps.supports_inline_tools
-  && satisfies req.inline_tool_choice caps.supports_inline_tool_choice
-  && satisfies req.runtime_mcp_tools caps.supports_runtime_mcp_tools
-  && satisfies req.runtime_tool_events caps.supports_runtime_tool_events
-  && satisfies req.runtime_mcp_http_headers caps.supports_runtime_mcp_http_headers
+let provider_satisfies_profile name (caps : Provider_tool_support.capabilities) =
+  match Cascade_capability_schema.resolve_profile name with
+  | Some spec ->
+      Cascade_capability_schema.provider_satisfies_required
+        caps
+        spec.required_capabilities
+  | None -> false
 
 let safe_lane_cascade_name = "__safe_lane"
 

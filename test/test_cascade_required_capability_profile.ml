@@ -1,8 +1,10 @@
-(** RFC-0027 PR-2: cascade.json [_required_capability_profile] parser.
+(** RFC-0027 PR-2 / RFC-0058: cascade.json [_required_capability_profile] parser.
 
-    Verifies the new optional field round-trips through
+    Verifies the optional field round-trips through
     [Cascade_config_loader.load_catalog] and that an unknown profile
-    string fails closed (Error) instead of falling back to None. *)
+    string fails closed (Error) instead of falling back to None.
+
+    @since RFC-0058 migrated from closed variant to string-based profiles *)
 
 open Alcotest
 
@@ -26,15 +28,6 @@ let with_temp_json contents f =
 let entry_named entries name =
   List.find_opt (fun (e : Loader.catalog_entry) -> e.name = name) entries
 
-let pp_profile_opt fmt = function
-  | None -> Format.pp_print_string fmt "None"
-  | Some p ->
-      Format.pp_print_string fmt
-        (Printf.sprintf "Some %s" (CP.profile_to_string p))
-
-let profile_opt =
-  testable pp_profile_opt ( = )
-
 let test_profile_set_to_known_value () =
   let json =
     {|{"big_three_models": ["claude_code:auto"],
@@ -47,8 +40,8 @@ let test_profile_set_to_known_value () =
       (match entry_named entries "big_three" with
        | None -> failf "big_three entry missing"
        | Some e ->
-           check profile_opt "tool_strict parsed"
-             (Some CP.Tool_strict)
+           check (option string) "tool_strict parsed"
+             (Some "tool_strict")
              e.required_capability_profile)
 
 let test_profile_field_omitted_defaults_to_none () =
@@ -60,7 +53,7 @@ let test_profile_field_omitted_defaults_to_none () =
       (match entry_named entries "big_three" with
        | None -> failf "big_three entry missing"
        | Some e ->
-           check profile_opt "field omitted -> None" None
+           check (option string) "field omitted -> None" None
              e.required_capability_profile)
 
 let test_profile_empty_string_treated_as_unset () =
@@ -75,7 +68,7 @@ let test_profile_empty_string_treated_as_unset () =
       (match entry_named entries "big_three" with
        | None -> failf "big_three entry missing"
        | Some e ->
-           check profile_opt "empty string -> None" None
+           check (option string) "empty string -> None" None
              e.required_capability_profile)
 
 let test_unknown_profile_fails_closed () =
@@ -95,24 +88,23 @@ let test_unknown_profile_fails_closed () =
 
 let test_each_known_profile_parses () =
   List.iter
-    (fun p ->
-      let s = CP.profile_to_string p in
+    (fun name ->
       let json =
         Printf.sprintf
           {|{"sample_models": ["claude_code:auto"],
             "sample_required_capability_profile": "%s"}|}
-          s
+          name
       in
       with_temp_json json @@ fun path ->
       match Loader.load_catalog ~config_path:path with
-      | Error msg -> failf "load failed for profile %s: %s" s msg
+      | Error msg -> failf "load failed for profile %s: %s" name msg
       | Ok entries ->
           (match entry_named entries "sample" with
-           | None -> failf "sample entry missing for profile %s" s
+           | None -> failf "sample entry missing for profile %s" name
            | Some e ->
-               check profile_opt
-                 (Printf.sprintf "%s parsed" s)
-                 (Some p) e.required_capability_profile))
+               check (option string)
+                 (Printf.sprintf "%s parsed" name)
+                 (Some name) e.required_capability_profile))
     CP.all_profiles
 
 let () =
@@ -128,7 +120,7 @@ let () =
             test_profile_empty_string_treated_as_unset;
           test_case "unknown value -> Error (fail-closed)" `Quick
             test_unknown_profile_fails_closed;
-          test_case "every Cascade_capability_profile.profile round-trips"
+          test_case "every known profile name round-trips"
             `Quick test_each_known_profile_parses;
         ] );
     ]

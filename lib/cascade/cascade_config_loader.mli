@@ -82,18 +82,18 @@ type catalog_entry = {
       to drop the hint when it does not match a live catalog entry.
 
       @since 0.174.0 *)
-  required_capability_profile : Cascade_capability_profile.profile option;
-  (** Optional declarative capability requirement (RFC-0027).  When
-      set, the validator (PR-3) checks that every model entry in this
-      cascade satisfies the named profile via
+  required_capability_profile : string option;
+  (** Optional declarative capability requirement (RFC-0058).  When
+      set, the validator checks that every model entry in this cascade
+      satisfies the named profile via
       {!Cascade_capability_profile.provider_satisfies_profile}.
 
       JSON key: ["{name}_required_capability_profile"], string-typed.
       Unknown profile names cause [load_catalog] to return [Error _]
-      (no silent fallback — fail-closed per memory rule
-      [feedback_keeper_runtime_fail_closed_for_unknown_permissive_default]).
+      (fail-closed).  Profile names are resolved via
+      {!Cascade_capability_schema}.
 
-      @since RFC-0027 PR-2 *)
+      @since RFC-0027 PR-2, updated RFC-0058 *)
 }
 
 (** Deprecated logical route keys must not be treated as concrete catalog

@@ -7,9 +7,10 @@ import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
 import { KeeperBadge } from './keeper-badge'
 import { KeeperBDIPanel } from './keeper-bdi-panel'
+import { KeeperMemoryPanel } from './memory-subsystems'
 import { formatDuration } from './mission-utils'
 
-type KeeperInspectorFocus = 'bdi' | 'tool-access'
+type KeeperInspectorFocus = 'bdi' | 'tool-access' | 'memory'
 
 interface ToolAccessRow {
   label: string
@@ -19,6 +20,7 @@ interface ToolAccessRow {
 const FOCUS_CHIPS: Array<{ key: KeeperInspectorFocus; label: string; title: string }> = [
   { key: 'bdi', label: 'BDI', title: 'Will, needs, desires, and goal horizons' },
   { key: 'tool-access', label: 'Tool Access', title: 'Runtime tool and execution access snapshot' },
+  { key: 'memory', label: 'Memory', title: 'Keeper memory bank entries (memory.jsonl)' },
 ]
 
 function keeperKeys(keeper: Keeper): string[] {
@@ -114,7 +116,10 @@ export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
 }
 
 function currentFocus(): KeeperInspectorFocus {
-  return route.value.params.focus === 'tool-access' ? 'tool-access' : 'bdi'
+  const f = route.value.params.focus
+  if (f === 'tool-access') return 'tool-access'
+  if (f === 'memory') return 'memory'
+  return 'bdi'
 }
 
 function navigateFocus(focus: KeeperInspectorFocus): void {
@@ -261,7 +266,9 @@ export function KeeperCognitionInspector() {
 
       ${focus === 'tool-access'
         ? html`<${ToolAccessSnapshot} keeper=${selected} />`
-        : html`<${BdiSnapshot} keeper=${selected} />`}
+        : focus === 'memory'
+          ? html`<${KeeperMemoryPanel} keeperName=${selected.name} />`
+          : html`<${BdiSnapshot} keeper=${selected} />`}
     </section>
   `
 }

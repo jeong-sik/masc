@@ -1,26 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
 
-(** Issue #10349 Phase 2: registry-canonical meta lookup for masc path
-    resolvers.  Same contract as [Keeper_exec_fs.with_registry_meta]. *)
-let with_registry_meta ~(keeper_name : string) f =
-  match Keeper_registry.find_by_name keeper_name with
-  | None ->
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
-      ~labels:[ "source_layer", "masc_path_resolver"; "field", "registry_missing" ]
-      ();
-    error_json
-      (Printf.sprintf "keeper not found in registry: %s" keeper_name)
-  | Some entry ->
-    if not (String.equal entry.meta.name keeper_name) then
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
-        ~labels:[ "source_layer", "masc_path_resolver"; "field", "name_mismatch" ]
-        ();
-    f entry.meta
-;;
-
 let handle_keeper_autoresearch_tool
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -174,7 +154,7 @@ let handle_keeper_masc_tool
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  with_registry_meta ~keeper_name @@ fun meta ->
+  with_registry_meta ~keeper_name ~source_layer:"masc_path_resolver" @@ fun meta ->
   match keeper_masc_path_blocked ~config ~keeper_name ~name ~args with
   | Some err -> error_json err
   | None ->
@@ -238,29 +218,21 @@ let handle_registered_keeper_tool
       ~(name : string)
       ~(args : Yojson.Safe.t)
   : string option =
-  match Keeper_registry.find_by_name keeper_name with
-  | None ->
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
-      ~labels:[ "source_layer", "masc_path_resolver"; "field", "registry_missing" ]
-      ();
-    Some (error_json
-      (Printf.sprintf "keeper not found in registry: %s" keeper_name))
-  | Some entry ->
-    if not (String.equal entry.meta.name keeper_name) then
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
-        ~labels:[ "source_layer", "masc_path_resolver"; "field", "name_mismatch" ]
-        ();
-    let meta = entry.meta in
-    match Tool_dispatch.lookup_tag name with
-    | Some Tool_dispatch.Mod_autoresearch ->
-      Some (handle_keeper_autoresearch_tool ~config ~meta ~name ~args)
-    | Some _ ->
-      Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
-    | None when Tool_dispatch.is_registered name ->
-      Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
-    | None -> None
+  match Tool_dispatch.lookup_tag name with
+  | Some Tool_dispatch.Mod_autoresearch ->
+    (match
+       find_registry_meta ~keeper_name ~source_layer:"masc_path_resolver"
+     with
+     | None ->
+       Some
+         (error_json
+            (Printf.sprintf "keeper not found in registry: %s" keeper_name))
+     | Some meta -> Some (handle_keeper_autoresearch_tool ~config ~meta ~name ~args))
+  | Some _ ->
+    Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
+  | None when Tool_dispatch.is_registered name ->
+    Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
+  | None -> None
 ;;
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)

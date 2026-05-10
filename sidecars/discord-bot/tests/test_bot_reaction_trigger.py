@@ -52,7 +52,6 @@ def bot() -> GateBot:
         cfg.discord_admin_role_id = ""
         cfg.status_heartbeat_sec = 10
         cfg.discord_reaction_trigger_emoji = "🤖"
-        cfg.discord_busy_debounce_sec = 0
         cfg.discord_batch_max_messages = 50
         cfg.discord_batch_gap_window_sec = 1800
         cfg.keeper_map.return_value = {}

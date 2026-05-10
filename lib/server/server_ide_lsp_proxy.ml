@@ -165,6 +165,19 @@ let extract_id fields =
   | _ -> None
 ;;
 
+(** Extract line (0-based) from LSP position params. *)
+let extract_line params =
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "position" fields with
+     | Some (`Assoc pos) ->
+       (match List.assoc_opt "line" pos with
+        | Some (`Int n) -> Some n
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
 (** Ensure LSP process exists for a language.
     Spawns + initializes on first use, blocking until ready. *)
 let ensure_lsp_process cs lang_id =
@@ -358,6 +371,54 @@ let handle_diagnostic cs params id =
          | Error msg -> send_error cs id (-32603) msg))
 ;;
 
+(** Handle textDocument/hover — enrich LSP response with MASC annotations. *)
+let handle_hover cs params id =
+  match extract_uri params with
+  | None -> send_response cs id `Null
+  | Some uri ->
+    let base = cs.base_path in
+    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
+    let line = extract_line params |> Option.value ~default:(-1) in
+    let lang_id = Lsp_process_manager.lang_of_path relative in
+    if lang_id = "unknown"
+    then (
+      if line >= 0
+      then (
+        let enriched =
+          Lsp_overlay_provider.enrich_hover
+            ~base_dir:base
+            ~file_path:relative
+            ~line
+            (`Assoc [ ("contents", `Assoc [ ("kind", `String "markdown"); ("value", `String "") ]) ])
+        in
+        send_response cs id enriched)
+      else send_response cs id `Null)
+    else (
+      match ensure_lsp_process cs lang_id with
+      | Error msg -> send_error cs id (-32603) msg
+      | Ok proc ->
+        let promise =
+          Lsp_message_router.send_request
+            cs.router
+            proc
+            ~method_:"textDocument/hover"
+            ~params
+            ~client_id:id
+        in
+        (match Eio.Promise.await promise with
+         | Ok result ->
+           if line >= 0
+           then
+             send_response cs id
+               (Lsp_overlay_provider.enrich_hover
+                  ~base_dir:base
+                  ~file_path:relative
+                  ~line
+                  result)
+           else send_response cs id result
+         | Error msg -> send_error cs id (-32603) msg))
+;;
+
 (** Dispatch an incoming LSP message to the appropriate handler. *)
 let dispatch_message cs msg =
   try
@@ -395,10 +456,15 @@ let dispatch_message cs msg =
                [ ( "capabilities"
                  , `Assoc
                      [ "textDocumentSync", `Int 2
+                     ; "completionProvider", `Assoc [ "resolveProvider", `Bool true ]
                      ; "hoverProvider", `Bool true
                      ; "definitionProvider", `Bool true
                      ; "referencesProvider", `Bool true
+                     ; "documentHighlightProvider", `Bool true
                      ; "documentSymbolProvider", `Bool true
+                     ; "foldingRangeProvider", `Bool true
+                     ; "selectionRangeProvider", `Bool true
+                     ; "documentLinkProvider", `Bool true
                      ; "codeLensProvider", `Assoc [ "resolveProvider", `Bool false ]
                      ; "inlayHintProvider", `Bool true
                      ; "diagnosticProvider", `Bool true
@@ -408,6 +474,7 @@ let dispatch_message cs msg =
        | Some "shutdown", Some n -> send_response cs n `Null
        | Some "exit", _ -> disconnect cs
        (* MASC-overlay-aware handlers *)
+       | Some "textDocument/hover", Some n -> handle_hover cs params n
        | Some "textDocument/codeLens", Some n -> handle_codelens cs params n
        | Some "textDocument/inlayHint", Some n -> handle_inlay_hint cs params n
        | Some "textDocument/diagnostic", Some n -> handle_diagnostic cs params n
@@ -418,6 +485,10 @@ let dispatch_message cs msg =
             let relative =
               resolve_relative ~base:cs.base_path uri |> Option.value ~default:""
             in
+            if String.equal m "textDocument/didSave" then
+              Lsp_overlay_provider.invalidate_cache
+                ~base_dir:cs.base_path
+                ~file_path:relative;
             let lang_id = Lsp_process_manager.lang_of_path relative in
             if lang_id <> "unknown" then forward_notification cs lang_id m params
           | None -> ())

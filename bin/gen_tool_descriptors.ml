@@ -1,4 +1,4 @@
-(* RFC-0057 Phase 1 — tool descriptor codegen.
+(* RFC-0057 Phase 2 — tool descriptor codegen.
 
    Mirrors bin/gen_shell_ir_walkers.ml: spec-as-OCaml-value -> Buffer.emit
    -> stdout. The dune rule in lib/tool_schemas/ captures stdout into
@@ -6,39 +6,13 @@
    generated schemas live alongside the hand-written ones in the same
    module namespace.
 
-   Phase 1 scope: masc_config + masc_code_read. The regression test
-   (test/test_tool_descriptors_gen.ml) compares emitted schemas against
-   hand-written ones field-by-field on Yojson values. tool_schemas_misc.ml
-   drops the hand-written masc_config entry and concatenates
-   Tool_descriptors_gen.schemas so generated schemas are the SSOT.
+   Phase 2 lifted spec types into lib/tool_schemas_specs/ to share
+   between the generator and any future tooling (schema lint, doc
+   generation). The executable now depends on tool_schemas_specs (types
+   only), avoiding the cycle because that library does not depend on
+   masc_tool_schemas. *)
 
-   Why self-contained (no library deps)?
-   bin/gen_shell_ir_walkers.ml (RFC-0054 PR-3) sets the precedent: the
-   generator carries its own spec to avoid a dune cycle between
-   (executable) and (library) when the library would consume the
-   generated file. Phase 2 lifts the spec records into a sibling
-   library lib/tool_schemas_specs/ once a 3rd tool lands. *)
-
-(* === Spec types (local; will move to lib/tool_schemas_specs in Phase 1). *)
-
-type param_type =
-  | T_string of { enum : string list option }
-  | T_int of { min : int option; max : int option }
-  | T_bool
-
-type param =
-  { p_name : string
-  ; p_type : param_type
-  ; p_description : string
-  ; p_required : bool
-  }
-
-type tool_spec =
-  { name : string
-  ; description : string
-  ; parameters : param list
-  ; additional_properties : bool
-  }
+open Tool_schemas_specs_types
 
 (* === Phase 0 spec data ==============================================
 
@@ -98,7 +72,22 @@ Use when inspecting source code during task execution without loading the entire
   ; additional_properties = false
   }
 
-let phase1_specs : tool_spec list = [ masc_config_spec; masc_code_read_spec ]
+let masc_tool_help_spec : tool_spec =
+  { name = "masc_tool_help"
+  ; description =
+      "Return canonical help text, parameters, and metadata for a specific MASC tool by name."
+  ; parameters =
+      [ { p_name = "tool_name"
+        ; p_type = T_string { enum = None }
+        ; p_description = "Exact MCP tool name to explain"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+
+let phase2_specs : tool_spec list =
+  [ masc_config_spec; masc_code_read_spec; masc_tool_help_spec ]
 
 (* === Emit helpers ==================================================== *)
 
@@ -181,5 +170,5 @@ let emit_schemas_list buf specs =
 let () =
   let buf = Buffer.create 4096 in
   emit_header buf;
-  emit_schemas_list buf phase1_specs;
+  emit_schemas_list buf phase2_specs;
   print_string (Buffer.contents buf)

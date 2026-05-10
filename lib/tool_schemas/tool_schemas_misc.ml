@@ -147,21 +147,6 @@ Use from the answering side after a prior masc_webrtc_offer call.";
     ];
   };
   {
-    name = "masc_tool_help";
-    description = "Return canonical help text, parameters, and metadata for a specific MASC tool by name.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("tool_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Exact MCP tool name to explain");
-        ]);
-      ]);
-      ("required", `List [`String "tool_name"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
     name = "masc_web_search";
     description = "Search the public web and return top result titles, URLs, and snippets. \
 Read-only helper for current-information lookups before deeper file or repo work. \

@@ -6,6 +6,29 @@
 
 open Ide_annotation_types
 
+module Cache = struct
+  let tbl : (string, annotation list) Hashtbl.t = Hashtbl.create 32
+
+  let key ~base_dir ~file_path = base_dir ^ "/" ^ file_path
+
+  let get ~base_dir ~file_path =
+    let k = key ~base_dir ~file_path in
+    match Hashtbl.find_opt tbl k with
+    | Some annotations -> annotations
+    | None ->
+      let filter : annotation_filter =
+        { file_path = Some file_path; keeper_id = None; goal_id = None; task_id = None }
+      in
+      let annotations = Ide_annotations.list ~base_dir ~filter in
+      Hashtbl.replace tbl k annotations;
+      annotations
+
+  let invalidate ~base_dir ~file_path =
+    Hashtbl.remove tbl (key ~base_dir ~file_path)
+
+  let clear () = Hashtbl.clear tbl
+end
+
 (** LSP CodeLens entry as JSON. *)
 let codelens_to_json (a : annotation) : Yojson.Safe.t =
   let range =
@@ -47,13 +70,7 @@ let inlay_hint_to_json (a : annotation) : Yojson.Safe.t =
 
 (** Generate LSP CodeLens entries for a file. *)
 let codelenses ~base_dir ~file_path : Yojson.Safe.t list =
-  let filter : annotation_filter = {
-    file_path = Some file_path;
-    keeper_id = None;
-    goal_id = None;
-    task_id = None;
-  } in
-  let annotations = Ide_annotations.list ~base_dir ~filter in
+  let annotations = Cache.get ~base_dir ~file_path in
   List.filter_map (fun (a : annotation) ->
     match a.kind with
     | Decision -> Some (codelens_to_json a)
@@ -65,13 +82,7 @@ let codelenses ~base_dir ~file_path : Yojson.Safe.t list =
 (** Generate LSP InlayHint entries for a file.
     Only annotations with goal_id or task_id bindings produce hints. *)
 let inlay_hints ~base_dir ~file_path : Yojson.Safe.t list =
-  let filter : annotation_filter = {
-    file_path = Some file_path;
-    keeper_id = None;
-    goal_id = None;
-    task_id = None;
-  } in
-  let annotations = Ide_annotations.list ~base_dir ~filter in
+  let annotations = Cache.get ~base_dir ~file_path in
   List.filter_map (fun (a : annotation) ->
     if a.goal_id <> None || a.task_id <> None then
       Some (inlay_hint_to_json a)
@@ -84,13 +95,7 @@ let inlay_hints ~base_dir ~file_path : Yojson.Safe.t list =
     diagnostics to surface unresolved questions in the editor. *)
 let diagnostics ~base_dir ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
   Yojson.Safe.t list =
-  let filter : annotation_filter = {
-    file_path = Some file_path;
-    keeper_id = None;
-    goal_id = None;
-    task_id = None;
-  } in
-  let annotations = Ide_annotations.list ~base_dir ~filter in
+  let annotations = Cache.get ~base_dir ~file_path in
   let masc_diags = List.filter_map (fun (a : annotation) ->
     match a.kind with
     | Question ->
@@ -109,3 +114,7 @@ let diagnostics ~base_dir ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
     | Decision | Bookmark | Comment -> None
   ) annotations in
   lsp_diagnostics @ masc_diags
+
+let invalidate_cache ~base_dir ~file_path = Cache.invalidate ~base_dir ~file_path
+
+let clear_cache () = Cache.clear ()

@@ -136,8 +136,8 @@ let read_message (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.
        | Some n -> read_exact flow n
        | None ->
            (* No Content-Length found; protocol violation.
-              Try reading a single line as fallback. *)
-           read_header_line flow)
+              Return empty string so caller can detect and handle. *)
+           "")
     else begin
       let len = parse_content_length line in
       read_headers (match len with Some n -> Some n | None -> content_length)

@@ -59,6 +59,8 @@ type conn_state =
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
   ; workspace_root : string ref
   ; send_mutex : Eio.Mutex.t
+  ; spawn_mutex : Eio.Mutex.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; on_disconnect : unit Eio.Promise.u
   ; disconnected : bool Atomic.t
   }
@@ -116,13 +118,35 @@ let extract_uri params =
   | _ -> None
 ;;
 
+(** Decode percent-encoded URI component (e.g. [%20] -> [ ]). *)
+let pct_decode s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let i = ref 0 in
+  while !i < len do
+    let c = String.get s !i in
+    if c = '%' && !i + 2 < len then begin
+      let hex = String.sub s (!i + 1) 2 in
+      (match int_of_string_opt ("0x" ^ String.uppercase_ascii hex) with
+       | Some byte -> Buffer.add_char buf (Char.chr byte); i := !i + 3
+       | None -> Buffer.add_char buf c; incr i)
+    end else begin
+      Buffer.add_char buf c;
+      incr i
+    end
+  done;
+  Buffer.contents buf
+
 (** Resolve file:// URI to relative path from base. *)
 let resolve_relative ~base uri =
   let prefix = "file://" in
   if String.starts_with ~prefix uri
   then (
     let full =
-      String.sub uri (String.length prefix) (String.length uri - String.length prefix)
+      let raw =
+        String.sub uri (String.length prefix) (String.length uri - String.length prefix)
+      in
+      pct_decode raw
     in
     if String.starts_with ~prefix:base full
     then (
@@ -144,51 +168,62 @@ let extract_id fields =
 (** Ensure LSP process exists for a language.
     Spawns + initializes on first use, blocking until ready. *)
 let ensure_lsp_process cs lang_id =
-  match Hashtbl.find_opt cs.processes lang_id with
-  | Some proc -> Ok proc
-  | None ->
-    let workspace_root = !(cs.workspace_root) in
-    (match Lsp_process_manager.spawn ~sw:cs.sw ~lang_id ~workspace_root cs.proc_mgr with
-     | Error err ->
-       let msg = Format.asprintf "%a" Lsp_process_manager.pp_spawn_error err in
-       Log.Server.warn "LSP spawn failed for %s: %s" lang_id msg;
-       Error msg
-     | Ok proc ->
-       Lsp_message_router.start_response_reader
-         ~sw:cs.sw
-         cs.router
-         proc
-         ~on_notification:(fun ~client_id:_ ~method_ params ->
-           send_client_notification cs method_ params);
-       let init_params =
-         `Assoc
-           [ "rootUri", `String ("file://" ^ workspace_root)
-           ; "rootPath", `String workspace_root
-           ; "processId", `Int (Unix.getpid ())
-           ; "capabilities", `Assoc []
-           ]
-       in
-       let promise =
-         Lsp_message_router.send_request
+  Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+    match Hashtbl.find_opt cs.processes lang_id with
+    | Some proc -> Ok proc
+    | None ->
+      let workspace_root = !(cs.workspace_root) in
+      (match Lsp_process_manager.spawn ~sw:cs.sw ~lang_id ~workspace_root cs.proc_mgr with
+       | Error err ->
+         let msg = Format.asprintf "%a" Lsp_process_manager.pp_spawn_error err in
+         Log.Server.warn "LSP spawn failed for %s: %s" lang_id msg;
+         Error msg
+       | Ok proc ->
+         Lsp_message_router.start_response_reader
+           ~sw:cs.sw
            cs.router
            proc
-           ~method_:"initialize"
-           ~params:init_params
-           ~client_id:(-1)
-       in
-       (match Eio.Promise.await promise with
-        | Ok _ ->
-          Lsp_message_router.send_notification
-            cs.router
-            proc
-            ~method_:"initialized"
-            ~params:(`Assoc []);
-          Hashtbl.add cs.processes lang_id proc;
-          Log.Server.info "LSP server ready: %s" lang_id;
-          Ok proc
-        | Error msg ->
-          Log.Server.warn "LSP initialize failed for %s: %s" lang_id msg;
-          Error msg))
+           ~on_notification:(fun ~client_id:_ ~method_ params ->
+             send_client_notification cs method_ params);
+         let init_params =
+           `Assoc
+             [ "rootUri", `String ("file://" ^ workspace_root)
+             ; "rootPath", `String workspace_root
+             ; "processId", `Int (Unix.getpid ())
+             ; "capabilities", `Assoc []
+             ]
+         in
+         let promise =
+           Lsp_message_router.send_request
+             cs.router
+             proc
+             ~method_:"initialize"
+             ~params:init_params
+             ~client_id:(-1)
+         in
+         let init_result =
+           try
+             Ok (Eio.Time.with_timeout_exn cs.clock 10.0 (fun () ->
+               Eio.Promise.await promise))
+           with Eio.Time.Timeout ->
+             Error (Printf.sprintf "LSP initialize timeout for %s (10s)" lang_id)
+         in
+         (match init_result with
+          | Ok (Ok _) ->
+            Lsp_message_router.send_notification
+              cs.router
+              proc
+              ~method_:"initialized"
+              ~params:(`Assoc []);
+            Hashtbl.add cs.processes lang_id proc;
+            Log.Server.info "LSP server ready: %s" lang_id;
+            Ok proc
+          | Ok (Error msg) ->
+            Log.Server.warn "LSP initialize failed for %s: %s" lang_id msg;
+            Error msg
+          | Error msg ->
+            Log.Server.warn "LSP initialize timeout for %s" lang_id;
+            Error msg)))
 ;;
 
 (** Forward a request to LSP process, await response, relay to client. *)
@@ -421,7 +456,7 @@ let dispatch_message cs msg =
 ;;
 
 (** Register the /api/v1/ide/lsp WebSocket endpoint. *)
-let add_routes ~sw router =
+let add_routes ~sw ~clock router =
   let router =
     Http.Router.get
       "/api/v1/ide/lsp"
@@ -433,27 +468,29 @@ let add_routes ~sw router =
                 | Some o -> o
                 | None -> "localhost"
               in
-              Ws.Handshake.respond_with_upgrade ~sha1 reqd (fun () ->
-                Eio.Switch.run (fun conn_sw ->
-                  let done_promise, done_resolver = Eio.Promise.create () in
-                  let ws_conn =
-                    Ws.Server_connection.create_websocket (fun wsd ->
-                      Log.Server.info "LSP WebSocket connected from %s" origin;
-                      let cs =
-                        { sw = conn_sw
-                        ; router = Lsp_message_router.create ()
-                        ; processes = Hashtbl.create 4
-                        ; wsd
-                        ; base_path = base_path_of_state state
-                        ; proc_mgr =
-                            (match state.Mcp_server.proc_mgr with
-                             | Some mgr -> mgr
-                             | None -> failwith "no proc_mgr")
-                        ; workspace_root = ref (base_path_of_state state)
-                        ; send_mutex = Eio.Mutex.create ()
-                        ; on_disconnect = done_resolver
-                        ; disconnected = Atomic.make false
-                        }
+              (match state.Mcp_server.proc_mgr with
+               | None -> Log.Server.warn "LSP WebSocket: no proc_mgr available"
+               | Some proc_mgr ->
+               Ws.Handshake.respond_with_upgrade ~sha1 reqd (fun () ->
+                 Eio.Switch.run (fun conn_sw ->
+                   let done_promise, done_resolver = Eio.Promise.create () in
+                   let ws_conn =
+                     Ws.Server_connection.create_websocket (fun wsd ->
+                       Log.Server.info "LSP WebSocket connected from %s" origin;
+                       let cs =
+                         { sw = conn_sw
+                         ; router = Lsp_message_router.create ()
+                         ; processes = Hashtbl.create 4
+                         ; wsd
+                         ; base_path = base_path_of_state state
+                         ; proc_mgr
+                         ; workspace_root = ref (base_path_of_state state)
+                         ; send_mutex = Eio.Mutex.create ()
+                         ; spawn_mutex = Eio.Mutex.create ()
+                         ; clock
+                         ; on_disconnect = done_resolver
+                         ; disconnected = Atomic.make false
+                         }
                       in
                       { Ws.Websocket_connection.frame =
                           (fun ~opcode ~is_fin:_ ~len payload ->
@@ -485,7 +522,7 @@ let add_routes ~sw router =
                   ignore (Eio.Promise.await done_promise)))
               |> function
               | Ok () -> ()
-              | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e)
+              | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e))
            request
            reqd)
       router

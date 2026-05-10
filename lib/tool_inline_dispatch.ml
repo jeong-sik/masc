@@ -55,10 +55,15 @@ type context = Tool_inline_dispatch_types.context = {
 
 let safe_exec = Tool_inline_dispatch_types.safe_exec
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 (** Dispatch a tool call.
-    Returns [Some (success, message)] if the tool name is handled,
+    Returns [Some (Tool_result.t)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
-let dispatch (ctx : context) ~(name : string) : tool_result option =
+let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
+  let start = Time_compat.now () in
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let state = ctx.state in
@@ -94,34 +99,46 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
 
   match name with
   (* ── Coord lifecycle (delegated) ─────────────────────────────── *)
-  | "masc_start" -> Tool_inline_dispatch_coord.handle_start ctx
-  | "masc_join" -> Tool_inline_dispatch_coord.handle_join ctx
-  | "masc_leave" -> Tool_inline_dispatch_coord.handle_leave ctx
+  | "masc_start" ->
+      Tool_inline_dispatch_coord.handle_start ctx
+      |> Option.map (wrap_result ~name ~start)
+  | "masc_join" ->
+      Tool_inline_dispatch_coord.handle_join ctx
+      |> Option.map (wrap_result ~name ~start)
+  | "masc_leave" ->
+      Tool_inline_dispatch_coord.handle_leave ctx
+      |> Option.map (wrap_result ~name ~start)
 
   (* ── Communication (delegated) ──────────────────────────────── *)
-  | "masc_broadcast" -> Tool_inline_dispatch_comm.handle_broadcast ctx
-  | "masc_messages" -> Tool_inline_dispatch_comm.handle_messages ctx
-  | "masc_who" -> Tool_inline_dispatch_comm.handle_who ctx
+  | "masc_broadcast" ->
+      Tool_inline_dispatch_comm.handle_broadcast ctx
+      |> Option.map (wrap_result ~name ~start)
+  | "masc_messages" ->
+      Tool_inline_dispatch_comm.handle_messages ctx
+      |> Option.map (wrap_result ~name ~start)
+  | "masc_who" ->
+      Tool_inline_dispatch_comm.handle_who ctx
+      |> Option.map (wrap_result ~name ~start)
 
   (* ── HITL Approval Queue (#5907) ─────────────────────────────── *)
   | "masc_approval_pending" ->
       let json = Keeper_approval_queue.list_pending_json () in
-      Some (true, Yojson.Safe.to_string json)
+      Some (wrap_result ~name ~start (true, Yojson.Safe.to_string json))
   | "masc_approval_get" ->
       let id = arg_get_string "id" "" in
-      if String.equal id "" then Some (false, "id is required")
+      if String.equal id "" then Some (wrap_result ~name ~start (false, "id is required"))
       else
         (match Keeper_approval_queue.get_pending_json ~id with
-         | Some json -> Some (true, Yojson.Safe.to_string json)
+         | Some json -> Some (wrap_result ~name ~start (true, Yojson.Safe.to_string json))
          | None ->
-           Some (false,
+           Some (wrap_result ~name ~start (false,
              Printf.sprintf
                "approval %s is no longer pending or was not found. Refresh with masc_approval_pending before approving/rejecting."
-               id))
+               id)))
   | "masc_approval_resolve" ->
       let id = arg_get_string "id" "" in
       let decision_str = arg_get_string "decision" "approve" in
-      if String.equal id "" then Some (false, "id is required")
+      if String.equal id "" then Some (wrap_result ~name ~start (false, "id is required"))
       else
         let decision = match String.lowercase_ascii decision_str with
           | "approve" -> Agent_sdk.Hooks.Approve
@@ -132,9 +149,9 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
         in
         (match Keeper_approval_queue.resolve ~id ~decision with
          | Ok () ->
-           Some (true, Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str)
+           Some (wrap_result ~name ~start (true, Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str))
          | Error err ->
-           Some (false, Keeper_approval_queue.resolve_error_to_string err))
+           Some (wrap_result ~name ~start (false, Keeper_approval_queue.resolve_error_to_string err)))
 
   (* Verification tools removed: pruned *)
 
@@ -146,10 +163,10 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
       let raw = arg_get_string "action" "" in
       (match Mcp_session.action_of_string_opt raw with
        | None ->
-         Some (false,
+         Some (wrap_result ~name ~start (false,
            Printf.sprintf
              "action must be one of [%s]; got %S"
-             (String.concat "|" Mcp_session.valid_action_strings) raw)
+             (String.concat "|" Mcp_session.valid_action_strings) raw))
        | Some action ->
       let now = Time_compat.now () in
       let sessions = ctx.load_mcp_sessions config in
@@ -207,8 +224,8 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
             end
       in
       (match response with
-       | Ok json -> Some (true, Yojson.Safe.to_string json)
-       | Error e -> Some (false, e)))
+       | Ok json -> Some (wrap_result ~name ~start (true, Yojson.Safe.to_string json))
+       | Error e -> Some (wrap_result ~name ~start (false, e))))
 
   (* Infrastructure tools: cancellation, subscription, progress,
      governance_set removed — pruned from surfaces *)
@@ -216,7 +233,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
   | "masc_spawn" ->
       let spawn_agent_name = arg_get_string "agent_name" "" in
       let prompt = arg_get_string "prompt" "" in
-      if String.equal prompt "" then Some (false, "prompt is required")
+      if String.equal prompt "" then Some (wrap_result ~name ~start (false, "prompt is required"))
       else
       let timeout_seconds = arg_get_int "timeout_seconds" 300 in
       let model_name =
@@ -245,21 +262,21 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
         | _ -> None
       in
        (match runtime_model_valid with
-       | Error e -> Some (false, e)
+       | Error e -> Some (wrap_result ~name ~start (false, e))
        | Ok () ->
            ignore (sw, state);
            let result =
              Spawn.spawn ~agent_name:spawn_agent_name
                ~prompt ~timeout_seconds ?working_dir ()
            in
-           Some (result.Spawn.success, Spawn.result_to_string result))
+           Some (wrap_result ~name ~start (result.Spawn.success, Spawn.result_to_string result)))
 
   (* ── Tool discovery ─────────────────────────────────────────── *)
   | "masc_discover_tools" ->
       let query = String.lowercase_ascii (arg_get_string "query" "") in
       let limit = arg_get_int "limit" 20 in
       if String.equal query "" then
-        Some (false, "query is required")
+        Some (wrap_result ~name ~start (false, "query is required"))
       else
         let all_schemas = Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false () in
         let words = String.split_on_char ' ' query |> List.filter (fun w -> String.length w > 0) in
@@ -279,12 +296,14 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
             ("description", `String schema.description);
           ]
         ) matches in
-        Some (true, Yojson.Safe.to_string (`Assoc [
+        Some (wrap_result ~name ~start (true, Yojson.Safe.to_string (`Assoc [
           ("query", `String query);
           ("count", `Int (List.length results));
           ("tools", `List results);
           ("hint", `String "These tools are callable via tools/call even if not in the default tools/list.");
-        ]))
+        ])))
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
-  | _ -> Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name
+  | _ ->
+      Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name
+      |> Option.map (wrap_result ~name ~start)

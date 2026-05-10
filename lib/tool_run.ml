@@ -29,6 +29,10 @@ type context = {
 (** Tool result type *)
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 open Tool_args
 
 (** {1 Individual Handlers} *)
@@ -96,14 +100,15 @@ let handle_run_list ctx _args : tool_result =
 
 (** {1 Dispatcher} *)
 
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_run_init" -> Some (handle_run_init ctx args)
-  | "masc_run_plan" -> Some (handle_run_plan ctx args)
-  | "masc_run_log" -> Some (handle_run_log ctx args)
-  | "masc_run_deliverable" -> Some (handle_run_deliverable ctx args)
-  | "masc_run_get" -> Some (handle_run_get ctx args)
-  | "masc_run_list" -> Some (handle_run_list ctx args)
+  | "masc_run_init" -> Some (wrap_result ~name ~start (handle_run_init ctx args))
+  | "masc_run_plan" -> Some (wrap_result ~name ~start (handle_run_plan ctx args))
+  | "masc_run_log" -> Some (wrap_result ~name ~start (handle_run_log ctx args))
+  | "masc_run_deliverable" -> Some (wrap_result ~name ~start (handle_run_deliverable ctx args))
+  | "masc_run_get" -> Some (wrap_result ~name ~start (handle_run_get ctx args))
+  | "masc_run_list" -> Some (wrap_result ~name ~start (handle_run_list ctx args))
   | _ -> None
 
 let schemas : Masc_domain.tool_schema list = [

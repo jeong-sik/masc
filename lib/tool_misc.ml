@@ -30,6 +30,10 @@ open Tool_args
 
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 type context = {
   config: Coord.config;
   agent_name: string;
@@ -142,24 +146,25 @@ let tool_inventory_json ctx ~include_hidden ~include_deprecated =
 (* Dispatch (facade)                                                *)
 (* ================================================================ *)
 
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   let admin_ctx : Tool_misc_admin.context =
     { config = ctx.config; agent_name = ctx.agent_name }
   in
   match name with
-  | "masc_config" -> Some (Tool_misc_admin.handle_config args)
-  | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer args)
-  | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer args)
-  | "masc_dashboard" -> Some (handle_dashboard ctx args)
-  | "masc_gc" -> Some (handle_gc ctx args)
-  | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
-  | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
-  | "masc_tool_help" -> Some (handle_tool_help ctx args)
-  | "masc_web_search" -> Some (handle_web_search ctx args)
-  | "masc_web_fetch" -> Some (handle_web_fetch ctx args)
-  | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args)
-  | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
-  | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
+  | "masc_config" -> Some (wrap_result ~name ~start (Tool_misc_admin.handle_config args))
+  | "masc_webrtc_offer" -> Some (wrap_result ~name ~start (Tool_misc_transport.handle_webrtc_offer args))
+  | "masc_webrtc_answer" -> Some (wrap_result ~name ~start (Tool_misc_transport.handle_webrtc_answer args))
+  | "masc_dashboard" -> Some (wrap_result ~name ~start (handle_dashboard ctx args))
+  | "masc_gc" -> Some (wrap_result ~name ~start (handle_gc ctx args))
+  | "masc_cleanup_zombies" -> Some (wrap_result ~name ~start (handle_cleanup_zombies ctx args))
+  | "masc_tool_stats" -> Some (wrap_result ~name ~start (handle_tool_stats ctx args))
+  | "masc_tool_help" -> Some (wrap_result ~name ~start (handle_tool_help ctx args))
+  | "masc_web_search" -> Some (wrap_result ~name ~start (handle_web_search ctx args))
+  | "masc_web_fetch" -> Some (wrap_result ~name ~start (handle_web_fetch ctx args))
+  | "masc_tool_admin_snapshot" -> Some (wrap_result ~name ~start (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args))
+  | "masc_tool_admin_update" -> Some (wrap_result ~name ~start (Tool_misc_admin.handle_tool_admin_update admin_ctx args))
+  | "masc_deep_review" -> Some (wrap_result ~name ~start (Tool_deep_review.handle_deep_review ctx.config args))
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas

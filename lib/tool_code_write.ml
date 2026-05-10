@@ -38,6 +38,10 @@ type context = {
 
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 let max_write_size = 1024 * 1024  (* 1 MiB *)
 
 let normalize_dir_prefix path =
@@ -810,13 +814,14 @@ let handle_code_git ctx args =
   end
 
 (* Dispatch *)
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_code_write" -> Some (handle_code_write ctx args)
-  | "masc_code_edit" -> Some (handle_code_edit ctx args)
-  | "masc_code_delete" -> Some (handle_code_delete ctx args)
-  | "masc_code_shell" -> Some (handle_code_shell ctx args)
-  | "masc_code_git" -> Some (handle_code_git ctx args)
+  | "masc_code_write" -> Some (wrap_result ~name ~start (handle_code_write ctx args))
+  | "masc_code_edit" -> Some (wrap_result ~name ~start (handle_code_edit ctx args))
+  | "masc_code_delete" -> Some (wrap_result ~name ~start (handle_code_delete ctx args))
+  | "masc_code_shell" -> Some (wrap_result ~name ~start (handle_code_shell ctx args))
+  | "masc_code_git" -> Some (wrap_result ~name ~start (handle_code_git ctx args))
   | _ -> None
 
 (* Tool schemas *)

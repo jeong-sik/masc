@@ -479,6 +479,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Voice_listen
   | TN.Keeper TK.Voice_session_end
   | TN.Keeper TK.Voice_session_start
+  | TN.Keeper TK.Memory_write
   | TN.Keeper TK.Voice_speak ->
       Some Masc_coordination
   | TN.Masc TM.Autoresearch_inject
@@ -627,7 +628,7 @@ let tool_group_of_typed_tool_name = function
       | TK.Board_stats
       | TK.Board_vote ) ->
       Some Board
-  | TN.Keeper (TK.Memory_search | TK.Library_read | TK.Library_search) ->
+  | TN.Keeper (TK.Memory_search | TK.Memory_write | TK.Library_read | TK.Library_search) ->
       Some Knowledge
   | TN.Keeper
       ( TK.Task_claim

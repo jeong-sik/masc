@@ -494,7 +494,7 @@ let tag_dispatch_fn
      -> tag:Tool_dispatch.module_tag
      -> name:string
      -> args:Yojson.Safe.t
-     -> (bool * string) option)
+     -> Tool_result.t option)
       ref
   =
   ref (fun ~config:_ ~agent_name:_ ~tag:_ ~name:_ ~args:_ -> None)
@@ -536,7 +536,8 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Fs_edit | Tool_name.Keeper.Fs_read | Tool_name.Keeper.Write -> "fs"
     | Tool_name.Keeper.Library_read
     | Tool_name.Keeper.Library_search
-    | Tool_name.Keeper.Memory_search -> "memory"
+    | Tool_name.Keeper.Memory_search
+    | Tool_name.Keeper.Memory_write -> "memory"
     | Tool_name.Keeper.Broadcast | Tool_name.Keeper.Handoff -> "coordination"
     | Tool_name.Keeper.Pr_create
     | Tool_name.Keeper.Pr_list

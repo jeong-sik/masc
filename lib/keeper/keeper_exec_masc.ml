@@ -17,8 +17,9 @@ let handle_keeper_autoresearch_tool
     }
   in
   match Tool_autoresearch.dispatch ctx ~name ~args with
-  | Some (true, msg) -> msg
-  | Some (false, msg) -> error_json msg
+  | Some result ->
+      if result.success then Tool_result.message result
+      else error_json (Tool_result.message result)
   | None -> error_json ~fields:[ "tool", `String name ] "unknown_autoresearch_tool"
 ;;
 
@@ -184,8 +185,10 @@ let handle_keeper_masc_tool
                     ~name
                     ~args
                 with
-                | Some (true, msg) -> msg
-                | Some (false, msg) -> error_json msg
+                | Some tr when tr.Tool_result.success ->
+                  tr.Tool_result.legacy_message
+                | Some tr ->
+                  error_json tr.Tool_result.legacy_message
                 | None ->
                   Yojson.Safe.to_string
                     (`Assoc

@@ -25,6 +25,10 @@ open Yojson.Safe.Util
 
 type tool_result = bool * string
 
+let wrap_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 type context = {
   config: Coord.config;
   agent_name: string;
@@ -1159,16 +1163,17 @@ let handle_task_history ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch ?agent_tool_names ctx ~name ~args : tool_result option =
+let dispatch ?agent_tool_names ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_add_task" -> Some (handle_add_task ctx args)
-  | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ctx args)
-  | "masc_claim_task" -> Some (handle_claim ?agent_tool_names ctx args)
-  | "masc_claim_next" -> Some (handle_claim_next ?agent_tool_names ctx args)
-  | "masc_transition" -> Some (handle_transition ?agent_tool_names ctx args)
-  | "masc_update_priority" -> Some (handle_update_priority ctx args)
-  | "masc_tasks" -> Some (handle_tasks ctx args)
-  | "masc_task_history" -> Some (handle_task_history ctx args)
+  | "masc_add_task" -> Some (wrap_result ~name ~start (handle_add_task ctx args))
+  | "masc_batch_add_tasks" -> Some (wrap_result ~name ~start (handle_batch_add_tasks ctx args))
+  | "masc_claim_task" -> Some (wrap_result ~name ~start (handle_claim ?agent_tool_names ctx args))
+  | "masc_claim_next" -> Some (wrap_result ~name ~start (handle_claim_next ?agent_tool_names ctx args))
+  | "masc_transition" -> Some (wrap_result ~name ~start (handle_transition ?agent_tool_names ctx args))
+  | "masc_update_priority" -> Some (wrap_result ~name ~start (handle_update_priority ctx args))
+  | "masc_tasks" -> Some (wrap_result ~name ~start (handle_tasks ctx args))
+  | "masc_task_history" -> Some (wrap_result ~name ~start (handle_task_history ctx args))
   | _ -> None
 
 (* ================================================================ *)

@@ -171,3 +171,65 @@ let message t = t.legacy_message
 let failure_class t = t.failure_class
 
 let to_legacy_compat t = (t.success, message t)
+
+(** Handler constructors — used by Tool_*.dispatch functions
+    to build structured results directly without going through [wrap]. *)
+
+let ok ~tool_name ~start_time message =
+  let end_time = Time_compat.now () in
+  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let data =
+    match structured_payload_of_message message with
+    | Some json -> json
+    | None -> `String message
+  in
+  { success = true; data; legacy_message = message; tool_name; duration_ms; failure_class = None }
+
+let error ?(failure_class = None) ~tool_name ~start_time message =
+  let end_time = Time_compat.now () in
+  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let data =
+    match structured_payload_of_message message with
+    | Some json -> json
+    | None -> `String message
+  in
+  let failure_class =
+    match failure_class with
+    | Some _ -> failure_class
+    | None -> Some (classify_from_dispatch_failure message)
+  in
+  { success = false; data; legacy_message = message; tool_name; duration_ms; failure_class }
+
+let of_exn ~tool_name ~start_time exn =
+  let end_time = Time_compat.now () in
+  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let cls = classify_from_exception exn in
+  let message =
+    Printf.sprintf "dispatch handler error for %s: %s" tool_name
+      (Stdlib.Printexc.to_string exn)
+  in
+  { success = false
+  ; data = `String message
+  ; legacy_message = message
+  ; tool_name
+  ; duration_ms
+  ; failure_class = Some cls
+  }
+
+let quick_ok ?(tool_name = "") message =
+  { success = true
+  ; data = `String message
+  ; legacy_message = message
+  ; tool_name
+  ; duration_ms = 0.0
+  ; failure_class = None
+  }
+
+let quick_error ?(tool_name = "") message =
+  { success = false
+  ; data = `String message
+  ; legacy_message = message
+  ; tool_name
+  ; duration_ms = 0.0
+  ; failure_class = Some Runtime_failure
+  }

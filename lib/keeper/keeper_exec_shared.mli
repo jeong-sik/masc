@@ -167,7 +167,7 @@ val tag_dispatch_fn
      -> tag:Tool_dispatch.module_tag
      -> name:string
      -> args:Yojson.Safe.t
-     -> (bool * string) option)
+     -> Tool_result.t option)
       ref
 
 (** Issue #10349 Phase 2: registry-canonical meta lookup.

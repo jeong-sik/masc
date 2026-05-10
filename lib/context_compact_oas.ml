@@ -5,11 +5,14 @@
     natively supports all 4 roles (System, User, Assistant, Tool) and
     preserves ToolUse/ToolResult pairing.
 
-    MASC-specific strategies (DropLowImportance, SummarizeOld) use OAS
-    Custom closures to inject domain logic that OAS does not provide.
+    MASC-specific strategies (DropLowImportance, SummarizeOld) map to OAS
+    built-in reducers ({!Agent_sdk.Context_reducer.importance_scored} and
+    {!Agent_sdk.Context_reducer.summarize_old}) so that improvements in OAS
+    automatically flow to MASC.
 
     @since Phase 1 — OAS Context_reducer integration
-    @since Phase B — legacy tag removal (roles are natively compatible) *)
+    @since Phase B — legacy tag removal (roles are natively compatible)
+    @since Phase C — DropLowImportance/SummarizeOld → OAS built-ins *)
 
 (* ================================================================ *)
 (* Strategy Type                                                     *)
@@ -69,16 +72,6 @@ let first_sentence (s : string) =
   | Some pos when pos <= max_len -> String.sub s 0 pos
   | _ -> String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." s |> String_util.to_string
 
-let tool_names_by_id (msgs : Agent_sdk.Types.message list) : (string * string) list =
-  let add_tool_name acc (m : Agent_sdk.Types.message) =
-    List.fold_left (fun acc -> function
-      | Agent_sdk.Types.ToolUse { id; name; _ } ->
-        if List.mem_assoc id acc then acc else (id, name) :: acc
-      | _ -> acc
-    ) acc m.content
-  in
-  List.fold_left add_tool_name [] msgs
-
 let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message option =
   if List.length msgs < 2 then
     None
@@ -112,70 +105,6 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
       tool_call_id = None;
       metadata = [];
     }
-
-let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string)
-    ~(content : string) : string =
-  let lines =
-    if content = "" then 0
-    else 1 + String.fold_left (fun acc ch -> if ch = '\n' then acc + 1 else acc) 0 content
-  in
-  let preview = first_sentence content in
-  let name = Option.value tool_name ~default:"unknown" in
-  Printf.sprintf "[tool:%s id:%s lines:%d chars:%d summary:%S]"
-    name tool_use_id lines (String.length content) preview
-
-let mask_tool_result_message ~(tool_names : (string * string) list)
-    (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
-  let content = List.map (function
-    | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
-      let tool_name = List.assoc_opt tool_use_id tool_names in
-      Agent_sdk.Types.ToolResult {
-        tool_use_id;
-        content = mask_tool_result_content ~tool_name ~tool_use_id ~content;
-        is_error;
-        (* Compaction keeps only a small textual stub plus the tool/result
-           pairing. Preserving structured payloads here would bypass the size
-           reduction and leak the full tool output through [json]. *)
-        json = None;
-      }
-    | other -> other
-  ) m.content in
-  { m with content }
-
-let summarize_old_messages ~(keep_recent : int)
-    (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
-  let total = List.length msgs in
-  if total <= keep_recent then msgs
-  else
-    let tool_names = tool_names_by_id msgs in
-    let old_count = total - keep_recent in
-    let rec split i acc rest =
-      if i <= 0 then (List.rev acc, rest)
-      else match rest with
-        | [] -> (List.rev acc, [])
-        | x :: xs -> split (i - 1) (x :: acc) xs
-    in
-    let old_msgs, recent_msgs = split old_count [] msgs in
-    let flush_chunk chunk acc =
-      match summarize_chunk (List.rev chunk) with
-      | Some summary -> summary :: acc
-      | None -> acc
-    in
-    let rec compact_old (old : Agent_sdk.Types.message list) chunk acc =
-      match old with
-      | [] -> List.rev (flush_chunk chunk acc)
-      | m :: tl ->
-        let has_tool_use = List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) m.content in
-        let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult _ -> true | _ -> false) m.content in
-        if has_tool_use then
-          compact_old tl [] (m :: flush_chunk chunk acc)
-        else if has_tool_result then
-          let masked = mask_tool_result_message ~tool_names m in
-          compact_old tl [] (masked :: flush_chunk chunk acc)
-        else
-          compact_old tl (m :: chunk) acc
-    in
-    compact_old old_msgs [] [] @ recent_msgs
 
 (** Score a list of messages by importance for context compaction.
     Returns [(index, score)] pairs where score is in [0.0, 1.0].
@@ -224,78 +153,81 @@ let drop_importance_threshold = Env_config_core.get_float ~default:0.3 "MASC_COM
 (** Number of recent messages to keep in [SummarizeOld] strategy. *)
 let summarize_keep_recent = Env_config_core.get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
 
+let score_message ~index ~total (m : Agent_sdk.Types.message) : float =
+  let recency = if total <= 1 then 1.0
+    else let t = float_of_int index /. float_of_int (total - 1) in
+         t *. t
+  in
+  let role_w = match m.role with
+    | Agent_sdk.Types.System -> role_system
+    | Agent_sdk.Types.Tool -> role_tool
+    | Agent_sdk.Types.User -> role_user
+    | Agent_sdk.Types.Assistant -> role_assistant
+  in
+  let msg_text = Agent_sdk.Types.text_of_message m in
+  let has_tool_content = List.exists (function
+    | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
+    | _ -> false) m.content
+  in
+  let tool_w = if has_tool_content then tool_present else tool_absent in
+  let score = w_recency *. recency +. w_role *. role_w +. w_tool *. tool_w in
+  let score =
+    if String.starts_with ~prefix:memory_summary_prefix msg_text
+       || String.starts_with ~prefix:_legacy_memory_summary_prefix msg_text
+       || String.starts_with ~prefix:goal_prefix msg_text
+       || String.starts_with ~prefix:_legacy_goal_prefix msg_text then
+      Float.max score anchor_boost
+    else score
+  in
+  Float.min 1.0 (Float.max 0.0 score)
+
 let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
   let n = List.length msgs in
-  List.mapi (fun i (m : Agent_sdk.Types.message) ->
-    let recency = if n <= 1 then 1.0
-      else let t = float_of_int i /. float_of_int (n - 1) in
-           t *. t
-    in
-    let role_w = match m.role with
-      | Agent_sdk.Types.System -> role_system
-      | Agent_sdk.Types.Tool -> role_tool
-      | Agent_sdk.Types.User -> role_user
-      | Agent_sdk.Types.Assistant -> role_assistant
-    in
-    let msg_text = Agent_sdk.Types.text_of_message m in
-    let has_tool_content = List.exists (function
-      | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
-      | _ -> false) m.content
-    in
-    let tool_w = if has_tool_content then tool_present else tool_absent in
-    let score = w_recency *. recency +. w_role *. role_w +. w_tool *. tool_w in
-    let score =
-      if String.starts_with ~prefix:memory_summary_prefix msg_text
-         || String.starts_with ~prefix:_legacy_memory_summary_prefix msg_text
-         || String.starts_with ~prefix:goal_prefix msg_text
-         || String.starts_with ~prefix:_legacy_goal_prefix msg_text then
-        Float.max score anchor_boost
-      else score
-    in
-    (i, Float.min 1.0 (Float.max 0.0 score))
-  ) msgs
+  List.mapi (fun i m -> (i, score_message ~index:i ~total:n m)) msgs
 
 (* ================================================================ *)
 (* Strategy Mapping: Local -> OAS                                   *)
 (* ================================================================ *)
 
-(** Map a local strategy to an OAS Context_reducer strategy.
+(** Map a local strategy to an OAS Context_reducer [t].
 
-    - PruneToolOutputs and MergeContiguous use OAS built-in strategies directly.
-    - DropLowImportance uses OAS Custom with importance scoring (OAS has no scoring).
-    - SummarizeOld uses OAS Custom with extractive summaries plus ToolResult
-      structured stubs so ToolUse/ToolResult pairing survives compaction. *)
+    - [PruneToolOutputs] and [MergeContiguous] use OAS built-in constructors.
+    - [DropLowImportance] uses OAS {!importance_scored} with the MASC
+      composite scorer ({!score_message}).
+    - [SummarizeOld] uses OAS {!summarize_old} with an extractive
+      summarizer ({!extractive_summarizer}).
+    - [Dynamic] is resolved before reaching this function; if it leaks
+      through, it falls back to {!importance_scored}. *)
+let extractive_summarizer (msgs : Agent_sdk.Types.message list) : string =
+  match summarize_chunk msgs with
+  | None -> ""
+  | Some msg -> Agent_sdk.Types.text_of_message msg
+
 (** Max length for tool output before pruning. Shared with keeper_agent_run. *)
 let tool_output_prune_limit = Env_config.ContextCompact.tool_output_prune_limit
 
-let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
+let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.t =
   match s with
   | PruneToolOutputs ->
-    Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = tool_output_prune_limit }
+    Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:tool_output_prune_limit
   | MergeContiguous ->
-    Agent_sdk.Context_reducer.Merge_contiguous
+    Agent_sdk.Context_reducer.merge_contiguous
   | DropLowImportance ->
-    Agent_sdk.Context_reducer.Custom (fun msgs ->
-      let scores = score_messages msgs in
-      let threshold = drop_importance_threshold in
-      List.filteri (fun i _m ->
-        match List.assoc_opt i scores with
-        | Some score -> score >= threshold
-        | None -> true
-      ) msgs)
+    Agent_sdk.Context_reducer.importance_scored
+      ~threshold:drop_importance_threshold
+      ~scorer:score_message
+      ()
   | Dynamic _ ->
     (* Dynamic is resolved before reaching oas_strategy_of.
-       If it leaks here, fall back to DropLowImportance. *)
-    Agent_sdk.Context_reducer.Custom (fun msgs ->
-      let scores = score_messages msgs in
-      let threshold = drop_importance_threshold in
-      List.filteri (fun i _m ->
-        match List.assoc_opt i scores with
-        | Some score -> score >= threshold
-        | None -> true
-      ) msgs)
+       If it leaks here, fall back to importance scoring. *)
+    Agent_sdk.Context_reducer.importance_scored
+      ~threshold:drop_importance_threshold
+      ~scorer:score_message
+      ()
   | SummarizeOld ->
-    Agent_sdk.Context_reducer.Custom (summarize_old_messages ~keep_recent:summarize_keep_recent)
+    Agent_sdk.Context_reducer.summarize_old
+      ~keep_recent:summarize_keep_recent
+      ~summarizer:extractive_summarizer
 
 (* ================================================================ *)
 (* Public API                                                       *)
@@ -458,6 +390,5 @@ let compact
     (String.concat "," strategy_names)
     (observation_summary observation);
   let oas_strategies = List.map oas_strategy_of resolved in
-  let reducer = Agent_sdk.Context_reducer.compose
-    (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in
+  let reducer = Agent_sdk.Context_reducer.compose oas_strategies in
   Agent_sdk.Context_reducer.reduce reducer messages

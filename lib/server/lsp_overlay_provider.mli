@@ -26,5 +26,8 @@ val clear_cache : unit -> unit
 val enrich_hover :
   base_dir:string -> file_path:string -> line:int -> Yojson.Safe.t -> Yojson.Safe.t
 (** Append MASC annotation context to an LSP Hover response.
-    If annotations overlap the given line, appends summaries to the hover contents.
+    Handles all Hover.contents forms: MarkupContent, MarkedString, MarkedString[].
     Returns the original response unchanged if no annotations overlap. *)
+
+val has_annotations_at_line : base_dir:string -> file_path:string -> line:int -> bool
+(** Check if any MASC annotations overlap the given LSP position (0-based line). *)

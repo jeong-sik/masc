@@ -1226,6 +1226,7 @@
 (include stanzas/test_keeper_fs_write_containment.inc)
 (include stanzas/test_keeper_gh_timeout_floor.inc)
 (include stanzas/test_keeper_identity_drift_counter.inc)
+(include stanzas/test_keeper_invariant.inc)
 (include stanzas/test_keeper_long_turn_9943.inc)
 (include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
 (include stanzas/test_keeper_meta_canonical_seed.inc)

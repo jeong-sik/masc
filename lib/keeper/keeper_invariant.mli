@@ -6,8 +6,6 @@
     - Tool surface monotonicity: Available tools only shrink when explicitly configured
 *)
 
-open Base
-
 (** Unique identifier for a keeper turn. *)
 type turn_id = string
 
@@ -19,18 +17,18 @@ type credential_scope = {
   keeper_id : string;
   github_account : string;
 }
-[@@deriving sexp, equal]
+[@@deriving eq]
 
 (** Normalised tool identifier. *)
 type tool_name = string
 
 (** {1 Sandbox Isolation} *)
 
-(** [sandbox_isolation ~turn ~sandbox_paths] checks that every path in
-    [sandbox_paths] is strictly prefixed by the sandbox root assigned to
-    [turn].  Violations indicate a potential container escape or mount
-    misconfiguration. *)
-val sandbox_isolation : turn:turn_id -> sandbox_paths:sandbox_path list -> (unit, string) Result.t
+(** [sandbox_isolation ~sandbox_roots ~sandbox_paths] checks that every path in
+    [sandbox_paths] is strictly prefixed by at least one root in [sandbox_roots].
+    Violations indicate a potential container escape or mount misconfiguration. *)
+val sandbox_isolation :
+  sandbox_roots:sandbox_path list -> sandbox_paths:sandbox_path list -> (unit, string) Result.t
 
 (** {1 Credential Isolation} *)
 
@@ -54,7 +52,7 @@ val tool_surface_monotonicity :
 
 (** Run all three invariants and return the first error, if any. *)
 val check_all :
-  turn:turn_id ->
+  sandbox_roots:sandbox_path list ->
   sandbox_paths:sandbox_path list ->
   keeper:string ->
   credential:credential_scope ->

@@ -82,10 +82,11 @@ val run_once : base_path:string -> unit
 
 (** {1 Background probe fiber} *)
 
-(** [start_probe ~sw ~base_path ~interval_sec] spawns a background Eio
+(** [start_probe ~sw ~base_path ~interval_sec ~clock] spawns a background Eio
     fiber that runs [check_cascade_health] every [interval_sec] seconds
     and updates the internal cache.  The fiber exits when [sw] is
     cancelled.  Currently unused — the supervisor calls [run_once]
-    inline.  Retained for future use when a faster cadence than the
-    30 s sweep is needed. *)
-val start_probe : sw:Eio.Switch.t -> base_path:string -> interval_sec:float -> unit
+    inline.  [clock] must be an Eio time clock (typically from the
+    fiber's environment).  Retained for future use when a faster cadence
+    than the 30 s sweep is needed. *)
+val start_probe : sw:Eio.Switch.t -> base_path:string -> interval_sec:float -> clock:float Eio.Time.clock_ty Eio.Resource.t -> unit

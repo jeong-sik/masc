@@ -22,7 +22,6 @@ type annotation = {
   content : string;
   goal_id : string option;
   task_id : string option;
-  task_id : string option;
   created_at_ms : int64;
   updated_at_ms : int64;
 }

@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { fetchIdeRegions, type IdeCodeRegion } from '../../api/ide'
 
 export interface CodeDocumentSource {
   readonly file_path: string
@@ -21,6 +22,9 @@ export interface CodeDocumentStore {
   readonly document: () => CodeDocumentSnapshot
   readonly lines: () => ReadonlyArray<CodeDocumentLine>
   readonly line: (lineNumber: number) => CodeDocumentLine | null
+  readonly regions: () => ReadonlyArray<IdeCodeRegion>
+  readonly regionsLoading: () => boolean
+  readonly loadRegions: (filePath: string, opts?: { keeper?: string; signal?: AbortSignal }) => Promise<void>
   readonly subscribe: (listener: () => void) => () => void
 }
 
@@ -38,12 +42,25 @@ export function createCodeDocumentStore(
   const maxLines = normalizeMaxLines(opts.maxLines)
   const initial = normalizeSource(initialSource, maxLines) ?? EMPTY_DOCUMENT
   const snapshot = signal<CodeDocumentSnapshot>(initial)
+  const regionsSignal = signal<ReadonlyArray<IdeCodeRegion>>([])
+  const regionsLoadingSignal = signal<boolean>(false)
 
   const load = (source: unknown): boolean => {
     const next = normalizeSource(source, maxLines)
     if (!next) return false
     snapshot.value = next
     return true
+  }
+
+  const loadRegions = async (filePath: string, opts?: { keeper?: string; signal?: AbortSignal }): Promise<void> => {
+    regionsLoadingSignal.value = true
+    try {
+      const fetched = await fetchIdeRegions(filePath, opts ?? {})
+      if (opts?.signal?.aborted) return
+      regionsSignal.value = fetched
+    } finally {
+      regionsLoadingSignal.value = false
+    }
   }
 
   const subscribe = (listener: () => void): (() => void) => {
@@ -62,6 +79,9 @@ export function createCodeDocumentStore(
     document: () => snapshot.value,
     lines: () => snapshot.value.lines,
     line: lineNumber => snapshot.value.lines[lineNumber - 1] ?? null,
+    regions: () => regionsSignal.value,
+    regionsLoading: () => regionsLoadingSignal.value,
+    loadRegions,
     subscribe,
   }
 }

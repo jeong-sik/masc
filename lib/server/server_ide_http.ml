@@ -189,3 +189,18 @@ let add_routes router =
           (Yojson.Safe.to_string (json_ok json)) reqd)
       request reqd)
     router3
+  in
+  Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+        let snapshot = `Assoc [
+          ("runtime_id", `String "runtime");
+          ("branch", `String "main");
+          ("supervisor", `String "local");
+          ("connected", `Bool true);
+          ("entries", `List []);
+        ] in
+        Http.Response.json ~compress:true ~request:request
+          (Yojson.Safe.to_string (json_ok snapshot)) reqd)
+      request reqd)
+    router4

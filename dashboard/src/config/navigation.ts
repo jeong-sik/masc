@@ -173,6 +173,9 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Observatory',
       description: 'Live collaboration and investigative timelines remain drill-down surfaces.',
       params: { section: 'observatory' },
+      // RFC-MASC-006 Phase 2a: kept as a hidden diagnostic surface, not yet promoted to main nav.
+      // Reachable via legacy redirects (monitoring:activity, monitoring:live) and direct URL.
+      // Remove hidden:true when Phase 2b drill-down is complete.
       hidden: true,
     },
     {
@@ -403,6 +406,15 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   delete next.surface
   delete next.operation
   delete next.run_id
+
+  // Sections that use the `view` sub-param for internal navigation.
+  // For all other sections, `view` is meaningless and must not leak in from prior navigation.
+  const SECTIONS_WITH_VIEW = new Set([
+    'fleet-health', 'runtime', 'agents', 'cognition', 'observatory',
+  ])
+  if (!next.section || !SECTIONS_WITH_VIEW.has(next.section)) {
+    delete next.view
+  }
 
   return next
 }

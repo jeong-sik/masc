@@ -763,3 +763,11 @@ val event_queue_snapshot :
     ([dequeued_total <= enqueued_total]). *)
 val dequeue_event :
   base_path:string -> string -> Keeper_event_queue.stimulus option
+
+val drain_board_events :
+  ?window_sec:float ->
+  base_path:string -> string -> Keeper_event_queue.stimulus list
+(** Drain all board-signal stimuli within [window_sec] from the keeper's
+    event queue using a CAS loop.  Returns the coalesced board signals
+    (urgency-sorted) and updates the queue atomically.  Returns []
+    when the keeper is not found or the queue has no board signals. *)

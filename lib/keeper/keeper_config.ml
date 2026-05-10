@@ -655,6 +655,15 @@ let keeper_batch_limit_rp =
 let keeper_batch_limit () : int =
   Runtime_params.get keeper_batch_limit_rp
 
+let keeper_board_debounce_window_sec_rp =
+  _rp_float ~key:"keeper.board.debounce_window_sec"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_BOARD_DEBOUNCE_SEC"
+                          ~default:2.0 ~min_v:0.0 ~max_v:30.0)
+    ~min_v:0.0 ~max_v:30.0
+    ~description:"Time window to coalesce board signals into one turn (seconds)" ()
+let keeper_board_debounce_window_sec () : float =
+  Runtime_params.get keeper_board_debounce_window_sec_rp
+
 let keeper_tool_cost_max_usd_rp =
   _rp_float ~key:"keeper.turn.tool_cost_max_usd"
     ~default:(fun () -> float_of_env_default "MASC_KEEPER_TOOL_COST_MAX_USD"

@@ -4,10 +4,10 @@
     and risk contracts without schema drift. *)
 
 open Alcotest
-module RC = Agent_sdk.Risk_contract
-module Proof = Agent_sdk.Cdal_proof
-module EM = Agent_sdk.Execution_mode
-module RK = Agent_sdk.Risk_class
+module RC = Masc_mcp_cdal_runtime.Risk_contract
+module Proof = Masc_mcp_cdal_runtime.Cdal_proof
+module EM = Masc_mcp_cdal_runtime.Execution_mode
+module RK = Masc_mcp_cdal_runtime.Risk_class
 
 (* Inline fixtures — avoids CWD issues in CI where dune runs tests
    from _build/default/test/ rather than the repo root. Canonical

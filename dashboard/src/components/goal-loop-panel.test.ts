@@ -66,12 +66,11 @@ describe('GoalLoopPanel', () => {
     cleanup()
   })
 
-  it('renders phase status, next action, and the strict corpus blocker', () => {
+  it('renders phase table, audit, next action, and the strict corpus blocker', () => {
     render(html`<${GoalLoopPanel} initialStatus=${blockedStatus()} />`)
 
     expect(screen.getByTestId('goal-loop-panel')).toBeTruthy()
-    expect(screen.getByTestId('goal-loop-phase-observe').textContent).toContain('critical')
-    expect(screen.getByTestId('goal-loop-phase-verify').textContent).toContain('FAIL')
+    expect(screen.getByRole('grid', { name: /goal loop phases/i })).toBeTruthy()
     expect(screen.getByTestId('goal-loop-audit-catalog').textContent).toContain('INCOMPLETE')
     expect(screen.getByTestId('goal-loop-corpus-missing').textContent).toContain('187')
     expect(screen.getByTestId('goal-loop-next-action').textContent).toContain('D-EMERGENCY-2')

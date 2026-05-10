@@ -79,9 +79,20 @@ let send cs msg =
   Eio.Mutex.use_rw ~protect:true cs.send_mutex (fun () -> send_text cs.wsd msg)
 ;;
 
+(** JSON-RPC request ID — LSP spec allows integer or string. *)
+type req_id = Id_int of int | Id_string of string
+
+let id_to_json = function
+  | Id_int n -> `Int n
+  | Id_string s -> `String s
+
+let req_id_to_int = function
+  | Id_int n -> n
+  | Id_string s -> Hashtbl.hash s
+
 (** Send JSON-RPC response. *)
 let send_response cs id result =
-  let resp = `Assoc [ "jsonrpc", `String "2.0"; "id", `Int id; "result", result ] in
+  let resp = `Assoc [ "jsonrpc", `String "2.0"; "id", id_to_json id; "result", result ] in
   send cs (Yojson.Safe.to_string resp)
 ;;
 
@@ -90,7 +101,7 @@ let send_error cs id code msg =
   let resp =
     `Assoc
       [ "jsonrpc", `String "2.0"
-      ; "id", `Int id
+      ; "id", id_to_json id
       ; "error", `Assoc [ "code", `Int code; "message", `String msg ]
       ]
   in
@@ -137,31 +148,35 @@ let pct_decode s =
   done;
   Buffer.contents buf
 
-(** Resolve file:// URI to relative path from base. *)
+(** Resolve file:// URI to relative path from base.
+    Strips trailing slash from base and checks directory boundary. *)
 let resolve_relative ~base uri =
   let prefix = "file://" in
-  if String.starts_with ~prefix uri
-  then (
-    let full =
-      let raw =
-        String.sub uri (String.length prefix) (String.length uri - String.length prefix)
-      in
-      pct_decode raw
+  if not (String.starts_with ~prefix uri) then Some uri
+  else
+    let raw = String.sub uri (String.length prefix) (String.length uri - String.length prefix) in
+    let full = pct_decode raw in
+    let base =
+      let len = String.length base in
+      if len > 1 && String.get base (len - 1) = '/'
+      then String.sub base 0 (len - 1)
+      else base
     in
-    if String.starts_with ~prefix:base full
-    then (
-      let start = String.length base in
-      if start < String.length full
-      then Some (String.sub full (start + 1) (String.length full - start - 1))
-      else Some "")
-    else Some full)
-  else Some uri
+    let base_len = String.length base in
+    let full_len = String.length full in
+    if not (String.starts_with ~prefix:base full) then Some full
+    else if base_len = full_len then Some ""
+    else if full_len > base_len && String.get full base_len = '/' then
+      Some (String.sub full (base_len + 1) (full_len - base_len - 1))
+    else
+      Some full
 ;;
 
 (** Extract client request ID from JSON-RPC message fields. *)
 let extract_id fields =
   match List.assoc_opt "id" fields with
-  | Some (`Int n) -> Some n
+  | Some (`Int n) -> Some (Id_int n)
+  | Some (`String s) -> Some (Id_string s)
   | _ -> None
 ;;
 
@@ -245,7 +260,7 @@ let forward_request cs lang_id method_ params id =
   | Error msg -> send_error cs id (-32603) msg
   | Ok proc ->
     let promise =
-      Lsp_message_router.send_request cs.router proc ~method_ ~params ~client_id:id
+      Lsp_message_router.send_request cs.router proc ~method_ ~params ~client_id:(req_id_to_int id)
     in
     (match Eio.Promise.await promise with
      | Ok result -> send_response cs id result
@@ -280,7 +295,7 @@ let handle_codelens cs params id =
             proc
             ~method_:"textDocument/codeLens"
             ~params
-            ~client_id:id
+            ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
          | Ok (`List items) -> send_response cs id (`List (items @ masc))
@@ -309,7 +324,7 @@ let handle_inlay_hint cs params id =
             proc
             ~method_:"textDocument/inlayHint"
             ~params
-            ~client_id:id
+            ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
          | Ok (`List items) -> send_response cs id (`List (items @ masc))
@@ -351,7 +366,7 @@ let handle_diagnostic cs params id =
             proc
             ~method_:"textDocument/diagnostic"
             ~params
-            ~client_id:id
+            ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
          | Ok (`Assoc rfields) ->
@@ -382,7 +397,7 @@ let handle_hover cs params id =
     let lang_id = Lsp_process_manager.lang_of_path relative in
     if lang_id = "unknown"
     then (
-      if line >= 0
+      if line >= 0 && Lsp_overlay_provider.has_annotations_at_line ~base_dir:base ~file_path:relative ~line
       then (
         let enriched =
           Lsp_overlay_provider.enrich_hover
@@ -403,7 +418,7 @@ let handle_hover cs params id =
             proc
             ~method_:"textDocument/hover"
             ~params
-            ~client_id:id
+            ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
          | Ok result ->
@@ -467,7 +482,7 @@ let dispatch_message cs msg =
                      ; "documentLinkProvider", `Bool true
                      ; "codeLensProvider", `Assoc [ "resolveProvider", `Bool false ]
                      ; "inlayHintProvider", `Bool true
-                     ; "diagnosticProvider", `Bool true
+                     ; "diagnosticProvider", `Assoc [ "interFileDependencies", `Bool false; "workspaceDiagnostics", `Bool false ]
                      ] )
                ])
        | Some "initialized", _ -> ()

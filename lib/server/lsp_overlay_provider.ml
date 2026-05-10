@@ -8,25 +8,30 @@ open Ide_annotation_types
 
 module Cache = struct
   let tbl : (string, annotation list) Hashtbl.t = Hashtbl.create 32
+  let mutex = Eio.Mutex.create ()
 
   let key ~base_dir ~file_path = base_dir ^ "/" ^ file_path
 
   let get ~base_dir ~file_path =
-    let k = key ~base_dir ~file_path in
-    match Hashtbl.find_opt tbl k with
-    | Some annotations -> annotations
-    | None ->
-      let filter : annotation_filter =
-        { file_path = Some file_path; keeper_id = None; goal_id = None; task_id = None }
-      in
-      let annotations = Ide_annotations.list ~base_dir ~filter in
-      Hashtbl.replace tbl k annotations;
-      annotations
+    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+      let k = key ~base_dir ~file_path in
+      match Hashtbl.find_opt tbl k with
+      | Some annotations -> annotations
+      | None ->
+        let filter : annotation_filter =
+          { file_path = Some file_path; keeper_id = None; goal_id = None; task_id = None }
+        in
+        let annotations = Ide_annotations.list ~base_dir ~filter in
+        Hashtbl.replace tbl k annotations;
+        annotations)
 
   let invalidate ~base_dir ~file_path =
-    Hashtbl.remove tbl (key ~base_dir ~file_path)
+    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+      Hashtbl.remove tbl (key ~base_dir ~file_path))
 
-  let clear () = Hashtbl.clear tbl
+  let clear () =
+    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+      Hashtbl.clear tbl)
 end
 
 (** LSP CodeLens entry as JSON. *)
@@ -128,8 +133,37 @@ let annotations_at_line ~base_dir ~file_path ~line =
     a.line_start - 1 <= line && line <= a.line_end - 1
   ) annotations
 
+let has_annotations_at_line ~base_dir ~file_path ~line =
+  annotations_at_line ~base_dir ~file_path ~line <> []
+
+(** Normalize Hover.contents to MarkupContent (kind, value).
+    Handles MarkupContent, MarkedString, and MarkedString[]. *)
+let contents_to_markup = function
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields, List.assoc_opt "value" fields with
+     | Some (`String k), Some (`String v) -> Some (k, v)
+     | _ ->
+       (match List.assoc_opt "language" fields, List.assoc_opt "value" fields with
+        | Some (`String lang), Some (`String v) ->
+          Some ("markdown", "```" ^ lang ^ "\n" ^ v ^ "\n```")
+        | _ -> None))
+  | `String s -> Some ("plaintext", s)
+  | `List items ->
+    let parts = List.filter_map (function
+      | `String s -> Some s
+      | `Assoc fs ->
+        (match List.assoc_opt "language" fs, List.assoc_opt "value" fs with
+         | Some (`String lang), Some (`String v) ->
+           Some ("```" ^ lang ^ "\n" ^ v ^ "\n```")
+         | _, Some (`String v) -> Some v
+         | _ -> None)
+      | _ -> None
+    ) items in
+    Some ("markdown", String.concat "\n\n" parts)
+  | _ -> None
+
 (** Append MASC annotation context to an LSP Hover response.
-    If the hover response is a MarkupContent, appends annotation summaries.
+    Handles all LSP Hover.contents forms: MarkupContent, MarkedString, MarkedString[].
     Returns the enriched response unchanged if no annotations overlap. *)
 let enrich_hover ~base_dir ~file_path ~line (result : Yojson.Safe.t) =
   let matching = annotations_at_line ~base_dir ~file_path ~line in
@@ -153,11 +187,17 @@ let enrich_hover ~base_dir ~file_path ~line (result : Yojson.Safe.t) =
     match result with
     | `Assoc fields ->
       (match List.assoc_opt "contents" fields with
-       | Some (`Assoc [ ("kind", `String k); ("value", `String v) ]) ->
-         `Assoc (List.map (fun (key, value) ->
-           if String.equal key "contents"
-           then ("contents", `Assoc [ ("kind", `String k); ("value", `String (v ^ masc_suffix)) ])
-           else (key, value)
-         ) fields)
-       | _ -> result)
+       | Some contents ->
+         (match contents_to_markup contents with
+          | Some (k, v) ->
+            let enriched =
+              `Assoc [ ("kind", `String k); ("value", `String (v ^ masc_suffix)) ]
+            in
+            `Assoc (List.map (fun (key, value) ->
+              if String.equal key "contents"
+              then ("contents", enriched)
+              else (key, value)
+            ) fields)
+          | None -> result)
+       | None -> result)
     | _ -> result

@@ -1,5 +1,20 @@
 {
   "_comment": "Checked-in seed for cascade authoring. Repo defaults expose exactly two profiles: big_three for keeper/workflow calls and tool_rerank for short rerank calls. Logical usage names are configured under [routes] instead of being profile names.",
+  "profiles": {
+    "tool_strict": {
+      "required_capabilities": [
+        "runtime_mcp_tools", "runtime_tool_events",
+        "runtime_mcp_http_headers"
+      ]
+    },
+    "inline_tools": {
+      "required_capabilities": [ "inline_tools", "inline_tool_choice" ]
+    },
+    "lite": {
+      "required_capabilities": [ "runtime_mcp_tools", "runtime_tool_events" ]
+    },
+    "local": { "required_capabilities": [] }
+  },
   "routes": {
     "keeper_turn": "big_three",
     "phase_recovery": "big_three",

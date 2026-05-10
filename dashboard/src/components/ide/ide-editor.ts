@@ -26,6 +26,7 @@ import {
 import { lspExtension, getSelectedAnnotation, clearSelectedAnnotation, type SelectedAnnotation } from './ide-lsp-client'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
+import { keeperCursorExtension } from './keeper-cursor-cm-extension'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -493,6 +494,7 @@ function CodeMirrorEditor({
           syntaxHighlightExt(),
           lang,
           lspExtension({ filePath: mountDocument.file_path }),
+          keeperCursorExtension(),
           EditorView.updateListener.of((update) => {
             const sel = getSelectedAnnotation(update.view)
             if (sel !== prevAnnRef.current) {

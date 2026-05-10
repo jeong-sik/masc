@@ -23,6 +23,10 @@ function shouldRefreshDevToken(): boolean {
   const meta = getStoredTokenMeta()
   if (!token) return true
   if (meta?.source === 'dev') return true
+  // A manually-pasted token should never be silently overwritten by the
+  // loopback dev-token bootstrapper.  (Issue: token appeared reset after
+  // page refresh because ensureDevToken() re-fetched and replaced it.)
+  if (meta?.source === 'manual') return false
   const actor = currentDashboardActor()
   if (isRemoteAccess() || actor !== 'dashboard') return false
   // Loopback dashboard sessions should self-heal if they are still holding

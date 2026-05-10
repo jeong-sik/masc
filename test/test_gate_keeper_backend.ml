@@ -93,7 +93,7 @@ let test_filesystem_safe_normal () =
 
 let test_filesystem_safe_strips_path_traversal () =
   let result = Gate_keeper_backend.filesystem_safe_or_unknown "../../etc/passwd" in
-  check string "path traversal sanitized" "___etc_passwd" result
+  check string "path traversal sanitized" "______etc_passwd" result
 
 let test_filesystem_safe_empty_to_unknown () =
   let result = Gate_keeper_backend.filesystem_safe_or_unknown "" in

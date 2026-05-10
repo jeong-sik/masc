@@ -113,23 +113,29 @@ let create ~base_dir ~keeper_id ~file_path ~line_start ~line_end ~kind ~content
 
 let list ~base_dir ~filter =
   ensure_store ~base_dir;
-  let all = load_all ~base_dir in
+  let all : annotation list = load_all ~base_dir in
   let by_file =
     match filter.file_path with
-    | Some fp -> List.filter (fun a -> a.file_path = fp) all
+    | Some fp -> List.filter (fun (a : annotation) -> a.file_path = fp) all
     | None -> all
   in
   let by_keeper =
     match filter.keeper_id with
-    | Some k -> List.filter (fun a -> a.keeper_id = k) by_file
+    | Some k -> List.filter (fun (a : annotation) -> a.keeper_id = k) by_file
     | None -> by_file
   in
   let by_goal =
     match filter.goal_id with
-    | Some g -> List.filter (fun a -> a.goal_id = Some g) by_keeper
+    | Some g -> List.filter (fun (a : annotation) -> 
+      match a.goal_id with Some gid -> gid = g | None -> false) by_keeper
     | None -> by_keeper
   in
   List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_goal
+
+let compact ~base_dir =
+  let all = load_all ~base_dir in
+  write_all ~base_dir all
+
 
 let delete ~base_dir ~id ~keeper_id =
   ensure_store ~base_dir;
@@ -147,6 +153,3 @@ let delete ~base_dir ~id ~keeper_id =
       then compact ~base_dir;
       Ok ()
 
-let compact ~base_dir =
-  let all = load_all ~base_dir in
-  write_all ~base_dir all

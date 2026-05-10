@@ -11,6 +11,8 @@ module Http = Http_server_eio
 
 let base_path_of_state state = state.Mcp_server.room_config.base_path
 
+let extract_path_param = Server_utils.extract_path_param
+
 let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
   let config = state.Mcp_server.room_config in
@@ -129,13 +131,13 @@ let add_routes router =
     router1
   in
   let router3 =
-    Http.Router.delete "/api/v1/ide/annotations/:id" (fun request reqd ->
+    Http.Router.any "/api/v1/ide/annotations/:id" (fun request reqd ->
       with_public_read
         (fun state _req reqd ->
           let uri = Uri.of_string request.target in
           let base, _source = resolve_workspace_base ~state ~uri in
           let id =
-            match Http.Router.param request "id" with
+            match extract_path_param ~prefix:"/api/v1/ide/annotations/" (Http.Request.path request) with
             | Some s when s <> "" -> s
             | _ -> ""
           in

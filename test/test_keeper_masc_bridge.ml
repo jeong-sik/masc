@@ -597,7 +597,7 @@ let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
       let raw =
         Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
           ~config
-          ~meta
+          ~keeper_name:meta.name
           ~name:"masc_approval_pending"
           ~args:(`Assoc [])
       in
@@ -633,7 +633,7 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
         let raw =
           Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
             ~config
-            ~meta
+            ~keeper_name:meta.name
             ~name:"masc_code_read"
             ~args:
               (`Assoc

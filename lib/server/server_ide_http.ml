@@ -239,8 +239,6 @@ let add_routes router =
       request reqd)
     router3
   in
-  (* [build_presence_snapshot] extracted in main — conflict resolved by taking
-     main's helper call instead of our inline construction. *)
   let router5 =
     Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
       with_public_read

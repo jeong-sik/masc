@@ -54,7 +54,7 @@ let test_unknown_string_returns_none () =
     (Option.map CP.profile_to_string (CP.profile_of_string ""))
 
 let test_all_profiles_enumerates_every_builtin () =
-  check int "all_profiles cardinality" 4 (List.length CP.all_profiles)
+  check int "all_profiles cardinality" 5 (List.length CP.all_profiles)
 
 let test_local_accepts_anything () =
   check bool "local accepts all_off" true

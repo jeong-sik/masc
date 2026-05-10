@@ -5,7 +5,6 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import type { KeeperPresenceEntry } from './keeper-presence-store'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -56,7 +55,7 @@ const KEEPER_COLORS = [
 
 export function getKeeperColor(keeperId: string, index?: number): { cursor: string; selection: string } {
   const idx = index ?? (keeperId.charCodeAt(0) + (keeperId.charCodeAt(1) || 0)) % KEEPER_COLORS.length
-  return KEEPER_COLORS[idx] ?? KEEPER_COLORS[0]
+  return KEEPER_COLORS[idx] ?? { cursor: KEEPER_COLORS[0]!.cursor, selection: KEEPER_COLORS[0]!.selection }
 }
 
 // ── Collision Detection ─────────────────────────────────────────
@@ -361,7 +360,6 @@ export function updateCursorFromToolCall(
   toolName: string,
   turn: number,
 ): KeeperCursorOverlay {
-  const existing = overlay.cursors.get(keeperId)
   const now = Date.now()
   
   const updated: KeeperCursor = {

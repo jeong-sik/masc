@@ -29,7 +29,6 @@ export interface CreateAnnotationInput {
   readonly content: string
   readonly goal_id?: string
   readonly task_id?: string
-  readonly task_id?: string
 }
 
 function appendFilterParams(

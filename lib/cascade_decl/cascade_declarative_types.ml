@@ -72,8 +72,12 @@ type cascade_alias = {
 
 type cascade_strategy =
   | Failover
+  | Capacity_aware
   | Weighted_random
+  | Circuit_breaker_cycling
   | Priority_tier
+  | Sticky
+  | Round_robin
 [@@deriving show, eq]
 
 type cascade_tier = {

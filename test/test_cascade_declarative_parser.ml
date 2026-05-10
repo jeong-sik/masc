@@ -312,7 +312,7 @@ let test_unknown_strategy () =
   let toml = {|
 [tier.bad-strategy]
 members = ["x"]
-strategy = "round_robin"
+strategy = "nonexistent_strategy"
 |} in
   let errs = is_error (parse_string toml) in
   has_error_at "tier.bad-strategy.strategy" errs
@@ -375,6 +375,42 @@ let test_api_format_of_protocol () =
   check bool "unknown" true
     (api_format_of_protocol "unknown" |> Result.is_error)
 
+let test_all_strategies_parse () =
+  let strategies =
+    [ "failover", Failover;
+      "capacity_aware", Capacity_aware;
+      "weighted_random", Weighted_random;
+      "circuit_breaker_cycling", Circuit_breaker_cycling;
+      "priority_tier", Priority_tier;
+      "sticky", Sticky;
+      "round_robin", Round_robin;
+    ]
+  in
+  List.iter (fun (name, expected) ->
+    let toml = Printf.sprintf {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "%s"
+|} name in
+    let cfg = ok_config (parse_string toml) in
+    match cfg.tiers with
+    | [ t ] ->
+      check string
+        (name ^ " strategy")
+        (show_cascade_strategy expected)
+        (show_cascade_strategy t.strategy)
+    | _ -> failwith "expected exactly one tier")
+    strategies
+
 (* --- Test suite --- *)
 
 let () =
@@ -418,5 +454,8 @@ let () =
         test_case "lookup helpers" `Quick test_lookup_helpers;
         test_case "key formatters" `Quick test_key_formatters;
         test_case "api_format_of_protocol" `Quick test_api_format_of_protocol;
+      ];
+      "strategies", [
+        test_case "all 7 strategies parse" `Quick test_all_strategies_parse;
       ];
     ]

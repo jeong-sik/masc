@@ -292,12 +292,18 @@ let strategy_of_string (s : string) :
     (cascade_strategy, string) result =
   match s with
   | "failover" -> Ok Failover
+  | "capacity_aware" -> Ok Capacity_aware
   | "weighted_random" -> Ok Weighted_random
+  | "circuit_breaker_cycling" -> Ok Circuit_breaker_cycling
   | "priority_tier" -> Ok Priority_tier
+  | "sticky" -> Ok Sticky
+  | "round_robin" -> Ok Round_robin
   | _ ->
     Error
       (Printf.sprintf
-         "unknown strategy %S: expected failover, weighted_random, or priority_tier"
+         "unknown strategy %S: expected one of failover, capacity_aware, \
+          weighted_random, circuit_breaker_cycling, priority_tier, sticky, \
+          round_robin"
          s)
 
 let parse_tier (name : string) (tbl : Otoml.t) :

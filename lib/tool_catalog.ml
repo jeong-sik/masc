@@ -457,6 +457,8 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Fs_edit
   | TN.Keeper TK.Write ->
       Some Playground_write
+  | TN.Keeper TK.Memory_write ->
+      Some Masc_coordination
   | TN.Keeper TK.Board_cleanup
   | TN.Keeper TK.Board_comment
   | TN.Keeper TK.Board_comment_vote
@@ -627,7 +629,7 @@ let tool_group_of_typed_tool_name = function
       | TK.Board_stats
       | TK.Board_vote ) ->
       Some Board
-  | TN.Keeper (TK.Memory_search | TK.Library_read | TK.Library_search) ->
+  | TN.Keeper (TK.Memory_search | TK.Memory_write | TK.Library_read | TK.Library_search) ->
       Some Knowledge
   | TN.Keeper
       ( TK.Task_claim

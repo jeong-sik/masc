@@ -427,14 +427,14 @@ let execute_keeper_tool_call_with_outcome
            (Keeper_exec_fs.handle_keeper_fs_read
               ~turn_sandbox_factory
               ~config
-              ~meta
+              ~keeper_name:meta.name
               ~args)
        | "keeper_fs_edit" ->
          make_executed_tool_result
            (Keeper_exec_fs.handle_keeper_fs_edit
               ~turn_sandbox_factory
               ~config
-              ~meta
+              ~keeper_name:meta.name
               ~args)
        | "keeper_bash" ->
          make_executed_tool_result
@@ -506,7 +506,7 @@ let execute_keeper_tool_call_with_outcome
            (Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args)
        | other ->
          (match
-            Keeper_exec_masc.handle_registered_keeper_tool ~config ~meta ~name:other ~args
+            Keeper_exec_masc.handle_registered_keeper_tool ~config ~keeper_name:meta.name ~name:other ~args
           with
           | Some raw_output -> make_executed_tool_result raw_output
           | None ->

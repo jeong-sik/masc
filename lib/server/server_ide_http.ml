@@ -203,7 +203,8 @@ let add_routes router =
         request reqd)
     router2
   in
-  Http.Router.get "/api/v1/ide/regions" (fun request reqd ->
+  let router4 =
+    Http.Router.get "/api/v1/ide/regions" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
         let uri = Uri.of_string request.target in
@@ -233,19 +234,20 @@ let add_routes router =
       request reqd)
     router3
   in
-  Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
-        let snapshot = build_presence_snapshot state in
-        Http.Response.json ~compress:true ~request:request
-          (Yojson.Safe.to_string (json_ok snapshot)) reqd)
-      request reqd)
+  let router5 =
+    Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
+      with_public_read
+        (fun state _req reqd ->
+          let snapshot = build_presence_snapshot state in
+          Http.Response.json ~compress:true ~request:request
+            (Yojson.Safe.to_string (json_ok snapshot)) reqd)
+        request reqd)
     router4
   in
   Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
     with_public_read
       (fun state _req inner_reqd ->
-        let origin = Server_utils.get_origin request in
+        let origin = get_origin request in
         let headers =
           Httpun.Headers.of_list
             ([
@@ -254,7 +256,7 @@ let add_routes router =
                ("connection", "keep-alive");
                ("x-accel-buffering", "no");
              ]
-             @ Server_utils.cors_headers origin)
+             @ cors_headers origin)
         in
         let response = Httpun.Response.create ~headers `OK in
         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in

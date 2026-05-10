@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import datetime
 import logging
 import os
 import sys
@@ -84,6 +85,7 @@ class GateBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.reactions = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self.gate = GateClient()
@@ -120,6 +122,9 @@ class GateBot(discord.Client):
         self._last_ready_at = ""
         self._status_task: asyncio.Task[None] | None = None
         self._activity_task: asyncio.Task[None] | None = None
+        self._processing: dict[int, asyncio.Lock] = {}
+        self._pending: dict[int, list[tuple[int, datetime.datetime]]] = {}
+        self._last_response_ts: dict[int, datetime.datetime] = {}
         self._write_runtime_status(connected_override=False)
 
     async def setup_hook(self) -> None:
@@ -152,6 +157,9 @@ class GateBot(discord.Client):
             except asyncio.CancelledError:
                 pass
             self._status_task = None
+        self._processing.clear()
+        self._pending.clear()
+        self._last_response_ts.clear()
         self._write_runtime_status(connected_override=False)
         await self.gate.aclose()
         await super().close()
@@ -576,6 +584,73 @@ class GateBot(discord.Client):
             embed = format_keeper_embed(response)
             await channel.send(embed=embed)
 
+    async def _drain_pending(
+        self,
+        channel: discord.abc.Messageable,
+        keeper_name: str,
+        trigger_msg_id: int,
+        trigger_user_id: str,
+        trigger_user_name: str,
+    ) -> None:
+        """Drain queued messages on `channel` into a single batched keeper turn."""
+        channel_id_int = int(getattr(channel, "id", 0))
+        if channel_id_int == 0:
+            return
+
+        since = self._last_response_ts.get(channel_id_int)
+        collected: list[str] = []
+        try:
+            history_kwargs: dict[str, Any] = {
+                "limit": self.cfg.discord_batch_max_messages,
+                "oldest_first": True,
+            }
+            if since is not None:
+                history_kwargs["after"] = since
+            async for hist_msg in channel.history(**history_kwargs):
+                if hist_msg.author == self.user or hist_msg.author.bot:
+                    continue
+                content = self._compose_gate_content(hist_msg)
+                if not content:
+                    continue
+                collected.append(f"{hist_msg.author.display_name}: {content}")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to fetch history for channel %s: %s", channel_id_int, exc
+            )
+
+        if not collected:
+            self._pending.pop(channel_id_int, None)
+            return
+
+        batch_content = "\n".join(collected)
+        drain_count = len(collected)
+
+        async with channel.typing():
+            streamed = await self._stream_to_channel(
+                channel,
+                keeper_name,
+                batch_content,
+                channel_user_id=trigger_user_id,
+                channel_user_name=trigger_user_name,
+                channel_room_id=str(channel_id_int),
+            )
+            if not streamed:
+                response = await self.gate.send_message(
+                    keeper_name=keeper_name,
+                    content=batch_content,
+                    channel_user_id=trigger_user_id,
+                    channel_user_name=trigger_user_name,
+                    channel_room_id=str(channel_id_int),
+                    message_id=str(trigger_msg_id),
+                    idempotency_key=f"discord-batch-{trigger_msg_id}-{drain_count}",
+                )
+                await self._send_response(channel, response)
+
+        self._last_response_ts[channel_id_int] = datetime.datetime.now(
+            datetime.timezone.utc
+        )
+        self._pending.pop(channel_id_int, None)
+
     async def on_message(self, message: discord.Message) -> None:
         """Route channel messages to the mapped keeper via streaming."""
         if message.author == self.user or message.author.bot:
@@ -586,6 +661,14 @@ class GateBot(discord.Client):
         self._maybe_reload_bindings()
         keeper_name = self._resolve_keeper_for_channel(message.channel)
         if keeper_name is None:
+            return
+
+        channel_id = message.channel.id
+        lock = self._processing.get(channel_id)
+        if lock is not None and lock.locked():
+            self._pending.setdefault(channel_id, []).append(
+                (message.id, message.created_at)
+            )
             return
 
         content = self._compose_gate_content(message)
@@ -617,6 +700,73 @@ class GateBot(discord.Client):
             )
 
         await self._send_response(message.channel, response)
+
+    async def on_raw_reaction_add(
+        self, payload: discord.RawReactionActionEvent
+    ) -> None:
+        """Trigger a keeper turn when a configured emoji reaction is added."""
+        configured = self.cfg.discord_reaction_trigger_emoji
+        if not configured:
+            return
+
+        emoji_str = str(payload.emoji)
+        emoji_name = payload.emoji.name or ""
+        if configured not in (emoji_str, emoji_name):
+            return
+
+        if self.user is not None and payload.user_id == self.user.id:
+            return
+
+        channel = self.get_channel(payload.channel_id)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(payload.channel_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Failed to fetch channel %s for reaction: %s",
+                    payload.channel_id,
+                    exc,
+                )
+                return
+
+        if not isinstance(channel, discord.abc.Messageable):
+            return
+
+        try:
+            user = await self.fetch_user(payload.user_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to fetch user %s for reaction: %s", payload.user_id, exc
+            )
+            return
+        if user.bot:
+            return
+
+        self._maybe_reload_bindings()
+        keeper_name = self._resolve_keeper_for_channel(channel)
+        if keeper_name is None:
+            return
+
+        channel_id_int = int(payload.channel_id)
+        trigger_user_id = str(payload.user_id)
+        trigger_user_name = str(user)
+        trigger_msg_id = int(payload.message_id)
+
+        lock = self._processing.setdefault(channel_id_int, asyncio.Lock())
+        if lock.locked():
+            self._pending.setdefault(channel_id_int, []).append(
+                (trigger_msg_id, datetime.datetime.now(datetime.timezone.utc))
+            )
+            return
+
+        async with lock:
+            await self._drain_pending(
+                channel,
+                keeper_name,
+                trigger_msg_id,
+                trigger_user_id,
+                trigger_user_name,
+            )
 
 
 def breaker_summary(snapshot: BreakerSnapshot) -> str:

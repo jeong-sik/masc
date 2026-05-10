@@ -75,6 +75,7 @@ class GateClient(GateClientBase):
         channel_user_name: str,
         channel_room_id: str,
         message_id: str,
+        idempotency_key: str | None = None,
     ) -> GateResponse:
         """Send a message to a keeper via the gate with Discord context."""
         context = self._discord_context(
@@ -86,7 +87,7 @@ class GateClient(GateClientBase):
             keeper_name=keeper_name,
             content=content,
             context=context,
-            idempotency_key=f"discord-msg-{message_id}",
+            idempotency_key=idempotency_key or f"discord-msg-{message_id}",
         )
 
     async def stream_message(

@@ -447,7 +447,9 @@ let test_path_absolute_outside_root () =
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"/etc/passwd" in
     check bool "absolute outside root rejected" true (Result.is_error result);
-    let err = Result.get_error result in
+    let err =
+      Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+    in
     check bool "error mentions outside" true
       (String.length err > 0
        && try let _ = Str.search_forward
@@ -482,7 +484,9 @@ let test_path_allowed_paths_filter () =
     let err_result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
     check bool "src path rejected" true (Result.is_error err_result);
-    let err = Result.get_error err_result in
+    let err =
+      Keeper_alerting_path.rejection_to_user_message (Result.get_error err_result)
+    in
     check bool "error mentions sandbox boundary" true
       (try let _ = Str.search_forward
         (Str.regexp_string "path_outside_sandbox") err 0 in true
@@ -677,7 +681,9 @@ let test_read_path_rejects_nonexistent () =
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:[] ~raw_path:"nonexistent-repo/" in
     check bool "nonexistent path rejected" true (Result.is_error result);
-    let err = Result.get_error result in
+    let err =
+      Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+    in
     check bool "error mentions allowed roots miss" true
       (String_util.contains_substring_ci err "path_not_found_under_allowed_roots")))
 
@@ -727,7 +733,9 @@ let test_read_path_rejects_ambiguous_nested_repo_suffix () =
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["workspace-a"; "workspace-b"] ~raw_path:"masc-mcp/lib" in
     check bool "ambiguous nested repo suffix rejected" true (Result.is_error result);
-    let err = Result.get_error result in
+    let err =
+      Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+    in
     check bool "error mentions ambiguity" true
       (String_util.contains_substring_ci err "ambiguous_relative_read_path")))
 
@@ -758,7 +766,9 @@ let test_read_path_does_not_follow_symlink_outside_root () =
       let result = Keeper_alerting_path.resolve_keeper_read_path
         ~config ~allowed_paths:[] ~raw_path:"masc-mcp/lib" in
       check bool "symlink escape is rejected" true (Result.is_error result);
-      let err = Result.get_error result in
+      let err =
+        Keeper_alerting_path.rejection_to_user_message (Result.get_error result)
+      in
       check bool "symlink escape does not resolve outside root" true
         (String_util.contains_substring_ci err "path_not_found_under_allowed_roots")))
 

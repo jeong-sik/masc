@@ -103,6 +103,64 @@ let test_filesystem_safe_all_special_to_unknown () =
   let result = Gate_keeper_backend.filesystem_safe_or_unknown "@@@!!!" in
   check string "all special becomes unknown" "unknown" result
 
+let test_filesystem_safe_whitespace_only () =
+  let result = Gate_keeper_backend.filesystem_safe_or_unknown "   " in
+  check string "whitespace only becomes unknown" "unknown" result
+
+let test_filesystem_safe_with_spaces () =
+  let result = Gate_keeper_backend.filesystem_safe_or_unknown "my channel" in
+  check string "spaces replaced with underscore" "my_channel" result
+
+let test_filesystem_safe_with_dots () =
+  let result = Gate_keeper_backend.filesystem_safe_or_unknown "channel.name" in
+  check string "dots replaced with underscore" "channel_name" result
+
+let test_filesystem_safe_newline_and_tab () =
+  let result =
+    Gate_keeper_backend.filesystem_safe_or_unknown
+      ("chan" ^ "\n" ^ "nel" ^ "\t" ^ "name")
+  in
+  check string "newline and tab replaced" "chan_nel_name" result
+
+let test_filesystem_safe_underscore_only () =
+  let result = Gate_keeper_backend.filesystem_safe_or_unknown "___" in
+  check string "underscore only becomes unknown" "unknown" result
+
+let test_filesystem_safe_mixed_safe_unsafe () =
+  let result = Gate_keeper_backend.filesystem_safe_or_unknown "a-b.c/d e" in
+  check string "mixed safe and unsafe chars" "a-b_c_d_e" result
+
+(* ── Agent name security ──────────────────────────────────────────── *)
+
+let test_agent_name_blocks_path_traversal () =
+  let agent_name =
+    Gate_keeper_backend.agent_name_for_channel_actor
+      ~channel:"../etc"
+      ~channel_room_id:"../../../tmp"
+      ~channel_user_id:"attack"
+  in
+  let has_slash = String.contains agent_name '/' in
+  let has_dot = String.contains agent_name '.' in
+  check bool "no slash in agent name" false has_slash;
+  check bool "no dot in agent name" false has_dot
+
+let test_agent_name_normal_values_unchanged () =
+  let agent_name =
+    Gate_keeper_backend.agent_name_for_channel_actor
+      ~channel:"discord" ~channel_room_id:"123" ~channel_user_id:"456"
+  in
+  check string "normal values pass through" "gate:discord:123:456" agent_name
+
+let test_agent_name_special_chars_sanitized () =
+  let agent_name =
+    Gate_keeper_backend.agent_name_for_channel_actor
+      ~channel:"my chan"
+      ~channel_room_id:"thread#1"
+      ~channel_user_id:"user@2"
+  in
+  check string "special chars become underscore"
+    "gate:my_chan:thread_1:user_2" agent_name
+
 (* ── Response parsing ────────────────────────────────────────────── *)
 
 let test_extract_reply_from_reply_field () =
@@ -161,6 +219,27 @@ let () =
             test_filesystem_safe_empty_to_unknown;
           test_case "all special becomes unknown" `Quick
             test_filesystem_safe_all_special_to_unknown;
+          test_case "whitespace only becomes unknown" `Quick
+            test_filesystem_safe_whitespace_only;
+          test_case "spaces replaced with underscore" `Quick
+            test_filesystem_safe_with_spaces;
+          test_case "dots replaced with underscore" `Quick
+            test_filesystem_safe_with_dots;
+          test_case "newline and tab replaced" `Quick
+            test_filesystem_safe_newline_and_tab;
+          test_case "underscore only becomes unknown" `Quick
+            test_filesystem_safe_underscore_only;
+          test_case "mixed safe and unsafe chars" `Quick
+            test_filesystem_safe_mixed_safe_unsafe;
+        ] );
+      ( "agent_name_security",
+        [
+          test_case "blocks path traversal" `Quick
+            test_agent_name_blocks_path_traversal;
+          test_case "normal values unchanged" `Quick
+            test_agent_name_normal_values_unchanged;
+          test_case "special chars sanitized" `Quick
+            test_agent_name_special_chars_sanitized;
         ] );
       ( "response_parsing",
         [

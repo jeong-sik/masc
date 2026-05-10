@@ -19,6 +19,8 @@ type param_type =
       ; default : int option
       }
   | T_bool of { default : bool option }
+  | T_string_array of { default : Yojson.Safe.t option }
+  | T_object of { default : Yojson.Safe.t option }
 
 type param =
   { p_name : string

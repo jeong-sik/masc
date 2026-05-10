@@ -3,4 +3,5 @@
 (library
  (name tool_schemas_specs)
  (wrapped false)
+ (libraries yojson)
  (modules tool_schemas_specs_types))

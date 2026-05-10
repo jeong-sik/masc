@@ -120,6 +120,6 @@
 (executable
  (name gen_tool_descriptors)
  (modules gen_tool_descriptors)
- (libraries tool_schemas_specs))
+ (libraries tool_schemas_specs yojson))
 
 ; Executable for MASC MCP

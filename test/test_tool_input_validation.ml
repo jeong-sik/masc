@@ -47,6 +47,7 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
         legacy_message = msg;
         tool_name;
         duration_ms = 0.0;
+        failure_class = None;
       }
 
 (** Build a JSON Schema object with given properties and required list. *)

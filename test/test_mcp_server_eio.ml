@@ -3029,6 +3029,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
                 legacy_message = "blocked-by-pre-hook";
                 tool_name = name;
                 duration_ms = 0.0;
+                failure_class = None;
               }
           else Tool_dispatch.Pass);
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in

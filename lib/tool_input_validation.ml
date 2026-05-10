@@ -159,6 +159,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       legacy_message = message;
       tool_name = name;
       duration_ms = 0.0;
+      failure_class = None;
     }
 
 let validate_args ?schema ~name ~args () =

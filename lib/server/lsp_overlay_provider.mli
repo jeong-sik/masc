@@ -16,3 +16,9 @@ val diagnostics :
   lsp_diagnostics:Yojson.Safe.t list ->
   Yojson.Safe.t list
 (** Merge MASC annotation diagnostics with LSP server diagnostics. *)
+
+val invalidate_cache : base_dir:string -> file_path:string -> unit
+(** Remove cached annotations for a specific file. Call on didSave. *)
+
+val clear_cache : unit -> unit
+(** Remove all cached annotations. *)

@@ -57,6 +57,7 @@
         test_keeper_cascade_profile
         test_cascade_capability_profile
         test_cascade_required_capability_profile
+        test_cascade_phase1_smoke
         test_cascade_secondary_entry_parser
         test_cascade_secondary_expand
         test_cascade_validator_capability_lint
@@ -289,6 +290,7 @@
           test_keeper_cascade_profile
           test_cascade_capability_profile
           test_cascade_required_capability_profile
+          test_cascade_phase1_smoke
           test_cascade_secondary_entry_parser
           test_cascade_secondary_expand
           test_cascade_validator_capability_lint

@@ -24,30 +24,41 @@ let handle_keeper_ide_annotate
   let content = Safe_ops.json_string ~default:"" "content" args in
   let goal_id = Safe_ops.json_string_opt "goal_id" args in
   let task_id = Safe_ops.json_string_opt "task_id" args in
-  if String.trim file_path = "" then
-    error_json "file_path is required for ide_annotate"
-  else if line_start < 1 then
-    error_json "line_start must be >= 1"
-  else if line_end < line_start then
-    error_json "line_end must be >= line_start"
-  else if String.trim content = "" then
-    error_json "content is required for ide_annotate"
-  else
-    let kind = match Ide_annotations.annotation_kind_of_string kind_str with
+  if String.trim file_path = ""
+  then error_json "file_path is required for ide_annotate"
+  else if line_start < 1
+  then error_json "line_start must be >= 1"
+  else if line_end < line_start
+  then error_json "line_end must be >= line_start"
+  else if String.trim content = ""
+  then error_json "content is required for ide_annotate"
+  else (
+    let kind =
+      match Ide_annotations.annotation_kind_of_string kind_str with
       | Some k -> k
       | None -> Comment
     in
-    (match Ide_annotations.create ~base_dir ~keeper_id:keeper_name
-             ~file_path ~line_start ~line_end ~kind ~content
-             ?goal_id ?task_id ()
-     with
-     | Ok annotation ->
-       Yojson.Safe.to_string (`Assoc [
-         "ok", `Bool true;
-         "id", `String annotation.id;
-         "file_path", `String annotation.file_path;
-         "line_start", `Int annotation.line_start;
-         "line_end", `Int annotation.line_end;
-       ])
-     | Error msg ->
-       error_json msg)
+    match
+      Ide_annotations.create
+        ~base_dir
+        ~keeper_id:keeper_name
+        ~file_path
+        ~line_start
+        ~line_end
+        ~kind
+        ~content
+        ?goal_id
+        ?task_id
+        ()
+    with
+    | Ok annotation ->
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "ok", `Bool true
+            ; "id", `String annotation.id
+            ; "file_path", `String annotation.file_path
+            ; "line_start", `Int annotation.line_start
+            ; "line_end", `Int annotation.line_end
+            ])
+    | Error msg -> error_json msg)
+;;

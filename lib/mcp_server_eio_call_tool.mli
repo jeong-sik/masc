@@ -148,7 +148,7 @@ val handle_call_tool_eio :
      Mcp_server.server_state ->
      name:string ->
      arguments:Yojson.Safe.t ->
-     bool * string) ->
+     Tool_result.t) ->
   maybe_emit_resource_notifications:
     (success:bool -> tool_name:string -> 'notify) ->
   broadcast_tools_list_changed:(unit -> unit) ->

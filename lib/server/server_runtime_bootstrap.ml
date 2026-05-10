@@ -1745,9 +1745,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           try Yojson.Safe.from_string args_json
           with Yojson.Json_error _ -> `Assoc []
         in
-        let (success, result_str) =
+        let result =
           Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state
             ~name:tool_name ~arguments
+        in
+        let success = result.Tool_result.success
+        and result_str = Tool_result.message result
         in
         if not success then
           Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"

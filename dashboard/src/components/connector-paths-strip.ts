@@ -21,6 +21,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
 import { CopyableCode } from './common/copyable-code'
+import { SurfaceCard } from './common/card'
 
 const pathsExpanded = signal<boolean>(false)
 
@@ -81,8 +82,8 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
   const paths = deriveMascPaths(connectors)
   const open = pathsExpanded.value
   return html`
-    <div
-      class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+    <${SurfaceCard}
+      class="mb-3 !border-[var(--color-border-default)] !bg-[var(--color-bg-surface)]"
       data-panel="connector-paths-strip"
     >
       <button
@@ -113,6 +114,6 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
             </div>
           `
         : null}
-    </div>
+    </${SurfaceCard}>
   `
 }

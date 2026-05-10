@@ -308,7 +308,7 @@ let docker_argv ~container_name (spec : Worker_execution_spec.t) =
 let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t) :
     (Worker_container_types.run_result, string) result =
   let name = container_name spec in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> best_effort_remove_container ?clock_opt name)
     (fun () ->
       let effective_timeout_sec = max 10 spec.timeout_sec in

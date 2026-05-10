@@ -518,7 +518,7 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
   let tmp = path ^ ".tmp" in
   try
     let oc = open_out tmp in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc content);
     Sys.rename tmp path;

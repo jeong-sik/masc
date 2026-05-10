@@ -365,7 +365,7 @@ module For_testing = struct
   let with_local_discovery_refresh refresh f =
     let previous = Atomic.get local_discovery_refresh_for_test in
     Atomic.set local_discovery_refresh_for_test (Some refresh);
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () ->
         Atomic.set local_discovery_refresh_for_test previous)
       f

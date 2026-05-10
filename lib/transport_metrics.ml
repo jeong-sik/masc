@@ -427,7 +427,7 @@ let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
 let tcp_port_reachable port =
   try
     let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () ->
         try Unix.close sock with
         | Eio.Cancel.Cancelled _ as e -> raise e

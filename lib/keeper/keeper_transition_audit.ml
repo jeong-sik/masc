@@ -343,7 +343,7 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
         let oc =
           open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
         in
-        Fun.protect
+        Eio_guard.protect
           ~finally:(fun () ->
             close_out_noerr oc)
           (fun () -> output_string oc (line ^ "\n"))
@@ -442,7 +442,7 @@ let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
         let oc =
           open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
         in
-        Fun.protect
+        Eio_guard.protect
           ~finally:(fun () ->
             close_out_noerr oc)
           (fun () -> output_string oc (line ^ "\n"))

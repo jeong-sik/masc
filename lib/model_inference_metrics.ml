@@ -679,7 +679,7 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       try
         let ic = open_in path in
         let entries = ref [] in
-        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        Eio_guard.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
           (try
              while true do
                let line = input_line ic in
@@ -713,7 +713,7 @@ let read_cost_entries_legacy ~base_path ~since_unix : raw_entry list =
     try
       let ic = open_in path in
       let entries = ref [] in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      Eio_guard.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
         (try
            while true do
              let line = input_line ic in

@@ -405,7 +405,7 @@ let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
     Prometheus.inc_counter Prometheus.metric_file_lock_retries
       ~labels:[ ("caller", caller) ]
       ~delta:(float_of_int retries) ();
-  Prometheus.observe_histogram Prometheus.metric_file_lock_acquire_duration
+  Prometheus.observe_histogram Prometheus.metric_file_lock_acquire_seconds
     ~labels:[ ("caller", caller); ("outcome", outcome) ]
     elapsed_s
 

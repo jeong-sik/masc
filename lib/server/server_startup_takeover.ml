@@ -114,7 +114,7 @@ let read_status_line fd ~timeout_sec =
 let probe_liveness ?(timeout_sec = 3.0) ?(path = Server_health_paths.liveness) port =
   Safe_ops.protect ~default:false (fun () ->
     let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> close_quietly socket)
       (fun () ->
         (* Keep the startup probe in-process so takeover logic does not depend on
@@ -133,7 +133,7 @@ let probe_liveness ?(timeout_sec = 3.0) ?(path = Server_health_paths.liveness) p
 let read_pid_file path =
   Safe_ops.protect ~default:None (fun () ->
     let ic = open_in path in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> close_in_noerr ic)
       (fun () -> Some (In_channel.input_all ic)))
 
@@ -155,7 +155,7 @@ let register_pid_cleanup ~path ~pid =
 
 let write_pid_file path pid =
   let oc = open_out path in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> Printf.fprintf oc "%d\n" pid)
 

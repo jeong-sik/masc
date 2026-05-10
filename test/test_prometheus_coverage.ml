@@ -476,6 +476,50 @@ let test_backend_mutex_metrics_emit_after_install () =
      | Some value -> Float.compare value 0.0 > 0
      | None -> false)
 
+let test_file_lock_acquire_seconds_metric_registered () =
+  (* Regression: metric_file_lock_acquire_duration was renamed to
+     metric_file_lock_acquire_seconds to match its string value.
+     Ensure the renamed metric is registered and observable. *)
+  let name = Prometheus.metric_file_lock_acquire_seconds in
+  Prometheus.register_histogram ~name
+    ~help:"file lock acquire duration in seconds" ();
+  Prometheus.observe_histogram name
+    ~labels:[ ("caller", "test"); ("outcome", "acquired") ]
+    0.05;
+  let text = Prometheus.to_prometheus_text () in
+  check bool "file_lock_acquire_seconds present in output" true
+    (try ignore (Str.search_forward (Str.regexp_string name) text 0); true
+     with Not_found -> false)
+
+let test_metric_names_consistent_with_string_values () =
+  (* Validate that metric variable names are semantically consistent
+     with their string values. This catches copy-paste drift where
+     a variable is reused with a mismatched string. *)
+  let check_consistent ~var_name ~string_val () =
+    let suffix =
+      String.sub var_name 7 (String.length var_name - 7)
+      (* strip "metric_" prefix *)
+    in
+    (* The variable name suffix should appear in the string value
+       after the "masc_" prefix, possibly with _total/_seconds suffix. *)
+    let string_base =
+      if String.starts_with ~prefix:"masc_" string_val then
+        String.sub string_val 5 (String.length string_val - 5)
+      else string_val
+    in
+    check bool
+      (Printf.sprintf "%s matches %s" var_name string_val)
+      true
+      (try ignore (Str.search_forward (Str.regexp_string suffix) string_base 0); true
+       with Not_found -> false)
+  in
+  check_consistent ~var_name:"metric_file_lock_acquire_seconds"
+    ~string_val:Prometheus.metric_file_lock_acquire_seconds ();
+  check_consistent ~var_name:"metric_tasks"
+    ~string_val:Prometheus.metric_tasks ();
+  check_consistent ~var_name:"metric_errors"
+    ~string_val:Prometheus.metric_errors ()
+
 (* ============================================================
    Convenience Functions Tests
    ============================================================ *)
@@ -646,6 +690,10 @@ let () =
         `Quick test_histogram_exported_as_summary;
       test_case "backend mutex observers emit histogram samples" `Quick
         test_backend_mutex_metrics_emit_after_install;
+      test_case "file_lock_acquire_seconds metric registered" `Quick
+        test_file_lock_acquire_seconds_metric_registered;
+      test_case "metric names consistent with string values" `Quick
+        test_metric_names_consistent_with_string_values;
     ];
     "convenience", [
       test_case "record_request" `Quick test_record_request;

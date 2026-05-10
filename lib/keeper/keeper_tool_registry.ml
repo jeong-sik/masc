@@ -355,7 +355,7 @@ let masc_schemas_snapshot () =
 
 let with_masc_schemas_for_test schemas f =
   let previous = masc_schemas_snapshot () in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> set_masc_schemas previous)
     (fun () ->
       set_masc_schemas schemas;

@@ -80,7 +80,7 @@ let run_all () =
     | dh ->
       let stop = ref false in
       let count_after_budget = ref 0 in
-      Fun.protect
+      Eio_guard.protect
         ~finally:(fun () -> try Unix.closedir dh with _ -> ())
         (fun () ->
           while not !stop do

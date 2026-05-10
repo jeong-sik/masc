@@ -524,13 +524,13 @@ let is_regular_file path =
 
 let read_file path =
   let ic = open_in_bin path in
-  Fun.protect ~finally:(fun () -> close_in_noerr ic)
+  Eio_guard.protect ~finally:(fun () -> close_in_noerr ic)
   @@ fun () -> really_input_string ic (in_channel_length ic)
 ;;
 
 let write_file path content =
   let oc = open_out_bin path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc)
+  Eio_guard.protect ~finally:(fun () -> close_out_noerr oc)
   @@ fun () -> output_string oc content
 ;;
 

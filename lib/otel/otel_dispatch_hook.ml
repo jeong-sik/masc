@@ -38,7 +38,7 @@ let with_test_span_emitter ~enabled:enabled_value ~emit_span:emit f =
   let prev_emitter = !span_emitter_override in
   enabled_override := Some enabled_value;
   span_emitter_override := Some emit;
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () ->
       enabled_override := prev_enabled;
       span_emitter_override := prev_emitter)

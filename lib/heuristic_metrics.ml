@@ -203,7 +203,7 @@ let do_flush () =
            Log.warn ~ctx:"heuristic_metrics" "flush skipped: %d records remain buffered"
              (Queue.length buffer)
        | Ok oc ->
-           Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+           Eio_guard.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
              Queue.iter (fun json ->
                output_string oc (Yojson.Safe.to_string json);
                output_char oc '\n'
@@ -277,7 +277,7 @@ let scrub_legacy_degenerate_rows path =
              let oc =
                open_out_gen [Open_wronly; Open_creat; Open_trunc] 0o644 tmp
              in
-             Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+             Eio_guard.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
                List.iter (fun line ->
                  output_string oc line;
                  output_char oc '\n') kept);

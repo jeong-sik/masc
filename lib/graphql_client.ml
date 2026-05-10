@@ -32,7 +32,7 @@ let with_auth_header_file key f =
   if key = "" then f None
   else
     let path = Filename.temp_file "masc-gql-auth-" ".hdr" in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
       (fun () ->
          Fs_compat.save_file path ("Authorization: Bearer " ^ key ^ "\n");
@@ -40,7 +40,7 @@ let with_auth_header_file key f =
 
 let with_body_file body f =
   let path = Filename.temp_file "masc-gql-body-" ".json" in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
        Fs_compat.save_file path body;

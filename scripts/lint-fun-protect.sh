@@ -11,6 +11,25 @@ ALLOWLIST=(
   "lib/core/eio_guard.ml"
   "lib/core/eio_guard.mli"
   "lib/cdal_runtime/autonomy_exec.ml"
+  # Sub-library boundary violations — these libraries do not depend on masc_mcp
+  # and therefore cannot import Eio_guard. See issue #10395.
+  "lib/pulse/pulse.ml"
+  "lib/backend/backend.ml"
+  "lib/eio_context/eio_context.ml"
+  "lib/dated_jsonl/dated_jsonl.ml"
+  "lib/exec/test/test_exec_gate_runtime.ml"
+  "lib/gate/channel_gate_discord_names.ml"
+  "lib/gate/channel_gate_imessage_state.ml"
+  "lib/gate/channel_gate_discord_state.ml"
+  "lib/shared_audit/store.ml"
+  "lib/masc_log/log.ml"
+  "lib/coord/coord_task_schedule.ml"
+  "lib/process/bg_task.ml"
+  "lib/process/process_eio.ml"
+  "lib/repo_manager/credential_store.ml"
+  "lib/repo_manager/repo_store.ml"
+  "lib/repo_manager/credential_materializer.ml"
+  "lib/repo_manager/keeper_repo_mapping.ml"
 )
 
 count=0

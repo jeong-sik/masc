@@ -910,7 +910,7 @@ let schedule_meta_cognition_summary_warm (config : Coord.config) =
     match Eio_context.get_switch_opt () with
     | Some sw ->
         Eio.Fiber.fork ~sw (fun () ->
-            Fun.protect
+            Eio_guard.protect
               ~finally:(fun () -> clear_meta_cognition_warm_flag key)
               (fun () ->
                 try

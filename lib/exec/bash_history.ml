@@ -151,7 +151,7 @@ let append ~base_path ~keeper_name entry =
 
 let count_lines path =
   let ic = open_in path in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> close_in_no_err ic)
     (fun () ->
       let count = ref 0 in
@@ -164,7 +164,7 @@ let count_lines path =
 
 let load_entries path =
   let ic = open_in path in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> close_in_no_err ic)
     (fun () ->
       let entries = ref [] in

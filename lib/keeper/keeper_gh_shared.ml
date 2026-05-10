@@ -612,7 +612,7 @@ let origin_url_of_git_config_path config_path =
   then None
   else
     let ic = open_in_bin config_path in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> close_in_noerr ic)
       (fun () ->
         let rec loop ~in_origin =
@@ -676,7 +676,7 @@ let origin_url_of_worktree_gitfile ~worktree_cwd =
     try
       let line =
         let ic = open_in_bin dotgit in
-        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        Eio_guard.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
             input_line ic)
       in
       let prefix = "gitdir:" in

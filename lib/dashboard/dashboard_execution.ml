@@ -574,7 +574,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
               timings.data_load_ms timings.assemble_ms
         end
       in
-      Fun.protect ~finally:emit_render_timings (fun () ->
+      Eio_guard.protect ~finally:emit_render_timings (fun () ->
       let snapshot_json =
         Dashboard_projection_cache.get_or_compute_snapshot_json
           ~config ~actor:(Some effective_actor) (fun actor_name ->

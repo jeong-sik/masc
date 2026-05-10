@@ -671,6 +671,56 @@ let test_retry_backoff_fail_closed_on_malformed_now () =
   check bool "malformed now → fail-closed" false
     (Routes.retry_backoff_active ~now:"not-an-iso-stamp" attempt)
 
+(* ---- Fault-recovery gaps (untested subprocess failure paths) ----
+   These tests pin the CURRENT behavior of the reconciler and schema
+   fetcher under failure.  They do NOT assert the behavior is ideal;
+   they prevent silent regression of the known gaps so that a future
+   fix can be validated against a concrete baseline.
+
+   Known gaps NOT covered here because the HTTP handlers are tightly
+   coupled to Eio/HTTP request types:
+   - handle_stop ignores run_argv_with_status exit code
+   - handle_logs ignores run_argv_with_status exit code *)
+
+let test_reconcile_start_shell_exception_propagates () =
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 1;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  try
+    ignore
+      (Routes.reconcile_desired_once
+         ~now:"2026-04-20T00:00:00Z"
+         ~next_retry_at:"2099-04-20T00:00:30Z"
+         ~current_generation:1
+         ~observed_state:Routes.Observed_unavailable
+         ~write_attempt:(fun _ -> Ok ())
+         ~start_shell:(fun () -> raise (Failure "shell failed"))
+         desired);
+    failf "expected exception from start_shell to propagate"
+  with Failure msg ->
+    check string "exception propagates unchanged" "shell failed" msg
+
+let test_fetch_schema_error_on_nonzero_exit () =
+  with_temp_dir "sidecar-schema-fail" (fun base_path ->
+      let sidecar_dir = Filename.concat base_path "sidecars/discord-bot" in
+      let python_bin = Filename.concat sidecar_dir "venv/bin/python" in
+      mkdir_p (Filename.dirname python_bin);
+      (* Fake python that exits 1 immediately *)
+      write_file python_bin "#!/bin/sh\nexit 1\n";
+      Unix.chmod python_bin 0o755;
+      Routes.reset_schema_cache ();
+      match Routes.fetch_schema ~base_path "discord" with
+      | Ok _ -> failf "expected Error when python exits non-zero"
+      | Error msg ->
+          check bool "error mentions schema_dump failure" true
+            (contains_substring msg "schema_dump failed"))
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -772,5 +822,12 @@ let () =
             test_retry_backoff_fail_closed_on_malformed_next;
           test_case "malformed now → fail-closed" `Quick
             test_retry_backoff_fail_closed_on_malformed_now;
+        ] );
+      ( "fault_recovery_gaps",
+        [
+          test_case "start_shell exception propagates through reconcile" `Quick
+            test_reconcile_start_shell_exception_propagates;
+          test_case "fetch_schema returns Error on non-zero python exit" `Quick
+            test_fetch_schema_error_on_nonzero_exit;
         ] );
     ]

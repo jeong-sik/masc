@@ -13,7 +13,7 @@ let shell_prewarm_timeout_s =
 
 let warm_shell_cache (state : Mcp_server.server_state) =
   Atomic.set _shell_warming true;
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> Atomic.set _shell_warming false)
     (fun () ->
       let t0 = Time_compat.now () in

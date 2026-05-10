@@ -355,7 +355,7 @@ let read_file_tail_lines path ~max_bytes ~max_lines =
       in
       let start = max 0 (size - max_bytes) in
       let ic = open_in_bin path in
-      Fun.protect
+      Eio_guard.protect
         ~finally:(fun () -> close_in_noerr ic)
         (fun () ->
           seek_in ic start;

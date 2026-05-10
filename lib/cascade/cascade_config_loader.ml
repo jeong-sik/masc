@@ -56,7 +56,7 @@ let ensure_materialized_json path =
 let read_json_file path =
   let ic = open_in path in
   let content =
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> close_in_noerr ic)
       (fun () ->
          let len = in_channel_length ic in

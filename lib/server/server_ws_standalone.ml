@@ -371,7 +371,7 @@ let start
       in
       Eio.Fiber.fork ~sw (fun () ->
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)
-        Fun.protect
+        Eio_guard.protect
           ~finally:(fun () ->
             Transport_metrics.set_ws_runtime_listening false;
             Transport_metrics.set_ws_listen_status "stopped")

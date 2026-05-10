@@ -63,7 +63,7 @@ let run_voice_status ?(timeout_sec = 35.0) ?(stdin_content = "") argv =
 
 let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
   let body_file = Filename.temp_file "masc_voice_request" ".json" in
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> (try Sys.remove body_file with Sys_error _ -> ()))
     (fun () ->
       write_text body_file (Yojson.Safe.to_string body_json);
@@ -289,7 +289,7 @@ let tts_preview_bytes_from_request_json json =
               speak_via_http_tts_to_file endpoint ~agent_id:"preview" ~message:text
                 ~voice ~model ~output_file
             in
-            Fun.protect
+            Eio_guard.protect
               ~finally:(fun () -> (try Sys.remove output_file with Sys_error _ -> ()))
               (fun () ->
                 match result with
@@ -921,7 +921,7 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
       "silence"; "1"; "0.5"; "1%"; "1"; "2.0"; "1%" ]
   in
   let cleanup () = try Sys.remove audio_file with Sys_error _ -> () in
-  Fun.protect ~finally:cleanup (fun () ->
+  Eio_guard.protect ~finally:cleanup (fun () ->
     play_tone 880.0;
     let record_result =
       try

@@ -140,7 +140,7 @@ let snapshot_env ~cwd =
       else
         try
           let ic = open_in head_file in
-          Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+          Eio_guard.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
             let line = input_line ic in
             let prefix = "ref: refs/heads/" in
             if String.starts_with ~prefix line then

@@ -734,7 +734,7 @@ let cap_episodes_jsonl ?(max_lines = episodes_jsonl_default_cap) () : int =
       let keep = drop (total - max_lines) lines in
       let tmp_path = path ^ ".tmp" in
       let oc = open_out tmp_path in
-      Fun.protect
+      Eio_guard.protect
         ~finally:(fun () -> close_out_noerr oc)
         (fun () ->
           List.iter (fun line ->

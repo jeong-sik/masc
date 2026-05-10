@@ -470,6 +470,6 @@ let with_setup ?stop ?config ?(enable = true) f env =
     snd
     @@ Fiber.pair
          (fun () -> setup_ ~sw ?stop ?config env)
-         (fun () -> Fun.protect ~finally:(fun () -> remove_backend ()) f)
+         (fun () -> Eio_guard.protect ~finally:(fun () -> remove_backend ()) f)
   else
     f ()

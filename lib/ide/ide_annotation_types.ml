@@ -22,6 +22,7 @@ type annotation = {
   content : string;
   goal_id : string option;
   task_id : string option;
+  task_id : string option;
   created_at_ms : int64;
   updated_at_ms : int64;
 }
@@ -45,6 +46,7 @@ type annotation_filter = {
   file_path : string option;
   keeper_id : string option;
   goal_id : string option;
+  task_id : string option;
 }
 
 let annotation_to_json (a : annotation) : Yojson.Safe.t =

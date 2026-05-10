@@ -58,6 +58,7 @@ type t =
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
+  | PathResolverIdentityMismatch
   | AdmissionShadowOutcome
   | HeartbeatSuccesses
   | HeartbeatFailures
@@ -253,6 +254,7 @@ let to_string = function
   | ToolUnderusedAllowedCount -> "masc_keeper_tool_underused_allowed_count"
   | ToolUnderusedAllowed -> "masc_keeper_tool_underused_allowed"
   | PathRejection -> "masc_keeper_path_rejection_total"
+  | PathResolverIdentityMismatch -> "masc_keeper_path_resolver_identity_mismatch_total"
   | AdmissionShadowOutcome -> "masc_keeper_admission_shadow_outcome_total"
   | HeartbeatSuccesses -> "masc_keeper_heartbeat_successes_total"
   | HeartbeatFailures -> "masc_keeper_heartbeat_failures_total"
@@ -447,6 +449,7 @@ let metric_keeper_tool_emission_pushes = "masc_keeper_tool_emission_pushes_total
 let metric_keeper_tool_underused_allowed_count = "masc_keeper_tool_underused_allowed_count"
 let metric_keeper_tool_underused_allowed = "masc_keeper_tool_underused_allowed"
 let metric_keeper_path_rejection = "masc_keeper_path_rejection_total"
+let metric_keeper_path_resolver_identity_mismatch = "masc_keeper_path_resolver_identity_mismatch_total"
 let metric_keeper_admission_shadow_outcome = "masc_keeper_admission_shadow_outcome_total"
 let metric_keeper_heartbeat_successes = "masc_keeper_heartbeat_successes_total"
 let metric_keeper_heartbeat_failures = "masc_keeper_heartbeat_failures_total"

@@ -13,13 +13,13 @@ val valid_fs_write_mode_strings : string list
 val handle_keeper_fs_read :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  keeper_name:string ->
   args:Yojson.Safe.t ->
   string
 
 val handle_keeper_fs_edit :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  keeper_name:string ->
   args:Yojson.Safe.t ->
   string

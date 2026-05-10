@@ -46,12 +46,36 @@ let fs_read_default_max_bytes = Tool_shard_limits.keeper_fs_read_default_max_byt
 let fs_read_min_max_bytes = 512
 let fs_read_max_max_bytes = 200_000
 
+(** Issue #10349 Phase 2: registry-canonical meta lookup.
+    Eliminates identity drift by refusing to accept an externally-injected
+    [keeper_meta]; the resolver asks the registry for the SSOT entry.
+    A mismatch or missing entry increments the drift counter and surfaces
+    a hard error so the caller cannot proceed with a stale/wrong identity. *)
+let with_registry_meta ~(keeper_name : string) f =
+  match Keeper_registry.find_by_name keeper_name with
+  | None ->
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
+      ~labels:[ "source_layer", "fs_resolver"; "field", "registry_missing" ]
+      ();
+    error_json
+      (Printf.sprintf "keeper not found in registry: %s" keeper_name)
+  | Some entry ->
+    if not (String.equal entry.meta.name keeper_name) then
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
+        ~labels:[ "source_layer", "fs_resolver"; "field", "name_mismatch" ]
+        ();
+    f entry.meta
+;;
+
 let handle_keeper_fs_read
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
-      ~(meta : keeper_meta)
+      ~(keeper_name : string)
       ~(args : Yojson.Safe.t)
   =
+  with_registry_meta ~keeper_name @@ fun meta ->
   let path = Safe_ops.json_string ~default:"" "path" args in
   let max_bytes =
     Safe_ops.json_int ~default:fs_read_default_max_bytes "max_bytes" args
@@ -199,9 +223,10 @@ let validate_write_target ~config ~meta ~target =
 let handle_keeper_fs_edit
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
-      ~(meta : keeper_meta)
+      ~(keeper_name : string)
       ~(args : Yojson.Safe.t)
   =
+  with_registry_meta ~keeper_name @@ fun meta ->
   let via_field =
     match turn_sandbox_factory with
     | Some _ -> [ ("via", `String "docker") ]

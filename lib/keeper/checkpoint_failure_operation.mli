@@ -15,5 +15,6 @@ type t =
   | Load_legacy (** Legacy checkpoint format load failure. *)
   | Migration_save (** Persisting a migrated checkpoint to the OAS store failed. *)
   | Restore_legacy (** Restoring the working context from a legacy checkpoint raised. *)
+  | Create_initial_save (** Initial checkpoint save during keeper boot create flow. *)
 
 val to_label : t -> string

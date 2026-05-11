@@ -897,7 +897,7 @@ let enqueue_partial_commit_continue_gate
                meta.name err);
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_cascade_sync_failures
-               ~labels:[("keeper", meta.name); ("site", "resume_sync")]
+               ~labels:[("keeper", meta.name); ("site", Cascade_sync_failure_site.(to_label Resume_sync))]
                ()
       | Agent_sdk.Hooks.Reject reason ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
@@ -914,7 +914,7 @@ let enqueue_partial_commit_continue_gate
                meta.name err reason);
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_cascade_sync_failures
-               ~labels:[("keeper", meta.name); ("site", "pause_sync")]
+               ~labels:[("keeper", meta.name); ("site", Cascade_sync_failure_site.(to_label Pause_sync))]
                ())
     ()
 

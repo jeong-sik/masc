@@ -194,7 +194,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       if len > Keeper_config.prompt_render_max_bytes then
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_turn_up_update_failures
-          ~labels:[("keeper", old.name); ("site", "prompt_cap")]
+          ~labels:[("keeper", old.name); ("site", Turn_up_update_failure_site.(to_label Prompt_cap))]
           ();
         Log.Keeper.warn
           "update_keeper personality.%s for %s exceeds prompt cap \
@@ -340,7 +340,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   | Error err ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_turn_up_update_failures
-        ~labels:[("keeper", p.name); ("site", "sandbox_validation")]
+        ~labels:[("keeper", p.name); ("site", Turn_up_update_failure_site.(to_label Sandbox_validation))]
         ();
       Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
         p.name err;
@@ -353,7 +353,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
        | Error err ->
            Prometheus.inc_counter
              Keeper_metrics.metric_keeper_turn_up_update_failures
-             ~labels:[("keeper", p.name); ("site", "sandbox_preflight")]
+             ~labels:[("keeper", p.name); ("site", Turn_up_update_failure_site.(to_label Sandbox_preflight))]
              ();
            Log.Keeper.warn "update_keeper failed sandbox preflight for %s: %s"
              p.name err;

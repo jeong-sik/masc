@@ -1352,7 +1352,7 @@ let provider_filter_allows_single ~provider_filter ~label provider =
       | Ok [ _ ] -> true
       | Ok _ | Error _ -> false
 
-let parse_secondary_from_entry ~api_key_env_overrides
+let parse_secondary_from_entry ~api_key_env_overrides ~cascade
     (entry : Cascade_config_loader.weighted_entry) =
   match entry.secondary with
   | None -> None
@@ -1366,8 +1366,8 @@ let parse_secondary_from_entry ~api_key_env_overrides
           secondary_supports_tool_choice = None;
         }
       in
-      Cascade_config.parse_weighted_entry
-        ~api_key_env_overrides secondary_entry
+      Cascade_config.parse_weighted_entry_with_drop_metric
+        ~api_key_env_overrides ~cascade secondary_entry
 
 let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
     ?provider_filter ~cascade_name () =
@@ -1394,8 +1394,9 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
         |> List.filter_map
              (fun (entry : Cascade_config_loader.weighted_entry) ->
                 match
-                  Cascade_config.parse_weighted_entry
+                  Cascade_config.parse_weighted_entry_with_drop_metric
                     ~api_key_env_overrides:profile.api_key_env_overrides
+                    ~cascade:normalized
                     entry
                 with
                 | None -> None
@@ -1405,6 +1406,7 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
                         parse_secondary_from_entry
                           ~api_key_env_overrides:
                             profile.api_key_env_overrides
+                          ~cascade:normalized
                           entry ))
       in
       let primaries = List.map fst parsed_pairs in
@@ -1507,14 +1509,16 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
                expand to several model strings, and the primary we got
                carries the resolved model_id). *)
             let primary_parsed =
-              Cascade_config.parse_weighted_entry
+              Cascade_config.parse_weighted_entry_with_drop_metric
                 ~api_key_env_overrides:profile.api_key_env_overrides
+                ~cascade:cascade_name
                 entry
             in
             (match primary_parsed with
              | Some parsed when same_kind_model parsed ->
-                 Cascade_config.parse_weighted_entry
+                 Cascade_config.parse_weighted_entry_with_drop_metric
                    ~api_key_env_overrides:profile.api_key_env_overrides
+                   ~cascade:cascade_name
                    (synth_secondary_entry entry secondary)
              | _ -> None)
       in

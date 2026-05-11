@@ -400,6 +400,11 @@ type weighted_entry_drop =
   | Drop_unavailable_scheme of { model : string; scheme : string }
   | Drop_invalid_syntax of string
 
+let weighted_entry_drop_reason_label = function
+  | Drop_unregistered_scheme _ -> "unregistered_scheme"
+  | Drop_unavailable_scheme _ -> "unavailable_scheme"
+  | Drop_invalid_syntax _ -> "invalid_syntax"
+
 (** Parse a weighted entry, distinguishing why it was rejected (unregistered
     scheme, unavailable scheme, invalid syntax). Used by
     {!parse_weighted_entries} to produce actionable load-time diagnostics
@@ -442,6 +447,38 @@ let parse_weighted_entry_diag
             ?supports_tool_choice_override:entry.supports_tool_choice
             ?keep_alive ?num_ctx
             ~provider_name ~model_id reg_entry)
+
+(** Resolve-path wrapper around {!parse_weighted_entry_diag} that
+    preserves the historical [option] return shape AND ticks the
+    iter-6 [Cascade_metrics.on_profile_candidate_drop] counter on
+    drop.  The plain {!parse_weighted_entry} silently swallows the
+    drop reason — fine for catalog-validation paths that have their
+    own diagnostic loop, but in resolve paths the silent drop
+    surfaces only as [providers = []] downstream and the WHY is
+    lost.  Use this when a [cascade] context exists, so the drop
+    rate is observable per cascade alongside the validation-time
+    [profile_candidate_drop] counter. *)
+let parse_weighted_entry_with_drop_metric
+    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
+    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
+    ?system_prompt ?(api_key_env_overrides = [])
+    ?keep_alive ?num_ctx
+    ~cascade
+    (entry : Cascade_config_loader.weighted_entry)
+  : Llm_provider.Provider_config.t option =
+  match
+    parse_weighted_entry_diag
+      ~temperature ~max_tokens ?system_prompt
+      ~api_key_env_overrides
+      ?keep_alive ?num_ctx
+      entry
+  with
+  | Ok cfg -> Some cfg
+  | Error drop ->
+    Cascade_metrics.on_profile_candidate_drop
+      ~cascade
+      ~reason:(weighted_entry_drop_reason_label drop);
+    None
 
 (** Expand provider:auto specs that map to multiple models.
     "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].

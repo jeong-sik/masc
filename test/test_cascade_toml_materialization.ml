@@ -675,6 +675,47 @@ let test_secondary_resolver_empty_cascade_returns_error () =
     check bool
       "Error returned as expected (no_callable_providers path)" true true
 
+(* Smoke + behavior guard for the iter-14 wrapper
+   [Cascade_config.parse_weighted_entry_with_drop_metric].
+
+   Ok path: a valid provider:model entry still returns [Some _] like
+   the legacy [parse_weighted_entry].
+
+   Drop path: an invalid-syntax entry returns [None] (matching the
+   legacy contract) AND ticks the iter-6 candidate-drop counter via
+   the typed [Drop_invalid_syntax] reason from
+   [parse_weighted_entry_diag].
+
+   Prometheus state is process-global and not asserted; the goal is
+   to pin the option-preserving contract so a future refactor that
+   widens the return shape — or drops the wrapper entirely — fails
+   here rather than silently regressing the resolve-path drop
+   visibility this iteration introduced. *)
+let test_parse_weighted_entry_with_drop_metric_contract () =
+  let ok_entry : Masc_mcp.Cascade_config_loader.weighted_entry =
+    { model = "ollama:qwen3.5:35b-a3b-nvfp4"
+    ; weight = 1
+    ; supports_tool_choice = None
+    ; secondary = None
+    ; secondary_supports_tool_choice = None
+    }
+  in
+  let drop_entry : Masc_mcp.Cascade_config_loader.weighted_entry =
+    { ok_entry with model = "no-colon-syntax-iter14" }
+  in
+  let ok_result =
+    Masc_mcp.Cascade_config.parse_weighted_entry_with_drop_metric
+      ~cascade:"smoke_test_cascade_iter14"
+      ok_entry
+  in
+  let drop_result =
+    Masc_mcp.Cascade_config.parse_weighted_entry_with_drop_metric
+      ~cascade:"smoke_test_cascade_iter14"
+      drop_entry
+  in
+  check bool "valid entry returns Some _" true (Option.is_some ok_result);
+  check bool "invalid-syntax entry returns None" true (Option.is_none drop_result)
+
 let test_provider_filter_widening_helper_callable () =
   Masc_mcp.Cascade_metrics.on_provider_filter_widening
     ~cascade:"smoke_test_cascade";
@@ -921,6 +962,10 @@ let () =
           test_case
             "provider_filter_widening: cascade label helper callable" `Quick
             test_provider_filter_widening_helper_callable;
+          test_case
+            "parse_weighted_entry_with_drop_metric: option contract preserved"
+            `Quick
+            test_parse_weighted_entry_with_drop_metric_contract;
         ] );
       ( "secondary_resolver_error_paths",
         [

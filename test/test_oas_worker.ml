@@ -734,7 +734,7 @@ let test_cascade_inference_normalizes_keeper_aliases () =
       ]
   in
   let canonical =
-    Cascade_inference.for_json ~name:Masc_mcp.Keeper_config.default_cascade_name json
+    Cascade_inference.for_json ~name:Masc_mcp.(Keeper_config.default_cascade_name ()) json
   in
   let legacy_oas = Cascade_inference.for_json ~name:"oas-keeper_unified" json in
   let legacy_removed = Cascade_inference.for_json ~name:"oas-coding_first" json in
@@ -760,7 +760,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
   let observation : Cascade_legacy_runner.cascade_observation =
     { cascade_name =
         Masc_mcp.Keeper_cascade_profile.Runtime_name
-          Masc_mcp.Keeper_config.default_cascade_name
+          Masc_mcp.(Keeper_config.default_cascade_name ())
     ; strategy = Some "round_robin"
     ; configured_labels = [ "glm:auto"; "llama:auto" ]
     ; candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ]
@@ -799,7 +799,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
   let json = Cascade_legacy_runner.cascade_observation_to_json observation in
   Alcotest.(check string)
     "cascade name preserved"
-    Masc_mcp.Keeper_config.default_cascade_name
+    Masc_mcp.(Keeper_config.default_cascade_name ())
     Yojson.Safe.Util.(json |> member "cascade_name" |> to_string);
   Alcotest.(check bool)
     "fallback applied preserved"
@@ -2398,7 +2398,7 @@ let test_classify_masc_internal_error_roundtrip () =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             internal_cascade_name Masc_mcp.Keeper_config.default_cascade_name
+             internal_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
          ; reason = Keeper_types.All_providers_failed
          })
   in
@@ -2406,7 +2406,7 @@ let test_classify_masc_internal_error_roundtrip () =
    | Some (Keeper_turn_driver.Cascade_exhausted { cascade_name; reason }) ->
      Alcotest.(check string)
        "cascade name"
-       Masc_mcp.Keeper_config.default_cascade_name
+       Masc_mcp.(Keeper_config.default_cascade_name ())
        (internal_cascade_name_to_string cascade_name);
      Alcotest.(check string)
        "cascade reason"
@@ -2416,7 +2416,7 @@ let test_classify_masc_internal_error_roundtrip () =
   let accept_err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Accept_rejected
-         { scope = Masc_mcp.Keeper_config.default_cascade_name
+         { scope = Masc_mcp.(Keeper_config.default_cascade_name ())
          ; model = Some "mock-model"
          ; reason = "response rejected by accept (model=mock-model)"
          })
@@ -2425,7 +2425,7 @@ let test_classify_masc_internal_error_roundtrip () =
    | Some (Keeper_turn_driver.Accept_rejected { scope; model; reason }) ->
      Alcotest.(check string)
        "accept scope"
-       Masc_mcp.Keeper_config.default_cascade_name
+       Masc_mcp.(Keeper_config.default_cascade_name ())
        scope;
      Alcotest.(check (option string)) "accept model" (Some "mock-model") model;
      Alcotest.(check bool)
@@ -4983,7 +4983,7 @@ let make_keeper_meta
           [ "name", `String name
           ; "agent_name", `String name
           ; "trace_id", `String trace_id
-          ; "cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name
+          ; "cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ())
           ; "last_model_used", `String "llama:auto"
           ])
   with

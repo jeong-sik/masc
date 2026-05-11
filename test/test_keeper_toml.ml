@@ -953,7 +953,7 @@ cascade_name = "oas-coding_first"
      | Error e -> fail e
      | Ok d ->
        check (option string) "legacy keeper cascade normalized"
-         (Some Masc_mcp.Keeper_config.default_cascade_name)
+         (Some Masc_mcp.(Keeper_config.default_cascade_name ()))
          d.cascade_name)
 
 let test_persona_resolver_defaults_to_research_tool_access () =

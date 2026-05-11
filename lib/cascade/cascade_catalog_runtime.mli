@@ -45,6 +45,15 @@ type snapshot = {
   mtime : float;
   validated_at : float;
   profiles : profile_build list;
+  default_profile_name : string;
+      (** Configured [routes.keeper_turn] target validated against
+          [profiles] at snapshot build time.  Resolved via
+          [Cascade_routes.cascade_name_for_use Keeper_turn] and known
+          to be present in [profiles] (validator rejects the snapshot
+          otherwise).  Callers that route blank cascade names through
+          this snapshot must read this field rather than
+          [List.hd profiles] — [profiles] is sorted lexicographically,
+          which is not the configured default. *)
 }
 
 type rejection

@@ -244,7 +244,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          | None ->
            let prev = cascade_name_of_meta old in
            if String.trim prev <> "" then prev
-           else Keeper_config.default_cascade_name
+           else (Keeper_config.default_cascade_name ())
        in
        Some Cascade_ref.{ group; item = None });
     will = new_will;

@@ -1443,13 +1443,13 @@ let () = test "build_verdict_sse_payload: distinct cascades = cross_model true" 
   let result =
     make_review_result
       ~evaluator_cascade:"verifier"
-      ~generator_cascade:Masc_mcp.Keeper_config.default_cascade_name
+      ~generator_cascade:Masc_mcp.(Keeper_config.default_cascade_name ())
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t1" ~req ~result in
   assert (payload_member "cross_model" json = `Bool true);
   assert (payload_member "generator_cascade" json
-          = `String Masc_mcp.Keeper_config.default_cascade_name);
+          = `String Masc_mcp.(Keeper_config.default_cascade_name ()));
   assert (payload_member "evaluator_cascade" json = `String "verifier");
   assert (payload_member "task_id" json = `String "t1")
 )
@@ -1498,7 +1498,7 @@ let () = test "build_verdict_sse_payload: empty evaluator string = cross_model f
   let result =
     make_review_result
       ~evaluator_cascade:""
-      ~generator_cascade:Masc_mcp.Keeper_config.default_cascade_name
+      ~generator_cascade:Masc_mcp.(Keeper_config.default_cascade_name ())
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t5" ~req ~result in

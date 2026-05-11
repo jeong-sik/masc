@@ -415,7 +415,7 @@ let cascade_name_of_meta (m : keeper_meta) : string =
   match m.cascade_ref with
   | Some ref_ when not (String.equal ref_.Cascade_ref.group "") ->
     ref_.Cascade_ref.group
-  | _ -> Keeper_config.default_cascade_name
+  | _ -> (Keeper_config.default_cascade_name ())
 ;;
 
 let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =

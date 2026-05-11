@@ -252,7 +252,7 @@ let config_json () =
           let cascade_name =
             match doc.Keeper_types_profile.cascade_name with
             | Some c -> c
-            | None -> Keeper_config.default_cascade_name
+            | None -> (Keeper_config.default_cascade_name ())
           in
           Some (`Assoc (keeper_profile_fields ~keeper:name ~cascade_name))))
     with
@@ -708,29 +708,38 @@ let provider_scheme_of_model_string (s : string) : string =
 ;;
 
 (** Collect the set of provider scheme prefixes declared by any cascade
-    profile in [config_path].  Reads the typed catalog (so invalid
-    profiles are skipped) and then each profile's raw model list.  Errors
-    are swallowed into an empty set — a missing/malformed [cascade.json]
-    is already surfaced by [config_json]; we do not want the health
-    endpoint to disappear just because the catalog loader fails. *)
-let declared_provider_schemes_set ?(config_path : string option) () : StringSet.t =
-  match config_path with
-  | None -> StringSet.empty
-  | Some path ->
-    (match Cascade_config_loader.load_catalog ~config_path:path with
-     | Error _ -> StringSet.empty
-     | Ok entries ->
+    profile.  RFC-0066 Phase 2: reads the live validated snapshot via
+    [Cascade_catalog_runtime.inspect_active] so declarative
+    [provider]/[model]/[profile] configs are visible.  Errors and
+    non-validated states yield the empty set — the health endpoint must
+    keep responding even if the catalog is rejected.
+
+    The [?config_path] argument is preserved for backward compatibility
+    with callers; under declarative config the runtime resolves its own
+    path through [Config_dir_resolver].  Callers that previously passed
+    an explicit path now get the snapshot's source-of-truth view. *)
+let declared_provider_schemes_set ?config_path:_ () : StringSet.t =
+  match Cascade_catalog_runtime.inspect_active () with
+  | Error _ -> StringSet.empty
+  | Ok state ->
+    let snapshot =
+      match state with
+      | Cascade_catalog_runtime.Validated snapshot -> Some snapshot
+      | Validated_with_rejections { snapshot; _ } -> Some snapshot
+      | Serving_last_known_good { snapshot; _ } -> Some snapshot
+    in
+    (match snapshot with
+     | None -> StringSet.empty
+     | Some snapshot ->
        List.fold_left
-         (fun acc (entry : Cascade_config_loader.catalog_entry) ->
-            let models =
-              Cascade_config_loader.load_profile ~config_path:path ~name:entry.name
-            in
+         (fun acc (profile : Cascade_catalog_runtime.profile_build) ->
             List.fold_left
-              (fun acc m -> StringSet.add (provider_scheme_of_model_string m) acc)
+              (fun acc (entry : Cascade_config_loader.weighted_entry) ->
+                StringSet.add (provider_scheme_of_model_string entry.model) acc)
               acc
-              models)
+              profile.weighted_entries)
          StringSet.empty
-         entries)
+         snapshot.profiles)
 ;;
 
 (** Public list version of {!declared_provider_schemes_set}.  Sorted and

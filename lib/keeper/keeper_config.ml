@@ -2,11 +2,22 @@
 
 open Tool_args
 
-(** Default cascade name for keeper turns. Resolved through [routes.keeper_turn]
-    so the concrete profile remains configuration-owned. *)
-let default_cascade_name =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Keeper_turn
+(** Default cascade name for keeper turns. Resolved through the live
+    [Cascade_catalog_runtime] snapshot so the answer reflects the
+    currently-installed catalog rather than module-init state. Falls
+    back to [Cascade_routes.cascade_name_for_use Keeper_turn] (legacy
+    spec-driven path) when the snapshot is not yet available, which
+    matches pre-RFC-0066 behavior during early boot.
+
+    RFC-0066 Phase 1: was a string value evaluated at module init,
+    freezing to the static fallback when the catalog was empty at
+    init time. See issue #14624. *)
+let default_cascade_name () =
+  match Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" () with
+  | Ok name -> name
+  | Error _ ->
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Keeper_turn
 
 
 (** Cascade name for recovery turns when keeper is in Failing phase.

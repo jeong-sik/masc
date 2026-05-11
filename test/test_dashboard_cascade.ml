@@ -118,7 +118,7 @@ let with_dashboard_snapshot f =
   Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
   Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
     ~source_path:"/tmp/dashboard-cascade-test.json"
-    ~profile_names:[ Masc_mcp.Keeper_config.default_cascade_name ];
+    ~profile_names:[ Masc_mcp.(Keeper_config.default_cascade_name ()) ];
   Fun.protect ~finally:Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests f
 ;;
 
@@ -169,7 +169,7 @@ models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
        Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
        Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
          ~source_path:cascade_path
-         ~profile_names:[ Masc_mcp.Keeper_config.default_cascade_name ];
+         ~profile_names:[ Masc_mcp.(Keeper_config.default_cascade_name ()) ];
        Fun.protect
          ~finally:Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests
          (fun () ->

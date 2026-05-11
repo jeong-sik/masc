@@ -173,7 +173,7 @@ let effective_declarative_cascade_name
   match defaults.cascade_name, defaults.manifest_path with
   | Some cascade_name, _ ->
       Keeper_cascade_profile.normalize_declared_name cascade_name
-  | None, Some _ -> Keeper_config.default_cascade_name
+  | None, Some _ -> (Keeper_config.default_cascade_name ())
   | None, None ->
       Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
 
@@ -257,7 +257,7 @@ let ensure_keeper_meta config name =
         let raw_value =
           match defaults.cascade_name, defaults.manifest_path with
           | Some cascade_name, _ -> cascade_name
-          | None, Some _ -> Keeper_config.default_cascade_name
+          | None, Some _ -> (Keeper_config.default_cascade_name ())
           | None, None -> cascade_name_of_meta meta
         in
         let msg =

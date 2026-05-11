@@ -92,7 +92,7 @@ let make_keeper_meta ~name ~goal_id =
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
           ("goal", `String "Goal-linked keeper");
-          ("cascade_name", `String Keeper_config.default_cascade_name);
+          ("cascade_name", `String (Keeper_config.default_cascade_name ()));
         ])
   with
   | Ok meta -> { meta with active_goal_ids = [ goal_id ] }

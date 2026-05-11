@@ -41,6 +41,7 @@ type snapshot = {
   mtime : float;
   validated_at : float;
   profiles : profile_snapshot list;
+  default_profile_name : string;
 }
 
 type profile_rejection = {
@@ -390,6 +391,7 @@ let snapshot_to_yojson (snapshot : snapshot) =
       ("source_path", `String snapshot.source_path);
       ("source_mtime", `Float snapshot.mtime);
       ("validated_at", `Float snapshot.validated_at);
+      ("default_profile_name", `String snapshot.default_profile_name);
       ("profile_count", `Int (List.length snapshot.profiles));
       ( "profiles",
         `List (List.map profile_snapshot_to_yojson snapshot.profiles) );
@@ -750,6 +752,7 @@ let validate_path_result ?sw ?net ~config_path () =
               mtime = Option.value attempted_mtime ~default:0.0;
               validated_at = checked_at;
               profiles = profile_snapshots;
+              default_profile_name = required_default_profile;
             }
           in
           record_probe_metrics profile_snapshots;
@@ -936,20 +939,43 @@ let lookup_active_profile ?sw ?net ?clock raw_name =
   | Error _ as e -> e
   | Ok snapshot -> (
       let trimmed = String.trim raw_name in
-      let normalized =
-        if (not (String.equal trimmed ""))
-           && Option.is_some (profile_lookup snapshot.profiles trimmed)
-        then trimmed
-        else normalize_declared_name raw_name
-      in
-      match profile_lookup snapshot.profiles normalized with
-      | Some profile -> Ok (snapshot, normalized, profile)
-      | None ->
-          let known = profile_names_of_snapshot snapshot |> String.concat ", " in
-          Error
-            (Printf.sprintf
-               "unknown cascade_name %S (active profiles: %s)"
-               normalized known))
+      if String.equal trimmed ""
+      then (
+        (* RFC-0066 Phase 1: blank raw means "the active default cascade".
+           Resolve via the snapshot's [default_profile_name], which the
+           validator builds from [Cascade_routes.cascade_name_for_use
+           Keeper_turn] and guarantees is present in [profiles]
+           (snapshot construction rejects otherwise).  Reading
+           [List.hd snapshot.profiles] would silently return the
+           lexicographically-first profile because [discover_profiles]
+           sorts via [List.sort_uniq String.compare]. *)
+        match profile_lookup snapshot.profiles snapshot.default_profile_name with
+        | Some profile ->
+            Ok (snapshot, snapshot.default_profile_name, profile)
+        | None ->
+            (* Validator invariant violation; stay defensive. *)
+            (match snapshot.profiles with
+             | first :: _ -> Ok (snapshot, first.name, first)
+             | [] ->
+                 Error
+                   "snapshot has no profiles; cannot resolve blank \
+                    cascade name"))
+      else
+        let normalized =
+          if Option.is_some (profile_lookup snapshot.profiles trimmed)
+          then trimmed
+          else normalize_declared_name raw_name
+        in
+        match profile_lookup snapshot.profiles normalized with
+        | Some profile -> Ok (snapshot, normalized, profile)
+        | None ->
+            let known =
+              profile_names_of_snapshot snapshot |> String.concat ", "
+            in
+            Error
+              (Printf.sprintf
+                 "unknown cascade_name %S (active profiles: %s)"
+                 normalized known))
 
 let resolve_declared_name ?sw ?net ?clock ~raw_name () =
   match lookup_active_profile ?sw ?net ?clock raw_name with

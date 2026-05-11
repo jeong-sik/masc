@@ -93,7 +93,7 @@ let with_config_dir f =
       Config_dir_resolver.reset ();
       Cascade_catalog_runtime.install_snapshot_for_tests
         ~source_path:cascade_path
-        ~profile_names:[ Keeper_config.default_cascade_name ];
+        ~profile_names:[ (Keeper_config.default_cascade_name ()) ];
       f config_dir)
 
 (** Test: TOML personality fields overwrite stale runtime JSON values. *)
@@ -1018,7 +1018,7 @@ preset = "social"
   | Ok updated ->
       check string "goal" "TOML goal" updated.Keeper_types.goal;
       check string "cascade_name reset to keeper default"
-        Keeper_config.default_cascade_name (Keeper_types.cascade_name_of_meta updated)
+        ((Keeper_config.default_cascade_name ())) (Keeper_types.cascade_name_of_meta updated)
 
 let test_social_model_resynced_from_declarative_defaults () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->

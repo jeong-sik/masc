@@ -1,5 +1,9 @@
-(* Keeper_turn_liveness — local-only cascade liveness decisions, ollama
-   saturation pre-skip, and turn liveload configuration.
+(* Keeper_turn_liveness — local-only cascade liveness decisions, local
+   provider saturation pre-skip, and turn liveload configuration.
+
+   Provider-specific probe knowledge lives in
+   [Cascade_capacity_probe]; this module routes probeable URLs through
+   that registry without naming any single provider.
 
    Public sub-module included by [Keeper_unified_turn]. *)
 
@@ -7,7 +11,8 @@ open Keeper_types
 
 (** Deterministic decision for the local-only phase fallback boundary. This
     does not probe runtime liveness; it only decides whether the selected
-    labels warrant an Ollama liveness check before preserving [local_only]. *)
+    labels resolve to URLs that [Cascade_capacity_probe.can_probe] before
+    preserving [local_only]. *)
 type local_only_liveness_decision =
   | Keep_effective_cascade of string
   | Probe_local_only_urls of {
@@ -31,9 +36,9 @@ val fail_open_local_only_when_unavailable :
   string list ->
   string
 (** When phase routing temporarily forces the phase-buffer route, fail open to the
-    keeper's configured base cascade if the local Ollama endpoint is
-    unavailable. Legacy [local_only] aliases normalize through
-    [routes.phase_buffer]. *)
+    keeper's configured base cascade if no registered local-capable probe
+    reports the endpoint as serving. Legacy [local_only] aliases
+    normalize through [routes.phase_buffer]. *)
 
 val resolve_ollama_only_base_url :
   ?resolve_label:(string -> Llm_provider.Provider_config.t option) ->

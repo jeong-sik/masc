@@ -66,10 +66,20 @@ let probes () =
 
 let can_probe ~url = List.exists (fun (module P : Probe) -> P.can_probe ~url) (probes ())
 
+(* First-match semantics (matches .mli wording): pick the first probe
+   that recognises [url], then return whatever that probe says — even
+   None. The previous [List.find_map] composition silently fell through
+   to later probes when the first one recognised the URL but had a
+   cache miss, which makes registry behaviour depend on registration
+   order in non-obvious ways once two probes overlap. *)
+let find_owner ~url =
+  List.find_opt (fun (module P : Probe) -> P.can_probe ~url) (probes ())
+;;
+
 let cached ~url ?now () =
-  List.find_map
-    (fun (module P : Probe) -> if P.can_probe ~url then P.cached ~url ?now () else None)
-    (probes ())
+  match find_owner ~url with
+  | None -> None
+  | Some (module P) -> P.cached ~url ?now ()
 ;;
 
 let capacity url =
@@ -82,10 +92,9 @@ let capacity url =
 ;;
 
 let probe ~sw ~net ~url ?timeout_s () =
-  List.find_map
-    (fun (module P : Probe) ->
-       if P.can_probe ~url then P.probe ~sw ~net ~url ?timeout_s () else None)
-    (probes ())
+  match find_owner ~url with
+  | None -> None
+  | Some (module P) -> P.probe ~sw ~net ~url ?timeout_s ()
 ;;
 
 let refresh_many ~sw ~net ~urls ?timeout_s () =

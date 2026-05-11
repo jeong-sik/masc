@@ -54,6 +54,15 @@ type model_policy = {
 
 type tool_policy = {
   supports_runtime_mcp_http_headers : bool;
+  requires_per_keeper_bridging_for_bound_actor_tools : bool;
+      (** When true, this provider's runtime cannot inject per-keeper auth
+          headers natively. Bound-actor runtime MCP tools therefore require
+          explicit per-keeper bridging at the cascade layer; otherwise the
+          filter must reject the policy for this provider.
+
+          Codex CLI is currently the only adapter that sets this to [true]:
+          its cached login does not allow per-keeper authorization headers
+          to be injected on each request without bridging. *)
 }
 
 type telemetry_policy = {
@@ -392,6 +401,14 @@ val model_label_of_config :
 
 (** Whether the resolved adapter declares runtime MCP HTTP header support. *)
 val supports_runtime_mcp_http_headers_for_config :
+  Llm_provider.Provider_config.t -> bool
+
+(** Whether the resolved adapter requires explicit per-keeper bridging in
+    order to carry a runtime MCP policy that uses bound-actor tools.
+
+    Currently only [codex_cli] returns [true]; the cascade filter uses this
+    flag to gate entries without dispatching on provider name. *)
+val requires_per_keeper_bridging_for_bound_actor_tools_for_config :
   Llm_provider.Provider_config.t -> bool
 
 (** {1 Misc} *)

@@ -44,6 +44,7 @@ type model_policy = {
 
 type tool_policy = {
   supports_runtime_mcp_http_headers : bool;
+  requires_per_keeper_bridging_for_bound_actor_tools : bool;
 }
 
 type telemetry_policy = {
@@ -139,8 +140,24 @@ let csv_items raw =
   |> List.map String.trim
   |> List.filter (fun s -> s <> "")
 
-let no_tool_http_headers = { supports_runtime_mcp_http_headers = false }
-let runtime_mcp_http_headers = { supports_runtime_mcp_http_headers = true }
+let no_tool_http_headers =
+  { supports_runtime_mcp_http_headers = false;
+    requires_per_keeper_bridging_for_bound_actor_tools = false;
+  }
+let runtime_mcp_http_headers =
+  { supports_runtime_mcp_http_headers = true;
+    requires_per_keeper_bridging_for_bound_actor_tools = false;
+  }
+(* Codex CLI quirk: its cached login cannot natively inject per-keeper auth
+   headers, so any runtime MCP policy that uses bound-actor tools requires
+   per-keeper bridging at the cascade layer. The
+   [Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp] predicate is
+   what the cascade filter consults to decide whether such bridging is in
+   place for a given keeper before admitting codex_cli for runtime MCP. *)
+let codex_cli_tool_policy =
+  { supports_runtime_mcp_http_headers = false;
+    requires_per_keeper_bridging_for_bound_actor_tools = true;
+  }
 let telemetry_reported = { usage_reporting = Reported; runtime_reporting = Reported }
 let telemetry_unknown = { usage_reporting = Unknown; runtime_reporting = Unknown }
 let telemetry_usage_missing =
@@ -375,7 +392,7 @@ let direct_adapters =
           expand_auto = true;
           family = Generic;
         };
-      tool_policy = no_tool_http_headers;
+      tool_policy = codex_cli_tool_policy;
       telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
@@ -1495,6 +1512,13 @@ let supports_runtime_mcp_http_headers_for_config
     (cfg : Llm_provider.Provider_config.t) =
   match adapter_of_provider_config cfg with
   | Some adapter -> adapter.tool_policy.supports_runtime_mcp_http_headers
+  | None -> false
+
+let requires_per_keeper_bridging_for_bound_actor_tools_for_config
+    (cfg : Llm_provider.Provider_config.t) =
+  match adapter_of_provider_config cfg with
+  | Some adapter ->
+      adapter.tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
   | None -> false
 
 (* ── Generic provider auth detail ─────────────────────────────── *)

@@ -70,6 +70,7 @@ max-concurrent = 2
 max-input = 4096
 
 [ollama.qwen3-8b]
+max-concurrent = 1
 
 [tier.rerank]
 members = ["claude-code.haiku.for-tool-rerank"]
@@ -192,6 +193,7 @@ max-context = 200000
 
 [claude-code.haiku]
 is-default = true
+max-concurrent = 1
 
 [claude-code.haiku.ok-alias]
 max-input = 4096
@@ -231,6 +233,7 @@ max-context = 200000
 
 [claude-code.haiku]
 is-default = true
+max-concurrent = 1
 
 [claude-code.haiku.alias-a]
 max-input = 4096
@@ -298,6 +301,7 @@ max-context = 200000
 
 [claude-code.haiku]
 is-default = true
+max-concurrent = 1
 
 [routes.direct]
 target = "claude-code.haiku"
@@ -316,6 +320,7 @@ max-context = 200000
 
 [claude-code.haiku]
 is-default = true
+max-concurrent = 1
 
 [tier.primary]
 members = ["claude-code.haiku"]
@@ -358,6 +363,7 @@ max-context = 200000
 
 [claude-code.haiku]
 is-default = true
+max-concurrent = 1
 
 [claude-code.haiku.gov]
 max-input = 8192
@@ -405,8 +411,10 @@ max-context = 200000
 
 [claude-code.haiku]
 is-default = true
+max-concurrent = 1
 
 [claude-code.sonnet]
+max-concurrent = 1
 |} in
   let errs = validate_toml toml in
   no_errors errs
@@ -449,6 +457,7 @@ command = "c"
 max-context = 4096
 
 [p.m]
+max-concurrent = 1
 
 [tier.t]
 members = ["p.m"]
@@ -470,6 +479,7 @@ command = "c"
 max-context = 4096
 
 [p.m]
+max-concurrent = 1
 
 [tier.t]
 members = ["p.m"]
@@ -491,6 +501,7 @@ command = "c"
 max-context = 4096
 
 [p.m]
+max-concurrent = 1
 
 [tier.t]
 members = ["p.m"]
@@ -510,6 +521,7 @@ command = "c"
 max-context = 4096
 
 [p.m]
+max-concurrent = 1
 
 [tier.t]
 members = ["p.m"]
@@ -529,6 +541,7 @@ command = "c"
 max-context = 4096
 
 [p.m]
+max-concurrent = 1
 
 [tier.t]
 members = ["p.m"]
@@ -554,6 +567,7 @@ command = "c"
 max-context = 4096
 
 [p.m]
+max-concurrent = 1
 
 [tier.t]
 members = ["p.m"]
@@ -579,6 +593,7 @@ command = "c"
 max-context = 4096
 
 [p.m]
+max-concurrent = 1
 
 [tier.t]
 members = ["p.m"]
@@ -597,6 +612,7 @@ command = "c"
 max-context = 4096
 
 [p.m]
+max-concurrent = 1
 
 [tier.t]
 members = ["p.m"]

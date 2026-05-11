@@ -1,6 +1,6 @@
 (** Declarative cascade config cross-reference validator (RFC-0058 v2).
 
-    Validates 10 load-time invariants on a parsed [cascade_config]:
+    Validates 11 load-time invariants on a parsed [cascade_config]:
     R1: Every binding references an existing provider
     R2: Every binding references an existing model
     R3: Every alias references an existing binding
@@ -10,7 +10,8 @@
     R7: Route targets reference existing tier-groups, tiers, or bindings
     R8: System targets reference existing bindings or aliases
     R9: At most one is-default=true per provider
-    R10: Strategy-specific fields match the declared strategy *)
+    R10: Strategy-specific fields match the declared strategy
+    R11: Binding max-concurrent required and positive (RFC-0058 §3.4) *)
 
 open Cascade_declarative_types
 
@@ -305,10 +306,12 @@ let validate_strategy_fields (cfg : cascade_config) : validation_error list =
    a sentinel value (0) when the field is missing so that this rule can
    flag the omission instead of silently throttling the binding to 1.
 
-   R11 is intentionally excluded from {!validate} (the default validator
-   used by the rest of the codebase, including legacy test fixtures that
-   predate the capacity requirement). It is invoked through {!validate_strict}
-   which is the contract for production cascade.toml loaders. *)
+   Run unconditionally as part of {!validate} (RFC-0058 Phase 5.5
+   unified the previous laxer/strict surfaces). The validator itself
+   is not auto-invoked by the parser hotpath — callers that opt into
+   validation (e.g. `cascade_catalog_validator`, declarative-config
+   tests) now get R11 enforcement; the parser's tolerant load path
+   is unchanged. *)
 
 let validate_binding_capacity (cfg : cascade_config) : validation_error list =
   List.filter_map
@@ -339,8 +342,5 @@ let validate (cfg : cascade_config) : validation_error list =
   @ validate_system_targets cfg
   @ validate_single_default cfg
   @ validate_strategy_fields cfg
-;;
-
-let validate_strict (cfg : cascade_config) : validation_error list =
-  validate cfg @ validate_binding_capacity cfg
+  @ validate_binding_capacity cfg
 ;;

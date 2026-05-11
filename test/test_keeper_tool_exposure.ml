@@ -336,7 +336,25 @@ let test_research_preset_has_read_tools () =
 
 let test_last_turn_safe_keeps_discovery_and_web_search () =
   let tools = Keeper_tool_policy.last_turn_safe_tool_names () in
-  let alias_expanded = tools @ Keeper_tool_alias.public_names () in
+  (* PR #14574 review #8: expose a public alias only when its routed
+     internal handler is actually present in [tools]. Appending the full
+     [public_names ()] unconditionally would make the "WebSearch alias"
+     assertion below pass even if [masc_web_search] were removed from
+     [last_turn_safe_tool_names], hiding regressions. Mirrors the
+     gating used in [partition_tool_search_hits]. *)
+  let tools_set =
+    let tbl = Hashtbl.create (List.length tools) in
+    List.iter (fun n -> Hashtbl.replace tbl n ()) tools;
+    tbl
+  in
+  let aliases_with_allowed_route =
+    Keeper_tool_alias.public_names ()
+    |> List.filter (fun pub ->
+      match Keeper_tool_alias.route pub with
+      | Some r -> Hashtbl.mem tools_set r.internal_name
+      | None -> false)
+  in
+  let alias_expanded = tools @ aliases_with_allowed_route in
   check
     bool
     "last turn allows keeper_tool_search"

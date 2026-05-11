@@ -50,10 +50,54 @@ let routing_table : (string, route) Hashtbl.t =
 
 (* ── Result-based telemetry ──────────────────────────────────────── *)
 
+(** [is_known_public name] is [true] when [name] has a routing entry. *)
+let is_known_public name = Hashtbl.mem routing_table name
+
+(** Known internal handler names — the [internal_name] values that
+    [routing_table] entries map onto, plus the [masc_*] surface that
+    [public_masc_to_internal] resolves. Used to bound the [routed_to]
+    Prometheus label so that unrecognised strings never become a new
+    time series. *)
+let known_internal_names_tbl : (string, unit) Hashtbl.t =
+  let t = Hashtbl.create 128 in
+  Hashtbl.iter (fun _ r -> Hashtbl.replace t r.internal_name ()) routing_table;
+  List.iter
+    (fun internal ->
+       Hashtbl.replace t internal ();
+       (* Also admit the public MCP counterpart (e.g. [masc_board_post])
+          so successful MCP routes do not collapse to [tool="unknown"]
+          (PR #14585 review). *)
+       match Tool_catalog_surfaces.keeper_internal_replacement internal with
+       | Some public -> Hashtbl.replace t public ()
+       | None -> ())
+    Tool_catalog_surfaces.keeper_internal_tools;
+  t
+;;
+
+let is_known_internal name = Hashtbl.mem known_internal_names_tbl name
+
+(** Bound a label value to a closed set so hallucinated / unbounded
+    names never inflate Prometheus cardinality. *)
+let safe_tool_label name =
+  if is_known_public name
+  then name
+  else if is_known_internal name
+  then name
+  else "unknown"
+;;
+
+let safe_routed_to_label name =
+  if name = "none" then name else if is_known_internal name then name else "unknown"
+;;
+
 let record_route_outcome ~tool ~routed_to ~result =
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_tool_call_total
-    ~labels:[ "tool", tool; "routed_to", routed_to; "result", result ]
+    ~labels:
+      [ "tool", safe_tool_label tool
+      ; "routed_to", safe_routed_to_label routed_to
+      ; "result", result
+      ]
     ()
 ;;
 
@@ -66,7 +110,13 @@ let route name =
 ;;
 
 (** [route_or_miss name] returns the route if found, or records a routing
-    miss via result-based telemetry and returns [None]. *)
+    miss via result-based telemetry and returns [None].
+
+    Used by direct OAS-edge dispatch where a [None] result short-circuits
+    the call. General canonicalisation (which also has to handle MCP
+    prefixes and pass-through of already-internal names) goes through
+    [Keeper_tool_disclosure.canonical_tool_name], which emits its own
+    per-branch telemetry — see that module for the wider path. *)
 let route_or_miss name =
   match route name with
   | Some r ->
@@ -76,11 +126,6 @@ let route_or_miss name =
     record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
     None
 ;;
-
-(** [is_known_public name] is [true] when [name] has a routing entry.
-    Callers that previously used [canonicalize_observed] to check whether a
-    name is known should use this instead. *)
-let is_known_public name = Hashtbl.mem routing_table name
 
 (** [public_names ()] returns all LLM-native public names in stable order.
     Used by callers that previously used [expand_universe] to add alias names

@@ -713,22 +713,23 @@ let run_turn
                      ~reported_tool_names
                      ~observed_tool_names
                  in
-                 (* RFC-0064: route LLM-native tool names (Bash/Read/etc) to their
-          keeper_* internal cognates before the disclosure check. Without
-          this, the disclosure check flags every Bash/Read call as "unexpected"
-          and nukes turns where the LLM only used the alias names (≈18% of
-          turns per #8778). Unknown names (routing misses) are left as-is and
-          may still trigger a teaching error — recorded via result-based
-          telemetry by [route_or_miss]. *)
-                 (* Canonicalise observed tool names across all three input
-                    surfaces (LLM-native public / MCP protocol /
-                    already-internal). Using Keeper_tool_alias.route_or_miss
-                    directly would record every internal "keeper_*"/"masc_*"
-                    call as a routing miss, inflating
-                    masc_keeper_tool_call_total{result="miss"} and skewing
-                    the alias dashboards (see PR #14574 review). *)
+                 (* RFC-0064: canonicalise observed tool names across all three
+                    input surfaces (LLM-native public / MCP protocol /
+                    already-internal) before the disclosure check. Without
+                    this, the disclosure check flags every Bash/Read call as
+                    "unexpected" and nukes turns where the LLM only used the
+                    alias names (≈18% of turns per #8778).
+
+                    [canonical_tool_name_observed] is the observation
+                    boundary — it emits exactly one
+                    [masc_keeper_tool_call_total] sample per observed
+                    name with bounded labels. Set-logic call sites
+                    (required-tool canonicalisation, surface composition)
+                    use the pure [canonical_tool_name] variant so a
+                    single observed call does not produce multiple
+                    counter samples (PR #14585 review #3). *)
                  let canonical_tool_names =
-                   List.map Keeper_tool_disclosure.canonical_tool_name tool_names
+                   List.map Keeper_tool_disclosure.canonical_tool_name_observed tool_names
                  in
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =

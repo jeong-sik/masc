@@ -34,14 +34,83 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
 
    Conflating them under a single [route] lookup loses (2) silently and
    misattributes (3) as routing misses; see PR #14574 review. *)
-let canonical_name name =
+(* Three input surfaces, packed into an outcome variant so the pure
+   canonicalisation and the observation-emitting wrapper share one
+   decision tree. *)
+type canonicalisation_outcome =
+  | Mcp_mapped of
+      { stripped : string
+      ; internal : string
+      }
+  | Route_hit of { internal : string }
+  | Already_internal of { canonical : string }
+  | Miss
+
+let canonicalise_outcome name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
   match Keeper_tool_alias.public_masc_to_internal stripped with
-  | Some internal -> internal
+  | Some internal -> Mcp_mapped { stripped; internal }
   | None ->
-    (match Keeper_tool_alias.route name with
-     | Some r -> r.internal_name
-     | None -> name)
+    (match Keeper_tool_alias.route stripped with
+     | Some r -> Route_hit { internal = r.internal_name }
+     | None ->
+       (* Check [stripped] (not the raw [name]) so MCP-prefixed internal
+          names like [mcp__masc__keeper_pr_create] are recognised and
+          canonicalised to [keeper_pr_create]. The unstripped form is
+          never in [is_known_internal] for known prefixed transports
+          (PR #14585 review). *)
+       if Keeper_tool_alias.is_known_internal stripped
+       then Already_internal { canonical = stripped }
+       else Miss)
+;;
+
+(** Pure canonicalisation — no telemetry. Used by set-logic call sites
+    (required-tool canonicalisation, surface composition, satisfaction
+    checks) where every invocation should NOT count as an observation. *)
+let canonical_name name =
+  match canonicalise_outcome name with
+  | Mcp_mapped { internal; _ } -> internal
+  | Route_hit { internal } -> internal
+  | Already_internal { canonical } -> canonical
+  | Miss -> name
+;;
+
+(** Observation-emitting canonicalisation. Used at the keeper turn
+    observation site (keeper_agent_run) where each observed tool name
+    should produce exactly one [masc_keeper_tool_call_total] sample with
+    bounded labels.
+
+    Telemetry labels per branch:
+    - [Mcp_mapped]: tool = stripped (e.g. [masc_board_post]), routed_to = internal, result = ok
+    - [Route_hit]:  tool = name, routed_to = internal, result = ok
+    - [Already_internal]: tool = name, routed_to = name, result = ok
+    - [Miss]:       tool = name (normalised to "unknown" by safe_tool_label), routed_to = "none", result = miss *)
+let canonical_name_observed name =
+  (* Always strip the MCP prefix before recording [tool] so MCP-prefixed
+     Anthropic Code calls (e.g. [mcp__masc__Bash]) and MCP-prefixed
+     keeper internal calls (e.g. [mcp__masc__masc_board_post]) keep the
+     stripped form in the label. The stripped form is in
+     [is_known_public] or [is_known_internal] for any successful route,
+     so [safe_tool_label] preserves it. Self-review of PR #14585 caught
+     that the Route_hit branch was still recording the raw prefixed
+     name and collapsing to ["unknown"]. *)
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  match canonicalise_outcome name with
+  | Mcp_mapped { internal; _ } ->
+    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
+    internal
+  | Route_hit { internal } ->
+    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
+    internal
+  | Already_internal { canonical } ->
+    Keeper_tool_alias.record_route_outcome
+      ~tool:canonical
+      ~routed_to:canonical
+      ~result:"ok";
+    canonical
+  | Miss ->
+    Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
+    name
 ;;
 
 let merge_observed_tool_names
@@ -214,6 +283,7 @@ let tool_progress_class_to_string = function
 ;;
 
 let canonical_tool_name = canonical_name
+let canonical_tool_name_observed = canonical_name_observed
 
 let claim_context_tool_names : string list =
   Tool_name.[ Masc Claim_next; Masc Claim_task; Keeper Task_claim ]

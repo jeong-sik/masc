@@ -108,7 +108,12 @@ let test_route_or_miss_records_ok () =
 ;;
 
 let test_route_or_miss_records_miss () =
-  let labels = [ "tool", "Skill"; "routed_to", "none"; "result", "miss" ] in
+  (* Cardinality bound (RFC-0064 PR #14574 review #4): a miss for a
+     hallucinated name like "Skill" is recorded against the
+     [tool="unknown"] / [routed_to="none"] bucket — never against the
+     raw observed string, otherwise each unique hallucination would
+     allocate its own Prometheus time series. *)
+  let labels = [ "tool", "unknown"; "routed_to", "none"; "result", "miss" ] in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
       Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
@@ -123,7 +128,7 @@ let test_route_or_miss_records_miss () =
       ()
   in
   Alcotest.(check (float 0.001))
-    "telemetry counter incremented for miss"
+    "telemetry counter incremented for miss (unknown bucket)"
     (before +. 1.0)
     after
 ;;
@@ -215,6 +220,112 @@ let test_hallucinated_builtin_still_unexpected () =
     unexpected
 ;;
 
+let test_mcp_prefixed_anthropic_alias_routes () =
+  (* Regression guard for PR #14574 review #5: [canonical_name] must
+     route ["mcp__masc__Bash"] the same way as ["Bash"]. Earlier the
+     route lookup used the raw [name] instead of the stripped form,
+     so MCP-prefixed Anthropic Code calls regressed into routing
+     misses. *)
+  let canonical = Disclosure.canonical_tool_name "mcp__masc__Bash" in
+  Alcotest.(check string)
+    "mcp__masc__Bash routes through stripped form to keeper_bash"
+    "keeper_bash"
+    canonical
+;;
+
+let test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped () =
+  (* Self-review of PR #14585: in canonical_name_observed, the Route_hit
+     branch (LLM-native public name reached via a stripped MCP prefix)
+     must record [tool=stripped] so the label stays within
+     [is_known_public]. Otherwise [safe_tool_label] collapses
+     ["mcp__masc__Bash"] to ["unknown"] on a successful route. *)
+  let labels = [ "tool", "Bash"; "routed_to", "keeper_bash"; "result", "ok" ] in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  let _ = Disclosure.canonical_tool_name_observed "mcp__masc__Bash" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  Alcotest.(check (float 0.001))
+    "MCP-prefixed Anthropic alias records tool=Bash (stripped), not raw prefixed name"
+    (before +. 1.0)
+    after
+;;
+
+let test_mcp_prefixed_keeper_internal_routes () =
+  (* PR #14585 review: MCP transports can emit prefixed internal names
+     like [mcp__masc__keeper_pr_create]. canonicalise_outcome must check
+     [is_known_internal stripped], not raw [name], so these are
+     canonicalised to the stripped form instead of falling into [Miss]
+     and being reported as unexpected. *)
+  let canonical = Disclosure.canonical_tool_name "mcp__masc__keeper_bash" in
+  Alcotest.(check string)
+    "mcp__masc__keeper_bash canonicalises to keeper_bash (stripped)"
+    "keeper_bash"
+    canonical
+;;
+
+let test_mcp_prefixed_masc_public_telemetry_preserves_label () =
+  (* PR #14585 review: a successful MCP-mapped route for a name like
+     [mcp__masc__masc_board_post] must record [tool=masc_board_post],
+     not collapse to ["unknown"]. Verifies that
+     [known_internal_names_tbl] is seeded with public MCP counterparts
+     via [Tool_catalog_surfaces.keeper_internal_replacement]. *)
+  let labels =
+    [ "tool", "masc_board_post"; "routed_to", "keeper_board_post"; "result", "ok" ]
+  in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  let _ = Disclosure.canonical_tool_name_observed "mcp__masc__masc_board_post" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  Alcotest.(check (float 0.001))
+    "MCP-prefixed masc_* public name records tool=masc_board_post (not unknown)"
+    (before +. 1.0)
+    after
+;;
+
+let test_canonical_tool_name_pure_does_not_increment_counter () =
+  (* Self-review of PR #14585 review #3: the pure variant must NOT emit
+     telemetry. Otherwise set-logic call sites (required-tool
+     canonicalisation, surface composition) would over-count. *)
+  let labels_ok = [ "tool", "Bash"; "routed_to", "keeper_bash"; "result", "ok" ] in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels:labels_ok
+      ()
+  in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels:labels_ok
+      ()
+  in
+  Alcotest.(check (float 0.001))
+    "pure canonical_tool_name does not increment masc_keeper_tool_call_total"
+    before
+    after
+;;
+
 let test_partial_tolerance_still_works () =
   let observed = [ "Skill"; "Bash" ] in
   let canonical = List.map Disclosure.canonical_tool_name observed in
@@ -256,7 +367,7 @@ let test_public_input_schema_present () =
          (Printf.sprintf "%s has tailored schema" name)
          true
          (Option.is_some (Alias.public_input_schema name)))
-    [ "Bash"; "Edit"; "Grep"; "Read"; "WebSearch"; "Write" ];
+    [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ];
   Alcotest.(check bool)
     "unknown public name has no schema"
     true
@@ -636,6 +747,26 @@ let () =
             "hallucinated builtin still unexpected"
             `Quick
             test_hallucinated_builtin_still_unexpected
+        ; Alcotest.test_case
+            "mcp-prefixed anthropic alias routes"
+            `Quick
+            test_mcp_prefixed_anthropic_alias_routes
+        ; Alcotest.test_case
+            "mcp-prefixed anthropic alias telemetry uses stripped tool label"
+            `Quick
+            test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped
+        ; Alcotest.test_case
+            "mcp-prefixed keeper internal canonicalises to stripped"
+            `Quick
+            test_mcp_prefixed_keeper_internal_routes
+        ; Alcotest.test_case
+            "mcp-prefixed masc public name telemetry preserves label"
+            `Quick
+            test_mcp_prefixed_masc_public_telemetry_preserves_label
+        ; Alcotest.test_case
+            "pure canonical_tool_name does not increment counter"
+            `Quick
+            test_canonical_tool_name_pure_does_not_increment_counter
         ; Alcotest.test_case
             "partial tolerance still works"
             `Quick

@@ -80,9 +80,20 @@ vars == <<keeper_phase, turn_number, context_id, context_tokens, message_count,
 \* table above as the authoritative abstraction function.
 \*
 \* Unmodeled here (covered in companion specs):
-\*   HandingOff, Draining, Paused, Restarting
+\*   HandingOff, Draining, Paused, Restarting, Zombie
 \* See KeeperGenerationLineage.tla for HandingOff and
 \*     KeeperReconcileLiveness.tla for Paused/Restarting/Draining.
+\* Zombie ("zombie" wire format) is terminal-terminal: it is reachable
+\* only post-Dead when supervisor cleanup latches a never-cleared
+\* failure (see ZombieIsForever / ZombieRequiresTerminalFailureLatched
+\* in KeeperStateMachine.tla, added iter 4 #14707).  No context-
+\* lifecycle events are reachable from Zombie, so it is intentionally
+\* omitted from the abstract Phases set rather than collapsed into
+\* "dead".  See iter 47 audit memo
+\* docs/tla-audit/kctxl-h1-phase-mapping-zombie-gap-2026-05-12.md
+\* for the analysis (KSM phase type carries 13 constructors; this
+\* spec projects to 7 abstract values covering 8 of the 12 non-Zombie
+\* phases — Failing|Crashed collapse into "error", others as listed).
 Phases == {"idle", "running", "compacting", "overflow_retry", "done", "error", "dead"}
 
 \* ── Initial State ────────────────────────────────────────

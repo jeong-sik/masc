@@ -21,6 +21,8 @@ import {
 } from './audit-replay-slider'
 import { activeIdeFile } from './ide-shell'
 import { activeKeeperName } from '../../keeper-state'
+import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 interface BoardPost {
   readonly id: string
@@ -47,6 +49,12 @@ const KIND_TOKEN: Record<ThreadKind, string> = {
   approve: 'var(--color-status-ok)',
   note: 'var(--color-fg-muted)',
   suggest: 'var(--color-status-warn)',
+}
+
+const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
+  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
 }
 
 const EMPTY_POSTS: ReadonlyArray<BoardPost> = []
@@ -123,6 +131,10 @@ export function IdeConversationRailMock() {
   const [replayUntilMs, setReplayUntilMs] = useState<number | null>(null)
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
+  const [, forceRender] = useState(0)
+
+  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
+  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1)), [])
 
   useEffect(() => {
     let cancelled = false
@@ -175,6 +187,10 @@ export function IdeConversationRailMock() {
     : replayItems.filter(item => visibleItemIds.has(replayItemId(item)))
   const visibleCounts = sourceCounts(visibleItems)
 
+  const presence = globalPresenceSnapshot.value
+  const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const overlay = cursorOverlaySignal.value
+
   return html`
     <div
       class="ide-rail-panel ide-conversation-panel"
@@ -209,6 +225,8 @@ export function IdeConversationRailMock() {
               item,
               focusedId,
               nextFocusedId => setFocusedId(focusedId === nextFocusedId ? null : nextFocusedId),
+              entries,
+              overlay,
             ))}
       </ol>
     </div>
@@ -261,27 +279,45 @@ function sourceCounts(items: ReadonlyArray<ReplayRailItem>) {
   )
 }
 
-function ReplayRailCard(item: ReplayRailItem, focusedId: string | null, onFocus: (id: string) => void) {
+function ReplayRailCard(
+  item: ReplayRailItem,
+  focusedId: string | null,
+  onFocus: (id: string) => void,
+  entries: ReadonlyArray<KeeperPresenceEntry>,
+  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+) {
   if (item.source === 'thread') {
     return PostCard(
       item.post,
       focusedId === item.post.id,
       () => onFocus(item.post.id),
+      entries,
+      overlay,
     )
   }
   if (item.source === 'decision') {
-    return DecisionCard(item)
+    return DecisionCard(item, entries, overlay)
   }
   return CascadeCard(item)
 }
 
-function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
+function PostCard(
+  post: BoardPost,
+  focused: boolean,
+  onFocus: () => void,
+  entries: ReadonlyArray<KeeperPresenceEntry>,
+  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+) {
   const kind = boardKindFromPost(post)
   const kindColor = KIND_TOKEN[kind]
   const keeperSlot = keeperHueIndex(post.author_identity)
   const keeperColor = `var(--color-keeper-${keeperSlot}-glow, var(--k-${keeperSlot}))`
   const createdMs = parseIsoToMs(post.created_at_iso)
   const bodyText = post.body || post.title || ''
+  const entry = entries.find(e => e.keeper_id === post.author_identity)
+  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
+  const cursor = overlay.cursors.get(post.author_identity)
+  const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
 
   return html`
     <li class="ide-rail-item">
@@ -298,6 +334,30 @@ function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
         <div class="ide-conversation-meta">
           <span style=${{ fontSize: 'var(--fs-11)', color: kindColor, letterSpacing: '0.05em' }}>${KIND_LABEL[kind]}</span>
           <${KeeperBadge} id=${post.author_identity} variant="full" size="sm" />
+          ${statusDot ? html`
+            <span
+              role="status"
+              aria-label=${`Author: ${statusDot.label}`}
+              style=${{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '2px',
+                fontSize: 'var(--fs-10)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                color: statusDot.color,
+              }}
+            >
+              <span style=${{
+                width: '4px',
+                height: '4px',
+                borderRadius: '50%',
+                background: statusDot.color,
+                display: 'inline-block',
+              }} />
+              ${statusDot.label}
+            </span>
+          ` : null}
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)', marginLeft: 'auto' }}>${formatThreadTime(createdMs)}</span>
         </div>
         ${post.hearth ? html`
@@ -306,6 +366,19 @@ function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
           </div>
         ` : null}
         <p class="ide-conversation-body">${bodyText}</p>
+        ${focusFile ? html`
+          <span style=${{
+            fontSize: 'var(--fs-10)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-accent-fg)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            display: 'block',
+          }}
+          title=${cursor?.file_path}
+          >↗ ${focusFile}:${cursor?.line}</span>
+        ` : null}
         <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
           ${post.comment_count > 0 ? `${post.comment_count} replies · ` : ''}${(post.votes ?? 0) > 0 ? `${post.votes ?? 0} votes` : ''}
         </div>
@@ -314,7 +387,11 @@ function PostCard(post: BoardPost, focused: boolean, onFocus: () => void) {
   `
 }
 
-function DecisionCard(item: Extract<ReplayRailItem, { source: 'decision' }>) {
+function DecisionCard(
+  item: Extract<ReplayRailItem, { source: 'decision' }>,
+  entries: ReadonlyArray<KeeperPresenceEntry>,
+  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+) {
   const decision = item.decision
   const keeper = decision.keeper_name || 'keeper'
   const hue = keeperHueIndex(keeper)
@@ -325,6 +402,10 @@ function DecisionCard(item: Extract<ReplayRailItem, { source: 'decision' }>) {
     decision.model_used,
     decision.tool,
   ].filter(Boolean).join(' · ')
+  const entry = entries.find(e => e.keeper_id === keeper)
+  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
+  const cursor = overlay.cursors.get(keeper)
+  const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
   return html`
     <li style=${{ display: 'block' }}>
       <div
@@ -342,9 +423,45 @@ function DecisionCard(item: Extract<ReplayRailItem, { source: 'decision' }>) {
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-status-info)', letterSpacing: '0.05em' }}>DECISION</span>
           <${KeeperBadge} id=${keeper} variant="full" size="sm" />
+          ${statusDot ? html`
+            <span
+              role="status"
+              aria-label=${`Author: ${statusDot.label}`}
+              style=${{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '2px',
+                fontSize: 'var(--fs-10)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                color: statusDot.color,
+              }}
+            >
+              <span style=${{
+                width: '4px',
+                height: '4px',
+                borderRadius: '50%',
+                background: statusDot.color,
+                display: 'inline-block',
+              }} />
+              ${statusDot.label}
+            </span>
+          ` : null}
           <span style=${{ marginLeft: 'auto', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatThreadTime(item.timestamp_ms)}</span>
         </div>
         <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>${summary || 'decision event'}</p>
+        ${focusFile ? html`
+          <span style=${{
+            fontSize: 'var(--fs-10)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-accent-fg)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title=${cursor?.file_path}
+          >↗ ${focusFile}:${cursor?.line}</span>
+        ` : null}
       </div>
     </li>
   `

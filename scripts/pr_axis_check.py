@@ -260,49 +260,77 @@ def main() -> int:
 
     owner, repo = get_repo_slug()
 
+    def _block(r: AxisRisk) -> bool:
+        return r.confidence != "LOW"
+
     if args.scan_all_open:
         results = scan_all_open_prs(owner, repo, args.hours, args.limit)
+        # Partition into blockers vs warnings
+        blockers: Dict[int, List[AxisRisk]] = {}
+        warnings: Dict[int, List[AxisRisk]] = {}
+        for pr_num, risks in results.items():
+            b = [r for r in risks if _block(r)]
+            w = [r for r in risks if not _block(r)]
+            if b:
+                blockers[pr_num] = b
+            if w:
+                warnings[pr_num] = w
         if args.json:
             print(json.dumps({
                 str(pr_num): [
                     {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
                     for r in risks
                 ]
-                for pr_num, risks in results.items()
+                for pr_num, risks in blockers.items()
             }, indent=2))
         else:
-            if results:
-                print(f"\nFound risks in {len(results)} PR(s):\n")
-                for pr_num, risks in results.items():
+            if warnings:
+                for pr_num, risks in warnings.items():
+                    print(f"\nPR #{pr_num} LOW-confidence overlaps (informational only):")
+                    for r in risks:
+                        print(f"  - {r.risk_type} from #{r.merged_pr} ({r.confidence}): {', '.join(r.overlap_files[:3])}")
+            if blockers:
+                print(f"\nFound blocking risks in {len(blockers)} PR(s):\n")
+                for pr_num, risks in blockers.items():
                     print(f"PR #{pr_num}:")
                     for r in risks:
                         print(f"  - {r.risk_type} from #{r.merged_pr} ({r.confidence})")
                 return 1
-            else:
+            if not warnings:
                 print("No axis risks found in any open PRs.")
-                return 0
+        return 0
 
     if not args.pr:
         parser.error("Either --pr or --scan-all-open is required")
 
     risks = check_pr_axis_stale(args.pr, owner, repo, args.hours, args.limit)
+    blockers = [r for r in risks if _block(r)]
+    warnings = [r for r in risks if not _block(r)]
 
     if args.json:
         print(json.dumps([
             {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
-            for r in risks
+            for r in blockers
         ], indent=2))
     else:
-        if risks:
-            print(f"Found {len(risks)} risk(s) for PR #{args.pr}:\n")
+        if warnings:
+            print(f"Found {len(warnings)} LOW-confidence overlap(s) for PR #{args.pr} (informational only):\n")
             print("| Merged PR | Risk Type | Overlap Files | Confidence |")
             print("|-----------|-----------|---------------|------------|")
-            for r in risks:
+            for r in warnings:
+                print(r.to_markdown())
+            print()
+        if blockers:
+            total = len(blockers)
+            print(f"Found {total} blocking risk(s) for PR #{args.pr}:\n")
+            print("| Merged PR | Risk Type | Overlap Files | Confidence |")
+            print("|-----------|-----------|---------------|------------|")
+            for r in blockers:
                 print(r.to_markdown())
             print()
             print("Recommended action: rebase on latest main and run `dune build @check`.")
             return 1
-        else:
+        if not warnings:
             print(f"No axis risks found for PR #{args.pr}.")
 
     return 0

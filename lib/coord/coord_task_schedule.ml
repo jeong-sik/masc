@@ -93,7 +93,13 @@ let required_tools_allowed ?agent_tool_names required_tools =
   | [], _ -> true
   | _ :: _, None -> true
   | required, Some allowed ->
-      List.for_all (string_list_contains allowed) required
+      (* Materialise [allowed] as a Hashtbl once so [List.for_all] does
+         O(1) lookups instead of [List.exists String.equal] per
+         required tool.  Called per task-schedule eligibility check
+         with ~30-50 allowed names and 1-5 required names. *)
+      let allowed_set = Hashtbl.create (List.length allowed) in
+      List.iter (fun name -> Hashtbl.replace allowed_set name ()) allowed;
+      List.for_all (fun name -> Hashtbl.mem allowed_set name) required
 
 let underscore_name name =
   String.map (function '-' -> '_' | c -> c) name

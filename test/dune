@@ -591,6 +591,7 @@
         test_keeper_personality_io_render
         test_keeper_identity_outcome_label
         test_keeper_hash_algo
+        test_keeper_container_name
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -801,6 +802,7 @@
         test_keeper_personality_io_render
         test_keeper_identity_outcome_label
         test_keeper_hash_algo
+        test_keeper_container_name
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify

@@ -40,25 +40,41 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
     }))
   const [, forceRender] = useState(0)
 
-  useEffect(() => interjectStore.subscribe(() => forceRender(tick => tick + 1)), [interjectStore])
-  useEffect(() => activeKeeperName.subscribe(name => {
-    interjectStore.setActiveKeeper(keeperName?.trim() || name)
-  }), [interjectStore, keeperName])
+  useEffect(() => {
+    const unsub = interjectStore.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [interjectStore])
+  useEffect(() => {
+    const unsub = activeKeeperName.subscribe(name => {
+      interjectStore.setActiveKeeper(keeperName?.trim() || name)
+    })
+    return () => unsub()
+  }, [interjectStore, keeperName])
   useEffect(() => {
     interjectStore.setActiveKeeper(resolveActiveKeeper(keeperName))
   }, [interjectStore, keeperName])
 
   const [presence, setPresence] = useState(globalPresenceSnapshot.value)
-  useEffect(() => globalPresenceSnapshot.subscribe(v => setPresence(v)), [])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(v => setPresence(v))
+    return () => unsub()
+  }, [])
 
   const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
-  useEffect(() => cursorOverlaySignal.subscribe(v => setOverlay(v)), [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
+    return () => unsub()
+  }, [])
 
   const snapshot = interjectStore.snapshot()
   const actions = interjectStore.actions()
   const keeperId = snapshot.active_keeper_id ?? ''
-  const presenceEntry = keeperId
-    ? presence?.entries.find(e => e.keeper_id === keeperId) ?? null
+  // InterjectStore only .trim()s keeper IDs; route keeper names may differ
+  // in casing. Compare on lowercase+trim so a presence entry from the route
+  // matches the (cased) interject keeper id.
+  const keeperIdNorm = keeperId.trim().toLowerCase()
+  const presenceEntry = keeperIdNorm
+    ? presence?.entries.find(e => e.keeper_id.trim().toLowerCase() === keeperIdNorm) ?? null
     : null
   const cursor = keeperId
     ? resolveCursor(keeperId, overlay.cursors)
@@ -200,7 +216,13 @@ function KeeperPresencePill(status: KeeperPresenceStatus) {
   `
 }
 
-function CursorLocation(cursor: { file_path: string; line: number; focus_mode: string; tool_name?: string }) {
+function CursorLocation(cursor: {
+  keeper_id: string
+  file_path: string
+  line: number
+  focus_mode: string
+  tool_name?: string
+}) {
   const fileName = cursor.file_path.split('/').pop() ?? cursor.file_path
   const color = getKeeperColor(cursor.keeper_id)
   return html`

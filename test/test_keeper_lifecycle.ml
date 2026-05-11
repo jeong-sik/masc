@@ -228,7 +228,7 @@ let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:512
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:None
       in
       check bool "compaction not attempted" false lifecycle.compaction.attempted;
@@ -314,7 +314,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
           ~on_compaction_started:(fun () -> incr compaction_started)
           ~model:"llama:auto"
           ~primary_model_max_tokens:320
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check int "compaction start hook called once" 1 !compaction_started;
@@ -401,7 +401,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
             failwith "synthetic callback failure")
           ~model:"llama:auto"
           ~primary_model_max_tokens:320
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "compaction still applied" true
@@ -475,7 +475,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "compaction not attempted" false lifecycle.compaction.attempted;
@@ -536,7 +536,7 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
           ~on_handoff_started:(fun () -> incr handoff_started)
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check int "compaction start hook called once" 1 !compaction_started;
@@ -622,7 +622,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "handoff attempted" true lifecycle.handoff_attempted;
@@ -695,8 +695,12 @@ let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:
-            (Some "Invalid request: Prompt exceeds max length")
+          ~current_turn_blocker_info:
+            (Some
+               KT.{
+                 klass = Sdk_token_budget_exceeded;
+                 detail = "Invalid request: Prompt exceeds max length";
+               })
           ~checkpoint:(Some checkpoint)
       in
       check bool "ratio stays below threshold" true
@@ -771,7 +775,7 @@ let test_apply_post_turn_lifecycle_passes_resilience_handles () =
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       Unix.chmod base_dir 0o755;
@@ -837,7 +841,7 @@ let test_apply_post_turn_lifecycle_legacy_path_skips_executor () =
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:None
       in
       check bool "no handoff attempted" false lifecycle.handoff_attempted;
@@ -877,7 +881,7 @@ let test_apply_post_turn_lifecycle_rejects_executor_without_audit () =
                ~on_handoff_started:(fun () -> ())
                ~model:"llama:auto"
                ~primary_model_max_tokens:4096
-               ~current_turn_overflow_blocker:None
+               ~current_turn_blocker_info:None
                ~checkpoint:None);
           false
         with Invalid_argument _ -> true
@@ -944,7 +948,7 @@ let test_post_turn_resilience_runtime_executor_pauses_handoff () =
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
         |> handles.sync_lifecycle_meta
       in
@@ -1030,7 +1034,7 @@ let test_rollover_aborts_on_save_failure () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       (* Restore permissions before assertions *)
@@ -1286,7 +1290,7 @@ let test_rollover_repairs_orphan_tool_result () =
           ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "rollover attempted" true rollover.attempted;

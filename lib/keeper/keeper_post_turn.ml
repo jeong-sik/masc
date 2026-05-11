@@ -367,7 +367,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
     ~(meta : keeper_meta)
     ~(model : string)
     ~(primary_model_max_tokens : int)
-    ~(current_turn_overflow_blocker : string option)
+    ~(current_turn_blocker_info : blocker_info option)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
   (* Reviewer #13214: an executor without an audit store would let
      retry/fallback/handoff/abort callbacks mutate live state
@@ -604,7 +604,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
           ~meta:meta_after_compaction
           ~model
           ~primary_model_max_tokens
-          ~current_turn_overflow_blocker
+          ~current_turn_blocker_info
           ~checkpoint
       in
       let continuity_meta =
@@ -662,7 +662,7 @@ let apply_post_turn_lifecycle
     ~(meta : keeper_meta)
     ~(model : string)
     ~(primary_model_max_tokens : int)
-    ~(current_turn_overflow_blocker : string option)
+    ~(current_turn_blocker_info : blocker_info option)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
   apply_post_turn_lifecycle_with_resilience_handles
     ~resilience_audit_store:None
@@ -673,7 +673,7 @@ let apply_post_turn_lifecycle
     ~meta
     ~model
     ~primary_model_max_tokens
-    ~current_turn_overflow_blocker
+    ~current_turn_blocker_info
     ~checkpoint
 
 let forced_overflow_retry_meta

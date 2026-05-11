@@ -146,7 +146,7 @@ val maybe_rollover_oas_handoff :
   meta:keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
-  current_turn_overflow_blocker:string option ->
+  current_turn_blocker_info:blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   handoff_rollover
 
@@ -156,10 +156,11 @@ type rollover_gate_decision =
   | Skip of string
   | Go of string
 
-(** [blocker_indicates_overflow msg] returns true when [msg] matches a
-    provider-agnostic context-overflow wording (GLM / OpenAI / Ollama /
-    Anthropic). Case-insensitive substring match. *)
-val blocker_indicates_overflow : string -> bool
+(** [blocker_class_indicates_overflow klass] returns true when [klass] is
+    the typed equivalent of a provider context-overflow signal.  Pure —
+    keeper layer reasons over [blocker_class], never substring-matching
+    error phrasing. *)
+val blocker_class_indicates_overflow : blocker_class -> bool
 
 (** [classify_rollover_gate] is the pure decision function used by
     [maybe_rollover_oas_handoff]. Exposed for unit tests.
@@ -172,8 +173,8 @@ val classify_rollover_gate :
   ratio:float ->
   handoff_threshold:float ->
   last_outcome:proactive_cycle_outcome ->
-  last_blocker:string ->
-  ?current_turn_overflow_blocker:string option ->
+  last_blocker_info:blocker_info option ->
+  ?current_turn_blocker_info:blocker_info option ->
   unit ->
   rollover_gate_decision
 
@@ -212,7 +213,7 @@ val apply_post_turn_lifecycle :
   meta:keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
-  current_turn_overflow_blocker:string option ->
+  current_turn_blocker_info:blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 
@@ -225,7 +226,7 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   meta:keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
-  current_turn_overflow_blocker:string option ->
+  current_turn_blocker_info:blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 

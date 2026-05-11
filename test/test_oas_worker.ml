@@ -5432,7 +5432,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
            ~meta
            ~model:"llama:auto"
            ~primary_model_max_tokens:100
-           ~current_turn_overflow_blocker:None
+           ~current_turn_blocker_info:None
            ~checkpoint:(Some checkpoint)
        in
        Alcotest.(check int)
@@ -5526,7 +5526,7 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
            ~meta
            ~model:"llama:auto"
            ~primary_model_max_tokens:100
-           ~current_turn_overflow_blocker:None
+           ~current_turn_blocker_info:None
            ~checkpoint:(Some checkpoint)
        in
        Alcotest.(check string)

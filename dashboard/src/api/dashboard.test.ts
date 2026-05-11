@@ -919,8 +919,6 @@ describe('fetchKeeperConfig', () => {
         override_fields: 'goal',
         cascade_catalog_source_kind: 'toml',
         cascade_catalog_source_path: '/tmp/config/cascade.toml',
-        cascade_runtime_json_path: '/tmp/config/cascade.json',
-        cascade_runtime_json_editable: 'false',
       },
       metrics: {
         generation: '3',
@@ -979,8 +977,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.sources.precedence).toEqual(['live_meta'])
     expect(result.sources.cascade_catalog_source_kind).toBe('toml')
     expect(result.sources.cascade_catalog_source_path).toBe('/tmp/config/cascade.toml')
-    expect(result.sources.cascade_runtime_json_path).toBe('/tmp/config/cascade.json')
-    expect(result.sources.cascade_runtime_json_editable).toBe(false)
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.presence_keepalive_sec).toBe(30)
     expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')

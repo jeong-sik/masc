@@ -874,11 +874,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${SectionHeader} size="xs" class="mt-2 mb-0.5">캐스케이드 카탈로그 출처</${SectionHeader}>
         <${LongText} text=${c.sources.cascade_catalog_source_path} />
       ` : null}
-      <div class="mt-1.5">
-        <${SectionHeader} size="xs" class="mb-1">우선순위</${SectionHeader}>
-        <${ModelList} models=${c.sources.precedence} />
-      </div>
-      <div class="mt-1.5">
         <${SectionHeader} size="xs" class="mb-1">오버라이드 필드</${SectionHeader}>
         <${ModelList} models=${c.sources.override_fields} />
       </div>

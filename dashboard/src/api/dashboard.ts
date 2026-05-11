@@ -2235,12 +2235,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         normalizeCascadeCatalogSourceKind(sources.cascade_catalog_source_kind),
       cascade_catalog_source_path:
         asNullableString(sources.cascade_catalog_source_path),
-    },
-    metrics: {
-      generation: asInt(metrics.generation) ?? 0,
-      total_turns: asInt(metrics.total_turns) ?? 0,
-      total_input_tokens: asInt(metrics.total_input_tokens) ?? 0,
-      total_output_tokens: asInt(metrics.total_output_tokens) ?? 0,
       total_tokens: asInt(metrics.total_tokens) ?? 0,
       total_cost_usd: asLooseNumber(metrics.total_cost_usd) ?? 0,
       last_model_used: asNullableString(metrics.last_model_used) ?? '',

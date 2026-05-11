@@ -103,8 +103,6 @@ describe('dashboard cascade split', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         updated_at: '2026-04-22T00:00:00Z',
-        config_path: '/tmp/config/cascade.json',
-        source_kind: 'toml',
         source_path: '/tmp/config/cascade.toml',
         validation_status: 'validated',
         validation_errors: [],

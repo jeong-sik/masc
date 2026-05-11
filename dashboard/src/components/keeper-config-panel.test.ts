@@ -134,8 +134,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       override_fields: ['goal', 'instructions'],
       cascade_catalog_source_kind: 'toml',
       cascade_catalog_source_path: '/tmp/config/cascade.toml',
-      cascade_runtime_json_path: '/tmp/config/cascade.json',
-      cascade_runtime_json_editable: false,
     },
     tools: {
       tool_access: { kind: 'preset', preset: 'coding' },

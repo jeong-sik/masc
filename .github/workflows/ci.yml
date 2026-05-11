@@ -938,6 +938,14 @@ jobs:
     # Draft via admin-merge fast-track) is detected on the next main run rather
     # than persisting silently. See #14668 root cause analysis.
     if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.tla == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
+    # Per-job concurrency: each main commit gets its own queue slot keyed by
+    # sha, so workflow-level cancel-in-progress doesn't abort an in-flight TLA
+    # check when a subsequent push lands. PR runs use run_id so they still
+    # supersede on synchronize (workflow-level behaviour preserved at the
+    # workflow concurrency block — this job-level block is additive).
+    concurrency:
+      group: tla-specs-${{ github.event_name == 'push' && github.sha || github.run_id }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout

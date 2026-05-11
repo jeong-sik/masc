@@ -2947,6 +2947,23 @@ let test_pre_operator_clear_no_extra_precondition () =
     ()
 ;;
 
+(* — Restart_budget_exhausted (R-A-6.b — 6th R-A-9 event) ─── *)
+
+let test_pre_restart_budget_already_exhausted () =
+  (* Pairs with §S3 BudgetNeverRevives: re-exhausting an already-cleared
+     budget is masked as a no-op by [update_conditions] (the unconditional
+     [false] write), but signals a duplicate dispatch from the supervisor
+     or operator path. *)
+  let c = { running_conditions with restart_budget_remaining = false } in
+  let err =
+    apply_err
+      ~current_phase:SM.Crashed
+      ~conditions:c
+      ~event:SM.Restart_budget_exhausted
+  in
+  assert_precondition_violation ~event_name:"restart_budget_exhausted" err
+;;
+
 (* ── Test suite ────────────────────────────────────────── *)
 
 let () =
@@ -3318,6 +3335,10 @@ let () =
             "Operator_clear_requested is escape-hatch (no extra precondition)"
             `Quick
             test_pre_operator_clear_no_extra_precondition
+        ; test_case
+            "Restart_budget_exhausted is non-idempotent (R-A-6.b)"
+            `Quick
+            test_pre_restart_budget_already_exhausted
         ] )
     ]
 ;;

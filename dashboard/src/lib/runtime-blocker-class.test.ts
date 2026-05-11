@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { KEEPER_RUNTIME_BLOCKER_CLASSES } from '../types'
+import { KEEPER_RUNTIME_BLOCKER_CLASSES, type KeeperRuntimeBlockerClass } from '../types'
 import {
   asKeeperRuntimeBlockerClass,
   isKeeperRuntimeBlockerClass,
@@ -18,6 +18,12 @@ describe('asKeeperRuntimeBlockerClass', () => {
     expect(asKeeperRuntimeBlockerClass('')).toBeNull()
   })
 
+  it('trims surrounding whitespace before membership check — parity with asString/asNullableString', () => {
+    expect(asKeeperRuntimeBlockerClass('cascade_exhausted ')).toBe('cascade_exhausted')
+    expect(asKeeperRuntimeBlockerClass('  sdk_max_turns_exceeded\t')).toBe('sdk_max_turns_exceeded')
+    expect(asKeeperRuntimeBlockerClass('   ')).toBeNull()
+  })
+
   it('rejects non-string values', () => {
     expect(asKeeperRuntimeBlockerClass(null)).toBeNull()
     expect(asKeeperRuntimeBlockerClass(undefined)).toBeNull()
@@ -29,9 +35,12 @@ describe('asKeeperRuntimeBlockerClass', () => {
 
 describe('isKeeperRuntimeBlockerClass', () => {
   it('narrows known literals to KeeperRuntimeBlockerClass', () => {
+    // The type guard's job is to convert `string` into `KeeperRuntimeBlockerClass`
+    // inside the truthy branch. The assertion below would fail to compile if
+    // narrowing did not happen — `string` is not assignable to the union.
     const candidate: string = 'cascade_exhausted'
     if (isKeeperRuntimeBlockerClass(candidate)) {
-      const narrowed: typeof candidate = candidate
+      const narrowed: KeeperRuntimeBlockerClass = candidate
       expect(narrowed).toBe('cascade_exhausted')
     } else {
       throw new Error('expected narrowing to succeed')

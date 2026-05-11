@@ -224,7 +224,7 @@ let process_msg config state msg =
         let limit = effective_limit config ~role ~category in
         let current = List.length recent in
         `Assoc [
-          ("category", `String (show_rate_limit_category category));
+          ("category", `String (rate_limit_category_to_string category));
           ("current", `Int current);
           ("limit", `Int limit);
           ("remaining", `Int (max 0 (limit - current)));

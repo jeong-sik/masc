@@ -7,6 +7,16 @@ type rate_limit_category =
   | TaskOpsLimit
 [@@deriving show { with_path = false }]
 
+(** Stable wire format for {!rate_limit_category}.  Returns the same
+    string [show_rate_limit_category] does today (PascalCase
+    constructor name) but locks the JSON wire contract against
+    [@@deriving show] template drift and accidental variant renames. *)
+let rate_limit_category_to_string = function
+  | GeneralLimit -> "GeneralLimit"
+  | BroadcastLimit -> "BroadcastLimit"
+  | TaskOpsLimit -> "TaskOpsLimit"
+;;
+
 (** Rate limit config *)
 type rate_limit_config = {
   per_minute: int;

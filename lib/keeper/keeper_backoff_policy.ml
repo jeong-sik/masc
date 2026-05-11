@@ -6,6 +6,11 @@ type t =
   }
 
 let make ~max_attempts ~retryable_errors =
+  if max_attempts < 1 then
+    invalid_arg
+      (Printf.sprintf
+         "Keeper_backoff_policy.make: max_attempts must be >= 1 (got %d)"
+         max_attempts);
   { max_attempts; retryable_errors }
 
 let default_for_sandbox =

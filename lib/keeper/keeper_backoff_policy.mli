@@ -15,7 +15,11 @@ type t
 
 (** [make ~max_attempts ~retryable_errors] constructs a policy.
     [max_attempts] is the *total* number of calls including the first
-    (so [max_attempts = 1] disables retry).
+    (so [max_attempts = 1] disables retry). **Must be [>= 1]**;
+    [Invalid_argument] is raised for [<= 0] — a zero-attempt policy
+    would let a caller queue an action and never execute it, which
+    is silent-failure-by-construction.
+
     [retryable_errors] enumerates exactly the {!Docker_client.sandbox_error}
     arms that warrant a retry — *no catch-all*, the caller must
     enumerate every retryable variant. *)

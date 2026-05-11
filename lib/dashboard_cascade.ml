@@ -230,8 +230,8 @@ let config_json () =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Keeper.warn
-        "dashboard_cascade.config_json: Keeper_registry.all failed (treating \
-         as empty): %s"
+        "dashboard_cascade.config_json: Keeper_registry.all failed (treating as empty): \
+         %s"
         (Printexc.to_string exn);
       []
   in
@@ -328,6 +328,7 @@ let raw_config_json () =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
   let source : Cascade_toml_materializer.source_info = source_info () in
   let config_path = Some source.json_path in
+  let source_read_error = ref None in
   let source_text =
     try load_raw_config_string source.source_path with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -336,28 +337,32 @@ let raw_config_json () =
         "dashboard cascade source config: failed to read %s: %s"
         source.source_path
         msg;
+      source_read_error := Some msg;
       ""
   in
   (* RFC-0058 §9 Phase 9.2: render JSON in memory instead of materialising
-     it to disk and re-reading. [render_toml_to_json_string] returns the
-     same byte-for-byte content that [ensure_materialized_json] would have
-     written, so the dashboard response is identical without growing a
-     committed [cascade.json] sibling. Falls back to the on-disk JSON only
-     when the source is JSON-native (no TOML alongside) — that branch
-     persists until Phase 9.3 retires source_kind = Json. *)
+     it to disk and re-reading. We reuse [source_text] (loaded once above)
+     and pipe it through [render_toml_string_to_json_string], so the
+     dashboard response is byte-for-byte identical to the old
+     [ensure_materialized_json] output without a second disk read or a
+     committed [cascade.json] sibling. The on-disk JSON branch only runs
+     for source_kind = Json and is retired in Phase 9.3. *)
   let raw_json, materialization_error =
     match source.kind with
     | Cascade_toml_materializer.Toml ->
-      (match
-         Cascade_toml_materializer.render_toml_file_to_json_string source.source_path
-       with
-       | Ok json -> json, None
-       | Error msg ->
-         Log.Keeper.warn
-           "DashboardCascade: in-memory materialization failed for %s: %s"
-           source.source_path
-           msg;
-         "", Some msg)
+      (match !source_read_error with
+       | Some msg -> "", Some msg
+       | None ->
+         (match
+            Cascade_toml_materializer.render_toml_string_to_json_string source_text
+          with
+          | Ok json -> json, None
+          | Error msg ->
+            Log.Keeper.warn
+              "DashboardCascade: in-memory materialization failed for %s: %s"
+              source.source_path
+              msg;
+            "", Some msg))
     | Cascade_toml_materializer.Json ->
       (match config_path with
        | None -> "", None
@@ -365,10 +370,7 @@ let raw_config_json () =
          (try load_raw_config_string path, None with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Sys_error msg ->
-            Log.Keeper.warn
-              "dashboard cascade raw config: failed to read %s: %s"
-              path
-              msg;
+            Log.Keeper.warn "dashboard cascade raw config: failed to read %s: %s" path msg;
             "", Some msg))
   in
   `Assoc
@@ -407,7 +409,11 @@ let save_raw_config_json raw_json =
           match save_config_file config_path raw_json with
           | Error msg -> Error msg
           | Ok () ->
-            invalidate_cascade_config config_path;
+            (* JSON-native source: [source.source_path] equals
+               [config_path] here, but key on [source_path] so this call
+               stays symmetric with the TOML arm below and with the
+               loader cache contract. *)
+            invalidate_cascade_config source.source_path;
             Ok (config_json ())
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -425,7 +431,12 @@ let save_raw_config_json raw_json =
           match save_config_file source.source_path raw_json with
           | Error msg -> Error msg
           | Ok () ->
-            invalidate_cascade_config config_path;
+            (* [Cascade_config_loader.load_toml_in_memory] and
+               [Cascade_catalog_runtime] both key their caches on
+               [source.source_path] (the TOML path). Invalidating
+               [json_path] here would silently no-op and dashboard reads
+               would return stale data until the next mtime tick. *)
+            invalidate_cascade_config source.source_path;
             Ok (config_json ())
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn

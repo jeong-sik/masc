@@ -9,7 +9,6 @@
 
    tool_schemas_agent
    tool_schemas_coord
-   tool_schemas_control
    tool_schemas_misc
    tool_schemas_coord_core
    tool_schemas_coord_extra

@@ -95,7 +95,8 @@ let handle_pause_status ~tool_name ~start_time ctx _args =
   in
   Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
 
-let schemas = Tool_schemas_control.schemas
+(* schemas removed in RFC-0057 PR-1 — masc_pause / masc_resume are emitted
+   via Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
 
 (* Dispatch function *)
 let dispatch ctx ~name ~args : Tool_result.t option =
@@ -115,16 +116,24 @@ let tool_required_permission = function
   | "masc_pause" | "masc_resume" -> Some Masc_domain.CanBroadcast
   | _ -> None
 
+(* RFC-0057 PR-1: control tool schemas now come from
+   Tool_descriptors_gen via Tool_schemas_misc.schemas. Filter to the
+   two control tools so they register with Mod_control. *)
 let () =
+  let is_control = function
+    | "masc_pause" | "masc_resume" -> true
+    | _ -> false
+  in
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_control
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ?required_permission:(tool_required_permission s.name)
-           ()))
-    schemas
+      if is_control s.name then
+        Tool_spec.register
+          (Tool_spec.create
+             ~name:s.name
+             ~description:s.description
+             ~module_tag:Tool_dispatch.Mod_control
+             ~input_schema:s.input_schema
+             ~handler_binding:Tag_dispatch
+             ?required_permission:(tool_required_permission s.name)
+             ()))
+    Tool_schemas_misc.schemas

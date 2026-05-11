@@ -117,10 +117,8 @@ val attribution_of_validation : cmd:string -> (unit, block_reason) result -> Att
 
 (** {1 OAS tool factories} *)
 
-(** Per-call observer hook invoked at the end of every tool execution.
-
 (** Closed sum classifying the producer error categories emitted by the
-    in-tree shell/file tools. Five variants mirror the docstring above:
+    in-tree shell/file tools. Five variants mirror the categorised tags:
     [Path_blocked], [File_read_error], [File_write_error],
     [Command_blocked], [Shell_error].
 
@@ -135,6 +133,8 @@ type tool_exec_error_kind =
   | Shell_error
 
 val tool_exec_error_kind_to_string : tool_exec_error_kind -> string
+
+(** Per-call observer hook invoked at the end of every tool execution.
 
     Receives the tool name, success flag, elapsed wall-clock duration,
     and (on failure) a categorized [error_kind] tag plus the
@@ -152,7 +152,6 @@ val tool_exec_error_kind_to_string : tool_exec_error_kind -> string
 
     Issue #10358: closes the 17.3% blank-error gap for tool_called
     rows fed via [worker_container.build_local_shell_tools]. *)
-
 type tool_exec_observer =
   tool_name:string
   -> success:bool

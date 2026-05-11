@@ -27,6 +27,8 @@ import { lspExtension, getSelectedAnnotation, clearSelectedAnnotation, type Sele
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
 import { keeperCursorExtension } from './keeper-cursor-cm-extension'
+import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
+import { globalPresenceSnapshot } from './keeper-presence-store'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -88,11 +90,16 @@ export function IdeEditor({
 
   useEffect(() => documentStore.subscribe(() => forceRender(tick => tick + 1)), [documentStore])
   useEffect(() => ownershipStore.subscribe(() => forceRender(tick => tick + 1)), [ownershipStore])
+  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1)), [])
+  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1)), [])
 
   const document = documentStore.document()
   const lines = documentStore.lines()
   const ownership = ownershipStore.ownership()
   const keepers = ownershipStore.knownKeepers()
+  const overlay = cursorOverlaySignal.value
+  const presence = globalPresenceSnapshot.value
+  const activeCursors = keepersWithCursorInFile(overlay.cursors, document.file_path)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
   const currentDiffRows = diffRows()
   const gridTemplateRows = editorGridRows(activeLayerKinds.length > 0, findOpen)
@@ -133,6 +140,23 @@ export function IdeEditor({
         <span style=${{ marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ${lines.length} lines · ownership · ${keepers.length} keepers · ${activeLayerKinds.length} layers
         </span>
+        ${activeCursors.length > 0 ? html`
+          <ul
+            role="status"
+            aria-label="Keepers active in this file"
+            style=${{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--sp-1)',
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            ${activeCursors.map(ac => EditorKeeperCursorChip(ac, presence))}
+          </ul>
+        ` : null}
         ${onFindOpen || onFindClose ? html`
           <button
             type="button"
@@ -733,6 +757,79 @@ function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: Re
   if (kind === 'keeper-trace') return 'stitched trace'
   if (kind === 'explode') return 'exclusive ghost view'
   return ''
+}
+
+// ── Active file cursor helpers ────────────────────────────────────
+
+interface ActiveCursorInfo {
+  keeper_id: string
+  line: number
+  tool_name?: string
+  focus_mode: string
+}
+
+function keepersWithCursorInFile(
+  cursors: ReadonlyMap<
+    string,
+    { keeper_id: string; file_path: string; line: number; focus_mode: string; tool_name?: string }
+  >,
+  filePath: string,
+): ReadonlyArray<ActiveCursorInfo> {
+  const matches: ActiveCursorInfo[] = []
+  for (const cursor of cursors.values()) {
+    // Cursor stream defaults missing line numbers to 0; filter them so
+    // the header chip never renders 'file:0' (BDI inspector applies the
+    // same 1-based guard).
+    if (cursor.file_path === filePath && cursor.line >= 1) {
+      matches.push({
+        keeper_id: cursor.keeper_id,
+        line: cursor.line,
+        tool_name: cursor.tool_name,
+        focus_mode: cursor.focus_mode,
+      })
+    }
+  }
+  return matches.sort((a, b) => a.keeper_id.localeCompare(b.keeper_id))
+}
+
+function EditorKeeperCursorChip(
+  ac: ActiveCursorInfo,
+  presence: { readonly entries: ReadonlyArray<{ keeper_id: string; status: string }> } | null,
+) {
+  const color = getKeeperColor(ac.keeper_id)
+  const status = presence?.entries.find(e => e.keeper_id === ac.keeper_id)?.status
+  const isActive = status === 'active'
+  return html`
+    <li
+      title=${`${ac.keeper_id} L${ac.line}${ac.tool_name ? ` · ${ac.tool_name}` : ''} · ${ac.focus_mode}`}
+      style=${{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '2px',
+        fontSize: 'var(--fs-10)',
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--color-fg-secondary)',
+        padding: '0 4px',
+        borderRadius: 'var(--r-1)',
+        background: `${color.cursor}18`,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style=${{
+          width: '5px',
+          height: '5px',
+          borderRadius: '50%',
+          background: color.cursor,
+          display: 'inline-block',
+          boxShadow: isActive ? `0 0 4px ${color.cursor}` : 'none',
+        }}
+      />
+      <span>${ac.keeper_id}</span>
+      <span style=${{ color: 'var(--color-fg-disabled)' }}>L${ac.line}</span>
+    </li>
+  `
 }
 
 // ── Annotation Popover ────────────────────────────────────────────

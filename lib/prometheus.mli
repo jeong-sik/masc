@@ -601,6 +601,13 @@ val metric_provider_health_probe_skipped : string
     Labels: [provider_name, profile_name, model_id]. *)
 val metric_provider_actual_health_status : string
 
+(** Total provider health probe errors observed during runtime catalog
+    validation. Counter complement to
+    [metric_provider_actual_health_status] — the gauge only shows the
+    last observed status, so a sustained probe failure rate is
+    otherwise invisible. Labels: [provider_name, profile_name]. *)
+val metric_provider_health_probe_error : string
+
 (** PR-I: cross-FSM edge transition counter. Labels: [edge] with values
     drawn from the static coupling graph documented in
     [docs/keeper-fsm-graph.dot]. Allowed values:

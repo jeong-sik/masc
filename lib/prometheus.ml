@@ -913,6 +913,14 @@ let metric_cascade_fallback_cycle_detected_total =
 
 let metric_provider_health_probe_skipped = "masc_provider_health_probe_skipped_total"
 let metric_provider_actual_health_status = "masc_provider_actual_health_status"
+
+(* Counter complement to [metric_provider_actual_health_status]: the
+   gauge only shows the LAST observed status, so a flapping or
+   sustained probe failure rate is invisible to operators.  This
+   counter ticks once per [Probe_error _] observation in
+   [Cascade_catalog_runtime.record_probe_metrics] so a [rate()] query
+   can quantify provider liveness churn over time. *)
+let metric_provider_health_probe_error = "masc_provider_health_probe_error_total"
 (* #12799: Passive loop detector — keeper emitting only read-only tool
    calls for N consecutive turns.  Labels: keeper. *)
 
@@ -1867,6 +1875,13 @@ let init () =
      Values: 0=unknown/skipped, 1=healthy, 3=unhealthy. Labels: provider_name, \
      profile_name, model_id."
     Gauge;
+  add
+    metric_provider_health_probe_error
+    "Total provider health probe errors observed during runtime catalog validation. \
+     Counter complement to [metric_provider_actual_health_status] — the gauge only \
+     shows the last observed status, so a sustained probe failure rate is otherwise \
+     invisible.  Labels: provider_name, profile_name."
+    Counter;
   add
     Keeper_metrics.metric_keeper_passive_loop_detected_total
     "#12799 Total passive-loop detections: keeper issued only read-only tool calls for N \

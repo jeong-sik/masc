@@ -589,6 +589,29 @@ let test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable () =
   check bool "zero and positive leak_count both callable without raising"
     true true
 
+(* Smoke + name-stability guard for [metric_provider_health_probe_error].
+   The probe-error counter is owned by Prometheus.ml (alongside the
+   sibling [_skipped] / [_actual_health_status] probe metrics) rather
+   than [Cascade_metrics] because all probe-namespace metrics share
+   the same labels and a single SSOT.  A future rename of the name
+   constant — or removal of the .mli export — trips a compile
+   failure here, which preserves dashboard alert continuity. *)
+let test_provider_health_probe_error_metric_name_is_exported () =
+  let name = Masc_mcp.Prometheus.metric_provider_health_probe_error in
+  check string "metric name is the documented total"
+    "masc_provider_health_probe_error_total"
+    name;
+  (* And the call site shape used in record_probe_metrics is callable
+     without raising. *)
+  Masc_mcp.Prometheus.inc_counter
+    name
+    ~labels:
+      [ ("provider_name", "smoke_probe_kind")
+      ; ("profile_name", "smoke_probe_profile")
+      ]
+    ();
+  check bool "inc_counter callable with both labels" true true
+
 (* Regression guard for [Serving_last_known_good] entry + recovery
    transitions.  Previously these transitions happened silently:
    [inspect_active] would flip a Validated cache into LKG (or back)
@@ -768,5 +791,8 @@ let () =
             "resolve_provider_leak: zero is no-op, positive callable"
             `Quick
             test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable;
+          test_case
+            "provider_health_probe_error metric name + call shape" `Quick
+            test_provider_health_probe_error_metric_name_is_exported;
         ] );
     ]

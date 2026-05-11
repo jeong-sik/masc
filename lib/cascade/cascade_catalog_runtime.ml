@@ -380,7 +380,21 @@ let record_probe_metrics (profiles : profile_snapshot list) =
                      ("profile_name", profile.name);
                    ]
                  ()
-           | Probe_not_applicable _ | Probe_ok | Probe_error _ -> ());
+           | Probe_error _ ->
+               (* Counter complement to the per-probe gauge below.
+                  The gauge only retains the LAST observed status,
+                  so flapping or sustained probe failures were
+                  invisible to operators; a [rate()] query over this
+                  counter quantifies provider liveness churn. *)
+               Prometheus.inc_counter
+                 Prometheus.metric_provider_health_probe_error
+                 ~labels:
+                   [
+                     ("provider_name", probe.provider_kind);
+                     ("profile_name", profile.name);
+                   ]
+                 ()
+           | Probe_not_applicable _ | Probe_ok -> ());
           Prometheus.set_gauge
             Prometheus.metric_provider_actual_health_status
             ~labels:

@@ -930,16 +930,32 @@ let inspect_active ?sw ?net ?clock () =
           profiles = [];
         }
       in
-      (match with_cache_lock (fun () -> !cache.active_snapshot) with
-       | Some snapshot ->
-           with_cache_lock (fun () ->
-               cache :=
-                 {
-                   active_snapshot = Some snapshot;
-                   rejected_update = Some rejection;
-                 });
-           Ok (Serving_last_known_good { snapshot; rejected_update = rejection })
-       | None -> Error rejection)
+      (* Capture prev rejected_update state inside the same lock as
+         the cache write so transition detection (None -> Some) is
+         race-safe. *)
+      let outcome =
+        with_cache_lock (fun () ->
+          match !cache.active_snapshot with
+          | Some snapshot ->
+            let prev_was_failing = Option.is_some !cache.rejected_update in
+            cache :=
+              {
+                active_snapshot = Some snapshot;
+                rejected_update = Some rejection;
+              };
+            `Lkg (snapshot, prev_was_failing)
+          | None -> `Fail)
+      in
+      (match outcome with
+       | `Lkg (snapshot, prev_was_failing) ->
+         Cascade_metrics.on_serving_last_known_good ~reason:"path_unresolved";
+         if not prev_was_failing then
+           Log.Misc.warn
+             "[CascadeCatalog] entering Serving_last_known_good: cascade \
+              path could not be resolved; continuing on cached snapshot \
+              until env/.masc/config layout is fixed";
+         Ok (Serving_last_known_good { snapshot; rejected_update = rejection })
+       | `Fail -> Error rejection)
   | Some config_path ->
       let source_state = active_source_state ~config_path in
       let source_path = source_state.info.source_path in
@@ -966,16 +982,40 @@ let inspect_active ?sw ?net ?clock () =
             | _ -> None)
       in
       match cached_result with
-      | Some result -> result
+      | Some result ->
+          (match result with
+           | Ok (Serving_last_known_good _) ->
+             (* Same-mtime replay of a previously-cached rejection.
+                Steady-state while the operator hasn't fixed the
+                fault — counter ticks but no log noise. *)
+             Cascade_metrics.on_serving_last_known_good
+               ~reason:"stale_rejection_cached"
+           | _ -> ());
+          result
       | None -> (
           match validate_path_result ?sw ?net ~config_path () with
           | Ok { snapshot; rejected_update = None } ->
-              with_cache_lock (fun () ->
+              (* Recovery detection: capture prev rejected_update
+                 inside the same lock as the write so an LKG -> OK
+                 transition is detected atomically. *)
+              let recovered =
+                with_cache_lock (fun () ->
+                  let prev_was_failing =
+                    Option.is_some !cache.rejected_update
+                  in
                   cache :=
                     {
                       active_snapshot = Some snapshot;
                       rejected_update = None;
-                    });
+                    };
+                  prev_was_failing)
+              in
+              if recovered then (
+                Cascade_metrics.on_lkg_recovery ();
+                Log.Misc.info
+                  "[CascadeCatalog] cascade.toml fault recovered; \
+                   transitioning from Serving_last_known_good back to \
+                   Validated");
               Ok (Validated snapshot)
           | Ok { snapshot; rejected_update = Some rejection } ->
               with_cache_lock (fun () ->
@@ -988,25 +1028,40 @@ let inspect_active ?sw ?net ?clock () =
                 (Validated_with_rejections
                    { snapshot; rejected_update = rejection })
           | Error rejection ->
-              (match with_cache_lock (fun () -> !cache.active_snapshot) with
-               | Some snapshot ->
-                   with_cache_lock (fun () ->
-                       cache :=
-                         {
-                           active_snapshot = Some snapshot;
-                           rejected_update = Some rejection;
-                         });
-                   Ok
-                     (Serving_last_known_good
-                        { snapshot; rejected_update = rejection })
-               | None ->
-                   with_cache_lock (fun () ->
-                       cache :=
-                         {
-                           active_snapshot = None;
-                           rejected_update = Some rejection;
-                         });
-                   Error rejection))
+              let outcome =
+                with_cache_lock (fun () ->
+                  match !cache.active_snapshot with
+                  | Some snapshot ->
+                    let prev_was_failing =
+                      Option.is_some !cache.rejected_update
+                    in
+                    cache :=
+                      {
+                        active_snapshot = Some snapshot;
+                        rejected_update = Some rejection;
+                      };
+                    `Lkg (snapshot, prev_was_failing)
+                  | None ->
+                    cache :=
+                      {
+                        active_snapshot = None;
+                        rejected_update = Some rejection;
+                      };
+                    `Fail)
+              in
+              (match outcome with
+               | `Lkg (snapshot, prev_was_failing) ->
+                 Cascade_metrics.on_serving_last_known_good
+                   ~reason:"validation_failed";
+                 if not prev_was_failing then
+                   Log.Misc.warn
+                     "[CascadeCatalog] entering Serving_last_known_good: \
+                      validation failed (%s); continuing on cached \
+                      snapshot until cascade.toml is fixed"
+                     (String.concat "; " rejection.errors);
+                 Ok (Serving_last_known_good
+                       { snapshot; rejected_update = rejection })
+               | `Fail -> Error rejection))
 
 let require_snapshot ?sw ?net ?clock () =
   match inspect_active ?sw ?net ?clock () with

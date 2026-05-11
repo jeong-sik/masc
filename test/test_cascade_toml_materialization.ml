@@ -554,6 +554,62 @@ models = [
          in
          loop 0)
 
+(* Regression guard for [Serving_last_known_good] entry + recovery
+   transitions.  Previously these transitions happened silently:
+   [inspect_active] would flip a Validated cache into LKG (or back)
+   without log or Prometheus signal, leaving operators unaware that
+   the catalog had drifted into a degraded state.
+
+   The catalog runtime now ticks
+   [masc_cascade_serving_last_known_good_total{reason}] on every LKG
+   entry and [masc_cascade_lkg_recovery_total] on every recovery —
+   plus a single WARN at entry transition and INFO at recovery
+   transition (not on steady-state replays).
+
+   This test pins the state-machine itself: valid -> invalid (LKG)
+   -> valid (recovery).  The metric counters themselves aren't
+   asserted (they're process-global and shared across the suite);
+   we rely on coverage from the state transitions to exercise the
+   counter call sites. *)
+let test_serving_last_known_good_entry_and_recovery () =
+  with_temp_dir "cascade-lkg" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path minimal_toml;
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  with_config_dir config_dir @@ fun () ->
+  (* Step 1: valid TOML -> Validated, primes the cache. *)
+  (match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+   | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) -> ()
+   | Ok _ -> fail "step 1: expected Validated state"
+   | Error rejection ->
+     failf "step 1: unexpected Error: %s"
+       (Yojson.Safe.to_string
+          (Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection)));
+  (* Step 2: replace TOML with a syntactically invalid file and
+     advance mtime so the catalog/loader caches miss.  Should land
+     on Serving_last_known_good with the cached snapshot. *)
+  write_file toml_path "[broken\nthis is not valid toml syntax";
+  Masc_mcp.Cascade_config_loader.invalidate_cache_entry toml_path;
+  let t1 = Unix.gettimeofday () +. 2.0 in
+  Unix.utimes toml_path t1 t1;
+  (match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+   | Ok (Masc_mcp.Cascade_catalog_runtime.Serving_last_known_good _) -> ()
+   | Ok Validated _ -> fail "step 2: expected LKG, got Validated"
+   | Ok (Validated_with_rejections _) ->
+     fail "step 2: expected LKG, got Validated_with_rejections"
+   | Error _ -> fail "step 2: expected LKG, got Error");
+  (* Step 3: restore valid TOML, advance mtime, expect recovery
+     transition LKG -> Validated. *)
+  write_file toml_path minimal_toml;
+  Masc_mcp.Cascade_config_loader.invalidate_cache_entry toml_path;
+  let t2 = Unix.gettimeofday () +. 4.0 in
+  Unix.utimes toml_path t2 t2;
+  match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+  | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) -> ()
+  | _ -> fail "step 3: expected Validated after recovery"
+
 (* Regression guard for the [load_toml_in_memory] race-aware rewrite.
    The previous implementation rendered TOML first and stat'd second,
    which meant a cache-hit path still paid the full parse cost.  The
@@ -663,5 +719,10 @@ let () =
             test_loader_cache_hits_when_mtime_unchanged;
           test_case "refreshes when mtime advances" `Quick
             test_loader_refreshes_when_mtime_advances;
+        ] );
+      ( "lkg_transitions",
+        [
+          test_case "valid -> invalid (LKG) -> valid (recovery)" `Quick
+            test_serving_last_known_good_entry_and_recovery;
         ] );
     ]

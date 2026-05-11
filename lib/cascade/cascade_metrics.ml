@@ -103,3 +103,35 @@ let metric_toml_read_race = "masc_cascade_toml_read_race_total"
 
 let on_toml_read_race () =
   Prometheus.inc_counter metric_toml_read_race ()
+
+(* Ticks once per [inspect_active] call that returned
+   [Serving_last_known_good].  This state means the runtime cannot
+   validate the current cascade.toml but is still serving the last
+   snapshot that did validate; without a counter, operators had no way
+   to know the catalog had drifted into a degraded state.  Labels:
+   - "path_unresolved" — the config path itself failed to resolve
+                          (env / .masc/config layout broken).  Severe.
+   - "validation_failed" — fresh validation produced [Error _] but a
+                            cached snapshot was available.  Severe.
+   - "stale_rejection_cached" — the rejection cached on the previous
+                                  call matches the current source-path
+                                  mtime, so we replay the LKG outcome
+                                  without re-validating.  Steady-state
+                                  while the operator hasn't fixed the
+                                  fault — log noise must stay low here.
+*)
+let metric_serving_last_known_good = "masc_cascade_serving_last_known_good_total"
+
+let on_serving_last_known_good ~reason =
+  Prometheus.inc_counter metric_serving_last_known_good
+    ~labels:[ ("reason", reason) ]
+    ()
+
+(* Ticks once per [inspect_active] call that transitions FROM a
+   non-empty [rejected_update] back TO [None] (i.e. operator fixed
+   the fault and the next validation passed clean).  Distinguishes
+   a real recovery from steady-state validated calls. *)
+let metric_lkg_recovery = "masc_cascade_lkg_recovery_total"
+
+let on_lkg_recovery () =
+  Prometheus.inc_counter metric_lkg_recovery ()

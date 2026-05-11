@@ -27,3 +27,14 @@ val on_toml_read_race : unit -> unit
     and post-stat samples, or the file vanished between samples.
     The loader still returns fresh content but skips the cache
     update so the next call re-converges. *)
+
+val on_serving_last_known_good : reason:string -> unit
+(** Tick the serving-last-known-good counter for one [inspect_active]
+    invocation that returned [Serving_last_known_good].  [reason] must
+    be one of [path_unresolved], [validation_failed],
+    [stale_rejection_cached]. *)
+
+val on_lkg_recovery : unit -> unit
+(** Tick once per [inspect_active] call that transitions out of
+    [Serving_last_known_good] back to [Validated] (operator fixed the
+    cascade.toml fault). *)

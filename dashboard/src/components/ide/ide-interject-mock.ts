@@ -80,16 +80,6 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
     ? resolveCursor(keeperId, overlay.cursors)
     : null
 
-  const presence = globalPresenceSnapshot.value
-  const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
-  const keeperId = snapshot.active_keeper_id
-  const entry = keeperId ? entries.find(e => e.keeper_id === keeperId) : null
-  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
-  const cursor = keeperId ? cursorOverlaySignal.value.cursors.get(keeperId) : undefined
-  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
-    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
-    : null
-
   return html`
     <div
       class="ide-interject-bar"

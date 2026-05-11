@@ -160,6 +160,14 @@ let self_identity_tokens (meta : keeper_meta) =
   |> List.flatten
   |> List.sort_uniq String.compare
 
+(* Single source of truth for "is this author one of us?".  Two inline
+   copies of this predicate used to live in [collect_message_scope] and
+   [board_signal_match]; centralising avoids the scatter-drift anti-
+   pattern when [identity_tokens_of_value] is ever extended. *)
+let is_self_author ~self_tokens (author : string) : bool =
+  identity_tokens_of_value author
+  |> List.exists (fun author_token -> List.mem author_token self_tokens)
+
 let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 
@@ -174,11 +182,7 @@ let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
     | [] -> (`Done, remaining, last_processed, List.rev mentions, List.rev scope_messages)
     | (msg : Masc_domain.message) :: rest ->
         let author = String.trim msg.from_agent in
-        if author = ""
-           || List.exists
-                (fun author_token -> List.mem author_token self_tokens)
-                (identity_tokens_of_value author)
-        then
+        if author = "" || is_self_author ~self_tokens author then
           consume_room_messages remaining msg.seq mentions scope_messages rest
         else if
           Coord_task_cache_invariant.stale_active_task_signal_present
@@ -409,11 +413,7 @@ let board_signal_match
     ~(meta : keeper_meta)
     ~(signal : Board_dispatch.keeper_board_signal) : board_signal_match =
   let self_tokens = self_identity_tokens meta in
-  if
-    List.exists
-      (fun author_token -> List.mem author_token self_tokens)
-      (identity_tokens_of_value signal.author)
-  then
+  if is_self_author ~self_tokens signal.author then
     { explicit_mention = false; matched_targets = []; score = 0 }
   else
     let targets =
@@ -525,10 +525,6 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
 
 (** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
-
-let is_self_author ~self_tokens (author : string) : bool =
-  identity_tokens_of_value author
-  |> List.exists (fun author_token -> List.mem author_token self_tokens)
 
 (** Check whether this keeper has commented on a post, and whether new
     external comments arrived after the keeper's latest comment.

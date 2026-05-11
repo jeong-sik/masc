@@ -2,6 +2,8 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import { KeeperBadge } from '../keeper-badge'
+import { globalPresenceSnapshot, type KeeperPresenceStatus } from './keeper-presence-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import {
   createRunActivityStore,
   type RunActivityEvent,
@@ -106,9 +108,13 @@ export function IdeActivityMock() {
   }, [store])
 
   useEffect(() => store.subscribe(() => forceRender(tick => tick + 1)), [store])
+  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1)), [])
+  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1)), [])
 
   const events = store.events()
   const keepers = store.knownKeepers()
+  const presence = globalPresenceSnapshot.value
+  const overlay = cursorOverlaySignal.value
 
   return html`
     <div
@@ -127,15 +133,30 @@ export function IdeActivityMock() {
       >
         ${events.length === 0
           ? html`<li class="ide-rail-empty">no recent activity</li>`
-          : events.map(item => ActivityRow(item))}
+          : events.map(item => ActivityRow(item, presence, overlay))}
       </ol>
     </div>
   `
 }
 
-function ActivityRow(item: RunActivityEvent) {
+const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
+  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
+}
+
+function ActivityRow(
+  item: RunActivityEvent,
+  presence: { readonly entries: ReadonlyArray<{ keeper_id: string; status: KeeperPresenceStatus }> } | null,
+  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+) {
   const hue = keeperHueIndex(item.keeper_id)
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
+  const entry = presence?.entries.find(e => e.keeper_id === item.keeper_id)
+  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
+  const cursor = overlay.cursors.get(item.keeper_id)
+  const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
+
   return html`
     <li
       class="ide-activity-row"
@@ -145,12 +166,51 @@ function ActivityRow(item: RunActivityEvent) {
     >
       <span class="ide-activity-time">${formatActivityTime(item.timestamp_ms)}</span>
       <span class="ide-activity-dot" aria-hidden="true" />
-      <div style=${{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-        <span style=${{ fontSize: 'var(--fs-11)' }}>
+      <div style=${{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+        <span style=${{ fontSize: 'var(--fs-11)', display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
           <${KeeperBadge} id=${item.keeper_id} variant="full" size="sm" />
           ${' '}${item.verb}${' '}<span style=${{ color: 'var(--color-fg-muted)' }}>${item.target}</span>
+          ${statusDot ? html`
+            <span
+              role="status"
+              aria-label=${`Current: ${statusDot.label}`}
+              style=${{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                fontSize: 'var(--fs-10)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                color: statusDot.color,
+                marginLeft: 'auto',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              <span style=${{
+                width: '4px',
+                height: '4px',
+                borderRadius: '50%',
+                background: statusDot.color,
+                display: 'inline-block',
+              }} />
+              ${statusDot.label}
+            </span>
+          ` : null}
         </span>
         ${item.detail ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${item.detail}</span>` : null}
+        ${focusFile ? html`
+          <span style=${{
+            fontSize: 'var(--fs-10)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-accent-fg)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title=${cursor?.file_path}
+          >↗ ${focusFile}:${cursor?.line}</span>
+        ` : null}
       </div>
     </li>
   `

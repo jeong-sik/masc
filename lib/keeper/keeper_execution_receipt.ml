@@ -97,11 +97,31 @@ type slot_release_phase =
    Mirrors the pattern applied to tool_surface_class in PR #14647 review. *)
 let slot_release_phase_to_string = to_tla_symbol
 
+(* Terminal classification of a cascade rotation attempt.  Producer-side
+   closed set in [keeper_unified_turn.ml]; JSON wire form is the lowercase
+   string via [cascade_rotation_outcome_to_string].
+
+   No [@@deriving tla] here because [slot_release_phase] above already
+   binds module-level [all_symbols]; following the precedent in
+   [keeper_types_profile.ml] a follow-up can wrap a TLA mirror in a
+   submodule when a spec actually models rotation outcomes. *)
+type cascade_rotation_outcome =
+  | Rotation_setup_failed
+  | Rotation_retry_scheduled
+  | Rotation_budget_exhausted
+  | Rotation_slot_phase_exhausted
+
+let cascade_rotation_outcome_to_string = function
+  | Rotation_setup_failed -> "setup_failed"
+  | Rotation_retry_scheduled -> "retry_scheduled"
+  | Rotation_budget_exhausted -> "budget_exhausted"
+  | Rotation_slot_phase_exhausted -> "slot_phase_exhausted"
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
   ; reason : string
-  ; outcome : string
+  ; outcome : cascade_rotation_outcome
   ; slot_release_at_phase : slot_release_phase option
   ; productive_phase_elapsed_ms : int option
   ; retry_phase_elapsed_ms : int option
@@ -202,7 +222,8 @@ let cascade_rotation_attempt_to_json attempt =
       ("from_cascade", `String (cascade_name_to_string attempt.from_cascade));
       ("to_cascade", `String (cascade_name_to_string attempt.to_cascade));
       ("reason", `String attempt.reason);
-      ("outcome", `String attempt.outcome);
+      ( "outcome",
+        `String (cascade_rotation_outcome_to_string attempt.outcome) );
       ( "slot_release_at_phase",
         string_opt_json
           (Option.map slot_release_phase_to_string

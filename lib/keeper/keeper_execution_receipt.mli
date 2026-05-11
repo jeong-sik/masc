@@ -108,11 +108,21 @@ val slot_release_phase_to_string : slot_release_phase -> string
     form of every variant, used by the RFC-0065 correspondence harness. *)
 val all_symbols : string list
 
+(** Terminal classification of a cascade rotation attempt. Closed set;
+    wire form is [cascade_rotation_outcome_to_string]. *)
+type cascade_rotation_outcome =
+  | Rotation_setup_failed
+  | Rotation_retry_scheduled
+  | Rotation_budget_exhausted
+  | Rotation_slot_phase_exhausted
+
+val cascade_rotation_outcome_to_string : cascade_rotation_outcome -> string
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
   ; reason : string
-  ; outcome : string
+  ; outcome : cascade_rotation_outcome
   ; slot_release_at_phase : slot_release_phase option
   ; productive_phase_elapsed_ms : int option
   ; retry_phase_elapsed_ms : int option

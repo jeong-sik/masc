@@ -1,4 +1,3 @@
-
 (** Tool_spec — Unified tool specification with compile-time safety.
 
     Replaces scattered registration across 6 separate systems with a single
@@ -30,61 +29,61 @@ type handler_binding =
   | Tag_dispatch
   | Match_chain
 
-type t = {
-  name : string;
-  description : string;
-  input_schema : Yojson.Safe.t;
-  module_tag : Tool_dispatch.module_tag;
-  handler_binding : handler_binding;
-  is_read_only : bool;
-  requires_join : bool;
-  is_destructive : bool;
-  is_idempotent : bool;
-  visibility : Tool_catalog.visibility;
-  lifecycle : Tool_catalog.lifecycle;
-  implementation_status : Tool_catalog.implementation_status;
-  canonical_name : string option;
-  replacement : string option;
-  reason : string option;
-  allow_direct_call_when_hidden : bool;
-  title : string option;
-  required_permission : Masc_domain.permission option;
-  effect_domain : Tool_catalog.effect_domain option;
-  requires_actor_binding : bool option;
-}
+type t =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; module_tag : Tool_dispatch.module_tag
+  ; handler_binding : handler_binding
+  ; is_read_only : bool
+  ; requires_join : bool
+  ; is_destructive : bool
+  ; is_idempotent : bool
+  ; visibility : Tool_catalog.visibility
+  ; lifecycle : Tool_catalog.lifecycle
+  ; implementation_status : Tool_catalog.implementation_status
+  ; canonical_name : string option
+  ; replacement : string option
+  ; reason : string option
+  ; allow_direct_call_when_hidden : bool
+  ; title : string option
+  ; required_permission : Masc_domain.permission option
+  ; effect_domain : Tool_catalog.effect_domain option
+  ; requires_actor_binding : bool option
+  }
 
 (** {1 Builder} *)
 
-val create :
-  name:string ->
-  description:string ->
-  module_tag:Tool_dispatch.module_tag ->
-  input_schema:Yojson.Safe.t ->
-  handler_binding:handler_binding ->
-  ?is_read_only:bool ->
-  ?requires_join:bool ->
-  ?is_destructive:bool ->
-  ?is_idempotent:bool ->
-  ?visibility:Tool_catalog.visibility ->
-  ?lifecycle:Tool_catalog.lifecycle ->
-  ?implementation_status:Tool_catalog.implementation_status ->
-  ?canonical_name:string ->
-  ?replacement:string ->
-  ?reason:string ->
-  ?allow_direct_call_when_hidden:bool ->
-  ?title:string ->
-  ?required_permission:Masc_domain.permission ->
-  ?effect_domain:Tool_catalog.effect_domain ->
-  ?requires_actor_binding:bool ->
-  unit -> t
 (** Build a tool spec. The first five arguments are required (compile error
     if omitted). All optional arguments default to fail-closed values:
     booleans to [false], options to [None], visibility to [Default],
     lifecycle to [Active], implementation_status to [Real]. *)
+val create
+  :  name:string
+  -> description:string
+  -> module_tag:Tool_dispatch.module_tag
+  -> input_schema:Yojson.Safe.t
+  -> handler_binding:handler_binding
+  -> ?is_read_only:bool
+  -> ?requires_join:bool
+  -> ?is_destructive:bool
+  -> ?is_idempotent:bool
+  -> ?visibility:Tool_catalog.visibility
+  -> ?lifecycle:Tool_catalog.lifecycle
+  -> ?implementation_status:Tool_catalog.implementation_status
+  -> ?canonical_name:string
+  -> ?replacement:string
+  -> ?reason:string
+  -> ?allow_direct_call_when_hidden:bool
+  -> ?title:string
+  -> ?required_permission:Masc_domain.permission
+  -> ?effect_domain:Tool_catalog.effect_domain
+  -> ?requires_actor_binding:bool
+  -> unit
+  -> t
 
 (** {1 Registration} *)
 
-val register : t -> unit
 (** Register a tool spec into all dispatch subsystems atomically:
     - [Tool_dispatch.register_module_tag] (tag + schema)
     - [Tool_dispatch.init_read_only_set] (if [is_read_only])
@@ -92,29 +91,30 @@ val register : t -> unit
     - [Tool_catalog.register_metadata] (visibility, lifecycle, semantic flags)
 
     @raise Invalid_argument if [name] is empty. *)
+val register : t -> unit
 
-val register_all : t list -> unit
 (** Bulk-register multiple specs. *)
+val register_all : t list -> unit
 
 (** {1 Conversion} *)
 
-val to_tool_schema : t -> Masc_domain.tool_schema
 (** Convert to [Masc_domain.tool_schema] for interop with existing schema-based APIs. *)
+val to_tool_schema : t -> Masc_domain.tool_schema
 
 (** {1 Boot-time verification} *)
 
-val verify_handler_coverage : unit -> string list
 (** Returns tool names that were registered via [register] with [Direct] or
     [Shared] binding but have no handler in [Tool_dispatch]. [Tag_dispatch]
     and [Match_chain] bindings are excluded. Call after server initialization
     completes. Empty list means full coverage. *)
+val verify_handler_coverage : unit -> string list
 
 val all_registered_names : unit -> string list
 
-val is_known : string -> bool
 (** True iff [name] was passed to {!register} earlier in the boot, regardless
     of [handler_binding]. Use this — not [Tool_dispatch.is_registered] — when
     validating user-facing tool policy configs: [Tool_dispatch.is_registered]
     only sees [Direct]/[Shared] bindings, while [Tag_dispatch]/[Match_chain]
     tools (the majority of [keeper_*] / [masc_*] surface) are dispatched via
     match patterns and would falsely register as unknown. *)
+val is_known : string -> bool

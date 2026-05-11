@@ -1,43 +1,45 @@
-(* OCaml ↔ TLA+ correspondence harness — RFC-0065 §3.6 scaffold.
+(* OCaml ↔ TLA+ correspondence harness — RFC-0065 §3.6.
  *
  * Phase 5.1: scaffold + B1 (KeeperCascadeAttemptFSM) coverage.
- * Phase 5.2 (this commit): adds B2 (KeeperToolSurface) observable
- *   label parity — SurfaceClassSet, RequirementSet.
- *
- * Phase 5.3 will plug in B3 (KeeperPostTurnOrchestration) and close
- * memory P5 OPEN item.
+ * Phase 5.2: B2 (KeeperToolSurface) observable label parity —
+ *   SurfaceClassSet, RequirementSet.
+ * Phase 5.3 (this commit): B3 (KeeperPostTurnOrchestration) —
+ *   WireinAtomSet parity + BlockerKlassSet coverage check.
+ *   Closes the P5 OPEN item in
+ *   memory/reference_keeper_state_machine_specs_consolidation_status.md
+ *   ("correspondence harness covers B1+B2+B3").
  *
  * Approach:
  *
- *   - Read enumerated sets (PhaseSet / TerminalSet / ProviderOutcomes
- *     for B1; SurfaceClassSet / RequirementSet for B2) from the .tla
- *     source via [Masc_test_deps.tla_quoted_set_from_repo_file_exn]
- *     (same primitive used by test_keeper_receipt_outcome_tla_parity).
- *   - Cross-reference with the OCaml side: variant labels emitted via
- *     [@@deriving tla] when available, hand-pinned label lists when
- *     the OCaml side carries the values as plain strings (current
- *     state for tool_surface_class / tool_requirement).
+ *   - Read enumerated sets from each .tla source via
+ *     [Masc_test_deps.tla_quoted_set_from_repo_file_exn] (same
+ *     primitive used by test_keeper_receipt_outcome_tla_parity).
+ *   - Cross-reference with the OCaml side: variant labels emitted
+ *     via [@@deriving tla] when available, hand-pinned label lists
+ *     when the OCaml side carries the values as plain strings or
+ *     as comment-pinned atoms (current state for tool_surface_class,
+ *     tool_requirement, wirein order).
  *   - Run a small number of representative transition checks: invoke
  *     [Cascade_fsm.decide] on inputs that map onto B1 actions and
  *     verify the OCaml decision matches the spec's expected next
  *     phase.
  *
- * What this harness does NOT do yet (deferred to Phase 5.3+):
+ * What this harness does NOT do yet (future work):
  *
  *   - Full TLC trace export + replay.  The aspirational version reads
  *     a TLC trace and replays each (state, action, state') tuple
  *     through OCaml.  Current phases ship parity + spot transitions.
- *   - B2 surface pipeline replay.  The 11-step compute_tool_surface
- *     transformation requires a keeper-runtime fixture; the spec
- *     covers the structural invariants at the TLC layer.
- *   - B3 post-turn ordering replay.  Wirein pinned order check —
- *     Phase 5.3.
+ *   - B2/B3 in-process replay.  The compute_tool_surface and
+ *     apply_post_turn_lifecycle pipelines need keeper-runtime
+ *     fixtures (acc / meta / switch); the TLC layer is the
+ *     load-bearing check for invariants.
  *)
 
 open Alcotest
 
 let spec_relpath_b1 = "specs/keeper-state-machine/KeeperCascadeAttemptFSM.tla"
 let spec_relpath_b2 = "specs/keeper-state-machine/KeeperToolSurface.tla"
+let spec_relpath_b3 = "specs/keeper-state-machine/KeeperPostTurnOrchestration.tla"
 
 (* ── Set parity (B1) ─────────────────────────────────────── *)
 
@@ -273,12 +275,63 @@ let test_requirement_set_parity () =
    invariants.  Hint left for Phase 5.3+ trace-replay work. *)
 let test_b2_pipeline_replay_pending () = skip ()
 
-(* ── Scaffold: future spec hooks (Phase 5.3) ────────────── *)
+(* ── Set parity (B3) ─────────────────────────────────────── *)
 
-let test_b3_post_turn_scaffold_pending () =
-  (* Placeholder — Phase 5.3 will add KeeperPostTurnOrchestration.tla,
-     wirein-order parity, and close memory P5 OPEN. *)
-  skip ()
+let test_wirein_atom_set_parity () =
+  (* B3 spec catalog: WireinAtomSet = {"A5", "A6", "K4b", "K1"}.
+     OCaml: pinned by comment at keeper_post_turn.ml:640-647 and
+     enforced by the call sequence at lines 648-656
+     (apply_autonomous_wirein → apply_resilience_wirein →
+      apply_tool_emission_wirein → apply_multimodal_wirein).
+     The atoms themselves do not appear as a closed enum on the
+     OCaml side — they are tier identifiers in the comments.
+     Hand-pin and parity-check. *)
+  let spec_atoms =
+    Masc_test_deps.tla_quoted_set_from_repo_file_exn
+      ~relpath:spec_relpath_b3
+      ~symbol:"WireinAtomSet"
+    |> Masc_test_deps.sorted_strings
+  in
+  let ocaml_atoms =
+    Masc_test_deps.sorted_strings
+      [ "A5"; "A6"; "K4b"; "K1" ]
+  in
+  if ocaml_atoms <> spec_atoms then begin
+    Printf.printf "OCaml wirein atoms : [%s]\n"
+      (String.concat "; " ocaml_atoms);
+    Printf.printf "Spec  wirein atoms : [%s]\n"
+      (String.concat "; " spec_atoms);
+    failwith
+      "KeeperPostTurnOrchestration WireinAtomSet differs from OCaml \
+       wirein tier atoms — sync the spec or the OCaml-side pin."
+  end
+
+let test_blocker_klass_overflow_coverage () =
+  (* B3 spec catalog: BlockerKlassSet contains the symbolic klass
+     names the producer side (StampBlocker action) ranges over.
+     The clean spec keeps the alphabet abstract — only "none" is
+     constrained.  The cfg pins four representative atoms; this
+     test confirms the overflow-relevant one
+     ("sdk_token_budget_exceeded") is present, since Track A's
+     blocker_class_indicates_overflow returns true only for that
+     variant.  If the spec drops it, rollover invariants become
+     vacuously satisfied on every trace. *)
+  let spec_klasses =
+    Masc_test_deps.tla_quoted_set_from_repo_file_exn
+      ~relpath:spec_relpath_b3
+      ~symbol:"BlockerKlassSet"
+  in
+  let must_have = [ "none"; "sdk_token_budget_exceeded" ] in
+  List.iter
+    (fun atom ->
+      if not (List.mem atom spec_klasses) then
+        failwith
+          (Printf.sprintf
+             "KeeperPostTurnOrchestration BlockerKlassSet must contain \
+              %S (needed for BlockerStampedBeforeRollover invariant to \
+              be non-vacuous)"
+             atom))
+    must_have
 
 (* ── Suite ──────────────────────────────────────────────── *)
 
@@ -311,11 +364,13 @@ let () =
         test_requirement_set_parity;
     ];
     "B2 pipeline contract (deferred to trace-replay)", [
-      test_case "B2 pipeline replay (Phase 5.3+, pending)" `Quick
+      test_case "B2 pipeline replay (future trace-replay work, pending)" `Quick
         test_b2_pipeline_replay_pending;
     ];
-    "Future specs (scaffold)", [
-      test_case "B3 KeeperPostTurnOrchestration (Phase 5.3, pending)" `Quick
-        test_b3_post_turn_scaffold_pending;
+    "B3 set parity", [
+      test_case "WireinAtomSet matches OCaml wirein tier atoms" `Quick
+        test_wirein_atom_set_parity;
+      test_case "BlockerKlassSet covers overflow klass" `Quick
+        test_blocker_klass_overflow_coverage;
     ];
   ]

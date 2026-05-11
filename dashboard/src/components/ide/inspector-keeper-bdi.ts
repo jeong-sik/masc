@@ -6,7 +6,11 @@ import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
-import { activeIdeFile } from './ide-shell'
+// Imported from `./ide-state` rather than `./ide-shell` to avoid the
+// circular dependency `ide-shell -> inspector-keeper-bdi -> ide-shell`
+// (which also drags `router` and other window-touching side effects
+// into this module's tests).
+import { activeIdeFile } from './ide-state'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 
 export interface KeeperBdiTokenSpend {
@@ -229,14 +233,20 @@ export function InspectorKeeperBDI({
   }, [snapshot])
 
   const cursor = cursorOverlaySignal.value.cursors.get(keeperName)
-  const focusLabel = cursor?.file_path
-    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+  // The SSE adapter defaults a missing `line` to 0 (see
+  // `keeper-cursor-overlay.ts::connectKeeperCursorStream` —
+  // `line: entry.line || 0`), so requiring a 1-based line here avoids
+  // labels like `foo.ts:0` and prevents click-to-navigate firing for
+  // placeholder cursors.
+  const hasValidFocus = !!cursor?.file_path && typeof cursor.line === 'number' && cursor.line >= 1
+  const focusLabel = hasValidFocus
+    ? `${cursor!.file_path.split('/').pop()}:${cursor!.line}`
     : null
   const tokenRows = snapshot?.recent_token_spend ?? []
   const lastTool = snapshot?.last_tool_call ?? null
 
   const navigateToFocus = (): void => {
-    if (cursor?.file_path) activeIdeFile.value = cursor.file_path
+    if (hasValidFocus && cursor) activeIdeFile.value = cursor.file_path
   }
 
   return html`
@@ -260,11 +270,10 @@ export function InspectorKeeperBDI({
           ${keeperName || '—'}
         </span>
         ${focusLabel ? html`
-          <span
-            role="button"
-            tabIndex=${0}
+          <button
+            type="button"
+            data-testid="bdi-focus-label"
             onClick=${navigateToFocus}
-            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToFocus() } }}
             title=${cursor?.file_path ?? ''}
             style=${{
               color: 'var(--color-accent-fg)',
@@ -277,8 +286,13 @@ export function InspectorKeeperBDI({
               borderRadius: 'var(--r-0)',
               padding: '0 var(--sp-1)',
               transition: 'background 0.15s',
+              background: 'transparent',
+              border: 'none',
+              font: 'inherit',
+              lineHeight: 'inherit',
+              textAlign: 'left',
             }}
-          >${focusLabel}</span>
+          >${focusLabel}</button>
         ` : null}
         ${pin?.line
           ? html`<span style=${{ marginLeft: 'auto', color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${pin.line}</span>`

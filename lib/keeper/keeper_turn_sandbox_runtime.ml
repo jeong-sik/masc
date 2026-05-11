@@ -242,14 +242,12 @@ let start_container (t : t) ~(timeout_sec : float) =
                let _rm_st, _rm_out =
                  run_argv_with_status_retry_eintr
                    ~timeout_sec:
-                     (Env_config_sandbox.Shell_timeout.timeout_sec
-                        ~bucket:Cleanup_rm
-                        ())
+                     (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
                    rm_argv
                in
                Error
                  (Printf.sprintf
-                    "docker_container_inspect_failed (mount verification): %s"
+                    "docker_container_inspect_failed (existence check): %s"
                     (Worker_dev_tools.truncate_for_log inspect_out)))
           | _ ->
             Error
@@ -415,18 +413,37 @@ let cleanup (t : t) =
     let still_exists () =
       (* Use `docker ps -a` so a stopped-but-still-existing container is not
          silently reported as "gone". Without `-a`, only running containers
-         appear and a failed `rm -f` would look successful. *)
+         appear and a failed `rm -f` would look successful.
+
+         If `docker ps` itself fails (daemon down, permission denied, etc.),
+         we treat the existence question as "unknown" and conservatively
+         report false (i.e. no further escalation). The post-rm log path
+         already records the rm failure; double-logging an unknown-existence
+         WARN would be noisier than useful. *)
       let check_argv =
         Keeper_sandbox_runtime.docker_command_argv ()
         @ [ "ps"; "-a"; "-q"; "--filter"; "name=" ^ container_name ]
       in
-      let _st, check_out =
+      let check_st, check_out =
         run_argv_with_status_retry_eintr
           ~timeout_sec:
             (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
           check_argv
       in
-      String.trim check_out <> ""
+      match check_st with
+      | Unix.WEXITED 0 -> String.trim check_out <> ""
+      | _ ->
+        Log.Keeper.debug
+          "%s: docker ps -a probe failed for %s (status=%s, out=%s); treating existence \
+           as unknown"
+          t.meta.name
+          container_name
+          (match check_st with
+           | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
+           | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
+           | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
+          (Worker_dev_tools.truncate_for_log check_out);
+        false
     in
     (match st with
      | Unix.WEXITED 0 when not (still_exists ()) -> ()

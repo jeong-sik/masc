@@ -702,6 +702,23 @@ command = "c"
   | [ p ] -> check bool "no headers sub-table → None" true (p.headers = None)
   | _ -> failwith "expected exactly one provider"
 
+let test_headers_declared_but_empty () =
+  (* [providers.p.headers] declared but contains zero entries.
+     Must distinguish from "absent": result is Some [], not None. *)
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[providers.p.headers]
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    check (option (list (pair string string)))
+      "declared but empty → Some []" (Some []) p.headers
+  | _ -> failwith "expected exactly one provider"
+
 (* --- Test suite --- *)
 
 let () =
@@ -773,5 +790,7 @@ let () =
       "headers", [
         test_case "present sorted by key" `Quick test_headers_present;
         test_case "absent yields None" `Quick test_headers_absent;
+        test_case "declared but empty yields Some []" `Quick
+          test_headers_declared_but_empty;
       ];
     ]

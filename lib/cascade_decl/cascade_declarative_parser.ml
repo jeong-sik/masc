@@ -81,31 +81,42 @@ let parse_capabilities (tbl : Otoml.t) : cascade_capabilities =
   }
 ;;
 
+(** Parse a [providers.<id>.headers] sub-table into a sorted association
+    list. Caller invokes only when the sub-table key exists, so the
+    returned list distinguishes "declared but empty / all entries rejected"
+    (empty list) from "no sub-table" (caller passes [None]).
+
+    Non-table values at the sub-table position emit a WARN and yield an
+    empty list. Non-string header values emit a per-entry WARN and are
+    dropped. The result is sorted by key for deterministic show/eq. *)
 let parse_headers (tbl : Otoml.t) (path : string)
-  : (string * string) list option
+  : (string * string) list
   =
-  let entries =
-    try Otoml.get_table tbl with
-    | _ -> []
-  in
-  let pairs =
-    List.filter_map
-      (fun (k, v) ->
-        match Otoml.get_string v with
-        | s -> Some (k, s)
-        | exception _ ->
-          Logs.warn (fun m ->
-            m
-              "cascade_declarative_parser: %s.%s — non-string header value, \
-               ignoring"
-              path
-              k);
-          None)
-      entries
-  in
-  match pairs with
-  | [] -> None
-  | _ -> Some (List.sort (fun (a, _) (b, _) -> String.compare a b) pairs)
+  match Otoml.get_table tbl with
+  | exception _ ->
+    Logs.warn (fun m ->
+      m
+        "cascade_declarative_parser: %s — expected TOML table, got non-table \
+         value; treating as empty"
+        path);
+    []
+  | entries ->
+    let pairs =
+      List.filter_map
+        (fun (k, v) ->
+          match Otoml.get_string v with
+          | s -> Some (k, s)
+          | exception _ ->
+            Logs.warn (fun m ->
+              m
+                "cascade_declarative_parser: %s.%s — non-string header value, \
+                 ignoring"
+                path
+                k);
+            None)
+        entries
+    in
+    List.sort (fun (a, _) (b, _) -> String.compare a b) pairs
 ;;
 
 let parse_provider (id : string) (tbl : Otoml.t)
@@ -175,7 +186,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
     let headers =
       match Otoml.find_opt tbl Fun.id [ "headers" ] with
       | None -> None
-      | Some h_tbl -> parse_headers h_tbl (path ^ ".headers")
+      | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
     in
     Ok { id; display_name; api_format; transport; is_non_interactive;
          credentials; liveness_class; capabilities; headers }

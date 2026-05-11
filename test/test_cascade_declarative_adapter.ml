@@ -215,6 +215,7 @@ let test_alias_parent_missing () =
       transport = Cli "x";
       is_non_interactive = false;
       credentials = None;
+      liveness_class = None;
     }];
     models = [{
       id = "m";
@@ -453,6 +454,7 @@ let test_duplicate_routes () =
       transport = Cli "claude";
       is_non_interactive = false;
       credentials = None;
+      liveness_class = None;
     }];
     models = [{
       id = "haiku";

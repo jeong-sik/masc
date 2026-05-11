@@ -110,7 +110,29 @@ let parse_provider (id : string) (tbl : Otoml.t)
            None)
       | None -> None
     in
-    Ok { id; display_name; api_format; transport; is_non_interactive; credentials }
+    let liveness_class =
+      match Otoml.find_opt tbl Fun.id [ "liveness" ] with
+      | None -> None
+      | Some live_tbl ->
+        (match Otoml.find_opt live_tbl Otoml.get_string [ "class" ] with
+         | None -> None
+         | Some raw ->
+           (match String.lowercase_ascii (String.trim raw) with
+            | "cloud_fast" -> Some Cloud_fast
+            | "cloud_thinking" -> Some Cloud_thinking
+            | "local_27b" -> Some Local_27b
+            | "local_70b_plus" -> Some Local_70b_plus
+            | other ->
+              Logs.warn (fun m ->
+                m "cascade_declarative_parser: %s.liveness.class \
+                   unknown value %S — ignoring (expected one of \
+                   cloud_fast, cloud_thinking, local_27b, \
+                   local_70b_plus)"
+                  path other);
+              None))
+    in
+    Ok { id; display_name; api_format; transport; is_non_interactive;
+         credentials; liveness_class }
 ;;
 
 let parse_providers (toml : Otoml.t) : (cascade_provider list, parse_error list) result =

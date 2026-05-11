@@ -25,6 +25,17 @@ type cascade_credential =
   | Inline of string
 [@@deriving show, eq]
 
+(** Per-provider liveness class — RFC-0058 §3.2.1 (Phase 5.2).
+    Replaces the hardcoded cascade-prefix → budget match table in
+    [Cascade_attempt_liveness_config.budget_for_label]. The four classes
+    correspond to existing budget constants in [Cascade_attempt_liveness]. *)
+type cascade_liveness_class =
+  | Cloud_fast
+  | Cloud_thinking
+  | Local_27b
+  | Local_70b_plus
+[@@deriving show, eq]
+
 type cascade_provider = {
   id : string;
   display_name : string;
@@ -32,6 +43,7 @@ type cascade_provider = {
   transport : cascade_transport;
   is_non_interactive : bool;
   credentials : cascade_credential option;
+  liveness_class : cascade_liveness_class option;
 }
 [@@deriving show, eq]
 

@@ -70,10 +70,30 @@ Phased to keep `main` green at every step. Each step is one PR.
 
 ### Phase 5.2 — Move liveness tunables to TOML
 
-- `cascade_attempt_liveness_config.ml`: the `match cascade_prefix with
-  "codex_cli" | "claude_code" | …` blocks become a `[providers.<p>.liveness]`
-  TOML sub-table (`first-byte-timeout-ms`, `inter-event-timeout-ms`,
-  `overall-timeout-ms`). The OCaml side reads the table.
+Split into two PRs to keep the schema migration reversible.
+
+**Phase 5.2a (schema only) — landed**
+- Add `cascade_liveness_class` type + `liveness_class` field on
+  `cascade_provider`.
+- Parser reads `[providers.<p>.liveness] class = "cloud_fast" | …` into
+  the new field. Unknown / missing values are tolerated (parser warns;
+  validator does not flag).
+- `config/cascade.toml` declares a `liveness` sub-table on every shipped
+  provider.
+- Caller (`Cascade_attempt_liveness_config.budget_for_label`) is
+  **unchanged** — keeps its hardcoded match. The TOML data is parsed but
+  not yet consumed. This keeps the schema additive: rolling back means
+  ignoring the new field, no behaviour change.
+
+**Phase 5.2b (caller migration) — follow-up PR**
+- `budget_for_label` is replaced by `budget_for_provider_id ~cfg`.
+  `keeper_turn_driver_try_provider.ml` passes the provider id (not the
+  cascade label string) and reads the cascade config.
+- The hardcoded `match cascade_prefix with "codex_cli" | "claude_code" |
+  …` block is deleted.
+- Promote the parser's missing-class tolerance to a validator R-rule
+  (every shipped provider must declare `liveness.class`) so future
+  provider entries cannot regress to the silent fallback.
 
 ### Phase 5.3 — Erase `cascade_prefix` literals from `provider_adapter`
 

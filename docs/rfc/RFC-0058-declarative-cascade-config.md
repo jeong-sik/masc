@@ -234,6 +234,33 @@ key = "OPENAI_API_KEY"
 | `key` | string | For `env`: variable name |
 | `path` | string | For `file`: file path |
 
+#### 3.2.1 Liveness sub-table `[providers.<p>.liveness]`
+
+Replaces the cascade-prefix → budget match table that previously lived
+in `cascade_attempt_liveness_config.budget_for_label`. The class
+selects which `Cascade_attempt_liveness` budget the attempt-wall
+observer applies when no streaming observer is attached.
+
+```toml
+[providers.claude_code.liveness]
+class = "cloud_fast"
+
+[providers.glm-coding.liveness]
+class = "cloud_thinking"
+
+[providers.ollama.liveness]
+class = "local_27b"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `class` | string | One of `"cloud_fast"`, `"cloud_thinking"`, `"local_27b"`, `"local_70b_plus"` |
+
+`class` is optional. When absent, callers fall back to their pre-Phase-5.2
+default (`cloud_fast`) — this preserves behavior for any provider that
+has not yet been classified. Unknown values emit a parser warning and
+are treated as absent.
+
 ### 3.3 Layer 2: Models
 
 ```toml

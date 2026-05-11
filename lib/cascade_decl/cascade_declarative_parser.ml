@@ -262,9 +262,27 @@ let parse_providers (toml : Otoml.t) : (cascade_provider list, parse_error list)
 
 (* --- Layer 2: Models --- *)
 
+let parse_thinking_control_format ~(path : string) (raw : string)
+  : cascade_thinking_control_format
+  =
+  match String.lowercase_ascii (String.trim raw) with
+  | "" | "none" | "no-thinking-control" | "no_thinking_control" -> No_thinking_control
+  | "thinking-object" | "thinking_object" -> Thinking_object
+  | "chat-template-kwargs" | "chat_template_kwargs" -> Chat_template_kwargs
+  | other ->
+    Logs.warn (fun m ->
+      m
+        "cascade_declarative_parser: %s.thinking-control-format = %S — expected one of \
+         none|thinking-object|chat-template-kwargs, defaulting to none"
+        path
+        other);
+    No_thinking_control
+;;
+
 let parse_model_capabilities ~(path : string) (tbl : Otoml.t) : cascade_model_capabilities
   =
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+  let b_default_true key = Otoml.find_or ~default:true tbl Otoml.get_boolean [ key ] in
   let positive_int_opt_field key =
     match Otoml.find_opt tbl Otoml.get_integer [ key ] with
     | None -> None
@@ -279,12 +297,32 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t) : cascade_model_ca
           n);
       None
   in
+  let thinking_control_format =
+    match Otoml.find_opt tbl Otoml.get_string [ "thinking-control-format" ] with
+    | None -> No_thinking_control
+    | Some raw -> parse_thinking_control_format ~path raw
+  in
   { max_output_tokens = positive_int_opt_field "max-output-tokens"
   ; supports_parallel_tool_calls = b "supports-parallel-tool-calls"
+  ; supports_tool_choice = b "supports-tool-choice"
+  ; supports_extended_thinking = b "supports-extended-thinking"
+  ; supports_reasoning_budget = b "supports-reasoning-budget"
+  ; thinking_control_format
   ; supports_image_input = b "supports-image-input"
+  ; supports_audio_input = b "supports-audio-input"
+  ; supports_video_input = b "supports-video-input"
+  ; supports_multimodal_inputs = b "supports-multimodal-inputs"
+  ; supports_response_format_json = b "supports-response-format-json"
+  ; supports_structured_output = b "supports-structured-output"
   ; supports_native_streaming = b "supports-native-streaming"
   ; supports_caching = b "supports-caching"
-  ; supports_response_format_json = b "supports-response-format-json"
+  ; supports_prompt_caching = b "supports-prompt-caching"
+  ; prompt_cache_alignment = positive_int_opt_field "prompt-cache-alignment"
+  ; supports_top_k = b "supports-top-k"
+  ; supports_min_p = b "supports-min-p"
+  ; supports_seed = b "supports-seed"
+  ; emits_usage_tokens = b_default_true "emits-usage-tokens"
+  ; supports_computer_use = b "supports-computer-use"
   }
 ;;
 

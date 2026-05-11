@@ -95,32 +95,80 @@ type cascade_provider =
 
 (** {1 Layer 2: Models} *)
 
-(** Per-model capabilities — RFC-0058 Model axis M1 (Phase 5.3 prep).
+(** Wire-format for controlling thinking/reasoning on OpenAI-compat
+    backends. Mirrors OAS [Llm_provider.Capabilities.thinking_control_format].
 
-    Mirrors the dispatch-critical subset of OAS
-    {!Llm_provider.Capabilities.capabilities}. cascade.toml
-    [\[models.<id>.capabilities\]] sub-table becomes the SSOT for the
-    fields below.
+    The three variants describe how an OpenAI-compat backend's request
+    body should encode "enable thinking":
+    - [No_thinking_control]: no reasoning surface at all (legacy GPT-4o,
+      Anthropic CLI wrappers).
+    - [Thinking_object]: DeepSeek/GLM-style \{"thinking":\{"type":"enabled"\}\}.
+    - [Chat_template_kwargs]: llama-server-style
+      \{"chat_template_kwargs":\{"enable_thinking":bool\}\}.
 
-    M1 (this PR): schema-only addition; no callers consume.
-    M2 (follow-up): OAS [for_model_id_static], which currently
+    Recorded on the model because the same physical model can be served
+    by backends with different thinking-control wire shapes (e.g., qwen3
+    via llama-server vs via DeepSeek's API), so the model entry must
+    pin which shape the backend expects. *)
+type cascade_thinking_control_format =
+  | No_thinking_control
+  | Thinking_object
+  | Chat_template_kwargs
+[@@deriving show, eq]
+
+(** Per-model capabilities — RFC-0058 Model axis M1 + M1b (Phase 5.3 prep).
+
+    Mirrors OAS {!Llm_provider.Capabilities.capabilities} for the fields
+    that real OAS callers actually branch on (measured via grep on
+    [.supports_*] / [.max_*] / [.emits_*] field access — 13 fields with
+    ≥4 access sites, 6 more shipped pre-emptively for cascade routing
+    completeness).
+
+    Schema-additive: no callers consume the fields in this PR. M2
+    follow-up wires OAS [for_model_id_static], which currently
     substring-matches on the upstream API model identifier (e.g.
     [\"claude-sonnet-4-6\"] — Llm_provider.Capabilities.for_model_id
     receives the api-name, not the cascade [\[models.<id>\]] key
-    [\"sonnet\"]), is replaced by cascade.toml lookup via
-    {!model_capabilities_for_id} — keyed on the cascade [<id>] (the
-    cascade key, not the api-name).
+    [\"sonnet\"]), to read these fields via {!model_capabilities_for_id} —
+    keyed on the cascade [<id>] (the cascade key, not the api-name).
 
     Field selection excludes fields already present on
-    {!cascade_model_spec} ([tools_support], [thinking_support],
-    [max_context], [streaming]) to avoid duplicate SSOT. *)
+    {!cascade_model_spec} ([tools_support] mirrors
+    [Capabilities.supports_tools], [thinking_support] mirrors
+    [supports_reasoning], [max_context] mirrors [max_context_tokens],
+    [streaming] is the abstract gate distinct from
+    {!supports_native_streaming}'s wire-protocol claim) — these are not
+    duplicated to avoid two-SSOT drift. *)
 type cascade_model_capabilities =
   { max_output_tokens : int option
-  ; supports_parallel_tool_calls : bool
-  ; supports_image_input : bool
-  ; supports_native_streaming : bool
+  ; (* Tool use *)
+    supports_parallel_tool_calls : bool
+  ; supports_tool_choice : bool
+  ; (* Thinking / reasoning *)
+    supports_extended_thinking : bool
+  ; supports_reasoning_budget : bool
+  ; thinking_control_format : cascade_thinking_control_format
+  ; (* Multimodal *)
+    supports_image_input : bool
+  ; supports_audio_input : bool
+  ; supports_video_input : bool
+  ; supports_multimodal_inputs : bool
+  ; (* Output format *)
+    supports_response_format_json : bool
+  ; supports_structured_output : bool
+  ; (* Protocol *)
+    supports_native_streaming : bool
   ; supports_caching : bool
-  ; supports_response_format_json : bool
+  ; supports_prompt_caching : bool
+  ; prompt_cache_alignment : int option
+  ; (* Sampling parameters *)
+    supports_top_k : bool
+  ; supports_min_p : bool
+  ; supports_seed : bool
+  ; (* Usage reporting *)
+    emits_usage_tokens : bool
+  ; (* Advanced modalities *)
+    supports_computer_use : bool
   }
 [@@deriving show, eq]
 

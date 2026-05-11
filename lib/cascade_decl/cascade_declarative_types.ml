@@ -120,7 +120,21 @@ type cascade_provider =
   }
 [@@deriving show, eq]
 
-(** Per-model capabilities — RFC-0058 Model axis M1 (Phase 5.3 prep).
+(** Wire-format for controlling thinking/reasoning on OpenAI-compat backends.
+    Mirrors OAS [Llm_provider.Capabilities.thinking_control_format].
+
+    Recorded per-model because the same physical model can be served by
+    backends with different thinking-control wire shapes (e.g., qwen3
+    via llama-server vs via DeepSeek's API), so the model entry pins
+    which shape the backend expects. *)
+type cascade_thinking_control_format =
+  | No_thinking_control
+  | Thinking_object (** DeepSeek-style: {"thinking":{"type":"enabled"}} *)
+  | Chat_template_kwargs
+  (** llama-server style: {"chat_template_kwargs":{"enable_thinking":bool}} *)
+[@@deriving show, eq]
+
+(** Per-model capabilities — RFC-0058 Model axis M1 + M1b (Phase 5.3 prep).
 
     Mirrors the dispatch-critical subset of OAS [Llm_provider.Capabilities.capabilities]
     so the cascade.toml [\[models.<id>.capabilities\]] sub-table becomes
@@ -131,24 +145,42 @@ type cascade_provider =
     Provider_config.model_id), not the cascade [\[models.<id>\]] key.
     M2 replaces that derivation with a cascade.toml lookup keyed on the
     cascade [<id>] (the cascade key) so OAS no longer needs to "know
-    model names".
+    model names". *)
 
-    Schema-additive in M1 (this PR): no callers consume the fields yet.
-    M2 caller cutover wires OAS [for_model_id] to read these fields.
-
-    Field selection prioritises fields that OAS callers branch on but
-    that cascade_model_spec does not already cover ([tools_support],
-    [thinking_support], [max_context], [streaming] live in the parent
-    record). *)
 type cascade_model_capabilities =
   { max_output_tokens : int option
     (** Hard cap on output tokens. None when unknown / model-default. *)
-  ; supports_parallel_tool_calls : bool
-    (** Multiple [tool_use] blocks in one assistant response.
-          OpenAI / Anthropic recent models do; CLI wrappers usually
-          don't. *)
-  ; supports_image_input : bool (** Vision input via base64 / URL image blocks. *)
-  ; supports_native_streaming : bool
+  ; (* Tool use *)
+    supports_parallel_tool_calls : bool
+    (** Multiple [tool_use] blocks in one assistant response. *)
+  ; supports_tool_choice : bool
+    (** Server-side [tool_choice] forcing. Most CLI-wrappers do not
+          honour it. *)
+  ; (* Thinking / reasoning *)
+    supports_extended_thinking : bool
+    (** [budget_tokens] / [reasoning_effort] knob. Distinct from
+          {!cascade_model_spec.thinking_support} which is the on/off
+          gate; this is the budgeted-depth control. *)
+  ; supports_reasoning_budget : bool (** Per-request reasoning depth control accepted. *)
+  ; thinking_control_format : cascade_thinking_control_format
+    (** Wire shape for thinking control on OpenAI-compat backends.
+          [No_thinking_control] is the safe default (no reasoning
+          surface). *)
+  ; (* Multimodal *)
+    supports_image_input : bool (** Vision input via base64 / URL image blocks. *)
+  ; supports_audio_input : bool
+  ; supports_video_input : bool
+  ; supports_multimodal_inputs : bool
+    (** Any non-text input. Distinct from the per-modality flags above:
+          true when at least one of image/audio/video is true. Declarative
+          surface keeps both so validators can detect the discrepancy. *)
+  ; (* Output format *)
+    supports_response_format_json : bool
+    (** [response_format = json_object] / JSON mode. *)
+  ; supports_structured_output : bool
+    (** JSON-schema strict mode (100% conforming output). *)
+  ; (* Protocol *)
+    supports_native_streaming : bool
     (** Server-Sent Events streaming on the wire protocol. Distinct
           from {!cascade_model_spec.streaming} which advertises the
           model's declared streaming support — this field tracks the
@@ -157,18 +189,51 @@ type cascade_model_capabilities =
   ; supports_caching : bool
     (** Provider supports any form of response caching (Anthropic
           prompt caching, OpenAI prompt caching, GLM cache). *)
-  ; supports_response_format_json : bool
-    (** [response_format = json_object] / JSON mode. *)
+  ; supports_prompt_caching : bool
+    (** Anthropic-style explicit prompt cache_control blocks. *)
+  ; prompt_cache_alignment : int option
+    (** Token-boundary alignment for prompt cache breakpoints (Anthropic
+          requires multiples of 1024 in some tiers). *)
+  ; (* Sampling parameters *)
+    supports_top_k : bool
+  ; supports_min_p : bool
+  ; supports_seed : bool (** Deterministic seed for reproducible sampling. *)
+  ; (* Usage reporting *)
+    emits_usage_tokens : bool
+    (** True when the provider's standard response carries
+          [input_tokens]/[output_tokens] (direct APIs like Anthropic,
+          OpenAI, Gemini, Kimi-API, GLM, Ollama). False for CLI-class
+          wrappers that strip usage before returning (codex_cli,
+          gemini_cli, kimi_cli). Default-true matches OAS. *)
+  ; (* Advanced modalities *)
+    supports_computer_use : bool
   }
 [@@deriving show, eq]
 
 let cascade_model_capabilities_default =
   { max_output_tokens = None
   ; supports_parallel_tool_calls = false
+  ; supports_tool_choice = false
+  ; supports_extended_thinking = false
+  ; supports_reasoning_budget = false
+  ; thinking_control_format = No_thinking_control
   ; supports_image_input = false
+  ; supports_audio_input = false
+  ; supports_video_input = false
+  ; supports_multimodal_inputs = false
+  ; supports_response_format_json = false
+  ; supports_structured_output = false
   ; supports_native_streaming = false
   ; supports_caching = false
-  ; supports_response_format_json = false
+  ; supports_prompt_caching = false
+  ; prompt_cache_alignment = None
+  ; supports_top_k = false
+  ; supports_min_p = false
+  ; supports_seed = false
+  ; emits_usage_tokens =
+      true
+      (* stricter default: most providers report usage; CLI wrappers explicitly opt out *)
+  ; supports_computer_use = false
   }
 ;;
 

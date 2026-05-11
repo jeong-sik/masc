@@ -166,6 +166,44 @@ let test_expand_model_strings_for_execution_matches_auto_expansion () =
       (C.expand_auto_models items)
       (C.expand_model_strings_for_execution items))
 
+let test_expand_model_strings_for_execution_dedupe_stable_repeated_inputs () =
+  with_clean_env (fun () ->
+    (* Pure repeated literals: dedupe must keep first occurrence and
+       preserve insertion order. *)
+    let items =
+      [ "codex_cli:gpt-5.2"
+      ; "kimi_cli:kimi-for-coding"
+      ; "codex_cli:gpt-5.2"
+      ; "kimi_cli:kimi-for-coding"
+      ; "codex_cli:gpt-5.2"
+      ]
+    in
+    check (list string) "first occurrence wins, order preserved"
+      [ "codex_cli:gpt-5.2"; "kimi_cli:kimi-for-coding" ]
+      (C.expand_model_strings_for_execution items))
+
+let test_expand_model_strings_for_execution_dedupe_explicit_and_auto () =
+  with_clean_env (fun () ->
+    (* Explicit model that an auto-expansion would also produce: the
+       explicit one (declared first) wins; the auto-expansion's
+       contribution of the same name is dropped, but its other entries
+       remain in expansion order. *)
+    let items = [ "codex_cli:gpt-5.2"; "codex_cli:auto" ] in
+    let expanded = C.expand_model_strings_for_execution items in
+    (* (a) head is the explicit declaration *)
+    check string "explicit first occurrence retained at head"
+      "codex_cli:gpt-5.2"
+      (List.hd expanded);
+    (* (b) duplicate of the explicit name does not reappear *)
+    let occurrences =
+      List.filter (String.equal "codex_cli:gpt-5.2") expanded
+      |> List.length
+    in
+    check int "no duplicate of explicit name" 1 occurrences;
+    (* (c) auto-expansion of other entries still present (sanity) *)
+    check bool "auto-expanded siblings present" true
+      (List.length expanded > 1))
+
 let test_expand_model_strings_for_execution_rotation_scope_rotates () =
   with_clean_env (fun () ->
     State.clear_all ();
@@ -342,6 +380,10 @@ let () =
         `Quick test_expand_auto_models_includes_cli_auto_specs;
       test_case "execution expansion matches auto expansion"
         `Quick test_expand_model_strings_for_execution_matches_auto_expansion;
+      test_case "dedupe_stable: first wins on repeats"
+        `Quick test_expand_model_strings_for_execution_dedupe_stable_repeated_inputs;
+      test_case "dedupe_stable: explicit beats auto-expansion"
+        `Quick test_expand_model_strings_for_execution_dedupe_explicit_and_auto;
       test_case "execution expansion can rotate by scope"
         `Quick test_expand_model_strings_for_execution_rotation_scope_rotates;
       test_case "weighted ordering rotates auto by scope"

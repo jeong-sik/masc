@@ -717,10 +717,24 @@ include Gh_command_validation
 let mkdir_p path _perm =
   Fs_compat.mkdir_p path
 
-type tool_exec_error_kind = Tool_exec_error_kind of string
+(* Closed sum: five producer-emitted error categories. The closed type
+   replaces the previous [Tool_exec_error_kind of string] wrapper —
+   string values are only re-introduced at the telemetry wire via
+   [tool_exec_error_kind_to_string].  Adding a new variant is a compile
+   obligation at every observer call site below. *)
+type tool_exec_error_kind =
+  | Path_blocked
+  | File_read_error
+  | File_write_error
+  | Command_blocked
+  | Shell_error
 
-let tool_exec_error_kind_of_string value = Tool_exec_error_kind value
-let tool_exec_error_kind_to_string (Tool_exec_error_kind value) = value
+let tool_exec_error_kind_to_string = function
+  | Path_blocked -> "path_blocked"
+  | File_read_error -> "file_read_error"
+  | File_write_error -> "file_write_error"
+  | Command_blocked -> "command_blocked"
+  | Shell_error -> "shell_error"
 
 type tool_exec_observer =
   tool_name:string ->
@@ -772,7 +786,7 @@ let make_file_read ?workdir ?on_exec () =
            Option.iter
              (fun (f : tool_exec_observer) ->
                 f ~tool_name:"file_read" ~success:false ~duration_ms
-                  ~error_kind:(tool_exec_error_kind_of_string "path_blocked")
+                  ~error_kind:(Path_blocked)
                   ~error_message:err ())
              on_exec;
            tool_error err
@@ -798,7 +812,7 @@ let make_file_read ?workdir ?on_exec () =
              Option.iter
                (fun (f : tool_exec_observer) ->
                   f ~tool_name:"file_read" ~success:false ~duration_ms
-                    ~error_kind:(tool_exec_error_kind_of_string "file_read_error")
+                    ~error_kind:(File_read_error)
                     ~error_message:msg ())
                on_exec;
              tool_error (Printf.sprintf "Cannot read: %s" msg))
@@ -835,7 +849,7 @@ let make_file_write ?workdir ?on_exec () =
            Option.iter
              (fun (f : tool_exec_observer) ->
                 f ~tool_name:"file_write" ~success:false ~duration_ms
-                  ~error_kind:(tool_exec_error_kind_of_string "path_blocked")
+                  ~error_kind:(Path_blocked)
                   ~error_message:err ())
              on_exec;
            tool_error err
@@ -861,7 +875,7 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun (f : tool_exec_observer) ->
                   f ~tool_name:"file_write" ~success:false ~duration_ms
-                    ~error_kind:(tool_exec_error_kind_of_string "file_write_error")
+                    ~error_kind:(File_write_error)
                     ~error_message:msg ())
                on_exec;
              tool_error (Printf.sprintf "Cannot write: %s" msg))
@@ -946,7 +960,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
             Option.iter
               (fun (f : tool_exec_observer) ->
                 f ~tool_name:"shell_exec" ~success:false ~duration_ms:0
-                  ~error_kind:(tool_exec_error_kind_of_string "command_blocked")
+                  ~error_kind:(Command_blocked)
                   ~error_message:(block_reason_to_string reason) ())
               on_exec;
             tool_error (block_reason_to_string reason)
@@ -1012,7 +1026,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                    f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
                  else
                    f ~tool_name:"shell_exec" ~success:false ~duration_ms
-                     ~error_kind:(tool_exec_error_kind_of_string "shell_error") ())
+                     ~error_kind:(Shell_error) ())
                on_exec;
              result
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -1021,7 +1035,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
              Option.iter
                (fun (f : tool_exec_observer) ->
                  f ~tool_name:"shell_exec" ~success:false ~duration_ms
-                   ~error_kind:(tool_exec_error_kind_of_string "shell_error")
+                   ~error_kind:(Shell_error)
                    ~error_message:exn_msg ())
                on_exec;
              tool_error

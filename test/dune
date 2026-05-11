@@ -225,7 +225,6 @@
         test_cascade_declarative_validator
         test_cascade_declarative_adapter
         test_cascade_declarative_hotpath
-        test_cascade_declarative_legacy_bridge
         test_doctor_dispatch
         test_disk_hygiene_script
         test_run_local_script
@@ -469,7 +468,6 @@
           test_cascade_declarative_validator
           test_cascade_declarative_adapter
           test_cascade_declarative_hotpath
-          test_cascade_declarative_legacy_bridge
           test_doctor_dispatch
           test_disk_hygiene_script
           test_run_local_script

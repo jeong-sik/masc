@@ -16,17 +16,41 @@ include Keeper_agent_checkpoint_hygiene
    The link call writes the backlog file and emits a Task.Linked activity
    event each invocation. Keying on (keeper_name, task_id, trace_id) means
    we only call link once per (task, trace) pair instead of once per turn.
-   Memory footprint is bounded by the keeper × task fan-out, which is
-   small (1 keeper writes 1 task at a time today). *)
+
+   trace_id rotates on every keeper run, and task_id grows over the
+   lifetime of a long-lived process, so the entry count is unbounded
+   in principle. A bounded FIFO eviction keeps the table at a fixed
+   ceiling — losing the oldest entry only forces one extra link call,
+   which costs one backlog write but never breaks correctness. *)
+
+let link_task_cache_max_entries = 4096
+
 let link_task_cache : (string * string * string, unit) Hashtbl.t =
-  Hashtbl.create 32
+  Hashtbl.create link_task_cache_max_entries
 ;;
 
+(* FIFO order so we know which entry to evict when the table is full. *)
+let link_task_cache_order : (string * string * string) Queue.t = Queue.create ()
 let link_task_cache_mutex = Stdlib.Mutex.create ()
 
+let evict_oldest_locked () =
+  match Queue.take_opt link_task_cache_order with
+  | None -> ()
+  | Some key -> Hashtbl.remove link_task_cache key
+;;
+
 let mark_task_link ~keeper ~task_id ~trace_id =
+  let key = keeper, task_id, trace_id in
   Stdlib.Mutex.protect link_task_cache_mutex (fun () ->
-    Hashtbl.replace link_task_cache (keeper, task_id, trace_id) ())
+    if Hashtbl.mem link_task_cache key
+    then ()
+    else begin
+      while Hashtbl.length link_task_cache >= link_task_cache_max_entries do
+        evict_oldest_locked ()
+      done;
+      Hashtbl.add link_task_cache key ();
+      Queue.add key link_task_cache_order
+    end)
 ;;
 
 let task_link_already_recorded ~keeper ~task_id ~trace_id =

@@ -615,7 +615,7 @@ let prepare_agent_setup
     let caller_requires_tools =
       (* Enumerate every [tool_choice] variant + [None] so a new constructor
          added to [Agent_sdk.Types.tool_choice] surfaces a Warning 8 here.
-         [Auto] and [None_] correctly evaluate to [false] (no tool *required*);
+         [Auto] and [None_] correctly evaluate to [false] (no tool required);
          the old [_ -> false] catch-all would have absorbed any future variant
          in the same direction without review. *)
       match current_tool_choice with

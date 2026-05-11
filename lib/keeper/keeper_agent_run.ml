@@ -1507,6 +1507,33 @@ let run_turn
        receipt is silently dropped cannot be reported as Ok. The
        coverage-gap helper is still called so the gap surface keeps
        working; the difference is the caller now sees the failure too. *)
+       (* Phase 5: wire goal/task/board with keeper tool results.
+          Link execution artifacts to the current task if one exists. *)
+       let () =
+         match acc.meta.current_task_id with
+         | None -> ()
+         | Some task_id ->
+           let task_id_str = Keeper_id.Task_id.to_string task_id in
+           let session_id =
+             Some (Keeper_id.Session_id.to_string meta.runtime.session_id)
+           in
+           let operation_id = Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id) in
+           (match
+              Coord.link_task_execution_artifacts_r
+                config
+                ~task_id:task_id_str
+                ?session_id
+                ?operation_id
+                ()
+            with
+            | Ok _ -> ()
+            | Error msg ->
+              Log.Keeper.warn
+                "keeper:%s link_task_execution_artifacts failed for task=%s: %s"
+                meta.name
+                task_id_str
+                msg)
+       in
        let receipt_append_outcome : (unit, string) result =
          try
            Keeper_execution_receipt.append config receipt;

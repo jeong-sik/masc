@@ -283,3 +283,11 @@ val on_cascade_invariant_violation : unit -> unit
     [Accept_rejected] FSM branch ("should be unreachable" defensive
     code).  Steady-state value must be ZERO; non-zero indicates a
     real FSM contract violation. *)
+
+val register_all : unit -> unit
+(** Pre-register every counter defined in this module with
+    [Prometheus.register_counter] so process startup exposes them
+    at /metrics with zero value.  Idempotent: register_counter is
+    a no-op if the metric is already known.  Intended to be
+    called once from [Prometheus.register_all] (or equivalent
+    startup hook). *)

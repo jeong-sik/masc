@@ -915,3 +915,68 @@ let metric_cascade_invariant_violation =
 
 let on_cascade_invariant_violation () =
   Prometheus.inc_counter metric_cascade_invariant_violation ()
+
+(* Iter 43 infrastructure: pre-register every counter introduced in
+   iter 2-42 with [Prometheus.register_counter] so the
+   process startup state exposes all metric names at /metrics with
+   zero value — operators querying for these names get a definitive
+   answer ("metric exists, zero events so far") instead of an empty
+   response that conflates "metric absent" with "metric never fired".
+
+   With-label counters still materialize individual label
+   combinations only on first emit (the label values are unknown
+   at registration time), but the base name + help text are now
+   visible from startup so dashboard queries and alert rule
+   compilations can validate the names without waiting for first
+   production hit.
+
+   Help text defaults to the metric name itself; richer help can
+   be backfilled in follow-up commits if dashboards need it. *)
+let register_all () =
+  let c name = Prometheus.register_counter ~name ~help:name () in
+  c metric_decisions;
+  c metric_fallbacks;
+  c metric_providers_exhausted;
+  c metric_routing_phase_overrides;
+  c metric_profile_discovery;
+  c metric_declarative_parse_errors;
+  c metric_parallel_validation;
+  c metric_toml_read_race;
+  c metric_serving_last_known_good;
+  c metric_degraded_recovery;
+  c metric_profile_candidate_drop;
+  c metric_resolve_provider_leak;
+  c metric_route_config_error;
+  c metric_resolve_failure;
+  c metric_validated_with_rejections;
+  c metric_provider_filter_widening;
+  c metric_auto_expansion_fanout;
+  c metric_ordering_health_widening;
+  c metric_provider_cooldown;
+  c metric_strategy_starvation_guard;
+  c metric_sticky_drift;
+  c metric_sticky_expiry;
+  c metric_default_label_fallback;
+  c metric_max_context_fallback;
+  c metric_discovered_context_below_floor;
+  c metric_context_capability_drift;
+  c metric_llama_model_not_discovered;
+  c metric_route_resolve_fallback;
+  c metric_deprecated_profile_name_filter;
+  c metric_capability_mismatch;
+  c metric_route_binding_dropped;
+  c metric_weighted_item_dropped;
+  c metric_resolve_live_fallback;
+  c metric_fallback_hint_invalid;
+  c metric_runtime_mcp_legacy_strip;
+  c metric_partial_eio_context;
+  c metric_discovery_refresh_exception;
+  c metric_profile_registration_failure;
+  c metric_cascade_invariant_violation
+;;
+
+(* Module-load side effect: register every cascade counter as soon
+   as this module is linked into the executable.  Avoids the
+   reverse dependency where [Prometheus.init] would have to know
+   about every downstream module that defines its own metrics. *)
+let () = register_all ()

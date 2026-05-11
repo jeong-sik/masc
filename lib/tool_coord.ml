@@ -469,27 +469,35 @@ let status_summary_string (ctx : context) =
       ~session_active:false
   in
   let suggested_next =
+    (* All branches must end with [take_items 2] so masc_status response
+       size stays bounded.  Prior pipeline had a trailing [|> take_items 2]
+       that applied uniformly; restoring that invariant explicitly per
+       branch (Copilot review #14662 thread tool_coord.ml:492). *)
     if Option.is_some planning_state.planning_missing_task
     then []
     else if Option.is_some planning_state.deliverable_conflict_task
     then [ "masc_deliver"; "masc_status" ]
-    else
-      guidance.next_steps
-      |> List.map (fun (step : Workflow_guide.step) -> step.tool)
-      |> fun tools ->
-      if credential_blocked
-      then List.filter (fun tool -> not (is_lifecycle_tool tool)) tools
-      else (
-        match binding.drift_reason with
-        | Some "no_owned" ->
-          let tools =
-            List.filter (fun tool -> not (String.equal tool "masc_transition")) tools
-          in
-          let tools =
-            if fresh_todo_count > 0 then "masc_claim_next" :: tools else tools
-          in
-          unique_strings tools
-        | Some _ | None -> tools |> take_items 2)
+    else (
+      let tools =
+        guidance.next_steps
+        |> List.map (fun (step : Workflow_guide.step) -> step.tool)
+      in
+      let tools =
+        if credential_blocked
+        then List.filter (fun tool -> not (is_lifecycle_tool tool)) tools
+        else (
+          match binding.drift_reason with
+          | Some "no_owned" ->
+            let tools =
+              List.filter (fun tool -> not (String.equal tool "masc_transition")) tools
+            in
+            let tools =
+              if fresh_todo_count > 0 then "masc_claim_next" :: tools else tools
+            in
+            unique_strings tools
+          | Some _ | None -> tools)
+      in
+      take_items 2 tools)
   in
   let attention_items =
     let items = [] in

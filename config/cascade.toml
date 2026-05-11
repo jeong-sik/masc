@@ -67,12 +67,19 @@ key = "GEMINI_API_KEY"
 [providers.gemini_cli.liveness]
 class = "cloud_fast"
 
-# Gemini CLI carries one capability — it is a viable bound-actor
-# fallback target for cascades that include Codex CLI (per-keeper MCP
-# config injection is unimplemented upstream but the catalog-level
-# validator only requires "tolerates", not "natively supports"; see
-# masc-mcp#11356). All other capability flags remain at their defaults
-# (no runtime MCP HTTP headers, no anthropic caching, no max-turns cap).
+# Gemini CLI carries one capability — it is intended as a viable
+# bound-actor fallback target for cascades that include Codex CLI
+# (per-keeper MCP config injection is unimplemented upstream but the
+# catalog-level validator only requires "tolerates", not "natively
+# supports"; see masc-mcp#11356). All other capability flags remain at
+# their defaults (no runtime MCP HTTP headers, no anthropic caching,
+# no max-turns cap).
+#
+# NOTE (data-only until cutover): this declaration is parsed into the
+# in-memory cascade-decl config, but [Cascade_catalog_validator] still
+# reads [Provider_adapter]'s hardcoded value for this kind. Toggling
+# this line therefore does not move the validator warn surface until
+# the caller cutover lands (see #14659 bridge primitive).
 [providers.gemini_cli.capabilities]
 tolerates-bound-actor-fallback = true
 

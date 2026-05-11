@@ -4,7 +4,7 @@
 **Author**: Agent (Claude Opus 4.7) — backfilling from merged PRs
 **Date**: 2026-05-11
 **Supersedes**: —
-**Related**: PR #14437 (Phase 0), PR #14464 (Phase 1), PR #14482 (Phase 2), PR #14486 (Phase 3), PR #14528 (Phase 4c-1). CLAUDE.md §"워크어라운드 거부 기준" #2 (string/substring classifier).
+**Related**: PR #14437 (Phase 0), PR #14464 (Phase 1), PR #14482 (Phase 2), PR #14486 (Phase 3), PR #14528 (Phase 4c-1). `~/me/CLAUDE.md` §"워크어라운드 거부 기준" (operator-local; not tracked in this repo) #2 (string/substring classifier).
 
 ---
 
@@ -20,7 +20,7 @@ Two adjacent silent-failure surfaces shared a root cause — strings used where 
 
 `Tool_*.dispatch` returned `(bool * string) option`. Retryability was decided by `is_retryable_message`, a 9-pattern substring classifier (`mcp_server_eio_call_tool.ml`). Failure semantics (transient vs policy vs runtime vs workflow rejection) were inferable only by parsing the message string at the call site. New error phrases produced silent reclassification.
 
-Both fall under CLAUDE.md §"워크어라운드 거부 기준" #2: string/substring 분류기가 closed sum type을 대체하고 있던 자리.
+Both fall under `~/me/CLAUDE.md` §"워크어라운드 거부 기준" (operator-local; not tracked in this repo) #2: string/substring 분류기가 closed sum type을 대체하고 있던 자리.
 
 ## 2. Non-Goals
 
@@ -89,7 +89,7 @@ The gRPC bridge still emits `(ok, message)` to outside clients. The projection l
 
 ## 4. Why these are *fixes*, not workarounds
 
-Under CLAUDE.md §"워크어라운드 거부 기준" the temptation here would be:
+Under `~/me/CLAUDE.md` §"워크어라운드 거부 기준" (operator-local; not tracked in this repo) the temptation here would be:
 
 - ❌ "Add more substrings to `is_retryable_message`" — workaround signature #2 (string classifier reinforcement).
 - ❌ "Count unmapped SDK errors with a Prometheus counter" — workaround signature #1 (telemetry-as-fix).
@@ -140,7 +140,7 @@ This is itself a process gap worth recording — RFC numbers should not be cited
 
 ## 11. References
 
-- CLAUDE.md §"AI 코드 생성 안티패턴" #2 Unknown → Permissive Default
-- CLAUDE.md §"워크어라운드 거부 기준" #2 String/Substring 분류기 보강
+- `~/me/CLAUDE.md` §"AI 코드 생성 안티패턴" (operator-local) #2 Unknown → Permissive Default
+- `~/me/CLAUDE.md` §"워크어라운드 거부 기준" (operator-local; not tracked in this repo) #2 String/Substring 분류기 보강
 - RFC-0042 (closed sum type for keeper turn terminal code) — analogous structural fix in a sibling subsystem
 - `lib/keeper/keeper_meta_contract.ml`, `lib/tool_result.ml`, `lib/keeper/keeper_status_bridge.ml`

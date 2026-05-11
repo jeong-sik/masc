@@ -486,20 +486,42 @@ let all_surfaces =
   ]
 ;;
 
+let build_surface_set tools =
+  let tbl = Hashtbl.create (List.length tools) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) tools;
+  tbl
+;;
+
+(* Per-surface membership tables, bound once at module load.  Direct
+   variant match (below) replaces a List.assoc_opt scan over an
+   (surface * Hashtbl) association list — the latter required linear
+   structural-equality comparison of variants on every call. *)
+let public_mcp_set = build_surface_set public_mcp_surface_tools
+let spawned_agent_set = build_surface_set spawned_agent_surface_tools
+let local_worker_set = build_surface_set local_worker_surface_tools
+let session_min_set = build_surface_set session_min_surface_tools
+let admin_set = build_surface_set admin_surface_tools
+let keeper_internal_set = build_surface_set keeper_internal_surface_tools
+let keeper_denied_set = build_surface_set keeper_denied_surface_tools
+let system_internal_set = build_surface_set system_internal_surface_tools
+
+let set_for_surface = function
+  | Public_mcp -> public_mcp_set
+  | Spawned_agent -> spawned_agent_set
+  | Local_worker -> local_worker_set
+  | Session_min -> session_min_set
+  | Admin -> admin_set
+  | Keeper_internal -> keeper_internal_set
+  | Keeper_denied -> keeper_denied_set
+  | System_internal -> system_internal_set
+;;
+
 let surface_sets : (surface * (string, unit) Hashtbl.t) list =
-  List.map
-    (fun surface ->
-       let tools = tools_for_surface surface in
-       let tbl = Hashtbl.create (List.length tools) in
-       List.iter (fun name -> Hashtbl.replace tbl name ()) tools;
-       surface, tbl)
-    all_surfaces
+  List.map (fun surface -> surface, set_for_surface surface) all_surfaces
 ;;
 
 let is_on_surface surface name =
-  match List.assoc_opt surface surface_sets with
-  | Some tbl -> Hashtbl.mem tbl name
-  | None -> false
+  Hashtbl.mem (set_for_surface surface) name
 ;;
 
 let surfaces_for_tool name =

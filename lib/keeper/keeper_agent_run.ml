@@ -1507,33 +1507,6 @@ let run_turn
        receipt is silently dropped cannot be reported as Ok. The
        coverage-gap helper is still called so the gap surface keeps
        working; the difference is the caller now sees the failure too. *)
-       (* Phase 5: wire goal/task/board with keeper tool results.
-          Link execution artifacts to the current task if one exists. *)
-       let () =
-         match acc.meta.current_task_id with
-         | None -> ()
-         | Some task_id ->
-           let task_id_str = Keeper_id.Task_id.to_string task_id in
-           let session_id =
-             Some (Keeper_id.Session_id.to_string meta.runtime.session_id)
-           in
-           let operation_id = Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id) in
-           (match
-              Coord.link_task_execution_artifacts_r
-                config
-                ~task_id:task_id_str
-                ?session_id
-                ?operation_id
-                ()
-            with
-            | Ok _ -> ()
-            | Error err ->
-              Log.Keeper.warn
-                "keeper:%s link_task_execution_artifacts failed for task=%s: %s"
-                meta.name
-                task_id_str
-                (Masc_domain.masc_error_to_string err))
-       in
        let receipt_append_outcome : (unit, string) result =
          try
            Keeper_execution_receipt.append config receipt;
@@ -1578,6 +1551,51 @@ let run_turn
                 meta.name
                 (Printexc.to_string gap_exn));
            Error err_msg
+       in
+
+       (* Phase 5: wire goal/task/board with keeper tool results.
+          Link execution artifacts to the current task if one exists.
+
+          NOTE: moved after receipt append so receipt persistence is not
+          delayed by backlog lock contention (review comment on PR #14564).
+          This still runs every turn while current_task_id is set; root fix
+          is to make the link call idempotent by checking whether the
+          trace_id is already on the task contract. Tracked as follow-up. *)
+       let () =
+         match acc.meta.current_task_id with
+         | None -> ()
+         | Some task_id ->
+           let task_id_str = Keeper_id.Task_id.to_string task_id in
+           let operation_id =
+             Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           in
+           let result =
+             try
+               Coord.link_task_execution_artifacts_r
+                 config
+                 ~task_id:task_id_str
+                 ?operation_id
+                 ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               (* link takes a backlog file lock; an OS-level lock
+                  contention or transient I/O hiccup can raise before
+                  the function gets a chance to return Error. Convert
+                  that into a normal Error so the warn path below logs
+                  it instead of unwinding the whole keeper turn. *)
+               Error
+                 (Masc_domain.System
+                    (Masc_domain.System_error.IoError (Printexc.to_string exn)))
+           in
+           (match result with
+            | Ok _ -> ()
+            | Error err ->
+              Log.Keeper.warn
+                "keeper:%s link_task_execution_artifacts failed for task=%s: %s"
+                meta.name
+                task_id_str
+                (Masc_domain.masc_error_to_string err))
        in
        (match turn_result, receipt_append_outcome with
         | Error _, _ ->

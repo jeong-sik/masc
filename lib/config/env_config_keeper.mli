@@ -53,6 +53,7 @@ end
 (** {1 Keeper supervisor} *)
 
 module KeeperSupervisor : sig
+  val domain_pool_enabled : bool
   val max_restarts : int
   val backoff_base_s : float
   val backoff_max_s : float

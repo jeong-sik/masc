@@ -259,7 +259,36 @@ let launch_supervised_fiber
       }
     in
     Keeper_registry.enqueue_event ~base_path meta.name bootstrap_signal;
-    Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+    (* RFC-0059 PR-7-pilot: when [MASC_KEEPER_DOMAIN_POOL_ENABLED] is set
+       AND the shared [Executor_pool_ref] has a pool, route the per-keeper
+       fork body through the pool so the heavy heartbeat loop runs on a
+       worker Domain instead of contending for the main Domain's Eio
+       scheduler with HTTP/SSE handlers and every other keeper.
+
+       Default OFF: opt-in only. When ON the body still owns its own
+       state via [Keeper_registry] (file-backed, cross-domain safe);
+       the outer [Eio.Fiber.fork] on [ctx.sw] preserves the existing
+       structured-concurrency contract — exceptions from the worker
+       propagate via [submit_exn] back to the awaiting main-domain
+       fiber and on to [ctx.sw].
+
+       Cross-domain switch / fiber-local-state safety inside
+       [run_heartbeat_loop] is the open architectural question this
+       pilot exists to validate; see RFC-0059 §10 risks. *)
+    let pool_for_keeper =
+      if Env_config.KeeperSupervisor.domain_pool_enabled
+      then Executor_pool_ref.get ()
+      else None
+    in
+    let fork_body body =
+      match pool_for_keeper with
+      | Some pool ->
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+          Eio.Executor_pool.submit_exn pool ~weight:0.05 body)
+      | None ->
+        Eio.Fiber.fork ~sw:ctx.sw body
+    in
+    fork_body (fun () ->
       let resolved = ref false in
       let resolve_done value =
         if (not !resolved) && Keeper_registry.try_resolve_done reg value

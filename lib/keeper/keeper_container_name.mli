@@ -26,8 +26,9 @@ type t
     [suffix] is the keeper-derived disambiguator (typically the keeper
     name or a config-derived identifier) folded into the hash so two
     keepers running the same [turn_id]/[attempt] still get distinct
-    names. Must be UTF-8 safe; the implementation hashes the raw bytes
-    so any non-empty string is accepted. *)
+    names. The implementation hashes the raw bytes so any string is
+    accepted, including the empty string (uncommon but not rejected
+    — the caller is expected to pass a meaningful identifier). *)
 val of_hash_hex
   :  algo:Keeper_hash_algo.t
   -> turn_id:int

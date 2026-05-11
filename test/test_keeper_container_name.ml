@@ -61,12 +61,14 @@ let test_no_field_boundary_collision () =
   let b = Keeper_container_name.to_string (make ~turn_id:4 ~attempt:27 ~suffix:"s" ()) in
   if String.equal a b then fail "field-boundary collision — separator missing"
 
-let test_no_suffix_boundary_collision () =
-  (* (turn_id=1, suffix="2|x") vs (turn_id=12, suffix="x") would
-     collide under naïve concat. The separator prevents this. *)
-  let a = Keeper_container_name.to_string (make ~turn_id:1 ~attempt:0 ~suffix:"2-x" ()) in
-  let b = Keeper_container_name.to_string (make ~turn_id:12 ~attempt:0 ~suffix:"x" ()) in
-  if String.equal a b then fail "suffix-boundary collision — separator missing"
+let test_no_attempt_suffix_boundary_collision () =
+  (* Without separators, [Printf.sprintf "%d%d%s" 0 2 "3x"] and
+     [Printf.sprintf "%d%d%s" 0 23 "x"] both produce "023x" — same
+     string. With the \x1f unit separator they become distinct
+     ("0\x1f2\x1f3x" vs "0\x1f23\x1fx"), and so do their digests. *)
+  let a = Keeper_container_name.to_string (make ~turn_id:0 ~attempt:2 ~suffix:"3x" ()) in
+  let b = Keeper_container_name.to_string (make ~turn_id:0 ~attempt:23 ~suffix:"x" ()) in
+  if String.equal a b then fail "attempt/suffix-boundary collision — separator missing"
 
 (* ── Length + prefix invariants ───────────────────────────────── *)
 
@@ -131,7 +133,7 @@ let () =
       ( "collision guard",
         [
           test_case "no field-boundary collision (42/7 vs 4/27)" `Quick test_no_field_boundary_collision;
-          test_case "no suffix-boundary collision" `Quick test_no_suffix_boundary_collision;
+          test_case "no attempt/suffix-boundary collision (2/3x vs 23/x)" `Quick test_no_attempt_suffix_boundary_collision;
         ] );
       ( "format invariants",
         [

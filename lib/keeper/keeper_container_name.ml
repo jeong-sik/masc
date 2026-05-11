@@ -12,9 +12,11 @@ let of_hash_hex ~algo ~turn_id ~attempt ~suffix =
   let input =
     (* Use unit separators (US, \x1F) so concatenation is unambiguous —
        different (turn_id, attempt, suffix) tuples map to different
-       inputs even when one field's serialisation could otherwise
-       collide with another's (e.g., suffix="42|7" vs turn_id=42 ++
-       attempt=7). *)
+       inputs even when adjacent digit fields could otherwise blur.
+       Without separators, [Printf.sprintf "%d%d%s" 1 23 "x" = "123x"]
+       and [Printf.sprintf "%d%d%s" 12 3 "x" = "123x"] — same string.
+       With \x1f between fields these become "1\x1f23\x1fx" vs
+       "12\x1f3\x1fx" and remain distinct. *)
     Printf.sprintf "%d\x1f%d\x1f%s" turn_id attempt suffix
   in
   let hex = Keeper_hash_algo.digest_hex algo input in

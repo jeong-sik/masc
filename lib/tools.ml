@@ -22,7 +22,8 @@ let raw_schemas : tool_schema list =
   Tool_schemas_coord_core.schemas
   @ Tool_schemas_coord_extra.schemas
   @ Tool_schemas_inline.schemas
-  @ Tool_schemas_plan.schemas
+  (* Tool_schemas_plan.schemas moved into Tool_descriptors_gen
+     (Tool_schemas_misc.schemas chain) via RFC-0057 PR-2 *)
   @ Tool_schemas_agent.schemas
   @ Tool_schemas_worktree.schemas
   @ Tool_run.schemas

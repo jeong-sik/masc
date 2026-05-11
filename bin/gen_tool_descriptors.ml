@@ -372,6 +372,150 @@ let masc_resume_spec : tool_spec =
   }
 ;;
 
+(* === PR-2: plan group (8 tools) === *)
+
+let masc_plan_init_spec : tool_spec =
+  { name = "masc_plan_init"
+  ; description =
+      "Initialize a planning context for a task, creating task_plan.md, notes.md, and \
+       deliverable.md structure. Use when starting structured work on a claimed task \
+       that needs planning artifacts. After masc_claim_next or masc_add_task; follow up \
+       with masc_plan_update to write the plan."
+  ; parameters =
+      [ { p_name = "task_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Task ID to create planning context for"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_plan_update_spec : tool_spec =
+  { name = "masc_plan_update"
+  ; description =
+      "Overwrite the current task plan with new content (markdown). Use when refining \
+       or replacing the execution plan for your current task. After masc_plan_init \
+       creates the structure; pair with masc_plan_get to review."
+  ; parameters =
+      [ { p_name = "task_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Task ID"
+        ; p_required = true
+        }
+      ; { p_name = "content"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "New plan content (markdown)"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_plan_get_spec : tool_spec =
+  { name = "masc_plan_get"
+  ; description =
+      "Retrieve the full planning context for a task as markdown (plan, notes, \
+       deliverable). Use when loading task context into your working memory before \
+       starting work. After masc_plan_init; omit task_id if masc_plan_set_task was \
+       called."
+  ; parameters =
+      [ { p_name = "task_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Task ID (optional if current task is set)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_plan_set_task_spec : tool_spec =
+  { name = "masc_plan_set_task"
+  ; description =
+      "Set the current task for your session so you can omit task_id in subsequent \
+       planning calls. Use when starting work on a task after claiming it. After \
+       masc_claim_next; auto-cleared on masc_leave."
+  ; parameters =
+      [ { p_name = "task_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Task ID to set as current"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_plan_get_task_spec : tool_spec =
+  { name = "masc_plan_get_task"
+  ; description =
+      "Get the task_id you're currently working on (session-scoped). Use when resuming \
+       work after a context switch or verifying your current assignment. Set via \
+       masc_plan_set_task. Auto-cleared on masc_leave."
+  ; parameters = []
+  ; additional_properties = false
+  }
+;;
+
+let masc_plan_clear_task_spec : tool_spec =
+  { name = "masc_plan_clear_task"
+  ; description =
+      "Clear your current task assignment without completing it (does not change task \
+       status). Use when switching to a different task, abandoning work, or resetting \
+       session state. Use masc_transition to change task status separately. Auto-called \
+       on masc_leave."
+  ; parameters = []
+  ; additional_properties = false
+  }
+;;
+
+let masc_note_add_spec : tool_spec =
+  { name = "masc_note_add"
+  ; description =
+      "Add a note/observation to the planning context. Notes are timestamped and \
+       appended."
+  ; parameters =
+      [ { p_name = "task_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Task ID"
+        ; p_required = true
+        }
+      ; { p_name = "note"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Note content"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_deliver_spec : tool_spec =
+  { name = "masc_deliver"
+  ; description =
+      "Attach final output/result to a task for handoff or review. Use for: code diffs, \
+       PR URLs, analysis reports, generated files. Deliverables persist with task and \
+       are visible to other agents. Call before masc_transition(action='done'). Example: \
+       masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pull/123'})"
+  ; parameters =
+      [ { p_name = "task_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Task ID"
+        ; p_required = true
+        }
+      ; { p_name = "content"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Deliverable content"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
 let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_code_read_spec
@@ -389,6 +533,15 @@ let phase6_specs : tool_spec list =
     (* PR-1 (paving stone): control group *)
   ; masc_pause_spec
   ; masc_resume_spec
+    (* PR-2: plan group *)
+  ; masc_plan_init_spec
+  ; masc_plan_update_spec
+  ; masc_plan_get_spec
+  ; masc_plan_set_task_spec
+  ; masc_plan_get_task_spec
+  ; masc_plan_clear_task_spec
+  ; masc_note_add_spec
+  ; masc_deliver_spec
   ]
 ;;
 

@@ -219,10 +219,10 @@ let test_register_restarting_refuses_exhausted_budget () =
   (* Phase 1: register fresh keeper (budget=true initially) and dispatch
      Restart_budget_exhausted to clear the flag in-place. *)
   let _ = R.register ~base_path:bp name (make_meta name) in
-  (* Drive to a non-terminal state, then exhaust budget.  We use a
-     synthetic update via R.update_entry-like path: dispatch a heartbeat
-     failure to leave Running, then the supervisor-side mark_dead path
-     would normally clear budget — here we simulate by direct dispatch. *)
+  (* Clear the budget directly via Restart_budget_exhausted — bypasses
+     the production path (supervisor's mark_dead emits this event after
+     observing restart_count >= max_restarts), so the test focuses on
+     register_restarting's guard rather than the supervisor wiring. *)
   (match
      R.dispatch_event ~base_path:bp name KSM.Restart_budget_exhausted
    with

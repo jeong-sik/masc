@@ -1737,14 +1737,21 @@ let sweep_and_recover (ctx : _ context) =
             Keeper_registry.register_restarting ~base_path old_entry.name meta
           with
           | Error (Keeper_registry.Budget_already_exhausted _) ->
+            (* Route to mark_dead instead of merely skipping: a keeper that
+               trips the BudgetNeverRevives guard should reach a stable
+               terminal state, otherwise it would re-enter [to_restart]
+               every sweep (an out-of-band budget reset would loop forever).
+               Mark Dead makes the keeper visible to operators and exits
+               the restart cycle deterministically. *)
             Log.Keeper.warn
               "%s: register_restarting refused — restart_budget_remaining=false \
-               (BudgetNeverRevives guard tripped); skipping restart this sweep"
+               (BudgetNeverRevives guard tripped); routing to mark_dead"
               old_entry.name;
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_restart_outcomes
               ~labels:[ "keeper", old_entry.name; "outcome", "refused_budget_exhausted" ]
-              ()
+              ();
+            to_mark_dead := old_entry :: !to_mark_dead
           | Ok reg ->
             Keeper_registry.restore_supervisor_state
               ~base_path

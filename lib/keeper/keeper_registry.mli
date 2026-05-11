@@ -430,9 +430,10 @@ val register : base_path:string -> string -> keeper_meta -> registry_entry
 val register_offline : base_path:string -> string -> keeper_meta -> registry_entry
 
 (** R-A-6.a — error variant for [register_restarting].
-    [Budget_already_exhausted] is raised when the caller attempts to
-    revive a keeper whose [restart_budget_remaining] was previously
-    cleared, which would violate TLA+ §S3 BudgetNeverRevives. *)
+    [Budget_already_exhausted] is returned (not raised — the API is
+    Result-based) when the caller attempts to revive a keeper whose
+    [restart_budget_remaining] was previously cleared, which would
+    violate TLA+ §S3 BudgetNeverRevives. *)
 type register_restarting_error =
   | Budget_already_exhausted of { name : string }
 
@@ -442,8 +443,8 @@ type register_restarting_error =
 
     Refuses to revive a keeper whose [restart_budget_remaining] was
     previously cleared — preserves the TLA+ §S3 BudgetNeverRevives
-    invariant.  See `docs/tla-audit/ksm-a6-budget-never-revives-2026-
-    05-12.md` for the three revival vectors this guard closes. *)
+    invariant.  See [docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md]
+    for the three revival vectors this guard closes. *)
 val register_restarting :
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result

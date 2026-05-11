@@ -784,18 +784,67 @@ let register_restarting ~base_path name meta
   : (registry_entry, register_restarting_error) result
   =
   let key = registry_key ~base_path name in
-  let existing = StringMap.find_opt key (Atomic.get registry) in
-  match existing with
-  | Some prior when not prior.conditions.restart_budget_remaining ->
-    Error (Budget_already_exhausted { name })
-  | _ ->
-    let conditions = {
-      Keeper_state_machine.default_conditions with
-      restart_budget_remaining = true;
-      backoff_elapsed = true;
-    } in
-    let phase = Keeper_state_machine.derive_phase conditions in
-    Ok (register_with_state ~base_path name meta ~phase ~conditions)
+  let conditions = {
+    Keeper_state_machine.default_conditions with
+    restart_budget_remaining = true;
+    backoff_elapsed = true;
+  } in
+  let phase = Keeper_state_machine.derive_phase conditions in
+  (* Build fresh entry once — its per-fiber atomics (fiber_stop,
+     event_queue, etc.) are independent of registry contents, so a
+     CAS retry can re-use the same record without re-allocating. *)
+  let done_p, done_r = Eio.Promise.create () in
+  let new_entry = {
+    base_path; name; meta; phase; conditions;
+    fiber_stop = Atomic.make false;
+    fiber_wakeup = Atomic.make false;
+    event_queue = Atomic.make Keeper_event_queue.empty;
+    started_at = Time_compat.now ();
+    grpc_close = Atomic.make None;
+    done_p; done_r;
+    restart_count = 0;
+    last_restart_ts = 0.0;
+    dead_since_ts = None;
+    crash_log = [];
+    last_error = None;
+    last_failure_reason = None;
+    turn_consecutive_failures = 0;
+    last_agent_count = 0;
+    board_wakeups = StringMap.empty;
+    board_cursor_ts = 0.0;
+    board_cursor_post_id = None;
+    tool_usage = StringMap.empty;
+    transition_seq = 0;
+    waiting_for_inference = Atomic.make false;
+    last_auto_rules = None;
+    last_event_bus_correlation = None;
+    pending_turn_measurement = None;
+    current_turn_observation = None;
+    last_completed_turn = None;
+    last_skip_observation = None;
+    compaction_stage = Packed Compaction_accumulating;
+  } in
+  (* Guard + write in a single CAS loop so a concurrent budget-exhaust
+     update between our read and write cannot be overwritten back to
+     [restart_budget_remaining = true].  Without this loop, two threads
+     racing — one exhausting the budget, one calling register_restarting
+     on the same name — could land with the wrong winner and silently
+     resurrect a Dead-bound entry.  See iter 14 audit. *)
+  let rec loop () =
+    let current = Atomic.get registry in
+    match StringMap.find_opt key current with
+    | Some prior when not prior.conditions.restart_budget_remaining ->
+      Error (Budget_already_exhausted { name })
+    | _ ->
+      let updated = StringMap.add key new_entry current in
+      if Atomic.compare_and_set registry current updated then begin
+        Log.Keeper.info
+          "registry: registering keeper name=%s base_path=%s phase=%s"
+          name base_path (Keeper_state_machine.phase_to_string phase);
+        Ok new_entry
+      end else loop ()
+  in
+  loop ()
 
 let unregister ~base_path name =
   Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;

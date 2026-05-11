@@ -42,6 +42,41 @@
 \*     - BugSemaphoreRelease : slot released mid-cascade between tiers
 \*     - BugTryNextLoops    : Try_next fires without advancing tier_index
 \*   At least one invariant MUST be violated.
+\*
+\* Runtime classifier indirection (R-D-2.c, iter 37, 2026-05-12):
+\*   The spec's two terminal phases `exhausted_normal` and
+\*   `exhausted_hard_quota` are ROLE IDENTITIES at the FSM level — both
+\*   collapse to a single `Cascade_fsm.Exhausted { last_err }`
+\*   constructor on the OCaml side (`lib/cascade/cascade_fsm.ml:20`).
+\*
+\*   Classification happens UPSTREAM of `decide` in
+\*   `lib/keeper/keeper_turn_driver.ml:654-672`:
+\*
+\*     if sdk_error_is_hard_quota sdk_err then
+\*       Cascade_fsm.Exhausted { last_err }   (* fast-path, skips decide *)
+\*     else
+\*       Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome
+\*
+\*   Both branches return the SAME constructor.  Production preserves the
+\*   distinction through (a) the cooldown side effect recorded ~line 1760
+\*   and (b) the implicit "fast-path was taken" execution trace.  Callers'
+\*   `| Cascade_fsm.Exhausted _ ->` pattern at lines 512, 722 cannot
+\*   recover the classification.
+\*
+\*   This is the TERMINAL-PHASE ANALOG of the input-level Call_err gap
+\*   documented in D-1 (`kcaf-d1-attempt-fsm-coverage-2026-05-12.md`):
+\*   both gaps share the `sdk_error_is_hard_quota` predicate as the
+\*   runtime classifier site.  See
+\*   `docs/tla-audit/kcaf-d2-exhausted-asymmetry-2026-05-12.md` for the
+\*   pattern-family analysis (flat-vs-typed alphabet collapse at FSM
+\*   boundary) and the R-D-2.a+R-D-1.a bundle proposal that would close
+\*   both gaps structurally.
+\*
+\*   Why the spec keeps the distinction anyway: TLC's
+\*   `HardQuotaTerminalImmediate` invariant + `BugHardQuotaBypass`
+\*   BugAction catch the regression spec-side BEFORE the OCaml collapse;
+\*   the spec is the canonical safety surface for this anti-pattern even
+\*   though OCaml represents it implicitly.
 
 EXTENDS Naturals, Sequences, FiniteSets
 

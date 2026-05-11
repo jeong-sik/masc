@@ -183,16 +183,50 @@ let discover_legacy_profile_names_from_json = function
 let discover_profile_names ~config_path ~json : string list =
   match Cascade_declarative_hotpath.try_load_declarative config_path with
   | Some (Ok snap) ->
+      Cascade_metrics.on_profile_discovery ~path:"declarative";
       Cascade_declarative_hotpath.decl_snapshot_profile_names snap
       |> List.filter (fun profile ->
              not
                (Cascade_config_loader.is_deprecated_logical_profile_name
                   profile))
       |> List.sort_uniq String.compare
-  | Some (Error _) | None ->
-      (* RFC-0066 Phase 4 target: this branch goes away once test
-         fixtures migrate to 5-layer declarative TOML. *)
-      discover_legacy_profile_names_from_json json
+  | Some (Error errs) ->
+      (* Declarative parser ran but produced adapter errors.  The
+         previous behavior was to silently fall through to the legacy
+         [_models] scan, hiding the cause of why the SSOT path failed.
+         Surface each error via WARN so operators can act on the live
+         cascade.toml fault, and tick a dedicated counter so the fault
+         rate is observable in Prometheus. *)
+      Cascade_metrics.on_declarative_parse_error ();
+      List.iter
+        (fun err ->
+          Log.Misc.warn
+            "[CascadeProfileDiscovery] declarative parse error: %s"
+            (Cascade_declarative_adapter.show_adapter_error err))
+        errs;
+      let legacy = discover_legacy_profile_names_from_json json in
+      Cascade_metrics.on_profile_discovery ~path:"legacy_after_decl_error";
+      (if legacy <> [] then
+         Log.Misc.warn
+           "[CascadeProfileDiscovery] using legacy _models fallback after \
+            declarative parse error (%d profile(s), %d adapter error(s)); \
+            cascade.toml is likely malformed or a pre-RFC-0058 fixture."
+           (List.length legacy)
+           (List.length errs));
+      legacy
+  | None ->
+      (* Declarative parser produced no result — most commonly a
+         pre-RFC-0058 fixture TOML in test code.  RFC-0066 Phase 4
+         target: this branch goes away once fixtures migrate. *)
+      let legacy = discover_legacy_profile_names_from_json json in
+      Cascade_metrics.on_profile_discovery ~path:"legacy_no_decl";
+      (if legacy <> [] then
+         Log.Misc.debug
+           "[CascadeProfileDiscovery] using legacy _models fallback (no \
+            5-layer schema present, %d profile(s)); likely a pre-RFC-0058 \
+            fixture TOML."
+           (List.length legacy));
+      legacy
 
 let float_opt_to_json = function
   | Some value -> `Float value

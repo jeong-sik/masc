@@ -303,7 +303,9 @@ let select_examples ~(max_examples : int) : calibration_example list =
   let false_positives, others = List.partition (fun d ->
     match d.evaluator_verdict, d.human_verdict with
     | Anti_rationalization.Approve, Reject_label -> true
-    | _ -> false
+    | Anti_rationalization.Approve, Approve_label -> false
+    | Anti_rationalization.Reject _, Reject_label -> false
+    | Anti_rationalization.Reject _, Approve_label -> false
   ) divs in
   let sorted = false_positives @ others in
   let limited =

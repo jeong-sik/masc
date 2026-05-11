@@ -516,6 +516,78 @@ let masc_deliver_spec : tool_spec =
   }
 ;;
 
+(* === PR-2c: inline_infra group (3 of 4 tools — masc_mcp_session
+   deferred because enum SSOT is locked to Tool_schemas_inline_infra
+   by test_types.ml :: mcp_session_action_ssot. Codegen needs a
+   shared enum source RFC before that can swap.) === *)
+
+let masc_approval_pending_spec : tool_spec =
+  { name = "masc_approval_pending"
+  ; description =
+      "Keeper-safe read-only view of the pending HITL approval queue. Use this to \
+       detect whether any approvals are waiting before asking an operator or using an \
+       admin-only detail/resolve path."
+  ; parameters = []
+  ; additional_properties = false
+  }
+;;
+
+let masc_approval_get_spec : tool_spec =
+  { name = "masc_approval_get"
+  ; description =
+      "Operator/admin-only detail view. Fetch one pending HITL approval by id, \
+       including the full input JSON. Use after finding an approval id in the \
+       dashboard or pending approval queue when the preview is insufficient for an \
+       operator decision. Requires the same privileged approval surface as resolving \
+       an approval."
+  ; parameters =
+      [ { p_name = "id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Pending approval id, for example appr_abc123def456"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_spawn_spec : tool_spec =
+  { name = "masc_spawn"
+  ; description =
+      "Spawn an agent process (claude, gemini, codex, or llama) to execute a task. \
+       Use when you need another agent to work in parallel on a subtask. For llama, \
+       provide model explicitly. Pair with masc_add_task to create the task first."
+  ; parameters =
+      [ { p_name = "agent_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Agent to spawn: 'claude', 'gemini', 'codex', or custom command"
+        ; p_required = true
+        }
+      ; { p_name = "model"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Explicit model id. Required when agent_name='llama'."
+        ; p_required = false
+        }
+      ; { p_name = "prompt"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "The task/prompt to send to the agent"
+        ; p_required = true
+        }
+      ; { p_name = "timeout_seconds"
+        ; p_type = T_int { min = None; max = None; default = Some 300 }
+        ; p_description = "Max execution time in seconds (default: 300)"
+        ; p_required = false
+        }
+      ; { p_name = "working_dir"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Working directory for the agent (optional)"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
 let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_code_read_spec
@@ -542,6 +614,10 @@ let phase6_specs : tool_spec list =
   ; masc_plan_clear_task_spec
   ; masc_note_add_spec
   ; masc_deliver_spec
+    (* PR-2c: inline_infra (3 of 4 — masc_mcp_session deferred) *)
+  ; masc_approval_pending_spec
+  ; masc_approval_get_spec
+  ; masc_spawn_spec
   ]
 ;;
 

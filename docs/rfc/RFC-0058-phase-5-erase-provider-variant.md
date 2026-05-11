@@ -115,6 +115,43 @@ Split into two PRs to keep the schema migration reversible.
   Legacy `validate` removed once test fixtures all carry
   `max-concurrent`.
 
+### Phase 5.6 — Erase residual `provider_cfg.kind` sites from keeper
+
+Closed by an 8-PR sweep (2026-05-11):
+
+| PR | Site | Boundary helper / structural change |
+|----|------|-------------------------------------|
+| #14691 | `keeper_turn_liveness.ml` (8 ollama tokens) | `Cascade_capacity_probe.can_probe` registry replaces the inline `is_ollama_cfg` variant match |
+| #14710 | `cascade_http_probe.ml` (3 internal `is_ollama_url` calls) | Explicit URL registry — `Http_probe.register_url` retires the `:11434` substring scan |
+| #14717 | `keeper_agent_context.ml:83` (`OpenAI_compat + Local` rewrap) | `Provider_adapter.apply_wire_overlay` — keeper layer no longer inspects either `Provider_config` or `Agent_sdk.Provider` variants |
+| #14721 | `cascade_client_capacity.auto_register_for_candidates` (substring auto-register) | `Provider_adapter.is_http_probe_capable_kind` predicate; caller registers explicitly |
+| #14729 | `keeper_turn_fsm.guard_transition` violation warn | dead-after-raise log line moved above `wrap_unit` — diagnostics reach operators |
+| #14736 | `keeper_turn_driver_helpers.ml:41` (per-provider attempt timeout bounds) | `Provider_adapter.timeout_bounds_of_kind` — last keeper-layer `match provider_cfg.kind` site closed |
+| #14745 | `keeper_bootstrap_stats.enabled` (producer-only field) | Removed; `should_start_supervisor_sweep` had already ignored it after the 2026-04-24 incident |
+| #14753 | `handle_keeper_down` swallowed `pending_confirms_removed` count | Log + JSON response now expose the count; aligned with `server_dashboard_http_delete_actions.purge_agent_filesystem_artifacts` |
+
+End-state invariant verified against `origin/main` HEAD `d3dd1086b`:
+
+```bash
+rg "match provider_cfg\.kind with" lib/keeper/ | grep -v provider_adapter
+# (no matches — keeper layer is variant-agnostic)
+```
+
+The `with` anchor is intentional: it matches OCaml `match … with`
+expressions only, so the two `[match provider_cfg.kind]` references that
+remain inside `keeper_turn_driver_helpers.{ml,mli}` docstrings (Phase 5.6
+history notes) do not trip the invariant.
+
+The only `provider_cfg.kind` reads left in `lib/` outside
+`provider_adapter` are out of scope:
+
+- `cascade_transport.ml:1706` uses `provider_cfg.kind` as a `Hashtbl`
+  registry key (lookup, not variant dispatch) — legitimate runtime
+  registry, passes the workaround rejection bar.
+- `cascade_catalog_runtime.ml:511` matches `strategy_cfg.kind`, not a
+  provider kind — strategy-side dispatch over a separate
+  `Cascade_strategy_config` type, unrelated to Phase 5.
+
 ## 5. Acceptance Gates
 
 For each Phase 5.N PR:

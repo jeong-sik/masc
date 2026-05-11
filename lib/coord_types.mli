@@ -1,4 +1,3 @@
-
 (** Coord_types — Shared types for coordination modules.
 
     Type-SSOT for the [tool_coord] / [coord_status_rendering] /
@@ -12,19 +11,19 @@
 
 (** Per-call coordination context.  Carries the resolved
     {!Coord.config} and the agent identifier. *)
-type context = {
-  config : Coord.config;
-  agent_name : string;
-}
+type context =
+  { config : Coord.config
+  ; agent_name : string
+  }
 
 (** Credential availability snapshot used by status rendering /
     cascade gating.  [credential_candidates] enumerates env-var
     names probed during resolution. *)
-type credential_state = {
-  credential_required : bool;
-  credential_available : bool;
-  credential_candidates : string list;
-}
+type credential_state =
+  { credential_required : bool
+  ; credential_available : bool
+  ; credential_candidates : string list
+  }
 
 (** Resolved binding between [current_task] and the assignee /
     planning state.
@@ -45,16 +44,16 @@ type credential_state = {
       is non-empty.
     - [claim_first_suppressed]: whether the "claim_first"
       suggestion was suppressed (e.g. agent already owns a task). *)
-type current_binding = {
-  assigned_task_ids : string list;
-  primary_owned : string option;
-  planning_current : string option;
-  current_is_assigned : bool;
-  effective_current : string option;
-  drift_reason : string option;
-  current_task_set : bool;
-  claim_first_suppressed : bool;
-}
+type current_binding =
+  { assigned_task_ids : string list
+  ; primary_owned : string option
+  ; planning_current : string option
+  ; current_is_assigned : bool
+  ; effective_current : string option
+  ; drift_reason : string option
+  ; current_task_set : bool
+  ; claim_first_suppressed : bool
+  }
 
 (** Planning-context anomaly snapshot.
 
@@ -62,7 +61,7 @@ type current_binding = {
       slot but not present in the backlog.
     - [deliverable_conflict_task]: task id whose deliverable
       claims completion in conflict with the recorded status. *)
-type planning_context_state = {
-  planning_missing_task : string option;
-  deliverable_conflict_task : string option;
-}
+type planning_context_state =
+  { planning_missing_task : string option
+  ; deliverable_conflict_task : string option
+  }

@@ -1,4 +1,3 @@
-
 (** Coord_goals — Goal-management MCP tool handlers.
 
     Reachable from {!Tool_coord.dispatch} for the 5 goal tools:
@@ -25,29 +24,32 @@
     plus per-handler private branch helpers.  All consumed only
     inside the 5 public {!handle_goal_*} entries. *)
 
-val handle_goal_list :
-  tool_name:string -> start_time:float ->
-  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_list ctx args] handles [masc_goal_list].
     Optional filters: [horizon] (short / mid / long), [status]
     (active / paused / done / dropped), [phase] (executing /
     awaiting_verification / etc.).  Returns the goal list with a
     rollup summary.  Validation errors return
     [(false, error_json)] without touching the store. *)
+val handle_goal_list
+  :  tool_name:string
+  -> start_time:float
+  -> Coord_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.t
 
-val handle_goal_upsert :
-  tool_name:string -> start_time:float ->
-  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_upsert ctx args] handles [masc_goal_upsert] —
     create-or-update a goal record.  Validates horizon /
     status / phase / priority / policy / principal /
     string_list fields against the pinned allowed-value tables.
     Lifecycle field errors are reported via the dedicated
     [goal_upsert_lifecycle_error] formatter. *)
+val handle_goal_upsert
+  :  tool_name:string
+  -> start_time:float
+  -> Coord_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.t
 
-val handle_goal_transition :
-  tool_name:string -> start_time:float ->
-  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
     {!goal_transition_action_strings}).  Operator-only
@@ -56,21 +58,33 @@ val handle_goal_transition :
     validation error.  Goal-completion transitions invoke
     {!validate_goal_completion_ready} which inspects task
     coverage and sub-goal status before allowing the move. *)
+val handle_goal_transition
+  :  tool_name:string
+  -> start_time:float
+  -> Coord_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.t
 
-val handle_goal_verify :
-  tool_name:string -> start_time:float ->
-  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_verify ctx args] handles [masc_goal_verify] —
     record an operator/keeper verification vote (approve /
     reject) on a goal completion claim.  Updates the goal's
     verification summary; transitions to verified state when
     the policy quorum is met. *)
+val handle_goal_verify
+  :  tool_name:string
+  -> start_time:float
+  -> Coord_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.t
 
-val handle_goal_review :
-  tool_name:string -> start_time:float ->
-  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_review ctx args] handles [masc_goal_review] —
     add a periodic review note to a goal with outcome (done /
     progress / blocked / dropped).  Reviews are append-only;
     drift to mutable updates would lose audit trail and break
     the verification timeline contract. *)
+val handle_goal_review
+  :  tool_name:string
+  -> start_time:float
+  -> Coord_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.t

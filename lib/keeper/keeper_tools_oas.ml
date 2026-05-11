@@ -1021,7 +1021,7 @@ let make_tool_bundle
                 ~name:td.name
                 ~description:td.description
                 ~input_schema:td.input_schema
-                (fun input -> h input))))
+                (fun input -> h input)))
          else None)
       tool_defs
   in
@@ -1085,8 +1085,7 @@ let make_tool_bundle
                     ~name:public
                     ~description
                     ~input_schema
-                    (fun input ->
-                       h input))))
+                    (fun input -> h input))))
       (Keeper_tool_alias.public_names ())
   in
   { tools = internal_tools @ alias_tools

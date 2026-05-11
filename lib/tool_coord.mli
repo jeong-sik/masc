@@ -1,4 +1,3 @@
-
 (** Tool_coord — Coord management MCP tools (status / reset /
     init / workflow_guide / check / assertion).
 
@@ -34,12 +33,12 @@
 
 (** {1 Context} *)
 
-type context = Coord_types.context = {
-  config : Coord.config;
-  agent_name : string;
-}
 (** Per-call context.  Concrete record — callers construct via
     [{ Tool_coord.config; agent_name }] at the dispatch site. *)
+type context = Coord_types.context =
+  { config : Coord.config
+  ; agent_name : string
+  }
 
 (** {1 Assertion kinds} *)
 
@@ -56,40 +55,34 @@ type assertion_kind = Coord_assertions.assertion_kind =
   | Current_task_set
   | Worktree_active
 
-val assertion_kind_to_string : assertion_kind -> string
 (** [assertion_kind_to_string k] returns the canonical lowercase
     label for [k].  Re-export of
     {!Coord_assertions.assertion_kind_to_string}; pinned for
     behaviour-tests under {!test/test_types}. *)
+val assertion_kind_to_string : assertion_kind -> string
 
-val all_assertion_kinds : assertion_kind list
 (** [all_assertion_kinds] is the canonical witness list — one
     entry per {!assertion_kind} constructor.  Re-export of
     {!Coord_assertions.all_assertion_kinds}; pinned for
     behaviour-tests under {!test/test_types}. *)
+val all_assertion_kinds : assertion_kind list
 
-val valid_assertion_strings : string list
 (** [valid_assertion_strings] is the canonical list of
     assertion kind labels (one per constructor).  Used by error
     messages + the [masc_assert] schema [enum] field — adding a
     constructor automatically updates this list. *)
+val valid_assertion_strings : string list
 
-val assertion_kind_of_string_lenient :
-  string -> assertion_kind option
 (** [assertion_kind_of_string_lenient s] parses a permissive
     label form (case-insensitive, allows variants like
     ["room_set"] / ["roomSet"] / ["room"]).  Returns [None] on
     unknown.  Lenient parsing is intentional for human-typed
     governance commands; drift to strict matching would break
     operator UX. *)
+val assertion_kind_of_string_lenient : string -> assertion_kind option
 
 (** {1 Dispatch} *)
 
-val dispatch :
-  context ->
-  name:string ->
-  args:Yojson.Safe.t ->
-  Tool_result.t option
 (** [dispatch ctx ~name ~args] routes [name] to the appropriate
     private handler ([handle_status], [handle_reset],
     [handle_init], [handle_workflow_guide], [handle_check],
@@ -103,3 +96,4 @@ val dispatch :
     Status results are cached for ~2 seconds via the internal
     text-cache to absorb repeated dashboard polls; cache
     invalidates on coord state mutations. *)
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option

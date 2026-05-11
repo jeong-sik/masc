@@ -55,12 +55,12 @@ val normalize_tool_result : success:bool -> string -> string
 
 (** Build the structured, recoverable envelope used when a keeper tool
     raises mutex EDEADLK / "Resource deadlock avoided". *)
-val transient_mutex_contention_tool_error :
-  tool_name:string ->
-  error_text:string ->
-  ?backtrace:string ->
-  unit ->
-  string
+val transient_mutex_contention_tool_error
+  :  tool_name:string
+  -> error_text:string
+  -> ?backtrace:string
+  -> unit
+  -> string
 
 (** Max chars for the SSE error preview rendered to dashboards. *)
 val sse_error_preview_max_chars : int
@@ -71,8 +71,7 @@ val sse_error_preview_max_chars : int
     ["gh pr create"], and ["event=APPROVE"], not raw command arguments or
     tool output. Caller-controlled route fields in input are ignored, and
     output [via] values are allowlisted before persistence. *)
-val tool_exec_result_markers :
-  input:Yojson.Safe.t -> output:string -> string list
+val tool_exec_result_markers : input:Yojson.Safe.t -> output:string -> string list
 
 (** Build the per-tool handler closure used by both internal and
     alias tool entries. The closure dispatches via
@@ -81,41 +80,42 @@ val tool_exec_result_markers :
     internal tool schema used for pre-execution validation after
     [?translate_input] reshapes incoming JSON from a public alias
     schema to the internal payload (identity by default). *)
-val make_keeper_tool_handler :
-  name:string ->
-  input_schema:Yojson.Safe.t ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  ctx_snapshot:Keeper_types.working_context ->
-  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
-  ?turn_sandbox_factory_git:Keeper_sandbox_factory.t ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
-  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
-  ?on_tool_called:(string -> unit) ->
-  ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t) ->
-  failure_counts:failure_counts ->
-  unit ->
-  Yojson.Safe.t -> Tool_result.t
+val make_keeper_tool_handler
+  :  name:string
+  -> input_schema:Yojson.Safe.t
+  -> config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> ctx_snapshot:Keeper_types.working_context
+  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?turn_sandbox_factory_git:Keeper_sandbox_factory.t
+  -> exec_cache:Masc_exec.Exec_cache.t option
+  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> ?on_tool_called:(string -> unit)
+  -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)
+  -> failure_counts:failure_counts
+  -> unit
+  -> Yojson.Safe.t
+  -> Tool_result.t
 
 (** Build the keeper's full [tool_bundle]: internal tools +
     alias-registered (public name) tools that translate input to
     internal payloads. The cleanup thunk releases per-turn sandbox
     runtimes (Docker case). *)
-val make_tool_bundle :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  ctx_snapshot:Keeper_types.working_context ->
-  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
-  ?on_tool_called:(string -> unit) ->
-  unit ->
-  tool_bundle
+val make_tool_bundle
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> ctx_snapshot:Keeper_types.working_context
+  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> ?on_tool_called:(string -> unit)
+  -> unit
+  -> tool_bundle
 
 (** Convenience over [make_tool_bundle] returning only [.tools]. *)
-val make_tools :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  ctx_snapshot:Keeper_types.working_context ->
-  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
-  ?on_tool_called:(string -> unit) ->
-  unit ->
-  Agent_sdk.Tool.t list
+val make_tools
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> ctx_snapshot:Keeper_types.working_context
+  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> ?on_tool_called:(string -> unit)
+  -> unit
+  -> Agent_sdk.Tool.t list

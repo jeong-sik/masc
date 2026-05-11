@@ -34,9 +34,21 @@ open Tool_args
     in the same analysis window.  Invalidated on any board mutation
     (post, comment, vote, delete, cleanup). *)
 
+(* Cache only the rendered payload (success flag + message string) — never
+   the full [Tool_result.t].  Storing the whole record would let cache
+   hits reuse the *original* [duration_ms] and [start_time], so a 50 ms
+   reading 30 s later would still report the 250 ms it took the first
+   caller — and any other per-call telemetry baked into the record would
+   leak the same way.  Copilot review #14662 thread 3.  Each hit rebuilds
+   a fresh [Tool_result] with the current caller's [~start_time]. *)
+type cached_payload =
+  { success : bool
+  ; message : string
+  }
+
 type board_list_cache =
   { mutable key : string option
-  ; mutable value : Tool_result.t option
+  ; mutable value : cached_payload option
   ; mutable expires_at : float
   }
 
@@ -49,19 +61,28 @@ let invalidate_board_list_cache () =
   _board_list_cache.expires_at <- 0.0
 ;;
 
-let cached_board_list ~key compute =
+let cached_board_list ~key ~tool_name ~start_time compute =
   let now = Time_compat.now () in
   let ttl_s = board_list_cache_ttl_s () in
+  let rebuild (payload : cached_payload) : Tool_result.t =
+    if payload.success
+    then Tool_result.ok ~tool_name ~start_time payload.message
+    else Tool_result.error ~tool_name ~start_time payload.message
+  in
   match _board_list_cache.key, _board_list_cache.value with
-  | Some cached_key, Some value
+  | Some cached_key, Some payload
     when String.equal cached_key key
-         && Stdlib.Float.compare now _board_list_cache.expires_at < 0 -> value
+         && Stdlib.Float.compare now _board_list_cache.expires_at < 0 ->
+    rebuild payload
   | _ ->
-    let value = compute () in
+    let result : Tool_result.t = compute () in
+    let payload =
+      { success = result.success; message = Tool_result.message result }
+    in
     _board_list_cache.key <- Some key;
-    _board_list_cache.value <- Some value;
+    _board_list_cache.value <- Some payload;
     _board_list_cache.expires_at <- now +. ttl_s;
-    value
+    result
 ;;
 
 (** Strip [STATE]...[/STATE] blocks from text (inlined to avoid
@@ -790,7 +811,7 @@ let handle_post_list ~tool_name ~start_time args =
   then handle_post_list_uncached ~tool_name ~start_time args
   else (
     let key = board_list_cache_key args in
-    cached_board_list ~key (fun () ->
+    cached_board_list ~key ~tool_name ~start_time (fun () ->
       handle_post_list_uncached ~tool_name ~start_time args))
 ;;
 

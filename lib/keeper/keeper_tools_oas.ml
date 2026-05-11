@@ -975,8 +975,37 @@ let make_tool_bundle
      execute_keeper_tool_call uses can_execute for the execution gate. *)
   let universe_names = Keeper_exec_tools.keeper_universe_tool_names meta in
   let tool_defs = Keeper_exec_tools.keeper_universe_model_tools meta in
+  (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
+     names (e.g. keeper_bash backing public alias Bash) must NOT appear on
+     the LLM-visible surface alongside their public alias.  Mirrors the
+     pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
+  let aliased_internal_names =
+    List.filter_map
+      (fun public ->
+         match Keeper_tool_alias.route public with
+         | Some r -> Some r.internal_name
+         | None -> None)
+      (Keeper_tool_alias.public_names ())
+  in
+  let alias_public_names_in_surface =
+    List.filter
+      (fun public ->
+         match Keeper_tool_alias.route public with
+         | Some r -> List.mem r.internal_name universe_names
+         | None -> false)
+      (Keeper_tool_alias.public_names ())
+  in
+  let assembled_surface_names =
+    List.filter
+      (fun n -> not (List.mem n aliased_internal_names))
+      universe_names
+    @ alias_public_names_in_surface
+  in
   (* Record tool assignment telemetry for causal tracing.
-     assignment_id links Assigned → Called → Completed events. *)
+     assignment_id links Assigned → Called → Completed events.
+     [tool_list] matches the actual LLM-visible surface (internal names
+     minus aliased counterparts, plus public alias names), so downstream
+     Assigned/Called/Completed pairing has no missing entries. *)
   let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
     let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
     let preset =
@@ -989,18 +1018,22 @@ let make_tool_bundle
       ~agent_id:meta.agent_name
       ~profile:"keeper"
       ?preset
-      ~tool_list:universe_names
+      ~tool_list:assembled_surface_names
       ~allow_set:(Keeper_tool_policy.StringSet.elements lookup.allow_set)
       ~deny_set:(Keeper_tool_policy.StringSet.elements lookup.deny_set)
       ~reason:"keeper tool bundle assembly"
       ()
   in
   let failure_counts = create_failure_counts () in
-  (* Pass A: existing internal tools. Behavior unchanged from pre-A.2. *)
+  (* Pass A: internal tools that have no public alias.  Aliased internals
+     are registered only via Pass B under their public name so the LLM
+     surface holds at most one entry per logical tool. *)
   let internal_tools =
     List.filter_map
       (fun (td : Masc_domain.tool_schema) ->
-         if List.mem td.name universe_names
+         if
+           List.mem td.name universe_names
+           && not (List.mem td.name aliased_internal_names)
          then (
            let h =
              make_keeper_tool_handler

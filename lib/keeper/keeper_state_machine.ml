@@ -955,17 +955,19 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
 
    This helper enforces a subset of those preconditions at the
    [apply_event] boundary so silent corruption becomes a typed
-   [Precondition_violation] result.  Only the most operationally
-   dangerous event is covered in this first PR; the remaining four
-   (Auto_compact_triggered, Operator_compact_requested,
-   Context_overflow_detected, Operator_clear_requested) follow in
-   subsequent PRs as the spec/code refinement chain (R-A-9 PR-2/PR-3)
-   matures.
+   [Precondition_violation] result.  Coverage extends incrementally
+   across the spec/code refinement chain (R-A-9):
+     - PR-1: Compact_retry_exhausted (latch correctness)
+     - PR-2: Context_overflow_detected, Auto_compact_triggered (overflow
+       lifecycle — the two events that drive Overflowed↔Compacting)
+     - PR-3: Operator_compact_requested, Operator_clear_requested
+       (operator-driven buffer ops)
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
      - iter 9 PR #14730 (systematic gap class)
-     - TLA+ §CompactRetryExhausted in KeeperStateMachine.tla *)
+     - TLA+ §ContextOverflowDetected, §AutoCompactTriggered,
+       §CompactRetryExhausted in KeeperStateMachine.tla *)
 let check_event_precondition (c : conditions) (ev : event)
   : (unit, transition_error) result
   =
@@ -1002,7 +1004,66 @@ let check_event_precondition (c : conditions) (ev : event)
                 duplicate dispatch in the caller"
            })
     else Ok ()
-  (* Remaining 4 events covered in follow-up PRs (R-A-9 PR-2/PR-3). *)
+  | Context_overflow_detected _ ->
+    if c.compaction_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §ContextOverflowDetected requires ~compaction_active; \
+                an overflow signal while compaction is already running means \
+                the in-flight compaction is the runaway — the retry latch \
+                must catch it, not a fresh overflow event that conflates the \
+                two attempts"
+           })
+    else Ok ()
+  | Auto_compact_triggered ->
+    if not c.context_overflow
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §AutoCompactTriggered requires context_overflow=true; \
+                triggering auto-compaction on a non-overflowed keeper flips \
+                compaction_active outside the Overflowed→Compacting transition \
+                and corrupts the overflow lifecycle invariant"
+           })
+    else if c.compaction_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §AutoCompactTriggered requires ~compaction_active; \
+                re-triggering while a compaction is already in flight \
+                duplicates the buffer op and tangles the ordering"
+           })
+    else if c.handoff_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §AutoCompactTriggered requires ~handoff_active; \
+                starting a compaction during handoff entangles two buffer \
+                ops on the same keeper"
+           })
+    else if c.compact_retry_exhausted
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §AutoCompactTriggered requires ~compact_retry_exhausted; \
+                the retry budget is spent — DerivePhase routes the next \
+                overflow to Paused, and a fresh auto-compact would defeat \
+                that latch (Issue #8581 root cause)"
+           })
+    else Ok ()
+  (* Remaining 2 events covered in follow-up PR (R-A-9 PR-3:
+     Operator_compact_requested, Operator_clear_requested). *)
   | _ -> Ok ()
 ;;
 

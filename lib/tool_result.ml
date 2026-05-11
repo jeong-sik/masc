@@ -135,23 +135,6 @@ let structured_payload_of_message (message : string) : Yojson.Safe.t option =
       in
       loop 0
 
-let wrap ?(failure_class = None) ~tool_name ~start_time (success, message) =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let data =
-    match structured_payload_of_message message with
-    | Some json -> json
-    | None -> `String message
-  in
-  let failure_class =
-    match failure_class with
-    | Some _ -> failure_class
-    | None ->
-        if success then None
-        else Some (classify_from_dispatch_failure message)
-  in
-  { success; data; legacy_message = message; tool_name; duration_ms; failure_class }
-
 let to_json t =
   let base =
     [ ("success", `Bool t.success)
@@ -170,10 +153,8 @@ let message t = t.legacy_message
 
 let failure_class t = t.failure_class
 
-let to_legacy_compat t = (t.success, message t)
-
 (** Handler constructors — used by Tool_*.dispatch functions
-    to build structured results directly without going through [wrap]. *)
+    to build structured results directly. *)
 
 let ok ~tool_name ~start_time message =
   let end_time = Time_compat.now () in

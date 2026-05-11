@@ -2300,7 +2300,7 @@ let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
       ~goal:"test goal"
       ~masc_tools:[]
       ~dispatch:(fun ~name ~args:_ ->
-        Tool_result.wrap ~tool_name:name ~start_time:(Time_compat.now ()) (true, "ok"))
+        Tool_result.ok ~tool_name:name ~start_time:(Time_compat.now ()) "ok")
       ()
   with
   | Ok _ -> Alcotest.fail "expected invalid explicit model label to fail before execution"

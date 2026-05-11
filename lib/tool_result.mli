@@ -52,33 +52,12 @@ type t = {
 
 val structured_payload_of_message : string -> Yojson.Safe.t option
 
-val wrap :
-  ?failure_class:tool_failure_class option ->
-  tool_name:string ->
-  start_time:float ->
-  (bool * string) ->
-  t
-(** [wrap ~tool_name ~start_time raw] converts a legacy [(bool * string)]
-    tuple into a structured result.
-
-    When [failure_class] is not provided and the result is a failure,
-    the message is classified by an internal heuristic. *)
-
 val to_json : t -> Yojson.Safe.t
 
 val message : t -> string
 
 val failure_class : t -> tool_failure_class option
 (** Accessor for the typed failure classification. *)
-
-val to_legacy_compat : t -> bool * string
-(** Converts back to [(bool * string)] for callers that have not yet
-    migrated to the typed result interface.
-
-    @deprecated Prefer consuming {!t} directly. *)
-[@@alert legacy_tuple
-  "This function exists for migration only. \
-   Migrate the call site to use Tool_result.t directly."]
 
 (** {1 Handler constructors}
 

@@ -42,7 +42,10 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   )
 
   const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
-  useEffect(() => cursorOverlaySignal.subscribe(v => setOverlay(v)), [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
+    return () => unsub()
+  }, [])
 
   const cursor = resolveKeeperCursor(keeperName, overlay.cursors)
 
@@ -241,20 +244,28 @@ function resolveKeeperCursor(
 ): KeeperCursor | null {
   if (!keeperName) return null
   const target = keeperName.toLowerCase().trim()
+  // 1. Exact key match (cursorOverlaySignal map keys are canonical keeper ids).
+  // 2. Cursor payload's own keeper_id (server-emitted identity, may differ
+  //    from the map key when the SSE source key is e.g. a session id).
+  // Substring/includes fallbacks were removed because they pick the wrong
+  // cursor when ids share prefixes/suffixes (e.g. "kim" matches "kimchi").
   for (const [id, cursor] of cursors) {
     if (id.toLowerCase() === target) return cursor
-  }
-  for (const [id, cursor] of cursors) {
-    if (id.toLowerCase().includes(target) || target.includes(id.toLowerCase())) return cursor
+    if (cursor.keeper_id && cursor.keeper_id.toLowerCase() === target) return cursor
   }
   return null
 }
 
 function PresenceIndicator(cursor: KeeperCursor | null) {
   if (!cursor) return null
+  // Defensive: SSE parser can emit file_path='' (not-yet-set) and
+  // last_update timestamps that are 0 or in the future. Without these
+  // guards the card renders ":<line>" with no filename and "-99m ago".
+  if (!cursor.file_path) return null
   const color = getKeeperColor(cursor.keeper_id)
   const fileName = cursor.file_path.split('/').pop() ?? cursor.file_path
-  const ageSec = Math.round((Date.now() - cursor.last_update) / 1000)
+  const rawAge = Math.round((Date.now() - cursor.last_update) / 1000)
+  const ageSec = Math.max(0, rawAge)
   const isEditing = cursor.focus_mode === 'editing'
   return html`
     <div

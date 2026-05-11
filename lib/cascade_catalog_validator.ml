@@ -141,7 +141,16 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
     |> List.filter_map (fun (provider_name, _model_id) ->
            PK.of_string provider_name)
   in
-  let has_codex = List.exists (fun k -> k = PK.Codex_cli) kinds in
+  (* "Has any kind that needs per-keeper bridging?" — Codex CLI is the
+     current canonical case; reading the capability flag keeps this
+     check open for future adapters that share the cached-login quirk
+     without rewriting the validator. RFC-0058 §2.4: capability, not match. *)
+  let has_bridging_required_kind =
+    List.exists
+      Provider_adapter
+      .requires_per_keeper_bridging_for_bound_actor_tools_for_kind
+      kinds
+  in
   let has_bound_actor_tolerant_fallback =
     List.exists
       (fun k ->
@@ -152,7 +161,7 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
         | _ -> false)
       kinds
   in
-  if has_codex && not has_bound_actor_tolerant_fallback then
+  if has_bridging_required_kind && not has_bound_actor_tolerant_fallback then
     Some
       {
         profile = Some profile;

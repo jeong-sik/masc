@@ -1567,6 +1567,13 @@ let requires_per_keeper_bridging_for_bound_actor_tools_for_config
       adapter.tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
   | None -> false
 
+let requires_per_keeper_bridging_for_bound_actor_tools_for_kind
+    (kind : Llm_provider.Provider_config.provider_kind) =
+  match adapter_of_provider_kind kind with
+  | Some adapter ->
+      adapter.tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
+  | None -> false
+
 (** Normalize a header key for case-insensitive comparison against
     [tool_policy.identity_runtime_mcp_header_keys]. *)
 let normalize_header_key key = String.lowercase_ascii (String.trim key)

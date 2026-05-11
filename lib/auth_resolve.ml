@@ -87,15 +87,20 @@ let resolve ~base_path ~keeper_id ~provider_kind
         else Error (Token_hash_missing { path = hash_path })
   else
     match Provider_kind_resolver.env_var_for_kind provider_kind with
-    | None -> (
-        match provider_kind with
-        | PK.Codex_cli ->
-            Error (Bound_actor_provider_mismatch { provider_kind })
-        | _ -> (
-            match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
-            | Some (raw, _) -> Ok { raw; source = Mcp_bearer_env }
-            | None ->
-                Error (Api_key_env_unset { var_name = "MASC_MCP_TOKEN" })))
+    | None ->
+        (* Providers requiring per-keeper bridging cannot accept the shared
+           [MASC_MCP_TOKEN] fallback: their bound-actor runtime MCP tools need
+           a per-keeper raw bearer. Codex CLI is the current canonical case
+           (cached login → no per-request headers), and the capability flag
+           on its adapter is the SSOT. RFC-0058 §2.4: capability, not match. *)
+        if Provider_adapter
+           .requires_per_keeper_bridging_for_bound_actor_tools_for_kind
+             provider_kind
+        then Error (Bound_actor_provider_mismatch { provider_kind })
+        else (
+          match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
+          | Some (raw, _) -> Ok { raw; source = Mcp_bearer_env }
+          | None -> Error (Api_key_env_unset { var_name = "MASC_MCP_TOKEN" }))
     | Some var_name -> (
         match first_nonempty_env [ var_name ] with
         | Some (raw, _) ->

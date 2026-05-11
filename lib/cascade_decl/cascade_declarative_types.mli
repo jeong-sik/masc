@@ -48,19 +48,29 @@ type cascade_liveness_class =
   | Local_70b_plus
 [@@deriving show, eq]
 
-(** Per-provider runtime capabilities — RFC-0058 §3.2. Schema-only at this
-    phase: a Phase 5.1 follow-up will replace the hardcoded variant match
-    in
-    [Llm_provider.Capabilities.{claude_code,gemini_cli,kimi_cli,codex_cli}_capabilities]
-    with a cascade.toml lookup. Boolean defaults are [false] — explicit
-    declaration in TOML is required for any non-false capability. *)
+(** Per-provider runtime + behavioral capabilities — RFC-0058 §2.4 +
+    Phase 5.1 (caller cutover prep, A.1) + §3.2 Phase 5.6 (tool/event support).
+
+    Schema-additive in this PR; no callers consume the fields yet.
+    Phase 5.1 caller cutover follows in A.3 (cascade_transport,
+    Provider_tool_support, Cascade_error_classify, Keeper_usage_trust);
+    Phase 5.6 caller cutover replaces [Cascade_config.headers_with_auth]
+    variant match. *)
 type cascade_capabilities = {
   supports_inline_tools : bool;
   supports_runtime_mcp_tools : bool;
   supports_runtime_tool_events : bool;
   supports_runtime_mcp_http_headers : bool;
+  requires_per_keeper_bridging_for_bound_actor_tools : bool;
+  identity_runtime_mcp_header_keys : string list;
+  argv_prompt_preflight : bool;
+  uses_anthropic_caching : bool;
+  max_turns_per_attempt : int option;
 }
 [@@deriving show, eq]
+
+val cascade_capabilities_default : cascade_capabilities
+
 
 type cascade_provider = {
   id : string;
@@ -71,17 +81,17 @@ type cascade_provider = {
   credentials : cascade_credential option;
   liveness_class : cascade_liveness_class option;
   capabilities : cascade_capabilities option;
-  (** Reserved schema (Phase 5.1 prep). Caller cutover follows in a
-      separate PR that replaces the [Llm_provider.Capabilities.*]
-      variant defaults. *)
+  (** Caller cutover (A.3) replaces:
+      - [Llm_provider.Capabilities.*] variant defaults (Phase 5.6, tool/event fields)
+      - [Cascade_transport] / [Provider_tool_support] / [Cascade_error_classify] /
+        [Keeper_usage_trust] closed-variant matches (Phase 5.1, dispatch fields) *)
   headers : (string * string) list option;
   (** Reserved schema (Phase 5.6 prep). Additional HTTP headers per
       provider, e.g. [("anthropic-version", "2023-06-01")] for Anthropic
       HTTP API. Sorted by key for deterministic show/eq. [None] means
       no [\[providers.<id>.headers\]] sub-table; [Some \[\]] means
       declared but empty (or all entries rejected as non-string).
-      Caller cutover follows in a separate PR that replaces
-      [Cascade_config.headers_with_auth] variant match. *)
+      Caller cutover replaces [Cascade_config.headers_with_auth] variant match. *)
 }
 [@@deriving show, eq]
 

@@ -630,6 +630,8 @@ command = "c"
       (Option.map show_cascade_liveness_class p.liveness_class)
   | _ -> failwith "expected exactly one provider"
 
+(* --- Capabilities tests (#14608 tool/event fields + RFC-0058 §2.4 Phase 5.1 dispatch fields) --- *)
+
 let test_capabilities_present () =
   let toml = {|
 [providers.p]
@@ -666,6 +668,107 @@ command = "c"
   | [ p ] ->
     check (option string) "no capabilities sub-table → None" None
       (Option.map show_cascade_capabilities p.capabilities)
+  | _ -> failwith "expected exactly one provider"
+
+let test_capabilities_full () =
+  (* All 9 fields (4 from #14608 + 5 from A.1) populated. *)
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[providers.p.capabilities]
+supports-inline-tools = true
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = true
+supports-runtime-mcp-http-headers = true
+requires-per-keeper-bridging-for-bound-actor-tools = true
+identity-runtime-mcp-header-keys = ["authorization", "x-masc-agent-name"]
+argv-prompt-preflight = true
+uses-anthropic-caching = true
+max-turns-per-attempt = 30
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    (match p.capabilities with
+     | None -> failwith "expected capabilities record"
+     | Some c ->
+       check bool "supports_inline_tools" true c.supports_inline_tools;
+       check bool "supports_runtime_mcp_tools" true c.supports_runtime_mcp_tools;
+       check bool "supports_runtime_tool_events" true c.supports_runtime_tool_events;
+       check bool "supports_runtime_mcp_http_headers" true c.supports_runtime_mcp_http_headers;
+       check bool "requires_per_keeper_bridging" true
+         c.requires_per_keeper_bridging_for_bound_actor_tools;
+       check (list string) "identity_runtime_mcp_header_keys"
+         [ "authorization"; "x-masc-agent-name" ]
+         c.identity_runtime_mcp_header_keys;
+       check bool "argv_prompt_preflight" true c.argv_prompt_preflight;
+       check bool "uses_anthropic_caching" true c.uses_anthropic_caching;
+       check (option int) "max_turns_per_attempt" (Some 30) c.max_turns_per_attempt)
+  | _ -> failwith "expected exactly one provider"
+
+let test_capabilities_partial_defaults () =
+  (* Only uses-anthropic-caching declared; the rest fall back to schema defaults. *)
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[providers.p.capabilities]
+uses-anthropic-caching = true
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    (match p.capabilities with
+     | None -> failwith "expected capabilities record"
+     | Some c ->
+       check bool "uses_anthropic_caching set" true c.uses_anthropic_caching;
+       check bool "supports_runtime_mcp_http_headers default false"
+         false c.supports_runtime_mcp_http_headers;
+       check (list string) "identity_runtime_mcp_header_keys default []"
+         [] c.identity_runtime_mcp_header_keys;
+       check (option int) "max_turns_per_attempt default None"
+         None c.max_turns_per_attempt)
+  | _ -> failwith "expected exactly one provider"
+
+let test_capabilities_max_turns_zero_rejected () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[providers.p.capabilities]
+max-turns-per-attempt = 0
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    (match p.capabilities with
+     | None -> failwith "expected capabilities record"
+     | Some c ->
+       check (option int) "non-positive max_turns_per_attempt ignored"
+         None c.max_turns_per_attempt)
+  | _ -> failwith "expected exactly one provider"
+
+let test_capabilities_max_turns_negative_rejected () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[providers.p.capabilities]
+max-turns-per-attempt = -5
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    (match p.capabilities with
+     | None -> failwith "expected capabilities record"
+     | Some c ->
+       check (option int) "negative max_turns_per_attempt ignored"
+         None c.max_turns_per_attempt)
   | _ -> failwith "expected exactly one provider"
 
 let test_headers_present () =
@@ -718,6 +821,7 @@ command = "c"
     check (option (list (pair string string)))
       "declared but empty → Some []" (Some []) p.headers
   | _ -> failwith "expected exactly one provider"
+
 
 (* --- Test suite --- *)
 
@@ -786,6 +890,12 @@ let () =
       "capabilities", [
         test_case "present parses with defaults" `Quick test_capabilities_present;
         test_case "absent yields None" `Quick test_capabilities_absent;
+        test_case "full parse (all 9 fields)" `Quick test_capabilities_full;
+        test_case "partial defaults" `Quick test_capabilities_partial_defaults;
+        test_case "max-turns 0 rejected" `Quick
+          test_capabilities_max_turns_zero_rejected;
+        test_case "max-turns negative rejected" `Quick
+          test_capabilities_max_turns_negative_rejected;
       ];
       "headers", [
         test_case "present sorted by key" `Quick test_headers_present;

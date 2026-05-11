@@ -43,6 +43,8 @@ val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
     Byte invariant guarded by [test_keeper_sdk_error_typed_bridge].
 
     @since 0.193.1 *)
+val terminal_reason_code_of_sdk_error : Agent_sdk.Error.sdk_error -> string
+
 val terminal_reason_code_of_sdk_error_typed
   :  Agent_sdk.Error.sdk_error
   -> Keeper_turn_terminal_code.t

@@ -33,7 +33,7 @@ let decide_local_only_liveness
      || String.equal normalized_base Keeper_config.local_only_cascade_name
   then Keep_effective_cascade normalized_effective
   else
-    let ollama_urls =
+    let probeable_urls =
       labels
       |> List.filter_map resolve_label
       |> List.filter_map (fun (cfg : Llm_provider.Provider_config.t) ->
@@ -42,7 +42,7 @@ let decide_local_only_liveness
              else None)
       |> dedupe_keep_order
     in
-    match ollama_urls with
+    match probeable_urls with
     | [] -> Keep_effective_cascade normalized_effective
     | probeable_base_urls ->
         Probe_local_only_urls

@@ -137,6 +137,63 @@ let cascade_outcome_to_string = function
   | Cascade_not_observed -> "not_observed"
   | Cascade_not_dispatched -> "not_dispatched"
 
+(* Receipt-level result of the tool-contract evaluation for the turn.
+   Closed union of three producer paths:
+     1. Initial-state sentinel from [keeper_run_tools]: [Contract_unknown].
+     2. Boundary-state overrides: [Contract_violated] (agent_run
+        CompletionContractViolation), [Contract_not_dispatched]
+        (turn_helpers pre-dispatch), [Contract_no_tool_capable_provider]
+        (run_tools no-provider escape).
+     3. Seven outcomes mirrored from
+        [Keeper_contract_classifier.contract_status_label]:
+        [Contract_tool_surface_mismatch], [Contract_missing_required_tool_use],
+        [Contract_claim_only_after_owned_task], [Contract_needs_execution_progress],
+        [Contract_passive_only], [Contract_satisfied_completion],
+        [Contract_satisfied_execution].
+   JSON wire form is the lowercase string via
+   [tool_contract_result_to_string].  No raw ["satisfied"] variant —
+   producer never emits it; closed type makes the fictional test fixture
+   string unrepresentable. *)
+type tool_contract_result =
+  | Contract_unknown
+  | Contract_not_dispatched
+  | Contract_violated
+  | Contract_tool_surface_mismatch
+  | Contract_no_tool_capable_provider
+  | Contract_missing_required_tool_use
+  | Contract_claim_only_after_owned_task
+  | Contract_needs_execution_progress
+  | Contract_passive_only
+  | Contract_satisfied_completion
+  | Contract_satisfied_execution
+
+let tool_contract_result_to_string = function
+  | Contract_unknown -> "unknown"
+  | Contract_not_dispatched -> "not_dispatched"
+  | Contract_violated -> "violated"
+  | Contract_tool_surface_mismatch -> "tool_surface_mismatch"
+  | Contract_no_tool_capable_provider -> "no_tool_capable_provider"
+  | Contract_missing_required_tool_use -> "missing_required_tool_use"
+  | Contract_claim_only_after_owned_task -> "claim_only_after_owned_task"
+  | Contract_needs_execution_progress -> "needs_execution_progress"
+  | Contract_passive_only -> "passive_only"
+  | Contract_satisfied_completion -> "satisfied_completion"
+  | Contract_satisfied_execution -> "satisfied_execution"
+
+(* Lift the typed [Keeper_contract_classifier.contract_status] into the
+   receipt-level [tool_contract_result].  Bridges the seven classifier
+   outcomes; the four boundary states are emitted only by producer sites
+   that already know they hold one of those states. *)
+let tool_contract_result_of_contract_status :
+    Keeper_contract_classifier.contract_status -> tool_contract_result = function
+  | Tool_surface_mismatch _ -> Contract_tool_surface_mismatch
+  | Missing_required_tool_use -> Contract_missing_required_tool_use
+  | Claim_only_after_owned_task -> Contract_claim_only_after_owned_task
+  | Needs_execution_progress -> Contract_needs_execution_progress
+  | Passive_only -> Contract_passive_only
+  | Satisfied_completion -> Contract_satisfied_completion
+  | Satisfied_execution -> Contract_satisfied_execution
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
@@ -168,7 +225,7 @@ type t =
   ; canonical_tools : string list
   ; unexpected_tools : string list
   ; tools_used : string list
-  ; tool_contract_result : string
+  ; tool_contract_result : tool_contract_result
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types.sandbox_profile
   ; sandbox_root : string option
@@ -320,9 +377,6 @@ let () =
 
 let operator_disposition (receipt : t) =
   let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
-  let tool_contract_result =
-    String.lowercase_ascii receipt.tool_contract_result
-  in
   let error_kind =
     Option.map
       (fun kind -> String.lowercase_ascii (error_kind_to_string kind))
@@ -397,16 +451,15 @@ let operator_disposition (receipt : t) =
   then ("pause_human", "turn_livelock_blocked")
   else if
     receipt.tool_surface.tool_requirement = Required
-    && (List.mem tool_contract_result
-          [
-            "violated";
-            "unknown";
-            "needs_execution_progress";
-            "missing_required_tool_use";
-            "passive_only";
-            "claim_only_after_owned_task";
-            "tool_surface_mismatch";
-            "no_tool_capable_provider";
+    && (List.mem receipt.tool_contract_result
+          [ Contract_violated
+          ; Contract_unknown
+          ; Contract_needs_execution_progress
+          ; Contract_missing_required_tool_use
+          ; Contract_passive_only
+          ; Contract_claim_only_after_owned_task
+          ; Contract_tool_surface_mismatch
+          ; Contract_no_tool_capable_provider
           ]
         || receipt.tools_used = [])
   then ("pause_human", "tool_required_unsatisfied")
@@ -448,7 +501,7 @@ let operator_disposition (receipt : t) =
          — investigate regression of #11651 silent-path fix"
         (outcome_kind_to_string receipt.outcome)
         (cascade_outcome_to_string receipt.cascade_outcome)
-        terminal_reason tool_contract_result
+        terminal_reason (tool_contract_result_to_string receipt.tool_contract_result)
         (Option.value
            (Option.map error_kind_to_string receipt.error_kind)
            ~default:"<none>");
@@ -550,7 +603,8 @@ let to_json (receipt : t) =
       ("canonical_tools", list_json receipt.canonical_tools);
       ("unexpected_tools", list_json receipt.unexpected_tools);
       ("tools_used", list_json receipt.tools_used);
-      ("tool_contract_result", `String receipt.tool_contract_result);
+      ( "tool_contract_result",
+        `String (tool_contract_result_to_string receipt.tool_contract_result) );
       ( "tool_surface",
         `Assoc
           [
@@ -699,7 +753,8 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "cascade_name", `String (cascade_name_to_string receipt.cascade_name)
     ; ( "cascade_outcome"
       , `String (cascade_outcome_to_string receipt.cascade_outcome) )
-    ; "tool_contract_result", `String receipt.tool_contract_result
+    ; ( "tool_contract_result"
+      , `String (tool_contract_result_to_string receipt.tool_contract_result) )
     ; ( "last_tool_name",
         match last_tool_name receipt with
         | Some value -> `String value
@@ -707,7 +762,9 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "tools_used", list_json receipt.tools_used
     ; ( "tool_contract",
         `Assoc
-          [ "result", `String receipt.tool_contract_result
+          [ ( "result"
+            , `String
+                (tool_contract_result_to_string receipt.tool_contract_result) )
           ; "required_tools", list_json receipt.tool_surface.required_tools
           ; ( "missing_required_tools",
               list_json receipt.tool_surface.missing_required_tools )

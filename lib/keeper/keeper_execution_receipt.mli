@@ -128,6 +128,30 @@ type cascade_outcome =
 
 val cascade_outcome_to_string : cascade_outcome -> string
 
+(** Receipt-level tool-contract evaluation result. Closed union of three
+    producer paths: (i) initial-state sentinel [Contract_unknown];
+    (ii) boundary-state overrides [Contract_not_dispatched],
+    [Contract_violated], [Contract_no_tool_capable_provider]; (iii) the
+    seven classifier outcomes mirrored from
+    [Keeper_contract_classifier.contract_status]. *)
+type tool_contract_result =
+  | Contract_unknown
+  | Contract_not_dispatched
+  | Contract_violated
+  | Contract_tool_surface_mismatch
+  | Contract_no_tool_capable_provider
+  | Contract_missing_required_tool_use
+  | Contract_claim_only_after_owned_task
+  | Contract_needs_execution_progress
+  | Contract_passive_only
+  | Contract_satisfied_completion
+  | Contract_satisfied_execution
+
+val tool_contract_result_to_string : tool_contract_result -> string
+
+val tool_contract_result_of_contract_status :
+  Keeper_contract_classifier.contract_status -> tool_contract_result
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
@@ -159,7 +183,7 @@ type t =
   ; canonical_tools : string list
   ; unexpected_tools : string list
   ; tools_used : string list
-  ; tool_contract_result : string
+  ; tool_contract_result : tool_contract_result
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types.sandbox_profile
   ; sandbox_root : string option

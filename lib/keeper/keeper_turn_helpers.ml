@@ -270,7 +270,7 @@ let record_pre_dispatch_terminal_observation
     ; canonical_tools = []
     ; unexpected_tools = []
     ; tools_used = []
-    ; tool_contract_result = "not_dispatched"
+    ; tool_contract_result = Keeper_execution_receipt.Contract_not_dispatched
     ; tool_surface = pre_dispatch_tool_surface
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta)

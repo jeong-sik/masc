@@ -25,7 +25,8 @@ type hook_accumulator =
   ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
-  ; mutable receipt_tool_contract_result : string
+  ; mutable receipt_tool_contract_result :
+      Keeper_execution_receipt.tool_contract_result
   }
 
 (** Immutable snapshot of hook outputs after OAS execution completes. *)
@@ -39,7 +40,8 @@ type hook_outputs =
   ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
-  ; out_receipt_tool_contract_result : string
+  ; out_receipt_tool_contract_result :
+      Keeper_execution_receipt.tool_contract_result
   }
 
 let freeze (acc : hook_accumulator) : hook_outputs =
@@ -214,7 +216,8 @@ let prepare_agent_setup
         ; approval_mode_derived
         }
     ; requested_tool_names = []
-    ; receipt_tool_contract_result = "unknown"
+    ; receipt_tool_contract_result =
+        Keeper_execution_receipt.Contract_unknown
     }
   in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
@@ -1024,7 +1027,8 @@ let prepare_agent_setup
   let initial_tool_surface_result =
     if initial_tool_surface.missing_required_tool_names <> []
     then (
-      acc.receipt_tool_contract_result <- "tool_surface_mismatch";
+      acc.receipt_tool_contract_result <-
+        Keeper_execution_receipt.Contract_tool_surface_mismatch;
       initial_tool_surface_blocker
       := Some
            (sdk_error_of_keeper_internal_error
@@ -1039,7 +1043,8 @@ let prepare_agent_setup
     else if
       initial_tool_surface.tool_gate_requested && initial_tool_surface.all_allowed = []
     then (
-      acc.receipt_tool_contract_result <- "no_tool_capable_provider";
+      acc.receipt_tool_contract_result <-
+        Keeper_execution_receipt.Contract_no_tool_capable_provider;
       Prometheus.inc_counter
         Prometheus.metric_empty_tool_universe_observed
         ~labels:

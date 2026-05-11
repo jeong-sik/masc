@@ -1026,13 +1026,19 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
     (defaults, { candidates; source = Hardcoded_defaults })
 
 let dedupe_stable (items : string list) =
-  let rec loop seen acc = function
+  (* Stable dedupe (first occurrence wins, ordering preserved).
+     Previous impl scanned a growing [seen] list via [List.mem] per
+     item — O(N^2).  Use a Hashtbl for membership while keeping a
+     list for the ordered output: O(N) total. *)
+  let seen = Hashtbl.create (List.length items) in
+  let rec loop acc = function
     | [] -> List.rev acc
+    | item :: rest when Hashtbl.mem seen item -> loop acc rest
     | item :: rest ->
-      if List.mem item seen then loop seen acc rest
-      else loop (item :: seen) (item :: acc) rest
+        Hashtbl.replace seen item ();
+        loop (item :: acc) rest
   in
-  loop [] [] items
+  loop [] items
 
 let expand_model_strings_for_execution ?rotation_scope (items : string list) =
   items

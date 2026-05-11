@@ -185,10 +185,11 @@ models = ["ollama:llama3"]
 temperature = 0.7
 max_tokens = 8192
 |};
-  (* Materialize so cascade.json exists for the strict loader. *)
-  (match M.ensure_materialized_json ~config_path:json_path with
-   | Ok _ -> ()
-   | Error e -> fail ("materialize failed unexpectedly: " ^ e));
+  (* RFC-0058 §9 Phase 9.3: the strict loader now renders TOML in
+     memory via [Cascade_config_loader.load_toml_in_memory], so no
+     on-disk cascade.json materialisation is needed. The [json_path]
+     variable is only used as the config-path argument because
+     [source_info] detects the TOML sibling automatically. *)
   match K.catalog_names_with_toml_fallback ~config_path:json_path () with
   | Error e -> fail ("expected Ok, got Error: " ^ e)
   | Ok (names, source) ->

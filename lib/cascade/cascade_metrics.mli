@@ -99,3 +99,12 @@ val on_auto_expansion_fanout : cascade:string -> fanout:int -> unit
     invoke unconditionally.  A [rate()] tracks how many extra
     candidates per cascade per second are synthesized by auto
     expansion. *)
+
+val on_ordering_health_widening : cascade:string -> unit
+(** Tick the ordering-step health-widening counter at
+    [order_weighted_entries] when [Cascade_health_tracker] has cooled
+    every provider (active = []) and the function falls back to the
+    unfiltered [entries] list.  A non-zero rate signals the health
+    tracker judged every provider in this cascade unhealthy yet
+    keeper turns continue to route — either the health tracker is
+    wrong or the cascade should fail closed. *)

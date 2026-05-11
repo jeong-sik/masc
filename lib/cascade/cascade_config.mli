@@ -141,6 +141,7 @@ val parse_weighted_entries :
 val order_weighted_entries :
   ?rand_int:(int -> int) ->
   ?rotation_scope:string ->
+  ?cascade:string ->
   Cascade_config_loader.weighted_entry list ->
   Cascade_config_loader.weighted_entry list
 (** Order weighted entries using the same health-adjusted runtime logic as

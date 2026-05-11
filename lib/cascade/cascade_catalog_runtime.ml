@@ -1241,6 +1241,7 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
       let ordered_entries =
         Cascade_config.order_weighted_entries
           ~rotation_scope:normalized
+          ~cascade:normalized
           profile.weighted_entries
       in
       let parsed_declared_providers =
@@ -1312,6 +1313,7 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
       let ordered_entries =
         Cascade_config.order_weighted_entries
           ~rotation_scope:normalized
+          ~cascade:normalized
           profile.weighted_entries
       in
       let parsed_declared_providers =
@@ -1401,6 +1403,7 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
       let ordered_entries =
         Cascade_config.order_weighted_entries
           ~rotation_scope:normalized
+          ~cascade:normalized
           profile.weighted_entries
       in
       let parsed_pairs =

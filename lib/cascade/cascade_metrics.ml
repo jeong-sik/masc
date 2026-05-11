@@ -337,3 +337,24 @@ let on_auto_expansion_fanout ~cascade ~fanout =
       ~labels:[ ("cascade", cascade) ]
       ~delta:(float_of_int fanout)
       ()
+
+(* [order_weighted_entries] is a fail-OPEN ordering step: when the
+   [Cascade_health_tracker] has cooled all providers (every weight
+   drops to 0 and [active = []]), the function silently falls back
+   to the unfiltered [entries] list — same shape as iter 12's
+   [provider_filter_widening], one stage later in the pipeline.
+
+   A non-zero rate here means [Cascade_health_tracker] judged every
+   provider in this cascade unhealthy, yet keeper turns continue to
+   route on the same list as if the health tracker had said nothing.
+   That's an emergency signal: either the health tracker is wrong
+   (false negatives across the board) or every provider is actually
+   down and the cascade should fail closed.
+
+   Cardinality: cascades (~10) = ~10 series. *)
+let metric_ordering_health_widening = "masc_cascade_ordering_health_widening_total"
+
+let on_ordering_health_widening ~cascade =
+  Prometheus.inc_counter metric_ordering_health_widening
+    ~labels:[ ("cascade", cascade) ]
+    ()

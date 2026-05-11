@@ -697,6 +697,19 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    [expand_weighted_entries] can emit unconditionally without
    polluting Prometheus state on every cascade load.  fanout>0
    exercises the inc_counter call site. *)
+(* Smoke + cardinality guard for
+   [Cascade_metrics.on_ordering_health_widening].  The widening arm
+   in [order_weighted_entries] is hit only when [Cascade_health_tracker]
+   has cooled every provider in a cascade — a hard scenario to provoke
+   from a unit test (the global health tracker has long-lived state
+   shared across the suite).  Smoke test pins the cascade label name
+   + helper signature so a future refactor that breaks the call shape
+   trips here rather than silently dead-coding the counter. *)
+let test_ordering_health_widening_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_ordering_health_widening
+    ~cascade:"smoke_test_cascade_iter18";
+  check bool "single-label cascade helper callable" true true
+
 let test_auto_expansion_fanout_zero_is_no_op_and_positive_callable () =
   Masc_mcp.Cascade_metrics.on_auto_expansion_fanout
     ~cascade:"smoke_test_cascade_iter15" ~fanout:0;
@@ -985,6 +998,9 @@ let () =
           test_case
             "auto_expansion_fanout: zero is no-op, positive callable" `Quick
             test_auto_expansion_fanout_zero_is_no_op_and_positive_callable;
+          test_case
+            "ordering_health_widening: cascade label helper callable" `Quick
+            test_ordering_health_widening_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

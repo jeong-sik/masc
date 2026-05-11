@@ -825,6 +825,7 @@ let provider_key_of_model_string s =
 let order_weighted_entries
     ?(rand_int = weighted_random_int)
     ?rotation_scope
+    ?cascade
     (entries : Cascade_config_loader.weighted_entry list) =
   let entries = maybe_rotate_weighted_entries ?rotation_scope entries in
   let entries = expand_weighted_auto_entries ?rotation_scope entries in
@@ -848,7 +849,23 @@ let order_weighted_entries
         (fun (e : Cascade_config_loader.weighted_entry) -> e.weight > 0)
         health_adjusted
     in
-    let effective = if active = [] then entries else active in
+    let effective =
+      if active = [] then (
+        (* Fail-open: every provider has been cooled by the health
+           tracker, but we still serve on the unfiltered list rather
+           than failing closed.  Emit a counter so operators can
+           alert on this state — see iter 18 commit + iter 12's
+           [on_provider_filter_widening] for the structural parallel.
+           Counter only ticks when the caller supplied [~cascade];
+           internal cascade_config callers without a cascade context
+           stay silent until they're audited individually. *)
+        Option.iter
+          (fun cascade ->
+            Cascade_metrics.on_ordering_health_widening ~cascade)
+          cascade;
+        entries)
+      else active
+    in
     weighted_shuffle ~rand_int effective
 
 let resolve_model_strings_traced_with

@@ -662,7 +662,8 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
                  Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
                    retry_cascade;
                reason;
-               outcome = "retry_scheduled";
+               outcome =
+                 Masc_mcp.Keeper_execution_receipt.Rotation_retry_scheduled;
                slot_release_at_phase = None;
                productive_phase_elapsed_ms = Some 174000;
                retry_phase_elapsed_ms = Some 0;

@@ -902,7 +902,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           ?retry_phase_elapsed_ms
           ~(from_cascade : Keeper_execution_receipt.cascade_name)
           ~(retry : EC.degraded_retry)
-          ~(outcome : string)
+          ~(outcome : Keeper_execution_receipt.cascade_rotation_outcome)
           (err : Agent_sdk.Error.sdk_error) =
         let attempt : Keeper_execution_receipt.cascade_rotation_attempt =
           {
@@ -1431,7 +1431,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             ?retry_phase_elapsed_ms
                             ~from_cascade:execution.cascade_name
                             ~retry:degraded_retry
-                            ~outcome:"setup_failed"
+                            ~outcome:
+                              Keeper_execution_receipt.Rotation_setup_failed
                             fail_open_err;
                           Log.Keeper.warn
                             "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but retry setup failed: %s"
@@ -1464,7 +1465,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             ?retry_phase_elapsed_ms
                             ~from_cascade:execution.cascade_name
                             ~retry:degraded_retry
-                            ~outcome:"retry_scheduled"
+                            ~outcome:
+                              Keeper_execution_receipt.Rotation_retry_scheduled
                             err;
                           degraded_retry_info := Some degraded_retry;
                           Log.Keeper.warn
@@ -1544,7 +1546,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         ?retry_phase_elapsed_ms
                         ~from_cascade:execution.cascade_name
                         ~retry:degraded_retry
-                        ~outcome:"budget_exhausted"
+                        ~outcome:
+                          Keeper_execution_receipt.Rotation_budget_exhausted
                         err;
                       Log.Keeper.warn
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but remaining turn budget %.1fs is below the OAS retry guard/minimum; ending this cycle: %s"
@@ -1573,7 +1576,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         ?retry_phase_elapsed_ms
                         ~from_cascade:execution.cascade_name
                         ~retry:degraded_retry
-                        ~outcome:"slot_phase_exhausted"
+                        ~outcome:
+                          Keeper_execution_receipt.Rotation_slot_phase_exhausted
                         err;
                       Log.Keeper.warn
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but productive slot phase budget %.1fs is exhausted after %.1fs; ending this cycle to release the outer turn slot: %s"

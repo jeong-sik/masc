@@ -57,7 +57,7 @@ vars ==
     << turn_live, turn_phase, decision_stage, cascade_state,
        measurement_bound, selected_model_bound >>
 
-TurnPhaseSet == {"idle", "prompting", "executing", "compacting", "finalizing"}
+TurnPhaseSet == {"idle", "prompting", "routing", "executing", "compacting", "finalizing", "exhausted"}
 DecisionSet  == {"undecided", "guard_ok", "gate_rejected", "tool_policy_selected"}
 CascadeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {

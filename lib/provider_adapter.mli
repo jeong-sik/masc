@@ -83,6 +83,13 @@ type tool_policy = {
           [cache_read_input_tokens] above the cacheable input threshold.
           Used by [Keeper_usage_trust] to flag caching-likely-disabled
           anomalies. RFC-0058 §2.4: capability flag, not a vendor match. *)
+  max_turns_per_attempt : int option;
+      (** Hard cap on the provider-internal agent loop turn count for a
+          single subprocess attempt.  [None] means the provider does not
+          impose a sub-keeper cap; [Some n] clamps the keeper-level
+          [max_turns] to [n] before handing it to the underlying CLI.
+          Only Claude Code currently sets this (loop hard cap = 30).
+          RFC-0058 §2.4: capability flag, not a vendor match. *)
 }
 
 type telemetry_policy = {

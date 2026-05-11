@@ -22,22 +22,28 @@ type cli_transport_overrides =
      to honour this field there. *)
   }
 
-let claude_code_max_turns_hard_cap = 30
+(* SSOT for the Claude Code subprocess hard cap lives in
+   [Provider_adapter] (claude adapter's [tool_policy.max_turns_per_attempt]).
+   The constant below is a backward-compat re-export for the existing test
+   suite; new code reads the cap via [provider_effective_max_turns] or
+   [Provider_adapter.adapter_of_provider_kind]. *)
+let claude_code_max_turns_hard_cap =
+  match
+    Provider_adapter.adapter_of_provider_kind
+      Llm_provider.Provider_config.Claude_code
+  with
+  | Some adapter ->
+    Option.value ~default:30 adapter.tool_policy.max_turns_per_attempt
+  | None -> 30
+;;
 
 let provider_effective_max_turns kind requested =
-  match kind with
-  | Llm_provider.Provider_config.Claude_code ->
-    min requested claude_code_max_turns_hard_cap
-  | Anthropic
-  | OpenAI_compat
-  | Ollama
-  | Gemini
-  | Glm
-  | Kimi
-  | DashScope
-  | Gemini_cli
-  | Kimi_cli
-  | Codex_cli -> requested
+  match Provider_adapter.adapter_of_provider_kind kind with
+  | Some adapter ->
+    (match adapter.tool_policy.max_turns_per_attempt with
+     | Some cap -> min requested cap
+     | None -> requested)
+  | None -> requested
 ;;
 
 (* #10097: codex_cli can only expose keeper-bound runtime MCP tools when the
@@ -416,19 +422,28 @@ let runtime_mcp_policy_for_provider
     let trimmed = String.trim agent_name in
     if String.equal trimmed "" then None else Some trimmed
   in
-  match policy_opt, provider_cfg.kind, agent_name with
-  | Some policy, Llm_provider.Provider_config.Codex_cli, Some agent_name ->
+  (* Codex CLI's [requires_per_keeper_bridging_for_bound_actor_tools = true]
+     is the capability flag that gates the legacy strip-and-bridge path; see
+     [Provider_adapter.codex_cli_tool_policy].  Other providers either carry
+     headers natively or do not need bridging. *)
+  let requires_per_keeper_bridging =
+    Provider_adapter
+    .requires_per_keeper_bridging_for_bound_actor_tools_for_config
+      provider_cfg
+  in
+  match policy_opt, requires_per_keeper_bridging, agent_name with
+  | Some policy, true, Some agent_name ->
     (* Codex CLI still cannot carry arbitrary per-request headers, but OAS
          routes [Authorization: Bearer ...] through [bearer_token_env_var].
          Keep only that auth path plus non-secret identity headers so Codex can
          pre-approve runtime MCP tools without leaking tokens through argv. *)
     Some (codex_runtime_mcp_policy_for_agent ~agent_name policy)
-  | Some policy, Llm_provider.Provider_config.Codex_cli, None ->
+  | Some policy, true, None ->
     (* No agent_name to inject — preserve the legacy strip-all behavior. *)
     Some (runtime_mcp_policy_without_http_headers policy)
-  | Some policy, _, Some agent_name ->
+  | Some policy, false, Some agent_name ->
     Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
-  | Some policy, _, None -> Some policy
+  | Some policy, false, None -> Some policy
   | None, _, _ -> None
 ;;
 
@@ -657,17 +672,24 @@ let resolve_tool_lane_for_oas_tools
       |> dedupe_preserve_order
     | _ -> []
   in
+  let requires_per_keeper_bridging =
+    Provider_adapter
+    .requires_per_keeper_bridging_for_bound_actor_tools_for_config
+      provider_cfg
+  in
   let codex_can_auth_keeper_bound_actor_tools =
-    match provider_cfg.kind, requested_agent_name with
-    | Llm_provider.Provider_config.Codex_cli, Some agent_name
-      when Option.is_some (keeper_name_of_agent_name agent_name) ->
+    match requested_agent_name with
+    | Some agent_name
+      when requires_per_keeper_bridging
+           && Option.is_some (keeper_name_of_agent_name agent_name) ->
       Option.is_some (per_keeper_authorization_header ~agent_name)
     | _ -> false
   in
   let codex_keeper_bound_actor_tools =
-    match provider_cfg.kind, requested_agent_name with
-    | Llm_provider.Provider_config.Codex_cli, Some agent_name
-      when Option.is_some (keeper_name_of_agent_name agent_name)
+    match requested_agent_name with
+    | Some agent_name
+      when requires_per_keeper_bridging
+           && Option.is_some (keeper_name_of_agent_name agent_name)
            && not codex_can_auth_keeper_bound_actor_tools ->
       List.filter
         runtime_mcp_tool_requires_bound_actor

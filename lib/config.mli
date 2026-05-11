@@ -24,3 +24,18 @@ val visible_tool_schemas :
   ?include_deprecated:bool ->
   unit -> Masc_domain.tool_schema list
 (** Get visible tool schemas. *)
+
+val surface_tool_schemas :
+  ?include_hidden:bool ->
+  ?include_deprecated:bool ->
+  unit -> Masc_domain.tool_schema list
+(** Subset of [visible_tool_schemas] whose [Tool_scope.classify] is
+    [Surface]. Initial keeper-internal list is empty, so on PR-N0
+    merge this returns the same set as [visible_tool_schemas]. PR-N1+
+    populate the keeper-internal list, narrowing this surface. *)
+
+val keeper_internal_tool_schemas : unit -> Masc_domain.tool_schema list
+(** Subset whose [Tool_scope.classify] is [Keeper_internal]. Includes
+    hidden + deprecated by default since keeper personas may reach
+    tools the external MCP surface does not expose. Empty until PR-N1
+    populates the keeper-internal list. *)

@@ -137,6 +137,37 @@ temperature = 0.7
       let second_item = List.nth group.items 1 in
       check string "second item id" "gemini_cli:gemini-3-flash-preview" second_item.id
 
+(* Companion: model strings with embedded colons are silently dropped by
+   [provider_model_of_string]'s single-separator contract.  This pins
+   the contract so a future relax (e.g. split-on-first-colon) is
+   detected at test time rather than silently changing semantics. *)
+let test_load_cascade_profile_drops_multi_colon_model () =
+  with_temp_dir "cascade_multi_colon" @@ fun config_dir ->
+  with_config_dir config_dir @@ fun () ->
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  let toml_content =
+    {|[mixed_profile]
+models = [
+  { model = "ollama:qwen3:14b", weight = 1 },
+  { model = "ollama:llama3-8b", weight = 1 }
+]
+|}
+  in
+  write_file toml_path toml_content;
+  let json_path = Filename.concat config_dir "cascade.json" in
+  let profile_opt =
+    Masc_mcp.Cascade_config_loader.load_cascade_profile
+      ~config_path:json_path ~name:"mixed_profile"
+  in
+  match profile_opt with
+  | None -> fail "expected profile to parse with one surviving entry"
+  | Some profile ->
+      let group = List.nth profile.groups 0 in
+      check int "multi-colon entry dropped, single-colon survives" 1
+        (List.length group.items);
+      let item = List.nth group.items 0 in
+      check string "surviving item model" "llama3-8b" item.model
+
 (* -------------------------------------------------------------------------- *)
 (* TOML materializer: <profile>.groups -> <profile>_groups JSON key         *)
 (* -------------------------------------------------------------------------- *)
@@ -192,6 +223,8 @@ let () =
             test_load_cascade_profile_hierarchical;
           test_case "flat models fallback" `Quick
             test_load_cascade_profile_flat_models_fallback;
+          test_case "multi-colon model dropped" `Quick
+            test_load_cascade_profile_drops_multi_colon_model;
         ] );
       ( "materializer",
         [

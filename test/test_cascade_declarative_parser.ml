@@ -338,6 +338,58 @@ let test_empty_toml () =
   check int "models" 0 (List.length cfg.models);
   check int "bindings" 0 (List.length cfg.bindings)
 
+(* Regression: top-level scalar/array entries must not be treated as
+   provider-alias tables.  Without the table filter in
+   [parse_bindings_and_aliases], values such as [comment = "..."] crash
+   [Otoml.get_table] inside [parse_provider_alias_table].  RFC-0058 §9.4. *)
+let test_top_level_scalar_does_not_crash () =
+  let toml =
+    {|
+comment = "edited in dashboard"
+
+[providers.example]
+protocol = "openai-http"
+transport = "http"
+endpoint = "https://example.com"
+
+[models.example-model]
+max-context = 4096
+
+[example.example-model]
+max-input = 4096
+max-output = 1024
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  check int "providers" 1 (List.length cfg.providers);
+  check int "models" 1 (List.length cfg.models);
+  check int "bindings" 1 (List.length cfg.bindings)
+
+(* Companion: top-level array entries must also be filtered out without
+   crashing.  [Otoml.get_table] on a [TomlArray] would type-error. *)
+let test_top_level_array_does_not_crash () =
+  let toml =
+    {|
+tags = ["a", "b"]
+
+[providers.example]
+protocol = "openai-http"
+transport = "http"
+endpoint = "https://example.com"
+
+[models.example-model]
+max-context = 4096
+
+[example.example-model]
+max-input = 4096
+max-output = 1024
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  check int "providers" 1 (List.length cfg.providers);
+  check int "models" 1 (List.length cfg.models);
+  check int "bindings" 1 (List.length cfg.bindings)
+
 let test_lookup_helpers () =
   let cfg = ok_config (parse_string full_toml) in
   check bool "provider_of_id found" true
@@ -668,6 +720,10 @@ let () =
         test_case "unknown strategy" `Quick test_unknown_strategy;
         test_case "invalid TOML syntax" `Quick test_invalid_toml_syntax;
         test_case "empty TOML" `Quick test_empty_toml;
+        test_case "top-level scalar tolerated" `Quick
+          test_top_level_scalar_does_not_crash;
+        test_case "top-level array tolerated" `Quick
+          test_top_level_array_does_not_crash;
       ];
       "lookup", [
         test_case "lookup helpers" `Quick test_lookup_helpers;

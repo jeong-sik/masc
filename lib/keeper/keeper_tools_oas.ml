@@ -1001,9 +1001,7 @@ let make_tool_bundle
       (Keeper_tool_alias.public_names ())
   in
   let assembled_surface_names =
-    List.filter
-      (fun n -> not (List.mem n aliased_internal_names))
-      universe_names
+    List.filter (fun n -> not (List.mem n aliased_internal_names)) universe_names
     @ alias_public_names_in_surface
   in
   (* Record tool assignment telemetry for causal tracing.

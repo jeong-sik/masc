@@ -272,8 +272,8 @@ let parse_thinking_control_format ~(path : string) (raw : string)
   | other ->
     Logs.warn (fun m ->
       m
-        "cascade_declarative_parser: %s.thinking-control-format = %S — expected one of \
-         none|thinking-object|chat-template-kwargs, defaulting to none"
+        "cascade_declarative_parser: %s.capabilities.thinking-control-format = %S — \
+         expected one of none|thinking-object|chat-template-kwargs, defaulting to none"
         path
         other);
     No_thinking_control
@@ -354,7 +354,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let streaming = Otoml.find_or ~default:true tbl Otoml.get_boolean [ "streaming" ] in
     let capabilities =
       Otoml.find_opt tbl Fun.id [ "capabilities" ]
-      |> Option.map (parse_model_capabilities ~path)
+      |> Option.map (parse_model_capabilities ~path:(path ^ ".capabilities"))
     in
     Ok
       { id

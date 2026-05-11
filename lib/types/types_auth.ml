@@ -143,6 +143,30 @@ type permission =
   | CanAdmin
 [@@deriving show { with_path = false }]
 
+(** Stable wire format for [permission].  Returns the same string as
+    [show_permission] does today (PascalCase constructor name), but
+    locks the contract: future renames of the variant constructor will
+    NOT change the wire string, because callers must update this
+    explicit match at the same time.  Public API/SSE/error output
+    (tool_catalog requiredPermission, Auth_error.Forbidden action)
+    depends on these exact strings. *)
+let permission_to_string = function
+  | CanInit -> "CanInit"
+  | CanReset -> "CanReset"
+  | CanJoin -> "CanJoin"
+  | CanLeave -> "CanLeave"
+  | CanReadState -> "CanReadState"
+  | CanAddTask -> "CanAddTask"
+  | CanClaimTask -> "CanClaimTask"
+  | CanCompleteTask -> "CanCompleteTask"
+  | CanBroadcast -> "CanBroadcast"
+  | CanOpenPortal -> "CanOpenPortal"
+  | CanSendPortal -> "CanSendPortal"
+  | CanCreateWorktree -> "CanCreateWorktree"
+  | CanRemoveWorktree -> "CanRemoveWorktree"
+  | CanVote -> "CanVote"
+  | CanAdmin -> "CanAdmin"
+
 (** Get permissions for a role *)
 let permissions_for_role = function
   | Worker -> [

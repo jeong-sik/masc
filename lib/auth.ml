@@ -1211,7 +1211,7 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
       Error
         (Auth
            (Auth_error.Forbidden
-              { agent = agent_name; action = show_permission permission }))
+              { agent = agent_name; action = permission_to_string permission }))
   else (
     match verify_optional_token config ~agent_name ~token with
     | Error e -> Error e
@@ -1222,7 +1222,7 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
         Error
           (Auth
              (Auth_error.Forbidden
-                { agent = agent_name; action = show_permission permission }))
+                { agent = agent_name; action = permission_to_string permission }))
     | Ok None ->
       if not auth_cfg.require_token
       then
@@ -1234,7 +1234,7 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
           Error
             (Auth
                (Auth_error.Forbidden
-                  { agent = agent_name; action = show_permission permission }))
+                  { agent = agent_name; action = permission_to_string permission }))
       else Error (Auth (Auth_error.Unauthorized "Token required")))
 ;;
 

@@ -71,7 +71,7 @@ let int_arg_opt args key =
 
 let permission_to_json tool_name =
   match Auth.permission_for_tool tool_name with
-  | Some permission -> `String (Masc_domain.show_permission permission)
+  | Some permission -> `String (Masc_domain.permission_to_string permission)
   | None -> `Null
 
 let auth_snapshot_json ctx =

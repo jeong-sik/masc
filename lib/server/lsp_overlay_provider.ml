@@ -42,7 +42,7 @@ let codelens_to_json (a : annotation) : Yojson.Safe.t =
       ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
     ]
   in
-  let kind_label = show_annotation_kind a.kind in
+  let kind_label = annotation_kind_to_string a.kind in
   let title =
     match a.goal_id with
     | Some g -> Printf.sprintf "[%s] %s (%s)" kind_label a.content g
@@ -64,7 +64,7 @@ let inlay_hint_to_json (a : annotation) : Yojson.Safe.t =
     | Some g, Some t -> Printf.sprintf "goal:%s task:%s" g t
     | Some g, None -> Printf.sprintf "goal:%s" g
     | None, Some t -> Printf.sprintf "task:%s" t
-    | None, None -> Printf.sprintf "[%s]" (show_annotation_kind a.kind)
+    | None, None -> Printf.sprintf "[%s]" (annotation_kind_to_string a.kind)
   in
   `Assoc [
     ("position", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
@@ -171,7 +171,7 @@ let enrich_hover ~base_dir ~file_path ~line (result : Yojson.Safe.t) =
   else
     let masc_section =
       String.concat "\n" (List.map (fun (a : annotation) ->
-        let kind = show_annotation_kind a.kind in
+        let kind = annotation_kind_to_string a.kind in
         match (a.goal_id, a.task_id) with
         | Some g, Some t ->
           Printf.sprintf "- **[%s]** %s (goal:%s task:%s)" kind a.content g t

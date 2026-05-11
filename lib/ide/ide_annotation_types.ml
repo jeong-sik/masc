@@ -12,6 +12,18 @@ type annotation_kind =
   | Bookmark
 [@@deriving show, eq]
 
+(** Stable wire format for {!annotation_kind}.  Pair-counterpart to
+    {!annotation_kind_of_string}; together they round-trip the JSON
+    [kind] field on annotation records.  Locks the contract against
+    [@@deriving show] template drift (and against accidental
+    constructor renames — both directions must update in lockstep). *)
+let annotation_kind_to_string = function
+  | Comment -> "Comment"
+  | Decision -> "Decision"
+  | Question -> "Question"
+  | Bookmark -> "Bookmark"
+;;
+
 let annotation_kind_of_string = function
   | "Comment" -> Some Comment
   | "Decision" -> Some Decision
@@ -66,7 +78,7 @@ let annotation_to_json (a : annotation) : Yojson.Safe.t =
     ; "line_start", `Int a.line_start
     ; "line_end", `Int a.line_end
     ; "keeper_id", `String a.keeper_id
-    ; "kind", `String (show_annotation_kind a.kind)
+    ; "kind", `String (annotation_kind_to_string a.kind)
     ; "content", `String a.content
     ; ( "goal_id"
       , match a.goal_id with

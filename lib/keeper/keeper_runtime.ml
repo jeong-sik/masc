@@ -646,7 +646,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
               (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
           | Ok { meta = m; materialized } ->
               if m.paused then
-                (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
+                (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
               else
               let stale_now =
                 (not materialized)

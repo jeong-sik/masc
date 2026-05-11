@@ -135,3 +135,28 @@ let metric_lkg_recovery = "masc_cascade_lkg_recovery_total"
 
 let on_lkg_recovery () =
   Prometheus.inc_counter metric_lkg_recovery ()
+
+(* Profile-validation step rejects individual candidates with one of
+   three typed reasons from [Cascade_config.parse_weighted_entry_diag].
+   Previously the reason was surfaced only in the profile_rejection
+   error message — operators had no machine-readable signal to alert
+   on (e.g. a missing credential dropping a whole cascade arm).
+   Pair to [Provider_tool_support.cascade_filter_rejection_metric]
+   (#10474), which observes the rejection happening one step later
+   in the pipeline (filter stage, after parsing succeeded).
+
+   Cardinality: cascades (~10) × reasons (3) = ~30 series.
+
+   Labels:
+   - "unregistered_scheme" — provider scheme not in the runtime
+                              registry (typo or removed adapter)
+   - "unavailable_scheme"  — registered but missing credential or
+                              runtime lane disabled (the most common
+                              operator-actionable signal)
+   - "invalid_syntax"      — entry string couldn't be parsed at all *)
+let metric_profile_candidate_drop = "masc_cascade_profile_candidate_drop_total"
+
+let on_profile_candidate_drop ~cascade ~reason =
+  Prometheus.inc_counter metric_profile_candidate_drop
+    ~labels:[ ("cascade", cascade); ("reason", reason) ]
+    ()

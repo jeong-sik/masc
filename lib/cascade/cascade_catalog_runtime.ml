@@ -621,6 +621,8 @@ let validate_profile_static ~config_path ~required_capability_profile name
                   ({ model_string = entry.model; provider_cfg } :: ok_acc, err_acc)
               | Error
                   (Cascade_config.Drop_unregistered_scheme { model; scheme }) ->
+                  Cascade_metrics.on_profile_candidate_drop
+                    ~cascade:name ~reason:"unregistered_scheme";
                   ( ok_acc,
                     Printf.sprintf
                       "candidate %S uses unregistered provider scheme %S"
@@ -628,6 +630,8 @@ let validate_profile_static ~config_path ~required_capability_profile name
                     :: err_acc )
               | Error
                   (Cascade_config.Drop_unavailable_scheme { model; scheme }) ->
+                  Cascade_metrics.on_profile_candidate_drop
+                    ~cascade:name ~reason:"unavailable_scheme";
                   ( ok_acc,
                     Printf.sprintf
                       "candidate %S uses unavailable provider scheme %S \
@@ -635,6 +639,8 @@ let validate_profile_static ~config_path ~required_capability_profile name
                       model scheme
                     :: err_acc )
               | Error (Cascade_config.Drop_invalid_syntax model) ->
+                  Cascade_metrics.on_profile_candidate_drop
+                    ~cascade:name ~reason:"invalid_syntax";
                   ( ok_acc,
                     Printf.sprintf
                       "candidate %S has invalid provider:model syntax"

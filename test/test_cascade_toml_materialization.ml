@@ -554,6 +554,23 @@ models = [
          in
          loop 0)
 
+(* Smoke guard for [Cascade_metrics.on_profile_candidate_drop]: the
+   call site in [validate_profile_static] is only exercised when an
+   invalid candidate entry slips past the 5-layer typed parser, which
+   is hard to provoke from a TOML fixture (the parser typically
+   rejects shape errors first).  This smoke test exercises the three
+   reasons directly so a future refactor that drops the call site
+   loses a reference (mli check) rather than silently dead-coding the
+   counter.  Prometheus state is process-global and not asserted. *)
+let test_profile_candidate_drop_helpers_do_not_throw () =
+  Masc_mcp.Cascade_metrics.on_profile_candidate_drop
+    ~cascade:"smoke_test_cascade" ~reason:"unregistered_scheme";
+  Masc_mcp.Cascade_metrics.on_profile_candidate_drop
+    ~cascade:"smoke_test_cascade" ~reason:"unavailable_scheme";
+  Masc_mcp.Cascade_metrics.on_profile_candidate_drop
+    ~cascade:"smoke_test_cascade" ~reason:"invalid_syntax";
+  check bool "all three reasons callable without raising" true true
+
 (* Regression guard for [Serving_last_known_good] entry + recovery
    transitions.  Previously these transitions happened silently:
    [inspect_active] would flip a Validated cache into LKG (or back)
@@ -724,5 +741,10 @@ let () =
         [
           test_case "valid -> invalid (LKG) -> valid (recovery)" `Quick
             test_serving_last_known_good_entry_and_recovery;
+        ] );
+      ( "metrics_smoke",
+        [
+          test_case "profile_candidate_drop helpers do not throw" `Quick
+            test_profile_candidate_drop_helpers_do_not_throw;
         ] );
     ]

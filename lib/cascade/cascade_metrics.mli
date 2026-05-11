@@ -38,3 +38,9 @@ val on_lkg_recovery : unit -> unit
 (** Tick once per [inspect_active] call that transitions out of
     [Serving_last_known_good] back to [Validated] (operator fixed the
     cascade.toml fault). *)
+
+val on_profile_candidate_drop : cascade:string -> reason:string -> unit
+(** Tick the per-cascade candidate drop counter at [validate_profile_static]
+    when [Cascade_config.parse_weighted_entry_diag] rejects an entry.
+    [reason] must be one of [unregistered_scheme], [unavailable_scheme],
+    [invalid_syntax]. *)

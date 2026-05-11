@@ -124,7 +124,7 @@ type agent_setup =
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
-  ; receipt_stop_reason_ref : string option ref
+  ; receipt_stop_reason_ref : Cascade_runner.stop_reason option ref
   ; receipt_cascade_observation_ref : Cascade_legacy_runner.cascade_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; reported_tool_names_ref : string list ref
@@ -527,7 +527,9 @@ let prepare_agent_setup
   let actual_keeper_tool_names_ref : string list ref = ref [] in
   let receipt_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
-  let receipt_stop_reason_ref : string option ref = ref None in
+  let receipt_stop_reason_ref : Cascade_runner.stop_reason option ref =
+    ref None
+  in
   let receipt_cascade_observation_ref
     : Cascade_legacy_runner.cascade_observation option ref
     =

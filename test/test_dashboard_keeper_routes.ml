@@ -675,7 +675,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
              };
            ]
          | _ -> []);
-      stop_reason = Some "completed";
+      stop_reason = Some Masc_mcp.Cascade_runner.Completed;
       error_kind = None;
       error_message = None;
       started_at;

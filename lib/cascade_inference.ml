@@ -64,6 +64,18 @@ let for_cascade ~(name : string) : t =
         thinking_enabled = params.thinking_enabled;
         thinking_budget = params.thinking_budget }
   | Error detail ->
+      (* Fail-OPEN to default: cascade.toml per-cascade inference
+         params (temperature, max_tokens, thinking_enabled,
+         thinking_budget) are silently replaced with the [empty]
+         record, and downstream callers resolve to their own
+         fallbacks.  Reuse iter 10 resolve_failure counter; root
+         cause is the same [lookup_active_profile] Error path that
+         iter 10 already labels [lookup_failed].  Without the tick,
+         operators saw only the WARN log line and had no way to
+         alert on cascade.toml inference settings being silently
+         ignored. *)
+      Cascade_metrics.on_resolve_failure
+        ~cascade:name ~reason:"lookup_failed";
       Log.warn ~ctx:"cascade"
         "%s: runtime catalog inference lookup failed (%s), using empty defaults"
         name detail;

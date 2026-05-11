@@ -151,7 +151,7 @@ describe('monitoring navigation labels', () => {
     const sections = sectionItemsForTab('monitoring')
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
-    expect(hiddenIds).toEqual(['observatory', 'memory-subsystems'])
+    expect(hiddenIds).toEqual(['observatory'])
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {

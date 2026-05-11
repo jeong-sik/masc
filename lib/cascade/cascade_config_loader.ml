@@ -67,27 +67,107 @@ let read_json_file path =
   Yojson.Safe.from_string content
 ;;
 
+(* Race-aware in-memory TOML loader.
+
+   Previous design (kept here for context — do not regress to it):
+     1. render TOML → json_string
+     2. stat → mtime  (after the read)
+     3. cache (mtime, json)
+   Failure mode: between steps 1 and 2 the operator atomically replaces
+   cascade.toml.  Step 1 captured the OLD content; step 2 captured the
+   NEW mtime.  The pair (NEW_mtime, OLD_content) lands in the cache and
+   pins stale config until the NEXT mtime change — operator's reload
+   silently lost.  Also: cache lookup happened after the render, so a
+   cache hit still paid the full TOML parse + JSON parse + serialize
+   cost.
+
+   Current design:
+     1. stat → mtime_pre                         (cheap; no read)
+     2. cache lookup keyed by (path, mtime_pre)
+          HIT  → return cached JSON, skip render entirely
+          MISS → render TOML → json_string
+                 stat → mtime_post
+                 if mtime_pre = mtime_post:  cache (mtime_pre, json)
+                 else:                       race; serve fresh json
+                                             but DO NOT cache
+   The skip-cache-on-race arm bounds the staleness window to a single
+   call; the next caller re-stats and either gets the settled mtime or
+   detects another race.  Cache-hit fast path drops TOML reparse cost
+   on every steady-state load.
+
+   The mtime drift is also surfaced via
+   [Cascade_metrics.on_toml_read_race] so operators can alert on
+   pathological reload churn (e.g. a writer that fsyncs in a tight
+   loop). *)
 let load_toml_in_memory config_path =
-  match Cascade_toml_materializer.render_toml_to_json_string ~config_path with
-  | Error msg -> Error msg
-  | Ok (source, json_string) ->
-    let mtime = (Unix.stat source.source_path).Unix.st_mtime in
-    let cache_key = source.source_path in
-    (match
-       with_cache_lock (fun () ->
-         match Hashtbl.find_opt config_cache cache_key with
-         | Some (cached_mtime, _) when Float.equal cached_mtime mtime -> `Cache_hit
-         | _ -> `Cache_miss)
-     with
-     | `Cache_hit -> Ok (Yojson.Safe.from_string json_string)
-     | `Cache_miss ->
-       let json = Yojson.Safe.from_string json_string in
-       with_cache_lock (fun () -> Hashtbl.replace config_cache cache_key (mtime, json));
-       Eio.traceln
-         "[CascadeConfig] loaded TOML %s mtime=%.0f (in-memory)"
-         source.source_path
-         mtime;
-       Ok json)
+  let source_state =
+    Cascade_toml_materializer.source_state ~config_path
+  in
+  let cache_key = source_state.info.source_path in
+  match source_state.source_mtime with
+  | None ->
+    (* Couldn't stat the resolved path.  Skip the pre-stat fast path
+       and let [render_toml_to_json_string] surface the real error
+       (file missing, permission denied, etc.) — its error message is
+       more actionable than what we could synthesize here. *)
+    (match Cascade_toml_materializer.render_toml_to_json_string ~config_path with
+     | Error msg -> Error msg
+     | Ok (_source, json_string) -> Ok (Yojson.Safe.from_string json_string))
+  | Some mtime_pre ->
+    let cached =
+      with_cache_lock (fun () ->
+        match Hashtbl.find_opt config_cache cache_key with
+        | Some (cached_mtime, cached_json)
+          when Float.equal cached_mtime mtime_pre ->
+          Some cached_json
+        | _ -> None)
+    in
+    (match cached with
+     | Some cached_json -> Ok cached_json
+     | None ->
+       (match Cascade_toml_materializer.render_toml_to_json_string ~config_path with
+        | Error msg -> Error msg
+        | Ok (_source, json_string) ->
+          let mtime_post =
+            try Some (Unix.stat cache_key).Unix.st_mtime with
+            | Unix.Unix_error _ | Sys_error _ -> None
+          in
+          let json = Yojson.Safe.from_string json_string in
+          (match mtime_post with
+           | Some mp when Float.equal mp mtime_pre ->
+             with_cache_lock (fun () ->
+               Hashtbl.replace config_cache cache_key (mp, json));
+             Eio.traceln
+               "[CascadeConfig] loaded TOML %s mtime=%.0f (in-memory)"
+               cache_key
+               mp;
+             Ok json
+           | Some mp ->
+             (* mtime moved between the pre-stat and the post-stat.
+                The rendered content is fresh-as-of mp but we cannot
+                prove it matches either sample, so we don't cache —
+                next call will re-stat and converge. *)
+             Cascade_metrics.on_toml_read_race ();
+             Log.warn
+               ~ctx:"CascadeConfig"
+               "TOML changed mid-read (mtime %.0f -> %.0f) for %s; \
+                serving fresh content but skipping cache update to \
+                force re-stat on next call"
+               mtime_pre
+               mp
+               cache_key;
+             Ok json
+           | None ->
+             (* Post-stat failed (file vanished mid-read).  Treat
+                like a race so the caller re-converges next time. *)
+             Cascade_metrics.on_toml_read_race ();
+             Log.warn
+               ~ctx:"CascadeConfig"
+               "TOML disappeared mid-read after mtime=%.0f for %s; \
+                returning in-memory render but skipping cache update"
+               mtime_pre
+               cache_key;
+             Ok json)))
 ;;
 
 (* RFC-0058 §9 Phase 9.3: TOML is the only cascade source. The previous

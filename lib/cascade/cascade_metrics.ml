@@ -91,3 +91,15 @@ let on_parallel_validation ~result =
   Prometheus.inc_counter metric_parallel_validation
     ~labels:[ ("result", result) ]
     ()
+
+(* Ticks once per [load_toml_in_memory] call that detected the
+   cascade.toml mtime drifted between the pre-stat and post-stat
+   samples (atomic rename / writer fsync race), or the file vanished
+   between samples.  A non-zero rate in steady state suggests a tight
+   writer loop or a deploy pipeline that touches the file multiple
+   times during release; a transient tick during operator-driven
+   reloads is expected. *)
+let metric_toml_read_race = "masc_cascade_toml_read_race_total"
+
+let on_toml_read_race () =
+  Prometheus.inc_counter metric_toml_read_race ()

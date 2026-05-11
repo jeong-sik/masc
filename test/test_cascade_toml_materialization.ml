@@ -554,6 +554,59 @@ models = [
          in
          loop 0)
 
+(* Regression guard for the [load_toml_in_memory] race-aware rewrite.
+   The previous implementation rendered TOML first and stat'd second,
+   which meant a cache-hit path still paid the full parse cost.  The
+   new pre-stat fast path returns the cached JSON without re-rendering
+   when the mtime is unchanged, and produces fresh content (with cache
+   refresh) when the mtime advances.  Pin both behaviors here. *)
+let test_loader_cache_hits_when_mtime_unchanged () =
+  with_temp_dir "cascade-loader-cache" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path minimal_toml;
+  match Masc_mcp.Cascade_config_loader.load_catalog_source toml_path with
+  | Error msg -> failf "first load failed: %s" msg
+  | Ok first ->
+    (match Masc_mcp.Cascade_config_loader.load_catalog_source toml_path with
+     | Error msg -> failf "second load failed: %s" msg
+     | Ok second ->
+       (* Cache hit must return the same in-memory JSON value (physical
+          equality is the strongest possible signal that no re-parse
+          happened; we accept structural equality to stay tolerant if
+          the loader ever swaps in a deep copy). *)
+       check string "cache hit returns identical content"
+         (Yojson.Safe.to_string first)
+         (Yojson.Safe.to_string second))
+
+let test_loader_refreshes_when_mtime_advances () =
+  with_temp_dir "cascade-loader-refresh" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path minimal_toml;
+  (match Masc_mcp.Cascade_config_loader.load_catalog_source toml_path with
+   | Error msg -> failf "first load failed: %s" msg
+   | Ok _ -> ());
+  (* Replace content and advance mtime past the cache entry. *)
+  write_file
+    toml_path
+    {|
+[other_profile]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|};
+  let now = Unix.gettimeofday () +. 2.0 in
+  Unix.utimes toml_path now now;
+  match Masc_mcp.Cascade_config_loader.load_catalog_source toml_path with
+  | Error msg -> failf "post-update load failed: %s" msg
+  | Ok refreshed ->
+    let json_str = Yojson.Safe.to_string refreshed in
+    check bool "fresh content reflects new profile" true
+      (contains_substring json_str "other_profile");
+    check bool "stale profile name is gone" false
+      (contains_substring json_str "big_three_models")
+
 let () =
   run "cascade_toml_materialization"
     [
@@ -603,5 +656,12 @@ let () =
             test_runtime_rewrites_drifted_json_from_toml;
           test_case "invalid toml blocks runtime without stale json fallback"
             `Quick test_invalid_toml_blocks_runtime_without_using_stale_json;
+        ] );
+      ( "loader_cache",
+        [
+          test_case "cache hits when mtime unchanged" `Quick
+            test_loader_cache_hits_when_mtime_unchanged;
+          test_case "refreshes when mtime advances" `Quick
+            test_loader_refreshes_when_mtime_advances;
         ] );
     ]

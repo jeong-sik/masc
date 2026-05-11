@@ -20,3 +20,10 @@ val on_parallel_validation : result:string -> unit
 (** Tick the parallel-validation counter for one [validate_path_result]
     invocation.  [result] must be one of [ok], [mismatch],
     [adapter_error], [no_decl]. *)
+
+val on_toml_read_race : unit -> unit
+(** Tick the TOML read-race counter once per [load_toml_in_memory]
+    call where the cascade.toml mtime drifted between the pre-stat
+    and post-stat samples, or the file vanished between samples.
+    The loader still returns fresh content but skips the cache
+    update so the next call re-converges. *)

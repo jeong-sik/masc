@@ -471,10 +471,22 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   List.iter init_agent agents;
 
   let selected = ref [] in
-  let selected_names = ref [] in
+  (* Side-channel set for O(1) "already selected?" checks across the
+     multi-phase selection loop.  [selected] (list) is still used for
+     ordering and length checks; the Hashtbl mirrors only the names.
+
+     Clamp the initial size: a negative [max_n] would raise
+     [Invalid_argument] from [Hashtbl.create], and a pathologically
+     large value would preallocate proportional buckets up-front.
+     Bound by [List.length agents] since the loop cannot select more
+     than that many names regardless of [max_n]. *)
+  let initial_size = max 0 (min max_n (List.length agents)) in
+  let selected_names : (string, unit) Hashtbl.t = Hashtbl.create initial_size in
+  let is_selected name = Hashtbl.mem selected_names name in
+  let mark_selected name = Hashtbl.replace selected_names name () in
   let add_selected result =
     selected := !selected @ [result];
-    selected_names := result.agent_name :: !selected_names
+    mark_selected result.agent_name
   in
   let priority_triggers = best_pending_triggers pending_triggers in
 
@@ -483,7 +495,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
     match trigger with
     | Mentioned _ | ContentAlert _
       when List.length !selected < max_n
-           && not (List.mem name !selected_names)
+           && not (is_selected name)
            && is_trigger_eligible ~agent_name:name trigger ->
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
@@ -520,7 +532,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   (* 2. Starvation rescue: force include agents who haven't been selected too long *)
   let max_starvation = Env_config.AgentSelection.max_starvation_ticks in
   let starved = List.filter_map (fun name ->
-    if List.mem name !selected_names then None
+    if is_selected name then None
     else if not (is_trigger_eligible ~agent_name:name Starved) then None
     else begin
       let s = get_stats name in
@@ -534,7 +546,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   (* Sort by most starved first *)
   let starved_sorted = List.sort (fun (_, t1) (_, t2) -> Int.compare t2 t1) starved in
   List.iter (fun (name, ticks) ->
-    if List.length !selected < max_n && not (List.mem name !selected_names) then begin
+    if List.length !selected < max_n && not (is_selected name) then begin
       let signal = starvation_bonus ~ticks in
       add_selected {
         agent_name = name;
@@ -553,7 +565,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
     let starvation_weight = 1.0 -. thompson_weight in
 
     let candidates = List.filter_map (fun name ->
-      if List.mem name !selected_names then None
+      if is_selected name then None
       else if not (is_trigger_eligible ~agent_name:name Thompson) then begin
         (* Unhealthy agents excluded from Thompson selection *)
         Log.Metrics.info "thompson sampling skipping %s (unhealthy)" name;
@@ -589,7 +601,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
       | _ when n <= 0 -> ()
       | r :: rest ->
           selected := r :: !selected;
-          selected_names := r.agent_name :: !selected_names;
+          mark_selected r.agent_name;
           take (n - 1) rest
     in
     take remaining sorted

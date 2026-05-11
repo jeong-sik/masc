@@ -23,13 +23,21 @@ module Http = Llm_provider.Http_client
 let typed_wire t = Code.to_wire t
 
 let api_cases : (string * SdkE.api_error * string) list =
-  [ "RateLimited", Retry.RateLimited { retry_after = Some 30.0; message = "" }, "api_error_rate_limited"
+  [ ( "RateLimited"
+    , Retry.RateLimited { retry_after = Some 30.0; message = "" }
+    , "api_error_rate_limited" )
   ; "Overloaded", Retry.Overloaded { message = "" }, "api_error_overloaded"
-  ; "ServerError", Retry.ServerError { status = 502; message = "" }, "api_error_server:502"
+  ; ( "ServerError"
+    , Retry.ServerError { status = 502; message = "" }
+    , "api_error_server:502" )
   ; "AuthError", Retry.AuthError { message = "" }, "api_error_auth"
-  ; "InvalidRequest", Retry.InvalidRequest { message = "bad" }, "api_error_invalid_request"
+  ; ( "InvalidRequest"
+    , Retry.InvalidRequest { message = "bad" }
+    , "api_error_invalid_request" )
   ; "NotFound", Retry.NotFound { message = "missing" }, "api_error_not_found"
-  ; "ContextOverflow", Retry.ContextOverflow { message = "ctx"; limit = Some 8192 }, "api_error_context_overflow"
+  ; ( "ContextOverflow"
+    , Retry.ContextOverflow { message = "ctx"; limit = Some 8192 }
+    , "api_error_context_overflow" )
   ; ( "NetworkError"
     , Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_refused }
     , "api_error_network" )
@@ -60,9 +68,13 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
   ; "Api/Timeout", SdkE.Api (Retry.Timeout { message = "60s" }), "api_error_timeout"
   ; "Mcp", SdkE.Mcp (SdkE.InitializeFailed { detail = "boot" }), "mcp_error"
   ; "Config", SdkE.Config (SdkE.MissingEnvVar { var_name = "X" }), "config_error"
-  ; "Serialization", SdkE.Serialization (SdkE.JsonParseError { detail = "syntax" }), "serialization_error"
+  ; ( "Serialization"
+    , SdkE.Serialization (SdkE.JsonParseError { detail = "syntax" })
+    , "serialization_error" )
   ; "Io", SdkE.Io (SdkE.ValidationFailed { detail = "vfd" }), "io_error"
-  ; "Orchestration", SdkE.Orchestration (SdkE.UnknownAgent { name = "ghost" }), "orchestration_error"
+  ; ( "Orchestration"
+    , SdkE.Orchestration (SdkE.UnknownAgent { name = "ghost" })
+    , "orchestration_error" )
   ; "A2a", SdkE.A2a (SdkE.TaskNotFound { task_id = "id" }), "a2a_error"
   ; "Internal", SdkE.Internal "internal issue", "internal_error"
   ]

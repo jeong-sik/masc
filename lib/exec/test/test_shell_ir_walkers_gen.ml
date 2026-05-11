@@ -136,7 +136,13 @@ let test_of_simple_round_trip () =
     ; W (Rg { pattern = "TODO"; path = Some "."; case_sensitive = true })
     ; W (Git_status { short = true })
     ; W (Git_clone { repo = "git@github.com:x/y.git"; branch = Some "main"; depth = 1 })
-    ; W (Curl { url = "http://example.com"; method_ = `POST; headers = Some [ ("A", "B") ]; body = Some "data" })
+    ; W
+        (Curl
+           { url = "http://example.com"
+           ; method_ = `POST
+           ; headers = Some [ "A", "B" ]
+           ; body = Some "data"
+           })
     ; W (Rm { paths = [ "a"; "b" ]; recursive = true; force = false })
     ; W (Sudo { target_argv = [ "whoami" ] })
     ]
@@ -163,9 +169,13 @@ let test_of_simple_generic_fallback () =
     }
   in
   (* env non-empty *)
-  let w_env = Shell_ir_typed.of_simple { base with env = [ ("K", lit "V") ] } in
-  Alcotest.(check bool) "env fallback" true
-    (match w_env with Shell_ir_typed.W (Generic _) -> true | _ -> false);
+  let w_env = Shell_ir_typed.of_simple { base with env = [ "K", lit "V" ] } in
+  Alcotest.(check bool)
+    "env fallback"
+    true
+    (match w_env with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false);
   (* redirects non-empty *)
   let w_redir =
     Shell_ir_typed.of_simple
@@ -179,25 +189,41 @@ let test_of_simple_generic_fallback () =
           ]
       }
   in
-  Alcotest.(check bool) "redirect fallback" true
-    (match w_redir with Shell_ir_typed.W (Generic _) -> true | _ -> false);
+  Alcotest.(check bool)
+    "redirect fallback"
+    true
+    (match w_redir with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false);
   (* Var arg *)
   let w_var = Shell_ir_typed.of_simple { base with args = [ Shell_ir.Var "X" ] } in
-  Alcotest.(check bool) "var fallback" true
-    (match w_var with Shell_ir_typed.W (Generic _) -> true | _ -> false);
+  Alcotest.(check bool)
+    "var fallback"
+    true
+    (match w_var with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false);
   (* unknown binary kind *)
   let w_unknown =
     Shell_ir_typed.of_simple { base with bin = bin_ok "docker"; args = [ lit "ps" ] }
   in
-  Alcotest.(check bool) "unknown bin fallback" true
-    (match w_unknown with Shell_ir_typed.W (Generic _) -> true | _ -> false);
+  Alcotest.(check bool)
+    "unknown bin fallback"
+    true
+    (match w_unknown with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false);
   (* git sub-command we do not parse *)
   let w_git_push =
     Shell_ir_typed.of_simple
       { base with bin = bin_ok "git"; args = [ lit "push"; lit "origin" ] }
   in
-  Alcotest.(check bool) "git push fallback" true
-    (match w_git_push with Shell_ir_typed.W (Generic _) -> true | _ -> false)
+  Alcotest.(check bool)
+    "git push fallback"
+    true
+    (match w_git_push with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false)
 ;;
 
 let test_constructor_names_in_declaration_order () =
@@ -226,7 +252,10 @@ let () =
         ] )
     ; ( "of_simple_round_trip"
       , [ Alcotest.test_case "of_simple ∘ to_simple = id" `Quick test_of_simple_round_trip
-        ; Alcotest.test_case "Generic fallback coverage" `Quick test_of_simple_generic_fallback
+        ; Alcotest.test_case
+            "Generic fallback coverage"
+            `Quick
+            test_of_simple_generic_fallback
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

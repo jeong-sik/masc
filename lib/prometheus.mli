@@ -15,50 +15,32 @@ type metric_type =
   | Gauge
   | Histogram
 
-type metric = {
-  name : string;
-  help : string;
-  metric_type : metric_type;
-  mutable value : float;
-  labels : label list;
-}
+type metric =
+  { name : string
+  ; help : string
+  ; metric_type : metric_type
+  ; mutable value : float
+  ; labels : label list
+  }
 
 (** {1 Metric Registration} *)
 
-val register_counter :
-  name:string -> help:string -> ?labels:label list -> unit -> unit
-
-val register_gauge :
-  name:string -> help:string -> ?labels:label list -> unit -> unit
-
-val register_histogram :
-  name:string -> help:string -> ?labels:label list -> unit -> unit
+val register_counter : name:string -> help:string -> ?labels:label list -> unit -> unit
+val register_gauge : name:string -> help:string -> ?labels:label list -> unit -> unit
+val register_histogram : name:string -> help:string -> ?labels:label list -> unit -> unit
 
 (** {1 Metric Updates} *)
 
-val inc_counter :
-  string -> ?labels:label list -> ?delta:float -> unit -> unit
-
-val set_gauge :
-  string -> ?labels:label list -> float -> unit
-
-val inc_gauge :
-  string -> ?labels:label list -> ?delta:float -> unit -> unit
-
-val dec_gauge :
-  string -> ?labels:label list -> ?delta:float -> unit -> unit
-
-val observe_histogram :
-  string -> ?labels:label list -> float -> unit
+val inc_counter : string -> ?labels:label list -> ?delta:float -> unit -> unit
+val set_gauge : string -> ?labels:label list -> float -> unit
+val inc_gauge : string -> ?labels:label list -> ?delta:float -> unit -> unit
+val dec_gauge : string -> ?labels:label list -> ?delta:float -> unit -> unit
+val observe_histogram : string -> ?labels:label list -> float -> unit
 
 (** {1 Metric Queries} *)
 
-val get_metric_value :
-  string -> ?labels:label list -> unit -> float option
-
-val metric_value_or_zero :
-  string -> ?labels:label list -> unit -> float
-
+val get_metric_value : string -> ?labels:label list -> unit -> float option
+val metric_value_or_zero : string -> ?labels:label list -> unit -> float
 val metric_total : string -> float
 
 (** {1 Metric Name Constants}
@@ -98,11 +80,13 @@ val metric_total : string -> float
     Labels: [keeper, model_used, resolved_model_id,
     context_max_bucket].  Bucket vocabulary:
     [64k | 128k | 200k | 256k | 1m | other | zero]. *)
+
 (** #10121: keeper turn livelock observer counters.  Labels:
     [keeper].  Re-attempt = same turn id started again before
     the counter advanced; regression = turn id moved strictly
     backwards (write_meta race symptom — #9733); livelock blocks
     are labeled by [keeper, reason]. *)
+
 (** #9943: per-keeper turn latency distribution.  Labels:
     [keeper, bucket].  Bucket vocabulary:
     [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
@@ -125,7 +109,6 @@ val metric_total : string -> float
     in cooldown each time a cooldown is applied or extended.
     Labels: [provider]. *)
 
-val metric_board_persist_lock_acquire_sec : string
 (** #10569 diagnostic: time spent waiting to acquire the board
     persist mutex.  High values point to writer-side contention:
     if N concurrent fibers serialize through this lock and any one
@@ -136,8 +119,8 @@ val metric_board_persist_lock_acquire_sec : string
     distinguish queueing (acquire high, held low) from syscall stall
     (acquire low, held high).  Recorded once per [with_persist_lock]
     entry. *)
+val metric_board_persist_lock_acquire_sec : string
 
-val metric_board_persist_lock_held_sec : string
 (** #10569 diagnostic: time spent inside the board persist lock,
     measured from acquisition to release.  Captures the actual disk
     I/O latency (append + rotate / atomic save) per persist call.
@@ -147,8 +130,8 @@ val metric_board_persist_lock_held_sec : string
     per-board tool timeout, (b) introducing a write queue / batch,
     or (c) leaving the path synchronous when held time is already
     sub-second. *)
+val metric_board_persist_lock_held_sec : string
 
-val metric_backend_mutex_acquire_sec : string
 (** Time spent waiting to acquire [Backend.FileSystem.t.mutex] before
     a write/delete operation.  Labels: [op] in
     {[set | delete | set_if_not_exists]}.
@@ -161,13 +144,14 @@ val metric_backend_mutex_acquire_sec : string
     Wired by [Backend.FileSystem.set_mutex_observers] from the main
     library at startup so that [masc_backend] does not depend on
     [Prometheus]. *)
+val metric_backend_mutex_acquire_sec : string
 
-val metric_backend_mutex_held_sec : string
 (** Time spent inside the backend persist lock, from acquisition to
     release. Labels: [op] in {[set | delete | set_if_not_exists]}.
 
     Captures time spent in the write critical section, used together
     with [metric_backend_mutex_acquire_sec]. *)
+val metric_backend_mutex_held_sec : string
 
 (** P-DASH-02: turn queue depth gauge.  Semaphore waiter count
     surfaced so operators can alert on queue pressure without log
@@ -177,11 +161,11 @@ val metric_backend_mutex_held_sec : string
     for the rationale.  Counter increments on each Pulse start;
     gauge advances on every successful beat. *)
 
-val metric_tool_join_required_guard : string
 (** #9770: count fires of the [join_required] guard in
     [Mcp_server_eio_execute].  Labels:
     [tool, agent_name, reason] with reason
     [room_uninitialized | agent_not_joined]. *)
+val metric_tool_join_required_guard : string
 
 (** #9771: counter for keeper turn-slot semaphore wait timeouts.
     Labels: [keeper, channel] with channel in
@@ -202,10 +186,9 @@ val metric_tool_join_required_guard : string
     FIFO wait queue. Reactive turn depth is intentionally not inferred from
     semaphore availability. *)
 
-val metric_timeout_policy_overshoot : string
 (** #9662: cooperative-cancel timeout overshoot counter emitted by
     [Timeout_policy].  Labels: [layer, origin]. *)
-
+val metric_timeout_policy_overshoot : string
 
 (** #9943: per-keeper noop compaction counter.  Increments when
     a snapshot records [compaction_before_tokens =
@@ -234,7 +217,6 @@ val metric_timeout_policy_overshoot : string
     or below threshold. Value is [1.0] when underused and [0.0]
     otherwise. Labels: [keeper], [tool]. *)
 
-
 (** #10349: counter incremented whenever
     [Keeper_alerting_path.resolve_keeper_read_path] rejects a
     path.  Replaces the previous user-facing leak of resolver
@@ -262,14 +244,16 @@ val metric_write_meta_cas_retry_total : string
 (** Total keeper OAS hook tool-output JSON parse failures. Labels:
     [surface] is [pr_review_action] or [pr_work_action]. *)
 val metric_tool_policy_unloaded_query : string
+
 val metric_tool_policy_init_failed : string
 val metric_cache_desync_cleared : string
 val metric_egress_audit_missing : string
-val metric_egress_audit_stale_orphan : string
+
 (** Cascade state synchronization failures: pause/resume/auto-pause paths
     only. Local discovery refresh failures use
     [metric_keeper_local_discovery_failures] so dashboards can attribute
     distinct failure classes. *)
+val metric_egress_audit_stale_orphan : string
 
 (** Local discovery readiness failures observed during create/turn paths.
     Separated from [metric_keeper_cascade_sync_failures] so dashboards do
@@ -278,10 +262,13 @@ val metric_egress_audit_stale_orphan : string
 (** #10091: labelled [keeper, has_current_task, contract_status]
     so fleet histograms can distinguish the active-task strict
     path from the no-task path covered by #10031. *)
+
 (** #10474: counter incremented when a keeper's cascade has zero
     tool-capable providers.  Labels: keeper, cascade. *)
+
 (** #10474: counter classifying each scheduled autonomous cycle outcome.
     Labels: keeper, outcome=[tool_called|noop|error]. *)
+
 (** #12799 Total passive-loop detections: keeper completed N consecutive turns
     using only passive read-only tools, violating the proactive contract.
     Incremented once per loop episode (streak resets on any execution-progress
@@ -309,43 +296,62 @@ val metric_egress_audit_stale_orphan : string
 (** Task-138 Unix timestamp of the most recent productive turn
     (execution/completion class) per keeper.  Reads as 0 until the
     keeper has produced anything in this process.  Labels: [keeper]. *)
+
 (** PR-B: counter incremented when [run_keeper_cycle] skips a turn
     because the keeper's resolved cascade is ollama-only and the
     [/api/ps] probe reports zero process_available slots.  Labelled
     by [keeper] and [cascade] so dashboards can attribute starvation
     to specific cascade profiles. *)
 val metric_persistence_read_drops : string
-val metric_persistence_utf8_repair : string
+
 (** Goal-loop Observe counter for persistence UTF-8 repairs. No labels. *)
+val metric_persistence_utf8_repair : string
 
 val metric_discovery_history_failures : string
-val metric_codex_cli_mcp_tool_omission : string
+
 (** #10097: per-tool counter for codex_cli keeper-bound runtime
     MCP omissions.  Paired with a once-per-fingerprint WARN log
     so logs carry structural facts and Prometheus carries
     frequency. *)
+val metric_codex_cli_mcp_tool_omission : string
 
-val metric_telemetry_coverage_gap : string
 (** #9520: total telemetry coverage gaps recorded. Labels:
     [source, producer, dashboard_surface, stale_reason]. This is the
     alertable pair to the durable
     [.masc/telemetry-coverage-gaps/YYYY-MM/DD.jsonl] store. *)
+val metric_telemetry_coverage_gap : string
 
-val metric_telemetry_unified_source_read_failures : string
 (** Total telemetry unified source discovery/read failures. Labels:
     [source] is {!Telemetry_unified.source_to_string}; [site] is a bounded
     read/discovery call-site vocabulary. *)
+val metric_telemetry_unified_source_read_failures : string
 
-val metric_tool_assignment_telemetry_failures : string
 (** Total tool-assignment telemetry decode/read failures. Labels:
     [site] is a bounded read/warm-up call-site vocabulary. *)
+val metric_tool_assignment_telemetry_failures : string
 
-val metric_telemetry_observe_failures : string
 (** Total {!Telemetry_observe} wrapper failures caught and returned as
     [Error]/default. Labels: [kind] is the wrapper call-site vocabulary.
     [Eio.Cancel.Cancelled] is re-raised and not counted. *)
+val metric_telemetry_observe_failures : string
 
+(** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
+    [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry
+    pair because dispatch happened outside an Eio scheduler. Labels:
+    [event_family] (one of [agent_lifecycle] / [task_transition] /
+    [accountability]) and [event_kind] (the variant). For
+    [agent_lifecycle], [event_kind] is one of [join] / [rejoin] /
+    [leave] (3 values). For both [task_transition] and
+    [accountability], [event_kind] uses the 8
+    [Masc_domain.task_action_to_string] values: [claim] / [start] /
+    [done] / [cancel] / [release] / [submit_for_verification] /
+    [approve] / [reject]. Cardinality bound: 19 series (3 + 8 + 8).
+    Non-zero rate means a production path is firing the lifecycle
+    outside an Eio fiber and the corresponding audit/telemetry rows
+    are missing — the silent root cause behind the [#10358] 5-tag → 2-tag
+    durable-ledger attrition. *)
 val metric_coord_telemetry_drop : string
+
 (** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
     [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry
     pair because dispatch happened outside an Eio scheduler. Labels:
@@ -365,7 +371,11 @@ val metric_coord_claim_post_provision_failures : string
 (** Total best-effort claim post-provision hook failures. Labels: [site]
     and [agent_name]. *)
 
+(** #10094: labelled [caller, timeout_s] so operators can
+    distinguish fantasy 60s budgets from intentional 120/180s
+    budgets when both fire timeouts in the same session. *)
 val metric_oas_bridge_timeout : string
+
 (** #10094: labelled [caller, timeout_s] so operators can
     distinguish fantasy 60s budgets from intentional 120/180s
     budgets when both fire timeouts in the same session. *)
@@ -375,9 +385,22 @@ val metric_oas_bridge_cancel : string
     mid_tail<600s, long_mid<1800s, long_tail>=1800s) — identical
     boundaries to [masc_keeper_oas_cancel_total] so PromQL can
     union the two sources for a fleet-wide bimodal view. *)
+
+(** #10942 mirror for [masc_oas_bridge].  Labelled [caller, bucket]
+    where bucket is wall-class (fast<60s, short_tail<300s,
+    mid_tail<600s, long_mid<1800s, long_tail>=1800s) — identical
+    boundaries to [masc_keeper_oas_cancel_total] so PromQL can
+    union the two sources for a fleet-wide bimodal view. *)
 val metric_oas_sse_relay_retries : string
+
 val metric_oas_sse_relay_drops : string
+
+(** Histogram populated from OAS [InferenceTelemetry] events that are
+    intentionally not relayed over SSE. Labels: [model_bucket], [phase],
+    and [token_bucket]. Cardinality bound: 8 model buckets * 2 phases *
+    5 token buckets = 80 labelled series. *)
 val metric_oas_sse_relay_queue_depth : string
+
 (** Histogram populated from OAS [InferenceTelemetry] events that are
     intentionally not relayed over SSE. Labels: [model_bucket], [phase],
     and [token_bucket]. Cardinality bound: 8 model buckets * 2 phases *
@@ -404,17 +427,17 @@ val metric_mcp_tool_schema_tokens_approx : string
 val metric_mcp_requests : string
 val metric_llm_inference_duration : string
 
-val metric_llm_prompt_tok_per_sec : string
 (** [masc_llm_prompt_tok_per_sec] — prefill throughput histogram.
     Observed in [Keeper_hooks_oas] after_turn when [response.telemetry.timings]
     is [Some] and [prompt_per_second] is positive. Labels: [model], [provider_kind]. *)
+val metric_llm_prompt_tok_per_sec : string
 
-val metric_llm_decode_tok_per_sec : string
 (** [masc_llm_decode_tok_per_sec] — decode throughput histogram.
     Observed alongside {!metric_llm_prompt_tok_per_sec} from the same turn
     when [predicted_per_second] is positive. Silent for providers that do
     not emit timings; inspect [masc_after_turn_telemetry_missing_total] to
     tell absence apart from zero. *)
+val metric_llm_decode_tok_per_sec : string
 
 val metric_after_turn_hook : string
 val metric_after_turn_telemetry_missing : string
@@ -426,14 +449,15 @@ val metric_workspace_route_failures : string
 val metric_active_agents : string
 val metric_pending_tasks : string
 val metric_uptime_seconds : string
-val metric_goal_attainment_pct : string
+
 (** Goal attainment percentage by [goal_id]. Companion
     {!metric_goal_attainment_measured} distinguishes real 0% from
     unmeasured goals. *)
+val metric_goal_attainment_pct : string
 
-val metric_goal_attainment_measured : string
 (** Gauge by [goal_id]: [1] when goal attainment percentage is measured,
     [0] when the dashboard projection is currently unmeasured. *)
+val metric_goal_attainment_measured : string
 
 val metric_sse_connections_active : string
 val metric_sse_reconnects : string
@@ -457,7 +481,19 @@ val metric_llm_provider_errors_by_reason : string
 val metric_llm_provider_retries : string
 val metric_llm_provider_input_tokens : string
 val metric_llm_provider_output_tokens : string
+
+(** §7.3.2 Zero Silent Failure measurement: aggregate counter for every
+    fallback event across the cascade pipeline. Labels: [kind] enumerates
+    the fallback class (cross_cascade, cascade_empty, capability_drop,
+    cli_unsupported, …); [detail] carries the specific reason within
+    the kind (e.g. for cross_cascade: source provider; for cascade_empty:
+    rejection_reason_label). Detail counters
+    ([masc_cross_cascade_fallback_total],
+    [masc_llm_provider_capability_drops_total]) remain for per-class
+    drill-down; this counter exists so the "Zero Silent Failure"
+    dashboard panel has a single numerator across all classes. *)
 val metric_fallback_triggered : string
+
 (** §7.3.2 Zero Silent Failure measurement: aggregate counter for every
     fallback event across the cascade pipeline. Labels: [kind] enumerates
     the fallback class (cross_cascade, cascade_empty, capability_drop,
@@ -469,15 +505,21 @@ val metric_fallback_triggered : string
     drill-down; this counter exists so the "Zero Silent Failure"
     dashboard panel has a single numerator across all classes. *)
 val metric_board_truncated_posts : string
+
 val metric_anti_rationalization_fallback : string
+
+(** #10113: per-pattern + per-decision counter for the gate 2
+    excuse substring detector.  Decision label is
+    [advisory_to_llm | terminal_reject | advisory_safety_net_reject]. *)
 val metric_anti_rationalization_excuse_pattern : string
+
 (** #10113: per-pattern + per-decision counter for the gate 2
     excuse substring detector.  Decision label is
     [advisory_to_llm | terminal_reject | advisory_safety_net_reject]. *)
 val metric_cascade_strategy_decisions : string
+
 val metric_cascade_capacity_events : string
 
-val metric_cascade_attempt_liveness_kill : string
 (** RFC-0022 §9 — would-be ([mode=observe]) and actual ([mode=enforce])
     in-attempt liveness kills, broken down by failure class.
 
@@ -490,72 +532,71 @@ val metric_cascade_attempt_liveness_kill : string
     budgets (cloud_fast / cloud_thinking / local_27b / local_70b_plus)
     against [scripts/diag-keeper-cycle.sh] before flipping any profile
     to {b enforce}. *)
+val metric_cascade_attempt_liveness_kill : string
 
-val metric_cascade_attempt_liveness_observed : string
 (** RFC-0022 PR-2 §3 — per-attempt finalizer counter regardless of
     outcome. Labels: [cascade], [provider], [outcome] ∈ {success |
     kill | wire_error}. The kill-rate is
     [kill_total / observed_total]. *)
+val metric_cascade_attempt_liveness_observed : string
 
-val metric_cascade_ttfb_seconds : string
 (** Histogram: time from cascade attempt start to first non-Done chunk (TTFT).
     Labels: [cascade], [provider]. *)
+val metric_cascade_ttfb_seconds : string
 
-val metric_cascade_inter_chunk_seconds : string
 (** Histogram: inter-chunk gap during streaming (TBT).
     Labels: [cascade], [provider]. *)
+val metric_cascade_inter_chunk_seconds : string
 
-val metric_cascade_provider_health_score : string
 (** Gauge: composite health score per cascade provider.
     [success_rate * speed_score * cost_score] in [0.0, 1.0].
     Labels: [provider_key]. *)
+val metric_cascade_provider_health_score : string
 
-val metric_cascade_decisions : string
 (** Counter: cascade routing decisions emitted by [Cascade_fsm.decide].
     Labels: [decision] in [accept|accept_on_exhaustion|try_next|exhausted]. *)
+val metric_cascade_decisions : string
 
-val metric_cascade_fallbacks : string
 (** Counter: cascade fallback transitions ([Try_next] outcomes).
     Labels: [reason] in [call_err|slot_full|accept_rejected|health_filter]. *)
+val metric_cascade_fallbacks : string
 
-val metric_cascade_providers_exhausted : string
 (** Counter: terminal exhaustion events emitted when a cascade has no
     further provider candidates. *)
+val metric_cascade_providers_exhausted : string
 
-val metric_cascade_routing_phase_overrides : string
 (** Counter: cascade routing phase overrides applied during decision.
     Labels: [phase], [from_cascade], [to_cascade]. *)
+val metric_cascade_routing_phase_overrides : string
 
-val metric_oas_context_overflow_ratio : string
 (** Gauge: context overflow ratio [estimated_tokens / limit_tokens] when
     [ContextOverflowImminent] fires.  Labels: [agent_name]. *)
+val metric_oas_context_overflow_ratio : string
 
-val metric_oas_context_compaction_total : string
 (** Counter: total context compaction actions from OAS event bus.
     Labels: [agent_name, trigger]. *)
+val metric_oas_context_compaction_total : string
 
-
-val metric_cascade_server_error_skip_total : string
 (** #12797 Total cascade label-ranking skips triggered by recent server-error
     (5xx) score decay for a provider.  Labels: [provider_key]. *)
+val metric_cascade_server_error_skip_total : string
 
-val metric_cascade_fallback_cycle_detected_total : string
 (** Total cascade fallback_cascade cycles detected during [load_catalog].
     A cycle means a provider stall propagates through every cascade in
     the loop silently for 600s+ without escaping.  Labels: [cascade]
     (the entry point of the detected cycle).  Discovered during the
     2026-05-05 fleet-stuck investigation:
     [default → glm_coding_plan_only → default]. *)
+val metric_cascade_fallback_cycle_detected_total : string
 
-val metric_provider_health_probe_skipped : string
 (** Total bootstrap/runtime-catalog provider health probes intentionally
     skipped as advisory. Labels: [provider_name, profile_name]. *)
+val metric_provider_health_probe_skipped : string
 
-val metric_provider_actual_health_status : string
 (** Last advisory provider health status observed by runtime catalog
     validation. Values: 0=unknown/skipped, 1=healthy, 3=unhealthy.
     Labels: [provider_name, profile_name, model_id]. *)
-
+val metric_provider_actual_health_status : string
 
 (** PR-I: cross-FSM edge transition counter. Labels: [edge] with values
     drawn from the static coupling graph documented in
@@ -653,25 +694,27 @@ val metric_fsm_guard_violation : string
 
     Cardinality is bounded by fleet size times this callback vocabulary. *)
 val metric_memory_pipeline_flushes : string
+
 val metric_memory_pipeline_flush_records : string
-val metric_memory_pipeline_flush_duration_seconds : string
+
 (** Counter incremented every time [Keeper_registry.update_entry] races
     a deregistration and the update is dropped. Labeled by [name]. A
     sustained per-keeper rate signals an orphan turn fiber dispatching
     against a missing registry entry. See masc-mcp 2026-05-07
     verifier-loop incident. *)
+val metric_memory_pipeline_flush_duration_seconds : string
 
 (** Counter incremented once per breach event when [update_entry] drops
     cross [orphan_drop_threshold] inside [orphan_drop_window_sec] for a
     given [name]. Edge-triggered: subsequent drops in the same window
     bump only [metric_keeper_registry_update_dropped]. Labeled by [name]. *)
 
-
 (** PR-J: number of times the per-turn OAS event-bus drain helper ran,
     labelled by call-site so operators can attribute drain pressure
     (e.g. background poller vs. unsubscribe vs. retry path).
     Labels: [site, outcome]. [outcome] is [drained] (events were
     pulled) or [empty] (subscriber returned no pending events). *)
+
 (** Total keeper transitions to [Dead] phase after restart-budget exhaustion.
     Labeled by [keeper] and [reason]. Operators should alert on any rate >0:
     by construction Dead means the supervisor gave up and no further
@@ -690,7 +733,6 @@ val metric_memory_pipeline_flush_duration_seconds : string
     and [cascade].  A positive rate means the health gate is protecting
     the fleet from resuming into a still-failing cascade. *)
 
-
 (** RFC-0020 Rule 2 evidence — incremented every time
     [run_smart_heartbeat_gate] overrides a [Skip_busy] / [Skip_idle]
     decision because the Event Layer queue
@@ -699,6 +741,7 @@ val metric_memory_pipeline_flush_duration_seconds : string
     write path (PR-C1 [wakeup_keeper ?stimulus]) is not firing or
     the smart heartbeat is already returning [Emit] on its own —
     either way operators can distinguish. Labels: [keeper]. *)
+
 (** Positive signal for the #12271 Skip_idle + Woken fix path. Increments
     each time [run_smart_heartbeat_gate] observes an external [wakeup_keeper]
     cut a Skip_idle backoff sleep short and the cycle was resumed
@@ -756,15 +799,19 @@ val metric_oas_bus_subscriber_stream_depth : string
 val metric_oas_bus_publish_block_seconds : string
 val metric_oas_bus_publish : string
 val metric_runtime_ollama_probe_generate_skips : string
-val metric_process_timeout : string
+
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
+val metric_process_timeout : string
 
-val metric_bg_task_sidecar_failures : string
 (** Background-task PID sidecar persistence failures. Labels:
     [site] = [write | read | read_parse | readdir | is_dir | unlink]. *)
+val metric_bg_task_sidecar_failures : string
 
+(** Build identity git probe failures. Labels:
+    [site] = [commit_ts_git_capture | commit_ts_git_status | commit_ts_parse]. *)
 val metric_build_identity_probe_failures : string
+
 (** Build identity git probe failures. Labels:
     [site] = [commit_ts_git_capture | commit_ts_git_status | commit_ts_parse]. *)
 val metric_distributed_lock_acquire_failed : string
@@ -781,10 +828,10 @@ val metric_fs_atomic_orphans_cleaned : string
     signal of shared credential state (connection pool / fork). *)
 val metric_auth_bearer_token_mismatch : string
 
-val metric_auth_strict_unknown_tool_denials : string
 (** #10183: strict Auth rejects for unknown external tools.  Labels:
     [agent_name, tool_class] where [tool_class] is bounded to
     [empty | external]. *)
+val metric_auth_strict_unknown_tool_denials : string
 
 (** A1 track: counter for keeper registry dispatch_event failures that
     were previously silently dropped via [ignore].  Labels:
@@ -794,40 +841,39 @@ val metric_auth_strict_unknown_tool_denials : string
 (** gRPC directive routing failures — target agent not in registry
     or directive malformed.  Labels: [keeper, site]. *)
 
-val metric_auth_credential_token_duplicate : string
 (** #9786 follow-up: boot-time audit counter for credentials
     sharing the same token hash.  Increments once per boot per
     duplicate group.  Operator alert: any non-zero rate is a
     routing-ambiguity that must be rotated. *)
+val metric_auth_credential_token_duplicate : string
 
-val metric_auth_credential_token_rotated : string
 (** #10304 prevention counter.  Increments once per credential that
     boot-time repair rotates out of a shared bearer-token group.
     Labels: [token_hash_prefix, scope]. *)
+val metric_auth_credential_token_rotated : string
 
-val metric_config_credential_archived_starvation : string
 (** Bare-form keeper credential files archived because they are dead after
     PR-3b1 starvation. Labels: [keeper_name]. *)
+val metric_config_credential_archived_starvation : string
 
-val metric_auth_credential_ambiguous_lookup : string
 (** #9786 runtime complement: every [find_credential_by_token]
     lookup that hits N>=2 matches fires this counter.
     Labels: [first_match] = the agent_name that won the
     [List.find] race.  Distinguishes a stale audit warning
     from active wrong-agent serving. *)
+val metric_auth_credential_ambiguous_lookup : string
 
-val metric_silent_auth_token_resolve_error : string
 (** PR-I (2026-04-25): mcp_server_eio_execute silently fell back to
     the caller's agent_name when [Auth.resolve_agent_from_token]
     returned [Error _].  Labels: [error_kind], [agent]. *)
+val metric_silent_auth_token_resolve_error : string
 
-val metric_silent_dashboard_actor_fallback : string
 (** PR-I (2026-04-25): Server_auth.dashboard_actor_for_request
     silently fell back to [request_actor_hint] because the bearer
     token resolved to no agent ([Ok None]) or an error.
     Labels: [outcome] = "none" | "error". *)
+val metric_silent_dashboard_actor_fallback : string
 
-val metric_auth_strict_would_reject : string
 (** Phase A F2 (2026-04-27): paired with
     [metric_silent_auth_token_resolve_error] to measure "how many of
     those silent fallbacks would be rejected under Strict mode" before
@@ -835,8 +881,8 @@ val metric_auth_strict_would_reject : string
     [mode] = "off" | "dry_run" | "strict",
     [error_kind] = same kinds as silent_auth,
     [agent] = the alias the request would have kept. *)
+val metric_auth_strict_would_reject : string
 
-val metric_empty_tool_universe_observed : string
 (** Phase A F3 (2026-04-28): increments every time
     [keeper_agent_run] enters the [Keeper_tool_surface_empty] blocker
     branch — tool gate is required but the visible tool surface is
@@ -847,8 +893,8 @@ val metric_empty_tool_universe_observed : string
     [turn_lane] = "text_only" | "tool_optional" | "tool_required"
                 | "retry" | "tool_disabled",
     [fallback_used] = "true" | "false". *)
+val metric_empty_tool_universe_observed : string
 
-val metric_coord_join_normalize_outcome : string
 (** RFC P3-a (2026-04-26): Coord.join identity normalization by
     [Keeper_identity.normalize_all_names].
     Labels: [outcome] = "ok" | "empty_input" | "persona_not_found"
@@ -856,18 +902,18 @@ val metric_coord_join_normalize_outcome : string
     Non-ok outcomes reject [masc_join] at the fail-closed identity gate.
     Cross-reference [metric_silent_auth_token_resolve_error] for auth/name
     drift diagnosis. *)
+val metric_coord_join_normalize_outcome : string
 
-val metric_config_unknown_keys_ignored : string
 (** Unknown config keys ignored after warning. Labels: [file_path]. *)
+val metric_config_unknown_keys_ignored : string
 
-val metric_governance_judge_unparseable : string
 (** Governance/operator judge responses that remained unparseable after
     deterministic JSON recovery. Labels: [judge]. *)
+val metric_governance_judge_unparseable : string
 
-val metric_governance_lenient_json_fallback_hit : string
 (** Lenient_json fallback hits for governance/operator judge output.
     Labels: [judge]. *)
-
+val metric_governance_lenient_json_fallback_hit : string
 
 (** {1 Transport metrics} *)
 
@@ -903,17 +949,17 @@ val metric_ws_bytes_cache_misses : string
     enrichment cost from unrelated snapshot or assembly latency. *)
 val metric_dashboard_execution_render_phase_sec : string
 
-val metric_dashboard_snapshot_latency_seconds : string
 (** Dashboard snapshot phase latency in seconds. *)
+val metric_dashboard_snapshot_latency_seconds : string
 
-val metric_dashboard_snapshot_latency_seconds_bucket : string
 (** Cumulative bucket counter for dashboard snapshot phase latency.
     Labels: [le]. *)
+val metric_dashboard_snapshot_latency_seconds_bucket : string
 
-val metric_dashboard_metric_all_zeros : string
 (** Dashboard render sub-operation timing all-zero diagnostic.
     Labels: [keeper_name], using [__dashboard__] for the render-level
     singleton required by the Observe dashboard contract. *)
+val metric_dashboard_metric_all_zeros : string
 
 (** PR-0.2.A (RFC 2026-04-masc-ide-strategy): cache lookup hit/miss
     counters. Labels: [cache] with values
@@ -925,9 +971,12 @@ val metric_dashboard_metric_all_zeros : string
     incrementing these counters never changes cache logic. *)
 val metric_cache_hits_total : string
 
+(** Companion to {!metric_cache_hits_total}; same [cache] label values. *)
 val metric_cache_misses_total : string
+
 (** Companion to {!metric_cache_hits_total}; same [cache] label values. *)
 val metric_ws_client_buffered_bytes : string
+
 val metric_ws_client_acks : string
 val metric_ws_throttled_deliveries : string
 val metric_ws_slice_fanout_skipped : string
@@ -935,30 +984,30 @@ val metric_ws_bytes_sent : string
 val metric_grpc_bytes_sent : string
 val metric_ws_delta_built : string
 
-val metric_ws_message_bytes : string
 (** Histogram of WebSocket message payload size in bytes, observed at
     the wire boundary. Labels: [direction = send | recv]. Complements
     the [masc_ws_bytes_sent_total] counter by exposing per-message
     distribution (p50/p95/p99) so operators can distinguish a few
     large frames from many small frames. *)
+val metric_ws_message_bytes : string
 
-val metric_grpc_backlog_replay_lines_scanned : string
 (** Lines walked while replaying [.masc/backlog.jsonl] on a gRPC
     Subscribe RPC, including those filtered out by [since_seq]. *)
+val metric_grpc_backlog_replay_lines_scanned : string
 
-val metric_grpc_backlog_replay_events_replayed : string
 (** Backlog events actually delivered (post-[since_seq] filter)
     on a gRPC Subscribe RPC. The gap between scanned-lines and
     replayed-events isolates wasted scan cost. *)
+val metric_grpc_backlog_replay_events_replayed : string
 
-val metric_http_accepts : string
 (** Primary HTTP listener accepted TCP connections. Labels: [mode]. *)
+val metric_http_accepts : string
 
-val metric_http_accept_errors : string
 (** Primary HTTP listener accept-loop errors. Labels: [mode]. *)
+val metric_http_accept_errors : string
 
-val metric_http_active_connections : string
 (** Primary HTTP listener active accepted connections. *)
+val metric_http_active_connections : string
 
 (** {1 Admission queue metrics} *)
 
@@ -967,7 +1016,12 @@ val metric_inference_queue_inflight : string
 val metric_inference_queue_acquired : string
 val metric_inference_queue_wait : string
 val metric_inference_queue_cancelled : string
+
+(** Total admission requests rejected before execution. Labels:
+    [surface=with_permit|try_with_permit] and
+    [reason=host_resource_saturated]. *)
 val metric_inference_queue_rejected : string
+
 (** Total admission requests rejected before execution. Labels:
     [surface=with_permit|try_with_permit] and
     [reason=host_resource_saturated]. *)
@@ -987,28 +1041,27 @@ val metric_agent_stale_total : string
     monotonic-by-construction gauges. [heap_words] and [live_words]
     are point-in-time heap structure values, naturally a gauge. *)
 
-val metric_gc_minor_words : string
 (** Cumulative words allocated in the minor heap since program start. *)
+val metric_gc_minor_words : string
 
-val metric_gc_major_words : string
 (** Cumulative words allocated in the major heap since program start. *)
+val metric_gc_major_words : string
 
-val metric_gc_heap_words : string
 (** Current size of the major heap, in words. *)
+val metric_gc_heap_words : string
 
-val metric_gc_live_words : string
 (** Number of live words in the major heap at last sample. *)
+val metric_gc_live_words : string
 
-val metric_gc_compactions : string
 (** Number of major-heap compactions since program start. *)
+val metric_gc_compactions : string
 
-val metric_gc_promoted_words : string
 (** Cumulative words promoted from minor to major heap since program start. *)
+val metric_gc_promoted_words : string
 
-val metric_memory_usage_bytes : string
 (** Approximate live OCaml heap memory usage in bytes, derived from
     [Gc.quick_stat.live_words] and [Sys.word_size]. *)
-
+val metric_memory_usage_bytes : string
 
 (** [masc_keeper_oas_run_timeout_total] counter incremented in the
     cascade FSM each time an [Agent.run] / [run_stream] returns
@@ -1025,7 +1078,8 @@ val metric_memory_usage_bytes : string
       below the wrapper.
 
     Labels: cascade, provider, source. *)
-  (* Centralized metric constants for inline string replacement. *)
+(* Centralized metric constants for inline string replacement. *)
+
 (** #13xxx: counter incremented every time the keeper dispatch layer
     denies a tool call because the tool is not in the keeper's allowlist.
     Surfaces preset drift (e.g. [board_core] group omitted from the
@@ -1042,6 +1096,7 @@ val metric_memory_usage_bytes : string
     making progress — its BDI is requesting a tool that its preset
     does not permit. *)
 val metric_after_turn_response_model_empty : string
+
 val metric_after_turn_response_model_alias : string
 val metric_pricing_catalog_miss : string
 val metric_cost_emit_zero_source : string
@@ -1056,17 +1111,13 @@ val metric_mention_dedup_decisions_total : string
 (** {1 Process monitoring} *)
 
 val approximate_open_fd_count : unit -> int
-
 val fd_warn_threshold : int
-
 val set_tool_schema_stats : count:int -> approx_tokens:int -> unit
 
 (** {1 Prometheus Export} *)
 
 val type_to_string : metric_type -> string
-
 val labels_to_string : label list -> string
-
 val to_prometheus_text : unit -> string
 
 (** {1 Convenience Functions} *)

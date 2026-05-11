@@ -437,7 +437,8 @@ let emit_parse_functions buf spec =
          Buffer.add_string
            buf
            (Printf.sprintf
-              "let gen_parse_%s (args : string list) : Shell_ir_typed_types.wrapped option =\n\
+              "let gen_parse_%s (args : string list) : Shell_ir_typed_types.wrapped \
+               option =\n\
                %s\n\
                ;;\n\n"
               c.name
@@ -545,7 +546,8 @@ let emit_of_simple buf spec =
     \      in\n\
     \      match parsed with\n\
     \      | Some w -> w\n\
-    \      | None -> generic ())\n;;\n\n"
+    \      | None -> generic ())\n\
+     ;;\n\n"
 ;;
 
 let emit_constructor_names buf spec =

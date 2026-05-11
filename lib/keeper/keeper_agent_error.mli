@@ -69,4 +69,6 @@ val checkpoint_persistence_error
 
 (** Map an optional cascade observation to a textual outcome label
     ("passed_to_next_model" / "completed" / "not_observed"). *)
-val cascade_outcome_of_observation : Cascade_legacy_runner.cascade_observation option -> string
+val cascade_outcome_of_observation
+  :  Cascade_legacy_runner.cascade_observation option
+  -> string

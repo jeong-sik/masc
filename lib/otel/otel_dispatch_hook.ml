@@ -19,19 +19,22 @@
 module OT = Opentelemetry
 
 let enabled_override : bool option ref = ref None
-let span_emitter_override :
-  ((name:string -> attrs:OT.key_value list -> unit) option) ref =
+
+let span_emitter_override : (name:string -> attrs:OT.key_value list -> unit) option ref =
   ref None
+;;
 
 let enabled () =
   match !enabled_override with
   | Some value -> value
   | None -> Otel_config.enabled
+;;
 
 let emit_span ~name ~attrs =
   match !span_emitter_override with
   | Some emit -> emit ~name ~attrs
   | None -> ignore (OT.Trace.with_ name ~attrs (fun _scope -> ()))
+;;
 
 let with_test_span_emitter ~enabled:enabled_value ~emit_span:emit f =
   let prev_enabled = !enabled_override in
@@ -43,6 +46,7 @@ let with_test_span_emitter ~enabled:enabled_value ~emit_span:emit f =
       enabled_override := prev_enabled;
       span_emitter_override := prev_emitter)
     f
+;;
 
 (** PR-0.2.C: process startup timestamp captured at module load. Used to
     classify tool calls into [phase=cold] (within first
@@ -51,22 +55,24 @@ let with_test_span_emitter ~enabled:enabled_value ~emit_span:emit f =
     (provider warmup, JIT, prefix-cache miss) from steady-state cost
     without changing the histogram's underlying observation. *)
 let startup_time = Unix.gettimeofday ()
+
 let cold_phase_seconds = 60.0
+
 let cold_warm_phase () =
-  if Unix.gettimeofday () -. startup_time < cold_phase_seconds then "cold"
-  else "warm"
+  if Unix.gettimeofday () -. startup_time < cold_phase_seconds then "cold" else "warm"
+;;
 
 let tool_span_attrs (result : Tool_result.t) =
   let status_attrs =
-    if result.success then
-      [("otel.status_code", `String "OK")]
-    else
-      [("otel.status_code", `String "ERROR")]
+    if result.success
+    then [ "otel.status_code", `String "OK" ]
+    else [ "otel.status_code", `String "ERROR" ]
   in
   let legacy_attrs =
-    [ (Otel_genai.Attr_key.tool_name, `String result.tool_name);
-      (Otel_genai.Attr_key.tool_success, `Bool result.success);
-      (Otel_genai.Attr_key.tool_duration_ms, `Int (int_of_float result.duration_ms)) ]
+    [ Otel_genai.Attr_key.tool_name, `String result.tool_name
+    ; Otel_genai.Attr_key.tool_success, `Bool result.success
+    ; Otel_genai.Attr_key.tool_duration_ms, `Int (int_of_float result.duration_ms)
+    ]
   in
   (* OpenTelemetry GenAI semantic conventions
      (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Tool execution
@@ -79,20 +85,19 @@ let tool_span_attrs (result : Tool_result.t) =
     |> List.map (fun (key, value) -> key, (value :> OT.value))
   in
   legacy_attrs @ gen_ai_attrs @ status_attrs
+;;
 
 (** Record a tool call as an OTel span and Prometheus histogram observation. *)
 let on_tool_result (result : Tool_result.t) : Tool_result.t =
   (* Prometheus histogram: always active regardless of MASC_OTEL_ENABLED *)
-  Prometheus.observe_histogram "masc_tool_call_duration_seconds"
-    ~labels:[("tool_name", result.tool_name);
-             ("phase", cold_warm_phase ())]
+  Prometheus.observe_histogram
+    "masc_tool_call_duration_seconds"
+    ~labels:[ "tool_name", result.tool_name; "phase", cold_warm_phase () ]
     (result.duration_ms /. 1000.0);
   (* OTel span: only when enabled *)
-  if enabled () then
-    emit_span
-      ~name:("tool/" ^ result.tool_name)
-      ~attrs:(tool_span_attrs result);
+  if enabled ()
+  then emit_span ~name:("tool/" ^ result.tool_name) ~attrs:(tool_span_attrs result);
   result
+;;
 
-let install () =
-  Tool_dispatch.register_post_hook on_tool_result
+let install () = Tool_dispatch.register_post_hook on_tool_result

@@ -733,9 +733,9 @@ let run_docker_shell_command_with_status
               then
                 sandbox_error
                   (Printf.sprintf
-                     "docker_shell_failed: cwd_not_found: %s (host working directory does \
-                      not exist; verify the relative path under your playground before \
-                      calling keeper_shell)"
+                     "docker_shell_failed: cwd_not_found: %s (host working directory \
+                      does not exist; verify the relative path under your playground \
+                      before calling keeper_shell)"
                      cwd)
               else if not (Sys.is_directory cwd)
               then
@@ -744,147 +744,151 @@ let run_docker_shell_command_with_status
                      "docker_shell_failed: cwd_not_directory: %s (working directory must \
                       be a directory, not a file)"
                      cwd)
-              else
+              else (
                 let prepared_gitdirs =
                   if git_creds_enabled && cmd_targets_git_or_gh cmd
                   then prepare_container_worktree_gitdirs ~host_root ~container_root
                   else 0
                 in
-              let restore_gitdirs () =
-                if git_creds_enabled
-                then (
-                  let restored =
-                    repair_container_worktree_gitdirs ~host_root ~container_root
+                let restore_gitdirs () =
+                  if git_creds_enabled
+                  then (
+                    let restored =
+                      repair_container_worktree_gitdirs ~host_root ~container_root
+                    in
+                    if restored > 0
+                    then
+                      Log.Keeper.info
+                        "%s: restored %d docker worktree gitdir path(s) under %s"
+                        meta.name
+                        restored
+                        host_root)
+                in
+                if prepared_gitdirs > 0
+                then
+                  Log.Keeper.info
+                    "%s: prepared %d docker worktree gitdir path(s) under %s"
+                    meta.name
+                    prepared_gitdirs
+                    host_root;
+                let uid = Unix.getuid () in
+                let gid = Unix.getgid () in
+                match
+                  Keeper_sandbox_runtime.docker_user_identity_mount_args
+                    ~host_root
+                    ~uid
+                    ~gid
+                with
+                | Error err -> sandbox_error err
+                | Ok identity_mounts ->
+                  let network_args, network_label =
+                    if git_creds_enabled
+                    then [ "--network"; "bridge" ], "bridge"
+                    else Keeper_sandbox_runtime.docker_network_args network_mode
                   in
-                  if restored > 0
-                  then
-                    Log.Keeper.info
-                      "%s: restored %d docker worktree gitdir path(s) under %s"
-                      meta.name
-                      restored
-                      host_root)
-              in
-              if prepared_gitdirs > 0
-              then
-                Log.Keeper.info
-                  "%s: prepared %d docker worktree gitdir path(s) under %s"
-                  meta.name
-                  prepared_gitdirs
-                  host_root;
-              let uid = Unix.getuid () in
-              let gid = Unix.getgid () in
-              (match
-                 Keeper_sandbox_runtime.docker_user_identity_mount_args
-                   ~host_root
-                   ~uid
-                   ~gid
-               with
-               | Error err -> sandbox_error err
-               | Ok identity_mounts ->
-                 let network_args, network_label =
-                   if git_creds_enabled
-                   then [ "--network"; "bridge" ], "bridge"
-                   else Keeper_sandbox_runtime.docker_network_args network_mode
-                 in
-                 let cred_result =
-                   if not git_creds_enabled
-                   then Ok ([], [])
-                   else (
-                     (* Credential composition is centralised in
+                  let cred_result =
+                    if not git_creds_enabled
+                    then Ok ([], [])
+                    else (
+                      (* Credential composition is centralised in
              [Host_config_provider.resolve].  It selects either the
              keeper's explicit GitHub identity bundle or the MASC-owned
              root bundle.  Ambient operator GH_TOKEN/GITHUB_TOKEN,
              ~/.config/gh, ~/.ssh, and keychain probes are not part of
              keeper execution. *)
-                     match Host_config_provider.resolve ~config ~identity:meta.name with
-                     | Error err -> Error (Credential_provider.pp_error err)
-                     | Ok binding ->
-                       let mounts =
-                         List.concat_map
-                           (fun (m : Credential_provider.ro_mount) ->
-                              [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
-                           binding.ro_mounts
-                       in
-                       let envs =
-                         List.concat_map (fun (k, v) -> [ "-e"; k ^ "=" ^ v ]) binding.env
-                       in
-                       Ok (mounts, envs))
-                 in
-                 (match cred_result with
-                  | Error err -> sandbox_error err
-                  | Ok (cred_mounts, cred_envs) ->
-                    let argv =
-                      Keeper_sandbox_runtime.docker_command_argv ()
-                      @ [ "run"; "--rm"; "--name"; container_name ]
-                      @ Keeper_sandbox_runtime.docker_label_args
-                          ~base_path:config.base_path
-                          ~keeper_name:meta.name
-                          ~container_kind:"oneshot"
-                          ~network_label
-                          ()
-                      @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
-                      @ Keeper_sandbox_runtime.docker_user_env_args ()
-                      @ Keeper_sandbox_runtime.docker_nofile_args ()
-                      @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
-                      @ [ "--tmpfs"
-                        ; Env_config_keeper.KeeperSandbox.tmpfs_mount ()
-                        ; "--cap-drop=ALL"
-                        ; "--security-opt"
-                        ; "no-new-privileges"
-                        ]
-                      @ seccomp_args
-                      @ [ "--pids-limit"
-                        ; string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ())
-                        ; "--memory"
-                        ; Env_config_keeper.KeeperSandbox.memory ()
-                        ; "-v"
-                        ; host_root ^ ":" ^ container_root ^ ":rw"
-                        ; "--workdir"
-                        ; container_cwd
-                        ]
-                      @ network_args
-                      @ cred_mounts
-                      @ cred_envs
-                      @ identity_mounts
-                      @ [ image; "bash"; "-lc"; cmd ]
-                    in
-                    (try
-                       let status, output =
-                         Eio_guard.protect ~finally:restore_gitdirs
-                         @@ fun () ->
-                         Masc_exec.Exec_gate.run_argv_with_status
-                           ~actor:`Keeper_shell
-                           ~raw_source:(String.concat " " argv)
-                           ~summary:"keeper docker command"
-                           ~env:(Unix.environment ())
-                           ~cwd:(Sys.getcwd ())
-                           ~timeout_sec
-                           argv
-                       in
-                       if status <> Unix.WEXITED 0
-                       then
-                         Keeper_registry.record_error
+                      match Host_config_provider.resolve ~config ~identity:meta.name with
+                      | Error err -> Error (Credential_provider.pp_error err)
+                      | Ok binding ->
+                        let mounts =
+                          List.concat_map
+                            (fun (m : Credential_provider.ro_mount) ->
+                               [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
+                            binding.ro_mounts
+                        in
+                        let envs =
+                          List.concat_map
+                            (fun (k, v) -> [ "-e"; k ^ "=" ^ v ])
+                            binding.env
+                        in
+                        Ok (mounts, envs))
+                  in
+                  (match cred_result with
+                   | Error err -> sandbox_error err
+                   | Ok (cred_mounts, cred_envs) ->
+                     let argv =
+                       Keeper_sandbox_runtime.docker_command_argv ()
+                       @ [ "run"; "--rm"; "--name"; container_name ]
+                       @ Keeper_sandbox_runtime.docker_label_args
                            ~base_path:config.base_path
-                           meta.name
-                           (docker_exec_failure_message ~image ~status ~output)
-                       else if
-                         git_creds_enabled
-                         && String_util.contains_substring_ci cmd "git worktree"
-                       then (
-                         let repaired =
-                           repair_container_worktree_gitdirs ~host_root ~container_root
-                         in
-                         if repaired > 0
-                         then
-                           Log.Keeper.info
-                             "%s: repaired %d docker worktree gitdir path(s) under %s"
-                             meta.name
-                             repaired
-                             host_root;
-                         Keeper_registry.clear_error ~base_path:config.base_path meta.name);
-                       Ok { status; output; image; network_label }
-                     with
-                     | Failure err -> sandbox_error err)))))))
+                           ~keeper_name:meta.name
+                           ~container_kind:"oneshot"
+                           ~network_label
+                           ()
+                       @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
+                       @ Keeper_sandbox_runtime.docker_user_env_args ()
+                       @ Keeper_sandbox_runtime.docker_nofile_args ()
+                       @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
+                       @ [ "--tmpfs"
+                         ; Env_config_keeper.KeeperSandbox.tmpfs_mount ()
+                         ; "--cap-drop=ALL"
+                         ; "--security-opt"
+                         ; "no-new-privileges"
+                         ]
+                       @ seccomp_args
+                       @ [ "--pids-limit"
+                         ; string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ())
+                         ; "--memory"
+                         ; Env_config_keeper.KeeperSandbox.memory ()
+                         ; "-v"
+                         ; host_root ^ ":" ^ container_root ^ ":rw"
+                         ; "--workdir"
+                         ; container_cwd
+                         ]
+                       @ network_args
+                       @ cred_mounts
+                       @ cred_envs
+                       @ identity_mounts
+                       @ [ image; "bash"; "-lc"; cmd ]
+                     in
+                     (try
+                        let status, output =
+                          Eio_guard.protect ~finally:restore_gitdirs
+                          @@ fun () ->
+                          Masc_exec.Exec_gate.run_argv_with_status
+                            ~actor:`Keeper_shell
+                            ~raw_source:(String.concat " " argv)
+                            ~summary:"keeper docker command"
+                            ~env:(Unix.environment ())
+                            ~cwd:(Sys.getcwd ())
+                            ~timeout_sec
+                            argv
+                        in
+                        if status <> Unix.WEXITED 0
+                        then
+                          Keeper_registry.record_error
+                            ~base_path:config.base_path
+                            meta.name
+                            (docker_exec_failure_message ~image ~status ~output)
+                        else if
+                          git_creds_enabled
+                          && String_util.contains_substring_ci cmd "git worktree"
+                        then (
+                          let repaired =
+                            repair_container_worktree_gitdirs ~host_root ~container_root
+                          in
+                          if repaired > 0
+                          then
+                            Log.Keeper.info
+                              "%s: repaired %d docker worktree gitdir path(s) under %s"
+                              meta.name
+                              repaired
+                              host_root;
+                          Keeper_registry.clear_error
+                            ~base_path:config.base_path
+                            meta.name);
+                        Ok { status; output; image; network_label }
+                      with
+                      | Failure err -> sandbox_error err)))))))
 ;;
 
 let run_docker_with_git_bash

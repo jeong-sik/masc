@@ -14,9 +14,7 @@ include Shell_ir_typed_types
 (* ---------------------------------------------------------------------- *)
 (* of_simple — delegated to generated walker (RFC-0054 PR-4) *)
 
-let of_simple : Shell_ir.simple -> wrapped =
-  Shell_ir_typed_walkers_gen.gen_of_simple
-;;
+let of_simple : Shell_ir.simple -> wrapped = Shell_ir_typed_walkers_gen.gen_of_simple
 
 (* ---------------------------------------------------------------------- *)
 (* to_simple — delegated to generated walker (RFC-0054 PR-5) *)

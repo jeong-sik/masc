@@ -1429,8 +1429,8 @@ let run_turn
            default is now the canonical wire; the normalize step is gone. *)
            Option.value ~default:"success" !receipt_stop_reason_ref
          | Error err ->
-             terminal_reason_code_of_sdk_error_typed err
-             |> Keeper_turn_terminal_code.to_wire
+           terminal_reason_code_of_sdk_error_typed err
+           |> Keeper_turn_terminal_code.to_wire
        in
        let cascade_observation = !receipt_cascade_observation_ref in
        let receipt =

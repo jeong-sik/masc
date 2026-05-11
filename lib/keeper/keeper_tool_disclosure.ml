@@ -78,15 +78,21 @@ let canonical_name name =
     - [Already_internal]: tool = name, routed_to = name, result = ok
     - [Miss]:       tool = name (normalised to "unknown" by safe_tool_label), routed_to = "none", result = miss *)
 let canonical_name_observed name =
+  (* Always strip the MCP prefix before recording [tool] so MCP-prefixed
+     Anthropic Code calls (e.g. [mcp__masc__Bash]) and MCP-prefixed
+     keeper internal calls (e.g. [mcp__masc__masc_board_post]) keep the
+     stripped form in the label. The stripped form is in
+     [is_known_public] or [is_known_internal] for any successful route,
+     so [safe_tool_label] preserves it. Self-review of PR #14585 caught
+     that the Route_hit branch was still recording the raw prefixed
+     name and collapsing to ["unknown"]. *)
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
   match canonicalise_outcome name with
-  | Mcp_mapped { stripped; internal } ->
-    (* Recording [stripped] keeps the label in [is_known_internal], so
-       MCP-prefixed names do not get collapsed into ["unknown"] on
-       successful routes (PR #14585 review #1). *)
+  | Mcp_mapped { internal; _ } ->
     Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
     internal
   | Route_hit { internal } ->
-    Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:internal ~result:"ok";
+    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
     internal
   | Already_internal ->
     Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:name ~result:"ok";

@@ -233,6 +233,58 @@ let test_mcp_prefixed_anthropic_alias_routes () =
     canonical
 ;;
 
+let test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped () =
+  (* Self-review of PR #14585: in canonical_name_observed, the Route_hit
+     branch (LLM-native public name reached via a stripped MCP prefix)
+     must record [tool=stripped] so the label stays within
+     [is_known_public]. Otherwise [safe_tool_label] collapses
+     ["mcp__masc__Bash"] to ["unknown"] on a successful route. *)
+  let labels = [ "tool", "Bash"; "routed_to", "keeper_bash"; "result", "ok" ] in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  let _ = Disclosure.canonical_tool_name_observed "mcp__masc__Bash" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  Alcotest.(check (float 0.001))
+    "MCP-prefixed Anthropic alias records tool=Bash (stripped), not raw prefixed name"
+    (before +. 1.0)
+    after
+;;
+
+let test_canonical_tool_name_pure_does_not_increment_counter () =
+  (* Self-review of PR #14585 review #3: the pure variant must NOT emit
+     telemetry. Otherwise set-logic call sites (required-tool
+     canonicalisation, surface composition) would over-count. *)
+  let labels_ok = [ "tool", "Bash"; "routed_to", "keeper_bash"; "result", "ok" ] in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels:labels_ok
+      ()
+  in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels:labels_ok
+      ()
+  in
+  Alcotest.(check (float 0.001))
+    "pure canonical_tool_name does not increment masc_keeper_tool_call_total"
+    before
+    after
+;;
+
 let test_partial_tolerance_still_works () =
   let observed = [ "Skill"; "Bash" ] in
   let canonical = List.map Disclosure.canonical_tool_name observed in
@@ -658,6 +710,14 @@ let () =
             "mcp-prefixed anthropic alias routes"
             `Quick
             test_mcp_prefixed_anthropic_alias_routes
+        ; Alcotest.test_case
+            "mcp-prefixed anthropic alias telemetry uses stripped tool label"
+            `Quick
+            test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped
+        ; Alcotest.test_case
+            "pure canonical_tool_name does not increment counter"
+            `Quick
+            test_canonical_tool_name_pure_does_not_increment_counter
         ; Alcotest.test_case
             "partial tolerance still works"
             `Quick

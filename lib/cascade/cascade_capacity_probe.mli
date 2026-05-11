@@ -73,3 +73,18 @@ val refresh_many
   -> ?timeout_s:float
   -> unit
   -> unit
+
+(** {1 Testing helpers}
+
+    These bypass the registry mutex contract intentionally — tests need
+    deterministic registry state and the production code never calls
+    [clear_registry]. Production code must not use this module. *)
+module For_testing : sig
+  (** [clear_registry ()] empties the probe registry. *)
+  val clear_registry : unit -> unit
+
+  (** [with_registry probes f] swaps the registry to [probes] for the
+      dynamic extent of [f] and restores the previous registry afterward
+      (even when [f] raises). *)
+  val with_registry : t list -> (unit -> 'a) -> 'a
+end

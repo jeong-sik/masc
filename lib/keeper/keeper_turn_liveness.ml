@@ -10,7 +10,7 @@ type local_only_liveness_decision =
   | Probe_local_only_urls of {
       effective_cascade : string;
       fallback_cascade : string;
-      ollama_base_urls : string list;
+      probeable_base_urls : string list;
     }
 
 let decide_local_only_liveness
@@ -44,17 +44,17 @@ let decide_local_only_liveness
     in
     match ollama_urls with
     | [] -> Keep_effective_cascade normalized_effective
-    | ollama_base_urls ->
+    | probeable_base_urls ->
         Probe_local_only_urls
           {
             effective_cascade = normalized_effective;
             fallback_cascade = normalized_base;
-            ollama_base_urls;
+            probeable_base_urls;
           }
 
 let fail_open_local_only_when_unavailable
     ?resolve_label
-    ?probe_ollama_base_url
+    ?probe_base_url
     ~(base_cascade : string)
     ~(effective_cascade : string)
     (labels : string list) : string =
@@ -64,9 +64,9 @@ let fail_open_local_only_when_unavailable
   with
   | Keep_effective_cascade cascade -> cascade
   | Probe_local_only_urls
-      { effective_cascade; fallback_cascade; ollama_base_urls } ->
-      let probe_ollama_base_url =
-        match probe_ollama_base_url with
+      { effective_cascade; fallback_cascade; probeable_base_urls } ->
+      let probe_base_url =
+        match probe_base_url with
         | Some probe -> Some probe
         | None ->
           (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
@@ -75,17 +75,17 @@ let fail_open_local_only_when_unavailable
                Option.is_some (Cascade_capacity_probe.probe ~sw ~net ~url:base_url ()))
            | _ -> None)
       in
-      (match probe_ollama_base_url with
+      (match probe_base_url with
        | None -> effective_cascade
        | Some probe ->
-         if List.exists probe ollama_base_urls then effective_cascade
+         if List.exists probe probeable_base_urls then effective_cascade
          else fallback_cascade)
 
 (** PR-B: ollama saturation pre-skip support.
 
     When every label in the resolved cascade points at the same
     ollama [base_url] (single-provider profile), we can pre-check the
-    [Cascade_ollama_probe] cache before paying an [Agent.run] dispatch.
+    [Cascade_capacity_probe] cache before paying an [Agent.run] dispatch.
     If the probe reports [process_available <= 0] the request would
     queue on a busy slot and very likely blow the keeper turn budget,
     causing a cascading FAILED cycle.  Skipping the turn here keeps
@@ -134,7 +134,7 @@ let resolve_ollama_only_base_url
     active request.  [None] (no cache entry / probe never ran) and
     failed probes are deliberately treated as "not saturated" so a
     flaky probe never starves the keeper.  Mirrors the conservative
-    fail-open policy in [Cascade_ollama_probe.try_probe]. *)
+    fail-open policy in [Cascade_http_probe.try_probe]. *)
 let is_ollama_saturated
     ?capacity_lookup
     (base_url : string) : bool =

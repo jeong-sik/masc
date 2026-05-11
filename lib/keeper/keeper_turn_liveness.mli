@@ -13,7 +13,7 @@ type local_only_liveness_decision =
   | Probe_local_only_urls of {
       effective_cascade : string;
       fallback_cascade : string;
-      ollama_base_urls : string list;
+      probeable_base_urls : string list;
     }
 
 val decide_local_only_liveness :
@@ -25,7 +25,7 @@ val decide_local_only_liveness :
 
 val fail_open_local_only_when_unavailable :
   ?resolve_label:(string -> Llm_provider.Provider_config.t option) ->
-  ?probe_ollama_base_url:(string -> bool) ->
+  ?probe_base_url:(string -> bool) ->
   base_cascade:string ->
   effective_cascade:string ->
   string list ->
@@ -47,7 +47,7 @@ val is_ollama_saturated :
   ?capacity_lookup:(string -> Cascade_throttle.capacity_info option) ->
   string ->
   bool
-(** Read the [Cascade_ollama_probe] cache and report whether the endpoint
+(** Read the [Cascade_capacity_probe] cache and report whether the endpoint
     is saturated (no available slots while at least one request is active
     or queued). No cache / failed probe returns [false] (fail-open) so a
     flaky probe never starves the keeper. *)

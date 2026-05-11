@@ -4499,16 +4499,16 @@ let test_decide_local_only_liveness_requests_deduped_ollama_probe () =
   with
   | UT.Keep_effective_cascade _ -> fail "expected Ollama liveness probe"
   | UT.Probe_local_only_urls
-      { effective_cascade; fallback_cascade; ollama_base_urls } ->
+      { effective_cascade; fallback_cascade; probeable_base_urls } ->
       check string "effective cascade" KC.local_only_cascade_name effective_cascade;
       check string "fallback cascade" "tool_rerank" fallback_cascade;
       check (list string) "deduped probe URLs" [ cfg.base_url ]
-        ollama_base_urls
+        probeable_base_urls
 
 let test_fail_open_local_only_when_probe_fails () =
   let cascade =
     UT.fail_open_local_only_when_unavailable
-      ~probe_ollama_base_url:(fun _ -> false)
+      ~probe_base_url:(fun _ -> false)
       ~base_cascade:"tool_rerank"
       ~effective_cascade:KC.local_only_cascade_name
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
@@ -4519,7 +4519,7 @@ let test_fail_open_local_only_preserves_explicit_local_only_base () =
   let probe_calls = ref 0 in
   let cascade =
     UT.fail_open_local_only_when_unavailable
-      ~probe_ollama_base_url:(fun _ ->
+      ~probe_base_url:(fun _ ->
         incr probe_calls;
         false)
       ~base_cascade:"local_only"
@@ -4533,7 +4533,7 @@ let test_fail_open_local_only_preserves_explicit_local_only_base () =
 let test_fail_open_local_only_preserves_healthy_local_only () =
   let cascade =
     UT.fail_open_local_only_when_unavailable
-      ~probe_ollama_base_url:(fun _ -> true)
+      ~probe_base_url:(fun _ -> true)
       ~base_cascade:"tool_rerank"
       ~effective_cascade:KC.local_only_cascade_name
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]

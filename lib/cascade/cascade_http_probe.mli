@@ -123,7 +123,7 @@ val cache_size : unit -> int
 (** First-class probe wrapper for registration with
     {!Cascade_capacity_probe.register}.  Structurally satisfies
     {!Cascade_capacity_probe.Probe}. *)
-module Ollama_probe : sig
+module Http_probe : sig
   val can_probe : url:string -> bool
 
   val probe

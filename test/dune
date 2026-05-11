@@ -1150,7 +1150,7 @@
 (include stanzas/test_cascade_per_candidate_telemetry.inc)
 (include stanzas/test_cascade_kimi_max_context_ssot.inc)
 (include stanzas/test_cascade_model_resolve.inc)
-(include stanzas/test_cascade_ollama_probe.inc)
+(include stanzas/test_cascade_http_probe.inc)
 (include stanzas/test_cascade_runtime.inc)
 (include stanzas/test_cascade_strategy.inc)
 (include stanzas/test_cascade_hierarchical_routing.inc)

@@ -199,7 +199,7 @@ let refresh_many ~sw ~net ?timeout_s urls =
    {!Cascade_capacity_probe}.  The module structurally satisfies
    [Cascade_capacity_probe.Probe] without an explicit annotation,
    avoiding a circular dependency between the two compilation units. *)
-module Ollama_probe = struct
+module Http_probe = struct
   let can_probe ~url = is_ollama_url url
 
   let probe ~sw ~net ~url ?timeout_s () =

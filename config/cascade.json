@@ -5,39 +5,45 @@
       "protocol": "anthropic-cli",
       "command": "claude",
       "is-non-interactive": true,
-      "credentials": { "type": "env", "key": "ANTHROPIC_API_KEY" }
+      "credentials": { "type": "env", "key": "ANTHROPIC_API_KEY" },
+      "liveness": { "class": "cloud_fast" }
     },
     "codex_cli": {
       "display-name": "OpenAI Codex CLI",
       "protocol": "openai-http",
       "command": "codex",
       "is-non-interactive": true,
-      "credentials": { "type": "env", "key": "OPENAI_API_KEY" }
+      "credentials": { "type": "env", "key": "OPENAI_API_KEY" },
+      "liveness": { "class": "cloud_fast" }
     },
     "gemini_cli": {
       "display-name": "Google Gemini CLI",
       "protocol": "google-cli",
       "command": "gemini",
       "is-non-interactive": true,
-      "credentials": { "type": "env", "key": "GEMINI_API_KEY" }
+      "credentials": { "type": "env", "key": "GEMINI_API_KEY" },
+      "liveness": { "class": "cloud_fast" }
     },
     "kimi_cli": {
       "display-name": "Moonshot Kimi CLI",
       "protocol": "kimi-cli",
       "command": "kimi",
       "is-non-interactive": true,
-      "credentials": { "type": "env", "key": "MOONSHOT_API_KEY" }
+      "credentials": { "type": "env", "key": "MOONSHOT_API_KEY" },
+      "liveness": { "class": "cloud_thinking" }
     },
     "glm-coding": {
       "display-name": "Zhipu GLM Coding",
       "protocol": "openai-http",
       "endpoint": "https://api.z.ai/api/coding/paas/v4",
-      "credentials": { "type": "env", "key": "ZAI_API_KEY" }
+      "credentials": { "type": "env", "key": "ZAI_API_KEY" },
+      "liveness": { "class": "cloud_thinking" }
     },
     "ollama": {
       "display-name": "Ollama Local",
       "protocol": "ollama-http",
-      "endpoint": "http://localhost:11434"
+      "endpoint": "http://localhost:11434",
+      "liveness": { "class": "local_27b" }
     }
   },
   "models": {

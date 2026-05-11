@@ -69,6 +69,27 @@ type cascade_capabilities = {
   max_turns_per_attempt : int option;
       (** Optional per-attempt cap on [max_turns]. Parser rejects
           non-positive values (warn + None). *)
+  tolerates_bound_actor_fallback : bool;
+      (** Catalog-level static-validation flag: when [true], this provider
+          is intended to be a viable fallback target if the operator's
+          catalog also lists an adapter that requires per-keeper bridging
+          (e.g. Codex CLI).
+
+          **Current data flow (parsed-only).** This PR adds the schema and
+          parser path so cascade.toml can declare the value, but
+          [Cascade_catalog_validator.codex_with_bound_actor_only_issue]
+          still reads
+          [Provider_adapter.tolerates_bound_actor_fallback_for_kind],
+          which is hard-coded to per-adapter literals in
+          [Provider_adapter] (introduced in #14642). Editing this value
+          in cascade.toml has no runtime effect on the catalog warning
+          until the caller cutover lands.
+
+          The cutover is a follow-up that routes
+          [Provider_adapter.adapter_of_provider_config] through
+          [tool_policy_of_cascade_capabilities] (see #14659) so the
+          cascade-decl value becomes the SSOT. This field is shipped now
+          so the schema is stable before that cutover. *)
 }
 [@@deriving show, eq]
 
@@ -82,6 +103,7 @@ let cascade_capabilities_default = {
   argv_prompt_preflight = false;
   uses_anthropic_caching = false;
   max_turns_per_attempt = None;
+  tolerates_bound_actor_fallback = false;
 }
 type cascade_provider = {
   id : string;

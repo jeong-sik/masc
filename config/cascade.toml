@@ -31,6 +31,7 @@ class = "cloud_fast"
 supports-runtime-mcp-http-headers = true
 uses-anthropic-caching = true
 max-turns-per-attempt = 30
+tolerates-bound-actor-fallback = true
 
 [providers.codex_cli]
 display-name = "OpenAI Codex CLI"
@@ -66,10 +67,21 @@ key = "GEMINI_API_KEY"
 [providers.gemini_cli.liveness]
 class = "cloud_fast"
 
-# Gemini CLI ships no [capabilities] sub-table — needs none of the
-# behavioral quirks (no runtime MCP HTTP headers, no anthropic caching,
-# no max-turns cap). Parser yields `capabilities = None`; A.3 callers
-# treat `None` as the conservative defaults (all-false / empty / None).
+# Gemini CLI carries one capability — it is intended as a viable
+# bound-actor fallback target for cascades that include Codex CLI
+# (per-keeper MCP config injection is unimplemented upstream but the
+# catalog-level validator only requires "tolerates", not "natively
+# supports"; see masc-mcp#11356). All other capability flags remain at
+# their defaults (no runtime MCP HTTP headers, no anthropic caching,
+# no max-turns cap).
+#
+# NOTE (data-only until cutover): this declaration is parsed into the
+# in-memory cascade-decl config, but [Cascade_catalog_validator] still
+# reads [Provider_adapter]'s hardcoded value for this kind. Toggling
+# this line therefore does not move the validator warn surface until
+# the caller cutover lands (see #14659 bridge primitive).
+[providers.gemini_cli.capabilities]
+tolerates-bound-actor-fallback = true
 
 [providers.kimi_cli]
 display-name = "Moonshot Kimi CLI"
@@ -86,6 +98,7 @@ class = "cloud_thinking"
 
 [providers.kimi_cli.capabilities]
 supports-runtime-mcp-http-headers = true
+tolerates-bound-actor-fallback = true
 
 [providers.glm-coding]
 display-name = "Zhipu GLM Coding"
@@ -115,8 +128,11 @@ endpoint = "http://localhost:11434"
 [providers.ollama.liveness]
 class = "local_27b"
 
-# Ollama ships no [capabilities] sub-table. Parser yields
-# `capabilities = None`; A.3 callers treat `None` as defaults.
+[providers.ollama.capabilities]
+# Local Ollama is a viable bound-actor fallback target in catalogs
+# that include Codex CLI — its HTTP surface accepts per-keeper auth
+# headers natively. All other capability flags default to false.
+tolerates-bound-actor-fallback = true
 
 # ── Layer 2: Models ────────────────────────────────────────────
 

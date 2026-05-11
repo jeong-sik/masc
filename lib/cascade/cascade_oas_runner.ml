@@ -121,16 +121,23 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
     ~(keeper_name : string)
     ~(provider_cfg : Llm_provider.Provider_config.t)
     (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
-  match provider_cfg.kind, keeper_agent_name_opt keeper_name, policy_opt with
-  | Llm_provider.Provider_config.Codex_cli, Some agent_name, Some policy
-    when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name)
-    ->
-      (not
-         (Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp
-            ~agent_name policy))
-      && List.exists Cascade_runner.runtime_mcp_tool_requires_bound_actor
-           policy.allowed_tool_names
-  | _ -> false
+  (* RFC-0058 §2.4: dispatch by adapter capability, not provider name. *)
+  if not
+       (Provider_adapter
+        .requires_per_keeper_bridging_for_bound_actor_tools_for_config
+          provider_cfg)
+  then false
+  else
+    match keeper_agent_name_opt keeper_name, policy_opt with
+    | Some agent_name, Some policy
+      when Option.is_some
+             (Keeper_identity.keeper_name_from_agent_name agent_name) ->
+        (not
+           (Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp
+              ~agent_name policy))
+        && List.exists Cascade_runner.runtime_mcp_tool_requires_bound_actor
+             policy.allowed_tool_names
+    | _ -> false
 
 (* #10681: per-provider rejection reason produced by the cascade filter.
    When the filter empties the cascade, operators previously saw only a

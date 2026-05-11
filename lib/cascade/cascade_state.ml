@@ -35,7 +35,15 @@ let record_sticky_choice ~keeper ~cascade ~provider ~ttl_ms ~now =
 let lookup_sticky ~keeper ~cascade ~now =
   match Sticky_map.find_opt (keeper, cascade) (Atomic.get sticky_table) with
   | Some entry when now < entry.expires_at -> Some entry.provider
-  | _ -> None
+  | Some _expired_entry ->
+    (* Entry existed but TTL expired.  Distinct from "no entry"
+       case below — surface separately so operators can tell
+       too-short-TTL invalidations from first-lookup misses.
+       See iter 24 commit + iter 23 sticky_drift for the related
+       candidate-list-invalidation counter. *)
+    Cascade_metrics.on_sticky_expiry ~cascade;
+    None
+  | None -> None
 
 let clear_sticky () = Atomic.set sticky_table Sticky_map.empty
 

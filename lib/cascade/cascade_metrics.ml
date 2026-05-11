@@ -428,3 +428,28 @@ let on_sticky_drift ~cascade =
   Prometheus.inc_counter metric_sticky_drift
     ~labels:[ ("cascade", cascade) ]
     ()
+
+(* [Cascade_state.lookup_sticky] returns None in two distinct cases
+   that were previously indistinguishable to callers:
+     - No entry recorded yet (first lookup for this keeper+cascade)
+     - Entry recorded but TTL expired (now >= entry.expires_at)
+
+   Only the second is interesting to operators — it's the explicit
+   signal that the configured TTL is too short for the actual
+   keeper request cadence, breaking the sticky-intent before the
+   next turn lands.  iter 23 covers [sticky_drift] (pin invalidated
+   by candidate-list change); this counter covers the orthogonal
+   case (pin invalidated by TTL).  Both surfaces matter for TTL
+   tuning: too-short TTL inflates [sticky_expiry], too-long TTL
+   inflates [sticky_drift].
+
+   The no-pin case is NOT counted (normal first lookup, no operator
+   signal).
+
+   Cardinality: cascades (~10) = ~10 series. *)
+let metric_sticky_expiry = "masc_cascade_sticky_expiry_total"
+
+let on_sticky_expiry ~cascade =
+  Prometheus.inc_counter metric_sticky_expiry
+    ~labels:[ ("cascade", cascade) ]
+    ()

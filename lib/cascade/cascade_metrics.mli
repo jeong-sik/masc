@@ -132,3 +132,11 @@ val on_sticky_drift : cascade:string -> unit
     (cascade.toml reload, provider deprecation, registry shift)
     and the strategy silently falls back to plain Failover.  Ticks
     only on the drift case, not on normal hit / miss-no-pin paths. *)
+
+val on_sticky_expiry : cascade:string -> unit
+(** Tick the sticky-expiry counter at [Cascade_state.lookup_sticky]
+    when an entry exists for [(keeper, cascade)] but its TTL has
+    expired ([now >= entry.expires_at]).  Distinct from
+    [on_sticky_drift] (candidate-list invalidation): this signals
+    TTL is too short for the actual keeper request cadence and
+    operators should consider raising it. *)

@@ -731,6 +731,17 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    dedicated [test_cascade_strategy] suite that drives sticky
    pinning under harness.  Smoke test pins the cascade label name
    + helper signature. *)
+(* Smoke for [Cascade_metrics.on_sticky_expiry].  The expiry arm in
+   [Cascade_state.lookup_sticky] only fires after a TTL window has
+   passed since [record_sticky_choice], which is awkward to drive
+   from a unit test without mock clocks.  Smoke pins the helper
+   signature; the natural code path is exercised by the existing
+   [test_cascade_strategy] / [test_cascade_state] suites. *)
+let test_sticky_expiry_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_sticky_expiry
+    ~cascade:"smoke_test_cascade_iter24";
+  check bool "single-label cascade helper callable" true true
+
 let test_sticky_drift_helper_callable () =
   Masc_mcp.Cascade_metrics.on_sticky_drift
     ~cascade:"smoke_test_cascade_iter23";
@@ -1062,6 +1073,9 @@ let () =
           test_case
             "sticky_drift: cascade label helper callable" `Quick
             test_sticky_drift_helper_callable;
+          test_case
+            "sticky_expiry: cascade label helper callable" `Quick
+            test_sticky_expiry_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

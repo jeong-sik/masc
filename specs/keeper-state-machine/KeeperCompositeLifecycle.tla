@@ -134,13 +134,43 @@ vars == <<ksm_phase, ktc_turn_phase, kdp_decision, kcl_cascade_state,
 
 PhaseSet       == {"Running", "Failing", "Overflowed", "Compacting",
                    "HandingOff", "Draining", "Stable"}
-TurnPhaseSet   == {"idle", "prompting", "executing", "compacting",
-                   "finalizing"}
+
+\* TurnPhaseSet: KTC projection.  iter 39 R-E-1.a (2026-05-12) sync —
+\* KTC.tla:127 widened to 7 members in iter 28 (#14793 R-B-1.a) to match
+\* OCaml's 7-constructor `Keeper_registry.turn_phase`; KCL had carried
+\* the pre-iter-28 5-member set, creating a cross-spec drift documented
+\* in `docs/tla-audit/kcl-e1-cross-spec-projection-drift-2026-05-12.md`
+\* (PR #14822 Finding 1, HIGH risk).  Type widening only — KCL's existing
+\* observer actions don't transition into routing/exhausted; per-attempt
+\* FSM is owned by KCAF and the keeper-projection action set by KTC
+\* (B-2 audit #14809).  Action modeling deferred — see KTC R-B-2.{a,b,c}.
+TurnPhaseSet   == {"idle", "prompting", "routing", "executing",
+                   "compacting", "finalizing", "exhausted"}
+
 DecisionSet    == {"undecided", "guard_ok", "gate_rejected",
                    "tool_policy_selected"}
 CascadeSet     == {"idle", "selecting", "trying", "done", "exhausted"}
 CompactionSet  == {"accumulating", "compacting", "done"}
+
+\* KcafPhaseSet: DELIBERATE 3:6 projection collapse from KCAF.tla:79-81.
+\* iter 39 R-E-1.c (2026-05-12, this commit) documents the mapping per
+\* iter 38 KCL E-1 Finding 2 (PR #14822):
+\*
+\*   KCL abstract      ↔  KCAF concrete
+\*   "idle"            ↔  "idle"
+\*   "attempting"      ↔  "attempting", "awaiting_response"
+\*   "terminal"        ↔  "success", "exhausted_normal", "exhausted_hard_quota"
+\*
+\* The terminal collapse silently merges KCAF's distinguished terminals
+\* (exhausted_normal vs exhausted_hard_quota documented in D-2 audit
+\* #14815).  Joint invariants conditioning on `kcaf_attempt_phase` cannot
+\* distinguish hard-quota from normal exhaustion at the cross-spec level
+\* — the D-2 safety surface (HardQuotaTerminalImmediate +
+\* BugHardQuotaBypass) lives only in KCAF, not in any KCL joint property.
+\* This is INTENTIONAL: KCL operates at a coarser observation
+\* granularity; per-terminal-flavor invariants belong in KCAF.
 KcafPhaseSet   == {"idle", "attempting", "terminal"}
+
 KptoPhaseSet   == {"idle", "active", "persisted"}
 ActionSet      == {
                    "StartTurn", "MeasurementBroadcast", "DecideGuard",

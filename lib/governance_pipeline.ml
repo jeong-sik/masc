@@ -141,7 +141,10 @@ let make_pre_hook ~config ~governance_level =
           legacy_message = Yojson.Safe.to_string response;
           tool_name = name;
           duration_ms = 0.0;
-          failure_class = None;
+          (* Governance Reject — policy gate said no.  Stamp
+             [Policy_rejection] so failure-class telemetry buckets
+             governance denials separately from runtime/transient errors. *)
+          failure_class = Some Tool_result.Policy_rejection;
         }
     | `Deny reason ->
         maybe_create_petition ~config ~decision;
@@ -164,7 +167,10 @@ let make_pre_hook ~config ~governance_level =
           legacy_message = Yojson.Safe.to_string response;
           tool_name = name;
           duration_ms = 0.0;
-          failure_class = None;
+          (* Governance Reject — policy gate said no.  Stamp
+             [Policy_rejection] so failure-class telemetry buckets
+             governance denials separately from runtime/transient errors. *)
+          failure_class = Some Tool_result.Policy_rejection;
         }
 
 (* ── Installation ───────────────────────────────────────────── *)

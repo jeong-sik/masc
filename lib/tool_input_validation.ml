@@ -159,7 +159,10 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       legacy_message = message;
       tool_name = name;
       duration_ms = 0.0;
-      failure_class = None;
+      (* Input-schema / policy rejection — classify so the
+         dispatch-level metric label (failure_class) reflects the
+         actual category instead of bucketing as "unclassified". *)
+      failure_class = Some Tool_result.Policy_rejection;
     }
 
 let validate_args ?schema ~name ~args () =

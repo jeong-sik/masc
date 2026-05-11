@@ -625,7 +625,12 @@ let make_keeper_tool_handler
                  ; duration_ms = Float.of_int duration_ms
                  ; data = `Null
                  ; legacy_message = raw_result
-                 ; failure_class = None
+                 ; (* The keeper-internal tool returned a non-throwing
+                      error result; classify as Runtime_failure so the
+                      dispatch metric label and downstream observers
+                      can distinguish it from transient / policy / workflow
+                      rejections. *)
+                   failure_class = Some Tool_result.Runtime_failure
                  }
              in
              ignore (Tool_dispatch.run_post_hooks tr));

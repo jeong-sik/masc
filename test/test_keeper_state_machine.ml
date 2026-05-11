@@ -3011,9 +3011,11 @@ let test_snapshot_dead_requires_no_budget () =
      of an already-dead entry, the third vector documented in iter 14
      audit memo. *)
   let c = { running_conditions with fiber_alive = false; restart_budget_remaining = true } in
-  (* derive_phase from these conditions produces Restarting (since
-     backoff_elapsed is false by default), not Dead — so we manually
-     pass Dead as the recorded phase to simulate a corrupted entry. *)
+  (* derive_phase from these conditions produces Crashed (since
+     backoff_elapsed is false by default, the Restarting branch is
+     skipped and the fallback [not fiber_alive && restart_budget_remaining]
+     wins), not Dead — so we manually pass Dead as the recorded phase
+     to simulate a corrupted entry. *)
   assert_snapshot_fails ~property:"DeadRequiresNoBudget" SM.Dead c
 ;;
 

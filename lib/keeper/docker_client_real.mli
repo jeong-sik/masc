@@ -1,10 +1,10 @@
-(** RFC-0070 Phase 3b-iv.2.1 — Real {!Docker_client.S} ([rm] wired).
+(** RFC-0070 Phase 3b-iv.2.2 — Real {!Docker_client.S} ([rm] + [exec] wired).
 
-    Phase 3a's stub kept [Docker_client.S] as a *signature only*.
-    Phase 3b-iv.1b added [Docker_client_mock] for tests. Phase 3b-iv.2.0
-    added the *production* skeleton (placeholders). Phase 3b-iv.2.1
-    (this) wires [rm] to [Process_eio.run_argv_with_status]; [exec],
-    [run], [ps_query] remain placeholders pending 3b-iv.2.{2,3,4}.
+    Phase 3a's stub kept [Docker_client.S] as a *signature only*. Phase
+    3b-iv.1b added [Docker_client_mock] for tests. Phase 3b-iv.2.0
+    added the *production* skeleton. Phase 3b-iv.2.1 (#14844) wired
+    [rm]; Phase 3b-iv.2.2 (this) wires [exec]. [run] and [ps_query]
+    remain placeholders pending 3b-iv.2.{3,4}.
 
     Reference: docs/rfc/RFC-0070-keeper-sandbox-pure-edge-separation.md §3.2
 
@@ -21,10 +21,23 @@
       to [WEXITED 127]). [Eio.Cancel.Cancelled] still propagates to the
       caller by design — RFC-0070 requires cancellation to remain
       observable rather than being absorbed into a typed error.
-    - [exec], [run], [ps_query] — still [Error Cleanup_failed]
-      placeholder pending 3b-iv.2.{2,3,4}. Each sub-phase replaces one
-      body without changing the public surface — callers wiring Real
-      today pick up real behaviour as each lands.
+    - [exec] — wired: spawns
+      [docker exec <name> sh -lc <cmd>] via
+      [Process_eio.run_argv_with_status_split]. The semantic
+      distinction vs [rm] matters: a non-zero exit *inside the
+      container* is the *command's* result, returned as
+      [Ok exec_result { exit_code = n; stdout; stderr }] — not a
+      daemon error. Only daemon-level statuses become
+      [Error Daemon_unreachable]:
+      {ul
+        {- [WEXITED 125] (daemon error)}
+        {- [WEXITED 127] (docker CLI missing / spawn failure)}
+        {- [WSIGNALED _] / [WSTOPPED _]}}
+      All other [WEXITED n] values surface as
+      [Ok { exit_code = n; stdout; stderr }].
+    - [run], [ps_query] — still [Error Cleanup_failed] placeholder
+      pending 3b-iv.2.{3,4}. Each sub-phase replaces one body without
+      changing the public surface.
 
     **Why a placeholder skeleton and not [failwith]**: returning
     [Error Cleanup_failed] keeps the signature in {!result}; a caller

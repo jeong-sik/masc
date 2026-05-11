@@ -55,12 +55,25 @@ let test_run_placeholder () =
   | Error Docker_client.Cleanup_failed -> ()
   | _ -> fail "expected Cleanup_failed placeholder"
 
-let test_exec_placeholder () =
+(* Phase 3b-iv.2.2 — exec is no longer a placeholder. It spawns
+   [docker exec <container> sh -lc <cmd>]. The test environment may
+   or may not have a docker daemon, so we only assert the *typed*
+   contract: either [Ok exec_result] (daemon present, command ran
+   inside container even if it failed) or [Error Daemon_unreachable]
+   (no daemon / CLI missing). Other [sandbox_error] variants are
+   semantically out of scope for [exec] and must NOT surface. *)
+let test_exec_returns_typed_result () =
   match
-    Docker_client_real.exec ~container:(sample_container ()) ~cmd:"ls"
+    Docker_client_real.exec ~container:(sample_container ()) ~cmd:"echo hi"
   with
-  | Error Docker_client.Cleanup_failed -> ()
-  | _ -> fail "expected Cleanup_failed placeholder"
+  | Ok _ -> ()                                    (* daemon present *)
+  | Error Docker_client.Daemon_unreachable -> ()  (* daemon / CLI missing *)
+  | Error Docker_client.Cleanup_failed
+  | Error Docker_client.Image_pull_failed
+  | Error Docker_client.Container_oom
+  | Error Docker_client.Exec_timeout
+  | Error Docker_client.Probe_format_drift ->
+    fail "exec should only surface Ok exec_result or Error Daemon_unreachable"
 
 let test_ps_query_placeholder () =
   match Docker_client_real.ps_query ~labels:[] with
@@ -96,7 +109,9 @@ let () =
       ( "S placeholder",
         [
           test_case "run → Cleanup_failed" `Quick test_run_placeholder;
-          test_case "exec → Cleanup_failed" `Quick test_exec_placeholder;
+          test_case "exec → Ok exec_result | Error Daemon_unreachable"
+            `Quick
+            test_exec_returns_typed_result;
           test_case "ps_query → Cleanup_failed" `Quick test_ps_query_placeholder;
           test_case "rm → typed error (Daemon_unreachable | Cleanup_failed)"
             `Quick

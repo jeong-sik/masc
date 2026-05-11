@@ -89,11 +89,13 @@ type slot_release_phase =
   | Productive_phase_exhausted [@tla.symbol "productive_phase_exhausted"]
 [@@deriving tla]
 
-let slot_release_phase_to_string = function
-  | Retry_setup_failed -> "retry_setup_failed"
-  | Retry_scheduled -> "retry_scheduled"
-  | Retry_budget_exhausted -> "retry_budget_exhausted"
-  | Productive_phase_exhausted -> "productive_phase_exhausted"
+(* [@tla.symbol] is the single source of truth for the wire form:
+   - to_tla_symbol (ppx-generated) emits the symbol attached per variant
+   - all_symbols / all_states (ppx-generated) enumerate the type
+   Defining slot_release_phase_to_string in terms of to_tla_symbol means
+   JSON/Prometheus wire and TLA correspondence catalog cannot drift.
+   Mirrors the pattern applied to tool_surface_class in PR #14647 review. *)
+let slot_release_phase_to_string = to_tla_symbol
 
 type cascade_rotation_attempt =
   { from_cascade : cascade_name

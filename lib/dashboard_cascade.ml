@@ -228,7 +228,12 @@ let config_json () =
        initialised). *)
     try Keeper_registry.all () with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> []
+    | exn ->
+      Log.Keeper.warn
+        "dashboard_cascade.config_json: Keeper_registry.all failed (treating \
+         as empty): %s"
+        (Printexc.to_string exn);
+      []
   in
   let active_names =
     List.fold_left

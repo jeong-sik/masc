@@ -207,6 +207,7 @@ let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.R
                 Buffer.clear buf)
             done
           with
+          | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
             Log.Server.debug
               "LSP %s stderr reader ended: %s"
@@ -214,5 +215,6 @@ let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.R
               (Printexc.to_string exn));
         Ok { lang_id; proc; stdin_w; stdout_r; next_id = 1 }
       with
+      | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Process_error (Printexc.to_string exn)))
 ;;

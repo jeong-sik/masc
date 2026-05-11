@@ -107,39 +107,6 @@ let make_lazy_bucket_lookup ~cascade_json_opt () =
         Some b)
 ;;
 
-let make_lazy_bucket_lookup ~cascade_json_opt () =
-  let table : (string, Keeper_provider_token_bucket.t) Hashtbl.t = Hashtbl.create 16 in
-  let table_mutex = Stdlib.Mutex.create () in
-  fun provider ->
-    Stdlib.Mutex.protect table_mutex (fun () ->
-      match Hashtbl.find_opt table provider with
-      | Some b -> Some b
-      | None ->
-        let capacity, refill_rate =
-          match cascade_json_opt with
-          | Some json ->
-            (match read_provider_rate_config ~provider json with
-             | Some (c, r) -> c, r
-             | None -> default_bucket_capacity, default_bucket_refill_rate)
-          | None -> default_bucket_capacity, default_bucket_refill_rate
-        in
-        let b =
-          Keeper_provider_token_bucket.create ~provider ~capacity ~refill_rate ~now
-        in
-        (* Register WFQ wake hook: when this provider's bucket refills
-             from < 1.0 to >= 1.0, try to wake one waiting keeper. *)
-        Keeper_provider_token_bucket.add_on_refill b (fun () ->
-          match Keeper_wfq_overflow.wake_one wfq_queue with
-          | None -> ()
-          | Some _entry ->
-            (* Woken keeper will be reconsidered on its next heartbeat
-                   tick; we do NOT synchronously dispatch here to avoid
-                   nested admission decisions inside the refill callback. *)
-            ());
-        Hashtbl.add table provider b;
-        Some b)
-;;
-
 (* Try to claim the init slot.  Returns [true] if this fiber should
    run the load now; [false] if another fiber is already running or
    has already finished.  Mutex is held only for the state read and

@@ -111,7 +111,13 @@ let query_pr_for_branch branch =
         number, state
       | _ -> None, None
     with
-    | _ -> None, None)
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Dashboard.warn
+        "dashboard_worktree_status.query_pr_for_branch: failed to parse `gh pr \
+         view` output: %s"
+        (Printexc.to_string exn);
+      None, None)
 ;;
 
 (* ------------------------------------------------------------------ *)

@@ -1,5 +1,236 @@
 {
-  "_comment": "Checked-in seed for cascade authoring. Repo defaults expose exactly two profiles: big_three for keeper/workflow calls and tool_rerank for short rerank calls. Logical usage names are configured under [routes] instead of being profile names.",
+  "providers": {
+    "claude_code": {
+      "display-name": "Anthropic Claude Code CLI",
+      "protocol": "anthropic-cli",
+      "command": "claude",
+      "is-non-interactive": true,
+      "credentials": { "type": "env", "key": "ANTHROPIC_API_KEY" }
+    },
+    "codex_cli": {
+      "display-name": "OpenAI Codex CLI",
+      "protocol": "openai-http",
+      "command": "codex",
+      "is-non-interactive": true,
+      "credentials": { "type": "env", "key": "OPENAI_API_KEY" }
+    },
+    "gemini_cli": {
+      "display-name": "Google Gemini CLI",
+      "protocol": "google-cli",
+      "command": "gemini",
+      "is-non-interactive": true,
+      "credentials": { "type": "env", "key": "GEMINI_API_KEY" }
+    },
+    "kimi_cli": {
+      "display-name": "Moonshot Kimi CLI",
+      "protocol": "kimi-cli",
+      "command": "kimi",
+      "is-non-interactive": true,
+      "credentials": { "type": "env", "key": "MOONSHOT_API_KEY" }
+    },
+    "glm-coding": {
+      "display-name": "Zhipu GLM Coding",
+      "protocol": "openai-http",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "credentials": { "type": "env", "key": "ZAI_API_KEY" }
+    },
+    "ollama": {
+      "display-name": "Ollama Local",
+      "protocol": "ollama-http",
+      "endpoint": "http://localhost:11434"
+    }
+  },
+  "models": {
+    "codex-spark": {
+      "api-name": "gpt-5.3-codex-spark",
+      "max-context": 128000,
+      "tools-support": true,
+      "streaming": true
+    },
+    "kimi-coding": {
+      "api-name": "kimi-for-coding",
+      "max-context": 128000,
+      "tools-support": true,
+      "streaming": true
+    },
+    "sonnet": {
+      "api-name": "claude-sonnet-4-6",
+      "max-context": 200000,
+      "tools-support": true,
+      "thinking-support": true,
+      "max-thinking-budget": 16000,
+      "streaming": true
+    },
+    "haiku": {
+      "api-name": "claude-haiku-4-5-20251001",
+      "max-context": 200000,
+      "tools-support": true,
+      "streaming": true
+    },
+    "gemini-flash": {
+      "api-name": "gemini-3-flash-preview",
+      "max-context": 128000,
+      "tools-support": true,
+      "streaming": true
+    },
+    "gemini-flash-lite": {
+      "api-name": "gemini-3.1-flash-lite-preview",
+      "max-context": 128000,
+      "tools-support": true,
+      "streaming": true
+    },
+    "glm-5-turbo": {
+      "api-name": "glm-5-turbo",
+      "max-context": 128000,
+      "tools-support": true,
+      "streaming": true
+    },
+    "glm-flashx": {
+      "api-name": "glm-4.7-flashx",
+      "max-context": 128000,
+      "tools-support": true,
+      "streaming": true
+    }
+  },
+  "codex_cli": {
+    "codex-spark": {
+      "is-default": true,
+      "max-concurrent": 1,
+      "for-tool-rerank": { "max-output": 1024, "temperature": 0.1 }
+    }
+  },
+  "kimi_cli": { "kimi-coding": { "is-default": true, "max-concurrent": 1 } },
+  "claude_code": {
+    "sonnet": {
+      "is-default": true,
+      "max-concurrent": 1,
+      "price-input": 3.0,
+      "price-output": 15.0
+    },
+    "haiku": {
+      "is-default": false,
+      "max-concurrent": 2,
+      "price-input": 0.8,
+      "price-output": 4.0,
+      "for-tool-rerank": { "max-output": 1024, "temperature": 0.1 },
+      "for-governance": {
+        "max-input": 8192,
+        "max-output": 2048,
+        "temperature": 0.1
+      }
+    }
+  },
+  "gemini_cli": {
+    "gemini-flash": { "is-default": true, "max-concurrent": 1 },
+    "gemini-flash-lite": { "is-default": false, "max-concurrent": 1 }
+  },
+  "glm-coding": {
+    "glm-5-turbo": { "is-default": true, "max-concurrent": 2 },
+    "glm-flashx": { "is-default": false, "max-concurrent": 2 }
+  },
+  "tier": {
+    "big_three": {
+      "members": [ "codex_cli.codex-spark", "kimi_cli.kimi-coding" ],
+      "strategy": "failover"
+    },
+    "keeper_diverse": {
+      "members": [
+        "claude_code.sonnet", "gemini_cli.gemini-flash",
+        "codex_cli.codex-spark"
+      ],
+      "strategy": "failover"
+    },
+    "tool_rerank": {
+      "members": [
+        "codex_cli.codex-spark.for-tool-rerank",
+        "claude_code.haiku.for-tool-rerank"
+      ],
+      "strategy": "failover"
+    },
+    "governance": {
+      "members": [ "claude_code.haiku.for-governance" ],
+      "strategy": "failover"
+    },
+    "tier_small": { "members": [], "strategy": "failover" },
+    "tier_medium": {
+      "members": [ "glm-coding.glm-flashx" ],
+      "strategy": "failover"
+    },
+    "__safe_lane": {
+      "members": [ "kimi_cli.kimi-coding" ],
+      "strategy": "failover"
+    },
+    "local_recovery": {
+      "members": [ "codex_cli.codex-spark" ],
+      "strategy": "failover"
+    },
+    "tier_fast": {
+      "members": [
+        "claude_code.haiku", "codex_cli.codex-spark",
+        "gemini_cli.gemini-flash", "gemini_cli.gemini-flash-lite",
+        "glm-coding.glm-5-turbo", "glm-coding.glm-flashx"
+      ],
+      "strategy": "failover"
+    }
+  },
+  "tier-group": {
+    "big_three": {
+      "tiers": [ "big_three", "keeper_diverse", "__safe_lane" ],
+      "strategy": "priority_tier",
+      "fallback": true
+    },
+    "tier_small": {
+      "tiers": [ "tier_small", "tier_medium", "big_three" ],
+      "strategy": "priority_tier",
+      "fallback": true
+    },
+    "tier_medium": {
+      "tiers": [ "tier_medium", "big_three" ],
+      "strategy": "priority_tier",
+      "fallback": true
+    },
+    "local_recovery": {
+      "tiers": [ "local_recovery", "big_three" ],
+      "strategy": "priority_tier",
+      "fallback": true
+    },
+    "tier_fast": {
+      "tiers": [ "tier_fast", "big_three" ],
+      "strategy": "priority_tier",
+      "fallback": true
+    },
+    "tool_rerank": {
+      "tiers": [ "tool_rerank", "__safe_lane" ],
+      "strategy": "priority_tier",
+      "fallback": true
+    },
+    "governance": {
+      "tiers": [ "governance", "__safe_lane" ],
+      "strategy": "priority_tier",
+      "fallback": true
+    }
+  },
+  "routes": {
+    "keeper_turn": { "target": "tier-group.big_three" },
+    "phase_recovery": { "target": "tier-group.big_three" },
+    "phase_buffer": { "target": "tier-group.big_three" },
+    "tool_required": { "target": "tier-group.big_three" },
+    "governance_judge": { "target": "tier-group.governance" },
+    "operator_judge": { "target": "tier-group.governance" },
+    "cross_verifier": { "target": "tier-group.big_three" },
+    "verifier": { "target": "tier-group.big_three" },
+    "autoresearch": { "target": "tier-group.big_three" },
+    "adversarial_reviewer": { "target": "tier-group.big_three" },
+    "auto_responder": { "target": "tier-group.big_three" },
+    "routing": { "target": "tier-group.big_three" },
+    "openai_compat": { "target": "tier-group.big_three" },
+    "persona_generation": { "target": "tier-group.big_three" },
+    "provider_benchmark": { "target": "tier-group.big_three" },
+    "llm_rerank": { "target": "tier-group.tool_rerank" },
+    "simple_task": { "target": "tier-group.tier_small" },
+    "moderate_task": { "target": "tier-group.tier_medium" },
+    "complex_task": { "target": "tier-group.big_three" }
+  },
   "profiles": {
     "tool_strict": {
       "required_capabilities": [
@@ -14,98 +245,5 @@
       "required_capabilities": [ "runtime_mcp_tools", "runtime_tool_events" ]
     },
     "local": { "required_capabilities": [] }
-  },
-  "routes": {
-    "keeper_turn": "big_three",
-    "phase_recovery": "big_three",
-    "phase_buffer": "big_three",
-    "tool_required": "big_three",
-    "governance_judge": "big_three",
-    "operator_judge": "big_three",
-    "cross_verifier": "big_three",
-    "verifier": "big_three",
-    "autoresearch": "big_three",
-    "adversarial_reviewer": "big_three",
-    "auto_responder": "big_three",
-    "routing": "big_three",
-    "openai_compat": "big_three",
-    "persona_generation": "big_three",
-    "provider_benchmark": "big_three",
-    "llm_rerank": "tool_rerank",
-    "simple_task": "tier_small",
-    "moderate_task": "tier_medium",
-    "complex_task": "big_three"
-  },
-  "_comment_big_three": "Canonical keeper/workflow profile. Keep operator-chosen providers here; code must route logical usages through [routes] instead of hardcoding extra profile names.",
-  "big_three_models": [
-    "codex_cli:gpt-5.3-codex-spark",
-    "gemini_cli:auto",
-    "kimi_cli:kimi-for-coding",
-    { "model": "glm-coding:auto", "supports_tool_choice": true },
-    "claude_code:auto"
-  ],
-  "big_three_temperature": 0.2,
-  "big_three_max_tokens": 16384,
-  "big_three_thinking_enabled": false,
-  "big_three_keeper_assignable": true,
-  "big_three_fallback_cascade": "keeper_diverse",
-  "_comment_keeper_diverse": "Fallback cascade for contract violation retry. Different model composition from big_three to break correlated failure.",
-  "keeper_diverse_models": [
-    "claude_code:claude-sonnet-4-6", "gemini_cli:gemini-3-flash-preview",
-    "codex_cli:gpt-5.3-codex-spark"
-  ],
-  "keeper_diverse_temperature": 0.3,
-  "keeper_diverse_max_tokens": 16384,
-  "keeper_diverse_keeper_assignable": true,
-  "_comment_tool_rerank": "System-only short-output profile for rerank/scoring calls.",
-  "tool_rerank_models": [
-    "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto",
-    "kimi_cli:kimi-for-coding", "glm-coding:auto", "claude_code:auto"
-  ],
-  "tool_rerank_temperature": 0.0,
-  "tool_rerank_max_tokens": 200,
-  "tool_rerank_keeper_assignable": false,
-  "_comment_tier_small": "Operator opt-in slot for 4B-class local models. Empty by default; routes fall through to tier_medium.",
-  "tier_small_models": [],
-  "tier_small_temperature": 0.3,
-  "tier_small_max_tokens": 1000,
-  "tier_small_keeper_assignable": false,
-  "tier_small_fallback_cascade": "tier_medium",
-  "_comment_tier_medium": "9B-class models for moderate tasks (extraction, reformat, medium-length generation). Falls back to big_three on exhaustion.",
-  "tier_medium_models": [ "glm-coding:glm-4.7-flashx" ],
-  "tier_medium_temperature": 0.2,
-  "tier_medium_max_tokens": 4096,
-  "tier_medium_keeper_assignable": false,
-  "tier_medium_fallback_cascade": "big_three",
-  "_comment___safe_lane": "System-only baseline cascade. Satisfies every capability profile. Used as last-resort fallback target. Not keeper-assignable.",
-  "__safe_lane_models": [
-    "claude_code:auto",
-    { "model": "glm-coding:auto", "supports_tool_choice": true },
-    "kimi_cli:kimi-for-coding"
-  ],
-  "__safe_lane_temperature": 0.2,
-  "__safe_lane_max_tokens": 16384,
-  "__safe_lane_keeper_assignable": false,
-  "__safe_lane_required_capability_profile": "tool_strict",
-  "_comment_local_recovery": "P1-2 fix: recovery profile for fallback_cascade = \"local_recovery\". Uses a curated local/CLI primary list, then falls back to big_three on exhaustion. Not keeper-assignable.",
-  "local_recovery_models": [
-    "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto", "claude_code:auto"
-  ],
-  "local_recovery_temperature": 0.2,
-  "local_recovery_max_tokens": 16384,
-  "local_recovery_keeper_assignable": false,
-  "local_recovery_fallback_cascade": "big_three",
-  "_comment_tier_fast": "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion.",
-  "tier_fast_models": [
-    "claude_code:claude-haiku-4-5-20251001",
-    "codex_cli:gpt-5.3-codex-spark",
-    "gemini_cli:gemini-3-flash-preview",
-    "gemini_cli:gemini-3.1-flash-lite-preview",
-    { "model": "glm-coding:glm-5-turbo", "supports_tool_choice": true },
-    { "model": "glm-coding:glm-4.7-flashx", "supports_tool_choice": true }
-  ],
-  "tier_fast_temperature": 0.2,
-  "tier_fast_max_tokens": 8192,
-  "tier_fast_keeper_assignable": true,
-  "tier_fast_fallback_cascade": "big_three"
+  }
 }

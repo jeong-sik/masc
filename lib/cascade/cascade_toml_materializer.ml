@@ -659,11 +659,33 @@ let toml_section_names_result ~config_path =
               String.equal key "routes"
               || String.equal key "profiles"
               || String.equal key "admission"
+              (* RFC-0058 v2 declarative namespaces: these describe
+                 providers, models, tiers, and tier-groups, not legacy
+                 cascade profiles. Without this filter the degraded
+                 fallback validator would treat e.g. "providers" or
+                 "tier" as a cascade name and expand them into bogus
+                 profile names. *)
+              || String.equal key "providers"
+              || String.equal key "models"
+              || String.equal key "tier"
+              || String.equal key "tier-group"
             in
+            (* Top-level provider-alias binding tables (e.g. [claude_code.haiku]
+               appears as a top-level "claude_code" key with sub-table
+               "haiku"). Identify them by checking the [providers]
+               namespace declared earlier so they are not surfaced as
+               cascade profile names either. *)
+            let provider_ids =
+              match List.assoc_opt "providers" fields with
+              | Some (Otoml.TomlTable inner) | Some (Otoml.TomlInlineTable inner) ->
+                List.map fst inner
+              | _ -> []
+            in
+            let is_provider_binding key = List.mem key provider_ids in
             let names =
               fields
               |> List.filter_map (fun (key, value) ->
-                if is_meta_key key || is_reserved_table key
+                if is_meta_key key || is_reserved_table key || is_provider_binding key
                 then None
                 else (
                   match value with

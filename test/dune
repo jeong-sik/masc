@@ -218,6 +218,7 @@
         test_observability_provider_contracts
         test_config_doctor
         test_cascade_toml_materialization
+        test_cascade_routes_decoder
         test_cascade_toml_section_fallback_10259
         test_cascade_declarative_parser
         test_cascade_declarative_validator
@@ -459,6 +460,7 @@
           test_observability_provider_contracts
           test_config_doctor
           test_cascade_toml_materialization
+          test_cascade_routes_decoder
           test_cascade_toml_section_fallback_10259
           test_cascade_declarative_parser
           test_cascade_declarative_validator

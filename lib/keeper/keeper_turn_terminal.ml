@@ -93,9 +93,32 @@ let of_legacy_error_text raw_error =
    other [of_legacy_error_text] result has classified the error and
    should be returned as-is. *)
 let is_unknown_empty (reason : t) =
+  (* Enumerate every [Keeper_turn_disposition.t] variant so the
+     compiler flags any new disposition added. Only the empty-raw
+     [Unknown { raw_error = "" }] case opts into the SDK-error-derived
+     code; all other dispositions (Success, External_cancel,
+     Turn_wall_clock_timeout, Oas_timeout_budget,
+     Gh_repo_context_missing_worktree, Required_tool_use_no_tool_call,
+     Required_tool_use_unsatisfied, Post_commit_ambiguous,
+     Provider_error, and Unknown with non-empty raw_error) must yield
+     [false]. A future disposition variant added to
+     [Keeper_turn_disposition.t] would silently inherit [false] under
+     the previous [_ -> false] catch-all without a review point on
+     whether the new variant should opt into the unknown-empty
+     pathway. Same FSM Sparse Match anti-pattern as PRs #14716,
+     #14790, #14806, #14810, #14816, #14823. *)
   match reason.disposition with
   | Keeper_turn_disposition.Unknown { raw_error = "" } -> true
-  | _ -> false
+  | Keeper_turn_disposition.Unknown { raw_error = _ }
+  | Keeper_turn_disposition.Success
+  | Keeper_turn_disposition.External_cancel
+  | Keeper_turn_disposition.Turn_wall_clock_timeout
+  | Keeper_turn_disposition.Oas_timeout_budget
+  | Keeper_turn_disposition.Gh_repo_context_missing_worktree
+  | Keeper_turn_disposition.Required_tool_use_no_tool_call
+  | Keeper_turn_disposition.Required_tool_use_unsatisfied
+  | Keeper_turn_disposition.Post_commit_ambiguous
+  | Keeper_turn_disposition.Provider_error _ -> false
 ;;
 
 let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_error err =

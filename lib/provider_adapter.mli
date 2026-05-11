@@ -462,6 +462,38 @@ val supports_runtime_mcp_http_headers_for_config :
 val requires_per_keeper_bridging_for_bound_actor_tools_for_config :
   Llm_provider.Provider_config.t -> bool
 
+(** RFC-0058 §2.4 SSOT bridge: build a [tool_policy] from a cascade-decl
+    [cascade_capabilities] (the TOML-parsed shape).
+
+    [None] (no [[providers.<id>.capabilities]] sub-table) returns the
+    conservative [no_tool_http_headers] baseline (a private [tool_policy]
+    record inside [provider_adapter.ml]; not exported by this signature).
+
+    [Some c] maps the [tool_policy]-relevant subset of
+    [cascade_capabilities]:
+
+    - [supports_runtime_mcp_http_headers]
+    - [requires_per_keeper_bridging_for_bound_actor_tools]
+    - [identity_runtime_mcp_header_keys]
+    - [argv_prompt_preflight]
+    - [uses_anthropic_caching]
+    - [max_turns_per_attempt]
+    - [tolerates_bound_actor_fallback]
+
+    The remaining [cascade_capabilities] fields
+    ([supports_inline_tools], [supports_runtime_mcp_tools],
+    [supports_runtime_tool_events]) describe runtime tool / event
+    surfaces and are intentionally not represented in [tool_policy];
+    they are consumed elsewhere (e.g. [Provider_tool_support]).
+
+    Schema-additive primitive; no callers yet. Future caller cutover
+    will route [adapter_of_provider_config] through this bridge so
+    [config/cascade.toml] becomes the lookup root and the 13 hardcoded
+    [tool_policy = ...] records collapse into a single cascade-toml-
+    driven path. *)
+val tool_policy_of_cascade_capabilities :
+  Cascade_declarative_types.cascade_capabilities option -> tool_policy
+
 (** Same as {!requires_per_keeper_bridging_for_bound_actor_tools_for_config}
     but takes a typed [provider_kind] directly.  Used by call sites that do
     not have a full {!Llm_provider.Provider_config.t} (e.g. keeper-bound

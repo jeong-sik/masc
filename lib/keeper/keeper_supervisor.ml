@@ -1726,46 +1726,72 @@ let sweep_and_recover (ctx : _ context) =
            old_entry.name
            (Keeper_state_machine.Supervisor_restart_attempt { attempt });
          let old_crash_log = old_entry.crash_log in
-         let reg = Keeper_registry.register_restarting ~base_path old_entry.name meta in
-         Keeper_registry.restore_supervisor_state
-           ~base_path
-           old_entry.name
-           ~restart_count:attempt
-           ~last_restart_ts:now
-           ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
-         launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg;
-         publish_lifecycle
-           ~event:
-             (Keeper_lifecycle_events.Custom_event
-                { verb = Keeper_lifecycle_events.Restarted
-                ; phase = Some Keeper_state_machine.Running
-                })
-           old_entry.name
-           (Printf.sprintf "attempt %d" attempt)
-           ();
-         Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_restart_outcomes
-           ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
-           ();
-         Log.Keeper.info
-           "%s: restarted (attempt %d, backoff %.0fs)"
-           old_entry.name
-           attempt
-           (backoff_delay (attempt - 1));
-         (* Soft pre-warning when this is the FINAL allowed restart: next
-           crash will trip the budget and mark Dead. Operator-actionable
-           but not yet a fault — investigate root cause now. *)
-         if attempt >= max_restarts
-         then (
-           Log.Keeper.warn
-             "keeper near-exhaustion: name=%s restart=%d/%d — investigate"
-             old_entry.name
-             attempt
-             max_restarts;
-           Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_near_exhaustion_total
-             ~labels:[ "keeper", old_entry.name ]
-             ())
+         (* R-A-6.a guard: register_restarting refuses revival when the
+            prior entry's restart_budget was already exhausted (TLA+ §S3
+            BudgetNeverRevives).  In normal sweeps this never fires —
+            the [restart_count >= max_restarts] gate at line ~1468 routes
+            exhausted keepers to [to_mark_dead], not [to_restart].  A
+            refusal here means some out-of-band path cleared the budget
+            (one of the three vectors documented in iter 14 audit memo). *)
+         (match
+            Keeper_registry.register_restarting ~base_path old_entry.name meta
+          with
+          | Error (Keeper_registry.Budget_already_exhausted _) ->
+            (* Route to mark_dead instead of merely skipping: a keeper that
+               trips the BudgetNeverRevives guard should reach a stable
+               terminal state, otherwise it would re-enter [to_restart]
+               every sweep (an out-of-band budget reset would loop forever).
+               Mark Dead makes the keeper visible to operators and exits
+               the restart cycle deterministically. *)
+            Log.Keeper.warn
+              "%s: register_restarting refused — restart_budget_remaining=false \
+               (BudgetNeverRevives guard tripped); routing to mark_dead"
+              old_entry.name;
+            Prometheus.inc_counter
+              Keeper_metrics.metric_keeper_restart_outcomes
+              ~labels:[ "keeper", old_entry.name; "outcome", "refused_budget_exhausted" ]
+              ();
+            to_mark_dead := old_entry :: !to_mark_dead
+          | Ok reg ->
+            Keeper_registry.restore_supervisor_state
+              ~base_path
+              old_entry.name
+              ~restart_count:attempt
+              ~last_restart_ts:now
+              ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
+            launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg;
+            publish_lifecycle
+              ~event:
+                (Keeper_lifecycle_events.Custom_event
+                   { verb = Keeper_lifecycle_events.Restarted
+                   ; phase = Some Keeper_state_machine.Running
+                   })
+              old_entry.name
+              (Printf.sprintf "attempt %d" attempt)
+              ();
+            Prometheus.inc_counter
+              Keeper_metrics.metric_keeper_restart_outcomes
+              ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
+              ();
+            Log.Keeper.info
+              "%s: restarted (attempt %d, backoff %.0fs)"
+              old_entry.name
+              attempt
+              (backoff_delay (attempt - 1));
+            (* Soft pre-warning when this is the FINAL allowed restart: next
+               crash will trip the budget and mark Dead. Operator-actionable
+               but not yet a fault — investigate root cause now. *)
+            if attempt >= max_restarts
+            then (
+              Log.Keeper.warn
+                "keeper near-exhaustion: name=%s restart=%d/%d — investigate"
+                old_entry.name
+                attempt
+                max_restarts;
+              Prometheus.inc_counter
+                Keeper_metrics.metric_keeper_near_exhaustion_total
+                ~labels:[ "keeper", old_entry.name ]
+                ()))
        | _ ->
          Prometheus.inc_counter
            Keeper_metrics.metric_keeper_restart_outcomes

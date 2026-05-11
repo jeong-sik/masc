@@ -48,7 +48,8 @@ let test_other_detail_generic_recoverable () =
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Other_detail (non-quota) -> cascade_exhausted"
-      "cascade_exhausted" reason
+      "cascade_exhausted"
+      (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Generic Cascade_exhausted with Other_detail should be recoverable"
 
@@ -57,7 +58,8 @@ let test_all_providers_failed_recoverable () =
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "All_providers_failed -> cascade_exhausted"
-      "cascade_exhausted" reason
+      "cascade_exhausted"
+      (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Cascade_exhausted with All_providers_failed should be recoverable"
 
@@ -66,7 +68,8 @@ let test_no_providers_available_recoverable () =
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "No_providers_available -> cascade_exhausted"
-      "cascade_exhausted" reason
+      "cascade_exhausted"
+      (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Cascade_exhausted with No_providers_available should be recoverable"
 
@@ -76,7 +79,8 @@ let test_candidates_filtered_specific_reason () =
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     check string "Candidates_filtered keeps specific label"
-      "cascade_candidates_filtered" reason
+      "cascade_candidates_filtered"
+      (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Candidates_filtered should be recoverable"
 
@@ -84,7 +88,7 @@ let test_max_turns_specific_reason () =
   let err = make_cascade_exhausted KT.Max_turns_exceeded in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "Max_turns keeps specific label" "max_turns" reason
+    check string "Max_turns keeps specific label" "max_turns" (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Max_turns should be recoverable"
 
@@ -95,7 +99,7 @@ let test_no_tool_capable_non_recoverable () =
   | Some reason ->
     fail
       (Printf.sprintf "No_tool_capable_provider should stay None, got %s"
-         reason)
+         (KEC.degraded_retry_reason_to_string reason))
   | None -> ()
 
 let test_accept_rejected_non_recoverable () =
@@ -103,7 +107,8 @@ let test_accept_rejected_non_recoverable () =
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
     fail
-      (Printf.sprintf "Accept_rejected should stay None, got %s" reason)
+      (Printf.sprintf "Accept_rejected should stay None, got %s"
+         (KEC.degraded_retry_reason_to_string reason))
   | None -> ()
 
 (* Regression: auto-recoverable cascade exhaustion must still be
@@ -140,7 +145,8 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
   with
   | Some retry ->
     check string "catalog order wins" "catalog_first" retry.next_cascade;
-    check string "fallback reason" "cascade_exhausted" retry.fallback_reason
+    check string "fallback reason" "cascade_exhausted"
+      (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Expected catalog-ordered degraded retry"
 
 (* ---- Status-code-aware rotation tests ----------------------------------- *)
@@ -155,7 +161,7 @@ let test_soft_rate_limit_is_recoverable () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "soft 429 -> rate_limit" "rate_limit" reason
+    check string "soft 429 -> rate_limit" "rate_limit" (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "Soft rate-limit should be recoverable (trigger cascade rotation)"
 
@@ -171,7 +177,7 @@ let test_soft_rate_limit_no_retry_after_is_recoverable () =
     (Owne.sdk_error_is_hard_quota err);
   (match KEC.recoverable_cascade_failure_reason err with
    | Some reason ->
-     check string "no-retry_after rate_limit -> rate_limit" "rate_limit" reason
+     check string "no-retry_after rate_limit -> rate_limit" "rate_limit" (KEC.degraded_retry_reason_to_string reason)
    | None ->
      fail "Non-hard-quota RateLimited without retry_after should be recoverable")
 
@@ -182,7 +188,7 @@ let test_server_error_500_is_recoverable () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "500 -> server_error" "server_error" reason
+    check string "500 -> server_error" "server_error" (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "ServerError 500 should be recoverable (trigger cascade rotation)"
 
@@ -193,7 +199,7 @@ let test_server_error_503_is_recoverable () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "503 -> server_error" "server_error" reason
+    check string "503 -> server_error" "server_error" (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "ServerError 503 should be recoverable (trigger cascade rotation)"
 
@@ -204,7 +210,7 @@ let test_server_error_502_is_recoverable () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "502 -> server_error" "server_error" reason
+    check string "502 -> server_error" "server_error" (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "ServerError 502 should be recoverable (trigger cascade rotation)"
 
@@ -217,7 +223,7 @@ let test_auth_error_is_recoverable () =
   in
   match KEC.recoverable_cascade_failure_reason err with
   | Some reason ->
-    check string "auth error -> auth_error" "auth_error" reason
+    check string "auth error -> auth_error" "auth_error" (KEC.degraded_retry_reason_to_string reason)
   | None ->
     fail "AuthError should be recoverable (trigger cascade rotation)"
 
@@ -232,7 +238,7 @@ let test_hard_quota_not_reclassified_as_rate_limit () =
     (Owne.sdk_error_is_hard_quota err);
   (match KEC.recoverable_cascade_failure_reason err with
    | Some reason ->
-     check string "hard quota keeps hard_quota label" "hard_quota" reason
+     check string "hard quota keeps hard_quota label" "hard_quota" (KEC.degraded_retry_reason_to_string reason)
    | None ->
      fail "Hard quota should be recoverable with hard_quota label")
 
@@ -246,7 +252,7 @@ let test_server_error_400_not_recoverable_by_new_arm () =
   (* Should return None (not recoverable via server_error) unless some other
      arm catches it first — here it falls through to None. *)
   (match KEC.recoverable_cascade_failure_reason err with
-   | Some reason when reason = "server_error" ->
+   | Some KEC.Server_error ->
      fail "400 should NOT be classified as server_error by rotation arm"
    | _ -> ())
 
@@ -268,7 +274,7 @@ let test_rotation_finds_next_cascade_for_rate_limit () =
   with
   | Some retry ->
     check string "rotation goes to fallback" "fallback_cascade" retry.next_cascade;
-    check string "reason is rate_limit" "rate_limit" retry.fallback_reason
+    check string "reason is rate_limit" "rate_limit" (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None ->
     fail "Soft rate-limit should trigger rotation to next cascade"
 
@@ -288,7 +294,7 @@ let test_rotation_finds_next_cascade_for_auth_error () =
   with
   | Some retry ->
     check string "auth rotation goes to fallback" "fallback_cascade" retry.next_cascade;
-    check string "reason is auth_error" "auth_error" retry.fallback_reason
+    check string "reason is auth_error" "auth_error" (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None ->
     fail "AuthError should trigger rotation to next cascade"
 

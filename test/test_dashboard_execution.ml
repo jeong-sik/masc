@@ -513,7 +513,7 @@ let append_execution_receipt ?(outcome = "ok")
         Some
           (Lib.Keeper_execution_receipt.cascade_name_of_string
              Lib.Keeper_config.local_recovery_cascade_name);
-      fallback_reason = Some "turn_timeout";
+      fallback_reason = Some Lib.Keeper_error_classify.Turn_timeout;
       cascade_rotation_attempts =
         [
           {
@@ -523,7 +523,7 @@ let append_execution_receipt ?(outcome = "ok")
             to_cascade =
               Lib.Keeper_execution_receipt.cascade_name_of_string
                 Lib.Keeper_config.local_recovery_cascade_name;
-            reason = "turn_timeout";
+            reason = Lib.Keeper_error_classify.Turn_timeout;
             outcome = Lib.Keeper_execution_receipt.Rotation_retry_scheduled;
             slot_release_at_phase =
               Some Lib.Keeper_execution_receipt.Productive_phase_exhausted;

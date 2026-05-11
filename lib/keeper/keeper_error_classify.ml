@@ -194,9 +194,42 @@ let is_auto_recoverable_cascade_fail_open_error
   || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 
+(* Classification of why a degraded retry is being attempted.  Closed set
+   covering both producer paths: [local_recovery_retry] (7 narrow reasons)
+   and [recoverable_cascade_failure_reason] (broader set including raw
+   provider API failures).  Wire form is the lowercase string via
+   [degraded_retry_reason_to_string]. *)
+type degraded_retry_reason =
+  | Hard_quota
+  | Max_turns
+  | Resumable_cli_session
+  | Admission_queue_timeout
+  | Oas_timeout_budget
+  | Turn_timeout
+  | Cascade_candidates_filtered
+  | Required_tool_contract_violation
+  | Cascade_exhausted
+  | Rate_limit
+  | Server_error
+  | Auth_error
+
+let degraded_retry_reason_to_string = function
+  | Hard_quota -> "hard_quota"
+  | Max_turns -> "max_turns"
+  | Resumable_cli_session -> "resumable_cli_session"
+  | Admission_queue_timeout -> "admission_queue_timeout"
+  | Oas_timeout_budget -> "oas_timeout_budget"
+  | Turn_timeout -> "turn_timeout"
+  | Cascade_candidates_filtered -> "cascade_candidates_filtered"
+  | Required_tool_contract_violation -> "required_tool_contract_violation"
+  | Cascade_exhausted -> "cascade_exhausted"
+  | Rate_limit -> "rate_limit"
+  | Server_error -> "server_error"
+  | Auth_error -> "auth_error"
+
 type degraded_retry =
   { next_cascade : string
-  ; fallback_reason : string
+  ; fallback_reason : degraded_retry_reason
   }
 
 let fallback_cascade_for_unavailable_profile
@@ -236,32 +269,32 @@ let degraded_retry_after_recoverable_error
           Keeper_config.local_recovery_cascade_name
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
-    local_recovery_retry "hard_quota"
+    local_recovery_retry Hard_quota
   else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    local_recovery_retry "max_turns"
+    local_recovery_retry Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
-        local_recovery_retry "resumable_cli_session"
+        local_recovery_retry Resumable_cli_session
     | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
-        local_recovery_retry "admission_queue_timeout"
+        local_recovery_retry Admission_queue_timeout
     | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
-        local_recovery_retry "oas_timeout_budget"
+        local_recovery_retry Oas_timeout_budget
     | Some (Keeper_turn_driver.Turn_timeout _) ->
-        local_recovery_retry "turn_timeout"
+        local_recovery_retry Turn_timeout
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
-        local_recovery_retry "cascade_candidates_filtered"
+        local_recovery_retry Cascade_candidates_filtered
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Max_turns_exceeded; _ }) ->
-        local_recovery_retry "max_turns"
+        local_recovery_retry Max_turns
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
-        local_recovery_retry "hard_quota"
+        local_recovery_retry Hard_quota
     | Some (Keeper_turn_driver.Cascade_exhausted _)
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
@@ -272,34 +305,34 @@ let degraded_retry_after_recoverable_error
 
 let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
   if is_required_tool_contract_violation err then
-    Some "required_tool_contract_violation"
+    Some Required_tool_contract_violation
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
-    Some "hard_quota"
+    Some Hard_quota
   else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    Some "max_turns"
+    Some Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
-        Some "resumable_cli_session"
+        Some Resumable_cli_session
     | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
-        Some "admission_queue_timeout"
+        Some Admission_queue_timeout
     | Some (Keeper_turn_driver.Oas_timeout_budget _) ->
-        Some "oas_timeout_budget"
+        Some Oas_timeout_budget
     | Some (Keeper_turn_driver.Turn_timeout _) ->
-        Some "turn_timeout"
+        Some Turn_timeout
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
-        Some "cascade_candidates_filtered"
+        Some Cascade_candidates_filtered
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Max_turns_exceeded; _ }) ->
-        Some "max_turns"
+        Some Max_turns
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
-        Some "hard_quota"
+        Some Hard_quota
     | Some (Keeper_turn_driver.Cascade_exhausted _) ->
         (* Generic cascade exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
@@ -308,7 +341,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
            silent turns ended with [(null)] fallback_reason because this
            arm previously returned [None]. Other arms below remain
            non-recoverable to keep the surface conservative. *)
-        Some "cascade_exhausted"
+        Some Cascade_exhausted
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
@@ -333,12 +366,12 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
            so only soft (non-hard-quota) rate limits reach this arm. *)
         (match err with
          | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
-             Some "rate_limit"
+             Some Rate_limit
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
            when status >= 500 ->
-             Some "server_error"
+             Some Server_error
          | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _) ->
-             Some "auth_error"
+             Some Auth_error
          (* Sub-500 server errors (4xx already handled above for AuthError /
             RateLimited) are not classified as recoverable cascade failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)

@@ -120,7 +120,7 @@ let cascade_rotation_outcome_to_string = function
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
-  ; reason : string
+  ; reason : Keeper_error_classify.degraded_retry_reason
   ; outcome : cascade_rotation_outcome
   ; slot_release_at_phase : slot_release_phase option
   ; productive_phase_elapsed_ms : int option
@@ -162,7 +162,7 @@ type t =
   ; cascade_outcome : string
   ; degraded_retry_applied : bool
   ; degraded_retry_cascade : cascade_name option
-  ; fallback_reason : string option
+  ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
   ; stop_reason : Cascade_runner.stop_reason option
   ; error_kind : error_kind option
@@ -221,7 +221,10 @@ let cascade_rotation_attempt_to_json attempt =
     [
       ("from_cascade", `String (cascade_name_to_string attempt.from_cascade));
       ("to_cascade", `String (cascade_name_to_string attempt.to_cascade));
-      ("reason", `String attempt.reason);
+      ( "reason",
+        `String
+          (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason)
+      );
       ( "outcome",
         `String (cascade_rotation_outcome_to_string attempt.outcome) );
       ( "slot_release_at_phase",
@@ -588,7 +591,9 @@ let to_json (receipt : t) =
               | None -> `Null );
             ( "fallback_reason",
               match receipt.fallback_reason with
-              | Some value -> `String value
+              | Some value ->
+                `String
+                  (Keeper_error_classify.degraded_retry_reason_to_string value)
               | None -> `Null );
             ( "rotation_attempts",
               `List

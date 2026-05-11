@@ -4706,7 +4706,8 @@ let required_tool_contract_violation_error () =
 let expect_degraded_retry label expected_cascade expected_reason = function
   | Some (retry : EC.degraded_retry) ->
       check string (label ^ " cascade") expected_cascade retry.next_cascade;
-      check string (label ^ " reason") expected_reason retry.fallback_reason
+      check string (label ^ " reason") expected_reason
+        (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail (label ^ ": expected degraded retry")
 
 let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota () =
@@ -6267,7 +6268,7 @@ let test_degraded_retry_budget_gate_allows_remaining_budget () =
       check string "retry cascade" KC.local_recovery_cascade_name
         retry.next_cascade;
       check string "fallback reason" "oas_timeout_budget"
-        retry.fallback_reason
+        (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
       fail "expected productive slot phase budget to remain"
   | UT.Degraded_retry_budget_exhausted _ ->
@@ -6290,7 +6291,7 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
       check string "retry cascade candidate" KC.local_recovery_cascade_name
         retry.next_cascade;
       check string "fallback reason" "oas_timeout_budget"
-        retry.fallback_reason
+        (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
       fail "expected exhausted retry budget, not slot phase budget"
   | UT.Degraded_retry_allowed _ -> fail "expected exhausted retry budget"
@@ -6313,7 +6314,7 @@ let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
       check string "retry cascade candidate" KC.local_recovery_cascade_name
         retry.next_cascade;
       check string "fallback reason" "oas_timeout_budget"
-        retry.fallback_reason
+        (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
       fail "expected OAS timeout budget to bypass slot phase for local recovery"
   | UT.Degraded_retry_budget_exhausted _ ->
@@ -6337,7 +6338,7 @@ let test_degraded_retry_slot_phase_allows_first_contract_rotation () =
       check string "retry cascade candidate" (KC.default_cascade_name ())
         retry.next_cascade;
       check string "fallback reason" "required_tool_contract_violation"
-        retry.fallback_reason
+        (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
       fail "expected first contract rotation to bypass productive slot phase"
   | UT.Degraded_retry_budget_exhausted _ ->

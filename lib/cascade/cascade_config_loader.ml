@@ -563,7 +563,14 @@ let load_catalog ~config_path =
        (match
           Cascade_capability_profile.register_declared_profiles_from_json profiles_json
         with
-        | Error msg -> Log.warn ~ctx:"CascadeConfig" "profiles registration error: %s" msg
+        | Error msg ->
+          (* Iter 41: previously a WARN log only; catalog kept loading
+             without the declared profiles registered.  Counter ticks
+             so the silent registration gap is observable — downstream
+             [resolve_required_capabilities] returns None for these
+             profiles and capability filtering falls back to defaults. *)
+          Cascade_metrics.on_profile_registration_failure ();
+          Log.warn ~ctx:"CascadeConfig" "profiles registration error: %s" msg
         | Ok () -> ())
      | None -> ());
     let builders =

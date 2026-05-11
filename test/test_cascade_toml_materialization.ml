@@ -829,6 +829,15 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    provider_registry harness.  Smoke pins the no-arg helper
    signature so a future refactor that changes the call shape
    trips here. *)
+(* Smoke for [Cascade_metrics.on_profile_registration_failure].
+   Natural code path requires a cascade.toml [profiles] section
+   that triggers [register_declared_profiles_from_json] Error —
+   exercised end-to-end via catalog_runtime tests with the right
+   fixture.  Smoke pins the no-arg helper signature. *)
+let test_profile_registration_failure_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_profile_registration_failure ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_discovery_refresh_exception_helper_callable () =
   Masc_mcp.Cascade_metrics.on_discovery_refresh_exception ();
   check bool "no-arg helper callable without raising" true true
@@ -1308,6 +1317,9 @@ let () =
           test_case
             "discovery_refresh_exception: helper callable" `Quick
             test_discovery_refresh_exception_helper_callable;
+          test_case
+            "profile_registration_failure: helper callable" `Quick
+            test_profile_registration_failure_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

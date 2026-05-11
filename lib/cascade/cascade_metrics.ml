@@ -874,3 +874,25 @@ let metric_discovery_refresh_exception =
 
 let on_discovery_refresh_exception () =
   Prometheus.inc_counter metric_discovery_refresh_exception ()
+
+(* [Cascade_config_loader.load_catalog] calls
+   [Cascade_capability_profile.register_declared_profiles_from_json]
+   before parsing the catalog so that
+   [resolve_required_capabilities] can find the declared profiles
+   later.  When that registration fails, the existing code logs a
+   WARN line and CONTINUES loading the catalog — silently building
+   a catalog where some capability profiles aren't registered.
+
+   Downstream impact: [resolve_required_capabilities] returns None
+   for the unregistered profiles, capability filtering falls back
+   to defaults, and operators may see iter 6 / 14
+   [profile_candidate_drop] fire with confusing reasons.  Counter
+   makes the registration-fault rate alertable so the upstream
+   cause is observable.
+
+   Cardinality: 1 series. *)
+let metric_profile_registration_failure =
+  "masc_cascade_profile_registration_failure_total"
+
+let on_profile_registration_failure () =
+  Prometheus.inc_counter metric_profile_registration_failure ()

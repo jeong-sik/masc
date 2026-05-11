@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { activeIdeFile } from './ide-state'
 import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -14,6 +14,7 @@ import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
+import { KeeperMemoryTierPanel } from '../keeper-memory-tier-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
@@ -23,7 +24,9 @@ import {
   serializeActive,
 } from '../../../design-system/headless-core/layered-overlay'
 
-export const activeIdeFile = signal<string>('package.json')
+// Re-export to preserve the public path used by existing callers. The
+// canonical source now lives in `./ide-state` to avoid circular imports.
+export { activeIdeFile }
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
@@ -197,7 +200,7 @@ export function IdeShell() {
       />
       ${reviewFocusActive
         ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
-        : null}
+        : html`<${IdeBreadcrumb} />`}
       <div
         class="ide-plane-grid"
         role="presentation"
@@ -238,7 +241,7 @@ export function IdeShell() {
               class="ide-plane-conversation"
               style=${{
                 display: 'grid',
-                gridTemplateRows: 'auto auto auto auto 1fr',
+                gridTemplateRows: 'auto auto auto auto auto 1fr',
                 minHeight: 0,
                 overflow: 'auto',
               }}
@@ -251,6 +254,7 @@ export function IdeShell() {
               <${IdePersistencePanel} keeperName=${terminalKeeper} />
               <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
               <${IdeConversationRailMock} />
+              ${terminalKeeper.trim() ? html`<${KeeperMemoryTierPanel} keeperName=${terminalKeeper} />` : null}
             </div>
           `}
         ${railsCollapsed
@@ -284,6 +288,58 @@ function IdeReviewFocusStrip({ activeLayers }: { readonly activeLayers: Readonly
       <span class="text-[var(--color-fg-disabled)]">·</span>
       <span class="font-mono">${layerLabels.length > 0 ? layerLabels.join(' / ') : 'custom layers'}</span>
       <span class="ml-auto font-mono text-[var(--color-fg-disabled)]">branch graph rail</span>
+    </div>
+  `
+}
+
+// ── Editor Breadcrumb ────────────────────────────────────────────
+
+const FILE_ICONS: Readonly<Record<string, string>> = {
+  '.ts': '🟦', '.tsx': '🟦',
+  '.js': '🟨', '.jsx': '🟨',
+  '.py': '🐍', '.ml': '🐫', '.mli': '🐫',
+  '.rs': '🦀', '.go': '🔵',
+  '.json': '📋', '.md': '📝',
+  '.html': '🌐', '.css': '🎨',
+  '.toml': '⚙️', '.yaml': '⚙️', '.yml': '⚙️',
+}
+
+function IdeBreadcrumb() {
+  const [filePath, setFilePath] = useState(activeIdeFile.value)
+  useEffect(() => {
+    const unsub = activeIdeFile.subscribe(f => setFilePath(f))
+    return () => unsub()
+  }, [])
+
+  const segments = filePath.split('/')
+  // segments is non-empty because String.prototype.split('/') always returns ≥1 element
+  // (even '' → ['']), but TS noUncheckedIndexedAccess requires a fallback.
+  const fileName = segments[segments.length - 1] ?? ''
+  const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : ''
+  const icon = FILE_ICONS[ext] ?? '📄'
+
+  return html`
+    <div
+      role="navigation"
+      aria-label="File breadcrumb"
+      data-testid="ide-breadcrumb"
+      class="flex items-center gap-1.5 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] px-3 py-1 font-mono text-2xs"
+    >
+      <span aria-hidden="true" style=${{ fontSize: '12px', lineHeight: '16px' }}>${icon}</span>
+      <span
+        class="flex min-w-0 items-center gap-0.5 text-[var(--color-fg-secondary)]"
+        style=${{ overflow: 'hidden' }}
+      >
+        ${segments.map((seg, i) => html`
+          <span key=${`breadcrumb-seg-${i}`}>
+            ${i > 0 ? html`<span class="text-[var(--color-fg-disabled)]">/</span>` : null}
+            <span
+              class=${i === segments.length - 1 ? 'text-[var(--color-fg-primary)]' : ''}
+              style=${{ whiteSpace: 'nowrap' }}
+            >${seg}</span>
+          </span>
+        `)}
+      </span>
     </div>
   `
 }

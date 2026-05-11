@@ -39,7 +39,7 @@ let ollama_port_needle =
   Printf.sprintf ":%d" ollama_default_port
 
 (** Ollama native API path for the running-models ("process status")
-    endpoint.  Used by both {!Cascade_ollama_probe} (cascade-level
+    endpoint.  Used by both {!Cascade_http_probe} (cascade-level
     capacity probe) and {!Tool_local_runtime_probe} (tool-level KV
     assessment); anchoring the suffix in one place prevents the two
     call sites from drifting if Ollama ever renames the route. *)

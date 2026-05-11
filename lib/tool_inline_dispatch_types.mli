@@ -1,15 +1,16 @@
-
 (** Tool_inline_dispatch_types — shared types for inline dispatch modules.
 
     Extracted to avoid circular dependencies between
     [tool_inline_dispatch], [tool_inline_dispatch_coord], and
     [tool_inline_dispatch_comm]. *)
 
-(** Boolean success flag paired with human-readable output. *)
-type tool_result = bool * string
+type tool_result = Tool_result.t
+(** Structural alias — all inline dispatch handlers return
+    [Tool_result.t option]. *)
 
-(** Context record capturing all bindings from [execute_tool_eio] that the
-    inline dispatch block needs. Pure data — callers populate all fields. *)
+(** Context record capturing all bindings from [execute_tool_eio]
+    that the inline dispatch block needs. Pure data — callers
+    populate all fields. *)
 type context = {
   config : Coord.config;
   agent_name : string;
@@ -38,8 +39,3 @@ type context = {
     Mcp_server_eio_governance.mcp_session_record list ->
     unit;
 }
-
-(** [safe_exec argv] runs [argv] as a subprocess with a 60s timeout.
-    Returns [(true, stdout)] on exit 0 and [(false, stderr_or_msg)] on
-    any non-zero exit or timeout. *)
-val safe_exec : string list -> tool_result

@@ -48,25 +48,25 @@ let env_flag_enabled name =
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_transport_status _args : tool_result =
+let handle_transport_status ~tool_name ~start_time _args : tool_result =
   let ctx =
     Transport_read_model.context_from_env
       ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
   in
   let json = Transport_read_model.transport_status_json ctx in
-  Tool_result.quick_ok (Yojson.Safe.to_string json)
+  Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string json)
 
-let handle_websocket_discovery _args : tool_result =
+let handle_websocket_discovery ~tool_name ~start_time _args : tool_result =
   let ctx =
     Transport_read_model.context_from_env
       ~allow_legacy_accept:(env_flag_enabled "MASC_ALLOW_LEGACY_ACCEPT") ()
   in
   let json = Transport_read_model.websocket_discovery_json ctx in
-  Tool_result.quick_ok (Yojson.Safe.to_string json)
+  Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string json)
 
-let handle_webrtc_offer args : tool_result =
+let handle_webrtc_offer ~tool_name ~start_time args : tool_result =
   if not (Server_webrtc_transport.is_enabled ()) then
-    error_result "webrtc transport disabled"
+    Tool_result.error ~tool_name ~start_time:start_time "webrtc transport disabled"
   else
   let*! agent_name = get_string_required args "agent_name" in
   let ice_candidates = get_string_list args "ice_candidates" in
@@ -85,12 +85,12 @@ let handle_webrtc_offer args : tool_result =
     Server_webrtc_transport.handle_offer_request
       (Yojson.Safe.to_string (`Assoc fields))
   with
-  | Ok body -> Tool_result.quick_ok (pretty_json_string body)
-  | Error msg -> error_result msg
+  | Ok body -> Tool_result.ok ~tool_name ~start_time:start_time (pretty_json_string body)
+  | Error msg -> Tool_result.error ~tool_name ~start_time:start_time msg
 
-let handle_webrtc_answer args : tool_result =
+let handle_webrtc_answer ~tool_name ~start_time args : tool_result =
   if not (Server_webrtc_transport.is_enabled ()) then
-    error_result "webrtc transport disabled"
+    Tool_result.error ~tool_name ~start_time:start_time "webrtc transport disabled"
   else
   let*! offer_id = get_string_required args "offer_id" in
   let*! agent_name = get_string_required args "agent_name" in
@@ -105,5 +105,5 @@ let handle_webrtc_answer args : tool_result =
     |> Yojson.Safe.to_string
   in
   match Server_webrtc_transport.handle_answer_request body with
-  | Ok response -> Tool_result.quick_ok (pretty_json_string response)
-  | Error msg -> error_result msg
+  | Ok response -> Tool_result.ok ~tool_name ~start_time:start_time (pretty_json_string response)
+  | Error msg -> Tool_result.error ~tool_name ~start_time:start_time msg

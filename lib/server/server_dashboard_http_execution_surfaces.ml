@@ -8,48 +8,47 @@ open Server_dashboard_http_core
    the ceiling on slow-disk deployments without a rebuild. The outer
    wrapper at [server_runtime_bootstrap.ml] uses the matching
    [shell_prewarm_outer_timeout_sec] env to keep the 5s headroom. *)
-let shell_prewarm_timeout_s =
-  Env_config_runtime.Dashboard.shell_prewarm_inner_timeout_sec
+let shell_prewarm_timeout_s = Env_config_runtime.Dashboard.shell_prewarm_inner_timeout_sec
 
 let warm_shell_cache (state : Mcp_server.server_state) =
   Atomic.set _shell_warming true;
-  Fun.protect
+  Eio_guard.protect
     ~finally:(fun () -> Atomic.set _shell_warming false)
     (fun () ->
-      let t0 = Time_compat.now () in
-      (try
+       let t0 = Time_compat.now () in
+       try
          let cache_key = dashboard_shell_cache_key state.Mcp_server.room_config in
-         let compute () =
-           dashboard_shell_payload_json state.Mcp_server.room_config
-         in
+         let compute () = dashboard_shell_payload_json state.Mcp_server.room_config in
          let result =
            match state.Mcp_server.clock with
            | Some clock ->
-               Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0
-                 ~clock ~timeout_sec:shell_prewarm_timeout_s compute
-           | None ->
-               Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+             Dashboard_cache.get_or_compute_with_timeout
+               cache_key
+               ~ttl:15.0
+               ~clock
+               ~timeout_sec:shell_prewarm_timeout_s
+               compute
+           | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
          in
-         if is_dashboard_cache_timeout_json result then
+         if is_dashboard_cache_timeout_json result
+         then
            Log.Dashboard.warn
              "shell cache pre-warm timed out during compute (%.0fs)"
              shell_prewarm_timeout_s
-         else begin
+         else (
            Atomic.set _shell_warmed true;
            Atomic.set _last_good_shell result;
-           Log.Dashboard.info "shell cache pre-warmed (%.1fms)"
-             ((Time_compat.now () -. t0) *. 1000.0)
-         end
+           Log.Dashboard.info
+             "shell cache pre-warmed (%.1fms)"
+             ((Time_compat.now () -. t0) *. 1000.0))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Log.Dashboard.warn "shell cache pre-warm failed: %s"
-             (Printexc.to_string exn)))
+         Log.Dashboard.warn "shell cache pre-warm failed: %s" (Printexc.to_string exn))
+;;
 
 (* Delta-push: track last broadcast hash per event_type to skip unchanged payloads. *)
-let _last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t =
-  Hashtbl.create 8
-
+let _last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t = Hashtbl.create 8
 let _broadcast_hash_mu = Eio.Mutex.create ()
 
 (** Broadcast a single cached surface to all Observer SSE sessions.
@@ -66,44 +65,47 @@ let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
         | Some prev -> not (Digestif.SHA256.equal prev hash)
         | None -> true
       in
-      if changed then (Hashtbl.replace _last_broadcast_hash event_type hash; true)
+      if changed
+      then (
+        Hashtbl.replace _last_broadcast_hash event_type hash;
+        true)
       else false)
   in
-  if should_broadcast then begin
+  if should_broadcast
+  then (
     let sse_json =
       `Assoc
-        [
-          ("type", `String event_type);
-          ("payload", json);
-          ("ts_unix", `Float (Time_compat.now ()));
+        [ "type", `String event_type
+        ; "payload", json
+        ; "ts_unix", `Float (Time_compat.now ())
         ]
     in
-    Sse.broadcast_to Observers sse_json
-  end else
-    Log.Dashboard.routine "%s: payload unchanged, skipping broadcast" event_type
+    Sse.broadcast_to Observers sse_json)
+  else Log.Dashboard.routine "%s: payload unchanged, skipping broadcast" event_type
+;;
 
 let execution_actor_for_request ~base_path request =
   Server_auth.sanitized_dashboard_actor_for_request ~base_path request
+;;
 
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () =
-  _operator_snapshot_broadcast_ref :=
-    broadcast_cached_surface ~event_type:"operator_snapshot"
+  _operator_snapshot_broadcast_ref
+  := broadcast_cached_surface ~event_type:"operator_snapshot"
+;;
 
 let () =
-  _operator_digest_broadcast_ref :=
-    broadcast_cached_surface ~event_type:"operator_digest"
+  _operator_digest_broadcast_ref := broadcast_cached_surface ~event_type:"operator_digest"
+;;
 
 let _execution_cache =
   create_cached_surface
     (`Assoc
-      [
-        ("status", `String "initializing");
-        ("generated_at", `String (Masc_domain.now_iso ()));
-        ( "message",
-          `String "Execution data is being computed. Refresh in a few seconds."
-        );
-      ])
+        [ "status", `String "initializing"
+        ; "generated_at", `String (Masc_domain.now_iso ())
+        ; "message", `String "Execution data is being computed. Refresh in a few seconds."
+        ])
+;;
 
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
@@ -115,28 +117,31 @@ let _execution_cache =
 let record_invalidation_failure ~callback ~message exn =
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_lifecycle_callback_failures
-    ~labels:[ ("callback", callback) ]
+    ~labels:[ "callback", callback ]
     ();
   Log.Dashboard.error "%s: %s" message (Printexc.to_string exn)
+;;
 
 let invalidate_execution_cache_with_hooks_for_testing
-    ~invalidate_execution_surface
-    ~invalidate_light_cache
-    () =
+      ~invalidate_execution_surface
+      ~invalidate_light_cache
+      ()
+  =
   (try invalidate_execution_surface () with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-       record_invalidation_failure
-         ~callback:"execution_surface_cache_invalidate"
-         ~message:"Failed to invalidate execution surface cache"
-         exn);
-  (try invalidate_light_cache () with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       record_invalidation_failure
-         ~callback:"dashboard_execution_light_cache_invalidate"
-         ~message:"Failed to invalidate dashboard execution cache"
-         exn)
+     record_invalidation_failure
+       ~callback:"execution_surface_cache_invalidate"
+       ~message:"Failed to invalidate execution surface cache"
+       exn);
+  try invalidate_light_cache () with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    record_invalidation_failure
+      ~callback:"dashboard_execution_light_cache_invalidate"
+      ~message:"Failed to invalidate dashboard execution cache"
+      exn
+;;
 
 let invalidate_execution_cache () =
   invalidate_execution_cache_with_hooks_for_testing
@@ -144,30 +149,32 @@ let invalidate_execution_cache () =
     ~invalidate_light_cache:(fun () ->
       Dashboard_cache.invalidate "execution:default:light")
     ()
+;;
 
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_namespace_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)
 let seed_execution_cache_for_test () =
-  mark_cached_surface_success _execution_cache
-    (`Assoc [ ("status", `String "seeded_for_test") ])
+  mark_cached_surface_success
+    _execution_cache
+    (`Assoc [ "status", `String "seeded_for_test" ])
+;;
 
 let _transport_health_cache =
   create_cached_surface
     (`Assoc
-      [
-        ("status", `String "initializing");
-        ("generated_at", `String (Masc_domain.now_iso ()));
-        ( "message",
-          `String "Transport health data is warming up. Refresh in a few seconds."
-        );
-      ])
+        [ "status", `String "initializing"
+        ; "generated_at", `String (Masc_domain.now_iso ())
+        ; ( "message"
+          , `String "Transport health data is warming up. Refresh in a few seconds." )
+        ])
+;;
 
-let dashboard_execution_snapshot_json () =
-  cached_surface_json _execution_cache
+let dashboard_execution_snapshot_json () = cached_surface_json _execution_cache
 
 let dashboard_transport_health_snapshot_json () =
   cached_surface_json _transport_health_cache
+;;
 
 (* Issue #8396: cache patchers used to recognise only 7 lifecycle event
    names while [Keeper_lifecycle_events.all_event_names] now publishes
@@ -185,10 +192,11 @@ let keepalive_running_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "running" -> Some true
   | "resumed" | "self_preservation" | "auto_resumed" -> Some true
   | "paused" -> Some true
-  | "paused_pruned" -> Some false   (* prune == removed from supervision *)
-  | "dead_cleaned" -> Some false    (* cleanup == no longer alive *)
+  | "paused_pruned" -> Some false (* prune == removed from supervision *)
+  | "dead_cleaned" -> Some false (* cleanup == no longer alive *)
   | "stopped" | "crashed" | "dead" -> Some false
   | _ -> None
+;;
 
 let phase_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "running" -> Some "running"
@@ -199,6 +207,7 @@ let phase_of_lifecycle_event = function
   | "crashed" -> Some "crashed"
   | "dead" | "dead_cleaned" -> Some "dead"
   | _ -> None
+;;
 
 let pipeline_stage_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "running" -> Some "idle"
@@ -208,152 +217,170 @@ let pipeline_stage_of_lifecycle_event = function
   | "stopped" | "dead" | "dead_cleaned" -> Some "offline"
   | "crashed" -> Some "crashed"
   | _ -> None
+;;
 
 let paused_of_lifecycle_event = function
-  | "started" | "restarted" | "reconciled" | "resumed" | "running"
-  | "self_preservation" | "auto_resumed" -> Some false
+  | "started"
+  | "restarted"
+  | "reconciled"
+  | "resumed"
+  | "running"
+  | "self_preservation"
+  | "auto_resumed" -> Some false
   | "paused" | "paused_pruned" | "stopped" -> Some true
   | "dead" | "dead_cleaned" | "crashed" -> Some false
   | _ -> None
+;;
 
 let keeper_agent_status_opt row =
   let open Yojson.Safe.Util in
   match member "agent" row with
-  | `Assoc _ as agent -> (
-      match member "status" agent with
-      | `String status -> Some status
-      | _ -> None)
-  | _ -> (
-      match member "status" row with
-      | `String status -> Some status
-      | _ -> None)
+  | `Assoc _ as agent ->
+    (match member "status" agent with
+     | `String status -> Some status
+     | _ -> None)
+  | _ ->
+    (match member "status" row with
+     | `String status -> Some status
+     | _ -> None)
+;;
 
 let patched_keeper_status row ~keepalive_running =
-  if not keepalive_running then
-    `String "offline"
-  else
+  if not keepalive_running
+  then `String "offline"
+  else (
     match keeper_agent_status_opt row with
-    | Some (("busy" | "active" | "listening" | "idle") as status) ->
-        `String status
+    | Some (("busy" | "active" | "listening" | "idle") as status) -> `String status
     | Some ("offline" | "inactive") -> `String "offline"
-    | _ -> `String "idle"
+    | _ -> `String "idle")
+;;
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
-  | `Assoc fields as row -> (
-      match Yojson.Safe.Util.member "name" row with
-      | `String name when String.equal name keeper_name ->
-          let row_fields : (string * Yojson.Safe.t) list = fields in
-          let row_fields =
-            row_fields
-            |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
-            |> upsert_assoc_field "status" (patched_keeper_status row ~keepalive_running)
-          in
-          let row_fields =
-            match paused_of_lifecycle_event event with
-            | Some paused -> upsert_assoc_field "paused" (`Bool paused) row_fields
-            | None -> row_fields
-          in
-          let row_fields =
-            match phase_of_lifecycle_event event with
-            | Some phase -> upsert_assoc_field "phase" (`String phase) row_fields
-            | None -> row_fields
-          in
-          let row_fields =
-            match pipeline_stage_of_lifecycle_event event with
-            | Some stage -> upsert_assoc_field "pipeline_stage" (`String stage) row_fields
-            | None -> row_fields
-          in
-          `Assoc row_fields
-      | _ -> row)
+  | `Assoc fields as row ->
+    (match Yojson.Safe.Util.member "name" row with
+     | `String name when String.equal name keeper_name ->
+       let row_fields : (string * Yojson.Safe.t) list = fields in
+       let row_fields =
+         row_fields
+         |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
+         |> upsert_assoc_field "status" (patched_keeper_status row ~keepalive_running)
+       in
+       let row_fields =
+         match paused_of_lifecycle_event event with
+         | Some paused -> upsert_assoc_field "paused" (`Bool paused) row_fields
+         | None -> row_fields
+       in
+       let row_fields =
+         match phase_of_lifecycle_event event with
+         | Some phase -> upsert_assoc_field "phase" (`String phase) row_fields
+         | None -> row_fields
+       in
+       let row_fields =
+         match pipeline_stage_of_lifecycle_event event with
+         | Some stage -> upsert_assoc_field "pipeline_stage" (`String stage) row_fields
+         | None -> row_fields
+       in
+       `Assoc row_fields
+     | _ -> row)
   | other -> other
+;;
 
 let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
+;;
 
 let running_keeper_names (config : Coord.config) =
   Keeper_types.keeper_names config
   |> List.filter_map (fun name ->
-         match Keeper_types.read_meta config name with
-         | Ok (Some meta)
-           when Keeper_status_bridge.runtime_keepalive_running config meta ->
-             Some name
-         | _ -> None)
+    match Keeper_types.read_meta config name with
+    | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->
+      Some name
+    | _ -> None)
+;;
 
 let patch_surface_json_for_running_keepers (config : Coord.config) = function
   | `Assoc fields as json ->
-      let running = running_keeper_names config in
-      if running = [] then json
-      else
-        let patch_rows rows =
-          List.fold_left
-            (fun acc keeper_name ->
-              patch_keeper_rows ~keeper_name ~event:"reconciled"
-                ~keepalive_running:true acc)
-            rows running
-        in
-        (match List.assoc_opt "keepers" fields with
+    let running = running_keeper_names config in
+    if running = []
+    then json
+    else (
+      let patch_rows rows =
+        List.fold_left
+          (fun acc keeper_name ->
+             patch_keeper_rows
+               ~keeper_name
+               ~event:"reconciled"
+               ~keepalive_running:true
+               acc)
+          rows
+          running
+      in
+      match List.assoc_opt "keepers" fields with
+      | Some (`List rows) ->
+        `Assoc (upsert_assoc_field "keepers" (`List (patch_rows rows)) fields)
+      | Some (`Assoc keeper_fields) ->
+        (match List.assoc_opt "items" keeper_fields with
          | Some (`List rows) ->
-             `Assoc
-               (upsert_assoc_field "keepers" (`List (patch_rows rows)) fields)
-         | Some (`Assoc keeper_fields) -> (
-             match List.assoc_opt "items" keeper_fields with
-             | Some (`List rows) ->
-                 let keeper_fields =
-                   upsert_assoc_field "items" (`List (patch_rows rows))
-                     keeper_fields
-                 in
-                 `Assoc
-                   (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
-             | _ -> json)
+           let keeper_fields =
+             upsert_assoc_field "items" (`List (patch_rows rows)) keeper_fields
+           in
+           `Assoc (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
          | _ -> json)
+      | _ -> json)
   | other -> other
+;;
 
 let patch_execution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   match _execution_cache.json with
-  | `Assoc fields -> (
-      match List.assoc_opt "keepers" fields with
-      | Some (`List rows) ->
-          _execution_cache.json <-
-            `Assoc
-              (upsert_assoc_field "keepers"
-                 (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
-                 fields)
-      | Some _ -> ()
-      | None -> ())
+  | `Assoc fields ->
+    (match List.assoc_opt "keepers" fields with
+     | Some (`List rows) ->
+       _execution_cache.json
+       <- `Assoc
+            (upsert_assoc_field
+               "keepers"
+               (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
+               fields)
+     | Some _ -> ()
+     | None -> ())
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
+;;
 
 let patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   match _operator_snapshot_cache.json with
-  | `Assoc fields -> (
-      match List.assoc_opt "keepers" fields with
-      | Some (`Assoc keeper_fields) -> (
-          match List.assoc_opt "items" keeper_fields with
-          | Some (`List rows) ->
-              let keeper_fields =
-                upsert_assoc_field "items"
-                  (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
-                  keeper_fields
-              in
-              _operator_snapshot_cache.json <-
-                `Assoc
-                  (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
-          | Some _ -> ()
-          | None -> ())
-      | Some _ -> ()
-      | None -> ())
+  | `Assoc fields ->
+    (match List.assoc_opt "keepers" fields with
+     | Some (`Assoc keeper_fields) ->
+       (match List.assoc_opt "items" keeper_fields with
+        | Some (`List rows) ->
+          let keeper_fields =
+            upsert_assoc_field
+              "items"
+              (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
+              keeper_fields
+          in
+          _operator_snapshot_cache.json
+          <- `Assoc (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
+        | Some _ -> ()
+        | None -> ())
+     | Some _ -> ()
+     | None -> ())
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
+;;
 
 let patch_keeper_dependent_caches ~keeper_name ~event =
   match keepalive_running_of_lifecycle_event event with
   | None -> ()
   | Some keepalive_running ->
-      patch_execution_cache_for_keeper ~keeper_name ~event ~keepalive_running;
-      patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running
+    patch_execution_cache_for_keeper ~keeper_name ~event ~keepalive_running;
+    patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running
+;;
 
 (** Late-bound broadcast hook. Set after [broadcast_namespace_truth_snapshot]
     is defined in [Server_dashboard_http_namespace_truth]. *)
 let _broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
   ref (fun (_state : Mcp_server.server_state) -> ())
+;;
 
 (** Start the proactive execution refresh loop. When an Executor_pool is
     available, each refresh runs in a pool domain with a domain-local Caqti
@@ -365,127 +392,164 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
      at start does not fire every boot. Env var override can still push
      above interval; runtime clamp remains the safety net. *)
   let execution_refresh_timeout_s =
-    float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
-      ~default:48.0 ~min_v:30.0 ~max_v:300.0
+    float_of_env_default
+      "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
+      ~default:48.0
+      ~min_v:30.0
+      ~max_v:300.0
   in
   let compute () =
     mark_cached_surface_attempt _execution_cache;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~net
-        ~mono_clock ~config:room_config
+      run_dashboard_compute
+        ~mode:Offloaded_readonly
+        ~sw
+        ~clock
+        ~net
+        ~mono_clock
+        ~config:room_config
         (fun ~config ~sw ->
-          Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
-          |> patch_surface_json_for_running_keepers config
-          |> with_projection_diagnostics ~surface:"execution" ~started_at
-               ~extra:
-                 [
-                   ( "readonly_pool",
-                     Coord_utils.domain_local_pg_backend_diagnostics_json () );
-                 ])
+           Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
+           |> patch_surface_json_for_running_keepers config
+           |> with_projection_diagnostics
+                ~surface:"execution"
+                ~started_at
+                ~extra:
+                  [ ( "readonly_pool"
+                    , Coord_utils.domain_local_pg_backend_diagnostics_json () )
+                  ])
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        mark_cached_surface_error _execution_cache exn;
-        raise exn
+      mark_cached_surface_error _execution_cache exn;
+      raise exn
   in
-  Proactive_refresh.start ~sw ~clock
+  Proactive_refresh.start
+    ~sw
+    ~clock
     ~config:
-      { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0)
-        with
-        timeout_s = execution_refresh_timeout_s;
-        warm_delay_s = 0.0;
+      { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
+        timeout_s = execution_refresh_timeout_s
+      ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _execution_cache json;
       broadcast_cached_surface ~event_type:"execution_snapshot" json;
       !_broadcast_namespace_truth_ref state)
+;;
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =
   let timeout_s =
-    float_of_env_default "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:8.0 ~min_v:3.0 ~max_v:30.0
+    float_of_env_default
+      "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
+      ~default:8.0
+      ~min_v:3.0
+      ~max_v:30.0
   in
   let compute () =
     mark_cached_surface_attempt _transport_health_cache;
-    try Transport_metrics.transport_health_json ~config:state.Mcp_server.room_config
-    with
+    try Transport_metrics.transport_health_json ~config:state.Mcp_server.room_config with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        mark_cached_surface_error _transport_health_cache exn;
-        raise exn
+      mark_cached_surface_error _transport_health_cache exn;
+      raise exn
   in
   let interval_s = 30.0 in
-  Proactive_refresh.start ~sw ~clock
+  Proactive_refresh.start
+    ~sw
+    ~clock
     ~config:
-      { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s)
-        with
-        timeout_s;
-        warm_delay_s = 0.0;
+      { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
+        timeout_s
+      ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _transport_health_cache json;
       broadcast_cached_surface ~event_type:"transport_health_snapshot" json)
+;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
   let fixture = query_param request "fixture" in
   let actor =
-    execution_actor_for_request
-      ~base_path:state.Mcp_server.room_config.base_path request
+    execution_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
   in
   let full_mode = bool_query_param request "full" ~default:false in
   let light = not full_mode in
   let compute ?actor ?fixture ~light () =
     let started_at = Unix.gettimeofday () in
-    run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
-      ~clock ~config:state.Mcp_server.room_config (fun ~config ~sw ->
-        Dashboard_execution.json ?actor ?fixture ~light ~config ~sw ~clock
-          ~proc_mgr:state.Mcp_server.proc_mgr ()
-        |> patch_surface_json_for_running_keepers config
-        |> with_projection_diagnostics ~surface:"execution" ~started_at
-             ~extra:
-               [
-                 ( "readonly_pool",
-                   Coord_utils.domain_local_pg_backend_diagnostics_json () );
-               ])
+    run_dashboard_compute
+      ~mode:Offloaded_readonly
+      ?net
+      ?mono_clock
+      ~sw
+      ~clock
+      ~config:state.Mcp_server.room_config
+      (fun ~config ~sw ->
+         Dashboard_execution.json
+           ?actor
+           ?fixture
+           ~light
+           ~config
+           ~sw
+           ~clock
+           ~proc_mgr:state.Mcp_server.proc_mgr
+           ()
+         |> patch_surface_json_for_running_keepers config
+         |> with_projection_diagnostics
+              ~surface:"execution"
+              ~started_at
+              ~extra:
+                [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ()
+                ])
   in
   match fixture, actor, full_mode with
   | None, None, false ->
-      (* Default light mode: stay instant after first success, but avoid
+    (* Default light mode: stay instant after first success, but avoid
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
-      cached_surface_or_first_success_json _execution_cache
-        ~cache_key:"execution:default:light" ~ttl:120.0 ~clock
-        ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-        (compute ~light:true)
+    cached_surface_or_first_success_json
+      _execution_cache
+      ~cache_key:"execution:default:light"
+      ~ttl:120.0
+      ~clock
+      ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
+      (compute ~light:true)
   | _ ->
-      (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
+    (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
          These are rare (test fixtures, actor-specific views, full mode). *)
-      let cache_key =
-        Printf.sprintf "execution:%s:%s:%s"
-          (Option.value ~default:"" actor)
-          (Option.value ~default:"" fixture)
-          (if full_mode then "full" else "light")
-      in
-      Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-        ~clock
-        ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-        (compute ?actor ?fixture ~light)
+    let cache_key =
+      Printf.sprintf
+        "execution:%s:%s:%s"
+        (Option.value ~default:"" actor)
+        (Option.value ~default:"" fixture)
+        (if full_mode then "full" else "light")
+    in
+    Dashboard_cache.get_or_compute_with_timeout
+      cache_key
+      ~ttl:120.0
+      ~clock
+      ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
+      (compute ?actor ?fixture ~light)
+;;
 
 let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   let compute () =
     let started_at = Unix.gettimeofday () in
-    run_dashboard_compute ~mode:Offloaded_readonly ?net:state.Mcp_server.net
-      ?mono_clock:state.Mcp_server.mono_clock ~sw ~clock
+    run_dashboard_compute
+      ~mode:Offloaded_readonly
+      ?net:state.Mcp_server.net
+      ?mono_clock:state.Mcp_server.mono_clock
+      ~sw
+      ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw:_ ->
-        Dashboard_http_keeper.execution_trust_dashboard_json config
-        |> with_projection_diagnostics ~surface:"execution_trust" ~started_at
-             ~extra:[])
+         Dashboard_http_keeper.execution_trust_dashboard_json config
+         |> with_projection_diagnostics ~surface:"execution_trust" ~started_at ~extra:[])
   in
   match state.Mcp_server.clock with
   | Some clock ->
@@ -495,21 +559,21 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
       compute
-  | None ->
-    Dashboard_cache.get_or_compute
-      "execution-trust:default"
-      ~ttl:15.0
-      compute
+  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:15.0 compute
+;;
 
 let transport_health_cache_diagnostics () =
   match cached_surface_json _transport_health_cache with
-  | `Assoc fields -> (
-      match List.assoc_opt "projection_diagnostics" fields with
-      | Some (`Assoc diagnostics) -> diagnostics
-      | _ -> [])
+  | `Assoc fields ->
+    (match List.assoc_opt "projection_diagnostics" fields with
+     | Some (`Assoc diagnostics) -> diagnostics
+     | _ -> [])
   | _ -> []
+;;
 
 let dashboard_transport_health_http_json ~state:_ =
   let json = cached_surface_json _transport_health_cache in
-  extend_projection_diagnostics json
+  extend_projection_diagnostics
+    json
     (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())
+;;

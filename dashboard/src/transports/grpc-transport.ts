@@ -22,6 +22,8 @@ import type {
   BroadcastResponse,
   StatusRequest,
   StatusResponse,
+  LspRequest,
+  LspResponse,
 } from '../grpc/masc_coordination_pb'
 
 const DEFAULT_RETRY_BASE_MS = 1000
@@ -89,6 +91,7 @@ export interface GrpcTransport extends Transport {
   readonly toolCall: (req: ToolCallRequest) => Promise<ToolCallResponse>
   readonly broadcast: (req: BroadcastRequest) => Promise<BroadcastResponse>
   readonly getStatus: (req: StatusRequest) => Promise<StatusResponse>
+  readonly lspCall: (req: LspRequest) => Promise<LspResponse>
 }
 
 interface GrpcTransportState {
@@ -199,7 +202,7 @@ async function* serverStreamingRpc<TReq, TRes>(
       // For binary mode we need frame parsing; for text mode (base64) decode first.
       // This implementation assumes the server returns binary frames.
       // In practice grpc-web-text base64-encodes each frame.
-      // To keep it robust we treat the whole buffer as one frame batch for now.
+      // To avoid partial-frame errors we treat the whole buffer as one frame batch for now.
       const bytes = new Uint8Array(value)
       for (const frame of parseFrames(bytes)) {
         if (frame.trailers) {
@@ -263,5 +266,6 @@ export function createGrpcTransport(
     toolCall: (req) => unaryRpc(baseUrl, service, 'ToolCall', req, opts, state),
     broadcast: (req) => unaryRpc(baseUrl, service, 'Broadcast', req, opts, state),
     getStatus: (req) => unaryRpc(baseUrl, service, 'GetStatus', req, opts, state),
+    lspCall: (req) => unaryRpc<LspRequest, LspResponse>(baseUrl, service, 'LspCall', req, opts, state),
   }
 }

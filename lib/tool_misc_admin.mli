@@ -1,4 +1,3 @@
-
 (** Tool_misc_admin — auth, config, tool inventory, and feature
     flag handlers.
 
@@ -22,10 +21,7 @@
 
 (** {1 Types} *)
 
-type tool_result = bool * string
-(** Standard MCP tool return shape: [(success, body_or_error)].
-    [body_or_error] is the JSON string serialised body on success,
-    or a plain error message on failure. *)
+type tool_result = Tool_result.t
 
 type context = {
   config : Coord.config;
@@ -37,7 +33,7 @@ type context = {
 (** {1 SSOT} *)
 
 val valid_admin_section_strings : string list
-(** [\["auth"\]] — canonical section values accepted by
+(** \[\["auth"\]\] — canonical section values accepted by
     [masc_tool_admin_update].
 
     Adding a new section requires {b three} synchronised changes:
@@ -49,7 +45,7 @@ val valid_admin_section_strings : string list
     drift between the three.
 
     {b History}: schema once advertised
-    [\["auth"; "unit_policy"\]] but the handler only implemented
+    \[\["auth"; "unit_policy"\]\] but the handler only implemented
     [auth] (#8546) — fictional sections were removed and pinned
     here. *)
 
@@ -75,12 +71,17 @@ val tool_inventory_json :
     for the snapshot/update handlers because they read from the
     base path. *)
 
-val handle_config : Yojson.Safe.t -> tool_result
-(** [handle_config args] returns the auth-config snapshot filtered
-    by [args.category] (optional string).  Read-only. *)
+val handle_feature_flags : tool_name:string -> start_time:float -> Yojson.Safe.t -> tool_result
+(** [handle_feature_flags ~tool_name ~start_time args] returns the
+    feature flag inventory filtered by optional [args.category] and
+    [args.only_overridden]. *)
 
-val handle_tool_admin_snapshot : context -> Yojson.Safe.t -> tool_result
-(** [handle_tool_admin_snapshot ctx args] returns the tool
+val handle_config : tool_name:string -> start_time:float -> Yojson.Safe.t -> tool_result
+(** [handle_config ~tool_name ~start_time args] returns the auth-config
+    snapshot filtered by [args.category] (optional string).  Read-only. *)
+
+val handle_tool_admin_snapshot : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> tool_result
+(** [handle_tool_admin_snapshot ~tool_name ~start_time ctx args] returns the tool
     inventory + auth config + feature-flag summary for the admin
     dashboard.  Optional args:
 
@@ -88,14 +89,14 @@ val handle_tool_admin_snapshot : context -> Yojson.Safe.t -> tool_result
     - [include_deprecated] (bool, default [true]). *)
 
 val handle_tool_admin_update :
-  context -> Yojson.Safe.t -> tool_result
-(** [handle_tool_admin_update ctx args] writes a new auth config.
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> tool_result
+(** [handle_tool_admin_update ~tool_name ~start_time ctx args] writes a new auth config.
     Required args:
 
     - [section] (string) — must be in {!valid_admin_section_strings}.
     - [updates] (object) — section-specific payload.
 
-    Returns [(false, "section must be one of: auth")] when the
+    Returns [Tool_result.error] with "section must be one of: auth" when the
     section is invalid.  The "must be one of" message is
     operator-actionable and pinned at the contract seam — drift
     breaks the admin UI's error-handling. *)

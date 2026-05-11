@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { useEffect, useState } from 'preact/hooks'
 import type { Keeper, Task } from '../../types'
 import { keepers, tasks } from '../../store'
 import { KeeperBadge } from '../keeper-badge'
@@ -6,6 +7,7 @@ import {
   canonicalKeeperName,
   keeperIdentityKeys,
 } from '../common/keeper-identity'
+import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 
 interface IdeKeeperWorkPanelProps {
   readonly keeperName: string
@@ -38,6 +40,14 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
     || summary.terminalCode
     || summary.runtimeBlocker,
   )
+
+  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
+    return () => unsub()
+  }, [])
+
+  const cursor = resolveKeeperCursor(keeperName, overlay.cursors)
 
   return html`
     <section
@@ -86,6 +96,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
             `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
         ${RuntimeBlock(summary)}
+        ${PresenceIndicator(cursor)}
         ${summary.recentOutput
           ? html`<p class="ide-keeper-work-output">${summary.recentOutput}</p>`
           : null}
@@ -225,4 +236,91 @@ function firstNonEmpty(...values: ReadonlyArray<string | null | undefined>): str
     if (trimmed) return trimmed
   }
   return null
+}
+
+function resolveKeeperCursor(
+  keeperName: string,
+  cursors: Map<string, KeeperCursor>,
+): KeeperCursor | null {
+  if (!keeperName) return null
+  const target = keeperName.toLowerCase().trim()
+  // 1. Exact key match (cursorOverlaySignal map keys are canonical keeper ids).
+  // 2. Cursor payload's own keeper_id (server-emitted identity, may differ
+  //    from the map key when the SSE source key is e.g. a session id).
+  // Substring/includes fallbacks were removed because they pick the wrong
+  // cursor when ids share prefixes/suffixes (e.g. "kim" matches "kimchi").
+  for (const [id, cursor] of cursors) {
+    if (id.toLowerCase() === target) return cursor
+    if (cursor.keeper_id && cursor.keeper_id.toLowerCase() === target) return cursor
+  }
+  return null
+}
+
+function PresenceIndicator(cursor: KeeperCursor | null) {
+  if (!cursor) return null
+  // Defensive: SSE parser can emit file_path='' (not-yet-set) and
+  // last_update timestamps that are 0 or in the future. Without these
+  // guards the card renders ":<line>" with no filename and "-99m ago".
+  if (!cursor.file_path) return null
+  const color = getKeeperColor(cursor.keeper_id)
+  const fileName = cursor.file_path.split('/').pop() ?? cursor.file_path
+  const rawAge = Math.round((Date.now() - cursor.last_update) / 1000)
+  const ageSec = Math.max(0, rawAge)
+  const isEditing = cursor.focus_mode === 'editing'
+  return html`
+    <div
+      class="ide-keeper-presence"
+      role="status"
+      aria-label="Keeper presence"
+      style=${{
+        display: 'grid',
+        gap: 'var(--sp-1)',
+        padding: 'var(--sp-2)',
+        background: 'var(--color-bg-surface)',
+        border: '1px solid var(--color-border-default)',
+        borderRadius: 'var(--r-2)',
+      }}
+    >
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+        <span
+          aria-hidden="true"
+          style=${{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            background: color.cursor,
+            display: 'inline-block',
+            boxShadow: isEditing ? `0 0 4px ${color.cursor}` : 'none',
+          }}
+        />
+        <span style=${{
+          fontSize: 'var(--fs-11)',
+          letterSpacing: '0.05em',
+          color: isEditing ? 'var(--color-status-err)' : 'var(--color-fg-muted)',
+          fontWeight: 600,
+        }}>${cursor.focus_mode.toUpperCase()}</span>
+        ${cursor.tool_name
+          ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)', marginLeft: 'auto' }}>${cursor.tool_name}</span>`
+          : null}
+      </div>
+      <div style=${{
+        fontSize: 'var(--fs-11)',
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--color-fg-secondary)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }} title=${cursor.file_path}>
+        ${fileName}:${cursor.line}${cursor.selection_end ? `-${cursor.selection_end.line}` : ''}
+      </div>
+      ${cursor.turn != null
+        ? html`
+          <div style=${{ display: 'flex', gap: 'var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
+            <span>turn ${cursor.turn}</span>
+            <span style=${{ marginLeft: 'auto' }}>${ageSec < 60 ? `${ageSec}s ago` : `${Math.round(ageSec / 60)}m ago`}</span>
+          </div>
+        `
+        : null}
+    </div>
+  `
 }

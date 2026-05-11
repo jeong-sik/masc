@@ -33,10 +33,9 @@ type 'a context = {
 
 (** {1 Result} *)
 
-type tool_result = bool * string
-(** Standard MCP tool return: [(success, body_or_error)].
-    [body_or_error] is the JSON-serialised body on success or an
-    error message on failure. *)
+type tool_result = Tool_result.t
+(** Re-exported from {!Tool_result}.  RFC-0062 Phase 4c-2:
+    handlers return structured [Tool_result.t] records. *)
 
 (** {1 Dispatch} *)
 

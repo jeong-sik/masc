@@ -13,6 +13,26 @@ import {
   pinKeeper,
   pinnedKeepers,
 } from './multi-keeper-pin-store'
+import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
+import { activeIdeFile } from './ide-shell'
+
+function setKeeperCursor(keeperId: string, filePath: string, line: number): void {
+  const cursors = new Map(cursorOverlaySignal.value.cursors)
+  const cursor: KeeperCursor = {
+    keeper_id: keeperId,
+    file_path: filePath,
+    line,
+    column: 0,
+    focus_mode: 'reading',
+    last_update: Date.now(),
+  }
+  cursors.set(keeperId, cursor)
+  cursorOverlaySignal.value = { ...cursorOverlaySignal.value, cursors }
+}
+
+function clearKeeperCursors(): void {
+  cursorOverlaySignal.value = { ...cursorOverlaySignal.value, cursors: new Map() }
+}
 
 const SCHOLAR_SNAPSHOT = {
   keeper: 'scholar',
@@ -110,6 +130,8 @@ function makeFetchMock(): ReturnType<typeof vi.fn> {
 beforeEach(() => {
   clearPins()
   activeKeeperName.value = ''
+  clearKeeperCursors()
+  activeIdeFile.value = 'package.json'
 })
 
 afterEach(() => {
@@ -119,6 +141,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
   clearPins()
   activeKeeperName.value = ''
+  clearKeeperCursors()
+  activeIdeFile.value = 'package.json'
 })
 
 describe('InspectorMultiKeeperBDI — single-pin fallback (RFC-0027 §10)', () => {
@@ -546,5 +570,120 @@ describe('buildDragHandlers — RFC-0027 PR-γ §4 unit', () => {
     handlers.onDrop(makeEvent(dt))
 
     expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['c', 'b', 'a', 'd'])
+  })
+})
+
+describe('InspectorMultiKeeperBDI — file focus label (cursor overlay → IDE jump)', () => {
+  it('renders no focus label when the keeper has no cursor in the overlay', async () => {
+    vi.stubGlobal('fetch', makeFetchMock())
+    pinKeeper('scholar', 1)
+    pinKeeper('moth', 2)
+    // No setKeeperCursor calls — cursors map empty.
+
+    const container = createContainer()
+    render(html`<${InspectorMultiKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('article[role="listitem"]').length).toBe(2)
+    })
+
+    expect(container.querySelector('button[aria-label^="focus file "]')).toBeNull()
+  })
+
+  it('renders the file:line label on the focused compact-fold panel when cursor is present', async () => {
+    vi.stubGlobal('fetch', makeFetchMock())
+    pinKeeper('scholar', 1)
+    pinKeeper('moth', 2)
+    // moth is at the head (most-recent) → focused panel.
+    setKeeperCursor('moth', 'src/components/ide/inspector-multi-keeper-bdi.ts', 318)
+
+    const container = createContainer()
+    render(html`<${InspectorMultiKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('article[role="listitem"]').length).toBe(2)
+    })
+
+    const mothPanel = container.querySelector('article[data-keeper="moth"]')
+    expect(mothPanel).not.toBeNull()
+    // Basename + line — no directory prefix.
+    const focusBtn = mothPanel?.querySelector('button[aria-label^="focus file "]') as HTMLButtonElement | null
+    expect(focusBtn).not.toBeNull()
+    expect(focusBtn?.textContent).toBe('inspector-multi-keeper-bdi.ts:318')
+    // Full path lives in the title attribute and aria-label.
+    expect(focusBtn?.title).toBe('src/components/ide/inspector-multi-keeper-bdi.ts')
+  })
+
+  it('clicking the panel focus label updates activeIdeFile to the full path', async () => {
+    vi.stubGlobal('fetch', makeFetchMock())
+    pinKeeper('scholar', 1)
+    pinKeeper('moth', 2)
+    setKeeperCursor('moth', 'src/runtime/router.ts', 42)
+
+    const container = createContainer()
+    render(html`<${InspectorMultiKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      const btn = container.querySelector('article[data-keeper="moth"] button[aria-label^="focus file "]')
+      expect(btn).not.toBeNull()
+    })
+
+    const focusBtn = container.querySelector(
+      'article[data-keeper="moth"] button[aria-label^="focus file "]',
+    ) as HTMLButtonElement
+    focusBtn.click()
+    expect(activeIdeFile.value).toBe('src/runtime/router.ts')
+  })
+
+  it('focus-mode chip renders file:line label and clicking jumps without re-focusing the keeper', async () => {
+    vi.stubGlobal('fetch', makeFetchMock())
+    pinKeeper('scholar', 1)
+    pinKeeper('moth', 2)
+    pinKeeper('luna', 3)
+    pinKeeper('ash', 4)
+    // ash is focused (head). scholar/moth/luna become chips.
+    setKeeperCursor('scholar', 'lib/keeper/keeper_registry.ml', 555)
+
+    const container = createContainer()
+    render(html`<${InspectorMultiKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-layout="focus-mode"]')).not.toBeNull()
+    })
+
+    const scholarChip = container.querySelector('span[role="listitem"][data-keeper="scholar"]')
+    expect(scholarChip).not.toBeNull()
+
+    // No focusable role="button" span (Thread 1 fix): only real <button> elements.
+    expect(scholarChip?.querySelector('span[role="button"]')).toBeNull()
+
+    const fileBtn = scholarChip?.querySelector('button[aria-label^="focus file "]') as HTMLButtonElement | null
+    expect(fileBtn).not.toBeNull()
+    expect(fileBtn?.textContent).toBe('keeper_registry.ml:555')
+
+    const headBefore = pinnedKeepers.value.entries[0]?.keeperName
+    fileBtn?.click()
+    // activeIdeFile jumped …
+    expect(activeIdeFile.value).toBe('lib/keeper/keeper_registry.ml')
+    // … but pin order untouched (focus-promote did NOT fire because the focus
+    // label is now a sibling button, not nested inside the focus chip button).
+    expect(pinnedKeepers.value.entries[0]?.keeperName).toBe(headBefore)
+  })
+
+  it('chip focus-file button is a sibling of the focus button (no nested interactive descendants)', async () => {
+    vi.stubGlobal('fetch', makeFetchMock())
+    pinKeeper('a', 1)
+    pinKeeper('b', 2)
+    pinKeeper('c', 3)
+    pinKeeper('d', 4)
+    setKeeperCursor('a', 'README.md', 7)
+
+    const container = createContainer()
+    render(html`<${InspectorMultiKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-layout="focus-mode"]')).not.toBeNull()
+    })
+
+    const chip = container.querySelector('span[role="listitem"][data-keeper="a"]')!
+    const focusBtn = chip.querySelector('button[aria-label="focus a"]')!
+    // Focus-file button must NOT be a descendant of the focus button.
+    expect(focusBtn.querySelector('button[aria-label^="focus file "]')).toBeNull()
+    expect(chip.querySelector('button[aria-label^="focus file "]')).not.toBeNull()
   })
 })

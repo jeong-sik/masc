@@ -18,6 +18,8 @@ module Float = Stdlib.Float
 open Masc_domain
 open Tool_args
 
+type tool_result = Tool_result.t
+
 type 'a context = {
   config : Coord.config;
   agent_name : string;
@@ -28,11 +30,12 @@ type 'a context = {
   mcp_session_id : string option;
 }
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
+let result_of_json ~tool_name ~start_time = function
+  | Ok json ->
+      Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
+  | Error message ->
+      Tool_result.error ~tool_name ~start_time
+        (Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
 
 let schema_properties entries = `Assoc entries
 
@@ -261,10 +264,6 @@ let judgment_write_schema =
         ];
   }
 
-let json_string_of_result = function
-  | Ok json -> (true, Yojson.Safe.to_string json)
-  | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
-
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   let control_ctx : 'a Operator_control.context =
@@ -285,32 +284,30 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.t option =
       let include_messages = get_bool args "include_messages" true in
       let include_keepers = get_bool args "include_keepers" true in
       Some
-        (wrap_result ~name ~start
-           ( true,
-             Yojson.Safe.to_string
-               (Operator_control.snapshot_json ?actor ?view ~include_messages
-                  ~include_keepers control_ctx) ))
+        (Tool_result.ok ~tool_name:name ~start_time:start
+           (Yojson.Safe.to_string
+              (Operator_control.snapshot_json ?actor ?view ~include_messages
+                 ~include_keepers control_ctx)))
   | "masc_operator_digest" ->
       let actor = get_string_opt args "actor" in
       let target_type = get_string_opt args "target_type" in
       let target_id = get_string_opt args "target_id" in
       let include_workers = get_bool args "include_workers" true in
       Some
-        (wrap_result ~name ~start
-           (json_string_of_result
-              (Operator_control.digest_json ?actor ?target_type ?target_id
-                 ~include_workers control_ctx)))
+        (result_of_json ~tool_name:name ~start_time:start
+           (Operator_control.digest_json ?actor ?target_type ?target_id
+              ~include_workers control_ctx))
   | "masc_operator_action" ->
-      Some (wrap_result ~name ~start (json_string_of_result (Operator_control.action_json control_ctx args)))
+      Some (result_of_json ~tool_name:name ~start_time:start (Operator_control.action_json control_ctx args))
   | "masc_operator_confirm" ->
-      Some (wrap_result ~name ~start (json_string_of_result (Operator_control.confirm_json control_ctx args)))
+      Some (result_of_json ~tool_name:name ~start_time:start (Operator_control.confirm_json control_ctx args))
   | "masc_surface_audit" ->
       let surface_id = get_string_opt args "surface_id" in
-      Some (wrap_result ~name ~start (true, Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ())))
+      Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ())))
   | "masc_operator_judgment_write" ->
       Some
-        (wrap_result ~name ~start
-           (json_string_of_result (Operator_control.judgment_write_json control_ctx args)))
+        (result_of_json ~tool_name:name ~start_time:start
+           (Operator_control.judgment_write_json control_ctx args))
   | _ -> None
 
 let schemas : tool_schema list =

@@ -185,6 +185,7 @@
   ide_annotation_types
   ide_annotations
   ide_region_tracker
+  ide_meta_sync
   server_ide_http
   lsp_process_manager
   lsp_message_router

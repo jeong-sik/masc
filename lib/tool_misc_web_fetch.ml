@@ -182,19 +182,19 @@ let fetch_impl ~url ~timeout_sec =
   | Ok (Some status, _) -> Error (Printf.sprintf "HTTP %d" status)
   | Ok (None, _) -> Error "no HTTP status received"
 
-let handle args =
+let handle ~tool_name ~start_time args =
   let url = get_string args "url" "" in
   let timeout = max 1 (min 60 (get_int args "timeout" default_timeout_sec)) in
   if not (valid_url url) then
-    (false, json_error "url must be a valid http or https URL")
+    Tool_result.error ~tool_name ~start_time "url must be a valid http or https URL"
   else
     let now = Unix.gettimeofday () in
     let key = url ^ "|" ^ Int.to_string timeout in
     match cache_lookup key now with
-    | Some cached -> (true, cached)
+    | Some cached -> Tool_result.ok ~tool_name ~start_time cached
     | None -> (
         match enforce_rate_limit now with
-        | Error message -> (false, json_error message)
+        | Error message -> Tool_result.error ~tool_name ~start_time message
         | Ok () -> (
             match fetch_impl ~url ~timeout_sec:timeout with
             | Ok (http_status, title, description, text) ->
@@ -215,5 +215,5 @@ let handle args =
                 in
                 let json = json_ok fields in
                 cache_store key json now;
-                (true, json)
-            | Error message -> (false, json_error message)))
+                Tool_result.ok ~tool_name ~start_time json
+            | Error message -> Tool_result.error ~tool_name ~start_time message))

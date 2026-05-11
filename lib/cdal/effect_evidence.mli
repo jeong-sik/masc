@@ -11,10 +11,10 @@
     @since SafeAuto source-path boundary *)
 
 (** Source-path evidence from the Mode_enforcer call site. *)
-type t = {
-  source_path : string option;  (** Path of the file that triggered the effect. *)
-  source_line : int option;     (** Line number within [source_path]. *)
-}
+type t =
+  { source_path : string option (** Path of the file that triggered the effect. *)
+  ; source_line : int option (** Line number within [source_path]. *)
+  }
 
 (** The empty evidence record: both fields are [None]. *)
 val empty : t

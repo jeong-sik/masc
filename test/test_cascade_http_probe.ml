@@ -1,4 +1,4 @@
-(** Unit tests for [Cascade_ollama_probe].
+(** Unit tests for [Cascade_http_probe].
 
     The HTTP probe path itself is intentionally not unit-tested
     here — it depends on a live ollama daemon and is covered by
@@ -11,7 +11,7 @@
       behaviour. *)
 
 open Alcotest
-module P = Masc_mcp.Cascade_ollama_probe
+module P = Masc_mcp.Cascade_http_probe
 module Throttle = Masc_mcp.Cascade_throttle
 
 (* ── URL classification ─────────────────────────────────────── *)
@@ -118,7 +118,7 @@ let test_cache_size_after_clear () =
    verify the empty/clear lifecycle here. *)
 
 let () =
-  run "cascade_ollama_probe" [
+  run "cascade_http_probe" [
     "is_ollama_url", [
       test_case "positive matches" `Quick test_is_ollama_url_positive;
       test_case "negative cases" `Quick test_is_ollama_url_negative;

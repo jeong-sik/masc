@@ -9,13 +9,13 @@
 (** Successfully loaded and validated bundle.
     [proof] is the decoded manifest proof, which is treated as the
     stored truth source for phase-1A replay. *)
-type loaded_bundle = {
-  proof : Masc_mcp_cdal_runtime.Cdal_proof.t;
-  manifest_json : Yojson.Safe.t;
-  contract : Masc_mcp_cdal_runtime.Risk_contract.t;
-  contract_json : Yojson.Safe.t;
-  recomputed_contract_id : string;
-}
+type loaded_bundle =
+  { proof : Masc_mcp_cdal_runtime.Cdal_proof.t
+  ; manifest_json : Yojson.Safe.t
+  ; contract : Masc_mcp_cdal_runtime.Risk_contract.t
+  ; contract_json : Yojson.Safe.t
+  ; recomputed_contract_id : string
+  }
 
 (** Load errors with structured context. *)
 type load_error =
@@ -34,10 +34,10 @@ type load_error =
     3. Read and parse contract.json
     4. Decode with Agent_sdk types
     5. Recompute contract_id *)
-val load :
-  store:Masc_mcp_cdal_runtime.Proof_store.config ->
-  Masc_mcp_cdal_runtime.Cdal_proof.t ->
-  (loaded_bundle, load_error) result
+val load
+  :  store:Masc_mcp_cdal_runtime.Proof_store.config
+  -> Masc_mcp_cdal_runtime.Cdal_proof.t
+  -> (loaded_bundle, load_error) result
 
 (** Human-readable error description. *)
 val load_error_to_string : load_error -> string

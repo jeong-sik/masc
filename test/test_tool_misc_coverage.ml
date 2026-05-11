@@ -380,27 +380,27 @@ let () = test "web_search_provider_plan_prefers_configured_official_provider" (f
 )
 
 let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
-  let success, result =
+  let result =
     Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
       [
         ("brave", `Error "provider failed");
         ("duckduckgo", `Hits [ ("Eio", "https://example.com/eio", "Fiber runtime") ]);
       ]
   in
-  assert success;
-  let json = parse_json result in
+  assert result.success;
+  let json = parse_json (Tool_result.message result) in
   let result_json = Yojson.Safe.Util.member "result" json in
   assert (Yojson.Safe.Util.member "engine" result_json = `String "duckduckgo");
   assert (Yojson.Safe.Util.member "result_count" result_json = `Int 1)
 )
 
 let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
-  let success, result =
+  let result =
     Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
       [ ("brave", `Empty); ("bing_rss", `Error "rss unavailable") ]
   in
-  assert (not success);
-  let json = parse_json result in
+  assert (not result.success);
+  let json = parse_json (Tool_result.message result) in
   assert (Yojson.Safe.Util.member "status" json = `String "error");
   assert
     (str_contains

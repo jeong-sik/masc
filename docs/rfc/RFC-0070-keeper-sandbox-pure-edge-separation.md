@@ -1,8 +1,18 @@
+---
+rfc: "0070"
+title: "Keeper Sandbox Runtime — Pure/Edge Separation"
+status: Draft
+created: 2026-05-12
+updated: 2026-05-12
+author: yousleepwhen
+supersedes: []
+superseded_by: null
+related: ["0002", "0003", "0006", "0036"]
+implementation_prs: []
+---
+
 # RFC-0070: Keeper Sandbox Runtime — Pure/Edge Separation
 
-- **Status**: Draft
-- **Author**: vincent (with Claude Opus 4.7, /loop iterations 1-5)
-- **Created**: 2026-05-12
 - **Depends on**: RFC-0036 Phase A (cleanup hook plumbing — foundation)
 - **Extends**: RFC-0006 Phase B-2 (Read/Edit/Grep docker exec routing)
 - **Related**: RFC-0002 (keeper FSM), RFC-0003 (composite lifecycle observer)
@@ -70,7 +80,7 @@ val of_request
 (* Same input ⇒ identical plan. No Random, no Unix.time. *)
 ```
 
-`Container_name.t` is a private string derived as `"masc-keeper-" ^ base36(Hash_algo.digest hash_algo (turn_id ‖ attempt ‖ suffix)[..16])`, where `Hash_algo.t = BLAKE3 | SHA_256 | SHA_512` (closed variant, default `BLAKE3` per §8 Q1). Collision space 1/2^96 at the 16-byte truncation. Test backdoor `Container_name.of_string_for_test` is exposed only under `let%test_module` and not in the public `.mli`. **The algorithm choice is parametric** — wall-clock is the only construction-time dependency that must remain absent.
+`Container_name.t` is a private string derived as `"masc-keeper-" ^ base36(Hash_algo.digest hash_algo (turn_id ‖ attempt ‖ suffix)[0..15])`, where `Hash_algo.t = BLAKE3 | SHA_256 | SHA_512` (closed variant, default `BLAKE3` per §8 Q1). The slice takes the first **16 bytes (128 bits)** of the digest, encoded in base36. Direct collision probability is 1/2^128; birthday-bound collision threshold (concurrent keepers in the same fleet) is ~2^64 ≈ 1.8×10^19 — effectively zero under any realistic load. Test backdoor `Container_name.of_string_for_test` is exposed only under `let%test_module` and not in the public `.mli`. **The algorithm choice is parametric** — wall-clock is the only construction-time dependency that must remain absent.
 
 ### 3.2 Edge layer (Docker_client + Sandbox_executor)
 
@@ -162,7 +172,7 @@ val cleanup_tick
 | **4** | Caller cutover (one site per PR): `keeper_shell_docker` / `keeper_sandbox_runtime` / `keeper_turn_sandbox_runtime` → `Sandbox_executor.run` | Phase 3 | MEDIUM — caller surface preserved by `Sandbox_executor` wrapper |
 | **5** | Catch-all removal: delete the 8 `try ... with _ -> None` sites in `keeper_sandbox_control.ml`; compiler enforces caller migration | Phase 4 | LOW — compiler is the migration check |
 
-Phases 1-5 are independently mergeable and revertable. Phase 5 closes the loop by making the old anti-pattern syntactically unwritable in this subsystem.
+Phases 1-5 are independently mergeable and revertible. Phase 5 closes the loop by making the old anti-pattern syntactically unwritable in this subsystem.
 
 ## 5. Validation
 
@@ -201,4 +211,4 @@ Phases 1-5 are independently mergeable and revertable. Phase 5 closes the loop b
 
 ## 9. Rollback
 
-Each Phase 1-5 is independently revertable. Phase 4 caller cutover lands one site per PR so a single revert clears one call path without affecting the others. Phase 5 (catch-all removal) is the only Phase whose revert is *additive* (re-adding `try ... with _ -> None`) — the RFC explicitly notes this as a one-way door once the compiler-enforced migration completes.
+Each Phase 1-5 is independently revertible. Phase 4 caller cutover lands one site per PR so a single revert clears one call path without affecting the others. Phase 5 (catch-all removal) is the only Phase whose revert is *additive* (re-adding `try ... with _ -> None`) — the RFC explicitly notes this as a one-way door once the compiler-enforced migration completes.

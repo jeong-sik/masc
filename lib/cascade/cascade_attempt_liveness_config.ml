@@ -48,8 +48,9 @@ let reset_cache_for_test () = mode_cache := None
    Local providers stay on the larger [local_27b] / [local_70b_plus]
    budgets to avoid killing slow local models. *)
 
-let budget_for_label (label : string) : Cascade_attempt_liveness.budget =
-  let canon = String.lowercase_ascii (String.trim label) in
+let budget_for_provider_id ~(provider_id : string) :
+    Cascade_attempt_liveness.budget =
+  let canon = String.lowercase_ascii (String.trim provider_id) in
   match canon with
   | "codex_cli" | "claude_code" | "claude" | "gemini_cli" | "gemini" ->
       Cascade_attempt_liveness.cloud_fast
@@ -64,12 +65,12 @@ let budget_for_label (label : string) : Cascade_attempt_liveness.budget =
 
 (* RFC-0022 §1 — see .mli for contract. *)
 let outer_wall_for_attempt
-    ~mode ~observer_attached ~per_provider_timeout_s ~provider_label =
+    ~mode ~observer_attached ~per_provider_timeout_s ~provider_id =
   match mode, observer_attached with
   | Enforce, true -> None
   | _, true ->
       let budget_wall =
-        (budget_for_label provider_label).Cascade_attempt_liveness.attempt_wall_max
+        (budget_for_provider_id ~provider_id).Cascade_attempt_liveness.attempt_wall_max
       in
       Option.map
         (fun t -> Float.max t budget_wall)

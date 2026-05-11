@@ -84,7 +84,7 @@ let test_e2e_observe_finalize_emits_observed_total () =
       let cascade = "integ_observe_cascade" in
       let provider = "integ_observe_provider" in
       let mode = Cfg.current_mode () in
-      let budget = Cfg.budget_for_label provider in
+      let budget = Cfg.budget_for_provider_id ~provider_id:provider in
       let obs =
         Obs.create ~mode ~budget ~cascade_label:cascade
           ~provider_label:provider ~started_at:0.0
@@ -106,7 +106,7 @@ let test_e2e_off_no_observed_total () =
       let cascade = "integ_off_cascade" in
       let provider = "integ_off_provider" in
       let mode = Cfg.current_mode () in
-      let budget = Cfg.budget_for_label provider in
+      let budget = Cfg.budget_for_provider_id ~provider_id:provider in
       let obs =
         Obs.create ~mode ~budget ~cascade_label:cascade
           ~provider_label:provider ~started_at:0.0
@@ -126,7 +126,7 @@ let test_enforce_registered_switch_kills_attempt_without_tick_clock () =
           try
             Eio.Switch.run (fun attempt_sw ->
                 let mode = Cfg.current_mode () in
-                let budget = Cfg.budget_for_label provider in
+                let budget = Cfg.budget_for_provider_id ~provider_id:provider in
                 let obs =
                   Obs.create ~mode ~budget ~cascade_label:cascade
                     ~provider_label:provider ~started_at:0.0

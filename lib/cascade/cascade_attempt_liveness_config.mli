@@ -32,13 +32,20 @@ val mode_label : mode -> string
 (** Stable label for telemetry / Prometheus counter values. One of
     [off | observe | enforce]. *)
 
-val budget_for_label : string -> Cascade_attempt_liveness.budget
-(** Map a cascade provider label (e.g. [codex_cli], [claude_code],
+val budget_for_provider_id :
+  provider_id:string -> Cascade_attempt_liveness.budget
+(** Map a cascade [provider_id] (e.g. [codex_cli], [claude_code],
     [gemini_cli], [glm-coding], [ollama_only], [llama-server]) to a
     per-profile budget.
 
-    Unknown labels fall back to {!Cascade_attempt_liveness.cloud_fast}
-    which is the conservative cloud-streaming default. *)
+    The argument is the {b provider} dispatch key — not a model id.
+    Callers should pass the value from
+    [Provider_adapter.provider_label_of_config provider_cfg] or an
+    equivalent provider-level identifier.
+
+    Unknown provider ids fall back to
+    {!Cascade_attempt_liveness.cloud_fast} which is the conservative
+    cloud-streaming default. *)
 
 val reset_cache_for_test : unit -> unit
 (** Test-only: reset the cached flag read so a new value of
@@ -49,7 +56,7 @@ val outer_wall_for_attempt
   :  mode:mode
   -> observer_attached:bool
   -> per_provider_timeout_s:float option
-  -> provider_label:string
+  -> provider_id:string
   -> float option
 (** RFC-0022 §1 — backstop wall for the legacy [per_provider_timeout_s]
     knob.
@@ -62,11 +69,14 @@ val outer_wall_for_attempt
       the authority and drives [Switch.fail] on TTFT, inter-chunk, or
       attempt wall budget breach. The legacy outer wall must not
       pre-empt it.
-    - [Off] / [Observe], or no observer: returns
-      [Some (max t (budget_for_label provider_label).attempt_wall_max)]
+    - [Off] / [Observe] + observer attached: returns
+      [Some (max t (budget_for_provider_id ~provider_id).attempt_wall_max)]
       when [per_provider_timeout_s = Some t]. Slow-but-legitimate
       streams (local Ollama 27B / 70B+) get the profile's attempt wall
       so the legacy 120s knob cannot prematurely fall back the cascade.
+    - No observer attached (any mode): returns [per_provider_timeout_s]
+      unchanged. Without an observer there is no per-provider budget
+      to clamp against, so the caller's legacy knob is honored as-is.
     - No legacy timeout configured ([per_provider_timeout_s = None]):
       returns [None] (no outer wall).
 

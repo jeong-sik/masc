@@ -30,7 +30,7 @@ let test_enforce_with_observer_returns_none () =
       ~mode:Cfg.Enforce
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_label:"codex_cli"
+      ~provider_id:"codex_cli"
   in
   Alcotest.(check opt_f) "Enforce + observer → None" None actual
 
@@ -40,7 +40,7 @@ let test_enforce_with_observer_ollama_returns_none () =
       ~mode:Cfg.Enforce
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_label:"ollama_only"
+      ~provider_id:"ollama_only"
   in
   Alcotest.(check opt_f)
     "Enforce + observer + ollama → None (observer is authority)"
@@ -54,7 +54,7 @@ let test_observe_ollama_clips_to_local_27b_wall () =
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_label:"ollama_only"
+      ~provider_id:"ollama_only"
   in
   Alcotest.(check opt_f)
     "Observe + ollama → local_27b wall 900s (not 120s)"
@@ -67,7 +67,7 @@ let test_off_ollama_clips_to_local_27b_wall () =
       ~mode:Cfg.Off
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_label:"llama-server"
+      ~provider_id:"llama-server"
   in
   Alcotest.(check opt_f)
     "Off + llama-server → local_27b wall 900s"
@@ -80,7 +80,7 @@ let test_observe_ollama_70b_clips_to_local_70b_plus_wall () =
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_label:"ollama_70b"
+      ~provider_id:"ollama_70b"
   in
   Alcotest.(check opt_f)
     "Observe + ollama_70b → local_70b_plus wall 1800s"
@@ -95,7 +95,7 @@ let test_observe_cloud_fast_keeps_user_t_when_larger () =
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 600.0)
-      ~provider_label:"codex_cli"
+      ~provider_id:"codex_cli"
   in
   Alcotest.(check opt_f)
     "Observe + codex_cli + user 600s → 600s (>cloud_fast 180s)"
@@ -108,7 +108,7 @@ let test_observe_cloud_fast_clips_when_user_smaller () =
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_label:"codex_cli"
+      ~provider_id:"codex_cli"
   in
   Alcotest.(check opt_f)
     "Observe + codex_cli + user 120s → cloud_fast 180s"
@@ -123,7 +123,7 @@ let test_no_observer_passes_through_user_value () =
       ~mode:Cfg.Off
       ~observer_attached:false
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_label:"ollama_only"
+      ~provider_id:"ollama_only"
   in
   Alcotest.(check opt_f)
     "Off + no observer → unchanged 120s (legacy)"
@@ -138,7 +138,7 @@ let test_enforce_without_observer_passes_through () =
       ~mode:Cfg.Enforce
       ~observer_attached:false
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_label:"codex_cli"
+      ~provider_id:"codex_cli"
   in
   Alcotest.(check opt_f)
     "Enforce + no observer → unchanged 120s (no silent drop)"
@@ -152,7 +152,7 @@ let test_none_input_stays_none_observe_with_observer () =
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:None
-      ~provider_label:"ollama_only"
+      ~provider_id:"ollama_only"
   in
   Alcotest.(check opt_f) "None input → None output" None actual
 
@@ -162,7 +162,7 @@ let test_none_input_stays_none_off_no_observer () =
       ~mode:Cfg.Off
       ~observer_attached:false
       ~per_provider_timeout_s:None
-      ~provider_label:"codex_cli"
+      ~provider_id:"codex_cli"
   in
   Alcotest.(check opt_f) "None + no observer → None" None actual
 
@@ -174,7 +174,7 @@ let test_unknown_label_falls_back_to_cloud_fast () =
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 60.0)
-      ~provider_label:"some-future-provider"
+      ~provider_id:"some-future-provider"
   in
   Alcotest.(check opt_f)
     "Observe + unknown → cloud_fast 180s"

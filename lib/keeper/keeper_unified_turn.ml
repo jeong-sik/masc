@@ -994,7 +994,7 @@ let run_keeper_cycle
                         (Printexc.to_string e);
                       Prometheus.inc_counter
                         Keeper_metrics.metric_keeper_turn_cleanup_failures
-                        ~labels:[ "keeper", meta.name; "site", "unsubscribe_event_bus" ]
+                        ~labels:[ "keeper", meta.name; "site", Turn_cleanup_failure_site.(to_label Unsubscribe_event_bus) ]
                         ());
                    try
                      Keeper_registry.mark_turn_finished
@@ -1009,7 +1009,7 @@ let run_keeper_cycle
                        (Printexc.to_string e);
                      Prometheus.inc_counter
                        Keeper_metrics.metric_keeper_turn_cleanup_failures
-                       ~labels:[ "keeper", meta.name; "site", "mark_turn_finished" ]
+                       ~labels:[ "keeper", meta.name; "site", Turn_cleanup_failure_site.(to_label Mark_turn_finished) ]
                        ()
                  in
                  match
@@ -2214,7 +2214,7 @@ let run_keeper_cycle
                         Prometheus.inc_counter
                           Keeper_metrics.metric_keeper_cascade_sync_failures
                           ~labels:
-                            [ "keeper", meta.name; "site", "ambiguous_partial_pause" ]
+                            [ "keeper", meta.name; "site", Cascade_sync_failure_site.(to_label Ambiguous_partial_pause) ]
                           ();
                         combined_err, updated_meta)
                     else err, updated_meta
@@ -2297,7 +2297,7 @@ let run_keeper_cycle
                          msg);
                   Prometheus.inc_counter
                     Keeper_metrics.metric_keeper_write_meta_cycle_failures
-                    ~labels:[ "keeper", meta.name; "site", "turn_failure" ]
+                    ~labels:[ "keeper", meta.name; "site", Write_meta_cycle_failure_site.(to_label Turn_failure) ]
                     ();
                   if is_ambiguous_partial
                   then (
@@ -2979,7 +2979,7 @@ let run_keeper_cycle
                      else Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
                   Prometheus.inc_counter
                     Keeper_metrics.metric_keeper_write_meta_cycle_failures
-                    ~labels:[ "keeper", meta.name; "site", "keeper_cycle" ]
+                    ~labels:[ "keeper", meta.name; "site", Write_meta_cycle_failure_site.(to_label Keeper_cycle) ]
                     ();
                   (* 8. Handle stop reason *)
                   Keeper_turn_fsm.emit_transition

@@ -48,6 +48,7 @@ type tool_policy = {
   identity_runtime_mcp_header_keys : string list;
   argv_prompt_preflight : bool;
   uses_anthropic_caching : bool;
+  max_turns_per_attempt : int option;
 }
 
 type telemetry_policy = {
@@ -150,6 +151,7 @@ let no_tool_http_headers =
     identity_runtime_mcp_header_keys = [];
     argv_prompt_preflight = false;
     uses_anthropic_caching = false;
+    max_turns_per_attempt = None;
   }
 
 let runtime_mcp_http_headers =
@@ -159,6 +161,7 @@ let runtime_mcp_http_headers =
     identity_runtime_mcp_header_keys = [];
     argv_prompt_preflight = false;
     uses_anthropic_caching = false;
+    max_turns_per_attempt = None;
   }
 
 (* Codex CLI quirk: its cached login cannot natively inject per-keeper auth
@@ -181,6 +184,7 @@ let codex_cli_tool_policy =
       [ "authorization"; "x-masc-agent-name"; "x-masc-keeper-name" ];
     argv_prompt_preflight = true;
     uses_anthropic_caching = false;
+    max_turns_per_attempt = None;
   }
 let telemetry_reported = { usage_reporting = Reported; runtime_reporting = Reported }
 let telemetry_unknown = { usage_reporting = Unknown; runtime_reporting = Unknown }
@@ -382,7 +386,11 @@ let direct_adapters =
           family = Generic;
         };
       tool_policy =
-        { runtime_mcp_http_headers with uses_anthropic_caching = true };
+        {
+          runtime_mcp_http_headers with
+          uses_anthropic_caching = true;
+          max_turns_per_attempt = Some 30;
+        };
       telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {

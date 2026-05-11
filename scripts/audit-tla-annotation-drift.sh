@@ -26,7 +26,41 @@ SPEC_DIR="${REPO_ROOT}/specs/keeper-state-machine"
 LIB_DIR="${REPO_ROOT}/lib"
 
 VERBOSE=0
-if [[ "${1:-}" == "--verbose" ]]; then VERBOSE=1; fi
+BASELINE_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --verbose) VERBOSE=1; shift ;;
+    --baseline) BASELINE_FILE="$2"; shift 2 ;;
+    --baseline=*) BASELINE_FILE="${1#*=}"; shift ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+# Load baseline known-drift entries (one per line, format: "type:symbol").
+# Lines starting with # and blank lines are ignored.  Baseline entries
+# are existing drifts awaiting resolution (e.g. spec extension RFC) —
+# the validator skips them so CI catches only NEW regressions.
+declare -a BASELINE=()
+if [[ -n "${BASELINE_FILE}" && -f "${BASELINE_FILE}" ]]; then
+  while IFS= read -r line; do
+    line="${line%%#*}"  # strip trailing comments
+    line="${line## }"
+    line="${line%% }"
+    [[ -z "${line}" ]] && continue
+    BASELINE+=("${line}")
+  done < "${BASELINE_FILE}"
+  if [[ "${VERBOSE}" == "1" ]]; then
+    echo "loaded baseline: ${#BASELINE[@]} known-drift entries from ${BASELINE_FILE}"
+  fi
+fi
+
+in_baseline() {
+  local key="$1"
+  for entry in "${BASELINE[@]:-}"; do
+    if [[ "${entry}" == "${key}" ]]; then return 0; fi
+  done
+  return 1
+}
 
 # Type → Set mapping.  OCaml type names (lowercase_with_underscores) to
 # TLA+ set identifiers (CamelCase + "Set").  Extend this list as new
@@ -75,6 +109,7 @@ extract_ocaml_members() {
 }
 
 VIOLATIONS=0
+KNOWN_DRIFTS=0
 TOTAL_PAIRS=0
 TOTAL_CHECKED=0
 
@@ -116,6 +151,11 @@ for pair in "${TYPE_SET_PAIRS[@]}"; do
       if [[ "${VERBOSE}" == "1" ]]; then
         echo "  ✓ ${sym_stripped} (from ${sym_full}) in ${spec_set}"
       fi
+    elif in_baseline "${ocaml_type}:${ocaml_sym}"; then
+      if [[ "${VERBOSE}" == "1" ]]; then
+        echo "  ~ ${sym_full} (type=${ocaml_type}) — known drift, skipped (baseline)"
+      fi
+      KNOWN_DRIFTS=$((KNOWN_DRIFTS + 1))
     else
       echo "drift: ocaml constructor '${ocaml_sym}' (type=${ocaml_type}) has no matching member in TLA+ ${spec_set}"
       echo "       tried: '${sym_full}', '${sym_stripped}'"
@@ -125,7 +165,7 @@ for pair in "${TYPE_SET_PAIRS[@]}"; do
 done
 
 echo ""
-echo "tla-annotation-drift summary: ${TOTAL_CHECKED} constructors checked across ${TOTAL_PAIRS} type/set pairs, ${VIOLATIONS} drift(s)"
+echo "tla-annotation-drift summary: ${TOTAL_CHECKED} constructors checked across ${TOTAL_PAIRS} type/set pairs, ${VIOLATIONS} new drift(s), ${KNOWN_DRIFTS} baseline-known drift(s)"
 
 if [[ "${VIOLATIONS}" -gt 0 ]]; then
   echo ""

@@ -61,6 +61,23 @@ let re_matches pattern text =
     true
   with Not_found -> false
 
+(* Precompile the static patterns used by [content_has_risky_quantitative_claim]
+   so each board-post check reuses the same DFA instead of rebuilding it
+   from the literal pattern on every call.  [Str] keeps match-group state
+   global, but only [match_beginning]/[match_end] read it — here we only
+   take the boolean from [search_forward], so sharing the regex across
+   fibers is safe for our use. *)
+let re_line_ref_short = Str.regexp_case_fold "[Ll][0-9][0-9]*"
+let re_line_ref_file =
+  Str.regexp_case_fold "[A-Za-z0-9_./-]+\\.[A-Za-z0-9_]+:[0-9][0-9]*"
+let re_percent = Str.regexp_case_fold "[0-9][0-9]*%"
+
+let re_matches_compiled re text =
+  try
+    ignore (Str.search_forward re text 0);
+    true
+  with Not_found -> false
+
 let contains_substring haystack needle =
   let len_haystack = String.length haystack in
   let len_needle = String.length needle in
@@ -129,8 +146,8 @@ let contains_word lower word =
 
 let content_has_risky_quantitative_claim content =
   let has_line_ref =
-    re_matches "[Ll][0-9][0-9]*" content
-    || re_matches "[A-Za-z0-9_./-]+\\.[A-Za-z0-9_]+:[0-9][0-9]*" content
+    re_matches_compiled re_line_ref_short content
+    || re_matches_compiled re_line_ref_file content
   in
   let lower = String.lowercase_ascii content in
   let has_quantifier =
@@ -139,7 +156,7 @@ let content_has_risky_quantitative_claim content =
       [ "site"; "sites"; "hit"; "hits"; "line"; "lines"; "occurrence";
         "occurrences"; "pattern"; "patterns"; "instance"; "instances";
         "accuracy" ]
-    || re_matches "[0-9][0-9]*%" content
+    || re_matches_compiled re_percent content
     || content_has_standalone_count content
   in
   has_line_ref && has_quantifier

@@ -210,8 +210,15 @@ let enrich_sdk_error ~cascade_name
              append_hint message moonshot_auth_hint_marker detail;
          })
   | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message })
-    when provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat
-      && retry_message_looks_like_not_found message ->
+    when retry_message_looks_like_not_found message ->
+    (* Endpoint URL hint is shape-agnostic data — every provider_cfg carries
+       [base_url] / [request_path] (empty strings for CLI agents) — so the
+       not_found hint applies to any provider whose retry message matches the
+       not_found pattern.  CLI providers' not_found errors rarely surface
+       through this code path (they emit text errors, not the OpenAI-compat
+       InvalidRequest shape), so the practical effect is a no-op for CLI
+       agents while still helping HTTP providers (openai-compat, glm, etc.)
+       diagnose endpoint drift.  RFC-0058 §2.4: no closed-variant dispatch. *)
     let detail =
       Printf.sprintf "base_url=%s request_path=%s endpoint=%s"
         provider_cfg.base_url provider_cfg.request_path

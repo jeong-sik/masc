@@ -532,13 +532,14 @@ OfflineRequiresLaunchPending ==
 
 \* S9b: Zombie requires the terminal_failure_latched marker.
 \*   Mirror of S6/S7/S8/S9 — every terminal/non-default phase has an
-\*   explicit "you are in phase X iff condition holds" invariant. Zombie
-\*   is reached only via TerminalFailureDetected which latches the flag;
-\*   priority 3 of DerivePhase makes the latch sufficient as well as
-\*   necessary while NotTerminal holds. Once Zombie is entered the latch
-\*   cannot clear (no action sets it false) so the invariant survives
-\*   forever — combined with S2b this guarantees the absorbing semantics
-\*   matches OCaml's apply_event reject (keeper_state_machine.ml:754-758).
+\*   explicit one-way "Phase = X => condition" invariant (not iff —
+\*   the reverse direction is intentionally outside this property's
+\*   scope; DerivePhase priority handles entry). Zombie is reached
+\*   only via TerminalFailureDetected which latches the flag. Once
+\*   Zombie is entered the latch cannot clear (no action sets it
+\*   false) so the invariant survives forever — combined with S2b
+\*   this guarantees the absorbing semantics matches OCaml's
+\*   apply_event reject (keeper_state_machine.ml:754-758).
 ZombieRequiresTerminalFailureLatched ==
     [](Phase = "Zombie" => terminal_failure_latched)
 

@@ -798,6 +798,16 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    [parse_weighted_item].  Same shape as iter 33
    route_binding_dropped — value-shape faults in legacy
    JSON-shape entries. *)
+(* Smoke for [Cascade_metrics.on_resolve_live_fallback].  The
+   natural code path requires a raw cascade name that isn't in
+   the live catalog and isn't a known logical use string — driving
+   that from a unit test would need a fixture catalog plus a
+   carefully chosen miss name.  Smoke pins the no-arg helper
+   signature. *)
+let test_resolve_live_fallback_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_resolve_live_fallback ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_weighted_item_dropped_documented_reasons_are_callable () =
   Masc_mcp.Cascade_metrics.on_weighted_item_dropped
     ~reason:"missing_or_empty_model";
@@ -1242,6 +1252,9 @@ let () =
           test_case
             "weighted_item_dropped: both documented reasons callable" `Quick
             test_weighted_item_dropped_documented_reasons_are_callable;
+          test_case
+            "resolve_live_fallback: helper callable" `Quick
+            test_resolve_live_fallback_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

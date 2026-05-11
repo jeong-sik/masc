@@ -226,3 +226,12 @@ val on_weighted_item_dropped : reason:string -> unit
     [invalid_value_type].  Also doubles as an RFC-0066 Phase 4
     migration tracker — 5-layer cascade.toml never hits this
     path, so non-zero rate flags legacy fixtures. *)
+
+val on_resolve_live_fallback : unit -> unit
+(** Tick the resolve-live fallback counter at
+    [Keeper_cascade_profile.resolve_live_with_catalog] when the
+    requested raw cascade name (and its logical-use
+    normalization) is not present in the live catalog and the
+    function falls back to the [Keeper_turn] default.  Distinct
+    from iter-30 [route_resolve_fallback] which catches the
+    route-table-lookup variant. *)

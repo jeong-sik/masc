@@ -270,7 +270,15 @@ let resolve_live_with_catalog ~catalog raw =
       | None -> trimmed
   in
   if List.mem normalized catalog then normalized
-  else Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
+  else begin
+    (* Iter 36: raw cascade name doesn't normalize to a catalog
+       member.  Silently falls back to [Keeper_turn] default —
+       operator's intended cascade is invalidated.  Distinct from
+       iter-30 [route_resolve_fallback] which catches the
+       route-table path; this is the direct-raw-name path. *)
+    Cascade_metrics.on_resolve_live_fallback ();
+    Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
+  end
 
 let resolve_live ?config_path raw =
   resolve_live_with_catalog ~catalog:(catalog_names ?config_path ()) raw

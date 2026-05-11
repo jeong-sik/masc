@@ -749,3 +749,32 @@ let on_weighted_item_dropped ~reason =
   Prometheus.inc_counter metric_weighted_item_dropped
     ~labels:[ ("reason", reason) ]
     ()
+
+(* [Keeper_cascade_profile.resolve_live_with_catalog] redirects a
+   raw cascade name to [fallback_name_for_catalog Keeper_turn]
+   when the name (or its logical-use normalization) is not present
+   in the live catalog.  This is a different layer from iter 30
+   [route_resolve_fallback]:
+
+     iter 30  cascade_name_for_use         — route-table lookup
+                                              (operator declared a
+                                              [routes] entry that
+                                              points at a missing
+                                              profile)
+     iter 36  resolve_live_with_catalog    — direct raw name lookup
+                                              (caller passed a cascade
+                                              name string that is
+                                              neither a catalog member
+                                              nor a known logical use)
+
+   The two windows can disagree because raw resolution does NOT
+   walk the [routes] table — it consults the catalog directly.  A
+   typo in caller code (or in cascade.toml's [routes] target itself
+   referencing a removed profile) hits this layer first.
+
+   Cardinality: 1 series. *)
+let metric_resolve_live_fallback =
+  "masc_cascade_resolve_live_fallback_total"
+
+let on_resolve_live_fallback () =
+  Prometheus.inc_counter metric_resolve_live_fallback ()

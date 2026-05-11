@@ -1,9 +1,9 @@
-# RFC-0057: Goal-Scope Observation→Claim Atomicity
+# RFC-0067: Goal-Scope Observation→Claim Atomicity
 
 **Issue**: #13738
 **Status**: Draft
 **Author**: Claude (agent)
-**Date**: 2026-05-09
+**Date**: 2026-05-09 (renumbered 2026-05-11 from RFC-0057 — number collided with RFC-0057-tool-descriptor-codegen.md, which was authored ~30 minutes earlier the same day and now has implementation PRs #14396/#14400/#14405/#14412/#14416/#14417/#14421 merged on main. The codegen RFC keeps the 0057 slot per established-precedent convention.)
 
 ## 1. Problem
 

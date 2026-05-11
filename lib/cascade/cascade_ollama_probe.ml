@@ -9,10 +9,10 @@ let is_ollama_url = Masc_network_defaults.is_ollama_url
 
 (* ── Cache ──────────────────────────────────────────────────── *)
 
-type cache_entry = {
-  capacity : Cascade_throttle.capacity_info;
-  recorded_at : float;
-}
+type cache_entry =
+  { capacity : Cascade_throttle.capacity_info
+  ; recorded_at : float
+  }
 
 let cache_ttl_s = 2.0
 (* Short TTL: ollama state changes whenever any client (this MASC,
@@ -22,27 +22,30 @@ let cache_ttl_s = 2.0
 
 let cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
 let cache_mutex = Eio.Mutex.create ()
-
 let now_default () = Unix.gettimeofday ()
 
 let cache_clear () =
-  Eio.Mutex.use_rw ~protect:false cache_mutex (fun () ->
-      Hashtbl.clear cache)
+  Eio.Mutex.use_rw ~protect:false cache_mutex (fun () -> Hashtbl.clear cache)
+;;
 
-let cache_size () =
-  Eio.Mutex.use_ro cache_mutex (fun () -> Hashtbl.length cache)
+let cache_size () = Eio.Mutex.use_ro cache_mutex (fun () -> Hashtbl.length cache)
 
 let cached_capacity ?now url =
-  let now = match now with Some n -> n | None -> now_default () in
+  let now =
+    match now with
+    | Some n -> n
+    | None -> now_default ()
+  in
   Eio.Mutex.use_ro cache_mutex (fun () ->
-      match Hashtbl.find_opt cache url with
-      | Some entry when now -. entry.recorded_at <= cache_ttl_s ->
-        Some entry.capacity
-      | _ -> None)
+    match Hashtbl.find_opt cache url with
+    | Some entry when now -. entry.recorded_at <= cache_ttl_s -> Some entry.capacity
+    | _ -> None)
+;;
 
 let store_capacity ~url ~capacity ~now =
   Eio.Mutex.use_rw ~protect:false cache_mutex (fun () ->
-      Hashtbl.replace cache url { capacity; recorded_at = now })
+    Hashtbl.replace cache url { capacity; recorded_at = now })
+;;
 
 (* ── JSON parser ────────────────────────────────────────────── *)
 
@@ -69,15 +72,16 @@ let parse_response ?(total = 1) ?now json =
      | `List items ->
        let process_active = List.length items in
        let process_available = max 0 (total - process_active) in
-       Some {
-         Cascade_throttle.total;
-         process_active;
-         process_available;
-         process_queue_length = 0;
-         source = Llm_provider.Provider_throttle.Discovered;
-       }
+       Some
+         { Cascade_throttle.total
+         ; process_active
+         ; process_available
+         ; process_queue_length = 0
+         ; source = Llm_provider.Provider_throttle.Discovered
+         }
      | _ -> None)
   | _ -> None
+;;
 
 (* ── HTTP probe ─────────────────────────────────────────────── *)
 
@@ -89,6 +93,7 @@ let probe_endpoint_of base_url =
     else base_url
   in
   stripped ^ Masc_network_defaults.ollama_api_ps_path
+;;
 
 (* Operator-tunable default for the probe timeout.
 
@@ -111,9 +116,7 @@ let probe_endpoint_of base_url =
    [Sys.getenv_opt] per probe attempt, which is negligible compared
    to the HTTP round-trip the probe makes. *)
 let probe_timeout_default_s = 0.5
-
 let probe_timeout_env_var = "MASC_OLLAMA_PROBE_TIMEOUT_SEC"
-
 let probe_timeout_warned = Atomic.make false
 
 let probe_timeout_resolved () =
@@ -121,7 +124,8 @@ let probe_timeout_resolved () =
   | None -> probe_timeout_default_s
   | Some raw ->
     let trimmed = String.trim raw in
-    if trimmed = "" then probe_timeout_default_s
+    if trimmed = ""
+    then probe_timeout_default_s
     else (
       match float_of_string_opt trimmed with
       | Some v when v >= 0.05 && v <= 30.0 -> v
@@ -129,12 +133,12 @@ let probe_timeout_resolved () =
         if not (Atomic.exchange probe_timeout_warned true)
         then
           Log.Misc.warn
-            "Ignoring %s=%S (expected float in [0.05, 30.0]); using \
-             default %.2fs."
+            "Ignoring %s=%S (expected float in [0.05, 30.0]); using default %.2fs."
             probe_timeout_env_var
             raw
             probe_timeout_default_s;
         probe_timeout_default_s)
+;;
 
 let try_probe ~sw ~net ?clock ?timeout_s ?now url =
   let timeout_s =
@@ -143,7 +147,11 @@ let try_probe ~sw ~net ?clock ?timeout_s ?now url =
     | None -> probe_timeout_resolved ()
   in
   let _ = sw in
-  let now = match now with Some n -> n | None -> now_default () in
+  let now =
+    match now with
+    | Some n -> n
+    | None -> now_default ()
+  in
   let endpoint = probe_endpoint_of url in
   match
     Masc_http_client.get_sync
@@ -151,7 +159,7 @@ let try_probe ~sw ~net ?clock ?timeout_s ?now url =
       ~timeout_sec:timeout_s
       ~net
       ~url:endpoint
-      ~headers:[("accept", "application/json")]
+      ~headers:[ "accept", "application/json" ]
       ()
   with
   | Error _ -> None
@@ -159,12 +167,13 @@ let try_probe ~sw ~net ?clock ?timeout_s ?now url =
     (match Yojson.Safe.from_string body with
      | exception _ -> None
      | json ->
-       match parse_response ~now json with
-       | None -> None
-       | Some cap ->
-         store_capacity ~url ~capacity:cap ~now;
-         Some cap)
+       (match parse_response ~now json with
+        | None -> None
+        | Some cap ->
+          store_capacity ~url ~capacity:cap ~now;
+          Some cap))
   | Ok _ -> None
+;;
 
 let refresh_many ~sw ~net ?timeout_s urls =
   let timeout_s =
@@ -174,13 +183,15 @@ let refresh_many ~sw ~net ?timeout_s urls =
   in
   List.iter
     (fun url ->
-       if is_ollama_url url then
+       if is_ollama_url url
+       then (
          match cached_capacity url with
-         | Some _ -> ()                   (* still fresh, skip *)
+         | Some _ -> () (* still fresh, skip *)
          | None ->
            let _ = try_probe ~sw ~net ~timeout_s url in
-           ())
+           ()))
     urls
+;;
 
 (* ── Probe adapter ───────────────────────────────────────────── *)
 
@@ -190,16 +201,22 @@ let refresh_many ~sw ~net ?timeout_s urls =
    avoiding a circular dependency between the two compilation units. *)
 module Ollama_probe = struct
   let can_probe ~url = is_ollama_url url
+
   let probe ~sw ~net ~url ?timeout_s () =
-    (match timeout_s with
-     | None -> try_probe ~sw ~net url
-     | Some v -> try_probe ~sw ~net ~timeout_s:v url)
+    match timeout_s with
+    | None -> try_probe ~sw ~net url
+    | Some v -> try_probe ~sw ~net ~timeout_s:v url
+  ;;
+
   let cached ~url ?now () =
-    (match now with
-     | None -> cached_capacity url
-     | Some v -> cached_capacity ~now:v url)
+    match now with
+    | None -> cached_capacity url
+    | Some v -> cached_capacity ~now:v url
+  ;;
+
   let refresh_many ~sw ~net ~urls ?timeout_s () =
-    (match timeout_s with
-     | None -> refresh_many ~sw ~net urls
-     | Some v -> refresh_many ~sw ~net ~timeout_s:v urls)
+    match timeout_s with
+    | None -> refresh_many ~sw ~net urls
+    | Some v -> refresh_many ~sw ~net ~timeout_s:v urls
+  ;;
 end

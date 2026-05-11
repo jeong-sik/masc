@@ -15,32 +15,32 @@
 (* ── Module type ─────────────────────────────────────────────── *)
 
 module type Probe = sig
-  val can_probe : url:string -> bool
   (** [can_probe ~url] is [true] when this probe knows how to query [url]. *)
+  val can_probe : url:string -> bool
 
-  val probe :
-    sw:Eio.Switch.t ->
-    net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t ->
-    url:string ->
-    ?timeout_s:float ->
-    unit ->
-    Cascade_throttle.capacity_info option
   (** [probe ~sw ~net ~url ?timeout_s ()] performs a live probe against [url],
       updates the probe's internal cache, and returns the result.
       Returns [None] on timeout, network error, or parse failure. *)
+  val probe
+    :  sw:Eio.Switch.t
+    -> net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t
+    -> url:string
+    -> ?timeout_s:float
+    -> unit
+    -> Cascade_throttle.capacity_info option
 
-  val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
   (** [cached ~url ?now ()] reads the probe's cache.  Pure: no IO. *)
+  val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
 
-  val refresh_many :
-    sw:Eio.Switch.t ->
-    net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t ->
-    urls:string list ->
-    ?timeout_s:float ->
-    unit ->
-    unit
   (** [refresh_many ~sw ~net ~urls ?timeout_s ()] probes every URL in [urls]
       that [can_probe] accepts and whose cache entry has expired. *)
+  val refresh_many
+    :  sw:Eio.Switch.t
+    -> net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t
+    -> urls:string list
+    -> ?timeout_s:float
+    -> unit
+    -> unit
 end
 
 (* ── Registry ────────────────────────────────────────────────── *)
@@ -48,19 +48,19 @@ end
 type t = (module Probe)
 
 let registered_probes : t list ref = ref []
-
-let register (probe : t) =
-  registered_probes := !registered_probes @ [probe]
+let register (probe : t) = registered_probes := !registered_probes @ [ probe ]
 
 (* ── Resolution chain ────────────────────────────────────────── *)
 
 let can_probe ~url =
   List.exists (fun (module P : Probe) -> P.can_probe ~url) !registered_probes
+;;
 
 let cached ~url ?now () =
-  List.find_map (fun (module P : Probe) ->
-    if P.can_probe ~url then P.cached ~url ?now () else None
-  ) !registered_probes
+  List.find_map
+    (fun (module P : Probe) -> if P.can_probe ~url then P.cached ~url ?now () else None)
+    !registered_probes
+;;
 
 let capacity url =
   match Cascade_throttle.capacity url with
@@ -69,16 +69,20 @@ let capacity url =
     (match cached ~url () with
      | Some _ as v -> v
      | None -> Cascade_client_capacity.capacity url)
+;;
 
 let probe ~sw ~net ~url ?timeout_s () =
-  List.find_map (fun (module P : Probe) ->
-    if P.can_probe ~url then P.probe ~sw ~net ~url ?timeout_s () else None
-  ) !registered_probes
+  List.find_map
+    (fun (module P : Probe) ->
+       if P.can_probe ~url then P.probe ~sw ~net ~url ?timeout_s () else None)
+    !registered_probes
+;;
 
 let refresh_many ~sw ~net ~urls ?timeout_s () =
-  List.iter (fun (module P : Probe) ->
-    P.refresh_many ~sw ~net ~urls ?timeout_s ()
-  ) !registered_probes
+  List.iter
+    (fun (module P : Probe) -> P.refresh_many ~sw ~net ~urls ?timeout_s ())
+    !registered_probes
+;;
 
 (* ── Built-in probe registration ─────────────────────────────── *)
 

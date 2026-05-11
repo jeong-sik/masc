@@ -853,8 +853,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
    | Some aid ->
        let error_kind =
          if not success then
-           let kind = if !timeout_hit then "timeout" else "tool_failure" in
-           Some (Tool_assignment_telemetry.error_kind_of_string kind)
+           Some
+             (if !timeout_hit then Tool_assignment_telemetry.Et_timeout
+              else Tool_assignment_telemetry.Et_tool_failure)
          else None
        in
        Tool_assignment_telemetry.emit_completed

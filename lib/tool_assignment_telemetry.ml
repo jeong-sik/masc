@@ -22,11 +22,22 @@ module Float = Stdlib.Float
 
 type assignment_id = string
 
-type error_kind = Error_kind of string
+(* Producer emits exactly two error categories ([mcp_server_eio_call_tool]:
+   "timeout" on cancellation, "tool_failure" otherwise).  Closing the
+   sum turns drift into a compile error; the JSON reader fails closed
+   via [error_kind_of_string : _ -> _ option]. *)
+type error_kind =
+  | Et_timeout
+  | Et_tool_failure
 
-let error_kind_of_string value = Error_kind value
+let error_kind_to_string = function
+  | Et_timeout -> "timeout"
+  | Et_tool_failure -> "tool_failure"
 
-let error_kind_to_string (Error_kind value) = value
+let error_kind_of_string = function
+  | "timeout" -> Some Et_timeout
+  | "tool_failure" -> Some Et_tool_failure
+  | _ -> None
 
 type tool_event =
   | Assigned of {
@@ -143,7 +154,7 @@ let event_of_json json : (tool_event, string) Result.t =
         let error_kind =
           match json |> member "error_kind" with
           | `Null -> None
-          | `String s -> Some (error_kind_of_string s)
+          | `String s -> error_kind_of_string s
           | _ -> None
         in
         Ok

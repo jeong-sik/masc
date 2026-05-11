@@ -16,11 +16,19 @@
 
 type assignment_id = string
 
-type error_kind = private Error_kind of string
-(** Coarse tool completion error family. *)
+(** Coarse tool completion error family. Closed set; the producer
+    [mcp_server_eio_call_tool] only ever emits two categories
+    ([Et_timeout] on cancellation/timeout, [Et_tool_failure] otherwise).
+    Wire form is byte-compatible with the previous private-string
+    wrapper via [error_kind_to_string]. *)
+type error_kind =
+  | Et_timeout
+  | Et_tool_failure
 
-val error_kind_of_string : string -> error_kind
-(** Convert a wire/log label into an internal error-kind value. *)
+val error_kind_of_string : string -> error_kind option
+(** Parse a wire/log label. Returns [None] for unknown values so JSON
+    decoders fail-closed (matches CLAUDE.md anti-pattern #2: unknown
+    inputs must not collapse into a permissive default). *)
 
 val error_kind_to_string : error_kind -> string
 (** Convert an internal error-kind value back to the public wire label. *)

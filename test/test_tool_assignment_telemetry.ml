@@ -144,7 +144,7 @@ let test_completed_error_kind_round_trip () =
       ~tool_name:"read"
       ~success:false
       ~duration_ms:7.0
-      ~error_kind:(Tool_assignment_telemetry.error_kind_of_string "timeout")
+      ~error_kind:Tool_assignment_telemetry.Et_timeout
       ();
     match Tool_assignment_telemetry.read_recent ~n:1 with
     | Error msg -> fail ("read_recent failed: " ^ msg)

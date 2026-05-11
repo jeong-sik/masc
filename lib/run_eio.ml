@@ -46,7 +46,7 @@ let run_record_of_json (json : Yojson.Safe.t) : run_record option =
     let deliverable = Safe_ops.json_string ~default:"" "deliverable" json in
     Some { task_id; agent_name; plan; deliverable; created_at; updated_at }
   | _ ->
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "parsing")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
     Log.Misc.error "run_of_json: missing required fields";
     None
 
@@ -62,7 +62,7 @@ let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
   | Some timestamp, Some note ->
     Some { timestamp; note }
   | _ ->
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "parsing")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
     Log.Misc.error "log_entry_of_json: missing required fields";
     None
 

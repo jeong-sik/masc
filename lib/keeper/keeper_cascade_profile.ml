@@ -66,21 +66,34 @@ let catalog_entries_result ?config_path () =
   | Some path ->
       Cascade_config_loader.load_catalog ~config_path:path
 
+(** RFC-0066 Phase 2: prefer the live validated snapshot (declarative
+    [provider]/[model]/[profile] aware) over the legacy
+    [Cascade_config_loader.load_catalog] (only sees `*_models` namespaces).
+    Falls back to the legacy reader when the snapshot is not yet
+    materialized (early boot, before [validate_path]) so existing
+    boot-order semantics are preserved. *)
 let catalog_names ?config_path () =
-  match catalog_entries ?config_path () with
-  | Some entries ->
-      List.map (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-        entries
-  | None -> []
+  match Cascade_catalog_runtime.known_profile_names () with
+  | Ok names when names <> [] -> names
+  | Ok _ | Error _ ->
+      (match catalog_entries ?config_path () with
+       | Some entries ->
+           List.map
+             (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
+             entries
+       | None -> [])
 
 let catalog_names_result ?config_path () =
-  match catalog_entries_result ?config_path () with
-  | Error _ as err -> err
-  | Ok entries ->
-      Ok
-        (List.map
-           (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-           entries)
+  match Cascade_catalog_runtime.known_profile_names () with
+  | Ok names when names <> [] -> Ok names
+  | Ok _ | Error _ ->
+      (match catalog_entries_result ?config_path () with
+       | Error _ as err -> err
+       | Ok entries ->
+           Ok
+             (List.map
+                (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
+                entries))
 
 (** #10259 — degraded fallback for the keeper cascade-name validator.
 

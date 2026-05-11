@@ -125,7 +125,7 @@ let () =
           test_case "running" `Quick test_parse_running;
           test_case "paused" `Quick test_parse_paused;
           test_case "restarting" `Quick test_parse_restarting;
-          test_case "exited (placeholder code)" `Quick test_parse_exited;
+          test_case "exited (state token only)" `Quick test_parse_exited;
           test_case "dead" `Quick test_parse_dead;
         ] );
       ( "case + whitespace tolerance",

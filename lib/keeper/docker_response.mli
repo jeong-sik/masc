@@ -18,6 +18,13 @@
     below; we lift them into a closed sum so callers cannot drift on
     new docker versions without compiler help. *)
 
+(** Six closed states from docker's [State] field.
+
+    Exit code is NOT carried here. The [State] token alone does not
+    convey [ExitCode]; that field arrives via [docker inspect].
+    Phase 3b-iv.2 will introduce a separate [inspect_record] type
+    that pairs [ps_status] with the inspect-only fields
+    ([ExitCode], [StartedAt], [FinishedAt], ...). *)
 type ps_status =
   | Created
   | Running
@@ -26,11 +33,6 @@ type ps_status =
   | Exited
   | Dead
 [@@deriving show, eq]
-(** Exit code is NOT carried here. The [State] token alone does not
-    convey [ExitCode]; that field arrives via [docker inspect].
-    Phase 3b-iv.2 will introduce a separate [inspect_record] type
-    that pairs [ps_status] with the inspect-only fields
-    ([ExitCode], [StartedAt], [FinishedAt], ...). *)
 
 (** Parsing failures for [parse_state]. Closed sum — no catch-all. *)
 type state_parse_error =

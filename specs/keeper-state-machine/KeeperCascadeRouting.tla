@@ -145,6 +145,7 @@ ItemDegrade(keeper) ==
     /\ keeper_state[keeper] = "Turning"
     /\ selected_item[keeper] /= "none"
     /\ IsHealthy(keeper, selected_item[keeper])
+    /\ fallback_count[keeper] < MaxFallbacks
     /\ LET item == selected_item[keeper]
            k_item == <<keeper, item>>
            cf == consecutive_failures[k_item] + 1

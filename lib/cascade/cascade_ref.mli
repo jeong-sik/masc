@@ -46,6 +46,14 @@ type cascade_ref = {
   item : string option;
 }
 
+(** Catalog-aware cascade name after point-of-use runtime normalization.
+    Lives at this leaf module so [Cascade_strategy] can carry it without
+    pulling in [Keeper_cascade_profile] (which depends on
+    [Cascade_catalog_runtime]). *)
+type runtime_name = Runtime_name of string
+
+val runtime_name_to_string : runtime_name -> string
+
 (** {1 JSON serialization} *)
 
 val traversal_strategy_to_json : traversal_strategy -> Yojson.Safe.t

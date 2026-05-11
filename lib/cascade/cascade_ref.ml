@@ -50,6 +50,18 @@ type cascade_ref = {
   item : string option;
 }
 
+(** Catalog-aware cascade name after point-of-use runtime normalization.
+
+    Moved here from [Keeper_cascade_profile] to break the circular
+    dependency [Cascade_strategy → Keeper_cascade_profile →
+    Cascade_catalog_runtime → Cascade_config → Cascade_strategy]
+    introduced by RFC-0066 Phase 1 (PR #14652).  Canonicalization
+    logic still lives in [Keeper_cascade_profile.runtime_name_of_string];
+    only the type and its trivial unwrap stay at this leaf. *)
+type runtime_name = Runtime_name of string
+
+let runtime_name_to_string (Runtime_name value) = value
+
 (** Logical use cases for cascade routing.  Moved here from [Cascade_routes]
     to break the circular dependency with [Keeper_cascade_profile]. *)
 type logical_use =

@@ -135,6 +135,11 @@ let install_snapshot_for_tests ~source_path ~profile_names =
       mtime;
       validated_at = Unix.gettimeofday ();
       profiles;
+      (* Test helper does not exercise default-profile resolution; an
+         empty string keeps the snapshot well-typed while preserving
+         the helper's "install these profile names verbatim" contract.
+         Field added by RFC-0066 Phase 1 (PR #14652). *)
+      default_profile_name = "";
     }
   in
   with_cache_lock (fun () ->
@@ -931,8 +936,22 @@ let require_snapshot ?sw ?net ?clock () =
       in
       Error detail
 
-let normalize_declared_name raw =
-  Keeper_cascade_profile.normalize_declared_name raw
+(* RFC-0066 cycle break: inlined the [Keeper_cascade_profile.normalize_declared_name]
+   body to avoid the [Keeper_cascade_profile → Cascade_catalog_runtime →
+   Keeper_cascade_profile] cycle that RFC-0066 Phase 1 (PR #14652)
+   completed by routing [catalog_names] through this module.
+
+   The body uses only [Cascade_routes] primitives, which this module
+   already depends on (see [Cascade_routes.configured_route_targets]
+   above), so inlining here is dependency-neutral. *)
+let normalize_declared_name (raw : string) : string =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then
+    Cascade_routes.cascade_name_for_use Cascade_routes.Keeper_turn
+  else
+    match Cascade_routes.logical_use_of_string_opt trimmed with
+    | Some use -> Cascade_routes.cascade_name_for_use use
+    | None -> trimmed
 
 let lookup_active_profile ?sw ?net ?clock raw_name =
   match require_snapshot ?sw ?net ?clock () with

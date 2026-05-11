@@ -6,11 +6,11 @@ type signal_ctx = {
   now : float;
   rand_int : int -> int;
   keeper_name : string;
-  cascade_name : Keeper_cascade_profile.runtime_name;
+  cascade_name : Cascade_ref.runtime_name;
 }
 
 let signal_cascade_name ctx =
-  Keeper_cascade_profile.runtime_name_to_string ctx.cascade_name
+  Cascade_ref.runtime_name_to_string ctx.cascade_name
 
 (* ── Scoring parameters (configurable via TOML / env vars) ─────────
 

@@ -38,9 +38,13 @@ let logical_use_of_string_opt = Cascade_routes.logical_use_of_string_opt
 let configured_route_targets = Cascade_routes.configured_route_targets
 let cascade_name_for_use = Cascade_routes.cascade_name_for_use
 
-type runtime_name = Runtime_name of string
+(* RFC-0066 cycle break: [runtime_name] moved to [Cascade_ref] (leaf).
+   Manifest alias preserved here so every caller written as
+   [Keeper_cascade_profile.Runtime_name x] / [.runtime_name_to_string]
+   keeps compiling unchanged. *)
+type runtime_name = Cascade_ref.runtime_name = Runtime_name of string
 
-let runtime_name_to_string (Runtime_name value) = value
+let runtime_name_to_string = Cascade_ref.runtime_name_to_string
 
 let catalog_entries ?config_path () =
   let path_opt =

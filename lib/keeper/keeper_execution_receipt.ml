@@ -78,12 +78,31 @@ type tool_surface =
   ; missing_required_tools : string list
   }
 
+(* Phase identifier emitted when a cascade rotation releases the in-flight
+   turn slot.  Producer-side closed set; the JSON wire is the lowercase
+   string form via [slot_release_phase_to_string].  [@@deriving tla] so the
+   RFC-0065 correspondence harness picks the symbols up automatically. *)
+type slot_release_phase =
+  | Retry_setup_failed [@tla.symbol "retry_setup_failed"]
+  | Retry_scheduled [@tla.symbol "retry_scheduled"]
+  | Retry_budget_exhausted [@tla.symbol "retry_budget_exhausted"]
+  | Productive_phase_exhausted [@tla.symbol "productive_phase_exhausted"]
+[@@deriving tla]
+
+(* [@tla.symbol] is the single source of truth for the wire form:
+   - to_tla_symbol (ppx-generated) emits the symbol attached per variant
+   - all_symbols / all_states (ppx-generated) enumerate the type
+   Defining slot_release_phase_to_string in terms of to_tla_symbol means
+   JSON/Prometheus wire and TLA correspondence catalog cannot drift.
+   Mirrors the pattern applied to tool_surface_class in PR #14647 review. *)
+let slot_release_phase_to_string = to_tla_symbol
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
   ; reason : string
   ; outcome : string
-  ; slot_release_at_phase : string option
+  ; slot_release_at_phase : slot_release_phase option
   ; productive_phase_elapsed_ms : int option
   ; retry_phase_elapsed_ms : int option
   ; error_kind : error_kind option
@@ -184,7 +203,10 @@ let cascade_rotation_attempt_to_json attempt =
       ("to_cascade", `String (cascade_name_to_string attempt.to_cascade));
       ("reason", `String attempt.reason);
       ("outcome", `String attempt.outcome);
-      ("slot_release_at_phase", string_opt_json attempt.slot_release_at_phase);
+      ( "slot_release_at_phase",
+        string_opt_json
+          (Option.map slot_release_phase_to_string
+             attempt.slot_release_at_phase) );
       ( "productive_phase_elapsed_ms",
         match attempt.productive_phase_elapsed_ms with
         | Some value -> `Int value

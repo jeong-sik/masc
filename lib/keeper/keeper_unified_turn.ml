@@ -1425,7 +1425,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             current_turn_phase_elapsed_ms ()
                           in
                           record_cascade_rotation_attempt
-                            ~slot_release_at_phase:"retry_setup_failed"
+                            ~slot_release_at_phase:
+                              Keeper_execution_receipt.Retry_setup_failed
                             ~productive_phase_elapsed_ms
                             ?retry_phase_elapsed_ms
                             ~from_cascade:execution.cascade_name
@@ -1454,7 +1455,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             match turn_slot_control with
                             | Some slot_control ->
                                 slot_control.Keeper_turn_slot.release_for_retry ();
-                                Some "retry_scheduled"
+                                Some Keeper_execution_receipt.Retry_scheduled
                             | None -> None
                           in
                           record_cascade_rotation_attempt
@@ -1537,7 +1538,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         current_turn_phase_elapsed_ms ()
                       in
                       record_cascade_rotation_attempt
-                        ~slot_release_at_phase:"retry_budget_exhausted"
+                        ~slot_release_at_phase:
+                          Keeper_execution_receipt.Retry_budget_exhausted
                         ~productive_phase_elapsed_ms
                         ?retry_phase_elapsed_ms
                         ~from_cascade:execution.cascade_name
@@ -1565,7 +1567,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         current_turn_phase_elapsed_ms ()
                       in
                       record_cascade_rotation_attempt
-                        ~slot_release_at_phase:"productive_phase_exhausted"
+                        ~slot_release_at_phase:
+                          Keeper_execution_receipt.Productive_phase_exhausted
                         ~productive_phase_elapsed_ms
                         ?retry_phase_elapsed_ms
                         ~from_cascade:execution.cascade_name

@@ -12,8 +12,22 @@ let mcp_session_action_enum_strings =
    moved to codegen (Tool_descriptors_gen via Tool_schemas_misc.schemas).
    masc_mcp_session remains here because its [action] enum is locked
    to [mcp_session_action_enum_strings] above by the SSOT regression
-   test; codegen needs a shared enum source RFC before it can swap. *)
-let schemas : tool_schema list = [
+   test; codegen needs a shared enum source RFC before it can swap.
+
+   The three codegen-emitted tools are re-included in this list so
+   downstream consumers (Tool_dispatch.mcp_context_required_set,
+   Keeper_tool_policy.is_keeper_mcp_context_required) that read
+   Tool_schemas_inline.schemas continue to see all inline_infra
+   tools. *)
+let _codegen_inline_infra_names =
+  [ "masc_approval_pending"; "masc_approval_get"; "masc_spawn" ]
+
+let _inline_infra_from_codegen =
+  List.filter
+    (fun (s : tool_schema) -> List.mem s.name _codegen_inline_infra_names)
+    Tool_schemas_misc.schemas
+
+let schemas : tool_schema list = _inline_infra_from_codegen @ [
   (* masc_mcp_session *)
   {
     name = "masc_mcp_session";

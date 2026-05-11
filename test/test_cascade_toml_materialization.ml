@@ -834,6 +834,16 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    that triggers [register_declared_profiles_from_json] Error —
    exercised end-to-end via catalog_runtime tests with the right
    fixture.  Smoke pins the no-arg helper signature. *)
+(* Smoke for [Cascade_metrics.on_cascade_invariant_violation].
+   Natural code path is reachable only if [Cascade_fsm] violates
+   its [accept_on_exhaustion:false] contract — by design it
+   should never fire in production.  Smoke pins the no-arg helper
+   signature so the defensive call-site never silently
+   dead-codes. *)
+let test_cascade_invariant_violation_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_cascade_invariant_violation ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_profile_registration_failure_helper_callable () =
   Masc_mcp.Cascade_metrics.on_profile_registration_failure ();
   check bool "no-arg helper callable without raising" true true
@@ -1320,6 +1330,9 @@ let () =
           test_case
             "profile_registration_failure: helper callable" `Quick
             test_profile_registration_failure_helper_callable;
+          test_case
+            "cascade_invariant_violation: helper callable" `Quick
+            test_cascade_invariant_violation_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

@@ -896,3 +896,22 @@ let metric_profile_registration_failure =
 
 let on_profile_registration_failure () =
   Prometheus.inc_counter metric_profile_registration_failure ()
+
+(* [Keeper_turn_driver]'s cascade-fsm dispatch has a defensive
+   [Accept] arm inside the [Accept_rejected] branch (L535)
+   commented as "should be unreachable" — it exists only to
+   "handle gracefully" if the FSM violates its
+   [accept_on_exhaustion:false] contract.  The arm logs a WARN
+   and proceeds as if Accept came through, but if it ever fires
+   it's a real invariant-violation signal in the cascade state
+   machine.
+
+   Counter ticks let operators alert on the violation rate.
+   Steady-state value should be ZERO — non-zero is a bug, not a
+   tunable.  Inverts the usual "zero is undefined" metric default:
+   zero is the expected and required state. *)
+let metric_cascade_invariant_violation =
+  "masc_cascade_invariant_violation_total"
+
+let on_cascade_invariant_violation () =
+  Prometheus.inc_counter metric_cascade_invariant_violation ()

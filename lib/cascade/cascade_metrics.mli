@@ -276,3 +276,10 @@ val on_profile_registration_failure : unit -> unit
     returns an Error.  The Error is logged but the catalog
     continues loading without the declared profiles; this counter
     surfaces the silent registration gap. *)
+
+val on_cascade_invariant_violation : unit -> unit
+(** Tick the cascade-invariant-violation counter at
+    [Keeper_turn_driver]'s [Accept] arm inside the
+    [Accept_rejected] FSM branch ("should be unreachable" defensive
+    code).  Steady-state value must be ZERO; non-zero indicates a
+    real FSM contract violation. *)

@@ -647,12 +647,28 @@ let validate_path_result ?sw ?net ~config_path () =
                ]
              ~profiles:[])
     | Ok json ->
-        let profiles = discover_profiles json in
+        let legacy_profiles = discover_profiles json in
+        (* RFC-0058 Phase 5 catalog discovery bridge: augment the legacy
+           [<name>_models] walk with declarative [tier.<X>]/[tier-group.<X>]
+           profile names so the runtime catalog reflects the full
+           5-layer schema, not just legacy keys. *)
+        let declarative_profiles =
+          Cascade_declarative_legacy_bridge.declarative_profile_names
+            ~config_path
+        in
+        let profiles =
+          List.sort_uniq String.compare
+            (legacy_profiles @ declarative_profiles)
+        in
         if profiles = [] then
           Error
             (rejection_of_path ~config_path:source_path ~attempted_mtime
                ~checked_at
-               ~errors:[ "active cascade catalog has no <name>_models profiles" ]
+               ~errors:[
+                 "active cascade catalog has no <name>_models profiles \
+                  (legacy) and no [tier.<X>]/[tier-group.<X>] profiles \
+                  (RFC-0058)"
+               ]
                ~profiles:[])
         else
           let required_default_profile =

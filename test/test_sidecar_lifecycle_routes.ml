@@ -709,7 +709,11 @@ let test_reconcile_start_shell_exception_propagates () =
 let test_fetch_schema_error_on_nonzero_exit () =
   with_temp_dir "sidecar-schema-fail" (fun base_path ->
       let sidecar_dir = Filename.concat base_path "sidecars/discord-bot" in
-      let python_bin = Filename.concat sidecar_dir "venv/bin/python" in
+      (* [Routes.python_argv_for] looks for [.venv/bin/python] (dotted venv) before
+         falling back to [uv run]. The fake interpreter must live at the exact
+         path the production code probes, otherwise this test silently exercises
+         the uv fallback (and depends on uv being installed). *)
+      let python_bin = Filename.concat sidecar_dir ".venv/bin/python" in
       mkdir_p (Filename.dirname python_bin);
       (* Fake python that exits 1 immediately *)
       write_file python_bin "#!/bin/sh\nexit 1\n";

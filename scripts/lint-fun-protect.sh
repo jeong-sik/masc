@@ -6,30 +6,42 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Files that are allowed to use Fun.protect (Eio_guard.ml itself, tests)
+# Files that are allowed to use Fun.protect. See issue #10395.
 ALLOWLIST=(
+  # ---- The Eio_guard implementation itself ----
   "lib/core/eio_guard.ml"
   "lib/core/eio_guard.mli"
-  "lib/cdal_runtime/autonomy_exec.ml"
-  # Sub-library boundary violations — these libraries do not depend on masc_mcp
-  # and therefore cannot import Eio_guard. See issue #10395.
-  "lib/pulse/pulse.ml"
+
+  # ---- Cannot import Eio_guard (layer below masc_core or no masc_core dep) ----
+  # Eio_guard lives in [lib/core/eio_guard.ml] (the [masc_core] library).
+  # The following libraries either sit *below* masc_core in the dune graph
+  # (importing Eio_guard would create a cycle) or do not declare a dependency
+  # on masc_core at all. Per-file rationale based on each library's [dune]
+  # libraries clause:
+  "lib/masc_log/log.ml"             # masc_core depends on masc_log → cycle
+  "lib/pulse/pulse.ml"              # deps: masc_config, masc_log (no masc_core)
+  "lib/eio_context/eio_context.ml"  # deps: eio, masc_log, tls (no masc_core)
+  "lib/dated_jsonl/dated_jsonl.ml"  # deps: fs_compat, eio, yojson (no masc_core)
+  "lib/shared_audit/store.ml"       # deps: unix, yojson, digestif (no masc_core)
+
+  # ---- Migratable but deferred ----
+  # These libraries transitively depend on masc_core and therefore *can* import
+  # Eio_guard. They remain on the allowlist because the migration was deferred
+  # to keep PR #10395 scoped. Tracked for follow-up; do not extend this section
+  # without an accompanying issue.
   "lib/backend/backend.ml"
-  "lib/eio_context/eio_context.ml"
-  "lib/dated_jsonl/dated_jsonl.ml"
-  "lib/exec/test/test_exec_gate_runtime.ml"
+  "lib/process/bg_task.ml"
+  "lib/process/process_eio.ml"
   "lib/gate/channel_gate_discord_names.ml"
   "lib/gate/channel_gate_imessage_state.ml"
   "lib/gate/channel_gate_discord_state.ml"
-  "lib/shared_audit/store.ml"
-  "lib/masc_log/log.ml"
   "lib/coord/coord_task_schedule.ml"
-  "lib/process/bg_task.ml"
-  "lib/process/process_eio.ml"
   "lib/repo_manager/credential_store.ml"
   "lib/repo_manager/repo_store.ml"
   "lib/repo_manager/credential_materializer.ml"
   "lib/repo_manager/keeper_repo_mapping.ml"
+  "lib/cdal_runtime/autonomy_exec.ml"
+  "lib/exec/test/test_exec_gate_runtime.ml"
 )
 
 count=0

@@ -134,6 +134,21 @@ class = "local_27b"
 # headers natively. All other capability flags default to false.
 tolerates-bound-actor-fallback = true
 
+[providers.runpod_qwen]
+display-name = "RunPod Qwen3.6-27B vLLM"
+protocol = "openai-http"
+endpoint = "https://57c7602uqm0t4w-8000.proxy.runpod.net/v1"
+
+[providers.runpod_qwen.liveness]
+class = "local_27b"
+
+[providers.runpod_qwen.capabilities]
+# RunPod-hosted vLLM serving Qwen3.6-27B-FP8 on 2× RTX 6000 Ada.
+# OpenAI-compatible /v1 endpoint with native tool_calls parser
+# (`--tool-call-parser qwen3_coder`). Self-hosted, no per-token cost.
+# Same bound-actor fallback semantics as Ollama.
+tolerates-bound-actor-fallback = true
+
 # ── Layer 2: Models ────────────────────────────────────────────
 
 [models.codex-spark]
@@ -186,6 +201,12 @@ max-context = 128000
 tools-support = true
 streaming = true
 
+[models.qwen3-6-27b-fp8]
+api-name = "Qwen/Qwen3.6-27B-FP8"
+max-context = 131072
+tools-support = true
+streaming = true
+
 # ── Layer 3: Provider×Model Bindings ───────────────────────────
 #
 # `max-concurrent` is REQUIRED (RFC-0058 §3.4). Defaults reflect
@@ -229,6 +250,13 @@ max-concurrent = 2
 [glm-coding.glm-flashx]
 is-default = false
 max-concurrent = 2
+
+[runpod_qwen.qwen3-6-27b-fp8]
+# vLLM is configured with VLLM_MAX_NUM_SEQS=4 — 4 concurrent
+# keeper turns at 128k context per sequence. Self-hosted on
+# 2× RTX 6000 Ada (96GB VRAM total); no marginal token cost.
+is-default = true
+max-concurrent = 4
 
 # ── Layer 4: Aliases (per-use overrides) ───────────────────────
 #

@@ -162,8 +162,8 @@ let self_identity_tokens (meta : keeper_meta) =
 
 (* Single source of truth for "is this author one of us?".  Two inline
    copies of this predicate used to live in [collect_message_scope] and
-   [board_signal_match]; centralising avoids the scatter-drift anti-
-   pattern when [identity_tokens_of_value] is ever extended. *)
+   [board_signal_match]; centralising avoids the scatter-drift
+   anti-pattern when [identity_tokens_of_value] is ever extended. *)
 let is_self_author ~self_tokens (author : string) : bool =
   identity_tokens_of_value author
   |> List.exists (fun author_token -> List.mem author_token self_tokens)

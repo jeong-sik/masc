@@ -8,9 +8,11 @@
      - WARN logged once per distinct fingerprint (sorted,
        comma-joined tool list) — operator sees the structural
        fact the first time a given set is stripped;
-     - Prometheus counter [masc_codex_cli_mcp_tool_omission_total
-       {tool}] increments on EVERY call so dashboards retain the
-       frequency signal.
+     - Prometheus counter
+       [masc_provider_mcp_tool_omission_total{provider, tool}]
+       increments on EVERY call so dashboards retain the frequency
+       signal (RFC-0058 §2.4: provider identity is a label, not part
+       of the metric name).
 
    The test pins:
 
@@ -40,10 +42,13 @@ let () =
 module T = Masc_mcp.Cascade_transport
 module Prom = Masc_mcp.Prometheus
 
-let metric = Prom.metric_codex_cli_mcp_tool_omission
+let metric = Prom.metric_provider_mcp_tool_omission
 
 let counter_for ~tool =
-  Prom.metric_value_or_zero metric ~labels:[ ("tool", tool) ] ()
+  Prom.metric_value_or_zero
+    metric
+    ~labels:[ ("provider", "codex_cli"); ("tool", tool) ]
+    ()
 
 (* Counter must increment on every invocation, even when the
    fingerprint has been seen before (the WARN dedup is about log

@@ -2879,13 +2879,6 @@ proactive_enabled = true
         (Filename.concat config_dir "cascade.json")
         (json |> member "sources" |> member "cascade_catalog_source_path"
        |> to_string);
-      Alcotest.(check string) "cascade runtime json path"
-        (Filename.concat config_dir "cascade.json")
-        (json |> member "sources" |> member "cascade_runtime_json_path"
-       |> to_string);
-      Alcotest.(check bool) "cascade runtime json editable" true
-        (json |> member "sources" |> member "cascade_runtime_json_editable"
-       |> to_bool);
       Alcotest.(check string) "active config root" config_dir
         (json |> member "sources" |> member "active_config_root" |> to_string);
       Alcotest.(check string) "active config root source" "env"

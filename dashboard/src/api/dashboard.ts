@@ -2235,12 +2235,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         normalizeCascadeCatalogSourceKind(sources.cascade_catalog_source_kind),
       cascade_catalog_source_path:
         asNullableString(sources.cascade_catalog_source_path),
-      cascade_runtime_json_path:
-        asNullableString(sources.cascade_runtime_json_path),
-      cascade_runtime_json_editable:
-        typeof sources.cascade_runtime_json_editable === 'boolean'
-          ? sources.cascade_runtime_json_editable
-          : asLooseBoolean(sources.cascade_runtime_json_editable),
     },
     metrics: {
       generation: asInt(metrics.generation) ?? 0,

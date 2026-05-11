@@ -70,4 +70,4 @@
  (flags
   (:standard -open Agent_sdk_base -open Agent_sdk -open Agent_sdk__))
  (preprocess
-  (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let)))
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_deriving.ord ppx_inline_test ppx_let)))

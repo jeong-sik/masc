@@ -10,12 +10,10 @@ type t =
   | Diagnose (** Read-only analysis, no mutations *)
   | Draft (** Workspace-local mutations, no external side effects *)
   | Execute (** Full execution with external side effects *)
-[@@deriving yojson, show]
+[@@deriving yojson, show, eq, ord]
 
 val to_string : t -> string
 val of_string : string -> (t, string) result
-val equal : t -> t -> bool
-val compare : t -> t -> int
 
 (** [can_serve ~requested ~effective] returns [true] iff
     [effective <= requested] in the ordering [Diagnose < Draft < Execute].

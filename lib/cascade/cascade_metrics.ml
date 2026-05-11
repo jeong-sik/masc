@@ -778,3 +778,28 @@ let metric_resolve_live_fallback =
 
 let on_resolve_live_fallback () =
   Prometheus.inc_counter metric_resolve_live_fallback ()
+
+(* [Keeper_cascade_profile.fallback_cascade_for] inspects a
+   profile's [fallback_cascade] hint and rejects it (returns None)
+   when the named target is not in the live catalog.  The function
+   logs a WARN-once and silently ignores the hint — the keeper
+   keeps running but the cascade-level fallback the operator
+   declared has no effect.
+
+   Distinct from iter 32 [capability_mismatch] which checks the
+   same graph at CATALOG-BUILD time: the runtime use can disagree
+   with the build-time check if catalog membership changed between
+   load and query (e.g. partial validation rejected a profile that
+   was a fallback target).
+
+   No label dimensions: hint target is operator-controlled (cascade
+   name string) so labeling would risk cardinality explosion.
+   Aggregate rate alerts; operators drill down via the single
+   WARN-once log line for the specific (profile, target) pair.
+
+   Cardinality: 1 series. *)
+let metric_fallback_hint_invalid =
+  "masc_cascade_fallback_hint_invalid_total"
+
+let on_fallback_hint_invalid () =
+  Prometheus.inc_counter metric_fallback_hint_invalid ()

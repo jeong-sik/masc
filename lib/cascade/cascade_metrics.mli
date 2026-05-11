@@ -235,3 +235,12 @@ val on_resolve_live_fallback : unit -> unit
     function falls back to the [Keeper_turn] default.  Distinct
     from iter-30 [route_resolve_fallback] which catches the
     route-table-lookup variant. *)
+
+val on_fallback_hint_invalid : unit -> unit
+(** Tick the fallback-hint-invalid counter at
+    [Keeper_cascade_profile.fallback_cascade_for] when the named
+    [fallback_cascade] target is not in the live catalog and the
+    function silently returns None (operator-declared fallback has
+    no effect).  Runtime complement to iter-32
+    [capability_mismatch] which checks the same graph at
+    catalog-build time. *)

@@ -804,6 +804,17 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    that from a unit test would need a fixture catalog plus a
    carefully chosen miss name.  Smoke pins the no-arg helper
    signature. *)
+(* Smoke for [Cascade_metrics.on_fallback_hint_invalid].  The
+   natural code path requires a catalog with a profile that
+   declares a [fallback_cascade] pointing at a missing target,
+   which is best exercised end-to-end via cascade.toml fixtures
+   in the catalog-builder suite.  Smoke pins the no-arg helper
+   signature so a future refactor that changes the call shape
+   trips here. *)
+let test_fallback_hint_invalid_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_fallback_hint_invalid ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_resolve_live_fallback_helper_callable () =
   Masc_mcp.Cascade_metrics.on_resolve_live_fallback ();
   check bool "no-arg helper callable without raising" true true
@@ -1255,6 +1266,9 @@ let () =
           test_case
             "resolve_live_fallback: helper callable" `Quick
             test_resolve_live_fallback_helper_callable;
+          test_case
+            "fallback_hint_invalid: helper callable" `Quick
+            test_fallback_hint_invalid_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

@@ -229,6 +229,13 @@ let fallback_cascade_for ?config_path name =
                   if String.equal target trimmed_name then None
                   else if List.mem target catalog_names then Some target
                   else begin
+                    (* Iter 37: tick a counter on every invalid-hint
+                       hit (not only on the once-per-pair WARN) so
+                       operators can alert on the rate.  Runtime
+                       complement to iter-32 [capability_mismatch]
+                       which catches the same graph fault at
+                       catalog-build time. *)
+                    Cascade_metrics.on_fallback_hint_invalid ();
                     let key = (trimmed_name, target) in
                     if not (Hashtbl.mem logged_invalid_fallback key) then begin
                       Hashtbl.add logged_invalid_fallback key ();

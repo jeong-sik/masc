@@ -1138,6 +1138,153 @@ max-context = 4096
        (model_capabilities_for_id cfg "does-not-exist"))
 ;;
 
+(* --- M1b: expanded schema fields (15 additions) --- *)
+
+let test_model_capabilities_m1b_full () =
+  (* Exercise all 15 fields added in M1b. Asserts each field is reachable
+     via TOML and that defaults stay separate from declared-true values. *)
+  let toml =
+    {|
+[models.m]
+max-context = 4096
+
+[models.m.capabilities]
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "thinking-object"
+supports-audio-input = true
+supports-video-input = true
+supports-multimodal-inputs = true
+supports-structured-output = true
+supports-prompt-caching = true
+prompt-cache-alignment = 1024
+supports-top-k = true
+supports-min-p = true
+supports-seed = true
+emits-usage-tokens = false
+supports-computer-use = true
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] ->
+    (match m.capabilities with
+     | Some c ->
+       check bool "tool_choice" true c.supports_tool_choice;
+       check bool "extended_thinking" true c.supports_extended_thinking;
+       check bool "reasoning_budget" true c.supports_reasoning_budget;
+       check
+         string
+         "thinking_control_format"
+         "Cascade_declarative_types.Thinking_object"
+         (show_cascade_thinking_control_format c.thinking_control_format);
+       check bool "audio_input" true c.supports_audio_input;
+       check bool "video_input" true c.supports_video_input;
+       check bool "multimodal_inputs" true c.supports_multimodal_inputs;
+       check bool "structured_output" true c.supports_structured_output;
+       check bool "prompt_caching" true c.supports_prompt_caching;
+       check (option int) "prompt_cache_alignment" (Some 1024) c.prompt_cache_alignment;
+       check bool "top_k" true c.supports_top_k;
+       check bool "min_p" true c.supports_min_p;
+       check bool "seed" true c.supports_seed;
+       (* Default-true field set explicitly to false here — the value
+          difference confirms parse path honors caller-declared values. *)
+       check bool "emits_usage_tokens declared false" false c.emits_usage_tokens;
+       check bool "computer_use" true c.supports_computer_use
+     | None -> failwith "expected capabilities record")
+  | _ -> failwith "expected exactly one model"
+;;
+
+let test_model_capabilities_emits_usage_default_true () =
+  (* emits_usage_tokens is the only default-true bool in the schema —
+     mirrors OAS default_capabilities (most direct APIs emit usage; CLI
+     wrappers explicitly opt out). Without an explicit declaration the
+     parsed value must be true. *)
+  let toml =
+    {|
+[models.m]
+max-context = 4096
+
+[models.m.capabilities]
+supports-tool-choice = true
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] ->
+    (match m.capabilities with
+     | Some c ->
+       check bool "emits_usage_tokens default true" true c.emits_usage_tokens;
+       (* Defaults-false sanity check against drift *)
+       check bool "audio_input default false" false c.supports_audio_input;
+       check bool "computer_use default false" false c.supports_computer_use
+     | None -> failwith "expected capabilities record")
+  | _ -> failwith "expected exactly one model"
+;;
+
+let test_thinking_control_format_variants () =
+  let qualified v = "Cascade_declarative_types." ^ v in
+  let cases =
+    [ "no-thinking-control", qualified "No_thinking_control"
+    ; "thinking-object", qualified "Thinking_object"
+    ; "chat-template-kwargs", qualified "Chat_template_kwargs"
+    ; (* Unknown values warn + fall back to No_thinking_control. *)
+      "garbage-value", qualified "No_thinking_control"
+    ]
+  in
+  List.iter
+    (fun (raw, expected) ->
+       let toml =
+         Printf.sprintf
+           {|
+[models.m]
+max-context = 4096
+
+[models.m.capabilities]
+thinking-control-format = "%s"
+|}
+           raw
+       in
+       let cfg = ok_config (parse_string toml) in
+       match cfg.models with
+       | [ m ] ->
+         (match m.capabilities with
+          | Some c ->
+            check
+              string
+              (Printf.sprintf "thinking-control-format=%S → %s" raw expected)
+              expected
+              (show_cascade_thinking_control_format c.thinking_control_format)
+          | None -> failwith "expected capabilities record")
+       | _ -> failwith "expected exactly one model")
+    cases
+;;
+
+let test_prompt_cache_alignment_zero_rejected () =
+  let toml =
+    {|
+[models.m]
+max-context = 4096
+
+[models.m.capabilities]
+prompt-cache-alignment = 0
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] ->
+    (match m.capabilities with
+     | Some c ->
+       check
+         (option int)
+         "prompt-cache-alignment=0 rejected → None"
+         None
+         c.prompt_cache_alignment
+     | None -> failwith "expected capabilities record")
+  | _ -> failwith "expected exactly one model"
+;;
+
 (* --- capabilities_for_provider_id lookup helper (Phase 5.1 A.3 prep) --- *)
 
 let test_capabilities_for_provider_id_present () =
@@ -1295,7 +1442,7 @@ let () =
             `Quick
             test_capabilities_for_provider_id_unknown_provider
         ] )
-    ; ( "model_capabilities (M1 — Model axis prep)"
+    ; ( "model_capabilities (M1b — Model axis prep, expanded)"
       , [ test_case
             "[models.<id>.capabilities] sub-table parses 6 fields"
             `Quick
@@ -1313,6 +1460,22 @@ let () =
             "model_capabilities_for_id returns None for unknown"
             `Quick
             test_model_capabilities_for_id_unknown
+        ; test_case
+            "M1b expanded — all 15 added fields reachable + value differentiation"
+            `Quick
+            test_model_capabilities_m1b_full
+        ; test_case
+            "M1b expanded — emits_usage_tokens default-true (sole exception)"
+            `Quick
+            test_model_capabilities_emits_usage_default_true
+        ; test_case
+            "M1b expanded — thinking_control_format 4 variants (incl. fallback)"
+            `Quick
+            test_thinking_control_format_variants
+        ; test_case
+            "M1b expanded — prompt-cache-alignment=0 rejected → None"
+            `Quick
+            test_prompt_cache_alignment_zero_rejected
         ] )
     ]
 ;;

@@ -58,14 +58,17 @@ module For_testing = struct
   ;;
 
   let with_registry probes f =
+    (* Atomic swap: read-and-replace under a single critical section so a
+       concurrent [register] between save and install cannot be lost. *)
     let saved =
-      Stdlib.Mutex.protect registry_mutex (fun () -> !registered_probes_rev)
+      Stdlib.Mutex.protect registry_mutex (fun () ->
+        let s = !registered_probes_rev in
+        registered_probes_rev := List.rev probes;
+        s)
     in
-    Stdlib.Mutex.protect registry_mutex (fun () ->
-      registered_probes_rev := List.rev probes);
-    Fun.protect
-      ~finally:(fun () ->
-        Stdlib.Mutex.protect registry_mutex (fun () -> registered_probes_rev := saved))
-      f
+    let restore () =
+      Stdlib.Mutex.protect registry_mutex (fun () -> registered_probes_rev := saved)
+    in
+    Fun.protect ~finally:restore f
   ;;
 end

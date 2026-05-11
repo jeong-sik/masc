@@ -88,9 +88,19 @@ val runtime_probe_json
   -> unit
   -> Yojson.Safe.t
 
-(** {1 Testing helpers} *)
+(** {1 Testing helpers}
 
+    These bypass the registry mutex contract intentionally — tests need
+    deterministic registry state and the production code never calls
+    [clear_registry]. Production code must not use this module. *)
 module For_testing : sig
+  (** [clear_registry ()] empties the probe registry. *)
   val clear_registry : unit -> unit
+
+  (** [with_registry probes f] atomically swaps the registry to [probes]
+      for the dynamic extent of [f] and restores the previous registry
+      afterward (even when [f] raises). The save+install is performed
+      under a single mutex critical section so a concurrent [register]
+      cannot be lost. *)
   val with_registry : t list -> (unit -> 'a) -> 'a
 end

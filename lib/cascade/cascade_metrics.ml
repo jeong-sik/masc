@@ -483,3 +483,38 @@ let on_default_label_fallback ~cascade ~reason =
   Prometheus.inc_counter metric_default_label_fallback
     ~labels:[ ("cascade", cascade); ("reason", reason) ]
     ()
+
+(* [Cascade_runtime] has four context-window resolution sites that
+   silently fall back to the hardcoded [fallback_context_window]
+   (128_000) when normal resolution can't produce a value:
+
+     label_no_provider_name      — [max_context_of_label]:
+                                    [provider_name_of_label] returned
+                                    None (malformed label string)
+     label_unregistered_scheme   — [max_context_of_label]:
+                                    [Provider_registry.find] returned
+                                    None (scheme not registered)
+     primary_no_available        — [resolve_primary_max_context]:
+                                    no label had an available provider
+                                    via [context_if_available]
+     cascade_max_no_available    — [resolve_max_cascade_context]:
+                                    same condition, in the
+                                    cascade-max-context aggregator
+
+   The four sites don't carry a cascade-name context (function
+   signatures take label lists only), so the counter labels by
+   [site] rather than by cascade — cardinality stays at 4 series
+   and operators can alert on the aggregate fallback rate, then
+   drill down via log/dashboard.
+
+   Cardinality: 4 series.
+
+   A non-zero rate signals operator-configured context_window is
+   not taking effect — either cascade.toml drift, registry
+   capability gaps, or all providers unavailable in the cascade. *)
+let metric_max_context_fallback = "masc_cascade_max_context_fallback_total"
+
+let on_max_context_fallback ~site =
+  Prometheus.inc_counter metric_max_context_fallback
+    ~labels:[ ("site", site) ]
+    ()

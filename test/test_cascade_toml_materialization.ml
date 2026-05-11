@@ -744,6 +744,25 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    site would emit an undocumented label and pollute Prometheus
    cardinality; pinning both strings here keeps the canonical set
    canonical. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_max_context_fallback].  Four documented site
+   labels map 1:1 to the four [fallback_context_window] arms in
+   [Cascade_runtime].  A typo at any call site would emit an
+   undocumented label and pollute Prometheus cardinality.  Pinning
+   all four strings here keeps the canonical set in lockstep with
+   the implementation. *)
+let test_max_context_fallback_documented_sites_are_callable () =
+  Masc_mcp.Cascade_metrics.on_max_context_fallback
+    ~site:"label_no_provider_name";
+  Masc_mcp.Cascade_metrics.on_max_context_fallback
+    ~site:"label_unregistered_scheme";
+  Masc_mcp.Cascade_metrics.on_max_context_fallback
+    ~site:"primary_no_available";
+  Masc_mcp.Cascade_metrics.on_max_context_fallback
+    ~site:"cascade_max_no_available";
+  check bool "all four documented site labels callable without raising"
+    true true
+
 let test_default_label_fallback_documented_reasons_are_callable () =
   Masc_mcp.Cascade_metrics.on_default_label_fallback
     ~cascade:"smoke_test_cascade_iter25" ~reason:"no_execution_labels";
@@ -1095,6 +1114,10 @@ let () =
             "default_label_fallback: both documented reasons callable"
             `Quick
             test_default_label_fallback_documented_reasons_are_callable;
+          test_case
+            "max_context_fallback: all four documented sites callable"
+            `Quick
+            test_max_context_fallback_documented_sites_are_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

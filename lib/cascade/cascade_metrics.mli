@@ -148,3 +148,10 @@ val on_default_label_fallback : cascade:string -> reason:string -> unit
     of [no_execution_labels] (no execution lane configured at all)
     or [local_cascade_no_local] (local-only cascade with no local
     candidate labels). *)
+
+val on_max_context_fallback : site:string -> unit
+(** Tick the max-context fallback counter when [Cascade_runtime]
+    resolves [fallback_context_window] instead of a configured
+    value.  [site] must be one of [label_no_provider_name],
+    [label_unregistered_scheme], [primary_no_available],
+    [cascade_max_no_available]. *)

@@ -490,15 +490,25 @@ module LspRequest = struct
     ; workspace_root : string option
     }
 
+  let of_bytes_result bytes =
+    match decode_result P.LspRequest.from_proto bytes with
+    | Ok p ->
+      Ok
+        ({ language_id = p.language_id
+         ; jsonrpc_request_json = p.jsonrpc_request_json
+         ; workspace_root =
+             (match p.workspace_root with
+              | "" -> None
+              | s -> Some s)
+         }
+         : t)
+    | Error _ as err -> err
+  ;;
+
   let of_bytes bytes =
-    let p = decode P.LspRequest.from_proto bytes in
-    { language_id = p.language_id
-    ; jsonrpc_request_json = p.jsonrpc_request_json
-    ; workspace_root =
-        (match p.workspace_root with
-         | "" -> None
-         | s -> Some s)
-    }
+    match of_bytes_result bytes with
+    | Ok req -> req
+    | Error msg -> invalid_arg msg
   ;;
 
   let to_bytes (t : t) =
@@ -517,9 +527,21 @@ module LspResponse = struct
     ; error_message : string
     }
 
+  let of_bytes_result bytes =
+    match decode_result P.LspResponse.from_proto bytes with
+    | Ok p ->
+      Ok
+        ({ jsonrpc_response_json = p.jsonrpc_response_json
+         ; error_message = p.error_message
+         }
+         : t)
+    | Error _ as err -> err
+  ;;
+
   let of_bytes bytes =
-    let p = decode P.LspResponse.from_proto bytes in
-    { jsonrpc_response_json = p.jsonrpc_response_json; error_message = p.error_message }
+    match of_bytes_result bytes with
+    | Ok resp -> resp
+    | Error msg -> invalid_arg msg
   ;;
 
   let to_bytes (t : t) =

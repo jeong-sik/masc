@@ -206,6 +206,7 @@ module LspRequest : sig
     ; workspace_root : string option
     }
 
+  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
   val to_bytes : t -> string
 end
@@ -216,6 +217,7 @@ module LspResponse : sig
     ; error_message : string
     }
 
+  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
   val to_bytes : t -> string
 end

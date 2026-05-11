@@ -12,6 +12,28 @@ include Keeper_agent_checkpoint_hygiene
 
 (* Post-turn telemetry logging — extracted to Keeper_turn_telemetry (#5732) *)
 
+(* Idempotency cache for link_task_execution_artifacts (PR #14564 review).
+   The link call writes the backlog file and emits a Task.Linked activity
+   event each invocation. Keying on (keeper_name, task_id, trace_id) means
+   we only call link once per (task, trace) pair instead of once per turn.
+   Memory footprint is bounded by the keeper × task fan-out, which is
+   small (1 keeper writes 1 task at a time today). *)
+let link_task_cache : (string * string * string, unit) Hashtbl.t =
+  Hashtbl.create 32
+;;
+
+let link_task_cache_mutex = Stdlib.Mutex.create ()
+
+let mark_task_link ~keeper ~task_id ~trace_id =
+  Stdlib.Mutex.protect link_task_cache_mutex (fun () ->
+    Hashtbl.replace link_task_cache (keeper, task_id, trace_id) ())
+;;
+
+let task_link_already_recorded ~keeper ~task_id ~trace_id =
+  Stdlib.Mutex.protect link_task_cache_mutex (fun () ->
+    Hashtbl.mem link_task_cache (keeper, task_id, trace_id))
+;;
+
 let per_provider_timeout_for_turn
       ~(meta : Keeper_types.keeper_meta)
       ?oas_timeout_s
@@ -1559,45 +1581,63 @@ let run_turn
           Link execution artifacts to the current task if one exists.
 
           NOTE: moved after receipt append so receipt persistence is not
-          delayed by backlog lock contention (review comment on PR #14564).
-          This still runs every turn while current_task_id is set; root fix
-          is to make the link call idempotent by checking whether the
-          trace_id is already on the task contract. Tracked as follow-up. *)
+          delayed by backlog lock contention (review on PR #14564).
+          Skipped when this (keeper, task, trace_id) tuple has already
+          been linked — Coord.link_task_execution_artifacts_r writes the
+          backlog and emits a Task.Linked event unconditionally, so
+          calling it every turn for an unchanged trace produced lock
+          contention and event-feed noise. *)
        let () =
          match acc.meta.current_task_id with
          | None -> ()
          | Some task_id ->
            let task_id_str = Keeper_id.Task_id.to_string task_id in
-           let operation_id =
-             Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-           in
-           let result =
-             try
-               Coord.link_task_execution_artifacts_r
-                 config
-                 ~task_id:task_id_str
-                 ?operation_id
-                 ()
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               (* link takes a backlog file lock; an OS-level lock
-                  contention or transient I/O hiccup can raise before
-                  the function gets a chance to return Error. Convert
-                  that into a normal Error so the warn path below logs
-                  it instead of unwinding the whole keeper turn. *)
-               Error
-                 (Masc_domain.System
-                    (Masc_domain.System_error.IoError (Printexc.to_string exn)))
-           in
-           (match result with
-            | Ok _ -> ()
-            | Error err ->
-              Log.Keeper.warn
-                "keeper:%s link_task_execution_artifacts failed for task=%s: %s"
-                meta.name
-                task_id_str
-                (Masc_domain.masc_error_to_string err))
+           let trace_id_str = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+           if task_link_already_recorded
+                ~keeper:meta.name
+                ~task_id:task_id_str
+                ~trace_id:trace_id_str
+           then ()
+           else begin
+             (* Pass trace_id as both session_id and operation_id to match
+                the existing keeper_run_tools.ml convention (session_id
+                fields elsewhere are populated from trace_id). *)
+             let session_id = Some trace_id_str in
+             let operation_id = Some trace_id_str in
+             let result =
+               try
+                 Coord.link_task_execution_artifacts_r
+                   config
+                   ~task_id:task_id_str
+                   ?session_id
+                   ?operation_id
+                   ()
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 (* link takes a backlog file lock; an OS-level lock
+                    contention or transient I/O hiccup can raise before
+                    the function gets a chance to return Error. Convert
+                    that into a normal Error so the warn path below logs
+                    it instead of unwinding the whole keeper turn. *)
+                 Error
+                   (Masc_domain.System
+                      (Masc_domain.System_error.IoError (Printexc.to_string exn)))
+             in
+             (match result with
+              | Ok _ ->
+                mark_task_link
+                  ~keeper:meta.name
+                  ~task_id:task_id_str
+                  ~trace_id:trace_id_str
+              | Error err ->
+                Log.Keeper.warn
+                  "keeper:%s link_task_execution_artifacts failed for \
+                   task=%s: %s"
+                  meta.name
+                  task_id_str
+                  (Masc_domain.masc_error_to_string err))
+           end
        in
        (match turn_result, receipt_append_outcome with
         | Error _, _ ->

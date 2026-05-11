@@ -44,15 +44,15 @@ let graceful ?fallback ~reason ~recovery_strategy ~confidence () =
 
 let is_full : type a e. (a, e) t -> bool = function
   | FullSuccess _ -> true
-  | _ -> false
+  | PartialSuccess _ | GracefulFailure _ -> false
 
 let is_partial : type a e. (a, e) t -> bool = function
   | PartialSuccess _ -> true
-  | _ -> false
+  | FullSuccess _ | GracefulFailure _ -> false
 
 let is_graceful : type a e. (a, e) t -> bool = function
   | GracefulFailure _ -> true
-  | _ -> false
+  | FullSuccess _ | PartialSuccess _ -> false
 
 let value_opt : type a e. (a, e) t -> a option = function
   | FullSuccess { value; _ } -> Some value

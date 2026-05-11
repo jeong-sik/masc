@@ -36,6 +36,19 @@ let managed_agent_passthrough_tool_names =
                 "masc_a2a_delegate";
               ]))
 
+(* O(1) membership view of [managed_agent_passthrough_tool_names].
+   Used by [tool_schemas_for_profile Managed_agent] to filter
+   ~150 visible schemas per request — replaces a per-schema
+   [List.mem] scan over ~20 passthrough names. *)
+let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
+  let tbl =
+    Hashtbl.create (List.length managed_agent_passthrough_tool_names)
+  in
+  List.iter
+    (fun name -> Hashtbl.replace tbl name ())
+    managed_agent_passthrough_tool_names;
+  tbl
+
 module StringSet = Set.Make (String)
 module StringMap = Map.Make (String)
 
@@ -100,7 +113,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
           |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-                 List.mem schema.name managed_agent_passthrough_tool_names
+                 Hashtbl.mem managed_agent_passthrough_tool_set schema.name
                  && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
         dedupe_tool_schemas_by_name

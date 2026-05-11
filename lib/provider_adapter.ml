@@ -1502,28 +1502,21 @@ let provider_label_from_registry (cfg : Llm_provider.Provider_config.t) =
   | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 
 let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
+  (* RFC-0058 §2.4: dispatch flows through the kind→canonical_name table
+     ([adapter_canonical_name_of_provider_kind]) rather than enumerating
+     every provider variant inline. [Glm] and [OpenAI_compat] still need
+     a registry lookup because multiple distinct providers share the
+     same [kind]: [OpenAI_compat] is disambiguated by [base_url] via
+     [openai_compat_adapter_by_endpoint], while [Glm] is disambiguated
+     by registry label ([glm] vs [glm-coding]) via
+     [provider_name_of_config]. [provider_label_from_registry] folds
+     both into the same [cascade_prefix] key. *)
   match cfg.kind with
-  | Llm_provider.Provider_config.Claude_code ->
-      resolve_direct_adapter cn_claude
-  | Codex_cli ->
-      resolve_direct_adapter cn_codex
-  | Gemini_cli ->
-      resolve_direct_adapter cn_gemini
-  | Kimi_cli ->
-      resolve_direct_adapter cn_kimi
-  | Anthropic ->
-      resolve_direct_adapter cn_claude_api
-  | Gemini ->
-      resolve_direct_adapter cn_gemini_api
-  | Kimi ->
-      resolve_direct_adapter cn_kimi_api
-  | Ollama ->
-      resolve_direct_adapter cn_ollama
-  | DashScope ->
-      resolve_direct_adapter cn_codex_api
-  | Glm
-  | OpenAI_compat ->
+  | Llm_provider.Provider_config.Glm
+  | Llm_provider.Provider_config.OpenAI_compat ->
       resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
+  | kind ->
+      resolve_direct_adapter (adapter_canonical_name_of_provider_kind kind)
 
 (* RFC-0058 §2.4 boundary: callers with only the typed [provider_kind]
    (no full provider config) resolve to an adapter through the same
@@ -1750,44 +1743,41 @@ let auth_detail_of_provider provider =
         note = None }
 
 let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string list =
+  (* RFC-0058 §2.4: Kimi and Gemini have non-adapter overrides
+     (multi-key fallback list and Vertex env pair respectively);
+     every other kind defers to the adapter's [auth_mode]. The
+     wildcard branch covers all current and future provider_kind
+     variants without enumerating them. *)
   match kind with
   | Llm_provider.Provider_config.Kimi -> kimi_api_key_envs
-  | Llm_provider.Provider_config.Gemini -> [ google_cloud_project_env; google_cloud_location_env ]
-  | Llm_provider.Provider_config.Anthropic
-  | Llm_provider.Provider_config.Ollama
-  | Llm_provider.Provider_config.Gemini_cli
-  | Llm_provider.Provider_config.Kimi_cli
-  | Llm_provider.Provider_config.Glm
-  | Llm_provider.Provider_config.DashScope
-  | Llm_provider.Provider_config.Claude_code
-  | Llm_provider.Provider_config.Codex_cli
-  | Llm_provider.Provider_config.OpenAI_compat ->
+  | Llm_provider.Provider_config.Gemini ->
+      [ google_cloud_project_env; google_cloud_location_env ]
+  | _ ->
       let adapter_name = adapter_canonical_name_of_provider_kind kind in
       (match resolve_direct_adapter adapter_name with
-      | Some adapter -> (
-          match adapter.auth_mode with
-          | Api_key env_name -> [ env_name ]
-          | No_auth | Cli_cached_login | Vertex_adc _ ->
-              Option.to_list (Llm_provider.Provider_config.default_api_key_env kind))
-      | None -> Option.to_list (Llm_provider.Provider_config.default_api_key_env kind))
+       | Some adapter -> (
+           match adapter.auth_mode with
+           | Api_key env_name -> [ env_name ]
+           | No_auth | Cli_cached_login | Vertex_adc _ ->
+               Option.to_list
+                 (Llm_provider.Provider_config.default_api_key_env kind))
+       | None ->
+           Option.to_list
+             (Llm_provider.Provider_config.default_api_key_env kind))
 
 let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.t) : string list =
+  (* Docker sandboxes invoke OpenAI_compat over loopback against the
+     local-runtime pool, which carries no remote credentials; every
+     other kind delegates to the keyset its adapter declares. Gemini
+     uses the API-key env (not Vertex ADC) inside the sandbox because
+     ADC files are not mounted. *)
   match cfg.kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
-    let uri = Uri.of_string cfg.base_url in
-    if Masc_network_defaults.is_loopback_host_opt (Uri.host uri) then []
-    else auth_env_keys_of_provider_kind cfg.kind
+      let uri = Uri.of_string cfg.base_url in
+      if Masc_network_defaults.is_loopback_host_opt (Uri.host uri) then []
+      else auth_env_keys_of_provider_kind cfg.kind
   | Llm_provider.Provider_config.Gemini -> [ gemini_api_key_env ]
-  | Llm_provider.Provider_config.Anthropic
-  | Llm_provider.Provider_config.Kimi
-  | Llm_provider.Provider_config.Ollama
-  | Llm_provider.Provider_config.Gemini_cli
-  | Llm_provider.Provider_config.Kimi_cli
-  | Llm_provider.Provider_config.Glm
-  | Llm_provider.Provider_config.DashScope
-  | Llm_provider.Provider_config.Claude_code
-  | Llm_provider.Provider_config.Codex_cli ->
-      auth_env_keys_of_provider_kind cfg.kind
+  | _ -> auth_env_keys_of_provider_kind cfg.kind
 
 let all_auth_env_keys () : string list =
   direct_adapters

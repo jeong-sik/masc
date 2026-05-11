@@ -338,8 +338,6 @@ let registered_metadata name =
 (* ================================================================ *)
 
 (* Delegate to surfaces sub-module *)
-let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_tools
-
 let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
 
 let public_mcp_tools = Tool_catalog_surfaces.public_mcp_surface_tools
@@ -801,14 +799,20 @@ let attach_inferred_effect_domain name (meta : metadata) =
   | None -> { meta with effect_domain = inferred_effect_domain name }
 
 let metadata name =
+  (* Hot path: called from MCP execute, tool list, OAS bridge, capability
+     registry, keeper guards, help registry, governance risk, etc.  Cache
+     surface-membership checks per call rather than re-querying. *)
+  let is_system_internal =
+    Tool_catalog_surfaces.is_on_surface System_internal name
+  in
   let base =
     match Hashtbl.find_opt metadata_table name with
     | Some meta -> meta
     | None ->
       if is_public_mcp name then default_metadata
-      else if List.mem name keeper_internal_set then
+      else if Tool_catalog_surfaces.is_on_surface Keeper_internal name then
         keeper_internal_metadata name
-      else if Tool_catalog_surfaces.is_on_surface System_internal name then
+      else if is_system_internal then
         { default_metadata with
           visibility = Hidden;
           allow_direct_call_when_hidden = true;
@@ -822,7 +826,7 @@ let metadata name =
           reason = Some "Internal tool; not on public MCP surface." }
   in
   let with_surface_visibility =
-    if Tool_catalog_surfaces.is_on_surface System_internal name then
+    if is_system_internal then
     (* Surface membership is the canonical "hidden but callable" contract for
        system-internal tools, even when a tool also carries explicit metadata
        for semantic hints like readonly/destructive. *)

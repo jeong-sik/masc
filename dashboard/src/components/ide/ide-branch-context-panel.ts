@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { fetchGitGraph, type GitGraphResponse } from '../../api/git-graph'
+import { globalPresenceSnapshot, type KeeperPresenceStatus } from './keeper-presence-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 type BranchTone = 'current' | 'dirty' | 'conflict' | 'stale'
 type PanelState = 'loading' | 'ready' | 'empty' | 'error'
@@ -18,6 +20,13 @@ export interface IdeWorktreeLane {
   readonly branch: string
   readonly path: string
   readonly color: string
+  /** Keeper identity owning this worktree, when known.
+      Used to match against presence/cursor stores (which are keyed by
+      keeper_id, not the worktree path that drives [id]). When undefined,
+      presence/cursor rendering for this lane degrades silently — the
+      upstream snapshot producer (lib/git_graph_snapshot.ml) is
+      responsible for populating this when it can. */
+  readonly keeperId?: string
 }
 
 export interface IdeBranchContextModel {
@@ -188,6 +197,11 @@ export function IdeBranchContextPanel({
   const [model, setModel] = useState<IdeBranchContextModel | null>(null)
   const [state, setState] = useState<PanelState>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [presence, setPresence] = useState(globalPresenceSnapshot.value)
+  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
+
+  useEffect(() => globalPresenceSnapshot.subscribe(v => setPresence(v)), [])
+  useEffect(() => cursorOverlaySignal.subscribe(v => setOverlay(v)), [])
 
   useEffect(() => {
     if (!subscribeActiveRepositoryId) return undefined
@@ -267,14 +281,7 @@ export function IdeBranchContextPanel({
         </div>
         ${model.lanes.length > 0 ? html`
           <ol class="ide-branch-lanes" aria-label="Worktree lanes">
-            ${model.lanes.map(lane => html`
-              <li key=${lane.id}>
-                <span class="ide-branch-lane-color" style=${{ background: lane.color }} aria-hidden="true" />
-                <span class="ide-branch-lane-name">${lane.label}</span>
-                <span class="ide-branch-lane-branch">${lane.branch}</span>
-                <span class="ide-branch-lane-path">${lane.path}</span>
-              </li>
-            `)}
+            ${model.lanes.map(lane => LaneRow(lane, presence, overlay))}
           </ol>
         ` : null}
         ${model.warnings.length > 0 ? html`
@@ -292,5 +299,74 @@ export function IdeBranchContextPanel({
         </div>
       `}
     </section>
+  `
+}
+
+const LANE_STATUS_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
+  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
+}
+
+function LaneRow(
+  lane: IdeWorktreeLane,
+  presence: { readonly entries: ReadonlyArray<{ keeper_id: string; status: KeeperPresenceStatus }> } | null,
+  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+) {
+  // Lane.id is the worktree path; presence/cursor stores key on keeper_id.
+  // Prefer the explicit keeperId mapping when the snapshot supplies it,
+  // otherwise fall back to id and accept that the lookup may miss.
+  const presenceKey = lane.keeperId ?? lane.id
+  const entry = presence?.entries.find(e => e.keeper_id === presenceKey)
+  const status = entry?.status
+  const cursor = overlay.cursors.get(presenceKey)
+  const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
+  const dotStyle = status ? LANE_STATUS_DOT[status] : null
+
+  return html`
+    <li key=${lane.id} style=${{ display: 'grid', gridTemplateColumns: '6px 1fr auto', alignItems: 'center', gap: 'var(--sp-1)', padding: '2px 0' }}>
+      <span
+        aria-hidden="true"
+        style=${{
+          width: '5px',
+          height: '5px',
+          borderRadius: '50%',
+          background: dotStyle ? dotStyle.color : 'var(--color-fg-disabled)',
+          boxShadow: status === 'active' ? `0 0 4px ${dotStyle?.color ?? 'transparent'}` : 'none',
+          justifySelf: 'center',
+        }}
+      />
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', minWidth: 0, overflow: 'hidden' }}>
+        <span class="ide-branch-lane-name">${lane.label}</span>
+        <span class="ide-branch-lane-branch">${lane.branch}</span>
+        <span class="ide-branch-lane-path">${lane.path}</span>
+        ${focusFile ? html`
+          <span
+            style=${{
+              fontSize: 'var(--fs-10)',
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--color-accent-fg)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title=${cursor?.file_path}
+          >${focusFile}:${cursor?.line}</span>
+        ` : null}
+      </div>
+      ${dotStyle ? html`
+        <span
+          role="status"
+          aria-label=${`Keeper ${lane.id}: ${dotStyle.label}`}
+          style=${{
+            fontSize: 'var(--fs-9)',
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            color: dotStyle.color,
+            whiteSpace: 'nowrap',
+          }}
+        >${dotStyle.label}</span>
+      ` : null}
+    </li>
   `
 }

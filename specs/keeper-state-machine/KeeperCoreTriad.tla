@@ -388,7 +388,22 @@ SideEffectContainment ==
     \* i.e., if side_effect is TRUE, outcome is never plain "error"
     \* it must be "partial_commit" instead
 
-\* S5: Active turn has a cascade selected
+\* S5: Active turn has a cascade selected.
+\*
+\* Cascade-name abstraction: `"none"` here is the SPEC-LEVEL EMPTY-ROLE
+\* SENTINEL — it asserts "no cascade is selected", not a literal string
+\* match against an OCaml return value.  The OCaml side has no literal
+\* "none" — `select_cascade` always returns a real cascade name (even for
+\* terminal phases — see `docs/tla-audit/kct-c3-terminal-cascade-contract
+\* -gap-2026-05-12.md`); the empty-role assertion is preserved
+\* STRUCTURALLY by the caller graph upstream gating the call for non-
+\* active turn_status values.
+\*
+\* The invariant therefore captures a structural property: the dispatch
+\* table in `lib/keeper/keeper_cascade_routing.ml` returns a non-empty
+\* cascade name for all phases that can co-occur with
+\* turn_status in {selecting, executing, retrying}, namely
+\* {Running, Failing, Compacting, HandingOff}.
 PhaseDecisionConsistency ==
     turn_status \in {"selecting", "executing", "retrying"} =>
         effective_cascade /= "none"

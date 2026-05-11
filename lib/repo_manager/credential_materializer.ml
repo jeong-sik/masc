@@ -94,27 +94,17 @@ let hosts_yml_has_oauth_token ~gh_config_dir =
   if not (Sys.file_exists path) then false
   else
     try
-      let ic = open_in path in
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () ->
-          let found = ref false in
-          (try
-             while not !found do
-               let line = input_line ic in
-               let trimmed = String.trim line in
-               let prefix = "oauth_token:" in
-               let plen = String.length prefix in
-               if String.length trimmed > plen
-                  && String.equal (String.sub trimmed 0 plen) prefix
-                  && String.trim
-                       (String.sub trimmed plen
-                          (String.length trimmed - plen))
-                     <> ""
-               then found := true
-             done
-           with End_of_file -> ());
-          !found)
+      let prefix = "oauth_token:" in
+      let plen = String.length prefix in
+      Fs_compat.load_file path
+      |> String.split_on_char '\n'
+      |> List.exists (fun line ->
+           let trimmed = String.trim line in
+           String.length trimmed > plen
+           && String.equal (String.sub trimmed 0 plen) prefix
+           && String.trim
+                (String.sub trimmed plen (String.length trimmed - plen))
+              <> "")
     with Sys_error _ -> false
 
 let gh_auth_status_ok ~gh_config_dir =
@@ -191,27 +181,21 @@ let read_token_from_hosts_yml ~gh_config_dir =
   if not (Sys.file_exists path) then None
   else
     try
-      let ic = open_in path in
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () ->
-          let token = ref None in
-          (try
-             while !token = None do
-               let line = input_line ic in
-               let trimmed = String.trim line in
-               let prefix = "oauth_token:" in
-               let plen = String.length prefix in
-               if String.length trimmed > plen
-                  && String.equal (String.sub trimmed 0 plen) prefix
-               then
-                 let raw =
-                   String.sub trimmed plen (String.length trimmed - plen)
-                 in
-                 token := Some (strip_value_decorations raw)
-             done
-           with End_of_file -> ());
-          !token)
+      let prefix = "oauth_token:" in
+      let plen = String.length prefix in
+      Fs_compat.load_file path
+      |> String.split_on_char '\n'
+      |> List.find_map (fun line ->
+           let trimmed = String.trim line in
+           if
+             String.length trimmed > plen
+             && String.equal (String.sub trimmed 0 plen) prefix
+           then
+             let raw =
+               String.sub trimmed plen (String.length trimmed - plen)
+             in
+             Some (strip_value_decorations raw)
+           else None)
     with Sys_error _ -> None
 
 (** Compute the SHA-256 prefix of the [oauth_token] stored in
@@ -343,19 +327,11 @@ let relabel_hosts_yml ~gh_config_dir ~identity_label =
   if not (Sys.file_exists path) then ()
   else
     try
-      let ic = open_in path in
       let lines =
-        Fun.protect
-          ~finally:(fun () -> close_in_noerr ic)
-          (fun () ->
-            let lines = ref [] in
-            (try
-               while true do lines := input_line ic :: !lines done
-             with End_of_file -> ());
-            !lines)
+        Fs_compat.load_file path |> String.split_on_char '\n'
       in
       let rewritten =
-        List.rev_map
+        List.map
           (fun line ->
             let trimmed = String.trim line in
             let prefix = "user:" in
@@ -376,13 +352,7 @@ let relabel_hosts_yml ~gh_config_dir ~identity_label =
             else line)
           lines
       in
-      let oc = open_out path in
-      Fun.protect
-        ~finally:(fun () -> close_out_noerr oc)
-        (fun () ->
-          List.iter
-            (fun line -> output_string oc line; output_char oc '\n')
-            rewritten)
+      Fs_compat.save_file path (String.concat "\n" rewritten)
     with Sys_error _ -> ()
 
 (* RFC-0019 PR-B Slice 2 + §8 R3: refuse paths that escape via [..]

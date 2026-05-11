@@ -20,6 +20,13 @@ export interface IdeWorktreeLane {
   readonly branch: string
   readonly path: string
   readonly color: string
+  /** Keeper identity owning this worktree, when known.
+      Used to match against presence/cursor stores (which are keyed by
+      keeper_id, not the worktree path that drives [id]). When undefined,
+      presence/cursor rendering for this lane degrades silently — the
+      upstream snapshot producer (lib/git_graph_snapshot.ml) is
+      responsible for populating this when it can. */
+  readonly keeperId?: string
 }
 
 export interface IdeBranchContextModel {
@@ -306,9 +313,13 @@ function LaneRow(
   presence: { readonly entries: ReadonlyArray<{ keeper_id: string; status: KeeperPresenceStatus }> } | null,
   overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
 ) {
-  const entry = presence?.entries.find(e => e.keeper_id === lane.id)
+  // Lane.id is the worktree path; presence/cursor stores key on keeper_id.
+  // Prefer the explicit keeperId mapping when the snapshot supplies it,
+  // otherwise fall back to id and accept that the lookup may miss.
+  const presenceKey = lane.keeperId ?? lane.id
+  const entry = presence?.entries.find(e => e.keeper_id === presenceKey)
   const status = entry?.status
-  const cursor = overlay.cursors.get(lane.id)
+  const cursor = overlay.cursors.get(presenceKey)
   const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
   const dotStyle = status ? LANE_STATUS_DOT[status] : null
 

@@ -28,7 +28,11 @@ import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
 import { keeperCursorExtension } from './keeper-cursor-cm-extension'
 import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
-import { globalPresenceSnapshot } from './keeper-presence-store'
+import {
+  globalPresenceSnapshot,
+  type KeeperPresenceSnapshot,
+  type KeeperPresenceStatus,
+} from './keeper-presence-store'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -154,7 +158,7 @@ export function IdeEditor({
               flexShrink: 0,
             }}
           >
-            ${activeCursors.map(ac => EditorKeeperCursorChip(ac, presence))}
+            ${activeCursors.map(ac => EditorKeeperCursorChip(ac, presence, ac.keeper_id))}
           </ul>
         ` : null}
         ${onFindOpen || onFindClose ? html`
@@ -794,13 +798,17 @@ function keepersWithCursorInFile(
 
 function EditorKeeperCursorChip(
   ac: ActiveCursorInfo,
-  presence: { readonly entries: ReadonlyArray<{ keeper_id: string; status: string }> } | null,
+  presence: KeeperPresenceSnapshot | null,
+  key: string,
 ) {
   const color = getKeeperColor(ac.keeper_id)
-  const status = presence?.entries.find(e => e.keeper_id === ac.keeper_id)?.status
+  const status: KeeperPresenceStatus | undefined = presence?.entries.find(
+    e => e.keeper_id === ac.keeper_id,
+  )?.status
   const isActive = status === 'active'
   return html`
     <li
+      key=${key}
       title=${`${ac.keeper_id} L${ac.line}${ac.tool_name ? ` · ${ac.tool_name}` : ''} · ${ac.focus_mode}`}
       style=${{
         display: 'inline-flex',

@@ -30,7 +30,7 @@ is-non-interactive = true
 [providers.glm-coding]
 provider-name = "Zhipu GLM Coding"
 protocol = "openai-http"
-endpoint = "https://open.bigmodel.cn/api/paas/v4"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
 
 [providers.ollama]
 provider-name = "Ollama Local"

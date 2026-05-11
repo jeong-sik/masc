@@ -124,6 +124,108 @@ let test_constructor_count () =
   Alcotest.(check int) "test fixture covers all constructors" 9 (List.length all_wrapped)
 ;;
 
+(* PR-4 round-trip: of_simple ∘ to_simple = identity for every
+   non-Generic constructor.  Generic is handled in the fallback test
+   below. *)
+let test_of_simple_round_trip () =
+  let open Shell_ir_typed in
+  let cmds : wrapped list =
+    [ W (Ls { path = None; flags = [] })
+    ; W (Ls { path = Some "/tmp"; flags = [ `Long; `All ] })
+    ; W (Cat { path = "/etc/passwd" })
+    ; W (Rg { pattern = "TODO"; path = Some "."; case_sensitive = true })
+    ; W (Git_status { short = true })
+    ; W (Git_clone { repo = "git@github.com:x/y.git"; branch = Some "main"; depth = 1 })
+    ; W
+        (Curl
+           { url = "http://example.com"
+           ; method_ = `POST
+           ; headers = Some [ "A", "B" ]
+           ; body = Some "data"
+           })
+    ; W (Rm { paths = [ "a"; "b" ]; recursive = true; force = false })
+    ; W (Sudo { target_argv = [ "whoami" ] })
+    ]
+  in
+  List.iter
+    (fun (W cmd as w) ->
+       let simple = Shell_ir_typed.to_simple cmd in
+       let back = Shell_ir_typed.of_simple simple in
+       if not (w = back)
+       then Alcotest.failf "of_simple round-trip failed for %a" Shell_ir_typed.pp w)
+    cmds
+;;
+
+(* PR-4 fallback: anything with env, redirects, Var args, or an
+   unhandled binary kind must round-trip through Generic. *)
+let test_of_simple_generic_fallback () =
+  let base =
+    { Shell_ir.bin = bin_ok "true"
+    ; args = [ lit "x" ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
+  in
+  (* env non-empty *)
+  let w_env = Shell_ir_typed.of_simple { base with env = [ "K", lit "V" ] } in
+  Alcotest.(check bool)
+    "env fallback"
+    true
+    (match w_env with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false);
+  (* redirects non-empty *)
+  let w_redir =
+    Shell_ir_typed.of_simple
+      { base with
+        redirects =
+          [ Redirect_scope.File
+              { fd = 1
+              ; target = Path_scope.classify ~raw:"/tmp/x" ~cwd:"/tmp"
+              ; mode = Redirect_scope.Write
+              }
+          ]
+      }
+  in
+  Alcotest.(check bool)
+    "redirect fallback"
+    true
+    (match w_redir with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false);
+  (* Var arg *)
+  let w_var = Shell_ir_typed.of_simple { base with args = [ Shell_ir.Var "X" ] } in
+  Alcotest.(check bool)
+    "var fallback"
+    true
+    (match w_var with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false);
+  (* unknown binary kind *)
+  let w_unknown =
+    Shell_ir_typed.of_simple { base with bin = bin_ok "docker"; args = [ lit "ps" ] }
+  in
+  Alcotest.(check bool)
+    "unknown bin fallback"
+    true
+    (match w_unknown with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false);
+  (* git sub-command we do not parse *)
+  let w_git_push =
+    Shell_ir_typed.of_simple
+      { base with bin = bin_ok "git"; args = [ lit "push"; lit "origin" ] }
+  in
+  Alcotest.(check bool)
+    "git push fallback"
+    true
+    (match w_git_push with
+     | Shell_ir_typed.W (Generic _) -> true
+     | _ -> false)
+;;
+
 let test_constructor_names_in_declaration_order () =
   Alcotest.(check (list string))
     "generated names match declaration order"
@@ -147,6 +249,13 @@ let () =
             "to_simple: hand-written = generated"
             `Quick
             test_to_simple_parallel_equivalence
+        ] )
+    ; ( "of_simple_round_trip"
+      , [ Alcotest.test_case "of_simple ∘ to_simple = id" `Quick test_of_simple_round_trip
+        ; Alcotest.test_case
+            "Generic fallback coverage"
+            `Quick
+            test_of_simple_generic_fallback
         ] )
     ; ( "spec_invariants"
       , [ Alcotest.test_case "constructor count baseline" `Quick test_constructor_count

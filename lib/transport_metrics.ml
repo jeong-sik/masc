@@ -274,7 +274,6 @@ let record_http_accept_error ~mode ~error =
 ;;
 
 let accept_latency_metric = "masc_http_accept_latency_seconds"
-
 let accept_latency_registered = Atomic.make false
 
 let ensure_accept_latency_registered () =
@@ -285,18 +284,16 @@ let ensure_accept_latency_registered () =
     Prometheus.register_histogram
       ~name:accept_latency_metric
       ~help:
-        "Time spent in Eio.Net.accept before a new TCP connection is handed to \
-         the accept loop.  A rising value signals fiber scheduling starvation \
-         — keeper turns or other long-running fibers not yielding back to the \
-         scheduler.  Labels: mode (h1|h2|auto)."
+        "Time spent in Eio.Net.accept before a new TCP connection is handed to the \
+         accept loop.  A rising value signals fiber scheduling starvation — keeper turns \
+         or other long-running fibers not yielding back to the scheduler.  Labels: mode \
+         (h1|h2|auto)."
       ())
+;;
 
 let record_http_accept_latency ~mode latency_s =
   ensure_accept_latency_registered ();
-  Prometheus.observe_histogram
-    accept_latency_metric
-    ~labels:[ "mode", mode ]
-    latency_s
+  Prometheus.observe_histogram accept_latency_metric ~labels:[ "mode", mode ] latency_s
 ;;
 
 let json_float_option = function
@@ -427,7 +424,7 @@ let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
 let tcp_port_reachable port =
   try
     let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () ->
         try Unix.close sock with
         | Eio.Cancel.Cancelled _ as e -> raise e

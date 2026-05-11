@@ -653,7 +653,7 @@ let metric_sse_external_subscribers = "masc_sse_external_subscribers_total"
 let metric_sse_client_evictions = "masc_sse_client_evictions_total"
 let metric_coord_broadcast_duration = "masc_coord_broadcast_duration_seconds"
 let metric_file_lock_retries = "masc_file_lock_retries_total"
-let metric_file_lock_acquire_duration = "masc_file_lock_acquire_seconds"
+let metric_file_lock_acquire_seconds = "masc_file_lock_acquire_seconds"
 let metric_grpc_active_streams = "masc_grpc_active_streams_total"
 let metric_grpc_heartbeat_latency = "masc_grpc_heartbeat_latency_seconds"
 let metric_grpc_subscribers = "masc_grpc_subscribers_total"
@@ -2288,7 +2288,7 @@ let init () =
   add metric_file_lock_retries
     "F_TLOCK retries before [acquire_flock_retry*] returned. Pairs with masc_file_lock_acquire_seconds. Labels: caller."
     Counter;
-  register_histogram ~name:metric_file_lock_acquire_duration
+  register_histogram ~name:metric_file_lock_acquire_seconds
     ~help:"acquire_flock_retry* wall-clock excluding openfile. Labels: caller, outcome (acquired|timeout)."
     ();
 

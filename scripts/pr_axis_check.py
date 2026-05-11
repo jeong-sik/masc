@@ -85,6 +85,26 @@ def get_repo_slug() -> Tuple[str, str]:
     return data["owner"]["login"], data["name"]
 
 
+def get_pr_base_sha(pr_number: int, owner: str, repo: str) -> Optional[str]:
+    """Get the base SHA of an open PR."""
+    resp = _run_gh([f"/repos/{owner}/{repo}/pulls/{pr_number}"])
+    return resp.get("base", {}).get("sha")
+
+
+def merge_commit_already_in_base(
+    merge_commit_sha: str, pr_base_sha: str, owner: str, repo: str
+) -> bool:
+    """Check if a merged PR's merge commit is already an ancestor of (or equal to) the PR base."""
+    if merge_commit_sha == pr_base_sha:
+        return True
+    # GitHub compare API: compare/{base}...{head}
+    # status == "ahead"   -> head is ahead of base (base is ancestor of head)
+    # status == "identical" -> same
+    resp = _run_gh([f"/repos/{owner}/{repo}/compare/{merge_commit_sha}...{pr_base_sha}"])
+    status = resp.get("status", "")
+    return status in ("ahead", "identical")
+
+
 def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
     """Get set of file paths changed in a PR."""
     files: List[dict] = []
@@ -125,6 +145,7 @@ query {{
         number
         title
         mergedAt
+        mergeCommit {{ oid }}
         files(first: 100) {{
           nodes {{ path }}
         }}
@@ -171,6 +192,10 @@ def check_pr_axis_stale(
         print(f"Warning: no files found for PR #{pr_number}", file=sys.stderr)
         return []
 
+    pr_base_sha = get_pr_base_sha(pr_number, owner, repo)
+    if not pr_base_sha:
+        print(f"Warning: could not determine base SHA for PR #{pr_number}", file=sys.stderr)
+
     recently_merged = get_recently_merged_prs(owner, repo, hours, limit)
     risks: List[AxisRisk] = []
 
@@ -182,6 +207,14 @@ def check_pr_axis_stale(
         overlap = open_files & merged_files
         if not overlap:
             continue
+
+        # Skip if the merged PR is already included in the current PR's base.
+        # mergeCommit.oid is fetched up-front in get_recently_merged_prs so we
+        # don't pay a per-PR REST round-trip here when scanning many PRs.
+        if pr_base_sha:
+            merge_commit = (merged.get("mergeCommit") or {}).get("oid")
+            if merge_commit and merge_commit_already_in_base(merge_commit, pr_base_sha, owner, repo):
+                continue
 
         # Determine risk type and confidence
         confidence = "LOW"
@@ -260,49 +293,77 @@ def main() -> int:
 
     owner, repo = get_repo_slug()
 
+    def _block(r: AxisRisk) -> bool:
+        return r.confidence != "LOW"
+
     if args.scan_all_open:
         results = scan_all_open_prs(owner, repo, args.hours, args.limit)
+        # Partition into blockers vs warnings
+        blockers: Dict[int, List[AxisRisk]] = {}
+        warnings: Dict[int, List[AxisRisk]] = {}
+        for pr_num, risks in results.items():
+            b = [r for r in risks if _block(r)]
+            w = [r for r in risks if not _block(r)]
+            if b:
+                blockers[pr_num] = b
+            if w:
+                warnings[pr_num] = w
         if args.json:
             print(json.dumps({
                 str(pr_num): [
                     {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
                     for r in risks
                 ]
-                for pr_num, risks in results.items()
+                for pr_num, risks in blockers.items()
             }, indent=2))
         else:
-            if results:
-                print(f"\nFound risks in {len(results)} PR(s):\n")
-                for pr_num, risks in results.items():
+            if warnings:
+                for pr_num, risks in warnings.items():
+                    print(f"\nPR #{pr_num} LOW-confidence overlaps (informational only):")
+                    for r in risks:
+                        print(f"  - {r.risk_type} from #{r.merged_pr} ({r.confidence}): {', '.join(r.overlap_files[:3])}")
+            if blockers:
+                print(f"\nFound blocking risks in {len(blockers)} PR(s):\n")
+                for pr_num, risks in blockers.items():
                     print(f"PR #{pr_num}:")
                     for r in risks:
                         print(f"  - {r.risk_type} from #{r.merged_pr} ({r.confidence})")
                 return 1
-            else:
+            if not warnings:
                 print("No axis risks found in any open PRs.")
-                return 0
+        return 0
 
     if not args.pr:
         parser.error("Either --pr or --scan-all-open is required")
 
     risks = check_pr_axis_stale(args.pr, owner, repo, args.hours, args.limit)
+    blockers = [r for r in risks if _block(r)]
+    warnings = [r for r in risks if not _block(r)]
 
     if args.json:
         print(json.dumps([
             {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
-            for r in risks
+            for r in blockers
         ], indent=2))
     else:
-        if risks:
-            print(f"Found {len(risks)} risk(s) for PR #{args.pr}:\n")
+        if warnings:
+            print(f"Found {len(warnings)} LOW-confidence overlap(s) for PR #{args.pr} (informational only):\n")
             print("| Merged PR | Risk Type | Overlap Files | Confidence |")
             print("|-----------|-----------|---------------|------------|")
-            for r in risks:
+            for r in warnings:
+                print(r.to_markdown())
+            print()
+        if blockers:
+            total = len(blockers)
+            print(f"Found {total} blocking risk(s) for PR #{args.pr}:\n")
+            print("| Merged PR | Risk Type | Overlap Files | Confidence |")
+            print("|-----------|-----------|---------------|------------|")
+            for r in blockers:
                 print(r.to_markdown())
             print()
             print("Recommended action: rebase on latest main and run `dune build @check`.")
             return 1
-        else:
+        if not warnings:
             print(f"No axis risks found for PR #{args.pr}.")
 
     return 0

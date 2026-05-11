@@ -31,17 +31,6 @@ val sdk_error_of_keeper_internal_error
 (** Coarse categorisation of [Agent_sdk.Error.sdk_error] (for dashboards). *)
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
-(** Per-variant terminal reason code for [Agent_sdk.Error.api_error] —
-    differentiates rate_limited / overloaded / server / auth / etc. so
-    that dashboard chips and broadcast payloads stay distinguishable.
-    Memory: no-collapse-richer-enum-at-sdk-boundary. *)
-val api_error_terminal_reason_code : Agent_sdk.Error.api_error -> string
-
-(** Combined terminal-reason-code mapping for any [Agent_sdk.Error.sdk_error],
-    delegating to [api_error_terminal_reason_code] for [Api] cases and
-    embedding the contract id for completion-contract violations. *)
-val terminal_reason_code_of_sdk_error : Agent_sdk.Error.sdk_error -> string
-
 (** RFC-0042 PR-2.5: typed bridge variants of the wire accessors.
     Wrap the existing parametrised wire string in
     [Keeper_turn_terminal_code.Sdk_error]. PR-3 swaps
@@ -54,6 +43,8 @@ val terminal_reason_code_of_sdk_error : Agent_sdk.Error.sdk_error -> string
     Byte invariant guarded by [test_keeper_sdk_error_typed_bridge].
 
     @since 0.193.1 *)
+val terminal_reason_code_of_sdk_error : Agent_sdk.Error.sdk_error -> string
+
 val terminal_reason_code_of_sdk_error_typed
   :  Agent_sdk.Error.sdk_error
   -> Keeper_turn_terminal_code.t
@@ -80,4 +71,6 @@ val checkpoint_persistence_error
 
 (** Map an optional cascade observation to a textual outcome label
     ("passed_to_next_model" / "completed" / "not_observed"). *)
-val cascade_outcome_of_observation : Cascade_legacy_runner.cascade_observation option -> string
+val cascade_outcome_of_observation
+  :  Cascade_legacy_runner.cascade_observation option
+  -> string

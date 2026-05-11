@@ -508,7 +508,7 @@ let append_execution_receipt
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
-      cascade_outcome = "passed_to_next_model";
+      cascade_outcome = Lib.Keeper_execution_receipt.Cascade_passed_to_next_model;
       degraded_retry_applied = true;
       degraded_retry_cascade =
         Some

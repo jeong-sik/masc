@@ -118,6 +118,16 @@ type cascade_rotation_outcome =
 
 val cascade_rotation_outcome_to_string : cascade_rotation_outcome -> string
 
+(** Receipt-level summary of how the in-turn cascade attempt sequence
+    ended. Closed set; wire form is [cascade_outcome_to_string]. *)
+type cascade_outcome =
+  | Cascade_passed_to_next_model
+  | Cascade_completed
+  | Cascade_not_observed
+  | Cascade_not_dispatched
+
+val cascade_outcome_to_string : cascade_outcome -> string
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
@@ -160,7 +170,7 @@ type t =
   ; cascade_selected_model : string option
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
-  ; cascade_outcome : string
+  ; cascade_outcome : cascade_outcome
   ; degraded_retry_applied : bool
   ; degraded_retry_cascade : cascade_name option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option

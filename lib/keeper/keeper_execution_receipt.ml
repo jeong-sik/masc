@@ -117,6 +117,26 @@ let cascade_rotation_outcome_to_string = function
   | Rotation_budget_exhausted -> "budget_exhausted"
   | Rotation_slot_phase_exhausted -> "slot_phase_exhausted"
 
+(* Receipt-level summary of how the in-turn cascade attempt sequence
+   ended.  Closed set across two producer paths:
+     - [Keeper_agent_error.cascade_outcome_of_observation] — 3 values
+       sourced from [Cascade_legacy_runner.cascade_observation].
+     - [keeper_turn_helpers.build_pending_receipt] — emits
+       [Cascade_not_dispatched] for pre-dispatch pending receipts.
+   JSON wire form is the lowercase string via
+   [cascade_outcome_to_string]. *)
+type cascade_outcome =
+  | Cascade_passed_to_next_model
+  | Cascade_completed
+  | Cascade_not_observed
+  | Cascade_not_dispatched
+
+let cascade_outcome_to_string = function
+  | Cascade_passed_to_next_model -> "passed_to_next_model"
+  | Cascade_completed -> "completed"
+  | Cascade_not_observed -> "not_observed"
+  | Cascade_not_dispatched -> "not_dispatched"
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
@@ -159,7 +179,7 @@ type t =
   ; cascade_selected_model : string option
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
-  ; cascade_outcome : string
+  ; cascade_outcome : cascade_outcome
   ; degraded_retry_applied : bool
   ; degraded_retry_cascade : cascade_name option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
@@ -299,7 +319,6 @@ let () =
     ()
 
 let operator_disposition (receipt : t) =
-  let cascade_outcome = String.lowercase_ascii receipt.cascade_outcome in
   let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
   let tool_contract_result =
     String.lowercase_ascii receipt.tool_contract_result
@@ -334,10 +353,13 @@ let operator_disposition (receipt : t) =
         string_contains_ci terminal_reason "config"
         || string_contains_ci terminal_reason "auth"
   in
-  if
-    String.equal terminal_reason "cascade_exhausted"
-    || String.equal cascade_outcome "cascade_exhausted"
-    || String.equal cascade_outcome "exhausted"
+  (* Pre-typing, this branch also matched cascade_outcome="cascade_exhausted"
+     and "exhausted" — neither is in the producer's closed [cascade_outcome]
+     set ([Cascade_passed_to_next_model] / [_completed] / [_not_observed] /
+     [_not_dispatched]).  Those branches were unreachable workarounds; the
+     typed migration drops them.  Cascade exhaustion still reaches this
+     branch via [terminal_reason="cascade_exhausted"]. *)
+  if String.equal terminal_reason "cascade_exhausted"
   then ("alert_exhausted", "cascade_exhausted")
   else if preflight_config_failure then
     ("pause_human", "preflight_config_error")
@@ -349,7 +371,7 @@ let operator_disposition (receipt : t) =
   else if
     provider_runtime_failure
     && (receipt.cascade_fallback_applied
-        || String.equal cascade_outcome "passed_to_next_model")
+        || receipt.cascade_outcome = Cascade_passed_to_next_model)
   then ("pass_next_model", "cascade_fallback")
   else if provider_runtime_failure then
     ("pause_human", "provider_runtime_error")
@@ -392,7 +414,7 @@ let operator_disposition (receipt : t) =
   then ("fail_open_next_cascade", "degraded_retry")
   else if
     receipt.cascade_fallback_applied
-    || String.equal cascade_outcome "passed_to_next_model"
+    || receipt.cascade_outcome = Cascade_passed_to_next_model
   then ("pass_next_model", "cascade_fallback")
   (* "healthy" requires an explicit success signal: turn completed without
      error AND cascade reached the configured terminal. Any other fallthrough
@@ -411,7 +433,7 @@ let operator_disposition (receipt : t) =
     match receipt.outcome with
     | `Cancelled -> ("user_cancelled", "cancelled")
     | `Skipped -> ("skipped", "phase_skipped")
-    | `Ok when String.equal cascade_outcome "completed" ->
+    | `Ok when receipt.cascade_outcome = Cascade_completed ->
       ("pass", "healthy")
     | _ ->
       Prometheus.inc_counter
@@ -425,7 +447,8 @@ let operator_disposition (receipt : t) =
          terminal_reason=%s tool_contract_result=%s error_kind=%s) \
          — investigate regression of #11651 silent-path fix"
         (outcome_kind_to_string receipt.outcome)
-        cascade_outcome terminal_reason tool_contract_result
+        (cascade_outcome_to_string receipt.cascade_outcome)
+        terminal_reason tool_contract_result
         (Option.value
            (Option.map error_kind_to_string receipt.error_kind)
            ~default:"<none>");
@@ -577,7 +600,8 @@ let to_json (receipt : t) =
               | None -> `Null );
             ("attempt_count", `Int receipt.cascade_attempt_count);
             ("fallback_applied", `Bool receipt.cascade_fallback_applied);
-            ("outcome", `String receipt.cascade_outcome);
+            ( "outcome",
+              `String (cascade_outcome_to_string receipt.cascade_outcome) );
             ("degraded_retry_applied", `Bool receipt.degraded_retry_applied);
             ( "degraded_retry_cascade",
               match receipt.degraded_retry_cascade with
@@ -673,7 +697,8 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
     ; "cascade_name", `String (cascade_name_to_string receipt.cascade_name)
-    ; "cascade_outcome", `String receipt.cascade_outcome
+    ; ( "cascade_outcome"
+      , `String (cascade_outcome_to_string receipt.cascade_outcome) )
     ; "tool_contract_result", `String receipt.tool_contract_result
     ; ( "last_tool_name",
         match last_tool_name receipt with

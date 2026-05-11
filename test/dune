@@ -1243,6 +1243,7 @@
 (include stanzas/test_keeper_meta_heartbeat_retain_9733.inc)
 (include stanzas/test_keeper_meta_merge.inc)
 (include stanzas/test_keeper_mutex_coverage.inc)
+(include stanzas/test_keeper_ocaml_tla_correspondence.inc)
 (include stanzas/test_keeper_path_roots_leak_10349.inc)
 (include stanzas/test_keeper_passive_loop_detector.inc)
 (include stanzas/test_keeper_pause_silent_failure_source.inc)

@@ -1,0 +1,7 @@
+; RFC-0059 §9.4: Domain_pool vs single-Domain fiber baseline.
+; 3 workloads: pure_io (sleep), pure_cpu (Int64 compute), mixed (IO + CPU).
+; Standalone — depends only on eio/eio_main/unix, no masc_mcp link.
+; Run: dune exec test/bench_standalone/bench.exe
+(executable
+ (name bench)
+ (libraries eio eio_main unix))

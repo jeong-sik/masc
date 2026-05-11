@@ -182,8 +182,9 @@ let run_try_provider
       | Cascade_attempt_liveness_config.Off -> None
       | Cascade_attempt_liveness_config.Observe | Cascade_attempt_liveness_config.Enforce
         ->
+        let provider_id = Provider_adapter.provider_label_of_config provider_cfg in
         let budget =
-          Cascade_attempt_liveness_config.budget_for_label provider_cfg.model_id
+          Cascade_attempt_liveness_config.budget_for_provider_id ~provider_id
         in
         let obs =
           Cascade_attempt_liveness_observer.create
@@ -283,7 +284,8 @@ let run_try_provider
                     ~mode:liveness_mode
                     ~observer_attached:(Option.is_some liveness_observer_opt)
                     ~per_provider_timeout_s
-                    ~provider_label:provider_cfg.model_id
+                    ~provider_id:
+                      (Provider_adapter.provider_label_of_config provider_cfg)
                 in
                 match outer_wall_for_provider with
                 | None -> run_fn ()

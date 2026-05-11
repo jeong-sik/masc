@@ -97,7 +97,7 @@ let test_mode_labels () =
   Alcotest.(check string) "observe" "observe" (mode_label Observe);
   Alcotest.(check string) "enforce" "enforce" (mode_label Enforce)
 
-(* -- budget_for_label ---------------------------------------------- *)
+(* -- budget_for_provider_id ---------------------------------------- *)
 
 let budget_eq (a : L.budget) (b : L.budget) =
   Float.equal a.ttft_max b.ttft_max
@@ -109,37 +109,37 @@ let check_budget label expected actual =
 
 let test_budget_codex_cli () =
   check_budget "codex_cli -> cloud_fast" L.cloud_fast
-    (Cfg.budget_for_label "codex_cli")
+    (Cfg.budget_for_provider_id ~provider_id:"codex_cli")
 
 let test_budget_claude_code () =
   check_budget "claude_code -> cloud_fast" L.cloud_fast
-    (Cfg.budget_for_label "claude_code")
+    (Cfg.budget_for_provider_id ~provider_id:"claude_code")
 
 let test_budget_glm_coding () =
   check_budget "glm-coding -> cloud_thinking" L.cloud_thinking
-    (Cfg.budget_for_label "glm-coding")
+    (Cfg.budget_for_provider_id ~provider_id:"glm-coding")
 
 let test_budget_kimi () =
   check_budget "kimi-for-coding -> cloud_thinking" L.cloud_thinking
-    (Cfg.budget_for_label "kimi-for-coding")
+    (Cfg.budget_for_provider_id ~provider_id:"kimi-for-coding")
 
 let test_budget_local () =
   check_budget "ollama_only -> local_27b" L.local_27b
-    (Cfg.budget_for_label "ollama_only");
+    (Cfg.budget_for_provider_id ~provider_id:"ollama_only");
   check_budget "llama-server -> local_27b" L.local_27b
-    (Cfg.budget_for_label "llama-server")
+    (Cfg.budget_for_provider_id ~provider_id:"llama-server")
 
 let test_budget_local_70b () =
   check_budget "local_70b_plus -> local_70b_plus" L.local_70b_plus
-    (Cfg.budget_for_label "local_70b_plus")
+    (Cfg.budget_for_provider_id ~provider_id:"local_70b_plus")
 
 let test_budget_unknown_default () =
   check_budget "unknown -> cloud_fast" L.cloud_fast
-    (Cfg.budget_for_label "weird_provider_xyz")
+    (Cfg.budget_for_provider_id ~provider_id:"weird_provider_xyz")
 
 let test_budget_case_insensitive () =
   check_budget "GLM-CODING -> cloud_thinking" L.cloud_thinking
-    (Cfg.budget_for_label "GLM-CODING")
+    (Cfg.budget_for_provider_id ~provider_id:"GLM-CODING")
 
 let () =
   Alcotest.run "cascade_attempt_liveness_config"
@@ -165,7 +165,7 @@ let () =
         ] );
       ( "mode_label",
         [ Alcotest.test_case "stable labels" `Quick test_mode_labels ] );
-      ( "budget_for_label",
+      ( "budget_for_provider_id",
         [
           Alcotest.test_case "codex_cli" `Quick test_budget_codex_cli;
           Alcotest.test_case "claude_code" `Quick test_budget_claude_code;

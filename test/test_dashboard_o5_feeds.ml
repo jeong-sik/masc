@@ -41,7 +41,7 @@ let test_agent_stress_feed_exposes_board_rows () =
             ; threshold = 4
             ; counted_toward_crash = true
             ; recoverable = false
-            ; error_kind = Some (Agent_stress.error_kind_of_string "api")
+            ; error_kind = Some Agent_stress.Ek_api
             }
       ; timestamp = 99.0
       }

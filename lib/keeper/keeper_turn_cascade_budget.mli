@@ -32,7 +32,7 @@ val next_fail_open_cascade_for_turn :
   Agent_sdk.Error.sdk_error ->
   EC.degraded_retry option
 
-val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
+val sdk_error_kind : Agent_sdk.Error.sdk_error -> Agent_stress.error_kind
 
 val record_turn_failure_stress :
   meta:keeper_meta ->
@@ -48,7 +48,7 @@ val oas_timeout_guard_sec : float
 val min_oas_timeout_budget_sec : float
 (** Minimum OAS timeout budget (seconds). *)
 
-val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
+val sdk_error_kind : Agent_sdk.Error.sdk_error -> Agent_stress.error_kind
 
 type oas_timeout_budget_resolution = {
   effective_timeout_sec : float;

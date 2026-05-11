@@ -23,11 +23,43 @@ module Random = Stdlib.Random
 (* Types                                                            *)
 (* ================================================================ *)
 
-type error_kind = Error_kind of string
+(* Closed sum mirroring [Agent_sdk.Error.sdk_error]'s 9 constructors.
+   The sole producer ([Keeper_turn_cascade_budget.sdk_error_kind])
+   pattern-matches the SDK tag, so the producer surface is bounded by
+   the SDK type itself. *)
+type error_kind =
+  | Ek_api
+  | Ek_agent
+  | Ek_mcp
+  | Ek_config
+  | Ek_serialization
+  | Ek_io
+  | Ek_orchestration
+  | Ek_a2a
+  | Ek_internal
 
-let error_kind_of_string value = Error_kind value
+let error_kind_to_string = function
+  | Ek_api -> "api"
+  | Ek_agent -> "agent"
+  | Ek_mcp -> "mcp"
+  | Ek_config -> "config"
+  | Ek_serialization -> "serialization"
+  | Ek_io -> "io"
+  | Ek_orchestration -> "orchestration"
+  | Ek_a2a -> "a2a"
+  | Ek_internal -> "internal"
 
-let error_kind_to_string (Error_kind value) = value
+let error_kind_of_string = function
+  | "api" -> Some Ek_api
+  | "agent" -> Some Ek_agent
+  | "mcp" -> Some Ek_mcp
+  | "config" -> Some Ek_config
+  | "serialization" -> Some Ek_serialization
+  | "io" -> Some Ek_io
+  | "orchestration" -> Some Ek_orchestration
+  | "a2a" -> Some Ek_a2a
+  | "internal" -> Some Ek_internal
+  | _ -> None
 
 type stress_kind =
   | Failure_streak of int

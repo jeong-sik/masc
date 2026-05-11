@@ -27,14 +27,31 @@ module Random = Stdlib.Random
 
     @since RFC-0001 Gate A *)
 
-(** Coarse error family attached to turn-failure stress events. *)
-type error_kind = private Error_kind of string
+(** Coarse SDK error family attached to a [Turn_failure]. Closed set
+    mirroring [Agent_sdk.Error.sdk_error]'s 9 constructors — the single
+    producer in [keeper_turn_cascade_budget.sdk_error_kind] exhaustively
+    matches the SDK error tag, so the value space is bounded.
 
-val error_kind_of_string : string -> error_kind
-(** Convert a wire/log label into an internal error-kind value. *)
+    Wire form is the lowercase string via [error_kind_to_string]
+    (byte-compatible with the previous private-string wrapper). *)
+type error_kind =
+  | Ek_api
+  | Ek_agent
+  | Ek_mcp
+  | Ek_config
+  | Ek_serialization
+  | Ek_io
+  | Ek_orchestration
+  | Ek_a2a
+  | Ek_internal
+
+val error_kind_of_string : string -> error_kind option
+(** Parse a wire label. [None] on unknown so write-only JSON paths fail
+    closed instead of round-tripping arbitrary strings
+    (CLAUDE.md anti-pattern #2: Unknown → Permissive Default). *)
 
 val error_kind_to_string : error_kind -> string
-(** Convert an internal error-kind value back to the public wire label. *)
+(** Convert to the public wire label. *)
 
 (** Stress event kinds -- each maps to a measurable condition. *)
 type stress_kind =

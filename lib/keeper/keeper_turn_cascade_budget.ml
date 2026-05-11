@@ -63,16 +63,17 @@ let next_fail_open_cascade_for_turn
     ~base_cascade ~effective_cascade ~tool_requirement
     ~attempted_cascades err
 
-let sdk_error_kind = function
-  | Agent_sdk.Error.Api _ -> "api"
-  | Agent_sdk.Error.Agent _ -> "agent"
-  | Agent_sdk.Error.Mcp _ -> "mcp"
-  | Agent_sdk.Error.Config _ -> "config"
-  | Agent_sdk.Error.Serialization _ -> "serialization"
-  | Agent_sdk.Error.Io _ -> "io"
-  | Agent_sdk.Error.Orchestration _ -> "orchestration"
-  | Agent_sdk.Error.A2a _ -> "a2a"
-  | Agent_sdk.Error.Internal _ -> "internal"
+let sdk_error_kind : Agent_sdk.Error.sdk_error -> Agent_stress.error_kind =
+  function
+  | Agent_sdk.Error.Api _ -> Ek_api
+  | Agent_sdk.Error.Agent _ -> Ek_agent
+  | Agent_sdk.Error.Mcp _ -> Ek_mcp
+  | Agent_sdk.Error.Config _ -> Ek_config
+  | Agent_sdk.Error.Serialization _ -> Ek_serialization
+  | Agent_sdk.Error.Io _ -> Ek_io
+  | Agent_sdk.Error.Orchestration _ -> Ek_orchestration
+  | Agent_sdk.Error.A2a _ -> Ek_a2a
+  | Agent_sdk.Error.Internal _ -> Ek_internal
 
 let record_turn_failure_stress
     ~(meta : keeper_meta)
@@ -95,7 +96,7 @@ let record_turn_failure_stress
         threshold;
         counted_toward_crash = not is_auto_recoverable;
         recoverable = is_auto_recoverable;
-        error_kind = Some (Agent_stress.error_kind_of_string (sdk_error_kind err));
+        error_kind = Some (sdk_error_kind err);
       };
     timestamp = Unix.gettimeofday ();
   }

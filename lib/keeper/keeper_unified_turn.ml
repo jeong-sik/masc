@@ -606,7 +606,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
             ~error_kind:
               (Keeper_execution_receipt.error_kind_of_string
-                 (sdk_error_kind err))
+                 (Agent_stress.error_kind_to_string (sdk_error_kind err)))
             ~error_message
             ~keeper_turn_id
             ();
@@ -615,7 +615,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~prev:Keeper_turn_fsm.Cascade_routing
             (Keeper_turn_fsm.Failed
                (Keeper_turn_fsm.Failure_provider_error
-                  { kind = sdk_error_kind err;
+                  { kind = Agent_stress.error_kind_to_string (sdk_error_kind err);
                     detail = error_message }));
           Error err
       | Ok initial_execution ->
@@ -917,7 +917,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             error_kind =
               Some
                 (Keeper_execution_receipt.error_kind_of_string
-                   (sdk_error_kind err));
+                   (Agent_stress.error_kind_to_string (sdk_error_kind err)));
             error_message = Some (Agent_sdk.Error.to_string err);
             recorded_at = now_iso ();
           }
@@ -1907,7 +1907,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~prev:Keeper_turn_fsm.Streaming
             (Keeper_turn_fsm.Failed
                (Keeper_turn_fsm.Failure_provider_error
-                  { kind = sdk_error_kind err;
+                  { kind = Agent_stress.error_kind_to_string (sdk_error_kind err);
                     detail = short_preview e_str }));
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"

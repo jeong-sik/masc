@@ -1,6 +1,7 @@
 open Keeper_types
 open Keeper_exec_shared
 open Ide_region_tracker
+open Ide_meta_sync
 
 (* Issue #8490: Variant SSOT for fs write mode. Adding a constructor
    forces compilation in [fs_write_mode_to_string] and
@@ -195,13 +196,21 @@ let raise_fs_edit_error ?fields message =
     Fire-and-forget: errors are logged but never block the write path.
     Uses [Ide_region_tracker.ingest_tool_call] which silently ignores
     non-file-write tools. *)
-let track_write_region ~config ~keeper_name ~file_path ~content ~mode_raw ~old_string ~new_string () =
+let track_write_region ~config ~keeper_name ~file_path ~content ~mode_raw ~old_string ~new_string ?(turn=0) () =
   let base_dir = Keeper_alerting_path.project_root_of_config config in
   let tool_name =
     match fs_write_mode_of_string_opt mode_raw with
     | Some Patch -> "edit_file"
     | _ -> "write_file"
   in
+  (* IDE meta sync: persist to .masc-ide/index.jsonl *)
+  let meta_config = { Ide_meta_sync.default_config with base_path = base_dir } in
+  let diff_text = None in
+  let state = Ide_meta_sync.initial_state in
+  let state = Ide_meta_sync.on_tool_call_complete meta_config state
+    ~keeper_id:keeper_name ~turn ~tool_name
+    ~file_path ~diff_text ~full_content:(Some content) in
+  let _state = Ide_meta_sync.flush_regions meta_config state in
   let arguments =
     let fields = [("path", `String file_path); ("content", `String content)] in
     match fs_write_mode_of_string_opt mode_raw with
@@ -217,7 +226,7 @@ let track_write_region ~config ~keeper_name ~file_path ~content ~mode_raw ~old_s
     ("arguments", arguments);
   ] in
   (try Ide_region_tracker.ingest_tool_call
-     ~base_dir ~keeper_id:keeper_name ~turn:0 tool_call_json
+     ~base_dir ~keeper_id:keeper_name ~turn tool_call_json
    with exn ->
      Log.Keeper.warn "IDE region tracking failed for keeper=%s path=%s: %s"
        keeper_name file_path (Printexc.to_string exn))

@@ -1056,10 +1056,11 @@ let inline_board_dispatch ~sw ~clock name args =
   let state = Mcp_server.create_state ~base_path:_test_base_path in
   Tool_inline_dispatch_extra.dispatch ~config:state.Mcp_server.room_config
     ~agent_name:"inline-curator" ~arguments:args ~state ~sw ~clock ~name
+    ~start_time:(Unix.gettimeofday ())
 
 let require_inline_result ~sw ~clock name args =
   match inline_board_dispatch ~sw ~clock name args with
-  | Some result -> result
+  | Some result -> (result.success, Tool_result.message result)
   | None -> Alcotest.failf "%s not routed by inline board dispatch" name
 
 let test_board_curation_inline_dispatch_routes_read_and_submit () =

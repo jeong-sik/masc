@@ -139,13 +139,13 @@ val clean_search_text : string -> string
 
 (** {1 Tool dispatch + simulation} *)
 
-val handle : Yojson.Safe.t -> bool * string
-(** [handle args] handles [masc_web_search] tool dispatch.
+val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.t
+(** [handle ~tool_name ~start_time args] handles [masc_web_search] tool dispatch.
     Required: [query] (string).  Optional: [limit] (int,
     clamped to [\[1, 10\]], default 5).
 
-    Returns [(true, json)] with search hits on success,
-    [(false, error_json)] when validation fails, the query is
+    Returns [Tool_result.ok] with search hits on success,
+    [Tool_result.error] when validation fails, the query is
     rate-limited, or all providers fail.  Cache hit returns
     early before rate-limit check.  The cache + rate-limit
     state is module-level (process-wide) — operator-visible
@@ -155,7 +155,7 @@ val simulate_for_test :
   query:string ->
   limit:int ->
   (string * simulated_provider_outcome) list ->
-  bool * string
+  Tool_result.t
 (** [simulate_for_test ~query ~limit outcomes] is a pure
     deterministic projection of {!handle}'s fallback chain for
     unit tests.  [outcomes] maps provider names to

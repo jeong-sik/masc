@@ -97,7 +97,7 @@ If you find concerns, list each with file:line and a brief explanation.
 If the code looks correct, respond with exactly: NO_ISSUES_FOUND|} question files_str)
 
 (** Run the adversarial review via OAS. Returns (ok, result_json). *)
-let handle_deep_review (config : Coord.config) args : bool * string =
+let handle_deep_review ~tool_name ~start_time (config : Coord.config) args : Tool_result.t =
   let target_files =
     match Yojson.Safe.Util.(member "target_files" args) with
     | `List files ->
@@ -110,15 +110,17 @@ let handle_deep_review (config : Coord.config) args : bool * string =
     | _ -> ""
   in
   if Stdlib.List.length target_files = 0 || String.equal question "" then
-    (false, Yojson.Safe.to_string (`Assoc [
-      ("error", `String "target_files (non-empty array) and question (string) are required")
-    ]))
+    Tool_result.error ~tool_name ~start_time
+      (Yojson.Safe.to_string (`Assoc [
+        ("error", `String "target_files (non-empty array) and question (string) are required")
+      ]))
   else
     match build_prompt ~target_files ~question ~base_path:config.base_path with
     | Error msg ->
-        (false, Yojson.Safe.to_string (`Assoc [
-          ("error", `String msg)
-        ]))
+        Tool_result.error ~tool_name ~start_time
+          (Yojson.Safe.to_string (`Assoc [
+            ("error", `String msg)
+          ]))
     | Ok prompt ->
         let cascade_name =
           Keeper_cascade_profile.cascade_name_for_use
@@ -144,18 +146,20 @@ let handle_deep_review (config : Coord.config) args : bool * string =
               then "no_issues"
               else "concern"
             in
-            (true, Yojson.Safe.to_string (`Assoc [
-              ("verdict", `String verdict);
-              ("review", `String text);
-              ("files_reviewed", `Int (List.length target_files));
-            ]))
+            Tool_result.ok ~tool_name ~start_time
+              (Yojson.Safe.to_string (`Assoc [
+                ("verdict", `String verdict);
+                ("review", `String text);
+                ("files_reviewed", `Int (List.length target_files));
+              ]))
         | Error err ->
             let msg = Agent_sdk.Error.to_string err in
             Log.Misc.warn "adversarial review failed: %s" msg;
-            (true, Yojson.Safe.to_string (`Assoc [
-              ("verdict", `String "unavailable");
-              ("error", `String msg);
-            ]))
+            Tool_result.ok ~tool_name ~start_time
+              (Yojson.Safe.to_string (`Assoc [
+                ("verdict", `String "unavailable");
+                ("error", `String msg);
+              ]))
 
 (** Tool schema for MCP registration. *)
 let tool_definitions = [

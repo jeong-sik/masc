@@ -21,8 +21,7 @@
 
 (** {1 Tool result + context} *)
 
-type tool_result = bool * string
-(** [(success, message)] dispatch return shape. *)
+type tool_result = Tool_result.t
 
 type context = {
   config : Coord.config;

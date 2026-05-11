@@ -793,19 +793,19 @@ let search_impl ~query ~limit =
   in
   loop [] (provider_order ())
 
-let handle args =
+let handle ~tool_name ~start_time args =
   let query = get_string args "query" "" in
   match validate_query query with
-  | Error message -> (false, json_error message)
+  | Error message -> Tool_result.error ~tool_name ~start_time message
   | Ok query ->
       let limit = max 1 (min 10 (get_int args "limit" 5)) in
       let now = Unix.gettimeofday () in
       let key = cache_key ~query ~limit in
       match cache_lookup key now with
-      | Some cached -> (true, cached)
+      | Some cached -> Tool_result.ok ~tool_name ~start_time cached
       | None -> (
           match enforce_rate_limit now with
-          | Error message -> (false, json_error message)
+          | Error message -> Tool_result.error ~tool_name ~start_time message
           | Ok () -> (
               match search_impl ~query ~limit with
               | Ok response ->
@@ -814,8 +814,8 @@ let handle args =
                       ~engine:response.engine response.hits
                   in
                   cache_store key json now;
-                  (true, json)
-              | Error message -> (false, json_error message)))
+                  Tool_result.ok ~tool_name ~start_time json
+              | Error message -> Tool_result.error ~tool_name ~start_time message))
 
 let simulate_for_test ~query ~limit outcomes =
   let normalize source tuples =
@@ -823,18 +823,17 @@ let simulate_for_test ~query ~limit outcomes =
   in
   let rec loop errors = function
     | [] ->
-        ( false,
-          json_error
-            (if Stdlib.List.length errors = 0 then "all web search providers failed"
-             else String.concat "; " (List.rev errors)) )
+        Tool_result.error ~tool_name:"masc_web_search" ~start_time:0.0
+          (if Stdlib.List.length errors = 0 then "all web search providers failed"
+           else String.concat "; " (List.rev errors))
     | (provider_name, outcome) :: rest -> (
         match outcome with
         | `Hits hits when Stdlib.List.length hits > 0 ->
-            ( true,
-              result_json ~query
-                ~search_url:("test://" ^ provider_name)
-                ~engine:provider_name
-                (normalize provider_name hits) )
+            Tool_result.ok ~tool_name:"masc_web_search" ~start_time:0.0
+              (result_json ~query
+                 ~search_url:("test://" ^ provider_name)
+                 ~engine:provider_name
+                 (normalize provider_name hits))
         | `Hits _ | `Empty ->
             loop ((provider_name ^ ": no results") :: errors) rest
         | `Error message ->

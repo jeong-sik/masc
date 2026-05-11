@@ -1,4 +1,3 @@
-
 (** Tool_inline_dispatch_extra — fallback inline-tool dispatch
     branch (board / mention handlers extracted from
     {!Tool_inline_dispatch}).
@@ -9,6 +8,9 @@
     - {!ensure_board_post_author}: caller-identity enforcement on
       [masc_board_post] [author] field, exposed for direct test
       coverage.
+
+    RFC-0062 Phase 4c-2: {!dispatch} now returns [Tool_result.t option]
+    instead of [(bool * string) option].
 
     Internal: 11 helpers (activity emission, JSON field upsert,
     Prometheus counter, identity canonicalization, surface-of-
@@ -58,10 +60,11 @@ val dispatch :
   sw:Eio.Switch.t ->
   clock:_ ->
   name:string ->
-  (bool * string) option
+  start_time:float ->
+  Tool_result.t option
 (** [dispatch ~config ~agent_name ~arguments ~state ~sw ~clock
-      ~name] handles inline dispatch for tool [name] when the main
-    table has no match.  Currently routes:
+      ~name ~start_time] handles inline dispatch for tool [name]
+    when the main table has no match.  Currently routes:
 
     - [masc_board_post] -> identity enforcement +
       {!Board_dispatch.create_post} +

@@ -28,11 +28,7 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = bool * string
-
-let wrap_result ~name ~start (success, message) =
-  if success then Tool_result.ok ~tool_name:name ~start_time:start message
-  else Tool_result.error ~tool_name:name ~start_time:start message
+type tool_result = Tool_result.t
 
 type context = {
   config : Coord.config;
@@ -629,10 +625,10 @@ let schemas : Masc_domain.tool_schema list =
   ]
 
 (* Handler *)
-let handle_agent_timeline (ctx : context) args : tool_result =
+let handle_agent_timeline ~tool_name ~start_time (ctx : context) args : tool_result =
   let agent_name = get_string args "agent_name" "" in
   if String.length agent_name = 0 then
-    (false, "agent_name is required")
+    Tool_result.error ~tool_name ~start_time "agent_name is required"
   else
     let since_hours = get_float args "since_hours" 24.0 in
     let limit = get_int args "limit" 50 in
@@ -643,13 +639,13 @@ let handle_agent_timeline (ctx : context) args : tool_result =
       build_timeline ctx.config ~agent_name ~since_hours ~limit ~include_tasks
         ~include_board ~include_tool_calls
     in
-    (true, Yojson.Safe.to_string json)
+    Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
 (* Dispatch *)
 let dispatch (ctx : context) ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   match name with
-  | "masc_agent_timeline" -> Some (wrap_result ~name ~start (handle_agent_timeline ctx args))
+  | "masc_agent_timeline" -> Some (handle_agent_timeline ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* ================================================================ *)

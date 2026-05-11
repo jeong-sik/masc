@@ -31,7 +31,7 @@ let arg_get_string_list ctx key =
   Safe_ops.json_string_list key ctx.arguments
 
 (** masc_start — compound onboarding (set project root + join + optional task) *)
-let handle_start (ctx : context) : tool_result option =
+let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let state = ctx.state in
@@ -77,8 +77,8 @@ let handle_start (ctx : context) : tool_result option =
   match room_result with
   | Error e ->
       Some
-        (false,
-         Printf.sprintf "masc_start failed while setting project scope: %s" e)
+        (Tool_result.error ~tool_name ~start_time
+           (Printf.sprintf "masc_start failed while setting project scope: %s" e))
   | Ok active_config ->
     (* Step 2: join (idempotent — skip if already joined) *)
     let join_result =
@@ -90,15 +90,15 @@ let handle_start (ctx : context) : tool_result option =
         if String.length msg > 0 then Error msg else Error "join failed"
     in
     match join_result with
-    | Error e -> Some (false, Printf.sprintf "masc_start failed at join: %s\nHint: try masc_join separately." e)
+    | Error e -> Some (Tool_result.error ~tool_name ~start_time (Printf.sprintf "masc_start failed at join: %s\nHint: try masc_join separately." e))
     | Ok () ->
       (* Step 3: add_task + claim + plan_set_task (if task_title provided) *)
       if String.equal task_title "" then
         Some
-          (true,
-           Printf.sprintf
-             "masc_start complete (project scope set + joined as %s). No task created — use masc_add_task to create one."
-             agent_name)
+          (Tool_result.ok ~tool_name ~start_time
+             (Printf.sprintf
+                "masc_start complete (project scope set + joined as %s). No task created — use masc_add_task to create one."
+                agent_name))
       else begin
         (* RFC-0034.v2: per-goal cap guard. masc_start does not pass a
            [goal_id], so the guard is a no-op for orphan tasks. Wired so
@@ -127,23 +127,23 @@ let handle_start (ctx : context) : tool_result option =
         in
         if String.equal task_id "" then
           Some
-            (true,
-             Printf.sprintf
-               "masc_start partial: joined as %s, but task creation failed: %s"
-               agent_name add_result)
+            (Tool_result.ok ~tool_name ~start_time
+               (Printf.sprintf
+                  "masc_start partial: joined as %s, but task creation failed: %s"
+                  agent_name add_result))
         else begin
           let _claim_msg = Coord_task.claim_task active_config ~agent_name ~task_id in
           Planning_eio.set_current_task active_config ~task_id;
           Some
-            (true,
-             Printf.sprintf
-               "masc_start complete: project scope set, joined as %s, task %s created+claimed+set as current."
-               agent_name task_id)
+            (Tool_result.ok ~tool_name ~start_time
+               (Printf.sprintf
+                  "masc_start complete: project scope set, joined as %s, task %s created+claimed+set as current."
+                  agent_name task_id))
         end
       end
 
 (** masc_join — join the active MASC project *)
-let handle_join (ctx : context) : tool_result option =
+let handle_join ~tool_name ~start_time (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
@@ -211,7 +211,7 @@ let handle_join (ctx : context) : tool_result option =
     ] in
     let _pushed = Session.push_notification_to_active_agents registry ~event:join_event in
     Mcp_server.sse_broadcast state join_event;
-    Some (true, final_result)
+    Some (Tool_result.ok ~tool_name ~start_time final_result)
   in
   (* RFC P3-a — fail-closed identity gate.
      Keeper_identity.normalize_all_names validates the agent identity
@@ -240,14 +240,14 @@ let handle_join (ctx : context) : tool_result option =
         sid agent_name outcome
         (Keeper_identity.show_validation_error err);
       Some
-        ( false,
-          Printf.sprintf
-            "masc_join rejected: identity validation failed for '%s' — %s. \
-             Ensure the persona and credential files exist for this agent."
-            agent_name (Keeper_identity.show_validation_error err) )
+        (Tool_result.error ~tool_name ~start_time
+           (Printf.sprintf
+              "masc_join rejected: identity validation failed for '%s' — %s. \
+               Ensure the persona and credential files exist for this agent."
+              agent_name (Keeper_identity.show_validation_error err)))
 
 (** masc_leave — leave a MASC room *)
-let handle_leave (ctx : context) : tool_result option =
+let handle_leave ~tool_name ~start_time (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
@@ -267,4 +267,4 @@ let handle_leave (ctx : context) : tool_result option =
     let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
     Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
   end;
-  Some (true, result)
+  Some (Tool_result.ok ~tool_name ~start_time result)

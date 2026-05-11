@@ -304,7 +304,10 @@ const FILE_ICONS: Readonly<Record<string, string>> = {
 
 function IdeBreadcrumb() {
   const [filePath, setFilePath] = useState(activeIdeFile.value)
-  useEffect(() => activeIdeFile.subscribe(f => setFilePath(f)), [])
+  useEffect(() => {
+    const unsub = activeIdeFile.subscribe(f => setFilePath(f))
+    return () => unsub()
+  }, [])
 
   const segments = filePath.split('/')
   // segments is non-empty because String.prototype.split('/') always returns ≥1 element

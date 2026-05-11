@@ -998,8 +998,37 @@ let make_tool_bundle
          not (List.mem td.name aliased_internal_names))
       tool_defs
   in
+  (* Pass B public alias names that will actually materialize as tools.
+     Mirrors the filter logic in [alias_tools] below: a public alias is
+     provisioned only when (a) routing exists, (b) the routed internal name
+     is in [universe_names], and (c) a tool_def for it exists. Computing
+     this up front lets telemetry report the full assembled surface
+     (Pass A internal names + Pass B public alias names) rather than
+     Pass A alone, which under-reported the agent-visible toolset. *)
+  let pass_b_public_alias_names =
+    List.filter_map
+      (fun public ->
+         match Keeper_tool_alias.route public with
+         | None -> None
+         | Some r ->
+           if not (List.mem r.internal_name universe_names)
+           then None
+           else if
+             List.exists
+               (fun (td : Masc_domain.tool_schema) ->
+                  String.equal td.name r.internal_name)
+               tool_defs
+           then Some public
+           else None)
+      (Keeper_tool_alias.public_names ())
+  in
+  let assembled_tool_surface =
+    universe_names_for_pass_a @ pass_b_public_alias_names
+  in
   (* Record tool assignment telemetry for causal tracing.
-     assignment_id links Assigned → Called → Completed events. *)
+     assignment_id links Assigned → Called → Completed events.
+     [tool_list] reflects the final agent-visible surface so assignment
+     reporting matches what the LLM actually sees. *)
   let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
     let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
     let preset =
@@ -1012,7 +1041,7 @@ let make_tool_bundle
       ~agent_id:meta.agent_name
       ~profile:"keeper"
       ?preset
-      ~tool_list:universe_names_for_pass_a
+      ~tool_list:assembled_tool_surface
       ~allow_set:(Keeper_tool_policy.StringSet.elements lookup.allow_set)
       ~deny_set:(Keeper_tool_policy.StringSet.elements lookup.deny_set)
       ~reason:"keeper tool bundle assembly"

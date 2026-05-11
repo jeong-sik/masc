@@ -22,7 +22,7 @@ import { MutedSpan, DetailCard } from './keeper-detail-kpi'
 //     "pass N/M (P%)" with a horizontal progress bar colored by tone,
 //     plus up to 3 top failure reasons rendered as muted chips.
 //
-//   Row 3 — Resilience Profile
+//   Row 3 — Fault Tolerance Profile
 //     Chips for 세대 / 크래시 / 재시작 / 연속 실패 (current).
 //
 // The conservation law (KeeperOutcomesConservation.tla) is guaranteed
@@ -113,7 +113,7 @@ export function OutcomesLedger({ keeper, outcomes }: {
         `}
       <//>
 
-      ${'' /* Row 3 — Resilience Profile */}
+      ${'' /* Row 3 — Fault Tolerance Profile */}
       <${DetailCard} class="px-3 py-2">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">
           <${SectionHeader} size="xs">회복력</${SectionHeader}>

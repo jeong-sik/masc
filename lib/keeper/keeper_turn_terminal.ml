@@ -144,6 +144,7 @@ let of_code ?source ?summary ?next_action code =
 let to_json reason =
   `Assoc
     [ "code", `String (code reason)
+    ; "disposition", `String (Keeper_turn_disposition.to_wire reason.disposition)
     ; "source", `String reason.source
     ; "severity", `String (severity_to_string reason.severity)
     ; "summary", `String reason.summary
@@ -163,11 +164,15 @@ let string_member key = function
 ;;
 
 let of_json json =
-  match string_member "code" json with
-  | None -> None
-  | Some code ->
-    let source = string_member "source" json |> Option.value ~default:"decision_log" in
-    let summary = string_member "summary" json in
-    let next_action = string_member "next_action" json in
-    Some (of_code ~source ?summary ?next_action code)
+  let source = string_member "source" json |> Option.value ~default:"decision_log" in
+  let summary = string_member "summary" json in
+  let next_action = string_member "next_action" json in
+  match string_member "disposition" json with
+  | Some wire ->
+    let disposition = Keeper_turn_disposition.of_wire wire in
+    Some (of_disposition ~source ?summary ?next_action disposition)
+  | None ->
+    (match string_member "code" json with
+     | Some code -> Some (of_code ~source ?summary ?next_action code)
+     | None -> None)
 ;;

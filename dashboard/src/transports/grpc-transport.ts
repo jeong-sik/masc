@@ -199,7 +199,7 @@ async function* serverStreamingRpc<TReq, TRes>(
       // For binary mode we need frame parsing; for text mode (base64) decode first.
       // This implementation assumes the server returns binary frames.
       // In practice grpc-web-text base64-encodes each frame.
-      // To keep it robust we treat the whole buffer as one frame batch for now.
+      // To avoid partial-frame errors we treat the whole buffer as one frame batch for now.
       const bytes = new Uint8Array(value)
       for (const frame of parseFrames(bytes)) {
         if (frame.trailers) {

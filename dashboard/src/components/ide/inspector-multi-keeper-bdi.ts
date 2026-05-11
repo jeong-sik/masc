@@ -274,11 +274,10 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: Keeper
           ? html`<span style=${{ color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${entry.line}</span>`
           : null}
         ${focusLabel ? html`
-          <span
-            role="button"
-            tabIndex=${0}
+          <button
+            type="button"
+            aria-label=${`focus file ${cursor?.file_path ?? ''}`}
             onClick=${navigateToFocus}
-            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToFocus() } }}
             title=${cursor?.file_path ?? ''}
             style=${{
               color: 'var(--color-accent-fg)',
@@ -288,10 +287,12 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: Keeper
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
               cursor: 'pointer',
+              border: 'none',
+              background: 'transparent',
               borderRadius: 'var(--r-0)',
               padding: '0 var(--sp-1)',
             }}
-          >${focusLabel}</span>
+          >${focusLabel}</button>
         ` : null}
         <button
           type="button"
@@ -369,25 +370,25 @@ function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps)
       >
         <span>${entry.keeperName}</span>
         ${entry.line !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>L${entry.line}</span>` : null}
-        ${focusLabel ? html`
-          <span
-            role="button"
-            tabIndex=${0}
-            onClick=${(e: MouseEvent) => { e.stopPropagation(); navigateToFocus() }}
-            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToFocus() } }}
-            title=${cursor?.file_path ?? ''}
-            style=${{
-              color: 'var(--color-accent-fg)',
-              fontSize: 'var(--fs-10)',
-              maxWidth: '90px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >${focusLabel}</span>
-        ` : null}
         ${tokens !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>${tokens.toLocaleString()}</span>` : null}
       </button>
+      ${focusLabel ? html`
+        <button
+          type="button"
+          aria-label=${`focus file ${cursor?.file_path ?? ''}`}
+          onClick=${navigateToFocus}
+          title=${cursor?.file_path ?? ''}
+          style=${{
+            ...CHIP_BUTTON_STYLE,
+            color: 'var(--color-accent-fg)',
+            fontSize: 'var(--fs-10)',
+            maxWidth: '90px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >${focusLabel}</button>
+      ` : null}
       <button
         type="button"
         aria-label=${`unpin ${entry.keeperName}`}

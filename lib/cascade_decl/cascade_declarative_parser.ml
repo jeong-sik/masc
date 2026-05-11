@@ -77,12 +77,12 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : cascade_capabilities =
     match Otoml.find_opt tbl Fun.id [ key ] with
     | None -> []
     | Some v ->
-      (try Otoml.get_array Otoml.get_string v
-       with _ ->
+      (try Otoml.get_array Otoml.get_string v with
+       | _ ->
          Logs.warn (fun m ->
            m
-             "cascade_declarative_parser: %s.capabilities.%s — \
-              expected string array, ignoring"
+             "cascade_declarative_parser: %s.capabilities.%s — expected string array, \
+              ignoring"
              path
              key);
          [])
@@ -96,26 +96,25 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : cascade_capabilities =
     | Some n ->
       Logs.warn (fun m ->
         m
-          "cascade_declarative_parser: %s.capabilities.%s = %d — \
-           expected positive integer, ignoring"
+          "cascade_declarative_parser: %s.capabilities.%s = %d — expected positive \
+           integer, ignoring"
           path
           key
           n);
       None
   in
-  {
-    supports_inline_tools = b "supports-inline-tools";
-    supports_runtime_mcp_tools = b "supports-runtime-mcp-tools";
-    supports_runtime_tool_events = b "supports-runtime-tool-events";
-    supports_runtime_mcp_http_headers = b "supports-runtime-mcp-http-headers";
-    requires_per_keeper_bridging_for_bound_actor_tools =
-      b "requires-per-keeper-bridging-for-bound-actor-tools";
-    identity_runtime_mcp_header_keys =
-      string_list_field "identity-runtime-mcp-header-keys";
-    argv_prompt_preflight = b "argv-prompt-preflight";
-    uses_anthropic_caching = b "uses-anthropic-caching";
-    max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt";
-    tolerates_bound_actor_fallback = b "tolerates-bound-actor-fallback";
+  { supports_inline_tools = b "supports-inline-tools"
+  ; supports_runtime_mcp_tools = b "supports-runtime-mcp-tools"
+  ; supports_runtime_tool_events = b "supports-runtime-tool-events"
+  ; supports_runtime_mcp_http_headers = b "supports-runtime-mcp-http-headers"
+  ; requires_per_keeper_bridging_for_bound_actor_tools =
+      b "requires-per-keeper-bridging-for-bound-actor-tools"
+  ; identity_runtime_mcp_header_keys =
+      string_list_field "identity-runtime-mcp-header-keys"
+  ; argv_prompt_preflight = b "argv-prompt-preflight"
+  ; uses_anthropic_caching = b "uses-anthropic-caching"
+  ; max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt"
+  ; tolerates_bound_actor_fallback = b "tolerates-bound-actor-fallback"
   }
 ;;
 
@@ -127,31 +126,28 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : cascade_capabilities =
     Non-table values at the sub-table position emit a WARN and yield an
     empty list. Non-string header values emit a per-entry WARN and are
     dropped. The result is sorted by key for deterministic show/eq. *)
-let parse_headers (tbl : Otoml.t) (path : string)
-  : (string * string) list
-  =
+let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
   match Otoml.get_table tbl with
   | exception _ ->
     Logs.warn (fun m ->
       m
-        "cascade_declarative_parser: %s — expected TOML table, got non-table \
-         value; treating as empty"
+        "cascade_declarative_parser: %s — expected TOML table, got non-table value; \
+         treating as empty"
         path);
     []
   | entries ->
     let pairs =
       List.filter_map
         (fun (k, v) ->
-          match Otoml.get_string v with
-          | s -> Some (k, s)
-          | exception _ ->
-            Logs.warn (fun m ->
-              m
-                "cascade_declarative_parser: %s.%s — non-string header value, \
-                 ignoring"
-                path
-                k);
-            None)
+           match Otoml.get_string v with
+           | s -> Some (k, s)
+           | exception _ ->
+             Logs.warn (fun m ->
+               m
+                 "cascade_declarative_parser: %s.%s — non-string header value, ignoring"
+                 path
+                 k);
+             None)
         entries
     in
     List.sort (fun (a, _) (b, _) -> String.compare a b) pairs
@@ -210,11 +206,12 @@ let parse_provider (id : string) (tbl : Otoml.t)
             | "local_70b_plus" -> Some Local_70b_plus
             | other ->
               Logs.warn (fun m ->
-                m "cascade_declarative_parser: %s.liveness.class \
-                   unknown value %S — ignoring (expected one of \
-                   cloud_fast, cloud_thinking, local_27b, \
+                m
+                  "cascade_declarative_parser: %s.liveness.class unknown value %S — \
+                   ignoring (expected one of cloud_fast, cloud_thinking, local_27b, \
                    local_70b_plus)"
-                  path other);
+                  path
+                  other);
               None))
     in
     let capabilities =
@@ -226,8 +223,17 @@ let parse_provider (id : string) (tbl : Otoml.t)
       | None -> None
       | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
     in
-    Ok { id; display_name; api_format; transport; is_non_interactive;
-         credentials; liveness_class; capabilities; headers }
+    Ok
+      { id
+      ; display_name
+      ; api_format
+      ; transport
+      ; is_non_interactive
+      ; credentials
+      ; liveness_class
+      ; capabilities
+      ; headers
+      }
 ;;
 
 let parse_providers (toml : Otoml.t) : (cascade_provider list, parse_error list) result =
@@ -256,8 +262,7 @@ let parse_providers (toml : Otoml.t) : (cascade_provider list, parse_error list)
 
 (* --- Layer 2: Models --- *)
 
-let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
-  : cascade_model_capabilities
+let parse_model_capabilities ~(path : string) (tbl : Otoml.t) : cascade_model_capabilities
   =
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
   let positive_int_opt_field key =
@@ -267,20 +272,19 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     | Some n ->
       Logs.warn (fun m ->
         m
-          "cascade_declarative_parser: %s.capabilities.%s = %d — \
-           expected positive integer, ignoring"
+          "cascade_declarative_parser: %s.capabilities.%s = %d — expected positive \
+           integer, ignoring"
           path
           key
           n);
       None
   in
-  {
-    max_output_tokens = positive_int_opt_field "max-output-tokens";
-    supports_parallel_tool_calls = b "supports-parallel-tool-calls";
-    supports_image_input = b "supports-image-input";
-    supports_native_streaming = b "supports-native-streaming";
-    supports_caching = b "supports-caching";
-    supports_response_format_json = b "supports-response-format-json";
+  { max_output_tokens = positive_int_opt_field "max-output-tokens"
+  ; supports_parallel_tool_calls = b "supports-parallel-tool-calls"
+  ; supports_image_input = b "supports-image-input"
+  ; supports_native_streaming = b "supports-native-streaming"
+  ; supports_caching = b "supports-caching"
+  ; supports_response_format_json = b "supports-response-format-json"
   }
 ;;
 

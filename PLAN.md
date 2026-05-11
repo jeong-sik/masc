@@ -8,11 +8,11 @@
 - keeper_exec_fs.ml - sandbox_isolation guard before writes wired (#14532)
 - keeper_turn_sandbox_runtime.ml / .mli - turn_id field + accessor + Docker label (#14532)
 - keeper_sandbox_runtime.ml / .mli - optional turn_id Docker label (#14532)
-- keeper_tool_alias.ml - Env_config_keeper.KeeperToolAlias (#14532)
-- lib/config/env_config_keeper.ml / .mli - KeeperToolAlias, KeeperLogSampling (#14532)
+- lib/config/env_config_keeper.ml / .mli - KeeperLogSampling module (#14532)
 - lib/masc_log/log.ml - per-keeper log sampling via MASC_KEEPER_LOG_SAMPLE_RATE (#14532)
 - test/test_keeper_invariant.ml - 14 alcotest tests (#14527, #14538)
 - Sandbox container removal warning on cleanup failure (#14509)
+- keeper_tool_alias 3-tier classification superseded by RFC-0064 (PR #14574): flat `route` table replaces aliases/oas_dual_register/hallucinated_builtins
 
 ## In-Flight PRs
 - #14552 - feat(ide): wire Ide_meta_sync into keeper_exec_fs (Phase 5)
@@ -21,6 +21,7 @@
 - #14564 - feat(keeper): wire goal/task/board with keeper tool results (Phase 5)
 - #14565 - feat(ide): add memory tier panel to IDE right-side (Phase 5)
 - #14573 - feat(grpc,lsp): add LspCall RPC to gRPC service (Phase 1)
+- #14574 - refactor(keeper): RFC-0064 two-surface tool alias — drop 3-tier classification (Phase 4)
 
 ## Remaining Work
 
@@ -41,7 +42,7 @@
 - [x] Fail-fast on missing required mounts (via required_mount_result in host_config_provider.ml)
 
 ### Phase 4: Tool Selection
-- [x] Move hardcoded alias table from keeper_tool_alias.ml to config
+- [~] Move hardcoded alias table from keeper_tool_alias.ml to config — **superseded by RFC-0064 (PR #14574)** which replaces the 3-tier classification with a flat `route` table at the source. Config-relocation kept the same workaround pattern (N-of-M `oas_dual_register`, string-list `hallucinated_builtins`); RFC-0064 eliminates it structurally.
 - [ ] Add passive-streak metric for tool selection validation (in-flight: PR #14555)
 
 ### Phase 5: IDE/Dashboard Integration

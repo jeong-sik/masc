@@ -17,22 +17,20 @@ open Env_config_core
 
 module KeeperBootstrap = struct
   (** Enable startup keeper bootstrap scan *)
-  let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
 
   (** Keeper considered stale when last turn exceeds this threshold (seconds) *)
   let stale_turn_seconds =
-    get_float_nonneg ~default:3600.0
-      "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
+    get_float_nonneg ~default:3600.0 "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
+  ;;
 
   (** Max keeper meta files to scan during bootstrap *)
-  let max_scan =
-    get_int_nonneg ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
+  let max_scan = get_int_nonneg ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
 
   (** Maximum concurrently active keepers. Guards keeper creation and bootstrap. *)
   let max_active_keepers =
-    get_int_nonneg ~default:10000
-      "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
+    get_int_nonneg ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
+  ;;
 
   (** Polling interval (seconds) for the lazy-startup wait loop in
       [server_bootstrap_loops.ml]. The autoboot fiber wakes up every
@@ -43,9 +41,10 @@ module KeeperBootstrap = struct
       tests while keeping the idle CPU cost negligible). Floor 0.05s
       protects against operator typos that would burn CPU. *)
   let lazy_startup_poll_interval_sec =
-    Float.max 0.05
-      (get_float ~default:0.25
-         "MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC")
+    Float.max
+      0.05
+      (get_float ~default:0.25 "MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC")
+  ;;
 
   (** Polling interval (seconds) for the keeper-lifecycle listener
       retry loop in [server_bootstrap_loops.ml]. After a listener
@@ -54,9 +53,10 @@ module KeeperBootstrap = struct
       when an upstream subsystem is briefly down. Default 0.25s
       preserves the inline literal at [server_bootstrap_loops.ml:240]. *)
   let keeper_listener_retry_interval_sec =
-    Float.max 0.05
-      (get_float ~default:0.25
-         "MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC")
+    Float.max
+      0.05
+      (get_float ~default:0.25 "MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC")
+  ;;
 
   (** Settle delay (seconds) between lazy-startup completion and the
       keeper bootstrap fan-out. The autoboot fiber sleeps for this
@@ -67,123 +67,110 @@ module KeeperBootstrap = struct
       may raise this; setting to 0 is allowed (no settle) but unwise
       under load. *)
   let post_startup_settle_sec =
-    Float.max 0.0
-      (get_float ~default:5.0
-         "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC")
+    Float.max 0.0 (get_float ~default:5.0 "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC")
+  ;;
 end
 
 (** {1 Keeper Metrics Rotation Configuration} *)
 
 module KeeperMetrics = struct
   (** Maximum metrics file size in bytes before rotation (default: 10MB) *)
-  let max_file_bytes =
-    get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
+  let max_file_bytes = get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
 
   (** Number of rotated files to keep (default: 1, i.e. .1 only) *)
-  let max_rotated_files =
-    get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
+  let max_rotated_files = get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
 end
 
 (** {1 Keeper Interesting Alert Configuration} *)
 
 module KeeperAlert = struct
   (** Master switch for keeper interesting alert detection/fanout *)
-  let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_ENABLED"
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_ENABLED"
 
   (** Minimum score required to trigger alert fanout *)
-  let min_score =
-    get_float ~default:0.70 "MASC_KEEPER_ALERT_MIN_SCORE"
+  let min_score = get_float ~default:0.70 "MASC_KEEPER_ALERT_MIN_SCORE"
 
   (** Maximum alert body chars used for external fanout payloads *)
-  let max_body_chars =
-    get_int_nonneg ~default:1200 "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
+  let max_body_chars = get_int_nonneg ~default:1200 "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
 
   (** Retry count for each fanout channel (in addition to initial attempt) *)
-  let max_retries =
-    get_int_nonneg ~default:2 "MASC_KEEPER_ALERT_MAX_RETRIES"
+  let max_retries = get_int_nonneg ~default:2 "MASC_KEEPER_ALERT_MAX_RETRIES"
 
   (** Base retry delay in milliseconds (exponential backoff) *)
   let retry_base_delay_ms =
     get_int_nonneg ~default:250 "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS"
+  ;;
 
   (** Board fanout configuration *)
-  let board_enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_BOARD_ENABLED"
+  let board_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_BOARD_ENABLED"
 
   let board_author =
     get_string ~default:"keeper-alert-bot" "MASC_KEEPER_ALERT_BOARD_AUTHOR"
+  ;;
 
-  let board_hearth =
-    get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_BOARD_HEARTH"
+  let board_hearth = get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_BOARD_HEARTH"
 
   let board_visibility =
     get_string ~default:"internal" "MASC_KEEPER_ALERT_BOARD_VISIBILITY"
+  ;;
 
   (** Slack fanout configuration *)
-  let slack_enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_ENABLED"
+  let slack_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_ENABLED"
 
-  let slack_webhook_url =
-    get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
+  let slack_webhook_url = get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
 
   (** Slack DM fanout configuration *)
   let slack_dm_enabled =
     Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_DM_ENABLED"
+  ;;
 
-  let slack_dm_user_id =
-    get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_DM_USER_ID"
+  let slack_dm_user_id = get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_DM_USER_ID"
 
   (** GitHub issue fanout configuration *)
-  let github_enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_GITHUB_ENABLED"
+  let github_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_GITHUB_ENABLED"
 
-  let github_repo =
-    get_string ~default:"" "MASC_KEEPER_ALERT_GITHUB_REPO"
-
-  let github_label =
-    get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_GITHUB_LABEL"
-
-  let github_min_score =
-    get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
+  let github_repo = get_string ~default:"" "MASC_KEEPER_ALERT_GITHUB_REPO"
+  let github_label = get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_GITHUB_LABEL"
+  let github_min_score = get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
 end
 
 (** {1 Keeper Supervisor Configuration} *)
 
 module KeeperSupervisor = struct
   (** Maximum restart attempts before declaring a keeper dead *)
-  let max_restarts =
-    get_int ~default:5 "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"
+  let max_restarts = get_int ~default:5 "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"
 
   (** Base delay for exponential backoff between restarts (seconds) *)
-  let backoff_base_s =
-    get_float ~default:10.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S"
+  let backoff_base_s = get_float ~default:10.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S"
 
   (** Maximum backoff delay cap (seconds) *)
-  let backoff_max_s =
-    get_float ~default:300.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S"
+  let backoff_max_s = get_float ~default:300.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S"
 
   (** Interval between supervisor sweep runs (seconds) *)
-  let sweep_interval_sec =
-    get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
+  let sweep_interval_sec = get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
 
   (** Self-preservation: ratio of crashed keepers to trigger suppression *)
   let self_preservation_ratio =
-    Float.min 1.0 (Float.max 0.0
-      (get_float ~default:0.3 "MASC_KEEPER_SELF_PRESERVATION_RATIO"))
+    Float.min
+      1.0
+      (Float.max 0.0 (get_float ~default:0.3 "MASC_KEEPER_SELF_PRESERVATION_RATIO"))
+  ;;
 
   (** Self-preservation: minimum crashed candidates to trigger *)
   let self_preservation_min_candidates =
     max 1 (get_int ~default:2 "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES")
+  ;;
 
   (** Dead tombstone TTL: seconds before Dead entries are cleaned up *)
-  let dead_ttl_sec =
-    Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_DEAD_TTL_SEC")
+  let dead_ttl_sec = Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_DEAD_TTL_SEC")
 
   (** Paused keeper file TTL: seconds before stale paused keeper meta files
       are removed from disk. Default: 86400 (24 hours). *)
   let paused_cleanup_ttl_sec =
-    Float.max 300.0 (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
+    Float.max
+      300.0
+      (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
+  ;;
 
   (** Initial auto-resume backoff delay after an auto-pause (seconds).
       On every successive auto-pause the delay doubles, capped at
@@ -191,37 +178,48 @@ module KeeperSupervisor = struct
       Set to 0 to disable the self-healing circuit breaker. *)
   let auto_resume_initial_sec =
     Float.max 0.0 (get_float ~default:3600.0 "MASC_KEEPER_AUTO_RESUME_INITIAL_SEC")
+  ;;
 
   (** Maximum auto-resume backoff delay (seconds).  Default: 86400 (24 hours). *)
   let auto_resume_max_sec =
     Float.max 3600.0 (get_float ~default:86400.0 "MASC_KEEPER_AUTO_RESUME_MAX_SEC")
+  ;;
 
   (** Liveness Recovery Supervisor (#12801): enable auto-recovery of Dead keepers
       whose root cause has cleared.  Set to false to disable (default: true). *)
   let liveness_recovery_enabled =
     get_bool ~default:true "MASC_KEEPER_LIVENESS_RECOVERY_ENABLED"
+  ;;
 
   (** Minimum time (seconds) a keeper must have been Dead before a liveness
       recovery attempt is made.  Allows transient root causes (e.g. provider
       outage) to clear before re-launching.  Default: 300 (5 min). *)
   let liveness_recovery_min_dead_sec =
     Float.max 30.0 (get_float ~default:300.0 "MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC")
+  ;;
 
   (** Base backoff delay (seconds) between liveness recovery attempts per keeper.
       Exponential: attempt 0 = base, 1 = 2*base, 2 = 4*base, etc.
       Default: 300 (5 min). *)
   let liveness_recovery_backoff_base_sec =
-    Float.max 30.0 (get_float ~default:300.0 "MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_BASE_SEC")
+    Float.max
+      30.0
+      (get_float ~default:300.0 "MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_BASE_SEC")
+  ;;
 
   (** Maximum backoff delay cap (seconds) for liveness recovery.
       Default: 3600 (1 hour). *)
   let liveness_recovery_backoff_max_sec =
-    Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_MAX_SEC")
+    Float.max
+      60.0
+      (get_float ~default:3600.0 "MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_MAX_SEC")
+  ;;
 
   (** Maximum total liveness recovery attempts per keeper before giving up
       permanently.  Default: 5. *)
   let liveness_recovery_max_attempts =
     max 1 (get_int ~default:5 "MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS")
+  ;;
 
   (** Signal for alive-but-stuck keepers (#12838) —
       keepers that are not Dead/Zombie and not paused, but whose
@@ -229,6 +227,7 @@ module KeeperSupervisor = struct
       keep advancing. *)
   let alive_but_stuck_enabled =
     get_bool ~default:true "MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED"
+  ;;
 
   (** Queue a bounded recovery wakeup when [alive_but_stuck_scan] emits.
       The recovery uses the Event Layer queue plus [fiber_wakeup]; it does
@@ -236,27 +235,31 @@ module KeeperSupervisor = struct
       by [alive_but_stuck_dedup_ttl_sec].  Default: true. *)
   let alive_but_stuck_recovery_enabled =
     get_bool ~default:true "MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED"
+  ;;
 
   (** Multiplier on the keeper's own [proactive.cooldown_sec] before a
       stalled keeper is flagged.  Default: 10 (10 cooldowns elapsed
       without a proactive turn). *)
   let alive_but_stuck_stall_multiplier =
     max 1 (get_int ~default:10 "MASC_KEEPER_ALIVE_BUT_STUCK_STALL_MULTIPLIER")
+  ;;
 
   (** Hard floor (seconds) so keepers with very small cooldowns are not
       flagged after a few minutes of legitimate quiet.  The detector
       uses [max(stall_floor, multiplier * cooldown)].  Default:
       1800 (30 min). *)
   let alive_but_stuck_stall_floor_sec =
-    Float.max 60.0 (get_float ~default:1800.0
-                      "MASC_KEEPER_ALIVE_BUT_STUCK_STALL_FLOOR_SEC")
+    Float.max
+      60.0
+      (get_float ~default:1800.0 "MASC_KEEPER_ALIVE_BUT_STUCK_STALL_FLOOR_SEC")
+  ;;
 
   (** Per-keeper dedup window (seconds): once a keeper is flagged the
       counter is incremented at most once per window, even if the
       sweep fires every 30s.  Default: 3600 (1 hr). *)
   let alive_but_stuck_dedup_ttl_sec =
-    Float.max 60.0 (get_float ~default:3600.0
-                      "MASC_KEEPER_ALIVE_BUT_STUCK_DEDUP_TTL_SEC")
+    Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_ALIVE_BUT_STUCK_DEDUP_TTL_SEC")
+  ;;
 end
 
 (** {1 Keeper Poll Intervals}
@@ -281,9 +284,8 @@ module KeeperPollIntervals = struct
       in-memory tail on a hard kill. Must be >= 0.1.
       Default: 2.0 — used at {!Keeper_crash_persistence}. *)
   let crash_persistence_drain_sec =
-    Float.max 0.1
-      (get_float ~default:2.0
-         "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC")
+    Float.max 0.1 (get_float ~default:2.0 "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC")
+  ;;
 
   (** Autonomous-turn semaphore queue poll interval in seconds.
 
@@ -293,9 +295,8 @@ module KeeperPollIntervals = struct
       Must be >= 0.001 (1ms floor — anything tighter is busy-loop).
       Default: 0.05. *)
   let autonomous_queue_poll_sec =
-    Float.max 0.001
-      (get_float ~default:0.05
-         "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC")
+    Float.max 0.001 (get_float ~default:0.05 "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC")
+  ;;
 end
 
 (** {1 Keeper Runtime Configuration} *)
@@ -309,11 +310,10 @@ module KeeperRuntime = struct
       Runtime_params, not parent-shell env edits. *)
   let deliberation_daily_budget_usd () =
     get_float ~default:0.10 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
+  ;;
 
   (** Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. *)
-  let snapshot_sec =
-    max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
-
+  let snapshot_sec = max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
 end
 
 (** {1 Keeper Context Reducer Configuration}
@@ -331,6 +331,7 @@ module KeeperReducer = struct
       Env: [MASC_KEEPER_REDUCER_CAP_TOKENS]. *)
   let cap_message_tokens =
     max 1024 (get_int ~default:32000 "MASC_KEEPER_REDUCER_CAP_TOKENS")
+  ;;
 
   (** Recent messages kept verbatim by
       {!Agent_sdk.Context_reducer.cap_message_tokens}.  Default: 3.
@@ -339,19 +340,20 @@ module KeeperReducer = struct
       Env: [MASC_KEEPER_REDUCER_KEEP_RECENT]. *)
   let cap_message_keep_recent =
     max 1 (min 20 (get_int ~default:3 "MASC_KEEPER_REDUCER_KEEP_RECENT"))
+  ;;
 end
 
 (** {1 Alert Dedup Configuration} *)
 
 module AlertDedup = struct
   (** Alert dedup window, clamped to >= 5s. Default: 60. *)
-  let window_sec =
-    Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
+  let window_sec = Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
 end
 
 (** Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. *)
 let keepalive_interval_sec_ =
   max 5 (min 300 (get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"))
+;;
 
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
@@ -359,14 +361,14 @@ module WorkAsHeartbeat = struct
   (** Master switch. When true, successful Coord.heartbeat after a
       unified turn counts as presence proof, allowing the next cycle to skip
       the full ensure_keeper_room_presence call. *)
-  let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
 
   (** Maximum seconds since last successful room heartbeat before presence
       sync is required again. Floor = keepalive interval (dynamic). *)
   let max_silence_sec =
     let floor = Float.of_int keepalive_interval_sec_ in
     Float.max floor (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
+  ;;
 end
 
 (** {1 Smart Heartbeat Configuration (Phase 2)} *)
@@ -375,8 +377,7 @@ module SmartHeartbeat = struct
   (** Master switch for adaptive heartbeat scheduling in the keepalive loop.
       When true, Heartbeat_smart.should_emit gates presence/snapshot/board/turn
       blocks, skipping cycles when the keeper is busy or deeply idle. *)
-  let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_SMART_HEARTBEAT"
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_SMART_HEARTBEAT"
 end
 
 (** {1 Keeper Keepalive Loop Constants} *)
@@ -393,32 +394,38 @@ module KeeperKeepalive = struct
       Range: [2, 50]. *)
   let max_consecutive_failures =
     max 2 (min 50 (get_int ~default:5 "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES"))
+  ;;
 
   (** Maximum consecutive unified turn failures before marking keeper as
       crashed. Covers LLM timeout, rate limit, and other turn errors.
       Default: 10. Range: [3, 100]. *)
   let max_consecutive_turn_failures =
     max 3 (min 100 (get_int ~default:10 "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES"))
+  ;;
 
   (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
       wakeups from the same board post. Default: 60.0.
       Range: [5, 300]. *)
   let board_debounce_sec =
-    Float.max 5.0 (Float.min 300.0
-      (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
+    Float.max
+      5.0
+      (Float.min 300.0 (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
+  ;;
 
   (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
       response but more CPU polling. Default: 2.0.
       Range: [0.1, 10.0]. *)
   let sleep_chunk_sec =
-    Float.max 0.1 (Float.min 10.0
-      (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+    Float.max 0.1 (Float.min 10.0 (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+  ;;
 
   (** Jitter factor applied to heartbeat interval (fraction of base).
       Default: 0.2 (20%). Range: [0.0, 0.5]. *)
   let jitter_factor =
-    Float.max 0.0 (Float.min 0.5
-      (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
+    Float.max
+      0.0
+      (Float.min 0.5 (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
+  ;;
 
   (** {2 Idle Turn Constants}
 
@@ -433,12 +440,14 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS]. Default: 10. *)
   let max_idle_turns_autonomous =
     max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
+  ;;
 
   (** Max idle turns for reactive (board/mention triggered) keeper turns.
       Reactive turns have an explicit trigger — more patience warranted.
       Env: [MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE]. Default: 15. *)
   let max_idle_turns_reactive =
     max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
+  ;;
 
   (** Hard ceiling for all keeper timeout constants (seconds).
       No timeout may exceed this value regardless of env override.
@@ -467,8 +476,12 @@ module KeeperKeepalive = struct
       the full turn budget remains a container for fallback/retry work
       rather than one provider's spend. *)
   let turn_timeout_sec =
-    Float.max 60.0 (Float.min timeout_hard_ceiling_sec
-      (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+    Float.max
+      60.0
+      (Float.min
+         timeout_hard_ceiling_sec
+         (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+  ;;
 
   let oas_timeout_default_sec = 300.0
 
@@ -483,8 +496,12 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 180.0.
       Range: [5, 1200]. *)
   let admission_wait_timeout_sec =
-    Float.max 5.0 (Float.min 1200.0
-      (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+    Float.max
+      5.0
+      (Float.min
+         1200.0
+         (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+  ;;
 
   (** Maximum time a scheduled autonomous keeper will wait for the local
       keeper turn gate before skipping the cycle. Reactive turns still wait
@@ -492,8 +509,12 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC]. Default: 30.0.
       Range: [5, 300]. *)
   let autonomous_slot_wait_timeout_sec =
-    Float.max 5.0 (Float.min 300.0
-      (get_float ~default:30.0 "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"))
+    Float.max
+      5.0
+      (Float.min
+         300.0
+         (get_float ~default:30.0 "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"))
+  ;;
 
   (** Per-call timeout in seconds for a single OAS Agent.run execution.
       Guards against indefinite LLM response waits within a turn.
@@ -515,6 +536,7 @@ module KeeperKeepalive = struct
       let capped = Option.map (fun v -> Float.min v 600.0) parsed in
       Some (Float.max 30.0 (Option.value ~default:300.0 capped))
     | None -> Some 300.0
+  ;;
 
   (** Maximum turns per single OAS Agent.run call.
       Keeper resumes via checkpoint in the next keepalive cycle when
@@ -528,6 +550,7 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 30. Range: [1, 100]. *)
   let oas_max_turns_per_call =
     max 1 (min 100 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
+  ;;
 
   (** Smaller turn budget for scheduled autonomous cycles so one keeper does
       not monopolize the autonomous semaphore for minutes at a time.
@@ -543,14 +566,20 @@ module KeeperKeepalive = struct
       Default: min(global, 10). Range: [1, global]. *)
   let oas_max_turns_per_call_scheduled_autonomous =
     let default = min oas_max_turns_per_call 10 in
-    max 1
-      (min oas_max_turns_per_call
-         (min 100
-            (get_int ~default
-               "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
+    max
+      1
+      (min
+         oas_max_turns_per_call
+         (min
+            100
+            (get_int ~default "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
+  ;;
 
   let oas_timeout_for_estimated_input_tokens_with_turn_budget
-      ~(estimated_input_tokens : int) ~(max_turns : int) : float =
+        ~(estimated_input_tokens : int)
+        ~(max_turns : int)
+    : float
+    =
     let _ = max_turns in
     match oas_timeout_sec_override with
     | Some v -> v
@@ -562,26 +591,29 @@ module KeeperKeepalive = struct
          the OAS agent's loop budget elsewhere; it is not a wall-clock input. *)
       let _ = estimated_input_tokens in
       Float.min turn_timeout_sec oas_timeout_default_sec
+  ;;
 
-  let oas_timeout_for_estimated_input_tokens
-      ~(estimated_input_tokens : int) : float =
+  let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) : float =
     oas_timeout_for_estimated_input_tokens_with_turn_budget
       ~estimated_input_tokens
       ~max_turns:oas_max_turns_per_call
+  ;;
 
   (** Backward-compatible accessor: returns the env override or 300s default.
       Prefer {!oas_timeout_for_estimated_input_tokens} when a live prompt
       estimate is available. *)
   let oas_timeout_sec =
     Option.value ~default:oas_timeout_default_sec oas_timeout_sec_override
+  ;;
 
   (** Idle-gap timeout for streaming OAS provider responses.
       This bounds time between streamed lines, not total turn duration.
       Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: 120. Range: [5, 600]. *)
   let stream_idle_timeout_sec =
-    Float.max 5.0
-      (Float.min 600.0
-         (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
+    Float.max
+      5.0
+      (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
+  ;;
 
   (** Stdout-idle timeout for CLI subprocess transports (Kimi CLI today;
       Claude Code / Gemini CLI / Codex CLI need an OAS upstream change to
@@ -593,9 +625,10 @@ module KeeperKeepalive = struct
       @category Timeouts
       @ops_class operator *)
   let cli_subprocess_idle_sec =
-    Float.max 10.0
-      (Float.min 600.0
-         (get_float ~default:120.0 "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"))
+    Float.max
+      10.0
+      (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"))
+  ;;
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
@@ -605,6 +638,7 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 4. *)
   let idle_skip_threshold =
     max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
+  ;;
 end
 
 (** {1 Keeper Watchdog Configuration}
@@ -624,22 +658,27 @@ module KeeperWatchdog = struct
       a warning so the watchdog does not declare a keeper stale later than
       the turn itself could possibly run. *)
   let stale_threshold_sec =
-    let raw = Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_STALE_SEC") in
-    if raw > KeeperKeepalive.turn_timeout_sec then (
-      Log.warn "MASC_KEEPER_WATCHDOG_STALE_SEC (%.1f) exceeds turn_timeout_sec (%.1f); clamping to turn_timeout_sec"
-        raw KeeperKeepalive.turn_timeout_sec;
-      KeeperKeepalive.turn_timeout_sec
-    ) else raw
+    let raw =
+      Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_STALE_SEC")
+    in
+    if raw > KeeperKeepalive.turn_timeout_sec
+    then (
+      Log.warn
+        "MASC_KEEPER_WATCHDOG_STALE_SEC (%.1f) exceeds turn_timeout_sec (%.1f); clamping \
+         to turn_timeout_sec"
+        raw
+        KeeperKeepalive.turn_timeout_sec;
+      KeeperKeepalive.turn_timeout_sec)
+    else raw
+  ;;
 
   (** Watchdog poll interval in seconds. Must be >= 5.
       Default: 30. *)
-  let poll_sec =
-    Float.max 5.0 (get_float ~default:30.0 "MASC_KEEPER_WATCHDOG_POLL_SEC")
+  let poll_sec = Float.max 5.0 (get_float ~default:30.0 "MASC_KEEPER_WATCHDOG_POLL_SEC")
 
   (** Consecutive noop turns before considering the keeper stuck in a
       failure loop. Must be >= 2. Default: 3. *)
-  let noop_threshold =
-    max 2 (get_int ~default:3 "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD")
+  let noop_threshold = max 2 (get_int ~default:3 "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD")
 
   (** Grace period after fiber start before idle-stale detection activates.
       Prevents false positives on server restart when [last_turn_ts] is
@@ -648,26 +687,27 @@ module KeeperWatchdog = struct
       up to 255 s plus one heartbeat cycle). *)
   let grace_period_sec =
     Float.max 0.0 (get_float ~default:360.0 "MASC_KEEPER_WATCHDOG_GRACE_SEC")
+  ;;
 
   (** Sliding window for stale-termination escalation tracking.
       Default: 21600 (6 hours). *)
   let termination_window_sec =
     Float.max 3600.0 (get_float ~default:21600.0 "MASC_KEEPER_TERMINATION_WINDOW_SEC")
+  ;;
 
   (** Number of stale terminations within [termination_window_sec] before
       escalating to [Stale_termination_storm]. Default: 5. *)
-  let escalation_threshold =
-    max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
+  let escalation_threshold = max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
 
   (** Fleet batch-termination detection window in seconds.
       Default: 60. *)
   let batch_window_sec =
     Float.max 1.0 (get_float ~default:60.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
+  ;;
 
   (** Number of distinct keepers terminating within [batch_window_sec] before
       emitting a fleet batch alert. Default: 5. *)
-  let batch_threshold =
-    max 1 (get_int ~default:5 "MASC_KEEPER_BATCH_THRESHOLD")
+  let batch_threshold = max 1 (get_int ~default:5 "MASC_KEEPER_BATCH_THRESHOLD")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)
@@ -677,12 +717,15 @@ module KeeperGrpc = struct
       Default: 5. Range: [1, 20]. *)
   let max_reconnect_attempts =
     max 1 (min 20 (get_int ~default:5 "MASC_KEEPER_GRPC_MAX_RECONNECT"))
+  ;;
 
   (** Backoff delay between gRPC reconnect attempts in seconds.
       Default: 5.0. Range: [1.0, 60.0]. *)
   let reconnect_backoff_sec =
-    Float.max 1.0 (Float.min 60.0
-      (get_float ~default:5.0 "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"))
+    Float.max
+      1.0
+      (Float.min 60.0 (get_float ~default:5.0 "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"))
+  ;;
 end
 
 (** {1 Proactive Generation} *)
@@ -692,11 +735,13 @@ module KeeperProactive = struct
       Default: 3. Range: [1, 10]. *)
   let max_attempts =
     max 1 (min 10 (get_int ~default:3 "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"))
+  ;;
 
   (** Stage timing ring buffer size for Phase 0 profiling.
       Default: 100. Range: [10, 1000]. *)
   let stage_timing_ring_size =
     max 10 (min 1000 (get_int ~default:100 "MASC_KEEPER_STAGE_TIMING_RING_SIZE"))
+  ;;
 end
 
 (** {1 Tool Execution} *)
@@ -707,6 +752,7 @@ module KeeperToolExec = struct
       Default: 3. Range: [2, 20]. *)
   let max_consecutive_tool_failures =
     max 2 (min 20 (get_int ~default:3 "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"))
+  ;;
 end
 
 (** {1 Context Ratio Hard Cap}
@@ -717,6 +763,7 @@ end
 
 let context_ratio_hard_cap =
   Float.max 0.80 (Float.min 0.99 (get_float ~default:0.95 "MASC_CONTEXT_RATIO_HARD_CAP"))
+;;
 
 (** {1 Context Compaction (OAS)} *)
 
@@ -724,22 +771,21 @@ module ContextCompact = struct
   let w_recency = get_float ~default:0.50 "MASC_COMPACT_W_RECENCY"
   let w_role = get_float ~default:0.35 "MASC_COMPACT_W_ROLE"
   let w_tool = get_float ~default:0.15 "MASC_COMPACT_W_TOOL"
-
   let role_system = get_float ~default:1.0 "MASC_COMPACT_ROLE_SYSTEM"
   let role_tool = get_float ~default:0.7 "MASC_COMPACT_ROLE_TOOL"
   let role_user = get_float ~default:0.6 "MASC_COMPACT_ROLE_USER"
   let role_assistant = get_float ~default:0.4 "MASC_COMPACT_ROLE_ASSISTANT"
-
   let tool_present = get_float ~default:0.8 "MASC_COMPACT_TOOL_PRESENT"
   let tool_absent = get_float ~default:0.5 "MASC_COMPACT_TOOL_ABSENT"
-
   let anchor_boost = get_float ~default:0.95 "MASC_COMPACT_ANCHOR_BOOST"
   let drop_importance_threshold = get_float ~default:0.3 "MASC_COMPACT_DROP_THRESHOLD"
   let summarize_keep_recent = get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
-
   let tool_output_prune_limit = get_int ~default:1500 "MASC_COMPACT_TOOL_PRUNE_LIMIT"
 
-  let dynamic_multi_agent_ratio = get_float ~default:0.80 "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
+  let dynamic_multi_agent_ratio =
+    get_float ~default:0.80 "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
+  ;;
+
   let dynamic_focused_ratio = get_float ~default:0.70 "MASC_COMPACT_DYN_FOCUSED_RATIO"
   let small_local_floor = get_int ~default:64_000 "MASC_COMPACT_SMALL_LOCAL_FLOOR"
   let large_cloud_floor = get_int ~default:500_000 "MASC_COMPACT_LARGE_CLOUD_FLOOR"
@@ -761,14 +807,14 @@ module DockerPlayground = struct
       P2b: aliased to {!Env_config_sandbox.Runtime.docker_playground_enabled};
       [()] call freezes the value at module init to preserve the
       original [Feature_flag_registry.get_bool] semantics. *)
-  let enabled =
-    Env_config_sandbox.Runtime.docker_playground_enabled ()
+  let enabled = Env_config_sandbox.Runtime.docker_playground_enabled ()
 
   (** Docker container name for keeper playground execution.
       Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playground".
       Not yet in {!Env_config_sandbox} — kept here. *)
   let container_name =
     get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
+  ;;
 
   (** Container-side root under which keeper playground bundles are mounted.
       Host [<base_path>/.masc/playground/<keeper>/…] maps to
@@ -777,8 +823,8 @@ module DockerPlayground = struct
       Default: "/home/keeper/playground".
       Not yet in {!Env_config_sandbox} — kept here. *)
   let container_playground_root =
-    get_string ~default:"/home/keeper/playground"
-      "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
+    get_string ~default:"/home/keeper/playground" "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
+  ;;
 end
 
 module KeeperSandbox = struct
@@ -792,37 +838,21 @@ module KeeperSandbox = struct
       semantics, env var names, and defaults. *)
 
   let hard_mode = Env_config_sandbox.Hardening.hard_mode
-
   let docker_image = Env_config_sandbox.Runtime.docker_image
-
   let preflight_enabled = Env_config_sandbox.Preflight.enabled
-
   let pids_limit = Env_config_sandbox.Hardening.pids_limit
-
   let nofile_limit = Env_config_sandbox.Hardening.nofile_limit
-
   let memory = Env_config_sandbox.Hardening.memory
-
   let tmpfs_size = Env_config_sandbox.Hardening.tmpfs_size
-
   let relax_fs = Env_config_sandbox.Hardening.relax_fs
-
   let read_only_rootfs_args = Env_config_sandbox.Hardening.read_only_rootfs_args
-
   let tmpfs_mount = Env_config_sandbox.Hardening.tmpfs_mount
-
   let seccomp_profile = Env_config_sandbox.Hardening.seccomp_profile
-
   let require_rootless = Env_config_sandbox.Hardening.require_rootless
-
   let require_userns = Env_config_sandbox.Hardening.require_userns
-
   let cleanup_enabled = Env_config_sandbox.Cleanup.enabled
-
   let cleanup_stale_after_sec = Env_config_sandbox.Cleanup.stale_after_sec
-
   let cleanup_interval_sec = Env_config_sandbox.Cleanup.interval_sec
-
   let with_git_dispatch_enabled = Env_config_sandbox.Runtime.git_dispatch
 
   (** Legacy RFC-0006 Phase B-1 flag.
@@ -832,14 +862,14 @@ module KeeperSandbox = struct
       config surfaces and should not gate runtime sandbox policy. *)
   let symmetric_read_containment () =
     get_bool ~default:false "MASC_KEEPER_SYMMETRIC_SANDBOX"
+  ;;
 
   (** Legacy RFC-0006 Phase B-2 flag.
 
       Docker read routing now follows [sandbox_profile=docker]
       unconditionally. This getter remains only for backward-compatible
       config surfaces and should not gate runtime sandbox policy. *)
-  let docker_read_routing () =
-    get_bool ~default:false "MASC_KEEPER_DOCKER_READ"
+  let docker_read_routing () = get_bool ~default:false "MASC_KEEPER_DOCKER_READ"
 end
 
 module DashboardHealth = struct
@@ -847,7 +877,10 @@ module DashboardHealth = struct
   let ctx_warn = get_float ~default:0.8 "MASC_DASHBOARD_HEALTH_CTX_WARN"
   let penalty_critical = get_float ~default:20.0 "MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL"
   let penalty_warn = get_float ~default:10.0 "MASC_DASHBOARD_HEALTH_PENALTY_WARN"
-  let runtime_warning_ctx_ratio = get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
+
+  let runtime_warning_ctx_ratio =
+    get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
+  ;;
 end
 
 (** {1 Wake-time Payload Telemetry}
@@ -864,8 +897,7 @@ end
 module KeeperTelemetry = struct
   (** Master switch for wake-payload measurement. Default off so the hot
       path is untouched until a baseline sweep is explicitly requested. *)
-  let payload_telemetry_enabled () =
-    get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
+  let payload_telemetry_enabled () = get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
 end
 
 (** {1 Cascade Runtime Overrides}
@@ -907,6 +939,7 @@ module KeeperCascade = struct
       (match parts with
        | [] -> None
        | _ -> Some parts)
+  ;;
 end
 
 (** {1 Transient Retry Backoff}
@@ -925,11 +958,15 @@ module KeeperRetryBackoff = struct
   (** Base delay (seconds) for exponential backoff.
       Delay at attempt [n] is [base * 2^(n-1)].
       Env: [MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC].  Default: 1.0. *)
-  let transient_backoff_base_sec () = get_float ~default:1.0 "MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC"
+  let transient_backoff_base_sec () =
+    get_float ~default:1.0 "MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC"
+  ;;
 
   (** Hard cap on backoff delay (seconds).
       Env: [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC].  Default: 4.0. *)
-  let transient_backoff_cap_sec () = get_float ~default:4.0 "MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC"
+  let transient_backoff_cap_sec () =
+    get_float ~default:4.0 "MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC"
+  ;;
 
   (** Exponential backoff delay for transient retry [attempt] (1-indexed).
       Env: [MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC] and
@@ -938,6 +975,7 @@ module KeeperRetryBackoff = struct
     let base = transient_backoff_base_sec () in
     let cap = transient_backoff_cap_sec () in
     Float.min cap (base *. Float.of_int (1 lsl (attempt - 1)))
+  ;;
 
   (** Productive slot-phase budget (seconds).  PR #13120: when a
       cascade returns a recoverable error after the keeper has
@@ -966,9 +1004,10 @@ module KeeperRetryBackoff = struct
       at all; when they do, 180 s is still well within reasonable
       tail latency. *)
   let degraded_retry_slot_phase_budget_sec =
-    Float.max 5.0
-      (get_float ~default:180.0
-         "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC")
+    Float.max
+      5.0
+      (get_float ~default:180.0 "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC")
+  ;;
 end
 
 (** RFC-0022 §9 rollout flag for the in-attempt streaming liveness gate.
@@ -988,6 +1027,7 @@ module CascadeAttemptLiveness = struct
     | Off -> "off"
     | Observe -> "observe"
     | Enforce -> "enforce"
+  ;;
 
   let warned_unknown = ref false
 
@@ -998,15 +1038,17 @@ module CascadeAttemptLiveness = struct
     | "" | "observe" -> Observe
     | "enforce" | "on" | "1" | "true" -> Enforce
     | other ->
-        if not !warned_unknown then begin
-          warned_unknown := true;
-          prerr_endline
-            (Printf.sprintf
-               "[env_config_keeper] WARN: MASC_CASCADE_ATTEMPT_LIVENESS=%s \
-                unrecognised, defaulting to observe"
-               other)
-        end;
-        Observe
+      if not !warned_unknown
+      then (
+        warned_unknown := true;
+        prerr_endline
+          (Printf.sprintf
+             "[env_config_keeper] WARN: MASC_CASCADE_ATTEMPT_LIVENESS=%s unrecognised, \
+              defaulting to observe"
+             other));
+      Observe
+  ;;
 end
 
 (** Print configuration summary for debugging *)
+

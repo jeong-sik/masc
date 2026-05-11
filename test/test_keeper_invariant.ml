@@ -36,6 +36,14 @@ let test_sandbox_isolation_empty_roots () =
   let paths = ["/tmp/masc_sandbox_turn_1/foo.ml"] in
   require_error "empty roots" (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
 
+let test_sandbox_isolation_root_slash () =
+  (* Regression for the prefix="//" degenerate case: when root is "/", every
+     absolute path must be treated as in-sandbox. *)
+  let roots = ["/"] in
+  let paths = ["/etc/passwd"; "/tmp/file"; "/"] in
+  require_ok "root slash"
+    (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
+
 (* ================================================================ *)
 (* credential_isolation tests                                         *)
 (* ================================================================ *)
@@ -48,8 +56,18 @@ let test_credential_isolation_ok () =
 
 let test_credential_isolation_violation () =
   let credential = { Inv.keeper_id = "keeper_a"; github_account = "gh_a" } in
-  let others = [{ Inv.keeper_id = "keeper_a"; github_account = "gh_a" }] in
+  (* Cross-persona reuse: keeper_b claims the github account already bound
+     to keeper_a. *)
+  let others = [{ Inv.keeper_id = "keeper_b"; github_account = "gh_a" }] in
   require_error "credential violation"
+    (Inv.credential_isolation ~keeper:"keeper_a" ~credential ~other_keepers:others)
+
+let test_credential_isolation_self_duplicate_ok () =
+  let credential = { Inv.keeper_id = "keeper_a"; github_account = "gh_a" } in
+  (* A repeated self-entry (same keeper_id, same github_account) is not a
+     cross-persona conflict. *)
+  let others = [{ Inv.keeper_id = "keeper_a"; github_account = "gh_a" }] in
+  require_ok "self duplicate ok"
     (Inv.credential_isolation ~keeper:"keeper_a" ~credential ~other_keepers:others)
 
 let test_credential_isolation_same_keeper_diff_account () =
@@ -143,6 +161,7 @@ let () =
             test_sandbox_isolation_sibling_prefix_rejected;
           test_case "path_traversal_rejected" `Quick
             test_sandbox_isolation_path_traversal_rejected;
+          test_case "root_slash" `Quick test_sandbox_isolation_root_slash;
         ] );
       ( "credential_isolation",
         [
@@ -150,6 +169,8 @@ let () =
           test_case "violation" `Quick test_credential_isolation_violation;
           test_case "same_keeper_diff_account" `Quick
             test_credential_isolation_same_keeper_diff_account;
+          test_case "self_duplicate_ok" `Quick
+            test_credential_isolation_self_duplicate_ok;
         ] );
       ( "tool_surface_monotonicity",
         [

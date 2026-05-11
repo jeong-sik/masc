@@ -122,18 +122,18 @@ val make_inline_sse_conn :
 (** {1 Connect-rate guard} *)
 
 val check_sse_connect_guard :
-  string -> (unit, string * float) result
+  string -> (unit, Sse_reject_reason.t * float) result
 (** [check_sse_connect_guard session_id] verifies that the
     session's SSE connect rate is within the configured limits
     AND records the new connect time on success.
 
     Returns:
     - [Ok ()] when the connect is allowed.
-    - [Error ("session_cooldown", wait_s)] when
+    - [Error (Sse_reject_reason.Session_cooldown, wait_s)] when
       {!sse_reconnect_min_interval_s} has not elapsed since the
       last connect on this session.
-    - [Error ("window_limit", wait_s)] when the session has
-      hit {!sse_connect_max_in_window} connects within
+    - [Error (Sse_reject_reason.Window_limit, wait_s)] when the
+      session has hit {!sse_connect_max_in_window} connects within
       {!sse_connect_window_s}.  [wait_s] is the time until the
       oldest connect-time entry leaves the window.
 

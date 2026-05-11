@@ -194,7 +194,7 @@ let check_sse_connect_guard session_id =
         sse_reconnect_min_interval_s -. (now -. state.last_connect_at)
     in
     if session_wait_s > 0.0 then begin
-      result := Error ("session_cooldown", session_wait_s);
+      result := Error (Sse_reject_reason.Session_cooldown, session_wait_s);
       map
     end else begin
       let window_wait_s =
@@ -208,7 +208,7 @@ let check_sse_connect_guard session_id =
           0.0
       in
       if window_wait_s > 0.0 then begin
-        result := Error ("window_limit", window_wait_s);
+        result := Error (Sse_reject_reason.Window_limit, window_wait_s);
         map
       end else begin
         result := Ok ();

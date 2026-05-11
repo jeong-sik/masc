@@ -55,7 +55,7 @@ let compact_if_needed_typed
       ~(meta : keeper_meta)
       ~(now_ts : float)
       (ctx : working_context)
-  : working_context * string option * compaction_decision
+  : working_context * Compaction_trigger.t option * compaction_decision
   =
   let ratio = context_ratio ctx in
   let msg_count = message_count ctx in

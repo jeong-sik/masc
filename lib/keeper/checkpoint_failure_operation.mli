@@ -13,5 +13,7 @@ type t =
   | Oas_io (** Generic OAS checkpoint I/O failure. *)
   | Oas_sdk (** OAS SDK-level checkpoint error. *)
   | Load_legacy (** Legacy checkpoint format load failure. *)
+  | Migration_save (** Persisting a migrated checkpoint to the OAS store failed. *)
+  | Restore_legacy (** Restoring the working context from a legacy checkpoint raised. *)
 
 val to_label : t -> string

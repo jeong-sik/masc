@@ -129,7 +129,7 @@ type t =
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types.sandbox_profile
   ; sandbox_root : string option
-  ; network_mode : string
+  ; network_mode : Keeper_types.network_mode
   ; approval_profile : string option
   ; approval_profile_derived : bool
   ; cascade_name : cascade_name

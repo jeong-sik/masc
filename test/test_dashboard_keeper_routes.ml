@@ -635,8 +635,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
       sandbox_kind =
         Masc_mcp.Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;
-      network_mode =
-        Masc_mcp.Keeper_types.network_mode_to_string meta.network_mode;
+      network_mode = meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name =

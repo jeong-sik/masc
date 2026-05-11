@@ -144,7 +144,7 @@ let append_keeper_receipt ?(outcome = "ok")
         };
       sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;
-      network_mode = Keeper_types.network_mode_to_string meta.network_mode;
+      network_mode = meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name = Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta);

@@ -85,12 +85,23 @@ let with_deny_selector policy selector =
 let with_deny_names policy names =
   with_deny_selector policy (Names names)
 
+(* Membership-only normalization: skip empties + trim, but skip the
+   StringSet dedup that [normalize_names] performs (duplicates do not
+   change membership).  Short-circuits on first match via [List.exists]. *)
+let name_in_normalized_list name candidates =
+  List.exists
+    (fun candidate ->
+      let trimmed = String.trim candidate in
+      (not (String.equal trimmed ""))
+      && String.equal trimmed name)
+    candidates
+
 let rec selector_matches_name selector name =
   match selector with
   | Empty -> false
   | All -> true
   | Names names ->
-      List.mem name (normalize_names names)
+      name_in_normalized_list name names
   | Surface surface ->
       Tool_catalog.is_on_surface surface name
   | Union selectors ->
@@ -135,20 +146,26 @@ let rec resolve_selector ?candidates selector =
           let first_set = resolve_selector ?candidates first in
           List.fold_left
             (fun acc sel ->
-              let resolved = resolve_selector ?candidates sel in
-              List.filter (fun name -> List.mem name resolved) acc)
+              let resolved_set =
+                StringSet.of_list (resolve_selector ?candidates sel)
+              in
+              List.filter (fun name -> StringSet.mem name resolved_set) acc)
             first_set rest
           |> normalize_names)
   | Diff { base; exclude } ->
       let base_resolved = resolve_selector ?candidates base in
-      let exclude_resolved = resolve_selector ?candidates exclude in
+      let exclude_set =
+        StringSet.of_list (resolve_selector ?candidates exclude)
+      in
       base_resolved
-      |> List.filter (fun name -> not (List.mem name exclude_resolved))
+      |> List.filter (fun name -> not (StringSet.mem name exclude_set))
       |> normalize_names
 
 let resolve ?candidates policy =
   let allowed = resolve_selector ?candidates policy.allow in
-  let denied = resolve_selector ?candidates policy.deny in
+  let denied_set =
+    StringSet.of_list (resolve_selector ?candidates policy.deny)
+  in
   allowed
-  |> List.filter (fun name -> not (List.mem name denied))
+  |> List.filter (fun name -> not (StringSet.mem name denied_set))
   |> normalize_names

@@ -272,14 +272,18 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
   match assert_transition_allowed ?ctx ~from_state ~to_state () with
   | Ok _ -> ()
   | Error violation ->
+      (* Log first: [wrap_unit] catches [Assert_failure] only to bump the
+         Prometheus counter, then re-raises. Anything sequenced after
+         [wrap_unit] would never run, so the diagnostic warn has to
+         precede it for operators to see *which* transition violated. *)
+      Log.Keeper.warn ~keeper_name ~turn_id
+        "[fsm:transition:violation] %s -> %s (%s)"
+        violation.from_state violation.to_state violation.reason;
       let stage = violation.from_state ^ "->" ^ violation.to_state in
       Keeper_fsm_guard_runtime.wrap_unit
         ~action:"KeeperTurnFSM.Next"
         ~stage
-        (fun () -> assert false);
-      Log.Keeper.warn ~keeper_name ~turn_id
-        "[fsm:transition:violation] %s -> %s (%s)"
-        violation.from_state violation.to_state violation.reason
+        (fun () -> assert false)
 
 (* Per-keeper last-transition wallclock, used to record the dwell time
    spent in [prev] state when a transition fires. Single-domain Eio

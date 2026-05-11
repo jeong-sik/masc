@@ -5,6 +5,8 @@ import {
   KeeperBdiSnapshot,
   normalizeKeeperBdiSnapshot,
 } from './inspector-keeper-bdi'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { activeIdeFile } from './ide-shell'
 import {
   pinKeeper,
   pinnedKeepers,
@@ -243,6 +245,13 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: Keeper
   const error = slot.error
   const lastTool = snapshot?.last_tool_call ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
+  const cursor = cursorOverlaySignal.value.cursors.get(entry.keeperName)
+  const focusLabel = cursor?.file_path
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
+  const navigateToFocus = (): void => {
+    if (cursor?.file_path) activeIdeFile.value = cursor.file_path
+  }
 
   return html`
     <article
@@ -264,6 +273,26 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: Keeper
         ${entry.line !== null
           ? html`<span style=${{ color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${entry.line}</span>`
           : null}
+        ${focusLabel ? html`
+          <span
+            role="button"
+            tabIndex=${0}
+            onClick=${navigateToFocus}
+            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToFocus() } }}
+            title=${cursor?.file_path ?? ''}
+            style=${{
+              color: 'var(--color-accent-fg)',
+              fontSize: 'var(--fs-11)',
+              maxWidth: '160px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+              borderRadius: 'var(--r-0)',
+              padding: '0 var(--sp-1)',
+            }}
+          >${focusLabel}</span>
+        ` : null}
         <button
           type="button"
           aria-label=${`unpin ${entry.keeperName}`}
@@ -314,6 +343,13 @@ interface KeeperChipProps {
 function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps) {
   const tokens = slot.snapshot?.recent_token_spend?.[0]?.total_tokens ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
+  const cursor = cursorOverlaySignal.value.cursors.get(entry.keeperName)
+  const focusLabel = cursor?.file_path
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
+  const navigateToFocus = (): void => {
+    if (cursor?.file_path) activeIdeFile.value = cursor.file_path
+  }
   return html`
     <span
       role="listitem"
@@ -333,6 +369,23 @@ function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps)
       >
         <span>${entry.keeperName}</span>
         ${entry.line !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>L${entry.line}</span>` : null}
+        ${focusLabel ? html`
+          <span
+            role="button"
+            tabIndex=${0}
+            onClick=${(e: MouseEvent) => { e.stopPropagation(); navigateToFocus() }}
+            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToFocus() } }}
+            title=${cursor?.file_path ?? ''}
+            style=${{
+              color: 'var(--color-accent-fg)',
+              fontSize: 'var(--fs-10)',
+              maxWidth: '90px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >${focusLabel}</span>
+        ` : null}
         ${tokens !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>${tokens.toLocaleString()}</span>` : null}
       </button>
       <button

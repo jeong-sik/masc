@@ -13,6 +13,7 @@ import type {
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
+import { asKeeperRuntimeBlockerClass } from './lib/runtime-blocker-class'
 import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
 import type { CascadeRef } from './types'
@@ -558,8 +559,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
-        runtime_blocker_class:
-          (asString(row.runtime_blocker_class) as Keeper['runtime_blocker_class']) ?? null,
+        runtime_blocker_class: asKeeperRuntimeBlockerClass(row.runtime_blocker_class),
         runtime_blocker_summary: asString(row.runtime_blocker_summary) ?? null,
         runtime_blocker_continue_gate:
           typeof row.runtime_blocker_continue_gate === 'boolean'

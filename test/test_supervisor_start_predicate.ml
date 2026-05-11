@@ -58,8 +58,7 @@ let with_temp_masc_dir f =
 let test_disabled_bootstrap_with_disk_keepers_starts_sweep () =
   with_temp_masc_dir (fun config ->
     let stats =
-      KR.{ enabled = false; scanned = 0; started = 0;
-           stale = 0; recovering = 0 }
+      KR.{ scanned = 0; started = 0; stale = 0; recovering = 0 }
     in
     check bool
       "disabled bootstrap + disk keepers (operator profile) → true"
@@ -74,8 +73,7 @@ let test_disabled_bootstrap_with_disk_keepers_starts_sweep () =
 let test_started_gt_zero_starts_sweep_without_enabled () =
   with_temp_masc_dir (fun config ->
     let stats =
-      KR.{ enabled = false; scanned = 1; started = 1;
-           stale = 0; recovering = 0 }
+      KR.{ scanned = 1; started = 1; stale = 0; recovering = 0 }
     in
     check bool
       "stats.started > 0 even when enabled = false → true"
@@ -90,8 +88,7 @@ let test_started_gt_zero_starts_sweep_without_enabled () =
 let test_predicate_total_on_defaulted_stats () =
   with_temp_masc_dir (fun config ->
     let stats =
-      KR.{ enabled = false; scanned = 0; started = 0;
-           stale = 0; recovering = 0 }
+      KR.{ scanned = 0; started = 0; stale = 0; recovering = 0 }
     in
     let _ : bool = KR.should_start_supervisor_sweep ~config ~stats in
     ())

@@ -63,9 +63,6 @@ let rate_limit_config_of_yojson json =
          admin_multiplier; broadcast_per_minute; task_ops_per_minute }
   with e -> Error (Printexc.to_string e)
 
-let show_rate_limit_category = show_rate_limit_category
-let show_rate_limit_error = show_rate_limit_error
-
 let limit_for_category config = function
   | GeneralLimit -> config.per_minute
   | BroadcastLimit -> config.broadcast_per_minute
@@ -212,7 +209,7 @@ let to_string = function
   | System e -> System_error.to_string e
   | RateLimitExceeded e ->
       Printf.sprintf "[RateLimit] Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
-        (show_rate_limit_category e.category) e.current e.limit e.wait_seconds
+        (Rate_limit_types.rate_limit_category_to_string e.category) e.current e.limit e.wait_seconds
   | CacheError e -> (match e with
       | CacheReadFailed path -> Printf.sprintf "[CacheError] Read failed [path=%s]" path
       | CacheWriteFailed path -> Printf.sprintf "[CacheError] Write failed [path=%s]" path

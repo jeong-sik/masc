@@ -123,55 +123,54 @@ let append_keeper_receipt
   let started_at = Masc_domain.now_iso () in
   let ended_at = Masc_domain.now_iso () in
   let receipt : Keeper_execution_receipt.t =
-    {
-      keeper_name = meta.name;
-      agent_name = meta.agent_name;
-      trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id;
-      generation = meta.runtime.generation;
-      turn_count = Some 7;
-      current_task_id = None;
-      goal_ids = meta.active_goal_ids;
-      outcome;
-      terminal_reason_code;
-      response_text_present = true;
-      model_used = Some "openai:gpt-5.4";
-      requested_tools;
-      reported_tools;
-      observed_tools;
-      canonical_tools;
-      unexpected_tools = [];
-      tools_used;
-      tool_contract_result;
-      tool_surface =
-        {
-          turn_lane = Keeper_agent_tool_surface.Lane_tool_required;
-          tool_surface_class = Keeper_agent_tool_surface.Surface_mixed;
-          tool_requirement;
-          visible_tool_count = 1;
-          tool_gate_enabled = true;
-          tool_surface_fallback_used = false;
-          required_tools = [];
-          missing_required_tools = [];
-        };
-      sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
-      sandbox_root = Some config.base_path;
-      network_mode = meta.network_mode;
-      approval_profile = Some "trusted_local";
-      approval_profile_derived = false;
-      cascade_name = Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta);
-      cascade_selected_model = Some "openai:gpt-5.4";
-      cascade_attempt_count = 1;
-      cascade_fallback_applied = false;
-      cascade_outcome;
-      degraded_retry_applied = false;
-      degraded_retry_cascade = None;
-      fallback_reason = None;
-      cascade_rotation_attempts = [];
-      stop_reason = Some Cascade_runner.Completed;
-      error_kind = None;
-      error_message = None;
-      started_at;
-      ended_at;
+    { keeper_name = meta.name
+    ; agent_name = meta.agent_name
+    ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+    ; generation = meta.runtime.generation
+    ; turn_count = Some 7
+    ; current_task_id = None
+    ; goal_ids = meta.active_goal_ids
+    ; outcome
+    ; terminal_reason_code
+    ; response_text_present = true
+    ; model_used = Some "openai:gpt-5.4"
+    ; requested_tools
+    ; reported_tools
+    ; observed_tools
+    ; canonical_tools
+    ; unexpected_tools = []
+    ; tools_used
+    ; tool_contract_result
+    ; tool_surface =
+        { turn_lane = Keeper_agent_tool_surface.Lane_tool_required
+        ; tool_surface_class = Keeper_agent_tool_surface.Surface_mixed
+        ; tool_requirement
+        ; visible_tool_count = 1
+        ; tool_gate_enabled = true
+        ; tool_surface_fallback_used = false
+        ; required_tools = []
+        ; missing_required_tools = []
+        }
+    ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
+    ; sandbox_root = Some config.base_path
+    ; network_mode = meta.network_mode
+    ; approval_profile = Some "trusted_local"
+    ; approval_profile_derived = false
+    ; cascade_name =
+        Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta)
+    ; cascade_selected_model = Some "openai:gpt-5.4"
+    ; cascade_attempt_count = 1
+    ; cascade_fallback_applied = false
+    ; cascade_outcome
+    ; degraded_retry_applied = false
+    ; degraded_retry_cascade = None
+    ; fallback_reason = None
+    ; cascade_rotation_attempts = []
+    ; stop_reason = Some Cascade_runner.Completed
+    ; error_kind = None
+    ; error_message = None
+    ; started_at
+    ; ended_at
     }
   in
   Keeper_execution_receipt.append config receipt

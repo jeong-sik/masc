@@ -541,15 +541,18 @@ let derive_phase (c : conditions) : phase =
 let update_conditions (c : conditions) (ev : event) : conditions =
   match ev with
   | Heartbeat_ok -> { c with heartbeat_healthy = true }
-  | Heartbeat_failed { consecutive; max_allowed } ->
+  | Heartbeat_failed _ ->
     (* Any failure makes heartbeat unhealthy. Recovery requires Heartbeat_ok.
-       The consecutive count is for audit/logging, not for health determination. *)
-    let _ = max_allowed in
-    { c with heartbeat_healthy = consecutive = 0 }
+       The [consecutive] / [max_allowed] payload is for audit/logging, not
+       for health determination — mirrors TLA+ HeartbeatFailed which sets
+       [heartbeat_healthy' = FALSE] unconditionally
+       (specs/keeper-state-machine/KeeperStateMachine.tla §HeartbeatFailed). *)
+    { c with heartbeat_healthy = false }
   | Turn_succeeded -> { c with turn_healthy = true }
-  | Turn_failed { consecutive; max_allowed } ->
-    let _ = max_allowed in
-    { c with turn_healthy = consecutive = 0 }
+  | Turn_failed _ ->
+    (* Mirrors TLA+ TurnFailed: [turn_healthy' = FALSE] unconditional.
+       Same payload semantics as Heartbeat_failed (audit only). *)
+    { c with turn_healthy = false }
   | Context_measured { auto_rules; _ } ->
     { c with
       guardrail_triggered = auto_rules.guardrail_stop

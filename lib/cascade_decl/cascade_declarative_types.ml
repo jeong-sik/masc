@@ -69,6 +69,15 @@ type cascade_capabilities = {
   max_turns_per_attempt : int option;
       (** Optional per-attempt cap on [max_turns]. Parser rejects
           non-positive values (warn + None). *)
+  tolerates_bound_actor_fallback : bool;
+      (** Catalog-level static-validation flag: when [true], this provider
+          is a viable fallback target if the operator's catalog also lists
+          an adapter that requires per-keeper bridging (e.g. Codex CLI).
+          Read by
+          [Cascade_catalog_validator.codex_with_bound_actor_only_issue]
+          via [Provider_adapter.tolerates_bound_actor_fallback_for_kind].
+          SSOT mirror of the OCaml-side [tool_policy.tolerates_bound_actor_fallback]
+          (introduced in PR #14642). *)
 }
 [@@deriving show, eq]
 
@@ -82,6 +91,7 @@ let cascade_capabilities_default = {
   argv_prompt_preflight = false;
   uses_anthropic_caching = false;
   max_turns_per_attempt = None;
+  tolerates_bound_actor_fallback = false;
 }
 type cascade_provider = {
   id : string;

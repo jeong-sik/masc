@@ -66,6 +66,7 @@ type cascade_capabilities = {
   argv_prompt_preflight : bool;
   uses_anthropic_caching : bool;
   max_turns_per_attempt : int option;
+  tolerates_bound_actor_fallback : bool;
 }
 [@@deriving show, eq]
 

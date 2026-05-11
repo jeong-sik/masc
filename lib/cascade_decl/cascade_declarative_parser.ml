@@ -115,6 +115,7 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : cascade_capabilities =
     argv_prompt_preflight = b "argv-prompt-preflight";
     uses_anthropic_caching = b "uses-anthropic-caching";
     max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt";
+    tolerates_bound_actor_fallback = b "tolerates-bound-actor-fallback";
   }
 ;;
 

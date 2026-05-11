@@ -13,11 +13,9 @@ let keeper_internal_list : string list =
     (* code helpers *)
     "masc_code_read"
   ; "masc_code_search"
-  ; "masc_code_symbols"
-    (* web fetchers *)
+  ; "masc_code_symbols" (* web fetchers *)
   ; "masc_web_fetch"
-  ; "masc_web_search"
-    (* worktree management *)
+  ; "masc_web_search" (* worktree management *)
   ; "masc_worktree_create"
   ; "masc_worktree_list"
   ; "masc_worktree_remove"
@@ -27,22 +25,19 @@ let keeper_internal_list : string list =
   ; "masc_coordination_fsm_snapshot"
   ; "masc_reset"
   ; "masc_workflow_guide"
-  ; "masc_mcp_session"
-    (* plan management (keeper persona authoring) *)
+  ; "masc_mcp_session" (* plan management (keeper persona authoring) *)
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"
   ; "masc_plan_get"
   ; "masc_plan_init"
   ; "masc_plan_set_task"
-  ; "masc_plan_update"
-    (* run management (keeper persona execution log) *)
+  ; "masc_plan_update" (* run management (keeper persona execution log) *)
   ; "masc_run_deliverable"
   ; "masc_run_get"
   ; "masc_run_init"
   ; "masc_run_list"
   ; "masc_run_log"
-  ; "masc_run_plan"
-    (* webrtc (experimental, not in user surface definition) *)
+  ; "masc_run_plan" (* webrtc (experimental, not in user surface definition) *)
   ; "masc_webrtc_offer"
   ; "masc_webrtc_answer"
     (* === Wave 3 (this PR) — keeper_board_* duplicates === *)
@@ -65,6 +60,7 @@ let keeper_internal_list : string list =
   ; "keeper_board_stats"
   ; "keeper_board_vote"
   ]
+;;
 
 let keeper_internal_names () = keeper_internal_list
 
@@ -75,14 +71,15 @@ let keeper_internal_names () = keeper_internal_list
    surface-trim hot paths. *)
 let keeper_internal_set : (string, unit) Hashtbl.t =
   let table = Hashtbl.create (List.length keeper_internal_list * 2) in
-  List.iter
-    (fun name -> Hashtbl.replace table name ())
-    keeper_internal_list;
+  List.iter (fun name -> Hashtbl.replace table name ()) keeper_internal_list;
   table
+;;
 
 let classify ~name =
   if Hashtbl.mem keeper_internal_set name then Keeper_internal else Surface
+;;
 
 let scope_to_string = function
   | Surface -> "surface"
   | Keeper_internal -> "keeper_internal"
+;;

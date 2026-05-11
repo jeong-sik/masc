@@ -357,20 +357,61 @@ Next ==
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
 \* ── Safety Invariants ────────────────────────────────────
+\*
+\* CASCADE NAME ABSTRACTION (S1/S2/S3-buffer)
+\* ----------------------------------------
+\* The string literals "none", "local_recovery", and "local_only" used below
+\* are SPEC-LEVEL CANONICAL ROLE NAMES, not literal OCaml return values.
+\*
+\* On the OCaml side (`lib/keeper/keeper_cascade_routing.ml` +
+\* `lib/cascade/cascade_routes.ml`), cascade names are resolved through a
+\* typed `logical_use` enum (`Phase_recovery`, `Phase_buffer`) and a
+\* prioritised resolution chain in `cascade_name_for_use`:
+\*   (a) operator-supplied `routes.<key>` binding, if its target exists
+\*       in the live catalog;
+\*   (b) first catalog entry name (the boot-time default profile);
+\*   (c) `route_spec.aliases` first element, or the route key — *only*
+\*       when the catalog is empty (a state boot validation rejects).
+\* The literal string produced at runtime depends on operator catalog and
+\* routes (RFC-0058 declarative route mapping); only the *default empty
+\* catalog* boot path produces the literal strings written below.
+\*
+\* The invariants below are written as TLA+ string equalities, but those
+\* literals should be read as canonical *role identifiers* — they stand
+\* in for the typed `logical_use` role that production resolves through
+\* the chain above:
+\*   - "none"           ↔ "no cascade is active for this turn"
+\*   - "local_recovery" ↔ `Phase_recovery` role
+\*   - "local_only"     ↔ `Phase_buffer` role
+\* TLC still compares strings; the *semantic* claim is role identity.
+\* See `docs/tla-audit/kct-c3-terminal-cascade-contract-gap-2026-05-12.md`
+\* and `docs/tla-audit/kct-s2s3-failing-buffer-cascade-alignment-2026-05-12.md`
+\* (the latter lands via PR #14787) for the production indirection
+\* analysis.
 
-\* S1: Terminal phase never has an active cascade
+\* S1: Terminal phase never has an active cascade.
+\* OCaml note: `select_cascade` returns `base_cascade` for terminal phases
+\* (paper contract gap — caller graph upstream-gates the call so the value
+\* is unreachable in production).  See C-3 audit memo above.
 NoTerminalCascade ==
     phase = "Terminal" => effective_cascade = "none"
 
-\* S2: Cascade selection in Failing phase must yield local_recovery.
+\* S2: Cascade selection in Failing phase must yield the Phase_recovery role.
 \* Note: if a keeper transitions to Failing MID-TURN, the already-selected
 \* cascade remains — cascade is chosen at turn start, not re-evaluated.
 \* This invariant checks the selection action, not the runtime state.
+\* OCaml: `Failing -> Keeper_config.local_recovery_cascade_name`, which
+\* resolves through `Phase_recovery` route — string match only in the
+\* default catalog.  See S2/S3 audit memo above.
 FailingUsesRecovery ==
     (phase = "Failing" /\ turn_status = "selecting"
      /\ effective_cascade /= "none") =>
         effective_cascade = "local_recovery"
 
+\* S3 (buffer): Cascade selection in buffer-operation phases must yield
+\* the Phase_buffer role.  OCaml:
+\* `Compacting | HandingOff -> Keeper_config.local_only_cascade_name`,
+\* which resolves through `Phase_buffer` route.  See S2/S3 audit memo.
 BufferOpsUseLocalOnly ==
     (phase \in {"Compacting", "HandingOff"} /\ turn_status = "selecting"
      /\ effective_cascade /= "none") =>

@@ -17,7 +17,7 @@
     2. CLI providers always advertise runtime MCP.  All CLI kinds
        (Claude Code, Gemini CLI, Kimi CLI, Codex CLI) use runtime MCP
        for tool invocation, not inline function-calling.
-       [normalize_cli_provider_caps] forces this contract regardless of
+       [normalize_cli_caps_when] forces this contract regardless of
        OAS-level defaults.
 
     The CLI list is exhaustively typed via [match] so adding a
@@ -26,7 +26,7 @@
 
     Cross-reference:
     - [lib/provider_tool_support.ml] — [oas_capabilities_of_config]
-      and [normalize_cli_provider_caps]
+      and [normalize_cli_caps_when]
     - [planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-hashed-pretzel.md]
       Step 15 line item ("test_provider_capability_matrix.ml")
 *)

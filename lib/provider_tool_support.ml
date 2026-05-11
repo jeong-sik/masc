@@ -19,8 +19,18 @@ let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
 (** [normalize_cli_caps_when ~is_cli caps] overrides CLI runtime caps when
     [is_cli] is [true]. Decoupled from [is_cli_agent_provider] so callers
     that have already resolved the adapter (e.g. [oas_capabilities_of_config]
-    below) can avoid re-resolving for the same provider. See
-    [normalize_cli_provider_caps] for the legacy entry point. *)
+    below) can avoid re-resolving for the same provider.
+
+    Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
+    Kimi CLI) use runtime MCP for tool invocation, not inline
+    function-calling. The OAS base capabilities for CLI kinds may disagree
+    on [supports_runtime_mcp_tools] (e.g. Gemini CLI defaults to [false]
+    in OAS — see [Provider_adapter] gemini-cli row: MCP servers are read
+    only from [~/.gemini/settings.json] / project [.gemini/settings.json]
+    with no [--mcp-config] flag, so masc-mcp's per-keeper request-scoped
+    policies cannot be injected per invocation). This override forces all
+    CLI runtimes to the same contract: disable inline tools, enable
+    runtime MCP. *)
 let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
   if is_cli
   then
@@ -31,19 +41,6 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
     ; supports_runtime_tool_events = true
     }
   else caps
-;;
-
-(** CLI providers (Claude Code, Kimi CLI, Gemini CLI, Codex CLI) use runtime
-    MCP for tool invocation, not inline function-calling.  The OAS base
-    capabilities for CLI kinds may disagree on [supports_runtime_mcp_tools]
-    (e.g. Gemini CLI defaults to [false] in OAS despite supporting MCP via
-    its --mcp-config flag).  Normalize all CLI runtimes to the same
-    contract: disable inline tools, enable runtime MCP. *)
-let normalize_cli_provider_caps
-      ~(provider_cfg : Llm_provider.Provider_config.t)
-      (caps : Llm_provider.Capabilities.capabilities)
-  =
-  normalize_cli_caps_when ~is_cli:(is_cli_agent_provider provider_cfg) caps
 ;;
 
 (** Resolve OAS-level capabilities for a provider config.

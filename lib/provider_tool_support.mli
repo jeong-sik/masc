@@ -8,7 +8,7 @@
     - {!classify_rejection} / {!apply_required_tool_use_filter}: #10474
       priority-ordered rejection observability for cascade dashboards.
 
-    Internal helpers ({!normalize_cli_provider_caps},
+    Internal helpers ({!normalize_cli_caps_when},
     {!supports_runtime_mcp_http_headers}) stay private. *)
 
 (** {1 Capability record} *)
@@ -82,11 +82,19 @@ val runtime_mcp_policy_requires_http_headers
 (** [runtime_mcp_policy_requires_unsupported_http_headers cfg policy]
     is true iff [policy] contains an HTTP header that [cfg] cannot
     carry.  This is stricter than
-    {!runtime_mcp_policy_requires_http_headers}: [codex_cli] may carry
-    the non-secret MASC identity headers
-    [x-masc-agent-name] and [x-masc-keeper-name], but still rejects
-    auth-bearing headers such as [Authorization] and
-    [x-masc-internal-token]. *)
+    {!runtime_mcp_policy_requires_http_headers}: it consults the
+    adapter's identity-header carve-out via
+    {!Provider_adapter.accepts_runtime_mcp_http_header_for_config}.
+
+    Example: [codex_cli] declares
+    [supports_runtime_mcp_http_headers = false] (no general header
+    support) but carries an identity-header carve-out covering
+    [Authorization] (rewritten into [bearer_token_env_var] so the
+    secret is delivered via subprocess env, not argv) and the
+    non-secret MASC routing labels [x-masc-agent-name] /
+    [x-masc-keeper-name].  Any other header key (e.g.
+    [x-masc-internal-token] or arbitrary user-supplied headers) is
+    still treated as unsupported and rejects the policy. *)
 val runtime_mcp_policy_requires_unsupported_http_headers
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Llm_transport.runtime_mcp_policy

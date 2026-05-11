@@ -251,3 +251,34 @@ let on_resolve_failure ~cascade ~reason =
   Prometheus.inc_counter metric_resolve_failure
     ~labels:[ ("cascade", cascade); ("reason", reason) ]
     ()
+
+(* [inspect_active] can settle in three Ok-but-degraded states:
+   - [Serving_last_known_good]  — fresh validation failed entirely;
+                                   iter 5 owns this metric.
+   - [Validated_with_rejections] — fresh validation succeeded but
+                                   PART of the cascade.toml was
+                                   rejected (e.g. a newly added
+                                   profile fails its own validation
+                                   while the rest of the catalog
+                                   stays valid).  Keeper turns still
+                                   route, but the rejected subset is
+                                   silently absent — the operator
+                                   who added the profile may not
+                                   realize it didn't take effect.
+
+   Reasons:
+   - "fresh_partial_rejection"   — validate_path_result newly
+                                    produced [Ok { rejected_update =
+                                    Some _ }] this call (L1059).
+   - "stale_partial_rejection_cached" — same-mtime cache replay
+                                         of a previously-cached
+                                         partial rejection (L1002).
+   The split mirrors the LKG counter's
+   ["validation_failed" / "stale_rejection_cached"] pair so dashboards
+   can tell entry from steady-state. *)
+let metric_validated_with_rejections = "masc_cascade_validated_with_rejections_total"
+
+let on_validated_with_rejections ~reason =
+  Prometheus.inc_counter metric_validated_with_rejections
+    ~labels:[ ("reason", reason) ]
+    ()

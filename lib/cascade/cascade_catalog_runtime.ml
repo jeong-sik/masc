@@ -1021,6 +1021,13 @@ let inspect_active ?sw ?net ?clock () =
                 fault — counter ticks but no log noise. *)
              Cascade_metrics.on_serving_last_known_good
                ~reason:"stale_rejection_cached"
+           | Ok (Validated_with_rejections _) ->
+             (* Same-mtime replay of a previously-cached partial
+                rejection.  Steady-state while the operator hasn't
+                fixed the rejected subset — counter ticks but no
+                log noise. *)
+             Cascade_metrics.on_validated_with_rejections
+               ~reason:"stale_partial_rejection_cached"
            | _ -> ());
           result
       | None -> (
@@ -1049,12 +1056,32 @@ let inspect_active ?sw ?net ?clock () =
                    Validated");
               Ok (Validated snapshot)
           | Ok { snapshot; rejected_update = Some rejection } ->
-              with_cache_lock (fun () ->
+              (* Capture prev cache state inside the same lock as
+                 the write so the [Validated -> Validated_with_rejections]
+                 transition is detected atomically (mirrors the LKG
+                 entry pattern in iter 5).  [prev_was_failing] is true
+                 if the previous state was already partial OR fully
+                 failing (LKG); the WARN below fires only on the
+                 clean -> partial transition. *)
+              let prev_was_failing =
+                with_cache_lock (fun () ->
+                  let prev = Option.is_some !cache.rejected_update in
                   cache :=
                     {
                       active_snapshot = Some snapshot;
                       rejected_update = Some rejection;
-                    });
+                    };
+                  prev)
+              in
+              Cascade_metrics.on_validated_with_rejections
+                ~reason:"fresh_partial_rejection";
+              if not prev_was_failing then
+                Log.Misc.warn
+                  "[CascadeCatalog] entering Validated_with_rejections: \
+                   %d profile(s) rejected (%s); cascade serves the validated \
+                   subset, operator should check newly-added profiles"
+                  (List.length rejection.profiles)
+                  (String.concat "; " rejection.errors);
               Ok
                 (Validated_with_rejections
                    { snapshot; rejected_update = rejection })

@@ -610,6 +610,21 @@ let test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable () =
    introduces a fourth reason — or renames an existing one — has to
    update this test, keeping the documented set in lockstep with the
    call sites. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_validated_with_rejections].  Mirrors the LKG
+   counter's documented-reason pinning (iter 5): the two reasons
+   [fresh_partial_rejection] and [stale_partial_rejection_cached]
+   must stay in lockstep with the two call sites in
+   [inspect_active].  A future refactor that introduces a third
+   reason — or renames an existing one — must update this test. *)
+let test_validated_with_rejections_helper_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_validated_with_rejections
+    ~reason:"fresh_partial_rejection";
+  Masc_mcp.Cascade_metrics.on_validated_with_rejections
+    ~reason:"stale_partial_rejection_cached";
+  check bool "both documented reasons callable without raising"
+    true true
+
 let test_resolve_failure_helper_documented_reasons_are_callable () =
   Masc_mcp.Cascade_metrics.on_resolve_failure
     ~cascade:"smoke_test_cascade" ~reason:"lookup_failed";
@@ -836,5 +851,9 @@ let () =
           test_case
             "resolve_failure: all three documented reasons callable" `Quick
             test_resolve_failure_helper_documented_reasons_are_callable;
+          test_case
+            "validated_with_rejections: both documented reasons callable"
+            `Quick
+            test_validated_with_rejections_helper_documented_reasons_are_callable;
         ] );
     ]

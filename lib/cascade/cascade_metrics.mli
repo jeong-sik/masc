@@ -70,3 +70,11 @@ val on_resolve_failure : cascade:string -> reason:string -> unit
     uses the normalized cascade name when available, or the raw
     cascade_name argument when normalization itself failed
     ([lookup_failed] arm). *)
+
+val on_validated_with_rejections : reason:string -> unit
+(** Tick the validated-with-rejections counter for one [inspect_active]
+    invocation that returned [Validated_with_rejections].  [reason]
+    must be one of [fresh_partial_rejection] (validate_path_result
+    newly produced a partial rejection on this call) or
+    [stale_partial_rejection_cached] (same-mtime cache replay of a
+    previously-cached partial rejection). *)

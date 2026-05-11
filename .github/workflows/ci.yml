@@ -932,7 +932,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.tla == 'true' }}
+    # PR mode: stay path-scoped (tla=true only when specs/keeper/oas/Makefile change).
+    # main push / schedule / workflow_dispatch: ignore path scope and always run,
+    # so a spec violation introduced by a non-tla-path PR (e.g. dashboard-only
+    # Draft via admin-merge fast-track) is detected on the next main run rather
+    # than persisting silently. See #14668 root cause analysis.
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.tla == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
 
     steps:
       - name: Checkout

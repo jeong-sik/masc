@@ -1,0 +1,55 @@
+name: TLA+ Main Verification
+
+# Independent of ci.yml — ensures every main commit gets TLA verification
+# even when ci.yml's workflow-level cancel-in-progress aborts the main ci
+# run due to rapid back-to-back merges.
+#
+# Background: #14668 fixed a clean-spec violation (KeeperCascadeRouting
+# TypeOK) that persisted on main for 4 days. #14670 forced TLA to run on
+# every main push by bypassing path-scope. However, ci.yml's
+# concurrency.cancel-in-progress=true on push events cancels the entire
+# workflow when the next merge lands, so 30+ consecutive main pushes
+# (2026-05-11 14:22-15:02 window) all cancelled before TLA could complete.
+#
+# This workflow has its own concurrency group keyed by sha, so each commit
+# gets its own slot and runs to completion regardless of subsequent pushes.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'  # belt-and-suspenders: 6h sweep catches gaps
+
+concurrency:
+  group: tla-main-${{ github.sha || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tla-specs:
+    name: TLA+ Model Checking (main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Download tla2tools.jar (pinned v1.8.0)
+        run: |
+          curl -fsSL -o specs/keeper-state-machine/tla2tools.jar \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+
+      - name: Run TLA+ model checking
+        run: |
+          make -C specs check-clean
+          make -C specs check-buggy

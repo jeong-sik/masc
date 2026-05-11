@@ -112,7 +112,8 @@ let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request req
 
 let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~session_id ~protocol_version
     ~reason ~retry_after_s reqd =
-  Transport_metrics.inc_sse_reject ~reason;
+  let reason_label = Sse_reject_reason.to_label reason in
+  Transport_metrics.inc_sse_reject ~reason:reason_label;
   let retry_after_s = Float.max retry_after_s 0.001 in
   let retry_after_header =
     retry_after_s |> Float.ceil |> int_of_float |> max 1 |> string_of_int
@@ -121,7 +122,7 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
     `Assoc
       [
         ("error", `String "sse_connection_rate_limited");
-        ("reason", `String reason);
+        ("reason", `String reason_label);
         ("retry_after_seconds", `Float retry_after_s);
       ]
     |> Yojson.Safe.to_string

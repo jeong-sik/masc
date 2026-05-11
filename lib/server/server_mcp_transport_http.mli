@@ -89,7 +89,8 @@ val get_last_event_id : Httpun.Request.t -> int option
 val mcp_headers : string -> string -> (string * string) list
 val json_headers :
   deps:deps -> string -> string -> string -> (string * string) list
-val check_sse_connect_guard : string -> (unit, string * float) result
+val check_sse_connect_guard
+  : string -> (unit, Sse_reject_reason.t * float) result
 val stop_sse_session : string -> unit
 val is_active_sse_session : string -> bool
 val reap_stale_guards : unit -> int

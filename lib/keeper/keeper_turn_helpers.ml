@@ -213,7 +213,7 @@ let post_turn_complete_task ~(cycle_completed : bool ref) = ignore cycle_complet
 
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   { turn_lane = "pre_dispatch"
-  ; tool_surface_class = "none"
+  ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
   ; tool_requirement = No_tools
   ; visible_tool_count = 0
   ; tool_gate_enabled = false

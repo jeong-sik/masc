@@ -134,7 +134,7 @@ let append_keeper_receipt ?(outcome = "ok")
       tool_surface =
         {
           turn_lane = "tool";
-          tool_surface_class = "mixed";
+          tool_surface_class = Keeper_agent_tool_surface.Surface_mixed;
           tool_requirement;
           visible_tool_count = 1;
           tool_gate_enabled = true;

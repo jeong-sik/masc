@@ -897,7 +897,9 @@ let append_decision_record
               let tool_surface_fields =
                 [
                   ("turn_lane", `String r.tool_surface.turn_lane);
-                  ("tool_surface_class", `String r.tool_surface.tool_surface_class);
+                  ( "tool_surface_class"
+                  , Keeper_agent_tool_surface.tool_surface_class_to_yojson
+                      r.tool_surface.tool_surface_class );
                   ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson r.tool_surface.tool_requirement);
                   ("visible_tool_count", `Int r.tool_surface.visible_tool_count);
                   ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);

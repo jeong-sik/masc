@@ -23,10 +23,26 @@ val tool_requirement_to_string : tool_requirement -> string
 val tool_requirement_of_string : string -> tool_requirement option
 val tool_requirement_to_yojson : tool_requirement -> Yojson.Safe.t
 
+(** Classification of the per-turn tool surface.  Closed sum type; the
+    OCaml side mirrors the RFC-0065 §3.2.2 KeeperToolSurface
+    SurfaceClassSet ({"none", "public_only", "mixed"}).
+    [@@deriving tla] emits [all_symbols : string list] so the
+    correspondence harness can parity-check against the spec catalog
+    without hand-pinning the label list. *)
+type tool_surface_class =
+  | Surface_none [@tla.symbol "none"]
+  | Surface_public_only [@tla.symbol "public_only"]
+  | Surface_mixed [@tla.symbol "mixed"]
+[@@deriving tla]
+
+val tool_surface_class_to_string : tool_surface_class -> string
+val tool_surface_class_of_string : string -> tool_surface_class option
+val tool_surface_class_to_yojson : tool_surface_class -> Yojson.Safe.t
+
 (** Diagnostic surface metrics emitted into trajectory entries. *)
 type tool_surface_metrics =
   { turn_lane : string
-  ; tool_surface_class : string
+  ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
@@ -55,7 +71,7 @@ type computed_tool_surface =
   ; selection_mode : string
   ; is_last_turn : bool
   ; is_warning_zone : bool
-  ; tool_surface_class : string
+  ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; tool_gate_requested : bool
   ; tool_surface_fallback_used : bool

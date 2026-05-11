@@ -69,7 +69,7 @@ type tool_requirement = Keeper_agent_tool_surface.tool_requirement
 
 type tool_surface =
   { turn_lane : string
-  ; tool_surface_class : string
+  ; tool_surface_class : Keeper_agent_tool_surface.tool_surface_class
   ; tool_requirement : Keeper_agent_tool_surface.tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
@@ -419,7 +419,9 @@ let to_json (receipt : t) =
       ?sandbox_root:receipt.sandbox_root
       ~network_mode:receipt.network_mode
       ?approval_mode:receipt.approval_profile
-      ~tool_surface_class:receipt.tool_surface.tool_surface_class
+      ~tool_surface_class:
+        (Keeper_agent_tool_surface.tool_surface_class_to_string
+           receipt.tool_surface.tool_surface_class)
       ~visible_tool_count:receipt.tool_surface.visible_tool_count
       ~required_tools:receipt.tool_surface.required_tools
       ~missing_required_tools:receipt.tool_surface.missing_required_tools
@@ -489,7 +491,9 @@ let to_json (receipt : t) =
         `Assoc
           [
             ("turn_lane", `String receipt.tool_surface.turn_lane);
-            ("tool_surface_class", `String receipt.tool_surface.tool_surface_class);
+            ( "tool_surface_class",
+              Keeper_agent_tool_surface.tool_surface_class_to_yojson
+                receipt.tool_surface.tool_surface_class );
             ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson receipt.tool_surface.tool_requirement);
             ("visible_tool_count", `Int receipt.tool_surface.visible_tool_count);
             ("tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled);
@@ -641,7 +645,9 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
               list_json receipt.tool_surface.missing_required_tools )
           ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
           ; "tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson receipt.tool_surface.tool_requirement
-          ; "tool_surface_class", `String receipt.tool_surface.tool_surface_class
+          ; ( "tool_surface_class"
+            , Keeper_agent_tool_surface.tool_surface_class_to_yojson
+                receipt.tool_surface.tool_surface_class )
           ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
           ] )
     ; ( "sandbox",

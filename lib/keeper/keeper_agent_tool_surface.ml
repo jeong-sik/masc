@@ -37,9 +37,34 @@ let tool_requirement_to_yojson = function
   | Optional -> `String "optional"
   | No_tools -> `String "none"
 
+(* Closed sum type for tool_surface_class.  Mirrors RFC-0065 §3.2.2
+   KeeperToolSurface SurfaceClassSet so the correspondence harness can
+   drop the hand-pinned label list.  [@tla.symbol "…"] fixes the wire
+   representation across JSON, Prometheus labels, dashboard surface,
+   and the .tla catalog. *)
+type tool_surface_class =
+  | Surface_none [@tla.symbol "none"]
+  | Surface_public_only [@tla.symbol "public_only"]
+  | Surface_mixed [@tla.symbol "mixed"]
+[@@deriving tla]
+
+let tool_surface_class_to_string = function
+  | Surface_none -> "none"
+  | Surface_public_only -> "public_only"
+  | Surface_mixed -> "mixed"
+
+let tool_surface_class_of_string = function
+  | "none" -> Some Surface_none
+  | "public_only" -> Some Surface_public_only
+  | "mixed" -> Some Surface_mixed
+  | _ -> None
+
+let tool_surface_class_to_yojson cls =
+  `String (tool_surface_class_to_string cls)
+
 type tool_surface_metrics =
   { turn_lane : string
-  ; tool_surface_class : string
+  ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
@@ -66,7 +91,7 @@ type computed_tool_surface =
   ; selection_mode : string
   ; is_last_turn : bool
   ; is_warning_zone : bool
-  ; tool_surface_class : string
+  ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; tool_gate_requested : bool
   ; tool_surface_fallback_used : bool

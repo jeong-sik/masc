@@ -219,10 +219,12 @@ let test_accept_on_exhaustion_terminal () =
 
 let test_surface_class_set_parity () =
   (* B2 spec catalog: SurfaceClassSet = {"none", "public_only", "mixed"}.
-     OCaml: keeper_run_tools.ml:949-955 emits exactly these strings.
-     There is no closed sum type on the OCaml side yet — the value
-     is a [string] field on [computed_tool_surface].  Hand-pin and
-     compare against the spec's enumerated catalog. *)
+     OCaml: now a closed sum type [tool_surface_class] with
+     [@@deriving tla] in [Keeper_agent_tool_surface].  The harness
+     drops the hand-pinned list and uses [all_symbols] directly —
+     the spec ↔ OCaml drift surface is the [@tla.symbol "…"]
+     attribute on each constructor, which the ppx serializes
+     into [all_symbols]. *)
   let spec_classes =
     Masc_test_deps.tla_quoted_set_from_repo_file_exn
       ~relpath:spec_relpath_b2
@@ -231,7 +233,7 @@ let test_surface_class_set_parity () =
   in
   let ocaml_classes =
     Masc_test_deps.sorted_strings
-      [ "none"; "public_only"; "mixed" ]
+      Masc_mcp.Keeper_agent_tool_surface.all_symbols
   in
   if ocaml_classes <> spec_classes then begin
     Printf.printf "OCaml surface classes : [%s]\n"
@@ -240,8 +242,8 @@ let test_surface_class_set_parity () =
       (String.concat "; " spec_classes);
     failwith
       "KeeperToolSurface SurfaceClassSet differs from OCaml \
-       tool_surface_class catalog — sync the spec or the OCaml-side \
-       contract list."
+       tool_surface_class all_symbols — sync the spec or the \
+       OCaml-side variant."
   end
 
 let test_requirement_set_parity () =

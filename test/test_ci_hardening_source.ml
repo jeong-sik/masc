@@ -1038,7 +1038,10 @@ let test_keeper_zombie_field_contracts () =
       tool_surface =
         {
           turn_lane = "unified";
-          tool_surface_class = "post_dispatch";
+          (* WORKAROUND: previously "post_dispatch" — invalid string never
+             emitted by producer.  Typed enum forces a real value.
+             Root: closed sum type disallows ad-hoc fixture strings. *)
+          tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_mixed;
           tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
           visible_tool_count = 1;
           tool_gate_enabled = true;

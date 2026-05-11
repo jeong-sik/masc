@@ -36,10 +36,12 @@ let with_room f =
 let coord_ctx config : Tool_coord.context =
   { Tool_coord.config; agent_name = "planner" }
 
-let parse_json_result (result : Tool_coord.tool_result) =
-  match result with
-  | { success = true; message = body } -> Yojson.Safe.from_string body
-  | { success = false; message = body } -> fail body
+let parse_json_result (result : Tool_result.t) =
+  (* RFC-0062 Phase 4d-2: Tool_coord.tool_result alias deleted.
+     Callers now consume Tool_result.t directly. [legacy_message] preserves
+     the prior string body for backward-compatible parsing. *)
+  if result.success then Yojson.Safe.from_string result.legacy_message
+  else fail result.legacy_message
 
 let principal_json ~kind ~id =
   `Assoc [ ("kind", `String kind); ("id", `String id) ]

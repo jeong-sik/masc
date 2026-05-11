@@ -28,9 +28,10 @@ module Make : functor (D : Docker_client.S) -> sig
 
   (** [execute_plan_with_retry ~retry plan] calls [D.run plan] up to
       [Keeper_backoff_policy.max_attempts retry] times *in total*
-      (one initial call plus up to [max_attempts - 1] retries on
-      retryable errors). Concretely: with [max_attempts = 3] the
-      callee may run at most three times — initial + 2 retries.
+      (one initial call plus up to [Keeper_backoff_policy.max_attempts
+      retry - 1] retries on retryable errors). Concretely: with
+      [Keeper_backoff_policy.max_attempts retry = 3] the callee may
+      run at most three times — initial + 2 retries.
 
       Returns the first [Ok], or the last [Error] after exhausting
       the call budget. Non-retryable errors return immediately

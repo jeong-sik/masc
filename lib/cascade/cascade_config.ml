@@ -879,7 +879,9 @@ let resolve_model_strings_traced_with
     let from_file_weighted =
       Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
     if from_file_weighted <> [] then
-      let ordered = order_weighted_entries ~rand_int from_file_weighted in
+      let ordered =
+        order_weighted_entries ~rand_int ~cascade:name from_file_weighted
+      in
       let models = List.map
           (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
       (models, Named)
@@ -893,7 +895,10 @@ let resolve_model_strings_traced_with
         Cascade_config_loader.load_profile_weighted
           ~config_path:path ~name:fallback_profile in
       if fallback_weighted <> [] then
-        let ordered = order_weighted_entries ~rand_int fallback_weighted in
+        let ordered =
+          order_weighted_entries
+            ~rand_int ~cascade:fallback_profile fallback_weighted
+        in
         let models = List.map
             (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
             ordered in
@@ -1036,7 +1041,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
     let from_file_weighted =
       Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
     if from_file_weighted <> [] then
-      let ordered = order_weighted_entries from_file_weighted in
+      let ordered = order_weighted_entries ~cascade:name from_file_weighted in
       let models = List.map
           (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
       let candidates = List.map candidate_info_of_weighted ordered in
@@ -1051,7 +1056,9 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
         Cascade_config_loader.load_profile_weighted
           ~config_path:path ~name:fallback_profile in
       if fallback_weighted <> [] then
-        let ordered = order_weighted_entries fallback_weighted in
+        let ordered =
+          order_weighted_entries ~cascade:fallback_profile fallback_weighted
+        in
         let models = List.map
             (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
         let candidates = List.map candidate_info_of_weighted ordered in

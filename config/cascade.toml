@@ -142,11 +142,30 @@ max-context = 128000
 tools-support = true
 streaming = true
 
+# Capabilities mirror OAS for_model_id_static gpt-5 family
+# (openai_chat_extended_capabilities + max-output override). M2 will
+# wire OAS to read these instead of substring-on-api-name.
+[models.codex-spark.capabilities]
+max-output-tokens = 128000
+supports-parallel-tool-calls = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+supports-response-format-json = true
+
 [models.kimi-coding]
 api-name = "kimi-for-coding"
 max-context = 128000
 tools-support = true
 streaming = true
+
+# Capabilities mirror OAS kimi_capabilities (only tool/reasoning flags
+# overridden from default_capabilities; multimodal/streaming/caching
+# left at default-false). M2 cutover preserves this asymmetry — if
+# kimi production actually streams natively this is an OAS bug to
+# rectify upstream, not here.
+[models.kimi-coding.capabilities]
+max-output-tokens = 32768
 
 [models.sonnet]
 api-name = "claude-sonnet-4-6"
@@ -156,11 +175,30 @@ thinking-support = true
 max-thinking-budget = 16000
 streaming = true
 
+# Capabilities mirror OAS for_model_id_static claude-sonnet-4 family
+# (anthropic_capabilities + max-output override). Anthropic prompt
+# caching is part of the standard Messages API.
+[models.sonnet.capabilities]
+max-output-tokens = 64000
+supports-parallel-tool-calls = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
 [models.haiku]
 api-name = "claude-haiku-4-5-20251001"
 max-context = 200000
 tools-support = true
 streaming = true
+
+# Capabilities mirror OAS for_model_id_static claude-haiku-4 family
+# (anthropic_capabilities + max-output override).
+[models.haiku.capabilities]
+max-output-tokens = 8192
+supports-parallel-tool-calls = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
 
 [models.gemini-flash]
 api-name = "gemini-3-flash-preview"
@@ -168,11 +206,33 @@ max-context = 128000
 tools-support = true
 streaming = true
 
+# Capabilities mirror OAS gemini_capabilities (matches starts_with
+# "gemini-3"). Gemini supports JSON mode natively.
+[models.gemini-flash.capabilities]
+max-output-tokens = 65000
+supports-parallel-tool-calls = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+supports-response-format-json = true
+
 [models.gemini-flash-lite]
 api-name = "gemini-3.1-flash-lite-preview"
 max-context = 128000
 tools-support = true
 streaming = true
+
+# Capabilities mirror OAS gemini_capabilities (api-name starts with
+# "gemini-3"). Lite variant shares the family's capability matrix in
+# OAS — refinement is a per-model M2 follow-up if production proves
+# different.
+[models.gemini-flash-lite.capabilities]
+max-output-tokens = 65000
+supports-parallel-tool-calls = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+supports-response-format-json = true
 
 [models.glm-5-turbo]
 api-name = "glm-5-turbo"
@@ -180,11 +240,28 @@ max-context = 128000
 tools-support = true
 streaming = true
 
+# Capabilities mirror OAS for_model_id_static glm-5-turbo branch.
+# tool_choice unsupported in OAS but that's separate from
+# parallel_tool_calls (left false at default).
+[models.glm-5-turbo.capabilities]
+max-output-tokens = 16384
+supports-native-streaming = true
+supports-response-format-json = true
+
 [models.glm-flashx]
 api-name = "glm-4.7-flashx"
 max-context = 128000
 tools-support = true
 streaming = true
+
+# Capabilities mirror OAS for_model_id_static glm-4.7 branch — falls
+# into the "glm-4.5 || glm-4.6 || glm-4.7 || glm-5" full-text OR clause
+# (api-name "glm-4.7-flashx" does NOT match the narrower "glm-4-flash"
+# entry which expects "glm-4-flash" prefix, not "glm-4.7-flashx").
+[models.glm-flashx.capabilities]
+max-output-tokens = 128000
+supports-native-streaming = true
+supports-response-format-json = true
 
 # ── Layer 3: Provider×Model Bindings ───────────────────────────
 #

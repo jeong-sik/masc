@@ -128,6 +128,12 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
+             (* Iter 40: counter ticks alongside the WARN log so the
+                swallow rate is alertable.  Previously the exception
+                arm logged once per occurrence (no dedup) but had no
+                Prometheus surface — operators could only spot
+                regressions by tailing logs. *)
+             Cascade_metrics.on_discovery_refresh_exception ();
              Log.warn ~ctx:"CascadeRuntime"
                "local runtime discovery refresh failed: %s"
                (Printexc.to_string exn);

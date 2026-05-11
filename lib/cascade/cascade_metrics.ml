@@ -852,3 +852,25 @@ let metric_partial_eio_context =
 
 let on_partial_eio_context () =
   Prometheus.inc_counter metric_partial_eio_context ()
+
+(* [Cascade_runtime.refresh_local_discovery_if_possible] catches
+   any [exn] raised by [refresh_llama_endpoints] (non-cancellation
+   exceptions only — [Eio.Cancel.Cancelled] is rethrown).  The
+   handler logs a WARN line with the printexc string and returns
+   [false], swallowing the exception so the keeper turn can
+   continue without local discovery.
+
+   This is the third "WARN + return false silently" exception
+   handler in the cascade pipeline that lacked a counter:
+   discovery API misbehavior, network hiccups, or upstream
+   Provider_registry bugs all funnel through this single arm with
+   only a textual log entry.  Counter ticks make the rate
+   alertable; pair with iter 8 [provider_health_probe_error] for
+   provider-level attribution.
+
+   Cardinality: 1 series. *)
+let metric_discovery_refresh_exception =
+  "masc_cascade_discovery_refresh_exception_total"
+
+let on_discovery_refresh_exception () =
+  Prometheus.inc_counter metric_discovery_refresh_exception ()

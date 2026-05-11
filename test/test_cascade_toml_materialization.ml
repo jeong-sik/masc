@@ -823,6 +823,16 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    cascade-runtime regression suite than from this materialization
    suite.  Smoke pins the no-arg helper signature so a future
    refactor that changes the call shape trips here. *)
+(* Smoke for [Cascade_metrics.on_discovery_refresh_exception].
+   Natural code path requires [refresh_llama_endpoints] to raise
+   a non-cancellation exception — best exercised in the
+   provider_registry harness.  Smoke pins the no-arg helper
+   signature so a future refactor that changes the call shape
+   trips here. *)
+let test_discovery_refresh_exception_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_discovery_refresh_exception ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_partial_eio_context_helper_callable () =
   Masc_mcp.Cascade_metrics.on_partial_eio_context ();
   check bool "no-arg helper callable without raising" true true
@@ -1295,6 +1305,9 @@ let () =
           test_case
             "partial_eio_context: helper callable" `Quick
             test_partial_eio_context_helper_callable;
+          test_case
+            "discovery_refresh_exception: helper callable" `Quick
+            test_discovery_refresh_exception_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

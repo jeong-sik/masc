@@ -796,7 +796,8 @@ let is_local_provider pname =
 let is_http_probe_capable_kind (kind : Llm_provider.Provider_config.provider_kind) : bool =
   match kind with
   | Llm_provider.Provider_config.Ollama -> true
-  | _ -> false
+  | Anthropic | Claude_code | OpenAI_compat | Glm | DashScope | Codex_cli
+  | Gemini | Gemini_cli | Kimi | Kimi_cli -> false
 ;;
 
 (** Per-provider per-attempt timeout bounds.

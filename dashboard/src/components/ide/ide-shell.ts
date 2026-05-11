@@ -336,11 +336,13 @@ function IdeBreadcrumb() {
         style=${{ overflow: 'hidden' }}
       >
         ${segments.map((seg, i) => html`
-          ${i > 0 ? html`<span class="text-[var(--color-fg-disabled)]">/</span>` : null}
-          <span
-            class=${i === segments.length - 1 ? 'text-[var(--color-fg-primary)]' : ''}
-            style=${{ whiteSpace: 'nowrap' }}
-          >${seg}</span>
+          <span key=${`breadcrumb-seg-${i}`}>
+            ${i > 0 ? html`<span class="text-[var(--color-fg-disabled)]">/</span>` : null}
+            <span
+              class=${i === segments.length - 1 ? 'text-[var(--color-fg-primary)]' : ''}
+              style=${{ whiteSpace: 'nowrap' }}
+            >${seg}</span>
+          </span>
         `)}
       </span>
       ${activeOnFile.length > 0

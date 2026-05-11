@@ -128,7 +128,6 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_portal_send", CanSendPortal);
     ("masc_worktree_create", CanCreateWorktree);
     ("masc_worktree_remove", CanRemoveWorktree);
-    ("sidecar", CanBroadcast);
   ]
 
 (* O(1) lookup table built once at module load.  Previously

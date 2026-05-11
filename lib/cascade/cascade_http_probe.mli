@@ -32,8 +32,35 @@
 (** [is_ollama_url url] mirrors the heuristic in
     {!Cascade_client_capacity.looks_like_ollama}: any URL whose
     host:port substring contains [:11434].  Re-exported here so
-    callers do not have to depend on both modules. *)
+    callers do not have to depend on both modules.
+
+    Prefer {!register_url} + {!is_registered} for new code: substring
+    matching misclassifies non-ollama servers running on :11434 and
+    misses ollama servers on non-default ports.  The {!Http_probe}
+    adapter no longer consults this function — it uses the registry
+    below. *)
 val is_ollama_url : string -> bool
+
+(** {1 Explicit URL registry}
+
+    The {!Http_probe} adapter only fires against URLs that callers
+    have explicitly registered.
+    {!Masc_network_defaults.ollama_default_url} is registered at
+    module load so the default deployment works without ceremony;
+    other URLs (custom ports, remote tunnels) must be registered by
+    a caller that already knows the URL is ollama-native. *)
+
+(** [register_url ~url] adds [url] to the probe registry.  Idempotent. *)
+val register_url : url:string -> unit
+
+(** [is_registered ~url] reports whether [url] has been registered. *)
+val is_registered : url:string -> bool
+
+(** Number of registered URLs.  Test helper. *)
+val registered_count : unit -> int
+
+(** Empty the URL registry.  Test helper. *)
+val registry_clear : unit -> unit
 
 (** {1 Cache lookup (synchronous, IO-free)} *)
 

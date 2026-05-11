@@ -117,11 +117,53 @@ let test_cache_size_after_clear () =
    cache_size after a manual store:  not exposed publicly, so just
    verify the empty/clear lifecycle here. *)
 
+(* ── Explicit URL registry — Http_probe.can_probe no longer uses
+   substring scan. Proves three invariants kept across the migration:
+   - default URL works without explicit register (module-load side-effect)
+   - non-:11434 ollama URL still probeable once registered
+   - substring-only matches (vLLM on :11434) are rejected unless
+     the caller has explicitly registered them. *)
+
+let test_default_url_registered_at_load () =
+  check bool "ollama_default_url registered on module load" true
+    (P.is_registered ~url:Masc_network_defaults.ollama_default_url);
+  check bool "Http_probe.can_probe accepts default url" true
+    (P.Http_probe.can_probe ~url:Masc_network_defaults.ollama_default_url)
+
+let test_register_url_non_default_port () =
+  let url = "http://127.0.0.1:51234" in
+  check bool "non-default url not auto-registered" false
+    (P.is_registered ~url);
+  P.register_url ~url;
+  check bool "registered after explicit call" true (P.is_registered ~url);
+  check bool "Http_probe.can_probe accepts registered url" true
+    (P.Http_probe.can_probe ~url);
+  P.registry_clear ();
+  P.register_url ~url:Masc_network_defaults.ollama_default_url
+
+let test_can_probe_rejects_substring_only_match () =
+  let foreign_url = "http://vllm.example.com:11434/v1" in
+  P.registry_clear ();
+  check bool "substring :11434 alone does not register" false
+    (P.is_registered ~url:foreign_url);
+  check bool "Http_probe.can_probe rejects substring-only :11434" false
+    (P.Http_probe.can_probe ~url:foreign_url);
+  (* Restore default for the rest of the suite. *)
+  P.register_url ~url:Masc_network_defaults.ollama_default_url
+
 let () =
   run "cascade_http_probe" [
     "is_ollama_url", [
       test_case "positive matches" `Quick test_is_ollama_url_positive;
       test_case "negative cases" `Quick test_is_ollama_url_negative;
+    ];
+    "Http_probe URL registry", [
+      test_case "ollama_default_url registered at load" `Quick
+        test_default_url_registered_at_load;
+      test_case "explicit register accepts non-default port" `Quick
+        test_register_url_non_default_port;
+      test_case "can_probe rejects substring-only :11434" `Quick
+        test_can_probe_rejects_substring_only_match;
     ];
     "parse_response", [
       test_case "one loaded model" `Quick test_parse_response_one_loaded;

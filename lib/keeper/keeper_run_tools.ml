@@ -463,6 +463,20 @@ let prepare_agent_setup
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  (* RFC-0064 Phase 2: Remove aliased internal names from the policy
+     surface. Public aliases are the LLM-visible names; internal
+     counterparts are implementation details. *)
+  let aliased_internal_names =
+    List.filter_map
+      (fun public ->
+         match Keeper_tool_alias.route public with
+         | Some r -> Some r.internal_name
+         | None -> None)
+      (Keeper_tool_alias.public_names ())
+  in
+  let allowed_exec_names =
+    List.filter (fun name -> not (List.mem name aliased_internal_names)) allowed_exec_names
+  in
   (* Only include a public alias name when its routed internal target is
      itself in [allowed_exec_names]. Otherwise the public name (e.g. "Bash")
      could let the LLM invoke a tool whose internal handler the current

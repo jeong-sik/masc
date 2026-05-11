@@ -74,9 +74,6 @@ let core_discovery_tools =
         ; Keeper Task_done
         ; Keeper Task_create
         ; Keeper Memory_search
-        ; (* Filesystem: read + write (action symmetry) *)
-          Keeper Fs_read
-        ; Keeper Fs_edit
         ; (* Board: core interaction *)
           Keeper Board_get
         ; Keeper Board_post
@@ -85,19 +82,26 @@ let core_discovery_tools =
         ; Keeper Board_list
         ; Keeper Board_curation_read
         ; Keeper Board_curation_submit
-        ; (* Shell + VCS *)
-          Keeper Shell
-        ; Keeper Bash
-        ; Keeper Preflight_check
+        ; (* VCS + misc *)
+          Keeper Preflight_check
         ; (* Review *)
           Keeper Pr_review_read
         ; Keeper Pr_review_comment
         ; Keeper Pr_review_reply
         ; (* Discovery fallback for meta/admin tools *)
           Keeper Tools_list
-        ; (* External search *)
-          Masc Web_search
         ]
+  @ [ (* RFC-0064 Phase 2: Public aliases replace internal names in
+         the LLM-facing discovery surface. Dual-registration cleanup
+         means internal names (keeper_bash, keeper_fs_read, etc.)
+         are no longer registered as OAS tools. *)
+        "Bash"
+      ; "Edit"
+      ; "Grep"
+      ; "Read"
+      ; "WebSearch"
+      ; "Write"
+      ]
 ;;
 
 let effective_core_tools () = core_discovery_tools

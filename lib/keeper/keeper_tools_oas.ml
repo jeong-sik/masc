@@ -974,6 +974,26 @@ let make_tool_bundle
      execute_keeper_tool_call uses can_execute for the execution gate. *)
   let universe_names = Keeper_exec_tools.keeper_universe_tool_names meta in
   let tool_defs = Keeper_exec_tools.keeper_universe_model_tools meta in
+  (* RFC-0064 Phase 2: Remove aliased internal names from Pass A to
+     eliminate dual-registration. Aliased tools appear ONLY under their
+     public name in the LLM-facing surface. *)
+  let aliased_internal_names =
+    List.filter_map
+      (fun public ->
+         match Keeper_tool_alias.route public with
+         | Some r -> Some r.internal_name
+         | None -> None)
+      (Keeper_tool_alias.public_names ())
+  in
+  let universe_names =
+    List.filter (fun name -> not (List.mem name aliased_internal_names)) universe_names
+  in
+  let tool_defs =
+    List.filter
+      (fun (td : Masc_domain.tool_schema) ->
+         not (List.mem td.name aliased_internal_names))
+      tool_defs
+  in
   (* Record tool assignment telemetry for causal tracing.
      assignment_id links Assigned → Called → Completed events. *)
   let (_assignment_id : Tool_assignment_telemetry.assignment_id) =

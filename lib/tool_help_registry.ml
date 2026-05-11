@@ -257,7 +257,7 @@ let derived_short_description name original =
 let derived_details_with_meta (meta : Tool_catalog.metadata) original =
   let base = normalize_spaces original in
   let extra_constraints = constraints_from_meta meta in
-  if Stdlib.List.length extra_constraints = 0 then
+  if extra_constraints = [] then
     base
   else
     String.concat "\n\n"
@@ -276,9 +276,14 @@ let entry_of_schema (schema : Masc_domain.tool_schema) : help_entry =
   | None ->
       (* Fetch catalog metadata once and thread it through every helper
          that would otherwise re-query Tool_catalog.metadata.  Without
-         this, each non-manual entry triggered 3 lookups:
+         this, each non-manual entry triggered 3 lookups via
          derived_short_description, constraints_from_metadata, and
-         derived_details (which calls constraints_from_metadata again). *)
+         derived_details — the pre-hoist call graph this comment
+         documented.  Today derived_details_with_meta calls
+         constraints_from_meta directly on the cached meta, so the
+         second lookup inside derived_details is gone; the threading
+         pattern below avoids the remaining two by passing [meta]
+         explicitly. *)
       let meta = Tool_catalog.metadata schema.name in
       {
         name = schema.name;

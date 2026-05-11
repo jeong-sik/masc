@@ -115,16 +115,21 @@ let allowed_repositories ~keeper_id ~base_path =
   let* mapping = find_mapping ~base_path keeper_id in
   Ok mapping.repository_ids
 
+let is_wildcard s = s = "*"
+
 (* Filter [repos] down to those whose id appears in
    [mapping.repository_ids], with ["*"] as a wildcard that bypasses
    filtering entirely.  Replaces two copy-pasted O(R x M) loops in
    [credentials_for_keeper] and [apply_mapping]: each was
    [List.filter (fun r -> List.exists (String.equal r.id) mapping.repository_ids) repos].
-   The set is materialised only when no wildcard short-circuits the
-   check, so the wildcard case stays allocation-free. *)
+   The Hashtbl materialisation is skipped when a wildcard short-circuits
+   the check, so the wildcard case avoids building the membership set
+   (the [is_wildcard] predicate itself is a fully-saturated function so
+   no closure is allocated per call, unlike [(String.equal "*")] which
+   would partially apply). *)
 let filter_repos_by_mapping (mapping : keeper_repo_mapping)
     (repos : repository list) : repository list =
-  if List.exists (String.equal "*") mapping.repository_ids then
+  if List.exists is_wildcard mapping.repository_ids then
     repos
   else
     let mapping_id_set =

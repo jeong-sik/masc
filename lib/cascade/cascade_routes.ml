@@ -130,17 +130,33 @@ let logical_use_of_string_opt raw =
              then Some spec.use
              else None)
 
+(* RFC-0058 v2 supports two route encodings in the materialized JSON:
+   - legacy:    {"routes": {"X": "tier_or_group"}}            (string value)
+   - declarative: {"routes": {"X": {"target": "tier-..."}}}   (object value)
+   The Phase 4 materializer (lib/cascade/cascade_toml_materializer.ml)
+   passes sub-tables through verbatim, so this consumer must extract
+   the [target] field instead of filtering non-string values to None —
+   otherwise every declarative route silently disappears from the
+   runtime view (Cascade_routes.configured_route_targets returns []).
+   See PR #14550 review thread #DUH/#DUN for the regression report. *)
+let target_of_route_value : Yojson.Safe.t -> string option = function
+  | `String raw -> Some (String.trim raw)
+  | `Assoc obj ->
+      (match List.assoc_opt "target" obj with
+       | Some (`String raw) -> Some (String.trim raw)
+       | _ -> None)
+  | _ -> None
+
 let route_bindings_from_json = function
   | `Assoc fields -> (
       match List.assoc_opt "routes" fields with
       | Some (`Assoc routes) ->
           routes
           |> List.filter_map (fun (key, value) ->
-                 match value with
-                 | `String raw_target ->
-                     let target = String.trim raw_target in
-                     if String.equal key "" || String.equal target "" then None
-                     else Some (key, target)
+                 match target_of_route_value value with
+                 | Some target
+                   when not (String.equal key "" || String.equal target "") ->
+                     Some (key, target)
                  | _ -> None)
       | _ -> [])
   | _ -> []

@@ -2947,7 +2947,7 @@ let test_pre_operator_clear_no_extra_precondition () =
     ()
 ;;
 
-(* — Restart_budget_exhausted (R-A-6.b — 6th R-A-9 event) ─── *)
+(* — Restart_budget_exhausted (R-A-6.b — adjacent arm, not R-A-9) ─── *)
 
 let test_pre_restart_budget_already_exhausted () =
   (* Pairs with §S3 BudgetNeverRevives: re-exhausting an already-cleared

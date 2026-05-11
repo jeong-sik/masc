@@ -967,8 +967,12 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      - R-A-6.b: Restart_budget_exhausted (non-idempotency — pairs with
        §S3 BudgetNeverRevives liveness invariant; iter 14 audit).
 
-   Coverage at 6/6 enumerated R-A-9 events.  Other events have no spec
-   preconditions beyond NotTerminal and fall through the catch-all.
+   Coverage: 5/5 R-A-9 events (Compact_retry_exhausted,
+   Context_overflow_detected, Auto_compact_triggered,
+   Operator_compact_requested, Operator_clear_requested) plus the
+   adjacent R-A-6.b Restart_budget_exhausted arm (iter 14 follow-up).
+   Other events have no spec preconditions beyond NotTerminal and
+   fall through the catch-all.
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md

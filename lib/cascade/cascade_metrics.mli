@@ -189,3 +189,12 @@ val on_route_resolve_fallback : reason:string -> unit
     or [target_not_in_catalog] (declared target missing from the
     catalog).  Distinct from iter-9 [route_config_error] which
     ticks during catalog validation. *)
+
+val on_deprecated_profile_name_filter : name:string -> unit
+(** Tick the deprecated-profile-name filter counter at the three
+    call sites of [Cascade_config_loader.is_deprecated_logical_profile_name].
+    [name] is the deprecated profile name itself (the closed set is
+    bounded at ~28 names so cardinality stays safe).  Doubles as a
+    migration tracker — when the counter stays at zero for a
+    given name across deploys, that name can be safely removed
+    from [deprecated_logical_profile_names]. *)

@@ -774,6 +774,21 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    [Cascade_routes.cascade_name_for_use].  A typo at either call
    site would emit an undocumented label; pinning both strings
    here keeps the canonical set in lockstep with the code. *)
+(* Smoke for [Cascade_metrics.on_deprecated_profile_name_filter].
+   The closed deprecated-name set is bounded (~28 names) so the
+   label cardinality stays safe.  Smoke test pins two
+   representative names from the canonical list — exhaustive
+   per-name coverage would just enumerate a constant list and add
+   noise; the call-site coverage in catalog_runtime and
+   config_loader exercises the actual emission paths. *)
+let test_deprecated_profile_name_filter_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_deprecated_profile_name_filter
+    ~name:"default";
+  Masc_mcp.Cascade_metrics.on_deprecated_profile_name_filter
+    ~name:"keeper_unified";
+  check bool "representative deprecated names callable without raising"
+    true true
+
 let test_route_resolve_fallback_documented_reasons_are_callable () =
   Masc_mcp.Cascade_metrics.on_route_resolve_fallback
     ~reason:"catalog_unvalidated";
@@ -1175,6 +1190,10 @@ let () =
             "route_resolve_fallback: both documented reasons callable"
             `Quick
             test_route_resolve_fallback_documented_reasons_are_callable;
+          test_case
+            "deprecated_profile_name_filter: representative names callable"
+            `Quick
+            test_deprecated_profile_name_filter_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

@@ -573,7 +573,17 @@ let load_catalog ~config_path =
       builders
       |> StringMap.bindings
       |> List.filter (fun (name, builder) ->
-        builder.has_schema_field && not (is_deprecated_logical_profile_name name))
+        let keep = builder.has_schema_field
+                   && not (is_deprecated_logical_profile_name name) in
+        (* Iter 31 telemetry: when a deprecated-named builder is
+           filtered, surface so RFC-0066 Phase 4 migration progress
+           is observable.  Only ticks when [has_schema_field] is true
+           — empty placeholder builders are not interesting. *)
+        if builder.has_schema_field
+           && is_deprecated_logical_profile_name name
+        then
+          Cascade_metrics.on_deprecated_profile_name_filter ~name;
+        keep)
     in
     let invalid_profile_errors =
       List.filter_map

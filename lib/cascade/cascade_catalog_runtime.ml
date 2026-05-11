@@ -174,7 +174,14 @@ let discover_legacy_profile_names_from_json = function
                  if
                    Cascade_config_loader.is_deprecated_logical_profile_name
                      profile
-                 then None
+                 then begin
+                   (* Iter 31: legacy profile name filtered out.  Tick
+                      a counter so RFC-0066 Phase 4 migration progress
+                      is observable per name. *)
+                   Cascade_metrics.on_deprecated_profile_name_filter
+                     ~name:profile;
+                   None
+                 end
                  else Some profile
              | _ -> None)
       |> List.sort_uniq String.compare
@@ -186,9 +193,15 @@ let discover_profile_names ~config_path ~json : string list =
       Cascade_metrics.on_profile_discovery ~path:"declarative";
       Cascade_declarative_hotpath.decl_snapshot_profile_names snap
       |> List.filter (fun profile ->
-             not
-               (Cascade_config_loader.is_deprecated_logical_profile_name
-                  profile))
+             if
+               Cascade_config_loader.is_deprecated_logical_profile_name
+                 profile
+             then begin
+               Cascade_metrics.on_deprecated_profile_name_filter
+                 ~name:profile;
+               false
+             end
+             else true)
       |> List.sort_uniq String.compare
   | Some (Error errs) ->
       (* Declarative parser ran but produced adapter errors.  The

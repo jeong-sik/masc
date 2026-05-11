@@ -629,3 +629,32 @@ let on_route_resolve_fallback ~reason =
   Prometheus.inc_counter metric_route_resolve_fallback
     ~labels:[ ("reason", reason) ]
     ()
+
+(* [Cascade_config_loader.is_deprecated_logical_profile_name] returns
+   true for ~28 legacy profile names (pre-RFC-0058 conventions like
+   "default", "keeper_reply", "phase_recovery", etc.).  Three callers
+   filter these names out of profile discovery silently:
+     - cascade_catalog_runtime.ml L175 (legacy [_models] fallback)
+     - cascade_catalog_runtime.ml L190 (declarative path filter)
+     - cascade_config_loader.ml L576 (builder validation)
+
+   When an operator references one of these names in a current
+   cascade.toml (typo, copy-paste from old docs, surviving fixture),
+   the profile is silently dropped from the catalog.  Downstream
+   route resolution then fails with the iter 30
+   [route_resolve_fallback] counter, but the root cause (deprecated
+   name filtered) is invisible.
+
+   The label is the deprecated name itself.  The set is closed
+   (~28 names), so cardinality is bounded.  A non-zero rate per
+   name doubles as a migration tracker for RFC-0066 Phase 4: when
+   counter for a given name stays at zero across deploys, the name
+   can be safely removed from
+   [deprecated_logical_profile_names]. *)
+let metric_deprecated_profile_name_filter =
+  "masc_cascade_deprecated_profile_name_filter_total"
+
+let on_deprecated_profile_name_filter ~name =
+  Prometheus.inc_counter metric_deprecated_profile_name_filter
+    ~labels:[ ("name", name) ]
+    ()

@@ -44,12 +44,24 @@ let default_model_strings ~cascade_name =
     | Ok label -> [ label ]
     | Error _ -> (
         match Provider_adapter.preferred_execution_model_labels () with
-        | [] -> [ Provider_adapter.default_local_fallback_label () ]
+        | [] ->
+          (* Neither explicit llama label nor any preferred execution
+             label is configured.  Iter 25: surface so dashboards can
+             alert on missing execution-lane config. *)
+          Cascade_metrics.on_default_label_fallback
+            ~cascade:cascade_name ~reason:"no_execution_labels";
+          [ Provider_adapter.default_local_fallback_label () ]
         | labels -> labels)
   in
   if is_local_only_cascade cascade_name then
     match List.filter is_local_label all_labels with
-    | [] -> [ Provider_adapter.default_local_fallback_label () ]
+    | [] ->
+      (* Local-only cascade but the resolved label set has no local
+         scheme — operator routed local traffic at a cascade with
+         only remote providers.  Iter 25 counter. *)
+      Cascade_metrics.on_default_label_fallback
+        ~cascade:cascade_name ~reason:"local_cascade_no_local";
+      [ Provider_adapter.default_local_fallback_label () ]
     | local -> local
   else
     all_labels

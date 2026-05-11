@@ -737,6 +737,21 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    from a unit test without mock clocks.  Smoke pins the helper
    signature; the natural code path is exercised by the existing
    [test_cascade_strategy] / [test_cascade_state] suites. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_default_label_fallback].  Two documented
+   reasons map 1:1 to the two fallback arms in
+   [Cascade_runtime.default_model_strings].  A typo at either call
+   site would emit an undocumented label and pollute Prometheus
+   cardinality; pinning both strings here keeps the canonical set
+   canonical. *)
+let test_default_label_fallback_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_default_label_fallback
+    ~cascade:"smoke_test_cascade_iter25" ~reason:"no_execution_labels";
+  Masc_mcp.Cascade_metrics.on_default_label_fallback
+    ~cascade:"smoke_test_cascade_iter25" ~reason:"local_cascade_no_local";
+  check bool "both documented reasons callable without raising"
+    true true
+
 let test_sticky_expiry_helper_callable () =
   Masc_mcp.Cascade_metrics.on_sticky_expiry
     ~cascade:"smoke_test_cascade_iter24";
@@ -1076,6 +1091,10 @@ let () =
           test_case
             "sticky_expiry: cascade label helper callable" `Quick
             test_sticky_expiry_helper_callable;
+          test_case
+            "default_label_fallback: both documented reasons callable"
+            `Quick
+            test_default_label_fallback_documented_reasons_are_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

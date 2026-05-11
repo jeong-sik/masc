@@ -140,3 +140,11 @@ val on_sticky_expiry : cascade:string -> unit
     [on_sticky_drift] (candidate-list invalidation): this signals
     TTL is too short for the actual keeper request cadence and
     operators should consider raising it. *)
+
+val on_default_label_fallback : cascade:string -> reason:string -> unit
+(** Tick the default-label-fallback counter at
+    [Cascade_runtime.default_model_strings] when label resolution
+    falls back to the hardcoded local default.  [reason] must be one
+    of [no_execution_labels] (no execution lane configured at all)
+    or [local_cascade_no_local] (local-only cascade with no local
+    candidate labels). *)

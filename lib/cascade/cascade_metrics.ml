@@ -453,3 +453,33 @@ let on_sticky_expiry ~cascade =
   Prometheus.inc_counter metric_sticky_expiry
     ~labels:[ ("cascade", cascade) ]
     ()
+
+(* [Cascade_runtime.default_model_strings] has two arms that fall
+   back to [Provider_adapter.default_local_fallback_label] when the
+   normal cascade.toml-derived label resolution can't produce
+   anything usable:
+
+     no_execution_labels        — neither
+                                  [explicit_llama_model_label_result]
+                                  nor [preferred_execution_model_labels]
+                                  produced any label.  Operator likely
+                                  hasn't configured any execution lane.
+     local_cascade_no_local     — cascade is local-only but its
+                                  candidate labels contain no local
+                                  scheme.  Operator routed local
+                                  traffic at a cascade with only
+                                  remote providers.
+
+   Both arms silently substitute a single hardcoded
+   [default_local_fallback_label].  Until iter 25 the only way to
+   notice was to inspect resolved Provider_config lists at the
+   dashboard.  Counter ticks here lift the silent fallback to a
+   per-cascade rate operators can alert on.
+
+   Cardinality: cascades (~10) x reasons (2) = ~20 series. *)
+let metric_default_label_fallback = "masc_cascade_default_label_fallback_total"
+
+let on_default_label_fallback ~cascade ~reason =
+  Prometheus.inc_counter metric_default_label_fallback
+    ~labels:[ ("cascade", cascade); ("reason", reason) ]
+    ()

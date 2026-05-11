@@ -114,6 +114,34 @@ let test_timeout_sec_isolation () =
     (counter_for ~program ~timeout_sec:60.0)
 ;;
 
+(* Pin the boundary semantics + label vocabulary so a future refactor
+   that drifts [of_seconds] thresholds or [to_label] strings surfaces
+   as a test failure here, not as a silent dashboard regression. *)
+let test_bucket_matrix () =
+  let cases =
+    [ -1.0, "lt_1s", "negative routes to lt_1s"
+    ; 0.0, "lt_1s", "zero routes to lt_1s"
+    ; 0.999, "lt_1s", "sub-1s"
+    ; 1.0, "ge_1s_lt_15s", "1.0 boundary lands in next bucket"
+    ; 14.999, "ge_1s_lt_15s", "just under 15"
+    ; 15.0, "ge_15s_lt_60s", "15.0 boundary"
+    ; 59.999, "ge_15s_lt_60s", "just under 60"
+    ; 60.0, "ge_60s_lt_300s", "60.0 boundary"
+    ; 299.999, "ge_60s_lt_300s", "just under 300"
+    ; 300.0, "ge_300s", "300.0 boundary"
+    ; 9999.0, "ge_300s", "very long"
+    ; Float.nan, "lt_1s", "NaN routes to lt_1s"
+    ; Float.infinity, "lt_1s", "+infinity routes to lt_1s"
+    ; Float.neg_infinity, "lt_1s", "-infinity routes to lt_1s"
+    ]
+  in
+  List.iter
+    (fun (f, expected_label, label) ->
+      let actual = Masc_mcp.Timeout_bucket.(to_label (of_seconds f)) in
+      Alcotest.(check string) label expected_label actual)
+    cases
+;;
+
 let () =
   Alcotest.run
     "process_timeout_counter_9632"
@@ -132,6 +160,12 @@ let () =
     ; ( "isolation"
       , [ Alcotest.test_case "programs isolated" `Quick test_program_isolation
         ; Alcotest.test_case "timeout_sec isolated" `Quick test_timeout_sec_isolation
+        ] )
+    ; ( "bucket_matrix"
+      , [ Alcotest.test_case
+            "of_seconds × to_label boundary + non-finite matrix"
+            `Quick
+            test_bucket_matrix
         ] )
     ]
 ;;

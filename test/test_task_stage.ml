@@ -18,7 +18,7 @@ let test_of_string_invalid () =
   | Error _ -> ()
   | Ok _ -> fail "expected error for invalid stage"
 
-let test_index_order () =
+let test_canonical_order () =
   (* [all] must be in ascending canonical order under [compare].
      Sorting it should be a no-op. *)
   let sorted = List.sort Task_stage.compare Task_stage.all in
@@ -109,7 +109,7 @@ let () =
       "yojson roundtrip", `Quick, test_yojson_roundtrip;
     ];
     "ordering", [
-      "index order", `Quick, test_index_order;
+      "canonical order", `Quick, test_canonical_order;
       "forward allowed", `Quick, test_forward_transition;
       "same stage idempotent", `Quick, test_same_stage;
       "backward forbidden", `Quick, test_backward_forbidden;

@@ -24,9 +24,9 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 val all : t list
 
 (** Can transition from [current] to [target]?
-    Forward transitions (target > current under {!compare}) are allowed.
-    Same-stage re-entry is allowed (idempotent).
-    Backward transitions are forbidden. *)
+    Implemented as [compare target current >= 0]: forward transitions
+    (target after current in canonical order) and same-stage re-entry
+    (idempotent) are allowed; backward transitions are forbidden. *)
 val can_transition : current:t -> target:t -> bool
 
 (** Validate a transition, returning Error with reason if forbidden. *)

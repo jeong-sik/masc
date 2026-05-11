@@ -79,33 +79,8 @@ let default_config
     ~system_prompt
     ~tools : config =
   let provider =
-    let provider = Agent_sdk.Provider.config_of_provider_config provider_cfg in
-    match provider_cfg.kind, provider.provider with
-    | Llm_provider.Provider_config.OpenAI_compat, Agent_sdk.Provider.Local { base_url }
-      when not
-             (String.equal provider_cfg.request_path
-                Masc_network_defaults.openai_chat_completions_path) ->
-        let auth_header =
-          if String.trim provider_cfg.api_key = "" then None
-          else Some "Authorization"
-        in
-        let static_token =
-          match String.trim provider_cfg.api_key with
-          | "" -> None
-          | token -> Some token
-        in
-        {
-          provider with
-          provider =
-            Agent_sdk.Provider.OpenAICompat
-              {
-                base_url;
-                auth_header;
-                path = provider_cfg.request_path;
-                static_token;
-              };
-        }
-    | _ -> provider
+    Agent_sdk.Provider.config_of_provider_config provider_cfg
+    |> Provider_adapter.apply_wire_overlay ~provider_cfg
   in
   {
     name;

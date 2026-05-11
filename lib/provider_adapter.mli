@@ -431,6 +431,26 @@ val adapter_of_provider_kind :
 val provider_label_of_config :
   Llm_provider.Provider_config.t -> string
 
+(** Apply a wire-layer overlay to an SDK [provider] config.
+
+    {!Agent_sdk.Provider.config_of_provider_config} maps an
+    [OpenAI_compat] cfg to [Local] when no transport hints exist on the
+    SDK side, which drops the configured non-default [request_path] and
+    auth token. [apply_wire_overlay] detects that under-routing and
+    rewraps the [provider] field as [OpenAICompat] with the cfg's
+    [base_url], [api_key]-derived auth header, custom [path], and
+    [static_token].
+
+    All other shapes pass through unchanged. This is the single
+    boundary site that inspects [provider_cfg.kind] alongside the
+    SDK's [provider] variant; keeper-layer callers
+    ({!Keeper_agent_context.default_config}) no longer pattern-match on
+    either. *)
+val apply_wire_overlay :
+  provider_cfg:Llm_provider.Provider_config.t ->
+  Agent_sdk.Provider.config ->
+  Agent_sdk.Provider.config
+
 (** Stable key for cascade health and circuit-breaker state.
     Most providers are keyed at provider level. Local OpenAI-compatible
     endpoints include model and base URL so independent loopback runtimes can

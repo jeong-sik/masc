@@ -428,6 +428,113 @@ let test_unmetered_provider_uses_declared_telemetry_policy () =
   check bool "unknown provider is not silently exempt" false
     (Adapter.is_structurally_unmetered_provider "unknown")
 
+(* RFC-0058 Phase 5.6 boundary helper: apply_wire_overlay.
+
+   These tests seal the invariant that the keeper layer no longer
+   needs to pattern-match on [provider_cfg.kind] and the SDK's
+   [provider] variant: every shape gets routed by this single helper
+   inside [Provider_adapter]. *)
+
+let agent_sdk_local_cfg ~base_url ~model_id ~api_key_env =
+  { Agent_sdk.Provider.provider = Agent_sdk.Provider.Local { base_url }
+  ; model_id
+  ; api_key_env
+  }
+
+let agent_sdk_anthropic_cfg ~model_id ~api_key_env =
+  { Agent_sdk.Provider.provider = Agent_sdk.Provider.Anthropic
+  ; model_id
+  ; api_key_env
+  }
+
+let test_apply_wire_overlay_rewraps_openai_compat_local_custom_path () =
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"qwen3.6:35b-a3b-mlx-bf16"
+      ~base_url:"http://127.0.0.1:11434"
+      ~request_path:"/api/chat" (* non-default ollama-native path *)
+      ~api_key:"secret-token"
+      ()
+  in
+  let sdk_cfg =
+    agent_sdk_local_cfg
+      ~base_url:"http://127.0.0.1:11434"
+      ~model_id:"qwen3.6:35b-a3b-mlx-bf16"
+      ~api_key_env:""
+  in
+  let result = Adapter.apply_wire_overlay ~provider_cfg:cfg sdk_cfg in
+  match result.provider with
+  | Agent_sdk.Provider.OpenAICompat
+      { base_url; auth_header; path; static_token } ->
+    check string "base_url preserved" "http://127.0.0.1:11434" base_url;
+    check (option string) "auth_header set when api_key non-empty"
+      (Some "Authorization") auth_header;
+    check string "non-default path forwarded" "/api/chat" path;
+    check (option string) "static_token preserved" (Some "secret-token")
+      static_token
+  | _ -> fail "expected OpenAICompat overlay"
+
+let test_apply_wire_overlay_keeps_local_when_path_is_default () =
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"qwen3.6:35b-a3b-mlx-bf16"
+      ~base_url:"http://127.0.0.1:11434"
+      ~request_path:"/v1/chat/completions" (* canonical OpenAI path *)
+      ()
+  in
+  let sdk_cfg =
+    agent_sdk_local_cfg
+      ~base_url:"http://127.0.0.1:11434"
+      ~model_id:"qwen3.6:35b-a3b-mlx-bf16"
+      ~api_key_env:""
+  in
+  let result = Adapter.apply_wire_overlay ~provider_cfg:cfg sdk_cfg in
+  match result.provider with
+  | Agent_sdk.Provider.Local { base_url } ->
+    check string "default path leaves Local untouched"
+      "http://127.0.0.1:11434" base_url
+  | _ -> fail "default path must not trigger overlay"
+
+let test_apply_wire_overlay_passthrough_for_anthropic () =
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Claude_api
+      ~model_id:"claude-sonnet-4-5"
+      ~base_url:"https://api.anthropic.com"
+      ()
+  in
+  let sdk_cfg =
+    agent_sdk_anthropic_cfg ~model_id:"claude-sonnet-4-5"
+      ~api_key_env:"ANTHROPIC_API_KEY"
+  in
+  let result = Adapter.apply_wire_overlay ~provider_cfg:cfg sdk_cfg in
+  match result.provider with
+  | Agent_sdk.Provider.Anthropic -> ()
+  | _ -> fail "non-OpenAI_compat kind must pass through"
+
+let test_apply_wire_overlay_omits_auth_header_when_key_blank () =
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"local-model"
+      ~base_url:"http://127.0.0.1:8000"
+      ~request_path:"/api/chat"
+      ~api_key:"   " (* whitespace-only treated as blank *)
+      ()
+  in
+  let sdk_cfg =
+    agent_sdk_local_cfg ~base_url:"http://127.0.0.1:8000"
+      ~model_id:"local-model" ~api_key_env:""
+  in
+  let result = Adapter.apply_wire_overlay ~provider_cfg:cfg sdk_cfg in
+  match result.provider with
+  | Agent_sdk.Provider.OpenAICompat { auth_header; static_token; _ } ->
+    check (option string) "auth_header None when key blank" None auth_header;
+    check (option string) "static_token None when key blank" None static_token
+  | _ -> fail "expected OpenAICompat overlay even with blank key"
+
 let test_openai_compat_provider_identity_uses_endpoint_metadata () =
   let kimi_endpoint_cfg =
     Llm_provider.Provider_config.make
@@ -600,5 +707,16 @@ let () =
             test_stt_request_openai_compat;
           test_case "stt request mcp rejected" `Quick
             test_stt_request_mcp_rejected;
+        ] );
+      ( "apply_wire_overlay",
+        [
+          test_case "rewraps Local->OpenAICompat for custom path" `Quick
+            test_apply_wire_overlay_rewraps_openai_compat_local_custom_path;
+          test_case "keeps Local on default OpenAI path" `Quick
+            test_apply_wire_overlay_keeps_local_when_path_is_default;
+          test_case "passthrough for Anthropic kind" `Quick
+            test_apply_wire_overlay_passthrough_for_anthropic;
+          test_case "blank api_key yields no auth header" `Quick
+            test_apply_wire_overlay_omits_auth_header_when_key_blank;
         ] );
     ]

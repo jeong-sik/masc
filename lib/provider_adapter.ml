@@ -1501,6 +1501,55 @@ let provider_label_from_registry (cfg : Llm_provider.Provider_config.t) =
   | Some adapter -> adapter.cascade_prefix
   | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 
+(** [apply_wire_overlay ~provider_cfg provider] returns [provider] with
+    its wire-layer transport rewritten when the SDK's
+    {!Agent_sdk.Provider.config_of_provider_config} mapping under-routes
+    an [OpenAI_compat] cfg as [Local] (no support for a custom
+    [request_path] / auth header).
+
+    Behaviour:
+    - When [provider_cfg.kind = OpenAI_compat] AND the SDK produced
+      [Local { base_url }] AND [provider_cfg.request_path] is not the
+      default OpenAI chat-completions path, the [provider] field is
+      rewrapped as [OpenAICompat { base_url; auth_header; path;
+      static_token }] so the configured non-default path and optional
+      auth token actually reach the wire.
+    - All other shapes are returned unchanged.
+
+    Keeper-layer callers ({!Keeper_agent_context.default_config}) used
+    to inline this match on [provider_cfg.kind] and
+    [provider.provider]. RFC-0058 Phase 5.6 moves that inspection into
+    this single boundary helper so adding another OpenAI-compatible
+    transport (vLLM, lmstudio, OpenRouter) only requires touching this
+    adapter module — keeper code never names a provider variant. *)
+let apply_wire_overlay
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    (provider : Agent_sdk.Provider.config) : Agent_sdk.Provider.config =
+  match provider_cfg.kind, provider.provider with
+  | Llm_provider.Provider_config.OpenAI_compat,
+    Agent_sdk.Provider.Local { base_url }
+    when not
+           (String.equal
+              provider_cfg.request_path
+              Masc_network_defaults.openai_chat_completions_path) ->
+    let api_key_trimmed = String.trim provider_cfg.api_key in
+    let auth_header =
+      if String.equal api_key_trimmed "" then None else Some "Authorization"
+    in
+    let static_token =
+      if String.equal api_key_trimmed "" then None else Some api_key_trimmed
+    in
+    { provider with
+      provider =
+        Agent_sdk.Provider.OpenAICompat
+          { base_url
+          ; auth_header
+          ; path = provider_cfg.request_path
+          ; static_token
+          }
+    }
+  | _ -> provider
+
 let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
   (* RFC-0058 §2.4: dispatch flows through the kind→canonical_name table
      ([adapter_canonical_name_of_provider_kind]) rather than enumerating

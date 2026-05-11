@@ -1083,13 +1083,3 @@ module KeeperToolAlias = struct
   ;;
 end
 
-(** {1 Keeper Log Sampling} *)
-
-module KeeperLogSampling = struct
-  (** @category Telemetry
-      @ops_class operator *)
-  let sample_rate () : float =
-    get_float_nonneg ~default:1.0 "MASC_KEEPER_LOG_SAMPLE_RATE"
-    |> fun r -> min 1.0 (max 0.0 r)
-  ;;
-end

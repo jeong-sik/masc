@@ -334,9 +334,3 @@ module KeeperToolAlias : sig
   val default_hallucinated : string list
 end
 
-(** {1 Keeper Log Sampling} *)
-
-module KeeperLogSampling : sig
-  (** Value in [0.0, 1.0]. 1.0 = keep all logs (default). *)
-  val sample_rate : unit -> float
-end

@@ -17,7 +17,6 @@ type credential_scope =
   { keeper_id : string
   ; github_account : string
   }
-[@@deriving eq]
 
 (** Normalised tool identifier. *)
 type tool_name = string
@@ -37,9 +36,11 @@ val sandbox_isolation
 (** {1 Credential Isolation} *)
 
 (** [credential_isolation ~keeper ~credential ~other_keepers] returns [Ok ()]
-    iff no entry in [other_keepers] shares both the same [keeper_id] and
-    [github_account] as [credential].  This prevents accidental credential
-    reuse across personas.
+    iff no entry in [other_keepers] uses the same [github_account] as
+    [credential] under a different [keeper_id]. This prevents accidental
+    credential reuse across personas; a single keeper may legitimately hold
+    multiple github accounts, and self-duplicates are not treated as
+    violations.
 
     The [~keeper] argument is retained for API compatibility but is not used
     for the comparison: the authoritative identity is [credential.keeper_id],

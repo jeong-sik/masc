@@ -7,7 +7,6 @@ type credential_scope =
   { keeper_id : string
   ; github_account : string
   }
-[@@deriving eq]
 
 type tool_name = string
 
@@ -38,9 +37,16 @@ let sandbox_isolation ~sandbox_roots ~sandbox_paths =
                    (* A path equal to the sandbox root itself is treated as
                       in-sandbox, matching [container_path_of_host] in
                       keeper_turn_sandbox_runtime.ml which accepts host_root
-                      as a valid sandbox path. *)
+                      as a valid sandbox path. When [root_norm] is "/", every
+                      absolute path is inside it; using "/" directly as the
+                      prefix (instead of "//") avoids the degenerate
+                      double-slash that would otherwise reject all non-root
+                      paths. *)
+                   let prefix =
+                     if String.equal root_norm "/" then "/" else root_norm ^ "/"
+                   in
                    String.equal norm root_norm
-                   || String.starts_with ~prefix:(root_norm ^ "/") norm)
+                   || String.starts_with ~prefix norm)
                 sandbox_roots))
         sandbox_paths
     with
@@ -53,15 +59,16 @@ let sandbox_isolation ~sandbox_roots ~sandbox_paths =
 ;;
 
 let credential_isolation ~keeper:_ ~credential ~other_keepers =
-  (* The [~keeper] parameter is retained for backward compatibility with
-     callers (and `check_all`'s signature), but the authoritative keeper
-     identity is [credential.keeper_id]. Using the credential's own
-     keeper_id closes the bug where a divergent [~keeper] argument would
-     silently miss conflicts. *)
+  (* Cross-persona credential isolation: a GitHub account used by one keeper
+     must not appear under a different keeper_id. The [~keeper] parameter is
+     retained for API stability; the authoritative identity is
+     [credential.keeper_id], so a divergent [~keeper] cannot mask a real
+     conflict. Same-keeper entries (e.g., a keeper holding multiple github
+     accounts, or repeated self-entries) are not violations. *)
   match
     List.find_opt
       (fun other ->
-         String.equal other.keeper_id credential.keeper_id
+         (not (String.equal other.keeper_id credential.keeper_id))
          && String.equal other.github_account credential.github_account)
       other_keepers
   with

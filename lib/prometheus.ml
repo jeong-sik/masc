@@ -1144,7 +1144,10 @@ let init () =
     Histogram;
   add metric_tasks "Total tasks processed" Counter;
   add metric_errors "Total errors" Counter;
-  add metric_error_events "Error events by type (parsing, missing_config, etc.)" Counter;
+  (* [type] label is bound by [Error_event_type.t] — adding a new value
+     requires extending the closed sum and re-running every emit site
+     through the compiler. *)
+  add metric_error_events "Error events by type (parsing, missing_config)" Counter;
   add
     metric_workspace_route_failures
     "Total workspace route filesystem/git/read exceptions, labeled by site"

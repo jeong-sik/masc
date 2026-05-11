@@ -452,7 +452,8 @@ let create_keeper env sw config name =
   | Some (false, err) -> fail err
   | None -> fail "missing masc_keeper_up dispatch"
 
-let append_execution_receipt ?(outcome = "ok")
+let append_execution_receipt
+    ?(outcome : Lib.Keeper_execution_receipt.outcome_kind = `Ok)
     ?(terminal_reason_code = "completed")
     ?(tool_contract_result = "satisfied")
     ?(stop_reason = Some Lib.Cascade_runner.Completed)
@@ -836,7 +837,7 @@ let test_dashboard_execution_queue_surfaces_keeper_runtime_trust () =
           (fun () ->
             create_keeper env sw config "sangsu";
             append_execution_receipt config ~keeper_name:"sangsu"
-              ~outcome:"error"
+              ~outcome:`Error
               ~terminal_reason_code:"required_tool_use_unsatisfied"
               ~tool_contract_result:"violated"
               ~stop_reason:None;

@@ -34,7 +34,7 @@ let mk_tool_surface ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Requ
   }
 
 let mk_receipt
-    ?(outcome = "error")
+    ?(outcome : R.outcome_kind = `Error)
     ?(terminal_reason_code = "")
     ?(tool_contract_result = "satisfied")
     ?(tools_used = [ "Read" ])
@@ -191,7 +191,7 @@ let test_alert_for_cascade_exhausted () =
 
 let test_unknown_when_unmapped () =
   let r =
-    mk_receipt ~outcome:"weird" ~cascade_outcome:"weird"
+    mk_receipt ~outcome:`Ok ~cascade_outcome:"weird"
       ~tool_contract_result:"satisfied" ()
   in
   check_disp "unmapped" r "unknown" "unmapped_cascade_state"
@@ -200,7 +200,7 @@ let test_unknown_when_unmapped () =
 
 let test_pass_for_healthy () =
   let r =
-    mk_receipt ~outcome:"ok" ~cascade_outcome:"completed"
+    mk_receipt ~outcome:`Ok ~cascade_outcome:"completed"
       ~tool_contract_result:"satisfied" ~terminal_reason_code:"completed"
       ()
   in
@@ -247,7 +247,7 @@ let test_each_broadcast_disp_is_reachable () =
   check bool "alert_exhausted reachable" true (R.needs_operator_broadcast d2);
   (* unknown via unmapped *)
   let r3 =
-    mk_receipt ~outcome:"weird" ~cascade_outcome:"weird"
+    mk_receipt ~outcome:`Ok ~cascade_outcome:"weird"
       ~tool_contract_result:"satisfied" ()
   in
   let d3, _ = R.operator_disposition r3 in

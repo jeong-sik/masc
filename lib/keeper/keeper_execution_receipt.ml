@@ -138,7 +138,7 @@ type t =
   ; turn_count : int option
   ; current_task_id : string option
   ; goal_ids : string list
-  ; outcome : string
+  ; outcome : outcome_kind
   ; terminal_reason_code : string
   ; response_text_present : bool
   ; model_used : string option
@@ -408,10 +408,10 @@ let operator_disposition (receipt : t) =
      an unmapped state. Spec parity with [ReceiptOutcomeSet] in
      [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
   else
-    match outcome_kind_of_string receipt.outcome with
-    | Some `Cancelled -> ("user_cancelled", "cancelled")
-    | Some `Skipped -> ("skipped", "phase_skipped")
-    | Some `Ok when String.equal cascade_outcome "completed" ->
+    match receipt.outcome with
+    | `Cancelled -> ("user_cancelled", "cancelled")
+    | `Skipped -> ("skipped", "phase_skipped")
+    | `Ok when String.equal cascade_outcome "completed" ->
       ("pass", "healthy")
     | _ ->
       Prometheus.inc_counter
@@ -424,7 +424,8 @@ let operator_disposition (receipt : t) =
         "operator_disposition: unmapped (outcome=%s cascade_outcome=%s \
          terminal_reason=%s tool_contract_result=%s error_kind=%s) \
          — investigate regression of #11651 silent-path fix"
-        receipt.outcome cascade_outcome terminal_reason tool_contract_result
+        (outcome_kind_to_string receipt.outcome)
+        cascade_outcome terminal_reason tool_contract_result
         (Option.value
            (Option.map error_kind_to_string receipt.error_kind)
            ~default:"<none>");
@@ -485,10 +486,7 @@ let to_json (receipt : t) =
              ("target_kind", `String "keeper");
              ("target_path", string_opt_json receipt.sandbox_root);
            ])
-      ~success:
-        (match outcome_kind_of_string receipt.outcome with
-         | Some kind -> outcome_kind_is_terminal_success kind
-         | None -> false (* unknown outcome: fail-closed *))
+      ~success:(outcome_kind_is_terminal_success receipt.outcome)
       ~duration_ms:(receipt_duration_ms receipt)
       ?error:receipt.error_message
       ~sandbox_target:
@@ -512,11 +510,7 @@ let to_json (receipt : t) =
         | Some value -> `String value
         | None -> `Null );
       ("goal_ids", list_json receipt.goal_ids);
-      ("outcome",
-       `String
-         (match outcome_kind_of_string receipt.outcome with
-          | Some kind -> outcome_kind_to_tla_receipt kind
-          | None -> receipt.outcome));
+      ("outcome", `String (outcome_kind_to_tla_receipt receipt.outcome));
       ("terminal_reason_code", `String receipt.terminal_reason_code);
       ("operator_disposition", `String operator_disposition);
       ("operator_disposition_reason", `String operator_disposition_reason);
@@ -670,11 +664,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
         | None -> `Null )
     ; "disposition", `String disposition
     ; "disposition_reason", `String reason
-    ; "outcome",
-      `String
-        (match outcome_kind_of_string receipt.outcome with
-         | Some kind -> outcome_kind_to_tla_receipt kind
-         | None -> receipt.outcome)
+    ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String receipt.terminal_reason_code
     ; ( "current_task_id",
         match receipt.current_task_id with

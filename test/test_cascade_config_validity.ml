@@ -200,37 +200,56 @@ let test_unknown_provider_is_dropped () =
         true
         (List.length parsed < List.length strings))
 
-let test_committed_json_matches_toml_materializer () =
+(* RFC-0058 §9 Phase 9 (Acceptance Criteria): "cascade.json no longer
+   generated or consumed." cascade.json is now a runtime-only derived
+   artifact — committing it would re-anchor it as a second SSOT and
+   diverge from cascade.toml at edit time. Replaces the previous
+   [test_committed_json_matches_toml_materializer] invariant which
+   enforced byte-equality between the committed JSON and the TOML
+   materialization. *)
+let test_cascade_json_is_not_committed () =
   let path = cascade_path () in
   let source =
     Masc_mcp.Cascade_toml_materializer.source_info ~config_path:path
   in
   check string "repo cascade source kind" "toml"
     (Masc_mcp.Cascade_toml_materializer.source_kind_to_string source.kind);
-  match source.kind with
-  | Masc_mcp.Cascade_toml_materializer.Json ->
-      fail "config/cascade.toml must remain the committed cascade SSOT"
-  | Masc_mcp.Cascade_toml_materializer.Toml -> (
-      match
-        Masc_mcp.Cascade_toml_materializer.render_toml_file_to_json_string
-          source.source_path
-      with
-      | Error msg -> fail ("cascade.toml failed to materialize: " ^ msg)
-      | Ok rendered_json ->
-          let ic = open_in source.json_path in
-          let committed_json =
-            Fun.protect
-              ~finally:(fun () -> close_in_noerr ic)
-              (fun () ->
-                let len = in_channel_length ic in
-                let buf = Bytes.create len in
-                really_input ic buf 0 len;
-                Bytes.to_string buf)
-          in
-          check bool
-            "committed cascade.json matches cascade.toml materialization"
-            true
-            (String.equal rendered_json committed_json))
+  (* The .json sibling is allowed to exist on disk (runtime materialise
+     writes it) but must not be tracked by git. Use [git ls-files
+     --error-unmatch] which exits non-zero when the path is untracked. *)
+  let repo_root =
+    let cwd = Sys.getcwd () in
+    (* The test runs from _build/...; resolve repo root via dune project. *)
+    let rec walk dir =
+      if Sys.file_exists (Filename.concat dir "dune-project")
+      then dir
+      else (
+        let parent = Filename.dirname dir in
+        if String.equal parent dir
+        then cwd
+        else walk parent)
+    in
+    walk cwd
+  in
+  let json_rel = "config/cascade.json" in
+  let cmd =
+    Printf.sprintf
+      "cd %s && git ls-files --error-unmatch %s >/dev/null 2>&1"
+      (Filename.quote repo_root)
+      (Filename.quote json_rel)
+  in
+  let tracked = Sys.command cmd = 0 in
+  check bool
+    "config/cascade.json must not be tracked by git (RFC-0058 §9)"
+    false
+    tracked;
+  (* TOML still has to render cleanly — keeps the materialiser exercised. *)
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_file_to_json_string
+      source.source_path
+  with
+  | Error msg -> fail ("cascade.toml failed to materialize: " ^ msg)
+  | Ok _ -> ()
 
 let with_temp_cascade_json body =
   let tmp = Filename.temp_file "cascade-strategy-" ".json" in
@@ -358,9 +377,9 @@ let () =
             `Quick
             test_unknown_provider_is_dropped;
           test_case
-            "committed json matches toml materializer"
+            "cascade.json is not committed (RFC-0058 §9)"
             `Quick
-            test_committed_json_matches_toml_materializer;
+            test_cascade_json_is_not_committed;
           test_case
             "priority_tier label tiers normalize to model ids"
             `Quick

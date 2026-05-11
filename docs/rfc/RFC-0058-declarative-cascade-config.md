@@ -527,6 +527,32 @@ binding/alias path.
 - Dashboard JSON removal (absorbed into TOML-only mode)
 - `ensure_materialized_json` eliminated
 
+### Phase 9: `cascade.json` elimination (split into 3 PRs)
+
+The acceptance criterion "*`cascade.json` no longer generated or consumed*"
+unwinds in three steps because ~20 files in `lib/cascade/`,
+`lib/dashboard/`, and `lib/server/` still consume the materialised JSON.
+Doing it as one PR risks breaking runtime callers during the migration.
+
+- **Phase 9.1 — Stop tracking the committed JSON** *(this PR)*: drop the
+  committed `config/cascade.json` and the byte-equality test that pinned
+  it to the TOML render, add `.gitignore` so the runtime-materialised
+  artefact stays out of source control. Runtime behaviour is unchanged
+  because `Cascade_toml_materializer.ensure_materialized_json` writes the
+  JSON sibling on first read.
+- **Phase 9.2 — Migrate consumers to in-memory render**: replace
+  `Cascade_config_loader.load_json (json_path)` plus
+  `ensure_materialized_json` call sites with
+  `Cascade_toml_materializer.render_toml_to_json_string` followed by
+  `Yojson` parsing — no disk write. Each migrated module is one focused
+  PR. Disk JSON keeps working as a fallback for the few remaining
+  callers.
+- **Phase 9.3 — Delete the JSON path entirely**: remove
+  `ensure_materialized_json`, drop the `Json` variant from
+  `Cascade_toml_materializer.source_kind`, retire the disk
+  `cascade.json` write, and audit-grep `lib/` for any residual
+  `cascade.json` references.
+
 ## 9. Acceptance Criteria
 
 - [ ] TOML file defines all 5 layers

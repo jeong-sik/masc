@@ -63,10 +63,16 @@ let re_matches pattern text =
 
 (* Precompile the static patterns used by [content_has_risky_quantitative_claim]
    so each board-post check reuses the same DFA instead of rebuilding it
-   from the literal pattern on every call.  [Str] keeps match-group state
-   global, but only [match_beginning]/[match_end] read it — here we only
-   take the boolean from [search_forward], so sharing the regex across
-   fibers is safe for our use. *)
+   from the literal pattern on every call.
+   Concurrency note: [Str] mutates a process-global last-match state on
+   every [search_forward]/[string_match], and the entire [Str.matched_*]
+   family ([matched_group], [matched_string], [match_beginning],
+   [match_end], [group_beginning], [group_end]) reads it. Sharing a
+   compiled regexp across fibers/domains is safe, but no caller may rely
+   on [Str.matched_*] without external serialization — here we only
+   consume the boolean from [search_forward] and never inspect match
+   groups, so the global state is not observed. Migrate to [Re] if
+   match-group access is ever needed on this hot path. *)
 let re_line_ref_short = Str.regexp_case_fold "[Ll][0-9][0-9]*"
 let re_line_ref_file =
   Str.regexp_case_fold "[A-Za-z0-9_./-]+\\.[A-Za-z0-9_]+:[0-9][0-9]*"

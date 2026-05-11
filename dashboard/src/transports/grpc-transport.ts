@@ -89,6 +89,7 @@ export interface GrpcTransport extends Transport {
   readonly toolCall: (req: ToolCallRequest) => Promise<ToolCallResponse>
   readonly broadcast: (req: BroadcastRequest) => Promise<BroadcastResponse>
   readonly getStatus: (req: StatusRequest) => Promise<StatusResponse>
+  readonly lspCall: (req: LspRequest) => Promise<LspResponse>
 }
 
 interface GrpcTransportState {

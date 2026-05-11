@@ -107,3 +107,14 @@ export interface TaskInfo {
   assignedTo: string
   priority: number
 }
+
+export interface LspRequest {
+  languageId: string
+  jsonrpcRequestJson: string
+  workspaceRoot?: string
+}
+
+export interface LspResponse {
+  jsonrpcResponseJson: string
+  errorMessage?: string
+}

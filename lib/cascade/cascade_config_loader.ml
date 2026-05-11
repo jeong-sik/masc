@@ -150,8 +150,13 @@ let load_json path =
 (** A model entry with an optional weight for weighted cascade selection.
     Weight defaults to 1 when not specified (backward compatible).
     [secondary] is the RFC-0027 PR-9 dual-track fallback (CLI primary +
-    direct-API secondary), [None] for legacy entries. *)
-type weighted_entry =
+    direct-API secondary), [None] for legacy entries.
+
+    The record itself lives in [Cascade_weighted_entry] so downstream
+    bridges (e.g. RFC-0058 declarative-legacy bridge) can produce values
+    of the same type without depending on this loader and creating a
+    cycle. *)
+type weighted_entry = Cascade_weighted_entry.t =
   { model : string
   ; weight : int
   ; supports_tool_choice : bool option
@@ -547,7 +552,7 @@ let load_catalog ~config_path =
     if invalid_profile_errors <> []
     then Error (String.concat "; " invalid_profile_errors)
     else (
-      let entries =
+      let legacy_entries =
         List.map
           (fun (name, builder) ->
              let required_capability_profile =
@@ -563,6 +568,36 @@ let load_catalog ~config_path =
              })
           active_builders
       in
+      (* RFC-0058 Phase 5 catalog discovery bridge: augment legacy
+         [<name>_models]-derived entries with declarative tier/tier-group
+         names so route targets like [tier-group.big_three] resolve in
+         [Cascade_routes.cascade_name_for_use].  [keeper_assignable] is
+         derived from route usage (fail-closed): a declarative entry is
+         keeper-assignable iff it is targeted by some [routes.X] entry.
+         Profiles reachable only via [system_targets.X] (governance,
+         dispatch, etc.) stay [keeper_assignable=false] — matching the
+         spirit of legacy [<name>_keeper_assignable] overrides without
+         hard-coding [true] for every system-only tier.  Names already
+         present in [legacy_entries] win to preserve any legacy
+         overrides during the transition. *)
+      let declarative_entries =
+        Cascade_declarative_legacy_bridge.declarative_profile_names
+          ~config_path
+        |> List.filter_map (fun name ->
+          if List.exists (fun (e : catalog_entry) -> String.equal e.name name)
+               legacy_entries
+          then None
+          else
+            Some
+              { name
+              ; keeper_assignable =
+                  Cascade_declarative_legacy_bridge.is_keeper_routable
+                    ~config_path ~name
+              ; fallback_cascade = None
+              ; required_capability_profile = None
+              })
+      in
+      let entries = legacy_entries @ declarative_entries in
       let cycles = detect_fallback_cycles entries in
       let key = cycle_set_key cycles in
       let should_warn =
@@ -630,7 +665,20 @@ let load_profile_weighted ~config_path ~name =
     let open Yojson.Safe.Util in
     (match json |> member key with
      | `List items -> List.filter_map parse_weighted_item items
-     | _ -> [])
+     | _ ->
+       (* RFC-0058 Phase 5 catalog discovery bridge: when the legacy
+          [<name>_models] key is absent, fall back to the declarative
+          tier/tier-group adapter so profiles defined under
+          [[tier.<X>]]/[[tier-group.<X>]] resolve to the same
+          [weighted_entry] shape the caller expects.  Returns [] when
+          the name is unknown to the declarative catalog — matching the
+          prior legacy behaviour on absent profiles. *)
+       (match
+          Cascade_declarative_legacy_bridge.weighted_entries_for_profile
+            ~config_path ~name
+        with
+        | Some entries -> entries
+        | None -> []))
 ;;
 
 let load_profile ~config_path ~name =

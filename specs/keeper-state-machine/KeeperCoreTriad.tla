@@ -23,9 +23,11 @@
 \*          lib/keeper/keeper_unified_turn.ml (turn lifecycle)
 \*
 \* OCaml mapping:
-\*   phase              <-> Keeper_state_machine.phase (12-phase OCaml type
+\*   phase              <-> Keeper_state_machine.phase (13-phase OCaml type
 \*                          projected to a 7-symbol triad alphabet; see the
-\*                          canonical mapping in the TypeOK preamble below)
+\*                          canonical mapping in the TypeOK preamble below.
+\*                          Zombie added iter 4 #14707 is terminal-terminal
+\*                          and intentionally collapsed into "Terminal".)
 \*   effective_cascade  <-> Keeper_cascade_routing.select_cascade result
 \*   provider_ceiling   <-> Oas_model_resolve.resolve_max_cascade_context
 \*   requested_max_tokens <-> Cascade_inference.resolve_max_tokens
@@ -88,8 +90,9 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 \* ── Type Invariant ───────────────────────────────────────
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
-\* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
-\* spec collapses the 12 phases into a 7-symbol "core triad" alphabet
+\* OCaml side is lib/keeper/keeper_state_machine.ml (13 phases;
+\* Zombie added iter 4 #14707).  This spec collapses the 12 non-Zombie
+\* phases into a 7-symbol "core triad" alphabet
 \* because the triad invariants only depend on running/failure/
 \* compaction signals, not on the full keeper lifecycle. Mapping:
 \*

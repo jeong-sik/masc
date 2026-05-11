@@ -26,7 +26,7 @@
 \*
 \* Scope projection: this spec models only the launch_pending /
 \* fiber_alive / phase relationship for the 3-phase fragment
-\* {Offline, Running, Dead}.  The full 12-phase variant is out of
+\* {Offline, Running, Dead}.  The full 13-phase variant is out of
 \* scope (other specs cover the remaining branches).
 \*
 \* Failure mode the bug action targets:

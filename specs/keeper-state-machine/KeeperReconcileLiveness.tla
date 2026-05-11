@@ -103,8 +103,9 @@ DerivePhase ==
 Phase == DerivePhase
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
-\* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
-\* spec uses the same CamelCase constructor names as the OCaml type
+\* OCaml side is lib/keeper/keeper_state_machine.ml (13 phases;
+\* Zombie added iter 4 #14707).  This spec uses the same CamelCase
+\* constructor names as the OCaml type
 \* but only models the 6 phases relevant to reconcile liveness — the
 \* phases the supervisor must drive to a stable state. Mapping
 \* (CamelCase identical to OCaml constructors):

@@ -68,7 +68,8 @@ VARIABLES
 
 vars == << phase, entered_at, now >>
 
-\* RFC-0002 12-phase FSM (keeper_state_machine.ml: type phase, 12 constructors).
+\* RFC-0002 13-phase FSM (keeper_state_machine.ml: type phase, 13 constructors;
+\* Zombie added iter 4 #14707, terminal-terminal — see PhaseSet below).
 PhaseSet == {
     "Offline",
     "Running",

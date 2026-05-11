@@ -36,7 +36,7 @@
 \*   spec variable                | OCaml location                                    | semantic
 \*   -----------------------------+---------------------------------------------------+---------
 \*   phase \in {"Running", "HandingOff"} | lib/keeper/keeper_state_machine.ml:phase    | type phase = ... | Running | ... | HandingOff | ...
-\*                                | (full 12-phase variant; this spec projects to 2)  |
+\*                                | (full 13-phase variant; this spec projects to 2)  |
 \*   handoff_needed (boolean)     | lib/keeper/keeper_state_machine.ml:context_handoff_needed | conditions.context_handoff_needed : bool
 \*                                | lib/keeper/keeper_state_machine.ml:update_conditions | set from auto_rules.handoff at update_conditions
 \*
@@ -56,7 +56,7 @@
 \*     fields were inserted above it.
 \*
 \* Scope projection: spec models the 2-phase fragment (Running / HandingOff).
-\* The full 12-phase variant is out of scope here; sibling specs
+\* The full 13-phase variant is out of scope here; sibling specs
 \* (KeeperContextLifecycle, KeeperCompactionLifecycle) cover other phase
 \* groups. Adding new OCaml phases does NOT require updating this spec
 \* unless the new phase competes with HandingOff for the handoff_needed

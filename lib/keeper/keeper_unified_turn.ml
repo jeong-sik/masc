@@ -866,7 +866,7 @@ let run_keeper_cycle
                              (Printexc.to_string exn);
                            Prometheus.inc_counter
                              Keeper_metrics.metric_keeper_event_bus_drain
-                             ~labels:[ "site", "background_poll"; "outcome", "exception" ]
+                             ~labels:[ "site", Event_bus_drain_site.(to_label Background_poll); "outcome", "exception" ]
                              ();
                            (* 2026-04-20: 0.25s → 0.05s.  OAS publishes a burst
                      of events per tool cycle (ToolCalled / ToolResult /
@@ -1437,7 +1437,7 @@ let run_keeper_cycle
                                  Keeper_metrics.metric_keeper_post_turn_wirein_failures
                                  ~labels:
                                    [ "keeper", meta.name
-                                   ; "site", "post_commit_transient"
+                                   ; "site", Post_turn_wirein_failure_site.(to_label Post_commit_transient)
                                    ]
                                  ();
                                Log.Keeper.error
@@ -2672,7 +2672,7 @@ let run_keeper_cycle
                        ~labels:
                          [ "keeper", updated_meta.Keeper_types.name
                          ; "channel", channel
-                         ; "site", "keeper_unified_turn"
+                         ; "site", Metric_emit_dropped_site.(to_label Keeper_unified_turn)
                          ]
                        ();
                      Log.Keeper.error
@@ -2680,7 +2680,7 @@ let run_keeper_cycle
                        (Printexc.to_string exn);
                      Prometheus.inc_counter
                        Keeper_metrics.metric_keeper_turn_metrics_snapshot_failures
-                       ~labels:[ "keeper", meta.name; "site", "post_cycle" ]
+                       ~labels:[ "keeper", meta.name; "site", Turn_metrics_snapshot_failure_site.(to_label Post_cycle) ]
                        ());
                   let turn_mode = Keeper_unified_metrics.turn_mode_of_result result in
                   let turn_mode_label =

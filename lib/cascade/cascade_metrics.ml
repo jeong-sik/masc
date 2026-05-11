@@ -160,3 +160,32 @@ let on_profile_candidate_drop ~cascade ~reason =
   Prometheus.inc_counter metric_profile_candidate_drop
     ~labels:[ ("cascade", cascade); ("reason", reason) ]
     ()
+
+(* [resolve_named_providers] compares the [Provider_config.t] list it
+   actually returns against the canonical labels parsed from the
+   declared profile.  Mismatch ("leak") means the resolver synthesized
+   a provider that was not literally declared in cascade.toml — most
+   commonly via alias expansion ([codex_cli:auto] -> a concrete model)
+   or provider_filter fallback widening, but in pathological cases a
+   genuine configuration drift where keeper turns route to a
+   provider the operator never approved.
+
+   Previously this was WARN-log only at the call site; operators had
+   no way to alert on leak rate without scraping logs.  Bumping the
+   counter by the number of leaked entries (not just calls) means a
+   dashboard can show "leak provider-hits per second per cascade",
+   distinguishing a single chronic alias from a sudden cascade-wide
+   widening.
+
+   Cardinality: cascades (~10) = ~10 series.  Provider-kind label
+   intentionally NOT added — the WARN line already enumerates the
+   leaked provider strings, and adding kind labels here would force
+   string parsing of the leaked entries to extract the kind. *)
+let metric_resolve_provider_leak = "masc_cascade_resolve_provider_leak_total"
+
+let on_resolve_provider_leak ~cascade ~leak_count =
+  if leak_count > 0 then
+    Prometheus.inc_counter metric_resolve_provider_leak
+      ~labels:[ ("cascade", cascade) ]
+      ~delta:(float_of_int leak_count)
+      ()

@@ -44,3 +44,10 @@ val on_profile_candidate_drop : cascade:string -> reason:string -> unit
     when [Cascade_config.parse_weighted_entry_diag] rejects an entry.
     [reason] must be one of [unregistered_scheme], [unavailable_scheme],
     [invalid_syntax]. *)
+
+val on_resolve_provider_leak : cascade:string -> leak_count:int -> unit
+(** Tick the resolve-leak counter at [resolve_named_providers] when
+    the returned Provider_config.t list contains entries not present
+    in the parsed declared profile.  Bumps by [leak_count] (number of
+    leaked entries observed in this single resolve call); a [leak_count]
+    of zero is a no-op so callers can call unconditionally. *)

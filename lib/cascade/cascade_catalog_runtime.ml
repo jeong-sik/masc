@@ -1211,6 +1211,9 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
         let leaked =
           List.filter (fun m -> not (List.mem m declared)) returned
         in
+        Cascade_metrics.on_resolve_provider_leak
+          ~cascade:normalized
+          ~leak_count:(List.length leaked);
         (if leaked <> [] then
            Log.warn ~ctx:"CascadeCatalog"
              "resolve_named_providers(%s): %d providers NOT in parsed declared \

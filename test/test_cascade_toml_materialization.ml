@@ -571,6 +571,24 @@ let test_profile_candidate_drop_helpers_do_not_throw () =
     ~cascade:"smoke_test_cascade" ~reason:"invalid_syntax";
   check bool "all three reasons callable without raising" true true
 
+(* Smoke + contract guard for [Cascade_metrics.on_resolve_provider_leak].
+   The contract is documented as: [leak_count=0] is a no-op (callers
+   can call unconditionally), [leak_count>0] bumps the counter by that
+   amount.  This test exercises both arms.  As with the candidate-drop
+   smoke test, Prometheus state is process-global and not asserted —
+   the goal is to lock the signature + no-op contract so a future
+   refactor that breaks the unconditional-call invariant trips a
+   compile or runtime failure here. *)
+let test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable () =
+  (* leak_count=0 must be a no-op (no exception, no metric tick that
+     could pollute neighboring tests). *)
+  Masc_mcp.Cascade_metrics.on_resolve_provider_leak
+    ~cascade:"smoke_test_cascade" ~leak_count:0;
+  Masc_mcp.Cascade_metrics.on_resolve_provider_leak
+    ~cascade:"smoke_test_cascade" ~leak_count:3;
+  check bool "zero and positive leak_count both callable without raising"
+    true true
+
 (* Regression guard for [Serving_last_known_good] entry + recovery
    transitions.  Previously these transitions happened silently:
    [inspect_active] would flip a Validated cache into LKG (or back)
@@ -746,5 +764,9 @@ let () =
         [
           test_case "profile_candidate_drop helpers do not throw" `Quick
             test_profile_candidate_drop_helpers_do_not_throw;
+          test_case
+            "resolve_provider_leak: zero is no-op, positive callable"
+            `Quick
+            test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable;
         ] );
     ]

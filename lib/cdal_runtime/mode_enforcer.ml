@@ -246,9 +246,16 @@ let classify_bash_tool input =
 ;;
 
 let effective_class tool_name input =
+  (* Enumerate every [tool_effect_class] variant so the compiler flags
+     any new constructor here. The previous [c -> c] catch-all was
+     identity passthrough, which is the right call for the three
+     statically-classifiable variants today — but a future variant
+     that should be refined from [input] (e.g. a [Network_dynamic]
+     mirroring [Shell_dynamic]) would silently inherit the static
+     classification with no review point. *)
   match classify_tool tool_name with
   | Shell_dynamic -> classify_bash_tool input
-  | c -> c
+  | (Read_only | Local_mutation | External_effect) as c -> c
 ;;
 
 let tool_effect_class_of_string = function

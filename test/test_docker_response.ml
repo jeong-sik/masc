@@ -116,6 +116,44 @@ let test_exec_result_structural_equality () =
   check bool "structural equality (a ≡ b by field)" true (Docker_response.equal_exec_result a b);
   check bool "exit_code distinguishes" false (Docker_response.equal_exec_result a c)
 
+(* ── ps_record structural equality (Phase 3b-iv.1a) ────────────── *)
+
+let sample_name =
+  Keeper_container_name.derive
+    ~algo:Keeper_hash_algo.SHA_256
+    ~turn_id:1
+    ~attempt:0
+    ~suffix:"test"
+
+let sample_ps_record =
+  Docker_response.
+    { id = "abc123"
+    ; name = sample_name
+    ; status = Running
+    ; labels = [ "masc.keeper", "test"; "masc.run_id", "42" ]
+    }
+
+let test_ps_record_structural_equality () =
+  let a = sample_ps_record in
+  let b = sample_ps_record in
+  let c = { sample_ps_record with status = Docker_response.Dead } in
+  check bool "ps_record structural equality" true (Docker_response.equal_ps_record a b);
+  check bool "status field distinguishes" false (Docker_response.equal_ps_record a c)
+
+let test_ps_record_labels_order () =
+  (* Labels are an association list — order matters for structural
+     equality. The parsing layer (Phase 3b-iv.2) is responsible for
+     emitting them in a canonical order if order-independence is
+     required. *)
+  let a = sample_ps_record in
+  let b =
+    { sample_ps_record with
+      labels = [ "masc.run_id", "42"; "masc.keeper", "test" ]
+    }
+  in
+  check bool "label list order matters (no auto-sort)"
+    false (Docker_response.equal_ps_record a b)
+
 let () =
   run "Docker_response"
     [
@@ -148,5 +186,14 @@ let () =
           test_case "structural equality + exit_code distinguishes"
             `Quick
             test_exec_result_structural_equality;
+        ] );
+      ( "ps_record",
+        [
+          test_case "structural equality + status distinguishes"
+            `Quick
+            test_ps_record_structural_equality;
+          test_case "label list order matters"
+            `Quick
+            test_ps_record_labels_order;
         ] );
     ]

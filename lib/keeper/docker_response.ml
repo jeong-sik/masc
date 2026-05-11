@@ -37,3 +37,11 @@ type exec_result =
   ; stderr : string
   }
 [@@deriving show, eq]
+
+type ps_record =
+  { id : string
+  ; name : Keeper_container_name.t
+  ; status : ps_status
+  ; labels : (string * string) list
+  }
+[@@deriving show, eq]

@@ -1276,6 +1276,9 @@ let init () =
     Keeper_metrics.metric_keeper_turn_queue_depth
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     Gauge;
+  (* [kind] is bound by [Bookkeeping_failure_kind.t]; [op] is free-form
+     dynamic context (e.g. ["drop_holder <label>"]) needed to
+     disambiguate which bookkeeping callback failed. *)
   add
     Keeper_metrics.metric_keeper_turn_slot_bookkeeping_failures
     "Total keeper turn-slot release bookkeeping callbacks that could not complete while \

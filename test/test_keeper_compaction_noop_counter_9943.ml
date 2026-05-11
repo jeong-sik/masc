@@ -17,27 +17,37 @@
 
 let () =
   let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-keeper-compaction-noop-9943-%06x"
-         (Random.bits ()))
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-keeper-compaction-noop-9943-%06x" (Random.bits ()))
   in
   Unix.putenv "MASC_BASE_PATH" dir
+;;
 
 module Prom = Masc_mcp.Prometheus
 
 let noop_for ~keeper ~trigger =
   Prom.metric_value_or_zero
     Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
-    ~labels:[ ("keeper", keeper); ("trigger", trigger) ]
+    ~labels:[ "keeper", keeper; "trigger", trigger ]
     ()
+;;
 
-(* Metric is registered at module init.  If a future refactor
-   accidentally drops the [add metric_keeper_compaction_noop ...]
-   call, the dashboard would silently flatten this signal — pin
-   the registration. *)
+(* Metric is registered at module init via [Prometheus.add ~labels:[]],
+   so [get_metric_value ~labels:[] ()] returns [Some 0.0] iff the
+   registration ran. If a future refactor accidentally drops the
+   [add metric_keeper_compaction_noop ...] call, this returns [None]
+   and the dashboard silently flattens — pin the registration.
+
+   [metric_total] is unsuitable as a check: it folds across all
+   labelled variants and returns [0.0] for both "not registered" and
+   "registered but no observations yet". *)
 let test_metric_registered () =
-  let _ = Prom.metric_total Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop in
-  Alcotest.(check pass) "metric registered at init" () ()
+  let registered =
+    Prom.get_metric_value Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop ()
+  in
+  Alcotest.(check bool) "metric registered at init" true (Option.is_some registered)
+;;
 
 (* Direct increment using the same call shape
    [append_metrics_snapshot] uses.  Verifies the counter advances
@@ -48,12 +58,13 @@ let test_counter_advances_for_noop_pattern () =
   let before = noop_for ~keeper ~trigger in
   Prom.inc_counter
     Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
-    ~labels:[ ("keeper", keeper); ("trigger", trigger) ]
+    ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
   Alcotest.(check (float 0.0001))
     "noop counter +1 with correct labels"
     (before +. 1.0)
     (noop_for ~keeper ~trigger)
+;;
 
 (* Different triggers land on different counter rows so dashboards
    can attribute noops to the source trigger.  Pre-fix the only
@@ -64,19 +75,21 @@ let test_distinct_triggers_separate_rows () =
   let before_proactive = noop_for ~keeper ~trigger:"proactive_warmup" in
   Prom.inc_counter
     Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
-    ~labels:[ ("keeper", keeper);
-              ("trigger", "context_overflow_imminent") ]
+    ~labels:[ "keeper", keeper; "trigger", "context_overflow_imminent" ]
     ();
   Prom.inc_counter
     Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
-    ~labels:[ ("keeper", keeper); ("trigger", "proactive_warmup") ]
+    ~labels:[ "keeper", keeper; "trigger", "proactive_warmup" ]
     ();
-  Alcotest.(check (float 0.0001)) "overflow row +1"
+  Alcotest.(check (float 0.0001))
+    "overflow row +1"
     (before_overflow +. 1.0)
     (noop_for ~keeper ~trigger:"context_overflow_imminent");
-  Alcotest.(check (float 0.0001)) "proactive row +1"
+  Alcotest.(check (float 0.0001))
+    "proactive row +1"
     (before_proactive +. 1.0)
     (noop_for ~keeper ~trigger:"proactive_warmup")
+;;
 
 (* Per-keeper isolation — keeper A's noops do not leak into
    keeper B's row.  Necessary because a fleet has 9-15 keepers
@@ -89,16 +102,17 @@ let test_per_keeper_isolation () =
   let before_b = noop_for ~keeper:b ~trigger in
   Prom.inc_counter
     Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
-    ~labels:[ ("keeper", a); ("trigger", trigger) ]
+    ~labels:[ "keeper", a; "trigger", trigger ]
     ();
   Prom.inc_counter
     Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
-    ~labels:[ ("keeper", a); ("trigger", trigger) ]
+    ~labels:[ "keeper", a; "trigger", trigger ]
     ();
   Alcotest.(check (float 0.0001))
     "keeper B unaffected by keeper A increments"
     before_b
     (noop_for ~keeper:b ~trigger)
+;;
 
 (* Prometheus text export must include the metric name and the
    keeper / trigger label keys — PromQL queries depend on this. *)
@@ -107,45 +121,46 @@ let test_prometheus_text_export () =
   let trigger = "context_overflow_imminent" in
   Prom.inc_counter
     Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
-    ~labels:[ ("keeper", keeper); ("trigger", trigger) ]
+    ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
   let text = Prom.to_prometheus_text () in
   let contains s sub =
-    let n = String.length s and m = String.length sub in
+    let n = String.length s
+    and m = String.length sub in
     let rec loop i =
-      if i + m > n then false
-      else if String.sub s i m = sub then true
-      else loop (i + 1)
+      if i + m > n then false else if String.sub s i m = sub then true else loop (i + 1)
     in
     loop 0
   in
-  Alcotest.(check bool) "metric name in export"
-    true (contains text Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop);
-  Alcotest.(check bool) "keeper label key in export"
-    true (contains text "keeper=");
-  Alcotest.(check bool) "trigger label key in export"
-    true (contains text "trigger=")
+  Alcotest.(check bool)
+    "metric name in export"
+    true
+    (contains text Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop);
+  Alcotest.(check bool) "keeper label key in export" true (contains text "keeper=");
+  Alcotest.(check bool) "trigger label key in export" true (contains text "trigger=")
+;;
 
 let () =
-  Alcotest.run "keeper_compaction_noop_counter_9943"
-    [
-      ( "registration",
-        [
-          Alcotest.test_case "metric registered at init" `Quick
-            test_metric_registered;
-        ] );
-      ( "label-shape",
-        [
-          Alcotest.test_case "counter advances with (keeper, trigger)"
-            `Quick test_counter_advances_for_noop_pattern;
-          Alcotest.test_case "distinct triggers → distinct rows"
-            `Quick test_distinct_triggers_separate_rows;
-          Alcotest.test_case "per-keeper isolation" `Quick
-            test_per_keeper_isolation;
-        ] );
-      ( "export",
-        [
-          Alcotest.test_case "metric + labels appear in /metrics"
-            `Quick test_prometheus_text_export;
-        ] );
+  Alcotest.run
+    "keeper_compaction_noop_counter_9943"
+    [ ( "registration"
+      , [ Alcotest.test_case "metric registered at init" `Quick test_metric_registered ] )
+    ; ( "label-shape"
+      , [ Alcotest.test_case
+            "counter advances with (keeper, trigger)"
+            `Quick
+            test_counter_advances_for_noop_pattern
+        ; Alcotest.test_case
+            "distinct triggers → distinct rows"
+            `Quick
+            test_distinct_triggers_separate_rows
+        ; Alcotest.test_case "per-keeper isolation" `Quick test_per_keeper_isolation
+        ] )
+    ; ( "export"
+      , [ Alcotest.test_case
+            "metric + labels appear in /metrics"
+            `Quick
+            test_prometheus_text_export
+        ] )
     ]
+;;

@@ -786,6 +786,20 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    7 / 9 / 15 [count=0 is no-op]: callers tick unconditionally and
    the helper guards against zero so neighboring tests stay
    unaffected.  Counter has no label dimensions (cardinality 1). *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_route_binding_dropped].  Two documented
+   reasons map 1:1 to the two filter arms in
+   [Cascade_routes.route_bindings_from_json].  Pinning both
+   strings here keeps the canonical set in lockstep with the
+   call sites. *)
+let test_route_binding_dropped_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_route_binding_dropped
+    ~reason:"invalid_value";
+  Masc_mcp.Cascade_metrics.on_route_binding_dropped
+    ~reason:"empty_key_or_target";
+  check bool "both documented reasons callable without raising"
+    true true
+
 let test_capability_mismatch_zero_is_no_op_and_positive_callable () =
   Masc_mcp.Cascade_metrics.on_capability_mismatch ~count:0;
   Masc_mcp.Cascade_metrics.on_capability_mismatch ~count:2;
@@ -1208,6 +1222,9 @@ let () =
           test_case
             "capability_mismatch: zero is no-op, positive callable" `Quick
             test_capability_mismatch_zero_is_no_op_and_positive_callable;
+          test_case
+            "route_binding_dropped: both documented reasons callable" `Quick
+            test_route_binding_dropped_documented_reasons_are_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

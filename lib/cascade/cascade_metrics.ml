@@ -688,3 +688,34 @@ let on_capability_mismatch ~count =
     Prometheus.inc_counter metric_capability_mismatch
       ~delta:(float_of_int count)
       ()
+
+(* [Cascade_routes.route_bindings_from_json] silently drops two
+   classes of malformed [routes] entry that escaped iter 9's
+   schema-error counters (which cover missing-target-profile and
+   unknown-route-key, NOT value-shape faults):
+
+     invalid_value         — [target_of_route_value] returned None.
+                              Either the value isn't a string (legacy
+                              encoding) and isn't an [Assoc] with a
+                              [target] field (declarative encoding),
+                              or the [Assoc] exists but has no
+                              [target] subfield.  Typical: operator
+                              typoed the [target] subfield key.
+     empty_key_or_target   — both encodings produced a value but the
+                              route key or target name is the empty
+                              string after trimming.
+
+   The silent drop means the [routes] table looks valid from a
+   parser perspective (no Error raised) but a route the operator
+   declared just doesn't make it into the catalog.  Downstream
+   route resolution then falls back to iter-30
+   [route_resolve_fallback] — but the iter-30 counter can't
+   distinguish "declared but malformed" from "never declared".
+
+   Cardinality: 2 reasons = 2 series. *)
+let metric_route_binding_dropped = "masc_cascade_route_binding_dropped_total"
+
+let on_route_binding_dropped ~reason =
+  Prometheus.inc_counter metric_route_binding_dropped
+    ~labels:[ ("reason", reason) ]
+    ()

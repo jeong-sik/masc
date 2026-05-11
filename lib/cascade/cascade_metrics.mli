@@ -209,3 +209,11 @@ val on_capability_mismatch : count:int -> unit
     [metric_cascade_fallback_cycle_detected_total] (already covers
     cycles); together they observe the two RFC-0055/0058 fallback
     graph invariants. *)
+
+val on_route_binding_dropped : reason:string -> unit
+(** Tick the route-binding-dropped counter at
+    [Cascade_routes.route_bindings_from_json] when an entry in the
+    [routes] table is silently dropped.  [reason] must be one of
+    [invalid_value] (neither legacy-string nor declarative-table
+    encoding produced a target) or [empty_key_or_target] (target
+    or key trimmed to empty string). *)

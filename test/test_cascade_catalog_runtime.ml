@@ -129,11 +129,135 @@ let bump_mtime path =
   last_touch := stamp;
   Unix.utimes path stamp stamp
 
+(* RFC-0058 §9.4: cascade.toml is the on-disk SSOT, and the materializer
+   emits the flat ["<profile>_<field>": ...] JSON shape these fixtures
+   were written in.  Inverting that shape into per-profile TOML tables
+   lets the existing flat-JSON fixtures keep working without rewriting
+   every call site. *)
+let cascade_profile_fields =
+  [ "models"; "temperature"; "max_tokens"; "strategy"; "max_cycles"
+  ; "backoff_base_ms"; "backoff_cap_ms"; "ollama_max_concurrent"
+  ; "cli_max_concurrent"; "tiers"; "sticky_ttl_ms"; "latency_baseline_ms"
+  ; "rate_limit_recency_window_s"; "rate_limit_decay_base"
+  ; "rate_limit_skip_after"; "server_error_recency_window_s"
+  ; "server_error_decay_base"; "server_error_skip_after"
+  ; "keeper_assignable"; "thinking_enabled"; "thinking_budget"
+  ; "fallback_cascade"; "required_capability_profile"; "api_key_env"
+  ; "keep_alive"; "num_ctx"; "timeout_sec"; "groups"
+  ]
+
+let toml_value_of_json = function
+  | `String s -> Printf.sprintf "%S" s
+  | `Int i -> string_of_int i
+  | `Float f -> Printf.sprintf "%g" f
+  | `Bool b -> if b then "true" else "false"
+  | `List items ->
+    let items_str =
+      items
+      |> List.map (function
+        | `String s -> Printf.sprintf "%S" s
+        | `Int i -> string_of_int i
+        | `Float f -> Printf.sprintf "%g" f
+        | `Bool b -> if b then "true" else "false"
+        | `Assoc fields ->
+          (* Inline table: {key = value, ...} *)
+          let kvs =
+            List.map (fun (k, v) ->
+              Printf.sprintf "%s = %s" k
+                (match v with
+                 | `String s -> Printf.sprintf "%S" s
+                 | `Int i -> string_of_int i
+                 | `Float f -> Printf.sprintf "%g" f
+                 | `Bool b -> if b then "true" else "false"
+                 | other -> Yojson.Safe.to_string other))
+              fields
+          in
+          Printf.sprintf "{ %s }" (String.concat ", " kvs)
+        | other -> Yojson.Safe.to_string other)
+      |> String.concat ", "
+    in
+    Printf.sprintf "[%s]" items_str
+  | other -> Yojson.Safe.to_string other
+
+let parse_profile_field key =
+  List.find_map
+    (fun field ->
+      let suffix = "_" ^ field in
+      if String.length key > String.length suffix
+         && String.equal
+              (String.sub key
+                 (String.length key - String.length suffix)
+                 (String.length suffix))
+              suffix
+      then Some (String.sub key 0 (String.length key - String.length suffix), field)
+      else None)
+    cascade_profile_fields
+
+let flat_json_to_toml content =
+  let json = Yojson.Safe.from_string content in
+  let fields =
+    match json with
+    | `Assoc xs -> xs
+    | _ -> failwith "expected flat JSON object at root"
+  in
+  (* Group by (profile_name, [(field, value); ...]) preserving order. *)
+  let buf = Buffer.create 256 in
+  let special_top_level acc (key, value) =
+    match key, value with
+    | "routes", `Assoc inner ->
+      Buffer.add_string buf "[routes]\n";
+      List.iter
+        (fun (rk, rv) ->
+          Buffer.add_string buf
+            (Printf.sprintf "%s = %s\n" rk (toml_value_of_json rv)))
+        inner;
+      Buffer.add_char buf '\n';
+      acc
+    | _ -> (key, value) :: acc
+  in
+  let remaining = List.rev (List.fold_left special_top_level [] fields) in
+  let profile_order = ref [] in
+  let profile_table : (string, (string * Yojson.Safe.t) list ref) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  List.iter
+    (fun (key, value) ->
+      match parse_profile_field key with
+      | Some (profile, field) ->
+        let entry =
+          match Hashtbl.find_opt profile_table profile with
+          | Some r -> r
+          | None ->
+            let r = ref [] in
+            Hashtbl.add profile_table profile r;
+            profile_order := profile :: !profile_order;
+            r
+        in
+        entry := (field, value) :: !entry
+      | None ->
+        failwith (Printf.sprintf "unsupported cascade JSON key: %s" key))
+    remaining;
+  List.iter
+    (fun profile ->
+      Buffer.add_string buf (Printf.sprintf "[%s]\n" profile);
+      let fields = List.rev !(Hashtbl.find profile_table profile) in
+      List.iter
+        (fun (field, value) ->
+          Buffer.add_string buf
+            (Printf.sprintf "%s = %s\n" field (toml_value_of_json value)))
+        fields;
+      Buffer.add_char buf '\n')
+    (List.rev !profile_order);
+  Buffer.contents buf
+
 let write_cascade_json config_dir content =
-  let path = Filename.concat config_dir "cascade.json" in
-  write_file path content;
-  bump_mtime path;
-  path
+  let toml_content = flat_json_to_toml content in
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path toml_content;
+  bump_mtime toml_path;
+  (* Return the .toml path so call sites that compare against the
+     snapshot's [source_path] (also .toml, RFC-0058 §9.4) match. *)
+  toml_path
 
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in

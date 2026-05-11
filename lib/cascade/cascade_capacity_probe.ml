@@ -64,9 +64,7 @@ let probes () =
 
 (* ── Resolution chain ────────────────────────────────────────── *)
 
-let can_probe ~url =
-  List.exists (fun (module P : Probe) -> P.can_probe ~url) (probes ())
-;;
+let can_probe ~url = List.exists (fun (module P : Probe) -> P.can_probe ~url) (probes ())
 
 let cached ~url ?now () =
   List.find_map
@@ -106,8 +104,7 @@ module For_testing = struct
       let saved = !registered_probes_rev in
       registered_probes_rev := List.rev probes;
       let restore () =
-        Stdlib.Mutex.protect registry_mutex (fun () ->
-          registered_probes_rev := saved)
+        Stdlib.Mutex.protect registry_mutex (fun () -> registered_probes_rev := saved)
       in
       Fun.protect ~finally:restore f)
   ;;

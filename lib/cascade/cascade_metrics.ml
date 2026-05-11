@@ -381,3 +381,27 @@ let on_provider_cooldown ~provider ~reason =
   Prometheus.inc_counter metric_provider_cooldown
     ~labels:[ ("provider", provider); ("reason", reason) ]
     ()
+
+(* Two [Cascade_strategy] ordering branches have a "starvation guard"
+   fail-OPEN: when every candidate reports capacity=0 the function
+   falls through with the pre-filter candidate list so at least one
+   call is attempted (and the upstream real error — rate limit,
+   auth — surfaces) instead of silently exhausting the cascade.
+
+   - Circuit_breaker_cycling — [order_candidates] line 608-609
+   - Priority_tier           — [priority_tier_order] line 542-543
+
+   The third ordering strategy ([weighted_shuffle]) deliberately
+   fails closed and is NOT covered by this counter.
+
+   A non-zero rate signals capacity probes have been judging the
+   cascade exhausted; pair with iter-8 probe metrics and iter-20
+   provider_cooldown to attribute the cause.
+
+   Cardinality: cascades (~10) x strategies (2) = ~20 series. *)
+let metric_strategy_starvation_guard = "masc_cascade_strategy_starvation_guard_total"
+
+let on_strategy_starvation_guard ~cascade ~strategy =
+  Prometheus.inc_counter metric_strategy_starvation_guard
+    ~labels:[ ("cascade", cascade); ("strategy", strategy) ]
+    ()

@@ -712,6 +712,25 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    A typo at any call site would produce an undocumented label and
    pollute Prometheus cardinality; pinning the four strings here
    keeps the documented set canonical. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_strategy_starvation_guard].  Two documented
+   strategy labels map 1:1 to the two ordering branches in
+   [Cascade_strategy.order_candidates] that fall open on
+   capacity=0 (Circuit_breaker_cycling and Priority_tier).  A typo
+   at either call site would emit an undocumented strategy label;
+   pinning the two strings here keeps the canonical set in lockstep
+   with the code.  The fail-open branches themselves require an
+   adapter that always reports capacity=0, which is hard to
+   provoke from a unit test without rewriting half the strategy
+   harness — smoke is signature-only. *)
+let test_strategy_starvation_guard_documented_strategies_are_callable () =
+  Masc_mcp.Cascade_metrics.on_strategy_starvation_guard
+    ~cascade:"smoke_test_cascade_iter22" ~strategy:"circuit_breaker_cycling";
+  Masc_mcp.Cascade_metrics.on_strategy_starvation_guard
+    ~cascade:"smoke_test_cascade_iter22" ~strategy:"priority_tier";
+  check bool "both documented strategy labels callable without raising"
+    true true
+
 let test_provider_cooldown_documented_reasons_are_callable () =
   Masc_mcp.Cascade_metrics.on_provider_cooldown
     ~provider:"smoke_test_provider_iter20" ~reason:"failure_threshold";
@@ -1023,6 +1042,10 @@ let () =
           test_case
             "provider_cooldown: all four documented reasons callable" `Quick
             test_provider_cooldown_documented_reasons_are_callable;
+          test_case
+            "strategy_starvation_guard: both documented strategies callable"
+            `Quick
+            test_strategy_starvation_guard_documented_strategies_are_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

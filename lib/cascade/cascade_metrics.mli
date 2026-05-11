@@ -117,3 +117,11 @@ val on_provider_cooldown : provider:string -> reason:string -> unit
     from the existing [keeper_provider_block_duration_sec]
     histogram, which captures duration distribution but not entry
     rate or reason. *)
+
+val on_strategy_starvation_guard : cascade:string -> strategy:string -> unit
+(** Tick the strategy-starvation-guard counter when
+    [Cascade_strategy.order_candidates] falls through with the
+    pre-capacity-filter candidate list because every candidate
+    reported capacity=0.  [strategy] must be one of
+    [circuit_breaker_cycling] or [priority_tier] (the only two
+    branches with this fail-open). *)

@@ -530,9 +530,16 @@ binding/alias path.
 ### Phase 9: `cascade.json` elimination (split into 3 PRs)
 
 The acceptance criterion "*`cascade.json` no longer generated or consumed*"
-unwinds in three steps because ~20 files in `lib/cascade/`,
-`lib/dashboard/`, and `lib/server/` still consume the materialised JSON.
-Doing it as one PR risks breaking runtime callers during the migration.
+unwinds in three steps. The work splits not because there are many
+*readers* (most readers go through `Cascade_config_loader.load_json`,
+which is already in-memory — see Phase 9.1) but because there are two
+remaining *writers* that materialise `config/cascade.json` on disk:
+`lib/dashboard_cascade.ml` (two `ensure_materialized_json` call sites)
+and the standalone `bin/cascade_materialize` CLI. Eliminating those
+writers in the same change that also drops the source-tracked JSON
+would couple a docs/test cleanup (9.1) with two behavioural rewrites
+(9.2) and the type-system shrink that follows (9.3), so each phase
+ships independently.
 
 - **Phase 9.1 — Stop tracking the committed JSON** *(landed in #14578)*:
   drop the committed `config/cascade.json` and the byte-equality test
@@ -551,11 +558,16 @@ Doing it as one PR risks breaking runtime callers during the migration.
     `bin/cascade_materialize` CLI. Both keep working after Phase 9.1 —
     the JSON they emit is now a runtime artefact rather than a tracked
     source.
-  Net effect of Phase 9.1: nothing in the runtime read path changes;
-  the only behavioural delta is that `git status` no longer reports the
-  regenerated JSON because the source-tracked copy is gone (and
-  ignoring it would be premature — Phase 9.3 deletes the write path
-  outright).
+  Net effect of Phase 9.1: nothing in the runtime read path changes.
+  The source-tracked copy is gone, so `git status` no longer shows a
+  tracked diff when the regenerated file drifts from the old committed
+  bytes. The runtime-materialised copy that the dashboard / CLI write
+  *will* keep appearing as an **untracked** file in `git status` until
+  Phase 9.2 stops the disk write and Phase 9.3 removes the write path
+  entirely. Phase 9.1 intentionally does not add `config/cascade.json`
+  to `.gitignore` — silencing the untracked entry would advertise the
+  disk artefact as permanent, which is the opposite of the §9
+  acceptance criterion.
 - **Phase 9.2 — Migrate the remaining disk writers off JSON**: rework
   `lib/dashboard_cascade.ml` and `bin/cascade_materialize` to serve /
   emit the rendered JSON in memory via

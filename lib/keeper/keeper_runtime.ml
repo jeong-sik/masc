@@ -773,6 +773,18 @@ let start_supervisor_sweep ctx =
           (try
             Keeper_registry.all ~base_path ()
             |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+              (* Enumerate every phase so the compiler flags any new
+                 variant added to [Keeper_state_machine.phase]. TOML
+                 hot-reload only reconciles Running keepers; the other
+                 12 phases must skip (a Stopped/Crashed/Dead/Zombie
+                 keeper has no in-memory meta to update; a Compacting
+                 or HandingOff keeper is mid-transition and reconcile
+                 would race; Offline / Paused / Failing / Overflowed /
+                 Draining / Restarting are all transient or paused
+                 states). A future phase (e.g. Migrating, Healing)
+                 would silently skip reconcile under [_ -> ()] without
+                 a review point. Same FSM Sparse Match anti-pattern as
+                 PR #14857. *)
               match entry.phase with
               | Keeper_state_machine.Running ->
                   (match ensure_keeper_meta ctx.config entry.name with
@@ -786,7 +798,18 @@ let start_supervisor_sweep ctx =
                    | Error e ->
                        Log.Keeper.warn "TOML reconcile failed for %s: %s"
                          entry.name e)
-              | _ -> ())
+              | Keeper_state_machine.Offline
+              | Keeper_state_machine.Failing
+              | Keeper_state_machine.Overflowed
+              | Keeper_state_machine.Compacting
+              | Keeper_state_machine.HandingOff
+              | Keeper_state_machine.Draining
+              | Keeper_state_machine.Paused
+              | Keeper_state_machine.Stopped
+              | Keeper_state_machine.Crashed
+              | Keeper_state_machine.Restarting
+              | Keeper_state_machine.Dead
+              | Keeper_state_machine.Zombie -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_toml_reconcile_sweep_failures

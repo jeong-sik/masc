@@ -654,6 +654,12 @@ let load_catalog ~config_path =
                (String.concat " → " (cycle @ [ entry ])))
         cycles;
       let mismatches = detect_capability_mismatches entries in
+      (* Iter 32: counter complement to the [fallback_cycle_detected]
+         counter the cycle detector already emits.  Bumped by the
+         number of mismatches in a single load_catalog invocation
+         so the iter-5 generic [validation_failed] reason can be
+         attributed to "capability subset violation" vs other faults. *)
+      Cascade_metrics.on_capability_mismatch ~count:(List.length mismatches);
       if mismatches <> []
       then
         Error

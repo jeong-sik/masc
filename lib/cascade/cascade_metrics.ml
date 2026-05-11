@@ -658,3 +658,33 @@ let on_deprecated_profile_name_filter ~name =
   Prometheus.inc_counter metric_deprecated_profile_name_filter
     ~labels:[ ("name", name) ]
     ()
+
+(* [Cascade_config_loader.detect_capability_mismatches] is the twin
+   of [detect_fallback_cycles]: both walk the catalog's
+   [fallback_cascade] graph looking for RFC-0055/0058 violations.
+   The cycle detector already emits
+   [metric_cascade_fallback_cycle_detected_total] (pre-iter-32);
+   the capability-mismatch detector emitted only a string in the
+   load_catalog Error, with no Prometheus surface.
+
+   Iter 5's [serving_last_known_good{reason="validation_failed"}]
+   does fire when load_catalog Errors, but it conflates capability
+   mismatches with every other validation fault — operators
+   couldn't distinguish "a fallback edge violates the capability
+   subset invariant" (RFC-0055 actionable) from "cascade.toml is
+   syntactically malformed" (RFC-0058 §9 actionable).
+
+   Bumped by the number of mismatches in a single load_catalog
+   invocation rather than +1 per call, so a single deploy that
+   introduces N broken edges spikes proportionally (same shape as
+   iter 7 leak / iter 9 route_config_error / iter 15
+   auto_expansion_fanout).
+
+   Cardinality: 1 series. *)
+let metric_capability_mismatch = "masc_cascade_capability_mismatch_total"
+
+let on_capability_mismatch ~count =
+  if count > 0 then
+    Prometheus.inc_counter metric_capability_mismatch
+      ~delta:(float_of_int count)
+      ()

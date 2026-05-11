@@ -198,3 +198,14 @@ val on_deprecated_profile_name_filter : name:string -> unit
     migration tracker — when the counter stays at zero for a
     given name across deploys, that name can be safely removed
     from [deprecated_logical_profile_names]. *)
+
+val on_capability_mismatch : count:int -> unit
+(** Tick the capability-mismatch counter at
+    [Cascade_config_loader.load_catalog] when
+    [detect_capability_mismatches] returns a non-empty list.
+    Bumped by [count] so a deploy that introduces N broken edges
+    spikes proportionally; [count=0] is a no-op so callers invoke
+    unconditionally.  Counter complement to the existing
+    [metric_cascade_fallback_cycle_detected_total] (already covers
+    cycles); together they observe the two RFC-0055/0058 fallback
+    graph invariants. *)

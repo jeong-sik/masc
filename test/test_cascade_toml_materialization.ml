@@ -781,6 +781,17 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    per-name coverage would just enumerate a constant list and add
    noise; the call-site coverage in catalog_runtime and
    config_loader exercises the actual emission paths. *)
+(* Smoke + contract guard for
+   [Cascade_metrics.on_capability_mismatch].  Same shape as iter
+   7 / 9 / 15 [count=0 is no-op]: callers tick unconditionally and
+   the helper guards against zero so neighboring tests stay
+   unaffected.  Counter has no label dimensions (cardinality 1). *)
+let test_capability_mismatch_zero_is_no_op_and_positive_callable () =
+  Masc_mcp.Cascade_metrics.on_capability_mismatch ~count:0;
+  Masc_mcp.Cascade_metrics.on_capability_mismatch ~count:2;
+  check bool "zero is no-op and positive is callable without raising"
+    true true
+
 let test_deprecated_profile_name_filter_helper_callable () =
   Masc_mcp.Cascade_metrics.on_deprecated_profile_name_filter
     ~name:"default";
@@ -1194,6 +1205,9 @@ let () =
             "deprecated_profile_name_filter: representative names callable"
             `Quick
             test_deprecated_profile_name_filter_helper_callable;
+          test_case
+            "capability_mismatch: zero is no-op, positive callable" `Quick
+            test_capability_mismatch_zero_is_no_op_and_positive_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

@@ -969,38 +969,38 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
 let check_event_precondition (c : conditions) (ev : event)
   : (unit, transition_error) result
   =
+  (* [reason] strings are short stable tags ("context_overflow=false" etc).
+     They flow into [transition_error_to_string] log lines and the
+     [Attribution.policy_failed.reason] telemetry field — keeping them
+     low-cardinality lets operators aggregate / alert on the exact
+     precondition that failed, while the long explanatory text stays
+     in source comments above each branch.
+
+     TLA+ §CompactRetryExhausted predicates: context_overflow=true /\
+     ~compaction_active /\ ~compact_retry_exhausted. *)
   match ev with
   | Compact_retry_exhausted ->
     if not c.context_overflow
     then
+      (* Latching the retry flag on a non-overflowed keeper would force
+         Paused on the next overflow event (TLA+ violation). *)
       Error
         (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §CompactRetryExhausted requires context_overflow=true; \
-                latching the retry flag on a non-overflowed keeper would \
-                force Paused on the next overflow event"
-           })
+           { event = event_to_string ev; reason = "context_overflow=false" })
     else if c.compaction_active
     then
+      (* Latching the retry flag while a compaction is in flight
+         conflates the in-progress attempt with budget exhaustion. *)
       Error
         (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §CompactRetryExhausted requires ~compaction_active; \
-                latching the retry flag while a compaction is in flight \
-                conflates the in-progress attempt with budget exhaustion"
-           })
+           { event = event_to_string ev; reason = "compaction_active=true" })
     else if c.compact_retry_exhausted
     then
+      (* Retry latch is idempotent — re-latching surfaces a duplicate
+         dispatch in the caller. *)
       Error
         (Precondition_violation
-           { event = event_to_string ev
-           ; reason =
-               "TLA+ §CompactRetryExhausted requires ~compact_retry_exhausted; \
-                the retry latch is idempotent — re-latching surfaces a \
-                duplicate dispatch in the caller"
-           })
+           { event = event_to_string ev; reason = "already_latched" })
     else Ok ()
   (* Remaining 4 events covered in follow-up PRs (R-A-9 PR-2/PR-3). *)
   | _ -> Ok ()

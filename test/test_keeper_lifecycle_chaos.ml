@@ -51,9 +51,12 @@ let dispatch name event =
 let dispatch_expect_rejected name event =
   match R.dispatch_event ~base_path:bp name event with
   | Ok _ -> Alcotest.fail "expected rejected transition"
-  (* R.dispatch_event returns a closed transition_error type:
-     rejected terminal keepers yield Terminal_state, Invalid_transition,
-     or Precondition_violation. *)
+  (* R.dispatch_event returns a closed transition_error type.  Terminal
+     keepers always yield Terminal_state (apply_event guards on
+     terminal phase before invoking check_event_precondition).  This
+     helper is also reused for non-terminal rejection-path tests
+     elsewhere — accept Invalid_transition / Precondition_violation
+     so a single helper covers both regimes. *)
   | Error (KSM.Terminal_state _) -> ()
   | Error (KSM.Invalid_transition _) -> ()
   | Error (KSM.Precondition_violation _) -> ()

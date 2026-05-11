@@ -613,9 +613,16 @@ let prepare_agent_setup
   in
   let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn ~allowed_tool_names =
     let caller_requires_tools =
+      (* Enumerate every [tool_choice] variant + [None] so a new constructor
+         added to [Agent_sdk.Types.tool_choice] surfaces a Warning 8 here.
+         [Auto] and [None_] correctly evaluate to [false] (no tool *required*);
+         the old [_ -> false] catch-all would have absorbed any future variant
+         in the same direction without review. *)
       match current_tool_choice with
       | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> true
-      | _ -> false
+      | Some (Agent_sdk.Types.Auto | Agent_sdk.Types.None_)
+      | None ->
+        false
     in
     max_turns > 1
     && (not is_last_turn)

@@ -336,7 +336,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
   | ex ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_observation_query_failures
-        ~labels:[("operation", "read_backlog_counts")]
+        ~labels:[("operation", Observation_query_operation.(to_label Read_backlog_counts))]
         ();
       Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
       (0, 0, 0, 0, false)
@@ -349,7 +349,7 @@ let count_active_agents ~(config : Coord.config) : int =
   | ex ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_observation_query_failures
-        ~labels:[("operation", "count_active_agents")]
+        ~labels:[("operation", Observation_query_operation.(to_label Count_active_agents))]
         ();
       Log.Keeper.warn "count_active_agents failed: %s" (Printexc.to_string ex);
       0
@@ -891,7 +891,7 @@ let collect_board_events_with_cursor_policy ~advance_cursor ~(base_path : string
         if final_events <> [] then begin
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_observation_query_failures
-            ~labels:[("operation", "cursor_stale")]
+            ~labels:[("operation", Observation_query_operation.(to_label Cursor_stale))]
             ();
           Log.Keeper.warn
             "board cursor not updated for %s despite %d events processed"
@@ -903,7 +903,7 @@ let collect_board_events_with_cursor_policy ~advance_cursor ~(base_path : string
   | exn ->
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_observation_query_failures
-      ~labels:[("operation", "board_events")]
+      ~labels:[("operation", Observation_query_operation.(to_label Board_events))]
       ();
     Log.Keeper.warn "board event collection failed: %s"
       (Printexc.to_string exn);
@@ -1355,7 +1355,7 @@ let keeper_cycle_decision
                    should_run (derived below) stays consistent with verdict. *)
                 Prometheus.inc_counter
                   Keeper_metrics.metric_keeper_observation_query_failures
-                  ~labels:[("operation", "empty_run_reasons")]
+                  ~labels:[("operation", Observation_query_operation.(to_label Empty_run_reasons))]
                   ();
                 Log.Keeper.warn
                   "unreachable: should_run=true but run_reasons is empty";

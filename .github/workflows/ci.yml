@@ -14,13 +14,22 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name || github.run_id }}
+  # On main pushes each commit gets its own group (keyed by sha) so successive
+  # merges do not abort each other's CI — every commit gets a verification
+  # window. On PRs and non-main pushes, supersede outdated runs as before
+  # (group keyed by ref so synchronize cancels the older run).
+  group: >-
+    ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{
+      github.event_name == 'push' && github.ref_name == 'main' && github.sha
+      || github.head_ref || github.ref_name || github.run_id
+    }}
   # Code-changing PR events supersede older CI for the same PR. Pushes to the
-  # same branch also supersede older post-merge CI; only the latest branch head
-  # needs the full verification matrix. State-only readiness events must not
-  # cancel an already-running code CI; they may queue behind it to run the
-  # ready/full-matrix path.
-  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)) }}
+  # same branch also supersede older post-merge CI EXCEPT for main pushes —
+  # main commits are independent state that must each be verified (background:
+  # #14668 / #14670, 30+ main runs cancelled before TLA could complete on
+  # 2026-05-11). State-only readiness events must not cancel already-running
+  # code CI; they may queue behind it to run the ready/full-matrix path.
+  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_name != 'main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:

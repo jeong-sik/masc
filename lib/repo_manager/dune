@@ -14,6 +14,7 @@
  (wrapped false)
  (libraries
    masc_mcp.config
+   masc_mcp.fs_compat
    masc_mcp.masc_exec
    masc_mcp.masc_log
    digestif

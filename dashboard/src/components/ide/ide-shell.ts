@@ -15,6 +15,7 @@ import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
+import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -199,7 +200,7 @@ export function IdeShell() {
       />
       ${reviewFocusActive
         ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
-        : null}
+        : html`<${IdeBreadcrumb} />`}
       <div
         class="ide-plane-grid"
         role="presentation"
@@ -286,6 +287,84 @@ function IdeReviewFocusStrip({ activeLayers }: { readonly activeLayers: Readonly
       <span class="text-[var(--color-fg-disabled)]">·</span>
       <span class="font-mono">${layerLabels.length > 0 ? layerLabels.join(' / ') : 'custom layers'}</span>
       <span class="ml-auto font-mono text-[var(--color-fg-disabled)]">branch graph rail</span>
+    </div>
+  `
+}
+
+// ── Editor Breadcrumb ────────────────────────────────────────────
+
+const FILE_ICONS: Readonly<Record<string, string>> = {
+  '.ts': '🟦', '.tsx': '🟦',
+  '.js': '🟨', '.jsx': '🟨',
+  '.py': '🐍', '.ml': '🐫', '.mli': '🐫',
+  '.rs': '🦀', '.go': '🔵',
+  '.json': '📋', '.md': '📝',
+  '.html': '🌐', '.css': '🎨',
+  '.toml': '⚙️', '.yaml': '⚙️', '.yml': '⚙️',
+}
+
+function IdeBreadcrumb() {
+  const [filePath, setFilePath] = useState(activeIdeFile.value)
+  useEffect(() => activeIdeFile.subscribe(f => setFilePath(f)), [])
+
+  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
+  useEffect(() => cursorOverlaySignal.subscribe(v => setOverlay(v)), [])
+
+  const segments = filePath.split('/')
+  const fileName = segments[segments.length - 1]
+  const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : ''
+  const icon = FILE_ICONS[ext] ?? '📄'
+
+  // Keepers currently on this file
+  const activeOnFile: Array<{ readonly keeperId: string; readonly color: string }> = []
+  for (const [keeperId, cursor] of overlay.cursors) {
+    if (cursor.file_path === filePath) {
+      activeOnFile.push({ keeperId, color: getKeeperColor(keeperId).cursor })
+    }
+  }
+
+  return html`
+    <div
+      role="navigation"
+      aria-label="File breadcrumb"
+      data-testid="ide-breadcrumb"
+      class="flex items-center gap-1.5 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] px-3 py-1 font-mono text-2xs"
+    >
+      <span aria-hidden="true" style=${{ fontSize: '12px', lineHeight: '16px' }}>${icon}</span>
+      <span
+        class="flex min-w-0 items-center gap-0.5 text-[var(--color-fg-secondary)]"
+        style=${{ overflow: 'hidden' }}
+      >
+        ${segments.map((seg, i) => html`
+          ${i > 0 ? html`<span class="text-[var(--color-fg-disabled)]">/</span>` : null}
+          <span
+            class=${i === segments.length - 1 ? 'text-[var(--color-fg-primary)]' : ''}
+            style=${{ whiteSpace: 'nowrap' }}
+          >${seg}</span>
+        `)}
+      </span>
+      ${activeOnFile.length > 0
+        ? html`
+          <span class="flex items-center gap-1 ml-auto shrink-0 text-[var(--color-fg-muted)]">
+            <span class="flex gap-0.5">
+              ${activeOnFile.map(k => html`
+                <span
+                  key=${k.keeperId}
+                  title=${k.keeperId}
+                  style=${{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    background: k.color,
+                    display: 'inline-block',
+                  }}
+                />
+              `)}
+            </span>
+            <span>${activeOnFile.length === 1 ? activeOnFile[0].keeperId : `${activeOnFile.length} keepers`}</span>
+          </span>
+        `
+        : null}
     </div>
   `
 }

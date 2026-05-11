@@ -115,6 +115,27 @@ let allowed_repositories ~keeper_id ~base_path =
   let* mapping = find_mapping ~base_path keeper_id in
   Ok mapping.repository_ids
 
+(* Filter [repos] down to those whose id appears in
+   [mapping.repository_ids], with ["*"] as a wildcard that bypasses
+   filtering entirely.  Replaces two copy-pasted O(R x M) loops in
+   [credentials_for_keeper] and [apply_mapping]: each was
+   [List.filter (fun r -> List.exists (String.equal r.id) mapping.repository_ids) repos].
+   The set is materialised only when no wildcard short-circuits the
+   check, so the wildcard case stays allocation-free. *)
+let filter_repos_by_mapping (mapping : keeper_repo_mapping)
+    (repos : repository list) : repository list =
+  if List.exists (String.equal "*") mapping.repository_ids then
+    repos
+  else
+    let mapping_id_set =
+      let tbl = Hashtbl.create (List.length mapping.repository_ids) in
+      List.iter (fun id -> Hashtbl.replace tbl id ()) mapping.repository_ids;
+      tbl
+    in
+    List.filter
+      (fun (r : repository) -> Hashtbl.mem mapping_id_set r.id)
+      repos
+
 (** Resolve the credentials currently mapped to [keeper_id], by looking
     through every repository the keeper is allowed to access and
     extracting each repository's [credential_id] into a unique list of
@@ -160,15 +181,7 @@ let credentials_for_keeper ~base_path ~keeper_id =
             Ok [credential]
       | Some _ | None ->
       let* repos = Repo_store.load_all ~base_path in
-      let mapped_repos =
-        if List.exists (String.equal "*") mapping.repository_ids then
-          repos
-        else
-          List.filter
-            (fun (r : repository) ->
-              List.exists (String.equal r.id) mapping.repository_ids)
-            repos
-      in
+      let mapped_repos = filter_repos_by_mapping mapping repos in
       (* Unique credential ids preserving first-seen order, so a keeper
          with several repos pointing at the same credential collapses to
          a single entry; the bridge can then dispatch deterministically. *)
@@ -253,13 +266,7 @@ let apply_mapping ~keeper_id ~base_path ~repositories =
         keeper_id msg;
       repositories
   | Mapping_found mapping ->
-      if List.exists (String.equal "*") mapping.repository_ids then
-        repositories
-      else
-        List.filter
-          (fun (r : repository) ->
-            List.exists (String.equal r.id) mapping.repository_ids)
-          repositories
+      filter_repos_by_mapping mapping repositories
 
 (* Path normalization for prefix comparison. *)
 let normalize_path_for_prefix_check path =

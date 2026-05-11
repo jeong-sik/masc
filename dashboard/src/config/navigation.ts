@@ -409,8 +409,16 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
   // Sections that use the `view` sub-param for internal navigation.
   // For all other sections, `view` is meaningless and must not leak in from prior navigation.
+  // `repositories` / `operations` / `ide-shell` / `planning` are redirect targets
+  // in `CROSS_SURFACE_SECTION_REDIRECTS` (router.ts) and `LEGACY_SECTION_REDIRECTS`
+  // (line 336+) that carry `view` as part of the canonical destination
+  // (e.g. `monitoring:git-graph → workspace:repositories?view=graph`,
+  // `command:connectors → command:operations?view=connectors`,
+  // cockpit IDE `?mode=Split → code:ide-shell?view=split-diff`,
+  // `workspace:goals → workspace:planning?view=default`).
   const SECTIONS_WITH_VIEW = new Set([
     'fleet-health', 'runtime', 'agents', 'cognition', 'observatory',
+    'repositories', 'operations', 'ide-shell', 'planning',
   ])
   if (!next.section || !SECTIONS_WITH_VIEW.has(next.section)) {
     delete next.view

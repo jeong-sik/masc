@@ -875,7 +875,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Prometheus.inc_counter
                   Keeper_metrics.metric_keeper_write_meta_failures
                   ~labels:
-                    [("keeper", entry.meta.name); ("phase", "turn_start")]
+                    [("keeper", entry.meta.name); ("phase", Oas_execution_error_phase.(to_label Turn_start))]
                   ();
                 Log.Keeper.warn
                   "%s: turn-start write_meta_with_merge failed: %s"
@@ -1133,7 +1133,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   (String.concat ", " attempted_cascades);
                 Prometheus.inc_counter
                   Keeper_metrics.metric_keeper_oas_execution_errors
-                  ~labels:[("keeper", meta.name); ("phase", "cascade_exhausted")]
+                  ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Cascade_exhausted))]
                   ()
               end
               else begin
@@ -1146,7 +1146,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                    re-parsing Turn_finalizing reason fields. *)
                 Prometheus.inc_counter
                   Keeper_metrics.metric_keeper_oas_execution_errors
-                  ~labels:[("keeper", meta.name); ("phase", "terminal_non_exhaustion")]
+                  ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Terminal_non_exhaustion))]
                   ();
                 Log.Keeper.warn
                   "%s: turn terminal (non-exhaustion error) — err=%s \
@@ -1609,7 +1609,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         (short_preview (Agent_sdk.Error.to_string err));
                       Prometheus.inc_counter
                         Keeper_metrics.metric_keeper_oas_execution_errors
-                        ~labels:[("keeper", meta.name); ("phase", "recoverable_cascade_transient")]
+                        ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Recoverable_cascade_transient))]
                         ();
                       Eio.Time.sleep clock delay;
                       retry_loop ~run_meta ~execution ~run_generation
@@ -1930,7 +1930,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             (short_preview e_str);
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_oas_execution_errors
-            ~labels:[("keeper", meta.name); ("phase", "cycle_failed")]
+            ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Cycle_failed))]
             ();
           let social_state, social_transition_reason =
             Social.derive_failure_state ~meta ~observation
@@ -2245,7 +2245,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           if count >= threshold && not auto_pause_succeeded then begin
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_oas_execution_errors
-              ~labels:[("keeper", meta.name); ("phase", "persistent_escalation")]
+              ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Persistent_escalation))]
               ();
             Log.Keeper.error
               "%s: %d consecutive persistent turn failures (threshold=%d), escalating to supervisor crash path"

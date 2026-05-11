@@ -1386,12 +1386,21 @@ let test_invariant_fiber_started_reset_exhaustive () =
   check bool "backoff_elapsed reset" false updated.backoff_elapsed;
   check bool "guardrail_triggered reset" false updated.guardrail_triggered;
   check bool "drain_complete reset" false updated.drain_complete;
+  check bool "terminal_failure_latched reset" false updated.terminal_failure_latched;
   (* TLA+ liveness fix: stop_requested is now RESET on Fiber_started.
      Restart contradicts stop. operator_paused is still preserved. *)
   check bool "stop_requested reset" false updated.stop_requested;
   (* Operator-intent conditions that ARE preserved *)
   check bool "operator_paused preserved" true updated.operator_paused;
   check bool "restart_budget preserved" true updated.restart_budget_remaining;
+  (* Forced-terminal latch markers — PRESERVED by design.
+     credential_archived / zombie_timeout_reached drive derive_phase priority 0
+     (forced Dead). Fiber_started intentionally does NOT clear them so a
+     credential-archived or zombie-timed-out keeper cannot "resurrect" via a
+     supervisor restart. See docs/tla-audit/ksm-derive-phase-priority-2026-05-12.md
+     (F-3.1 defense-in-depth analysis) and audit/fsm-loop-iter3 PR #14702. *)
+  check bool "credential_archived preserved" true updated.credential_archived;
+  check bool "zombie_timeout_reached preserved" true updated.zombie_timeout_reached;
   (* Untouched conditions stay as-is *)
   check bool "context_within_budget unchanged" false updated.context_within_budget;
   check bool "context_handoff_needed unchanged" true updated.context_handoff_needed

@@ -125,9 +125,18 @@ let resolve_observation_claim_goal_scope ?agent_tool_names ~(config : Coord.conf
     ~config ~meta ()
 
 let task_is_blocked (task : Masc_domain.task) =
+  (* Enumerate every [task_status] variant so the compiler flags any new
+     constructor here. The old [_ -> false] silently extended "not blocked"
+     to any future status (e.g. a hypothetical [BlockedOnReview]) which
+     would be exactly the wrong default for a blocked-task detector. *)
   match task.task_status with
   | Masc_domain.AwaitingVerification _ -> true
-  | _ -> false
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ ->
+    false
 
 let goal_progress_json ?config (meta : keeper_meta) =
   match config with

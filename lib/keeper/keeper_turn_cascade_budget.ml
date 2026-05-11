@@ -306,9 +306,24 @@ let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
 
 let degraded_retry_bypasses_slot_phase_guard
     (err : Agent_sdk.Error.sdk_error) : bool =
+  (* Enumerate every [masc_internal_error] variant plus [None] so the
+     compiler flags any new constructor here. The old [_ -> false] silently
+     extended the "not a budget exhaustion" set whenever a new error class
+     was added to Cascade_error_classify, which is exactly the wrong default
+     for a guard that decides whether to bypass slot-phase admission. *)
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
-  | _ -> false
+  | Some
+      ( Keeper_turn_driver.Cascade_exhausted _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.No_tool_capable_provider _
+      | Keeper_turn_driver.Accept_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Ambiguous_post_commit _ )
+  | None ->
+    false
 
 let reclassify_oas_timeout_for_attempt
     ~(timeout_budget : oas_timeout_budget_resolution option)

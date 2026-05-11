@@ -123,6 +123,115 @@ let test_load_jsonl_diagnostics_warn_includes_full_path () =
   check bool "warn message contains full path (not just basename)" true
     (contains captured path)
 
+let write_lines path lines =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       List.iter (fun l -> output_string oc l; output_char oc '\n') lines)
+
+let test_fold_jsonl_lines_small () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "small.jsonl" in
+  write_lines path [{|{"n":1}|}; {|{"n":2}|}; {|{"n":3}|}];
+  let total =
+    Fs_compat.fold_jsonl_lines
+      ~init:0
+      ~f:(fun acc ~line_no:_ json ->
+        match json with `Assoc [(_, `Int n)] -> acc + n | _ -> acc)
+      path
+  in
+  check int "fold sum" 6 total
+
+let test_fold_jsonl_lines_skips_blank_and_malformed () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "mixed.jsonl" in
+  write_lines path [{|{"n":1}|}; ""; {|not-json|}; {|{"n":2}|}];
+  let collected = ref [] in
+  let (), _stderr =
+    with_redirected_stderr (fun () ->
+      Fs_compat.fold_jsonl_lines
+        ~init:()
+        ~f:(fun () ~line_no:_ json ->
+          collected := json :: !collected)
+        path)
+  in
+  let values = List.rev !collected in
+  let ns =
+    List.map
+      (fun json ->
+        match json with
+        | `Assoc [(_, `Int n)] -> n
+        | _ -> -1)
+      values
+  in
+  check int "valid line count (blank + malformed skipped)" 2 (List.length ns);
+  check (list int) "extracted values in order" [1; 2] ns
+
+let test_fold_jsonl_lines_missing_trailing_newline () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "no_trailing.jsonl" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc {|{"n":1}|};
+      output_char oc '\n';
+      output_string oc {|{"n":2}|});
+  let total =
+    Fs_compat.fold_jsonl_lines
+      ~init:0
+      ~f:(fun acc ~line_no:_ json ->
+        match json with `Assoc [(_, `Int n)] -> acc + n | _ -> acc)
+      path
+  in
+  check int "no-trailing-newline reads last line" 3 total
+
+let test_fold_jsonl_lines_streaming_memory () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "big.jsonl" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      for i = 1 to 10_000 do
+        output_string oc (Printf.sprintf "{\"n\":%d}\n" i)
+      done);
+  Gc.compact ();
+  let total =
+    Fs_compat.fold_jsonl_lines
+      ~init:0
+      ~f:(fun acc ~line_no:_ json ->
+        match json with `Assoc [(_, `Int n)] -> acc + n | _ -> acc)
+      path
+  in
+  Gc.compact ();
+  let live_after_bytes =
+    (Gc.stat ()).Gc.live_words * (Sys.word_size / 8)
+  in
+  check int "fold all 10k entries" 50_005_000 total;
+  (* Streaming guarantee: post-fold heap stays bounded.  The 10k-line
+     file is ~100 KB on disk; allow 4x slack for test harness overhead
+     so this catches a regression (e.g. accidentally retaining a list
+     of all 10k JSON nodes) without being flaky. *)
+  let bound = 4 * 1024 * 1024 in
+  check bool
+    (Printf.sprintf "post-fold heap < 4 MB (was %d bytes)" live_after_bytes)
+    true (live_after_bytes < bound)
+
+let test_fold_jsonl_lines_missing_file () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "does_not_exist.jsonl" in
+  let result =
+    Fs_compat.fold_jsonl_lines
+      ~init:0
+      ~f:(fun acc ~line_no:_ _json -> acc + 1)
+      path
+  in
+  (* Consistent with [load_jsonl]: missing file returns [init] silently
+     rather than raising. *)
+  check int "missing file returns init" 0 result
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -148,6 +257,19 @@ let () =
           test_load_jsonl_diagnostics_counts_malformed_lines;
         test_case "warn includes full path" `Quick
           test_load_jsonl_diagnostics_warn_includes_full_path;
+      ]
+    );
+    ( "fold_jsonl_lines"
+    , [
+        test_case "small fold sum" `Quick test_fold_jsonl_lines_small;
+        test_case "skips blank, surfaces line_no" `Quick
+          test_fold_jsonl_lines_skips_blank_and_malformed;
+        test_case "missing trailing newline" `Quick
+          test_fold_jsonl_lines_missing_trailing_newline;
+        test_case "10k lines stays streaming" `Quick
+          test_fold_jsonl_lines_streaming_memory;
+        test_case "missing file raises Sys_error" `Quick
+          test_fold_jsonl_lines_missing_file;
       ]
     );
   ]

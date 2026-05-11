@@ -98,6 +98,20 @@ val parse_jsonl_lines : source:string -> string list -> Yojson.Safe.t list * int
     malformed count.  [source] is used in log messages.
     Use when lines come from tail-readers or non-file sources. *)
 
+val fold_jsonl_lines :
+  init:'acc ->
+  f:('acc -> line_no:int -> Yojson.Safe.t -> 'acc) ->
+  string ->
+  'acc
+(** Stream JSONL line-by-line via [Eio.Buf_read.lines] when the global
+    fs is registered, falling back to {!load_jsonl} + [List.fold_left]
+    otherwise.  [line_no] is the 1-based index of {b non-blank} JSONL
+    rows (matches {!load_jsonl_diagnostics}).  Use when the file may be
+    too large to materialize as a list, e.g. audit/metrics JSONL on
+    HTTP hot paths.  Returns [init] when [path] is missing (consistent
+    with {!load_jsonl}); raises [Sys_error] on read failures of an
+    existing file. *)
+
 val append_jsonl : string -> Yojson.Safe.t -> unit
 (** Append JSON value as line to JSONL file. *)
 

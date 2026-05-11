@@ -486,6 +486,52 @@ let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
 let load_jsonl (path : string) : Yojson.Safe.t list =
   fst (load_jsonl_diagnostics path)
 
+(** Stream JSONL line-by-line, folding [f] over parsed values.
+
+    Uses [Eio.Buf_read.lines] over [Eio.Path.with_open_in] when the
+    global fs is registered ([set_fs] called at boot), giving O(1)
+    resident memory regardless of file size and non-blocking IO inside
+    the Eio scheduler.  Falls back to {!load_jsonl} + [List.fold_left]
+    when no fs is available (tests, pre-boot helpers).
+
+    [line_no] is 1-based and skips blank lines so it tracks the
+    {b printed} JSONL row number rather than the raw byte stream
+    position — matches {!load_jsonl_diagnostics} semantics.
+
+    Malformed JSON lines are skipped after a stderr warning, like
+    {!load_jsonl_diagnostics}.  Raises [Sys_error] on missing /
+    unreadable files (consistent with the rest of the module). *)
+let fold_jsonl_lines ~init ~f path =
+  if not (file_exists path) then init
+  else
+  with_fs_or_fallback ~path
+    ~fallback:(fun () ->
+      let parsed = fst (load_jsonl_diagnostics path) in
+      let _, result =
+        List.fold_left
+          (fun (n, acc) json -> (n + 1, f acc ~line_no:n json))
+          (1, init) parsed
+      in
+      result)
+    (fun fs ->
+      let eio_path = Eio.Path.(fs / path) in
+      Eio.Path.with_open_in eio_path (fun flow ->
+        let buf = Eio.Buf_read.of_flow ~max_size:Int.max_int flow in
+        let line_idx = ref 0 in
+        let acc = ref init in
+        Eio.Buf_read.lines buf
+        |> Seq.iter (fun raw ->
+               incr line_idx;
+               let trimmed = String.trim raw in
+               if not (String.equal trimmed "") then
+                 match Yojson.Safe.from_string trimmed with
+                 | json -> acc := f !acc ~line_no:!line_idx json
+                 | exception Yojson.Json_error msg ->
+                     Stdlib.Printf.eprintf
+                       "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+                       path !line_idx msg);
+        !acc))
+
 (** Append JSON value as line to JSONL file. *)
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   let dir = Stdlib.Filename.dirname path in

@@ -137,11 +137,7 @@ let probe_liveness ?(timeout_sec = 3.0) ?(path = Server_health_paths.liveness) p
 ;;
 
 let read_pid_file path =
-  Safe_ops.protect ~default:None (fun () ->
-    let ic = open_in path in
-    Eio_guard.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> Some (In_channel.input_all ic)))
+  Safe_ops.protect ~default:None (fun () -> Some (Fs_compat.load_file path))
 ;;
 
 let parsed_pid path =

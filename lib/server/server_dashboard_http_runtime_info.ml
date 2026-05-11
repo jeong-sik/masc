@@ -621,7 +621,7 @@ let int_of_string_opt raw =
 
 let load_benchmark_rows path =
   let lines =
-    try In_channel.with_open_text path In_channel.input_all |> String.split_on_char '\n'
+    try Fs_compat.load_file path |> String.split_on_char '\n'
     with Sys_error _ -> []
   in
   lines

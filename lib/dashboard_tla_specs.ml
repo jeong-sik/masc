@@ -143,14 +143,7 @@ let specs_json () : Yojson.Safe.t =
   ]
 
 let read_file_safe path =
-  try
-    let ic = Stdlib.open_in_bin path in
-    Stdlib.Fun.protect
-      ~finally:(fun () -> Stdlib.close_in_noerr ic)
-      (fun () ->
-         let len = Stdlib.in_channel_length ic in
-         Stdlib.really_input_string ic len)
-    |> fun contents -> Some contents
+  try Some (Fs_compat.load_file path)
   with Sys_error _ | End_of_file -> None
 
 let normalize_int s =

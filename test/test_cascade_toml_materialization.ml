@@ -625,6 +625,56 @@ let test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable () =
    constructing a full Provider_config.t list with mismatched
    kinds.  This smoke test exercises the call surface directly so
    the [cascade] label name and helper signature are pinned. *)
+(* Regression for iter 13: the wrapper
+   [resolve_named_providers_strict_with_secondary_resolver] has three
+   Error returns (lookup_failed / provider_filter_rejected /
+   no_callable_providers) that were silent before this iteration —
+   iter 10 covered the base [resolve_named_providers_strict] but
+   keeper_turn_driver actually calls the wrapper, so the silent
+   Error paths were the most common cause of keeper turn failures
+   going unobserved.  Two of the three Error paths are reachable via
+   [install_snapshot_for_tests] (lookup_failed and
+   no_callable_providers); the provider_filter_rejected arm requires
+   a non-empty provider_filter against a non-empty candidate set,
+   which is harder to set up via the test helper and stays covered
+   by the smoke test of [on_resolve_failure] at iter 10. *)
+let test_secondary_resolver_unknown_cascade_returns_error () =
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
+    ~source_path:"/tmp/test-cascade-iter13-unknown.toml"
+    ~profile_names:[ "known_cascade_iter13" ];
+  match
+    Masc_mcp.Cascade_catalog_runtime
+    .resolve_named_providers_strict_with_secondary_resolver
+      ~cascade_name:"unknown_cascade_iter13"
+      ()
+  with
+  | Ok _ ->
+    fail
+      "expected Error for unknown cascade name; lookup_failed metric \
+       call site was not exercised"
+  | Error _ ->
+    check bool "Error returned as expected (lookup_failed path)" true true
+
+let test_secondary_resolver_empty_cascade_returns_error () =
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
+    ~source_path:"/tmp/test-cascade-iter13-empty.toml"
+    ~profile_names:[ "empty_cascade_iter13" ];
+  match
+    Masc_mcp.Cascade_catalog_runtime
+    .resolve_named_providers_strict_with_secondary_resolver
+      ~cascade_name:"empty_cascade_iter13"
+      ()
+  with
+  | Ok _ ->
+    fail
+      "expected Error for cascade with no callable providers; \
+       no_callable_providers metric call site was not exercised"
+  | Error _ ->
+    check bool
+      "Error returned as expected (no_callable_providers path)" true true
+
 let test_provider_filter_widening_helper_callable () =
   Masc_mcp.Cascade_metrics.on_provider_filter_widening
     ~cascade:"smoke_test_cascade";
@@ -871,5 +921,14 @@ let () =
           test_case
             "provider_filter_widening: cascade label helper callable" `Quick
             test_provider_filter_widening_helper_callable;
+        ] );
+      ( "secondary_resolver_error_paths",
+        [
+          test_case
+            "unknown cascade name -> Error (lookup_failed path)" `Quick
+            test_secondary_resolver_unknown_cascade_returns_error;
+          test_case
+            "empty cascade -> Error (no_callable_providers path)" `Quick
+            test_secondary_resolver_empty_cascade_returns_error;
         ] );
     ]

@@ -1372,7 +1372,17 @@ let parse_secondary_from_entry ~api_key_env_overrides
 let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
     ?provider_filter ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
-  | Error _ as e -> e
+  | Error _ as e ->
+      (* Iter 10 [on_resolve_failure] also covered the base
+         [resolve_named_providers_strict]; this wrapper is the actual
+         entry point that keeper_turn_driver:127 hits, so its three
+         Error returns were the most common silent cause of keeper
+         turn failures going unobserved.  Same metric + same reason
+         labels (no [function] dimension) so dashboards aggregate
+         "resolve failures per cascade" across both call sites. *)
+      Cascade_metrics.on_resolve_failure
+        ~cascade:cascade_name ~reason:"lookup_failed";
+      e
   | Ok (_snapshot, normalized, profile) ->
       let ordered_entries =
         Cascade_config.order_weighted_entries
@@ -1403,6 +1413,8 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
            ~provider_filter ~label:normalized primaries
        with
        | Error rejection ->
+           Cascade_metrics.on_resolve_failure
+             ~cascade:normalized ~reason:"provider_filter_rejected";
            Error (Cascade_config.provider_filter_rejection_to_string rejection)
        | Ok _filtered_primaries ->
            let provider_filter_allows =
@@ -1421,11 +1433,13 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
                     (primary, secondary))
            in
            let providers = List.map fst filtered_pairs in
-           if providers = [] then
+           if providers = [] then (
+             Cascade_metrics.on_resolve_failure
+               ~cascade:normalized ~reason:"no_callable_providers";
              Error
                (Printf.sprintf
                   "cascade %s resolved to no callable providers"
-                  normalized)
+                  normalized))
            else
              let slots = Array.of_list filtered_pairs in
              let secondary_resolver provider_index primary =

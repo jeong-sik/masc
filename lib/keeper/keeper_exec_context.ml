@@ -86,7 +86,7 @@ type rollover_gate_decision = Keeper_rollover.rollover_gate_decision =
   | Skip of string
   | Go of string
 
-let blocker_indicates_overflow = Keeper_rollover.blocker_indicates_overflow
+let blocker_class_indicates_overflow = Keeper_rollover.blocker_class_indicates_overflow
 let classify_rollover_gate = Keeper_rollover.classify_rollover_gate
 
 (* ================================================================ *)

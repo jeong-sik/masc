@@ -735,7 +735,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let tool_event_tracker = create_turn_tool_event_tracker () in
       let post_commit_failure_reason = ref None in
       let paused_meta_override = ref None in
-      let current_turn_overflow_blocker = ref None in
+      let current_turn_blocker_info = ref None in
       let event_bus_drain_cancel = ref None in
       let turn_event_bus_mu = Eio.Mutex.create () in
       let mark_paused_after_overflow ~run_meta ~reason =
@@ -1629,8 +1629,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         Keeper_registry.set_turn_phase
                           ~base_path:config.base_path meta.name
                           Keeper_registry.(Packed Turn_compacting);
-                        current_turn_overflow_blocker :=
-                          Some (Agent_sdk.Error.to_string err);
+                        (* SDK boundary classification: [EC.is_context_overflow err]
+                           was already true above, so the typed klass is fixed.
+                           Stamp the typed [blocker_info] so downstream consumers
+                           (rollover gate) reason over [klass] instead of
+                           substring-matching the [detail] field — keeper layer
+                           treats provider/model as opaque aliases. *)
+                        current_turn_blocker_info :=
+                          Some
+                            {
+                              klass = Sdk_token_budget_exceeded;
+                              detail = Agent_sdk.Error.to_string err;
+                            };
                         dispatch_keeper_phase_event
                           ~config
                           ~keeper_name:meta.name
@@ -2289,7 +2299,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~meta
               ~model:result.model_used
               ~primary_model_max_tokens:final_execution.max_context
-              ~current_turn_overflow_blocker:!current_turn_overflow_blocker
+              ~current_turn_blocker_info:!current_turn_blocker_info
               ~checkpoint:result.checkpoint
             |> resilience_handles.sync_lifecycle_meta
           in

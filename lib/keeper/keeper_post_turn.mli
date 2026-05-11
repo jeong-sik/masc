@@ -73,7 +73,7 @@ val apply_post_turn_lifecycle :
   meta:Keeper_types.keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
-  current_turn_overflow_blocker:string option ->
+  current_turn_blocker_info:Keeper_types.blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 
@@ -86,7 +86,7 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   meta:Keeper_types.keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
-  current_turn_overflow_blocker:string option ->
+  current_turn_blocker_info:Keeper_types.blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 (** Variant of {!apply_post_turn_lifecycle} for callers that own

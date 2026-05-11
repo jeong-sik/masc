@@ -543,7 +543,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ~meta
                   ~model:result.model_used
                   ~primary_model_max_tokens:max_cascade_context
-                  ~current_turn_overflow_blocker:None
+                  ~current_turn_blocker_info:None
                   ~checkpoint:result.checkpoint
                 |> resilience_handles.sync_lifecycle_meta
               in

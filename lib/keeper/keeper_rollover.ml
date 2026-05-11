@@ -56,30 +56,41 @@ type handoff_rollover = {
   message_count : int;
 }
 
-(** [blocker_indicates_overflow blocker] returns true when [blocker] matches any
-    of the provider-specific context-overflow strings. Provider-agnostic list
-    covers GLM, OpenAI, Ollama, and Anthropic wording.
+(** [blocker_class_indicates_overflow klass] returns true when [klass] is the
+    typed equivalent of a provider context-overflow signal.
 
-    Exposed for unit testing. Pure — no runtime dependency. *)
-let blocker_indicates_overflow (blocker : string) : bool =
-  let b = String.lowercase_ascii blocker in
-  let blen = String.length b in
-  let contains needle =
-    let nlen = String.length needle in
-    if nlen = 0 || blen < nlen then false
-    else
-      let rec scan i =
-        if i + nlen > blen then false
-        else if String.sub b i nlen = needle then true
-        else scan (i + 1)
-      in
-      scan 0
-  in
-  contains "exceeds max length"
-  || contains "context_length_exceeded"
-  || contains "prompt is too long"
-  || contains "prompt too long"
-  || contains "maximum context length"
+    Provider/model are treated as opaque aliases at the keeper layer: the
+    SDK boundary ([Keeper_status_bridge.blocker_class_of_sdk_error] /
+    [blocker_class_of_string]) is the only place where wire-level phrasing
+    is inspected.  Once the boundary has classified the error, downstream
+    consumers (rollover, dashboard, supervisor) reason only over the typed
+    [blocker_class] — never substring-matching the [detail] field. *)
+let blocker_class_indicates_overflow (klass : blocker_class) : bool =
+  match klass with
+  | Sdk_token_budget_exceeded -> true
+  | Cascade_exhausted _
+  | Ambiguous_post_commit_timeout
+  | Ambiguous_post_commit_failure
+  | Autonomous_slot_wait_timeout
+  | Admission_queue_wait_timeout
+  | Turn_timeout_after_queue_wait
+  | Admission_wait_wfq
+  | Admission_surface
+  | Oas_timeout_budget
+  | Turn_timeout
+  | Completion_contract_violation
+  | No_tool_capable_provider
+  | Fiber_unresolved
+  | Stale_turn_timeout
+  | Stale_fleet_batch
+  | Sdk_max_turns_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_tool_retry_exhausted
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met -> false
 
 type rollover_gate_decision =
   | Skip of string
@@ -127,22 +138,22 @@ let classify_rollover_gate
     ~(auto_handoff : bool) ~(cooldown_elapsed : bool)
     ~(ratio : float) ~(handoff_threshold : float)
     ~(last_outcome : proactive_cycle_outcome)
-    ~(last_blocker : string)
-    ?(current_turn_overflow_blocker : string option = None)
+    ~(last_blocker_info : blocker_info option)
+    ?(current_turn_blocker_info : blocker_info option = None)
     () : rollover_gate_decision =
   if not auto_handoff then Skip "auto_handoff_disabled"
   else if not cooldown_elapsed then Skip "cooldown"
   else
     let ratio_gate = ratio >= handoff_threshold in
-    let current_turn_signal =
-      match current_turn_overflow_blocker with
-      | Some blocker -> blocker_indicates_overflow blocker
+    let info_indicates_overflow = function
+      | Some { klass; _ } -> blocker_class_indicates_overflow klass
       | None -> false
     in
+    let current_turn_signal = info_indicates_overflow current_turn_blocker_info in
     let signal_gate =
       current_turn_signal
       || (last_outcome = Proactive_error
-          && blocker_indicates_overflow last_blocker)
+          && info_indicates_overflow last_blocker_info)
     in
     match ratio_gate, signal_gate with
     | true, true -> Go "ratio+signal"
@@ -156,7 +167,7 @@ let maybe_rollover_oas_handoff
     ~(meta : keeper_meta)
     ~(model : string)
     ~(primary_model_max_tokens : int)
-    ~(current_turn_overflow_blocker : string option)
+    ~(current_turn_blocker_info : blocker_info option)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : handoff_rollover =
   match checkpoint with
   | None ->
@@ -198,11 +209,8 @@ let maybe_rollover_oas_handoff
           ~ratio
           ~handoff_threshold:base_meta.handoff_threshold
           ~last_outcome:base_meta.runtime.proactive_rt.last_outcome
-          ~last_blocker:
-            (match base_meta.runtime.last_blocker with
-             | Some info -> info.detail
-             | None -> "")
-          ~current_turn_overflow_blocker
+          ~last_blocker_info:base_meta.runtime.last_blocker
+          ~current_turn_blocker_info
           ()
       in
       let rollover_base =

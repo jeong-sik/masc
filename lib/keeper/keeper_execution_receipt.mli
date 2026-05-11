@@ -211,16 +211,56 @@ val sandbox_kind_of_meta :
   Keeper_types.keeper_meta -> Keeper_types.sandbox_profile
 val to_json : t -> Yojson.Safe.t
 
+(** Operator-facing classification of a finished turn. Closed set.
+
+    Producer is [operator_disposition]; consumers
+    ([needs_operator_broadcast], dashboard JSON, broadcast payload)
+    pattern-match exhaustively. The wire form is byte-compatible with the
+    pre-typing string ([operator_disposition_kind_to_string]). *)
+type operator_disposition_kind =
+  | Disp_pass
+  | Disp_pause_human
+  | Disp_alert_exhausted
+  | Disp_fail_open_next_cascade
+  | Disp_pass_next_model
+  | Disp_user_cancelled
+  | Disp_skipped
+  | Disp_unknown
+
+val operator_disposition_kind_to_string : operator_disposition_kind -> string
+
+(** Reason paired with [operator_disposition_kind]. Closed set; the wire
+    form is byte-compatible with the pre-typing string. *)
+type operator_disposition_reason =
+  | Reason_healthy
+  | Reason_cascade_exhausted
+  | Reason_preflight_config_error
+  | Reason_degraded_retry
+  | Reason_cascade_fallback
+  | Reason_provider_runtime_error
+  | Reason_tool_required_unsatisfied
+  | Reason_turn_livelock_blocked
+  | Reason_cancelled
+  | Reason_phase_skipped
+  | Reason_unmapped_cascade_state
+
+val operator_disposition_reason_to_string :
+  operator_disposition_reason -> string
+
 (** Derived display pair (disposition, reason) computed from receipt fields.
     Exposed for test access; the runtime path consumes it via [append]. *)
-val operator_disposition : t -> string * string
+val operator_disposition :
+  t -> operator_disposition_kind * operator_disposition_reason
 
 (** [needs_operator_broadcast disposition] returns true when the disposition
     indicates a silent dead-end that operators must be notified about. *)
-val needs_operator_broadcast : string -> bool
+val needs_operator_broadcast : operator_disposition_kind -> bool
 
 val operator_broadcast_payload :
-  t -> disposition:string -> reason:string -> Yojson.Safe.t
+  t ->
+  disposition:operator_disposition_kind ->
+  reason:operator_disposition_reason ->
+  Yojson.Safe.t
 (** Structured payload emitted for [keeper.operator_broadcast_required].
     Exposed so tests can pin the diagnostic fields operators need when a
     keeper turn pauses or stalls silently. *)

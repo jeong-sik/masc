@@ -99,8 +99,10 @@ let mk_receipt
 
 let check_disp label receipt expected_disp expected_reason =
   let disp, reason = R.operator_disposition receipt in
-  check string (label ^ " (disposition)") expected_disp disp;
-  check string (label ^ " (reason)") expected_reason reason
+  check string (label ^ " (disposition)") expected_disp
+    (R.operator_disposition_kind_to_string disp);
+  check string (label ^ " (reason)") expected_reason
+    (R.operator_disposition_reason_to_string reason)
 
 (* === Bug class: tool_contract_result violations must pause_human ====== *)
 
@@ -237,15 +239,17 @@ let test_fail_open_for_degraded_retry () =
 (* === Trigger predicate ============================================== *)
 
 let test_needs_broadcast_predicate () =
-  check bool "pause_human triggers" true (R.needs_operator_broadcast "pause_human");
+  check bool "pause_human triggers" true
+    (R.needs_operator_broadcast R.Disp_pause_human);
   check bool "alert_exhausted triggers" true
-    (R.needs_operator_broadcast "alert_exhausted");
-  check bool "unknown triggers" true (R.needs_operator_broadcast "unknown");
-  check bool "pass does not" false (R.needs_operator_broadcast "pass");
+    (R.needs_operator_broadcast R.Disp_alert_exhausted);
+  check bool "unknown triggers" true
+    (R.needs_operator_broadcast R.Disp_unknown);
+  check bool "pass does not" false (R.needs_operator_broadcast R.Disp_pass);
   check bool "pass_next_model does not" false
-    (R.needs_operator_broadcast "pass_next_model");
+    (R.needs_operator_broadcast R.Disp_pass_next_model);
   check bool "fail_open_next_cascade does not" false
-    (R.needs_operator_broadcast "fail_open_next_cascade")
+    (R.needs_operator_broadcast R.Disp_fail_open_next_cascade)
 
 (* === Symmetric coverage: each broadcast disposition is reachable ===== *)
 
@@ -293,8 +297,8 @@ let test_broadcast_payload_carries_turn_diagnostics () =
       ()
   in
   let payload =
-    R.operator_broadcast_payload receipt ~disposition:"pause_human"
-      ~reason:"tool_required_unsatisfied"
+    R.operator_broadcast_payload receipt ~disposition:R.Disp_pause_human
+      ~reason:R.Reason_tool_required_unsatisfied
   in
   check string "task id" "task-102"
     (payload |> U.member "current_task_id" |> U.to_string);

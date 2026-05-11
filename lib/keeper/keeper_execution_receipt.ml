@@ -346,7 +346,7 @@ let string_contains_ci haystack needle =
 
 (* Cycle 51 observability: alert when [operator_disposition] cannot
    classify a receipt and falls through to the catch-all
-   [("unknown", "unmapped_cascade_state")].
+   [(Disp_unknown, Reason_unmapped_cascade_state)].
 
    PR #11651 fixed the historical "blocked" -> "unknown" silent path
    (livelock turns emitted [outcome="blocked"] which was not in
@@ -375,7 +375,54 @@ let () =
        structured detail goes to the WARN log line at the firing site."
     ()
 
-let operator_disposition (receipt : t) =
+type operator_disposition_kind =
+  | Disp_pass
+  | Disp_pause_human
+  | Disp_alert_exhausted
+  | Disp_fail_open_next_cascade
+  | Disp_pass_next_model
+  | Disp_user_cancelled
+  | Disp_skipped
+  | Disp_unknown
+
+let operator_disposition_kind_to_string = function
+  | Disp_pass -> "pass"
+  | Disp_pause_human -> "pause_human"
+  | Disp_alert_exhausted -> "alert_exhausted"
+  | Disp_fail_open_next_cascade -> "fail_open_next_cascade"
+  | Disp_pass_next_model -> "pass_next_model"
+  | Disp_user_cancelled -> "user_cancelled"
+  | Disp_skipped -> "skipped"
+  | Disp_unknown -> "unknown"
+
+type operator_disposition_reason =
+  | Reason_healthy
+  | Reason_cascade_exhausted
+  | Reason_preflight_config_error
+  | Reason_degraded_retry
+  | Reason_cascade_fallback
+  | Reason_provider_runtime_error
+  | Reason_tool_required_unsatisfied
+  | Reason_turn_livelock_blocked
+  | Reason_cancelled
+  | Reason_phase_skipped
+  | Reason_unmapped_cascade_state
+
+let operator_disposition_reason_to_string = function
+  | Reason_healthy -> "healthy"
+  | Reason_cascade_exhausted -> "cascade_exhausted"
+  | Reason_preflight_config_error -> "preflight_config_error"
+  | Reason_degraded_retry -> "degraded_retry"
+  | Reason_cascade_fallback -> "cascade_fallback"
+  | Reason_provider_runtime_error -> "provider_runtime_error"
+  | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
+  | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
+  | Reason_cancelled -> "cancelled"
+  | Reason_phase_skipped -> "phase_skipped"
+  | Reason_unmapped_cascade_state -> "unmapped_cascade_state"
+
+let operator_disposition (receipt : t) :
+    operator_disposition_kind * operator_disposition_reason =
   let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
   let error_kind =
     Option.map
@@ -414,21 +461,21 @@ let operator_disposition (receipt : t) =
      typed migration drops them.  Cascade exhaustion still reaches this
      branch via [terminal_reason="cascade_exhausted"]. *)
   if String.equal terminal_reason "cascade_exhausted"
-  then ("alert_exhausted", "cascade_exhausted")
+  then (Disp_alert_exhausted, Reason_cascade_exhausted)
   else if preflight_config_failure then
-    ("pause_human", "preflight_config_error")
+    (Disp_pause_human, Reason_preflight_config_error)
   else if
     provider_runtime_failure
     && (receipt.degraded_retry_applied
         || Option.is_some receipt.degraded_retry_cascade)
-  then ("fail_open_next_cascade", "degraded_retry")
+  then (Disp_fail_open_next_cascade, Reason_degraded_retry)
   else if
     provider_runtime_failure
     && (receipt.cascade_fallback_applied
         || receipt.cascade_outcome = Cascade_passed_to_next_model)
-  then ("pass_next_model", "cascade_fallback")
+  then (Disp_pass_next_model, Reason_cascade_fallback)
   else if provider_runtime_failure then
-    ("pause_human", "provider_runtime_error")
+    (Disp_pause_human, Reason_provider_runtime_error)
   else if
     String.starts_with ~prefix:"completion_contract_violation:" terminal_reason
   then
@@ -441,14 +488,14 @@ let operator_disposition (receipt : t) =
        regression counter is meant to flag. Treat terminal_reason as
        authoritative — the disposition is the same as the explicit
        [tool_required_unsatisfied] branch below. *)
-    ("pause_human", "tool_required_unsatisfied")
+    (Disp_pause_human, Reason_tool_required_unsatisfied)
   else if
     String.starts_with ~prefix:"turn_livelock:" terminal_reason
     ||
     (match error_kind with
      | Some "turn_livelock_blocked" -> true
      | Some _ | None -> false)
-  then ("pause_human", "turn_livelock_blocked")
+  then (Disp_pause_human, Reason_turn_livelock_blocked)
   else if
     receipt.tool_surface.tool_requirement = Required
     && (List.mem receipt.tool_contract_result
@@ -462,13 +509,13 @@ let operator_disposition (receipt : t) =
           ; Contract_no_tool_capable_provider
           ]
         || receipt.tools_used = [])
-  then ("pause_human", "tool_required_unsatisfied")
+  then (Disp_pause_human, Reason_tool_required_unsatisfied)
   else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
-  then ("fail_open_next_cascade", "degraded_retry")
+  then (Disp_fail_open_next_cascade, Reason_degraded_retry)
   else if
     receipt.cascade_fallback_applied
     || receipt.cascade_outcome = Cascade_passed_to_next_model
-  then ("pass_next_model", "cascade_fallback")
+  then (Disp_pass_next_model, Reason_cascade_fallback)
   (* "healthy" requires an explicit success signal: turn completed without
      error AND cascade reached the configured terminal. Any other fallthrough
      is an unmapped state — surface it as "unknown" so a new cascade_outcome
@@ -484,10 +531,10 @@ let operator_disposition (receipt : t) =
      [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
   else
     match receipt.outcome with
-    | `Cancelled -> ("user_cancelled", "cancelled")
-    | `Skipped -> ("skipped", "phase_skipped")
+    | `Cancelled -> (Disp_user_cancelled, Reason_cancelled)
+    | `Skipped -> (Disp_skipped, Reason_phase_skipped)
     | `Ok when receipt.cascade_outcome = Cascade_completed ->
-      ("pass", "healthy")
+      (Disp_pass, Reason_healthy)
     | _ ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_receipt_unmapped_disposition ();
@@ -505,11 +552,13 @@ let operator_disposition (receipt : t) =
         (Option.value
            (Option.map error_kind_to_string receipt.error_kind)
            ~default:"<none>");
-      ("unknown", "unmapped_cascade_state")
+      (Disp_unknown, Reason_unmapped_cascade_state)
 
 let to_json (receipt : t) =
-  let operator_disposition, operator_disposition_reason =
-    operator_disposition receipt
+  let disposition, disposition_reason = operator_disposition receipt in
+  let operator_disposition = operator_disposition_kind_to_string disposition in
+  let operator_disposition_reason =
+    operator_disposition_reason_to_string disposition_reason
   in
   let error_json =
     match receipt.error_kind, receipt.error_message with
@@ -726,10 +775,14 @@ let to_json (receipt : t) =
    anchor in [keeper_supervisor.ml] (StaleRunning watchdog +
    emit_stale_keeper_broadcast) is deferred to a separate cycle. *)
 let needs_operator_broadcast = function
-  | "pause_human" | "alert_exhausted" | "unknown" -> true
-  | _ -> false
+  | Disp_pause_human | Disp_alert_exhausted | Disp_unknown -> true
+  | Disp_pass | Disp_fail_open_next_cascade | Disp_pass_next_model
+  | Disp_user_cancelled | Disp_skipped ->
+    false
 
 let operator_broadcast_payload (receipt : t) ~disposition ~reason =
+  let disposition_s = operator_disposition_kind_to_string disposition in
+  let reason_s = operator_disposition_reason_to_string reason in
   `Assoc
     [ "schema", `String "keeper.operator_broadcast_required.v1"
     ; "keeper_name", `String receipt.keeper_name
@@ -740,8 +793,8 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
         match receipt.turn_count with
         | Some value -> `Int value
         | None -> `Null )
-    ; "disposition", `String disposition
-    ; "disposition_reason", `String reason
+    ; "disposition", `String disposition_s
+    ; "disposition_reason", `String reason_s
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String receipt.terminal_reason_code
     ; ( "current_task_id",
@@ -813,7 +866,10 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
   in
   Log.Keeper.error
     "%s: operator_broadcast_required emitted disposition=%s reason=%s seq=%d"
-    receipt.keeper_name disposition reason event.seq
+    receipt.keeper_name
+    (operator_disposition_kind_to_string disposition)
+    (operator_disposition_reason_to_string reason)
+    event.seq
 
 let append (config : Coord.config) (receipt : t) =
   let store =
@@ -836,7 +892,10 @@ let append (config : Coord.config) (receipt : t) =
       Log.Keeper.error
         "%s: operator_broadcast_required EMIT FAILED disposition=%s \
          reason=%s exn=%s"
-        receipt.keeper_name disposition reason (Printexc.to_string exn)
+        receipt.keeper_name
+        (operator_disposition_kind_to_string disposition)
+        (operator_disposition_reason_to_string reason)
+        (Printexc.to_string exn)
 
 (* Watchdog-driven broadcast (#fleet-stall 2026-04-26 Step 3): emitted by a
    supervisor-side fiber when a Running keeper has not produced a turn for

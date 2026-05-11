@@ -845,6 +845,14 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    exercised end-to-end via cascade_legacy_runner regression
    harness with > cascade_max_keys distinct cascade names.  Smoke
    pins the no-arg helper signature. *)
+(* Smoke for [Cascade_metrics.on_max_tokens_clamped].  Natural
+   code path requires a provider with a non-None ceiling lower
+   than the operator's [max_tokens] — exercised end-to-end in
+   the inference suite.  Smoke pins the no-arg helper signature. *)
+let test_max_tokens_clamped_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_max_tokens_clamped ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_cascade_metrics_eviction_helper_callable () =
   Masc_mcp.Cascade_metrics.on_cascade_metrics_eviction ();
   check bool "no-arg helper callable without raising" true true
@@ -1345,6 +1353,9 @@ let () =
           test_case
             "cascade_metrics_eviction: helper callable" `Quick
             test_cascade_metrics_eviction_helper_callable;
+          test_case
+            "max_tokens_clamped: helper callable" `Quick
+            test_max_tokens_clamped_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

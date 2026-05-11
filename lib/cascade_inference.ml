@@ -104,5 +104,12 @@ let resolve_max_tokens
     Mirrors TLA+ KeeperCoreTriad.CapabilityGate action. *)
 let clamp_max_tokens_to_ceiling ~(provider_ceiling : int option) (max_tokens : int) : int =
   match provider_ceiling with
-  | Some ceiling when max_tokens > ceiling -> max 1 ceiling
+  | Some ceiling when max_tokens > ceiling ->
+    (* Iter 46: tick a counter so operators can alert on
+       cascade.toml [max_tokens] settings being silently clipped
+       by provider ceilings.  The clamp policy itself stays — a
+       smaller response beats none — but the rate is now
+       observable for budget tuning / docs alignment. *)
+    Cascade_metrics.on_max_tokens_clamped ();
+    max 1 ceiling
   | _ -> max_tokens

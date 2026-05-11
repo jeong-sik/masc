@@ -932,6 +932,21 @@ let metric_cascade_metrics_eviction =
 let on_cascade_metrics_eviction () =
   Prometheus.inc_counter metric_cascade_metrics_eviction ()
 
+(* [Cascade_inference.clamp_max_tokens_to_ceiling] silently reduces
+   an operator-supplied [max_tokens] to the provider's
+   [provider_ceiling] when the operator's value exceeds it.  The
+   policy is intentional ("smaller response is better than no
+   response" per the docstring) but the silent reduction means
+   operators who configured [max_tokens=16384] for a long-form
+   response in cascade.toml and got a 4096-token truncation had no
+   signal that the budget was clipped.  Pair with iter 26
+   [max_context_fallback] for the symmetric context-window
+   side. *)
+let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
+
+let on_max_tokens_clamped () =
+  Prometheus.inc_counter metric_max_tokens_clamped ()
+
 (* Iter 43 infrastructure: pre-register every counter introduced in
    iter 2-42 with [Prometheus.register_counter] so the
    process startup state exposes all metric names at /metrics with
@@ -1038,7 +1053,8 @@ let register_all () =
      rate is a guaranteed FSM bug — not a tunable; alert immediately \
      and investigate the FSM transition that exposed an Accept in \
      Accept_rejected branch.";
-  c metric_cascade_metrics_eviction
+  c metric_cascade_metrics_eviction;
+  c metric_max_tokens_clamped
 ;;
 
 (* Module-load side effect: register every cascade counter as soon

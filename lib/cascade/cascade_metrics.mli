@@ -291,6 +291,13 @@ val on_cascade_metrics_eviction : unit -> unit
     rate signals cascade-name churn — either raise
     [cascade_max_keys] or canonicalize synthesized names. *)
 
+val on_max_tokens_clamped : unit -> unit
+(** Tick the max_tokens-clamped counter at
+    [Cascade_inference.clamp_max_tokens_to_ceiling] when the
+    operator-supplied [max_tokens] exceeds the provider ceiling
+    and is silently reduced.  Symmetric to iter-26
+    [max_context_fallback] (context-window side). *)
+
 val register_all : unit -> unit
 (** Pre-register every counter defined in this module with
     [Prometheus.register_counter] so process startup exposes them

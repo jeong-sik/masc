@@ -625,7 +625,12 @@ let make_keeper_tool_handler
                  ; duration_ms = Float.of_int duration_ms
                  ; data = `Null
                  ; legacy_message = raw_result
-                 ; failure_class = None
+                 ; (* The keeper-internal tool returned a non-throwing
+                      error result; classify as Runtime_failure so the
+                      dispatch metric label and downstream observers
+                      can distinguish it from transient / policy / workflow
+                      rejections. *)
+                   failure_class = Some Tool_result.Runtime_failure
                  }
              in
              ignore (Tool_dispatch.run_post_hooks tr));
@@ -996,9 +1001,7 @@ let make_tool_bundle
       (Keeper_tool_alias.public_names ())
   in
   let assembled_surface_names =
-    List.filter
-      (fun n -> not (List.mem n aliased_internal_names))
-      universe_names
+    List.filter (fun n -> not (List.mem n aliased_internal_names)) universe_names
     @ alias_public_names_in_surface
   in
   (* Record tool assignment telemetry for causal tracing.

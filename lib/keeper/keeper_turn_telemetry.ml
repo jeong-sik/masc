@@ -59,11 +59,19 @@ let friction_activity_payload
 
 let log_keeper_proof ~(keeper_name : string) (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) =
   (* Closed-set wire label.  Previously this called [show_result_status]
-     (a [@@deriving show] artifact that returns ["Cdal_proof.Completed"])
-     and stripped the module prefix by [String.rindex_opt raw '.']
-     substring split — a fragile pattern that breaks silently when the
-     type is moved or the module renamed.  [result_status_to_string] is
-     now exposed in the [.mli] for callers that need the wire label. *)
+     ([@@deriving show] artifact, "Cdal_proof.Completed") and stripped
+     the module prefix by [String.rindex_opt raw '.'].  That pattern is
+     fragile because [@@deriving show] is not a stable wire format —
+     adding a payload to any constructor would yield "Completed { … }"
+     after the strip, breaking downstream label parsers.
+     [result_status_to_string] returns one of five snake_case tokens
+     (Cdal_proof.completed / errored / timed_out / cancelled /
+     context_overflow) regardless of show-template changes.
+
+     Casing change: prior logs printed "Completed" (capitalised
+     constructor name); these now print "completed".  No alerting
+     parses these debug/warn keeper-proof log lines (the metric label
+     side already uses the same snake_case tokens). *)
   let status_string =
     Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_string proof.result_status
   in

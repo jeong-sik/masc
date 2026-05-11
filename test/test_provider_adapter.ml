@@ -698,7 +698,7 @@ let test_apply_wire_overlay_keeps_local_when_path_is_default () =
 let test_apply_wire_overlay_passthrough_for_anthropic () =
   let cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.Claude_api
+      ~kind:Llm_provider.Provider_config.Anthropic
       ~model_id:"claude-sonnet-4-5"
       ~base_url:"https://api.anthropic.com"
       ()

@@ -64,9 +64,12 @@ val of_json : Yojson.Safe.t -> (t, string) result
 val schema_version_current : int
 
 (** Closed-set wire label for {!result_status}.  Prefer this over
-    {!show_result_status} (the [@@deriving show] artifact prefixes
-    each constructor with the module path, e.g.
-    ["Cdal_proof.Completed"], which downstream callers then strip by
-    substring split — a fragile pattern that breaks silently when the
-    type is moved or the module renamed). *)
+    {!show_result_status}: [@@deriving show] output is not a stable
+    wire format — it formats constructors with their module path
+    (e.g. ["Cdal_proof.Completed"]) and would print payloads inline
+    for any future payload-bearing constructor, which would break
+    Prometheus label cardinality.  [result_status_to_string] returns
+    one of five stable snake_case tokens ([completed], [errored],
+    [timed_out], [cancelled], [context_overflow]) regardless of
+    [@@deriving show] template changes. *)
 val result_status_to_string : result_status -> string

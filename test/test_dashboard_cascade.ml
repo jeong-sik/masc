@@ -1124,6 +1124,15 @@ let lookup fields key =
   | None -> fail (Printf.sprintf "%s missing" key)
 ;;
 
+(* RFC-0058 §9 / #14356: with no live catalog installed in the test
+   environment, [Keeper_cascade_profile.resolve_live] falls back to
+   [Cascade_routes.first_alias_or_key Keeper_turn], whose first alias is
+   ["default"].  These tests verify the raw-vs-canonical drift surface,
+   which is independent of the specific canonical name — what matters is
+   that an unknown raw collapses to *some* known fallback that differs
+   from the raw value. *)
+let canonical_empty_catalog_fallback = "default"
+
 let test_keeper_profile_preserves_raw_unknown_cascade () =
   (* Genuinely unknown cascade — not in the live catalog and not a
      registered logical alias.  Typical sources: typos, personal
@@ -1142,8 +1151,8 @@ let test_keeper_profile_preserves_raw_unknown_cascade () =
     (lookup fs "cascade_name");
   check
     string
-    "canonical collapses unknown → keeper_unified"
-    "big_three"
+    "canonical collapses unknown → keeper_turn fallback"
+    canonical_empty_catalog_fallback
     (lookup fs "canonical");
   check
     bool
@@ -1165,8 +1174,8 @@ let test_keeper_profile_preserves_raw_legacy_alias () =
     (lookup fs "cascade_name");
   check
     string
-    "legacy alias canonicalizes to keeper_unified"
-    "big_three"
+    "legacy alias canonicalizes via routes table"
+    canonical_empty_catalog_fallback
     (lookup fs "canonical");
   check
     bool
@@ -1176,13 +1185,18 @@ let test_keeper_profile_preserves_raw_legacy_alias () =
 ;;
 
 let test_keeper_profile_canonical_matches_when_raw_is_canonical () =
+  (* With no test catalog installed, the canonical name surfaces as the
+     [Keeper_turn] alias fallback ([default]).  Passing that same name
+     as the raw should round-trip — raw == canonical. *)
   let fs =
     Masc_mcp.Dashboard_cascade.keeper_profile_fields
       ~keeper:"verdict"
-      ~cascade_name:"big_three"
+      ~cascade_name:canonical_empty_catalog_fallback
   in
-  check string "cascade_name stays canonical" "big_three" (lookup fs "cascade_name");
-  check string "canonical matches" "big_three" (lookup fs "canonical");
+  check string "cascade_name stays canonical"
+    canonical_empty_catalog_fallback (lookup fs "cascade_name");
+  check string "canonical matches"
+    canonical_empty_catalog_fallback (lookup fs "canonical");
   check
     bool
     "raw == canonical → UI renders —"
@@ -1306,21 +1320,35 @@ let test_recommendation_disable_for_decayed_provider () =
 ;;
 
 let test_recommendation_investigate_for_stuck_streak () =
-  let info =
+  (* Reviewer #13194 added a [trust_score < 0.50] clause to the
+     stuck-fingerprint gate: a busy provider with a lifetime artifact
+     should not trigger Investigate when the recent window is healthy.
+     Verify both directions: high-trust + stuck → no recommendation;
+     low-trust + stuck → investigate. *)
+  let healthy_stuck =
     mk_info
-      "p"
+      "p_healthy"
       ~success_rate:0.8
-        (* trust above the disable/reduce
-                                      thresholds, so the stuck-streak
-                                      branch is what trips the rule *)
       ~events_in_window:8
       ~top_fingerprints:[ "runtime_mcp_auth|cafed00d", 6 ]
   in
-  match DC.classify_recommendation info with
+  (match DC.classify_recommendation healthy_stuck with
+   | None -> ()
+   | Some _ ->
+     failwith
+       "high trust + stuck fingerprint should not recommend investigate");
+  let unhealthy_stuck =
+    mk_info
+      "p_unhealthy"
+      ~success_rate:0.4
+      ~events_in_window:8
+      ~top_fingerprints:[ "runtime_mcp_auth|cafed00d", 6 ]
+  in
+  match DC.classify_recommendation unhealthy_stuck with
   | Some r ->
     check
       string
-      "investigate (stuck streak)"
+      "investigate (low trust + stuck streak)"
       "investigate"
       (DC.recommendation_action_to_string r.rec_action)
   | None -> failwith "expected investigate recommendation"

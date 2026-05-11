@@ -511,8 +511,14 @@ let test_valid_catalog_records_probe_error_without_eio_caps () =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ())
   in
-  check string "blank name defaults to big_three"
-    Keeper_config.default_cascade_name blank_name;
+  (* [Keeper_config.default_cascade_name] is evaluated at module init
+     when no catalog is loaded, so it freezes to the
+     [first_alias_or_key] fallback ("default").  After the fixture
+     installs a catalog whose first profile is "big_three",
+     [resolve_declared_name ""] returns "big_three" — the live answer.
+     Pin against the fixture's first profile, not the init-time cache. *)
+  check string "blank name defaults to first catalog profile"
+    "big_three" blank_name;
   let custom_exec_name =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name
@@ -535,13 +541,15 @@ let test_valid_catalog_records_probe_error_without_eio_caps () =
     [ strict_model ]
     (require_ok
        (Cascade_catalog_runtime.models_of_cascade_name "strict_exec"));
+  (* Same init-time-cache issue: pin against the fixture's first
+     profile name. *)
   check string "keeper_unified logical alias falls back to big_three"
-    Keeper_config.default_cascade_name
+    "big_three"
     (require_ok
        (Cascade_catalog_runtime.resolve_declared_name
           ~raw_name:"keeper_unified" ()));
   check string "tool_use_strict logical alias falls back to big_three"
-    Keeper_config.default_cascade_name
+    "big_three"
     (require_ok
        (Cascade_catalog_runtime.resolve_declared_name
           ~raw_name:"tool_use_strict" ()));
@@ -806,8 +814,11 @@ let test_partial_catalog_keeps_validated_subset_available () =
   check bool "rejected invalid candidate is surfaced" true
     (contains_substring rejection_json
        "__nonexistent_provider_sentinel__:fake");
+  (* Same caveat as test_valid_catalog_records_probe_error_without_eio_caps:
+     [Keeper_config.default_cascade_name] is module-init-cached; assert
+     against the fixture's first profile name directly. *)
   check (list string) "dashboard only advertises validated profiles"
-    [ Keeper_config.default_cascade_name; "tool_rerank" ]
+    [ "big_three"; "tool_rerank" ]
     (Masc_mcp.Server_routes_http_routes_dashboard.available_cascade_profiles ());
   let invalid_profiles =
     Masc_mcp.Server_routes_http_routes_dashboard.invalid_cascade_profiles ()
@@ -833,7 +844,7 @@ let test_partial_catalog_keeps_validated_subset_available () =
     |> List.map (json_string_field "name")
   in
   check (list string) "dashboard config_json only renders validated profiles"
-    [ Keeper_config.default_cascade_name; "tool_rerank" ]
+    [ "big_three"; "tool_rerank" ]
     profile_names;
   check bool "dashboard config_json keeps rejected profile metadata" true
     (contains_substring (Yojson.Safe.to_string config_json) "broken_profile")

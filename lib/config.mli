@@ -19,6 +19,14 @@ val all_tool_names : unit -> string list
 val is_tool_visible : string -> bool
 (** Check if a tool is visible. *)
 
+val is_raw_tool_name : string -> bool
+(** [is_raw_tool_name name] is [true] when [name] appears in
+    {!raw_all_tool_schemas} — i.e. the tool universe before any
+    capability / visibility filtering.  O(1) via a name-keyed Hashtbl
+    built once at module init.  Used on the MCP dispatch hot path
+    where the alternative was rebuilding the entire visible schema
+    list per call just to membership-test one name. *)
+
 val visible_tool_schemas :
   ?include_hidden:bool ->
   ?include_deprecated:bool ->

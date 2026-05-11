@@ -101,6 +101,21 @@ let all_tool_names () : string list =
 let is_tool_visible tool_name =
   Tool_catalog.is_visible tool_name
 
+(* O(1) membership lookup for "is this name in raw_all_tool_schemas?".
+   Hot path: [Mcp_server_eio_tool_profile.tool_allowed_in_profile Full]
+   previously rebuilt visible_tool_schemas (dedupe + canonicalize + filter)
+   then List.map .name then List.mem per dispatch — ~150 entries scanned
+   per MCP tool call.  Hashtbl built once at module init. *)
+let raw_tool_name_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create (List.length raw_all_tool_schemas * 2) in
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      Hashtbl.replace tbl schema.name ())
+    raw_all_tool_schemas;
+  tbl
+
+let is_raw_tool_name name = Hashtbl.mem raw_tool_name_set name
+
 let visible_tool_schemas ?(include_hidden = false) ?(include_deprecated = false) () :
     Masc_domain.tool_schema list =
   Capability_registry.visible_public_tool_schemas_from ~include_hidden

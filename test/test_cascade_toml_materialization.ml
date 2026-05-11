@@ -691,6 +691,20 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    widens the return shape — or drops the wrapper entirely — fails
    here rather than silently regressing the resolve-path drop
    visibility this iteration introduced. *)
+(* Smoke + contract guard for [Cascade_metrics.on_auto_expansion_fanout].
+   The fanout=0 arm (all plain entries, no provider:auto in the
+   cascade) must be a no-op so callers in
+   [expand_weighted_entries] can emit unconditionally without
+   polluting Prometheus state on every cascade load.  fanout>0
+   exercises the inc_counter call site. *)
+let test_auto_expansion_fanout_zero_is_no_op_and_positive_callable () =
+  Masc_mcp.Cascade_metrics.on_auto_expansion_fanout
+    ~cascade:"smoke_test_cascade_iter15" ~fanout:0;
+  Masc_mcp.Cascade_metrics.on_auto_expansion_fanout
+    ~cascade:"smoke_test_cascade_iter15" ~fanout:4;
+  check bool "zero and positive fanout both callable without raising"
+    true true
+
 let test_parse_weighted_entry_with_drop_metric_contract () =
   let ok_entry : Masc_mcp.Cascade_config_loader.weighted_entry =
     { model = "ollama:qwen3.5:35b-a3b-nvfp4"
@@ -966,6 +980,9 @@ let () =
             "parse_weighted_entry_with_drop_metric: option contract preserved"
             `Quick
             test_parse_weighted_entry_with_drop_metric_contract;
+          test_case
+            "auto_expansion_fanout: zero is no-op, positive callable" `Quick
+            test_auto_expansion_fanout_zero_is_no_op_and_positive_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

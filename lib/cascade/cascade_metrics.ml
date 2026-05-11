@@ -306,3 +306,27 @@ let on_provider_filter_widening ~cascade =
   Prometheus.inc_counter metric_provider_filter_widening
     ~labels:[ ("cascade", cascade) ]
     ()
+
+(* [expand_weighted_entries] fans a single [provider:auto] entry out
+   to N concrete candidates via [Cascade_config.expand_auto_models]
+   ("glm:auto" -> ["glm:glm-5.1"; "glm:glm-5-turbo"; ...]).  The
+   per-cascade fan-out amount was silent: operators saw one line in
+   cascade.toml but the runtime cascading list was N entries, and a
+   change in the registry (new provider added, model deprecated)
+   would silently shift the effective candidate count without any
+   dashboard signal.
+
+   Bumped by [fanout] = [output_count - input_count] per call so a
+   [rate()] tracks "extra candidates synthesized per cascade per
+   second".  [fanout = 0] (all plain entries, no auto expansion) is
+   a documented no-op so callers can call unconditionally.
+
+   Cardinality: cascades (~10) = ~10 series. *)
+let metric_auto_expansion_fanout = "masc_cascade_auto_expansion_fanout_total"
+
+let on_auto_expansion_fanout ~cascade ~fanout =
+  if fanout > 0 then
+    Prometheus.inc_counter metric_auto_expansion_fanout
+      ~labels:[ ("cascade", cascade) ]
+      ~delta:(float_of_int fanout)
+      ()

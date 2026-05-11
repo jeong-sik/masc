@@ -86,3 +86,11 @@ val on_provider_filter_widening : cascade:string -> unit
     to fall back to the unfiltered list.  A non-zero rate signals
     the operator-supplied filter is being silently widened with
     security / budget / SLA implications. *)
+
+val on_auto_expansion_fanout : cascade:string -> fanout:int -> unit
+(** Tick the [provider:auto] fan-out counter at
+    [expand_weighted_entries] by [fanout] (= output_count -
+    input_count).  [fanout=0] is a documented no-op so callers
+    invoke unconditionally.  A [rate()] tracks how many extra
+    candidates per cascade per second are synthesized by auto
+    expansion. *)

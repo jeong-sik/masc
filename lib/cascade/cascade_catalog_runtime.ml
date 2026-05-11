@@ -512,13 +512,22 @@ let candidate_key_of_cfg (cfg : Llm_provider.Provider_config.t) =
       cfg.supports_tool_choice_override )
 
 let expand_weighted_entries
+    ~cascade
     (entries : Cascade_config_loader.weighted_entry list)
     : Cascade_config_loader.weighted_entry list =
-  List.concat_map
-    (fun (entry : Cascade_config_loader.weighted_entry) ->
-      Cascade_config.expand_auto_models [ entry.model ]
-      |> List.map (fun model -> { entry with model }))
-    entries
+  let input_count = List.length entries in
+  let expanded =
+    List.concat_map
+      (fun (entry : Cascade_config_loader.weighted_entry) ->
+        Cascade_config.expand_auto_models [ entry.model ]
+        |> List.map (fun model -> { entry with model }))
+      entries
+  in
+  let output_count = List.length expanded in
+  Cascade_metrics.on_auto_expansion_fanout
+    ~cascade
+    ~fanout:(output_count - input_count);
+  expanded
 
 let profile_lookup profiles name =
   List.find_opt (fun (profile : profile_snapshot) -> String.equal profile.name name) profiles
@@ -620,7 +629,9 @@ let validate_profile_static ~config_path ~required_capability_profile name
     match validate_strategy ~config_path ~name with
     | Error errors -> Error { name; errors; probes = [] }
     | Ok (strategy, ollama_max_concurrent, cli_max_concurrent) ->
-        let expanded_entries = expand_weighted_entries weighted_entries in
+        let expanded_entries =
+          expand_weighted_entries ~cascade:name weighted_entries
+        in
         let candidates, candidate_errors =
           List.fold_left
             (fun (ok_acc, err_acc) (entry : Cascade_config_loader.weighted_entry) ->
@@ -1203,9 +1214,9 @@ let resolve_declared_name ?sw ?net ?clock ~raw_name () =
 let models_of_cascade_name ?sw ?net ?clock raw_name =
   match lookup_active_profile ?sw ?net ?clock raw_name with
   | Error _ as e -> e
-  | Ok (_snapshot, _normalized, profile) ->
+  | Ok (_snapshot, normalized, profile) ->
       Ok
-        (expand_weighted_entries profile.weighted_entries
+        (expand_weighted_entries ~cascade:normalized profile.weighted_entries
          |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
                 entry.model))
 
@@ -1527,7 +1538,9 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
          consume round-robin state just to answer a secondary lookup. New
          execution paths use [resolve_named_providers_strict_with_secondary_resolver]
          to precompute secondaries from the same ordered snapshot. *)
-      let expanded = expand_weighted_entries profile.weighted_entries in
+      let expanded =
+        expand_weighted_entries ~cascade:cascade_name profile.weighted_entries
+      in
       List.find_map try_entry expanded
 
 let resolve_inference_params ?sw ?net ?clock ~name () =

@@ -8,21 +8,6 @@
 
     @since Unified Keeper Loop *)
 
-val bounded_oas_timeout_for_turn_budget
-  :  estimated_input_tokens:int
-  -> remaining_turn_budget_s:float
-  -> float option
-
-val bounded_oas_timeout_for_turn_budget_with_turn_budget
-  :  estimated_input_tokens:int
-  -> max_turns:int
-  -> remaining_turn_budget_s:float
-  -> float option
-
-(** Full timeout-budget resolution used by the unified turn loop.
-    Exposed for regression tests that need to distinguish "an OAS
-    call had a bounded budget" from "the turn had no retry budget
-    left before dispatch". *)
 type oas_timeout_budget_resolution =
   { effective_timeout_sec : float
   ; adaptive_timeout_sec : float
@@ -306,6 +291,17 @@ val run_keeper_cycle
     @param meta Current keeper metadata
     @param observation World state snapshot
     @param generation Current generation counter *)
+
+val bounded_oas_timeout_for_turn_budget
+  :  estimated_input_tokens:int
+  -> remaining_turn_budget_s:float
+  -> float option
+
+val bounded_oas_timeout_for_turn_budget_with_turn_budget
+  :  estimated_input_tokens:int
+  -> max_turns:int
+  -> remaining_turn_budget_s:float
+  -> float option
 
 val run_unified_turn
   :  config:Coord.config

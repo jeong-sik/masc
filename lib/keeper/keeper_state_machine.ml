@@ -955,13 +955,19 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
 
    This helper enforces a subset of those preconditions at the
    [apply_event] boundary so silent corruption becomes a typed
-   [Precondition_violation] result.  Coverage extends incrementally
+   [Precondition_violation] result.  Coverage extended incrementally
    across the spec/code refinement chain (R-A-9):
      - PR-1: Compact_retry_exhausted (latch correctness)
      - PR-2: Context_overflow_detected, Auto_compact_triggered (overflow
        lifecycle — the two events that drive Overflowed↔Compacting)
-     - PR-3: Operator_compact_requested, Operator_clear_requested
-       (operator-driven buffer ops)
+     - PR-3: Operator_compact_requested (operator-driven buffer op
+       exclusivity).  Operator_clear_requested is deliberately *not*
+       arm-enforced beyond the terminal guard — see its arm below for
+       the operator escape-hatch rationale.
+
+   Coverage closed at 5/5 R-A-9 events as of PR-3.  Other events have
+   no spec preconditions beyond NotTerminal and fall through the
+   catch-all.
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
@@ -1062,8 +1068,48 @@ let check_event_precondition (c : conditions) (ev : event)
                 that latch (Issue #8581 root cause)"
            })
     else Ok ()
-  (* Remaining 2 events covered in follow-up PR (R-A-9 PR-3:
-     Operator_compact_requested, Operator_clear_requested). *)
+  | Operator_compact_requested ->
+    (* TLA+ §OperatorCompactRequested.  Operator path differs from
+       AutoCompactTriggered: it does NOT require [context_overflow], so
+       an operator can pre-emptively compact a not-yet-overflowed
+       keeper.  But the two buffer-op exclusivity preconditions are
+       identical — concurrent compaction or handoff entangles ops. *)
+    if c.compaction_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §OperatorCompactRequested requires ~compaction_active; \
+                stacking operator-driven compaction on top of an in-flight \
+                buffer op duplicates the work and confuses the retry latch \
+                that OperatorCompactRequested clears as a side-effect"
+           })
+    else if c.handoff_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §OperatorCompactRequested requires ~handoff_active; \
+                handoff already owns the buffer, so a concurrent operator \
+                compaction would race on the same keeper context"
+           })
+    else Ok ()
+  | Operator_clear_requested _ ->
+    (* TLA+ §OperatorClearRequested deliberately requires only NotTerminal
+       (lib §masc_keeper_clear: "Last-resort: operator drops the keeper's
+       context entirely").  The terminal guard at the top of [apply_event]
+       already enforces this, so no extra arm is needed here.  Documented
+       to make the deliberate minimal precondition explicit — adding any
+       check beyond NotTerminal would weaken the operator escape-hatch. *)
+    Ok ()
+  (* Other events have no TLA+ state preconditions beyond what
+     [apply_event]'s terminal guard already enforces; their semantics
+     are encoded in [update_conditions] + [derive_phase] (e.g.
+     [Heartbeat_failed] always flips [heartbeat_healthy] to false
+     regardless of prior state).  Adding speculative arms here would
+     drift from the spec. *)
   | _ -> Ok ()
 ;;
 

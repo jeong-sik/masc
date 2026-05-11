@@ -495,21 +495,32 @@ let personas_dirs_with inputs resolution =
      happens to be true (e.g. [default_missing_root] pointing at a repo-local
      config/ tree). Without this gate, callers can silently load personas from
      a fallback root the resolver explicitly disowned. *)
-  let primary =
-    match resolution.config_root.source with
-    | Invalid_env | Missing -> []
-    | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
-      if resolution.personas.exists then [ resolution.personas.path ] else []
-  in
   let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
   (* Persona resolution is intentionally single-source:
-     - MASC_PERSONAS_DIR when explicitly set
+     - MASC_PERSONAS_DIR when explicitly set (bypasses config-root gating;
+       operator-declared persona roots stand on their own — a user may
+       legitimately want personas without a full MASC config directory)
      - otherwise the resolved config root's personas/
      Hidden secondary searches (~/.masc/personas, $MASC_BASE_PATH/.masc/personas)
      make the dashboard/config panel lie about the actual source of truth. *)
   match explicit_personas_dir_override with
-  | Some _ -> dedupe_paths primary
-  | None -> dedupe_paths primary
+  | Some _ ->
+    (* The env override path is captured in [resolution.personas] by
+       [personas_item] when MASC_PERSONAS_DIR is set; honor its exists
+       flag regardless of [config_root.source].  If the env path is
+       invalid the source comes back as [Invalid_env] and we still
+       suppress to keep the no-silent-fallback contract. *)
+    (match resolution.personas.source with
+     | Env when resolution.personas.exists -> [ resolution.personas.path ]
+     | _ -> [])
+  | None ->
+    let primary =
+      match resolution.config_root.source with
+      | Invalid_env | Missing -> []
+      | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
+        if resolution.personas.exists then [ resolution.personas.path ] else []
+    in
+    dedupe_paths primary
 
 let personas_dirs () =
   let resolution = resolve () in

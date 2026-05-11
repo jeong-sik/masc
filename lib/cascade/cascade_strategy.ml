@@ -532,7 +532,12 @@ let priority_tier_order adapter ctx ~tiers ~cycle cands =
   match allowed with
   | [] -> []
   | _ ->
-    let in_tier c = List.mem (adapter.health_key c) allowed in
+    (* Materialise [allowed] as a Hashtbl once so the per-candidate
+       membership check is O(1); prior shape did [List.mem health_key
+       allowed] per candidate, i.e. O(C x A) per ordering call. *)
+    let allowed_set = Hashtbl.create (List.length allowed) in
+    List.iter (fun name -> Hashtbl.replace allowed_set name ()) allowed;
+    let in_tier c = Hashtbl.mem allowed_set (adapter.health_key c) in
     let tier_cands = List.filter in_tier cands in
     (* Starvation guard: if every tier candidate reports capacity=0, fall
        through with the unfiltered tier list so at least one call is

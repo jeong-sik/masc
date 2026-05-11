@@ -1,9 +1,10 @@
 (** Declarative cascade config cross-reference validator (RFC-0058 v2).
 
-    [validate] checks 10 base load-time invariants (R1–R10) on a parsed
-    [cascade_config]; [validate_strict] additionally enforces R11
-    (binding max-concurrent required & positive). Each returns all errors
-    found rather than stopping at the first. *)
+    [validate] checks all 11 load-time invariants (R1–R11) on a parsed
+    [cascade_config] and returns every error found rather than stopping
+    at the first. R11 (binding max-concurrent required & positive,
+    RFC-0058 §3.4) is enforced unconditionally — RFC-0058 Phase 5.5
+    collapsed the previous laxer variant into this single entry point. *)
 
 type validation_error =
   { rule : string
@@ -13,9 +14,3 @@ type validation_error =
 [@@deriving show]
 
 val validate : Cascade_declarative_types.cascade_config -> validation_error list
-
-(** Like {!validate}, plus R11 (binding max-concurrent required & positive,
-    RFC-0058 §3.4). Use for production cascade.toml loading where missing
-    capacity must fail-fast. Legacy fixtures that predate the capacity
-    requirement continue to use {!validate}. *)
-val validate_strict : Cascade_declarative_types.cascade_config -> validation_error list

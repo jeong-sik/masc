@@ -721,12 +721,15 @@ let run_turn
           turns per #8778). Unknown names (routing misses) are left as-is and
           may still trigger a teaching error — recorded via result-based
           telemetry by [route_or_miss]. *)
+                 (* Canonicalise observed tool names across all three input
+                    surfaces (LLM-native public / MCP protocol /
+                    already-internal). Using Keeper_tool_alias.route_or_miss
+                    directly would record every internal "keeper_*"/"masc_*"
+                    call as a routing miss, inflating
+                    masc_keeper_tool_call_total{result="miss"} and skewing
+                    the alias dashboards (see PR #14574 review). *)
                  let canonical_tool_names =
-                   List.map (fun name ->
-                     match Keeper_tool_alias.route_or_miss name with
-                     | Some r -> r.internal_name
-                     | None -> name
-                   ) tool_names
+                   List.map Keeper_tool_disclosure.canonical_name tool_names
                  in
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =

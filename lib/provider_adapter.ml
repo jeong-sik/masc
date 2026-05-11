@@ -799,6 +799,41 @@ let is_http_probe_capable_kind (kind : Llm_provider.Provider_config.provider_kin
   | _ -> false
 ;;
 
+(** Per-provider per-attempt timeout bounds.
+
+    [min_timeout_s] is the floor below which an attempt timeout is
+    never set (e.g. ollama needs 300s to load a cold model — anything
+    lower means the keeper turn fails before the model finishes
+    initialising).
+
+    [max_timeout_s] is the ceiling above which an attempt cannot
+    block (e.g. claude_code's 120s subprocess budget — exceeding it
+    means the CLI has hung and the supervisor must intervene). *)
+type timeout_bounds =
+  { min_timeout_s : float option
+  ; max_timeout_s : float option
+  }
+
+(** [timeout_bounds_of_kind kind] is the per-provider attempt timeout
+    policy.  Encapsulates the only [match provider_cfg.kind] site that
+    used to live in keeper-layer driver helpers; new providers add an
+    arm here, not at the call site.
+
+    RFC-0058 Phase 5.6: vendor-specific operational tunables live
+    inside the adapter boundary, not the keeper turn-driver. *)
+let timeout_bounds_of_kind (kind : Llm_provider.Provider_config.provider_kind)
+  : timeout_bounds
+  =
+  match kind with
+  | Llm_provider.Provider_config.Ollama ->
+    { min_timeout_s = Some 300.0; max_timeout_s = None }
+  | Claude_code -> { min_timeout_s = None; max_timeout_s = Some 120.0 }
+  | Gemini | Gemini_cli -> { min_timeout_s = None; max_timeout_s = Some 180.0 }
+  | Kimi_cli -> { min_timeout_s = None; max_timeout_s = Some 60.0 }
+  | Anthropic | Kimi | OpenAI_compat | Glm | DashScope | Codex_cli ->
+    { min_timeout_s = None; max_timeout_s = None }
+;;
+
 (** Default fallback label for local runtime when no other preferred
     model labels are configured.  Uses "provider:auto" for the first
     [Local] adapter found. *)

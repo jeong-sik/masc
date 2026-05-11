@@ -31,24 +31,18 @@ let first_health_cooldown provider_cfg =
          | Ok () -> None
          | Error msg -> Some (provider_key, msg))
 
-type provider_attempt_timeout_constraints = {
+(* Manifest alias of [Provider_adapter.timeout_bounds]: keeps the
+   keeper-public type name stable while the [match provider_cfg.kind]
+   that produces values lives inside the adapter boundary
+   (RFC-0058 Phase 5.6). *)
+type provider_attempt_timeout_constraints = Provider_adapter.timeout_bounds = {
   min_timeout_s : float option;
   max_timeout_s : float option;
 }
 
 let provider_attempt_timeout_constraints
     (provider_cfg : Llm_provider.Provider_config.t) =
-  match provider_cfg.kind with
-  | Llm_provider.Provider_config.Ollama ->
-      { min_timeout_s = Some 300.0; max_timeout_s = None }
-  | Claude_code ->
-      { min_timeout_s = None; max_timeout_s = Some 120.0 }
-  | Gemini | Gemini_cli ->
-      { min_timeout_s = None; max_timeout_s = Some 180.0 }
-  | Kimi_cli ->
-      { min_timeout_s = None; max_timeout_s = Some 60.0 }
-  | Anthropic | Kimi | OpenAI_compat | Glm | DashScope | Codex_cli ->
-      { min_timeout_s = None; max_timeout_s = None }
+  Provider_adapter.timeout_bounds_of_kind provider_cfg.kind
 
 let apply_provider_attempt_timeout_constraints constraints timeout_s =
   let timeout_s =

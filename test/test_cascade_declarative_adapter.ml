@@ -216,6 +216,8 @@ let test_alias_parent_missing () =
       is_non_interactive = false;
       credentials = None;
       liveness_class = None;
+      capabilities = None;
+      headers = None;
     }];
     models = [{
       id = "m";
@@ -455,6 +457,8 @@ let test_duplicate_routes () =
       is_non_interactive = false;
       credentials = None;
       liveness_class = None;
+      capabilities = None;
+      headers = None;
     }];
     models = [{
       id = "haiku";

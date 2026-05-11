@@ -71,6 +71,54 @@ let parse_credential (tbl : Otoml.t) (path : string)
   | t -> Error (error (path ^ ".type") (Printf.sprintf "unknown credential type %S" t))
 ;;
 
+let parse_capabilities (tbl : Otoml.t) : cascade_capabilities =
+  let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+  {
+    supports_inline_tools = b "supports-inline-tools";
+    supports_runtime_mcp_tools = b "supports-runtime-mcp-tools";
+    supports_runtime_tool_events = b "supports-runtime-tool-events";
+    supports_runtime_mcp_http_headers = b "supports-runtime-mcp-http-headers";
+  }
+;;
+
+(** Parse a [providers.<id>.headers] sub-table into a sorted association
+    list. Caller invokes only when the sub-table key exists, so the
+    returned list distinguishes "declared but empty / all entries rejected"
+    (empty list) from "no sub-table" (caller passes [None]).
+
+    Non-table values at the sub-table position emit a WARN and yield an
+    empty list. Non-string header values emit a per-entry WARN and are
+    dropped. The result is sorted by key for deterministic show/eq. *)
+let parse_headers (tbl : Otoml.t) (path : string)
+  : (string * string) list
+  =
+  match Otoml.get_table tbl with
+  | exception _ ->
+    Logs.warn (fun m ->
+      m
+        "cascade_declarative_parser: %s — expected TOML table, got non-table \
+         value; treating as empty"
+        path);
+    []
+  | entries ->
+    let pairs =
+      List.filter_map
+        (fun (k, v) ->
+          match Otoml.get_string v with
+          | s -> Some (k, s)
+          | exception _ ->
+            Logs.warn (fun m ->
+              m
+                "cascade_declarative_parser: %s.%s — non-string header value, \
+                 ignoring"
+                path
+                k);
+            None)
+        entries
+    in
+    List.sort (fun (a, _) (b, _) -> String.compare a b) pairs
+;;
+
 let parse_provider (id : string) (tbl : Otoml.t)
   : (cascade_provider, parse_error list) result
   =
@@ -131,8 +179,17 @@ let parse_provider (id : string) (tbl : Otoml.t)
                   path other);
               None))
     in
+    let capabilities =
+      Otoml.find_opt tbl Fun.id [ "capabilities" ]
+      |> Option.map parse_capabilities
+    in
+    let headers =
+      match Otoml.find_opt tbl Fun.id [ "headers" ] with
+      | None -> None
+      | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
+    in
     Ok { id; display_name; api_format; transport; is_non_interactive;
-         credentials; liveness_class }
+         credentials; liveness_class; capabilities; headers }
 ;;
 
 let parse_providers (toml : Otoml.t) : (cascade_provider list, parse_error list) result =

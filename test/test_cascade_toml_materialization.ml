@@ -811,6 +811,16 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    in the catalog-builder suite.  Smoke pins the no-arg helper
    signature so a future refactor that changes the call shape
    trips here. *)
+(* Smoke for [Cascade_metrics.on_runtime_mcp_legacy_strip].  The
+   natural code path requires a provider that needs per-keeper
+   bridging plus a caller that does not supply [agent_name] — best
+   exercised end-to-end via the cascade-transport regression
+   harness rather than from this suite.  Smoke pins the no-arg
+   helper signature. *)
+let test_runtime_mcp_legacy_strip_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_runtime_mcp_legacy_strip ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_fallback_hint_invalid_helper_callable () =
   Masc_mcp.Cascade_metrics.on_fallback_hint_invalid ();
   check bool "no-arg helper callable without raising" true true
@@ -1269,6 +1279,9 @@ let () =
           test_case
             "fallback_hint_invalid: helper callable" `Quick
             test_fallback_hint_invalid_helper_callable;
+          test_case
+            "runtime_mcp_legacy_strip: helper callable" `Quick
+            test_runtime_mcp_legacy_strip_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

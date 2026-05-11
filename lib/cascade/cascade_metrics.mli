@@ -244,3 +244,11 @@ val on_fallback_hint_invalid : unit -> unit
     no effect).  Runtime complement to iter-32
     [capability_mismatch] which checks the same graph at
     catalog-build time. *)
+
+val on_runtime_mcp_legacy_strip : unit -> unit
+(** Tick the runtime-mcp-legacy-strip counter at
+    [Cascade_transport.runtime_mcp_policy_for_provider] when a
+    provider requires per-keeper bridging but the caller did not
+    supply [agent_name] and the function silently degrades to
+    strip-all-headers legacy behavior.  Non-zero rate signals a
+    caller path that should thread keeper [agent_name] but isn't. *)

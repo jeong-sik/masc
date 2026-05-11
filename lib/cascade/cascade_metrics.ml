@@ -803,3 +803,27 @@ let metric_fallback_hint_invalid =
 
 let on_fallback_hint_invalid () =
   Prometheus.inc_counter metric_fallback_hint_invalid ()
+
+(* [Cascade_transport.runtime_mcp_policy_for_provider] has a
+   degraded branch when the provider requires per-keeper bridging
+   (e.g. codex CLI) but the caller has not supplied an
+   [agent_name]: the policy is silently passed through
+   [runtime_mcp_policy_without_http_headers] (strip-all legacy
+   behavior).  Auth-bearing headers like [Authorization: Bearer
+   ...] disappear, runtime MCP tools run unauthenticated, and the
+   only evidence in the previous code was a code comment ("preserve
+   the legacy strip-all behavior").
+
+   A non-zero rate signals a caller path that should be threading
+   keeper [agent_name] but isn't — usually a refactor regression
+   or a new call site that forgot the parameter.  Pairs with iter
+   12 [provider_filter_widening] and iter 18
+   [ordering_health_widening] as the third per-call "silent intent
+   broadening" counter at the runtime-MCP-policy layer.
+
+   Cardinality: 1 series. *)
+let metric_runtime_mcp_legacy_strip =
+  "masc_cascade_runtime_mcp_legacy_strip_total"
+
+let on_runtime_mcp_legacy_strip () =
+  Prometheus.inc_counter metric_runtime_mcp_legacy_strip ()

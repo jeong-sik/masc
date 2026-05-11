@@ -624,7 +624,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
       tool_surface =
         {
           turn_lane = "tool";
-          tool_surface_class = "mixed";
+          tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_mixed;
           tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
           visible_tool_count = 2;
           tool_gate_enabled = true;

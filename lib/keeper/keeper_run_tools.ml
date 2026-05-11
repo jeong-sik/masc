@@ -200,7 +200,7 @@ let prepare_agent_setup
          | None -> Agent_sdk.Tool_op.Keep_all)
     ; tool_surface =
         { turn_lane = "text_only"
-        ; tool_surface_class = "none"
+        ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
         ; tool_requirement = No_tools
         ; visible_tool_count = 0
         ; tool_gate_enabled = false
@@ -946,12 +946,12 @@ let prepare_agent_setup
       List.filter (fun name -> not (List.mem name all_allowed)) required_tool_names
     in
     let visible_tool_count = List.length all_allowed in
-    let tool_surface_class =
+    let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
       if visible_tool_count = 0
-      then "none"
+      then Surface_none
       else if List.for_all Tool_catalog.is_public_mcp all_allowed
-      then "public_only"
-      else "mixed"
+      then Surface_public_only
+      else Surface_mixed
     in
     let tool_requirement =
       if visible_tool_count = 0
@@ -1524,7 +1524,9 @@ let prepare_agent_setup
                   ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
                   ~network_mode:(Keeper_types.network_mode_to_string meta.network_mode)
                   ?approval_mode:approval_mode_effective
-                  ~tool_surface_class:computed_surface.tool_surface_class
+                  ~tool_surface_class:
+                    (Keeper_agent_tool_surface.tool_surface_class_to_string
+                       computed_surface.tool_surface_class)
                   ~visible_tool_count:(List.length all_allowed)
                   ~required_tools:computed_surface.required_tool_names
                   ~missing_required_tools:computed_surface.missing_required_tool_names
@@ -1582,7 +1584,9 @@ let prepare_agent_setup
                      ; "llm_selected_count", `Int computed_surface.llm_selected_count
                      ; "final_visible", `Int (List.length all_allowed)
                      ; "turn_lane", `String lane
-                     ; "tool_surface_class", `String computed_surface.tool_surface_class
+                     ; ( "tool_surface_class"
+                       , Keeper_agent_tool_surface.tool_surface_class_to_yojson
+                           computed_surface.tool_surface_class )
                      ; ( "tool_requirement"
                        , tool_requirement_to_yojson computed_surface.tool_requirement )
                      ; "tool_gate_enabled", `Bool computed_surface.tool_gate_requested

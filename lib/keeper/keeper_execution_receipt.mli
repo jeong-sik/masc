@@ -85,7 +85,7 @@ type tool_requirement = Keeper_agent_tool_surface.tool_requirement
 
 type tool_surface =
   { turn_lane : string
-  ; tool_surface_class : string
+  ; tool_surface_class : Keeper_agent_tool_surface.tool_surface_class
   ; tool_requirement : tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool

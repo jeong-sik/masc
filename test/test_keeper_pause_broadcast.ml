@@ -17,7 +17,11 @@ let mk_tool_surface ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Requ
     R.tool_surface =
   {
     turn_lane = "unified";
-    tool_surface_class = "post_dispatch";
+    (* WORKAROUND: previously "post_dispatch" — a string the producer
+       never emits.  Typed enum forces a real value; Surface_mixed
+       matches the prior test intent of a tool-using turn.
+       Root: closed sum type now disallows ad-hoc fixture strings. *)
+    tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_mixed;
     tool_requirement;
     visible_tool_count = 1;
     tool_gate_enabled = true;

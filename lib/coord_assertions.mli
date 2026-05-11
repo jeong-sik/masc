@@ -1,4 +1,3 @@
-
 (** Coord_assertions — state inspection and assertion-based
     verification.
 
@@ -22,49 +21,49 @@
 
 (** {1 State snapshot} *)
 
-type agent_state = {
-  room_set : bool;
-  joined : bool;
-  task_claimed : bool;
-  current_task_set : bool;
-  worktree_active : bool;
-}
 (** Concrete record because {!Tool_coord} field-constructs it
     when projecting an inspected context to the assertion engine
     ([Coord_assertions.room_set = s.room_set]).  Hiding would
     break the type seam. *)
+type agent_state =
+  { room_set : bool
+  ; joined : bool
+  ; task_claimed : bool
+  ; current_task_set : bool
+  ; worktree_active : bool
+  }
 
 (** {1 Assertion taxonomy} *)
 
-type assertion_kind =
-  | Room_set         (** Project root configured (legacy aliases: [namespace_ready], [project_ready]). *)
-  | Joined           (** Agent has joined the project namespace. *)
-  | Task_claimed     (** Agent owns at least one claimed task. *)
-  | Current_task_set (** [current_task] is set, fresh, and unambiguous. *)
-  | Worktree_active  (** Agent is in an isolated branch worktree. *)
 (** Closed variant — every match site must update on extension.
     [Tool_coord] type-aliases this exact shape with the same five
     constructors, so the cross-module re-export is structurally
     pinned. *)
+type assertion_kind =
+  | Room_set
+  (** Project root configured (legacy aliases: [namespace_ready], [project_ready]). *)
+  | Joined (** Agent has joined the project namespace. *)
+  | Task_claimed (** Agent owns at least one claimed task. *)
+  | Current_task_set (** [current_task] is set, fresh, and unambiguous. *)
+  | Worktree_active (** Agent is in an isolated branch worktree. *)
 
-val assertion_kind_to_string : assertion_kind -> string
 (** [assertion_kind_to_string k] returns the canonical snake_case
     tag (e.g. [Room_set -> "room_set"]).  This is the operator-
     visible name in JSON output — runbook commands grep on these
     literals. *)
+val assertion_kind_to_string : assertion_kind -> string
 
-val all_assertion_kinds : assertion_kind list
 (** Canonical declaration order: [Room_set; Joined; Task_claimed;
     Current_task_set; Worktree_active].  Used by
     {!handle_check}'s default-list fallback when callers omit the
     [assertions] argument. *)
+val all_assertion_kinds : assertion_kind list
 
-val valid_assertion_strings : string list
 (** [List.map assertion_kind_to_string all_assertion_kinds].
     Used in the "Unknown assertion: ... (expected one of: ...)"
     error message so operators see the exact accepted values. *)
+val valid_assertion_strings : string list
 
-val assertion_kind_of_string_lenient : string -> assertion_kind option
 (** [assertion_kind_of_string_lenient s] parses an assertion
     name leniently: in addition to the canonical
     [assertion_kind_to_string] outputs, it accepts the legacy
@@ -77,14 +76,10 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
     Adding a new alias requires touching this function explicitly;
     .mli hides the alias set on purpose so a future "be more
     lenient" PR must extend the contract. *)
+val assertion_kind_of_string_lenient : string -> assertion_kind option
 
 (** {1 Tool entry point} *)
 
-val handle_check :
-  inspect_state:(Coord_types.context -> agent_state) ->
-  Coord_types.context ->
-  Yojson.Safe.t ->
-  Coord_types.tool_result
 (** [handle_check ~inspect_state ctx args] is the [masc_check]
     JSON-RPC entry point.
 
@@ -114,3 +109,10 @@ val handle_check :
     ]}
     [fix_hint] is the first failing assertion's hint; when all
     pass, [fix_hint] is [`Null]. *)
+val handle_check
+  :  inspect_state:(Coord_types.context -> agent_state)
+  -> tool_name:string
+  -> start_time:float
+  -> Coord_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.t

@@ -166,10 +166,18 @@ let readonly_allowed_commands =
   ]
 ;;
 
+(* Mirror of [Gh_command_validation.forbidden_shell_chars].  Kept as a
+   list for docs/tests; the scan uses a closed pattern match below so the
+   per-byte check compiles to a jump table instead of an O(M) list walk
+   over [cmd]. *)
 let forbidden_shell_chars = [ ';'; '|'; '&'; '>'; '<'; '`'; '$'; '\n'; '\r' ]
 
 let contains_forbidden_shell_chars cmd =
-  String.exists (fun ch -> List.mem ch forbidden_shell_chars) cmd
+  String.exists
+    (function
+      | ';' | '|' | '&' | '>' | '<' | '`' | '$' | '\n' | '\r' -> true
+      | _ -> false)
+    cmd
 ;;
 
 (** Relaxed metacharacter set for Coding/Full preset keepers.
@@ -199,7 +207,11 @@ let has_dangerous_ampersand cmd =
 ;;
 
 let contains_forbidden_shell_chars_coding cmd =
-  String.exists (fun ch -> List.mem ch forbidden_shell_chars_coding_base) cmd
+  String.exists
+    (function
+      | ';' | '`' | '$' | '\n' | '\r' -> true
+      | _ -> false)
+    cmd
   || has_dangerous_ampersand cmd
 ;;
 

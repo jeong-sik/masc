@@ -792,6 +792,20 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    [Cascade_routes.route_bindings_from_json].  Pinning both
    strings here keeps the canonical set in lockstep with the
    call sites. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_weighted_item_dropped].  Two documented
+   reasons map 1:1 to the two silent-drop arms in
+   [parse_weighted_item].  Same shape as iter 33
+   route_binding_dropped — value-shape faults in legacy
+   JSON-shape entries. *)
+let test_weighted_item_dropped_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_weighted_item_dropped
+    ~reason:"missing_or_empty_model";
+  Masc_mcp.Cascade_metrics.on_weighted_item_dropped
+    ~reason:"invalid_value_type";
+  check bool "both documented reasons callable without raising"
+    true true
+
 let test_route_binding_dropped_documented_reasons_are_callable () =
   Masc_mcp.Cascade_metrics.on_route_binding_dropped
     ~reason:"invalid_value";
@@ -1225,6 +1239,9 @@ let () =
           test_case
             "route_binding_dropped: both documented reasons callable" `Quick
             test_route_binding_dropped_documented_reasons_are_callable;
+          test_case
+            "weighted_item_dropped: both documented reasons callable" `Quick
+            test_weighted_item_dropped_documented_reasons_are_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

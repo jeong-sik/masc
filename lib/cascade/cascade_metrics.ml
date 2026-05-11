@@ -719,3 +719,33 @@ let on_route_binding_dropped ~reason =
   Prometheus.inc_counter metric_route_binding_dropped
     ~labels:[ ("reason", reason) ]
     ()
+
+(* [Cascade_config_loader.parse_weighted_item] silently drops two
+   classes of malformed entry in the legacy [<name>_models]
+   JSON-shape list:
+
+     missing_or_empty_model — value is an [Assoc] but the [model]
+                               subfield is missing, not a string,
+                               or trims to empty.
+     invalid_value_type     — value is neither a string (legacy
+                               compact encoding) nor an [Assoc]
+                               (declarative encoding).
+
+   The drops happen via [List.filter_map] in [load_profile_weighted],
+   producing a smaller-than-declared candidate list with no signal.
+   Counter complement to iter 33 [route_binding_dropped] — same
+   value-shape-fault class, different containing table.
+
+   Most cascade.toml deploys land on the 5-layer declarative schema
+   (which never hits this code path), so a non-zero rate flags
+   legacy [<name>_models] fixtures still in use — doubles as an
+   RFC-0066 Phase 4 migration tracker for fixture leftover.
+
+   Cardinality: 2 reasons = 2 series. *)
+let metric_weighted_item_dropped =
+  "masc_cascade_weighted_item_dropped_total"
+
+let on_weighted_item_dropped ~reason =
+  Prometheus.inc_counter metric_weighted_item_dropped
+    ~labels:[ ("reason", reason) ]
+    ()

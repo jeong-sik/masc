@@ -265,8 +265,20 @@ let parse_weighted_item = function
          ; secondary = sec
          ; secondary_supports_tool_choice = sec_stc
          }
-     | _ -> None)
-  | _ -> None
+     | _ ->
+       (* Iter 35: Assoc entry without a usable [model] field.
+          Surface the silent drop so operator typos in
+          [<name>_models] table form become observable. *)
+       Cascade_metrics.on_weighted_item_dropped
+         ~reason:"missing_or_empty_model";
+       None)
+  | _ ->
+    (* Iter 35: value is neither legacy string nor declarative
+       Assoc — drops happen via [List.filter_map] in
+       [load_profile_weighted] with no signal otherwise. *)
+    Cascade_metrics.on_weighted_item_dropped
+      ~reason:"invalid_value_type";
+    None
 ;;
 
 type catalog_entry =

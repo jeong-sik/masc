@@ -42,6 +42,13 @@ let detect_stuck_agents ~(now : float)
   in
   all_agents
   |> List.filter_map (fun (agent : Masc_domain.agent) ->
+         (* Enumerate every [Dashboard_labels.agent_group] variant so
+            the compiler flags any new group added. Only [Stuck] yields
+            an attention item; [Working], [Idle], [Offline] do not. A
+            future group (e.g. [Recovering]) would silently inherit
+            "no attention" under the previous [_ -> None] catch-all.
+            Same FSM Sparse Match anti-pattern as PRs #14716, #14790,
+            #14806, #14810, #14816. *)
          match Dashboard_labels.classify_agent ~now agent with
          | Dashboard_labels.Stuck ->
              let task_info =
@@ -63,7 +70,9 @@ let detect_stuck_agents ~(now : float)
                      task_info;
                  suggested_tool = "masc_observe_capacity";
                }
-         | _ -> None)
+         | Dashboard_labels.Working
+         | Dashboard_labels.Idle
+         | Dashboard_labels.Offline -> None)
 
 (** Detect idle agents when pending tasks exist *)
 let detect_idle_with_pending ~(now : float)
@@ -78,9 +87,13 @@ let detect_idle_with_pending ~(now : float)
     List.length
       (List.filter
          (fun a ->
+           (* Same exhaustive-enumeration reasoning as
+              [detect_stuck_agents] above. *)
            match Dashboard_labels.classify_agent ~now a with
            | Dashboard_labels.Idle -> true
-           | _ -> false)
+           | Dashboard_labels.Working
+           | Dashboard_labels.Stuck
+           | Dashboard_labels.Offline -> false)
          all_agents)
   in
   let pending_count =

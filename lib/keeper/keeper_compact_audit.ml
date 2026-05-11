@@ -183,7 +183,7 @@ let prune_best_effort base_path ~retention_days =
   | exception e ->
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_compact_audit_failures
-      ~labels:[("keeper", "global"); ("site", "retention_prune")]
+      ~labels:[("keeper", "global"); ("site", Compact_audit_failure_site.(to_label Retention_prune))]
       ();
     Log.Keeper.warn
       "keeper_compact_audit: retention prune failed: %s"
@@ -356,7 +356,7 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
      | Error (Io_failure m | Serialize_failure m) ->
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_compact_audit_failures
-         ~labels:[("keeper", agent_name); ("site", "persist_start")]
+         ~labels:[("keeper", agent_name); ("site", Compact_audit_failure_site.(to_label Persist_start))]
          ();
        Log.Keeper.warn "keeper_compact_audit: persist_start failed: %s" m)
   | Agent_sdk.Event_bus.ContextCompacted
@@ -386,7 +386,7 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
      | Error (Io_failure m | Serialize_failure m) ->
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_compact_audit_failures
-         ~labels:[("keeper", agent_name); ("site", "persist_complete")]
+         ~labels:[("keeper", agent_name); ("site", Compact_audit_failure_site.(to_label Persist_complete))]
          ();
        Log.Keeper.warn "keeper_compact_audit: persist_complete failed: %s" m)
   | _payload -> Log.Misc.debug "keeper_compact_audit: ignoring non-compaction event"
@@ -425,7 +425,7 @@ let spawn_subscriber
             | exn ->
                Prometheus.inc_counter
                  Keeper_metrics.metric_keeper_compact_audit_failures
-                 ~labels:[("keeper", "batch"); ("site", "handle_event")]
+                 ~labels:[("keeper", "batch"); ("site", Compact_audit_failure_site.(to_label Handle_event))]
                  ();
                Log.Keeper.warn "keeper_compact_audit: handle_event failed: %s"
                  (Printexc.to_string exn))

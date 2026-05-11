@@ -1,4 +1,4 @@
-# KDP cap2.cfg — Dead config audit (born broken, 6 months silent)
+# KDP cap2.cfg — Dead config audit (born broken, silent since 2026-04-26)
 
 **Iteration**: 44 (/loop FSM/TLA+/OCaml drift hunt)
 **Date**: 2026-05-12
@@ -93,7 +93,7 @@ $ git log --all -S "ToolSetNeverEmpty" --oneline -- specs/keeper-state-machine/K
 (no commits — ToolSetNeverEmpty was NEVER in KDP.tla)
 ```
 
-So the cap2.cfg has been **dead since birth**, ~6 months ago. No CI ever ran it (Makefile auto-derives `.tla` from `.cfg` base name and falls back to `-cap2.tla` which doesn't exist → SKIP). It only surfaces when manually targeted, which iter 42's `KDecisionPipeline-cap2.cfg` cross-check did.
+So the cap2.cfg has been **dead since birth** (2026-04-26 — ~2 weeks at the time of this audit). No CI ever ran it (Makefile auto-derives `.tla` from `.cfg` base name and falls back to `-cap2.tla` which doesn't exist → SKIP). It only surfaces when manually targeted, which iter 42's `KDecisionPipeline-cap2.cfg` cross-check did.
 
 ## Why production stays correct (today)
 
@@ -109,7 +109,7 @@ So the cap2.cfg has been **dead since birth**, ~6 months ago. No CI ever ran it 
 | **R-F-1.b** | Fix the cap2.cfg to match the parent spec — replace invariant set with `Safety` and remove orphan CONSTANTS / PROPERTIES. Keeps the "robustness with different state-space bounds" notion alive even though KDP doesn't have config-driven bounds. | LOW — cfg edit only. | ~10 LOC repair |
 | **R-F-1.c** | Validator extension — extend `scripts/audit-tla-annotation-drift.sh` (or new sister script) with a *cfg↔spec orphan reference* check. For each `INVARIANTS`/`PROPERTIES`/`CONSTANTS` entry in any `.cfg`, verify the corresponding `.tla` declares it. Generic across all 25 specs. | MID — new validator pass, baseline format. | ~50-100 LOC bash + baseline |
 
-**Recommended**: R-F-1.a (delete). Reasoning: (i) cfg has been silently broken for 6 months with zero CI signal — proves it's not load-bearing, (ii) its stated purpose ("robustness with PenaltyCapPerCycle = 2") is moot for the current KDP.tla (no penalty cap), (iii) R-F-1.b would preserve a misleading filename suggesting a parameter sweep that doesn't apply. R-F-1.c is the long-term structural fix — separate iter, paired with R-F-1.a or R-F-1.b on activation.
+**Recommended**: R-F-1.a (delete). Reasoning: (i) cfg has been silently broken since 2026-04-26 (~2 weeks) with zero CI signal — proves it's not load-bearing, (ii) its stated purpose ("robustness with PenaltyCapPerCycle = 2") is moot for the current KDP.tla (no penalty cap), (iii) R-F-1.b would preserve a misleading filename suggesting a parameter sweep that doesn't apply. R-F-1.c is the long-term structural fix — separate iter, paired with R-F-1.a or R-F-1.b on activation.
 
 ## New drift class — "born-dead config"
 

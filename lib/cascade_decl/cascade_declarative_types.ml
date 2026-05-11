@@ -110,6 +110,7 @@ let cascade_capabilities_default =
 type cascade_provider =
   { id : string
   ; display_name : string
+  ; protocol : string
   ; api_format : cascade_api_format
   ; transport : cascade_transport
   ; is_non_interactive : bool

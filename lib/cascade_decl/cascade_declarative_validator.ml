@@ -11,7 +11,8 @@
     R8: System targets reference existing bindings or aliases
     R9: At most one is-default=true per provider
     R10: Strategy-specific fields match the declared strategy
-    R11: Binding max-concurrent required and positive (RFC-0058 §3.4) *)
+    R11: Binding max-concurrent required and positive (RFC-0058 §3.4)
+    R12: Protocol ↔ transport consistency (RFC-0058 §2.1) *)
 
 open Cascade_declarative_types
 
@@ -313,6 +314,53 @@ let validate_strategy_fields (cfg : cascade_config) : validation_error list =
    tests) now get R11 enforcement; the parser's tolerant load path
    is unchanged. *)
 
+(* --- R12: Protocol ↔ transport consistency ---
+
+   A protocol string ending in "-cli" must pair with a Cli transport,
+   and one ending in "-http" must pair with an Http transport.
+   This catches misconfigurations where, e.g., a CLI provider is
+   accidentally given an HTTP endpoint. *)
+
+let validate_protocol_transport (cfg : cascade_config) : validation_error list =
+  List.filter_map
+    (fun (p : cascade_provider) ->
+       let path = Printf.sprintf "providers.%s.protocol" p.id in
+       let expected_transport =
+         if String.length p.protocol >= 4
+            && String.sub p.protocol (String.length p.protocol - 4) 4 = "-cli"
+         then Some "Cli"
+         else if String.length p.protocol >= 5
+                 && String.sub p.protocol (String.length p.protocol - 5) 5 = "-http"
+         then Some "Http"
+         else None
+       in
+       match expected_transport with
+       | None -> None
+       | Some expected ->
+         (match p.transport with
+          | Cli _ when expected = "Cli" -> None
+          | Http _ when expected = "Http" -> None
+          | Cli _ ->
+            Some
+              { rule = "R12"
+              ; path
+              ; message =
+                  Printf.sprintf
+                    "protocol %S implies Http transport, but transport is Cli"
+                    p.protocol
+              }
+          | Http _ ->
+            Some
+              { rule = "R12"
+              ; path
+              ; message =
+                  Printf.sprintf
+                    "protocol %S implies Cli transport, but transport is Http"
+                    p.protocol
+              }))
+    cfg.providers
+;;
+
 let validate_binding_capacity (cfg : cascade_config) : validation_error list =
   List.filter_map
     (fun (b : cascade_binding) ->
@@ -343,4 +391,5 @@ let validate (cfg : cascade_config) : validation_error list =
   @ validate_single_default cfg
   @ validate_strategy_fields cfg
   @ validate_binding_capacity cfg
+  @ validate_protocol_transport cfg
 ;;

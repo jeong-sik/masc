@@ -167,14 +167,17 @@ let parse_provider (id : string) (tbl : Otoml.t)
   in
   let protocol_result =
     match Otoml.find_opt tbl Otoml.get_string [ "protocol" ] with
-    | Some p -> api_format_of_protocol p
+    | Some p ->
+      (match api_format_of_protocol p with
+       | Ok fmt -> Ok (p, fmt)
+       | Error e -> Error e)
     | None -> Error "missing required field 'protocol'"
   in
   let transport_result = transport_of_provider tbl id in
   match protocol_result, transport_result with
   | Error e, _ -> Error (error (path ^ ".protocol") e)
   | _, Error e -> Error (error path e)
-  | Ok api_format, Ok transport ->
+  | Ok (protocol, api_format), Ok transport ->
     let is_non_interactive =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "is-non-interactive" ]
     in
@@ -226,6 +229,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
     Ok
       { id
       ; display_name
+      ; protocol
       ; api_format
       ; transport
       ; is_non_interactive

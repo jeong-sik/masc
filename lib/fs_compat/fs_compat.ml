@@ -20,29 +20,26 @@ let global_fs : Eio.Fs.dir_ty Eio.Path.t option Atomic.t = Atomic.make None
 
 (** Set the global Eio filesystem. Call once at server startup.
     @param fs The Eio fs from [Eio.Stdenv.fs env] *)
-let set_fs fs =
-  Atomic.set global_fs (Some fs)
+let set_fs fs = Atomic.set global_fs (Some fs)
 
 (** Clear the global fs (testing/shutdown only — not called in production).
     Safe because test runners and shutdown are single-fiber sequential. *)
-let clear_fs () =
-  Atomic.set global_fs None
+let clear_fs () = Atomic.set global_fs None
 
-let get_fs_opt () =
-  Atomic.get global_fs
+let get_fs_opt () = Atomic.get global_fs
 
 (** Check if Eio fs is available *)
-let has_fs () =
-  Option.is_some (Atomic.get global_fs)
+let has_fs () = Option.is_some (Atomic.get global_fs)
 
 (** Normalize [Eio.Io] to [Sys_error] so callers only need one catch.
     Eio operations raise [Eio.Io _] on permission errors, missing files, etc.
     Stdlib I/O already raises [Sys_error], so wrapping only the Eio branch
     keeps the exception contract uniform. *)
 let with_io ~path f =
-  try f ()
-  with Eio.Io _ as e ->
+  try f () with
+  | Eio.Io _ as e ->
     raise (Sys_error (Printf.sprintf "%s: %s" path (Printexc.to_string e)))
+;;
 
 (* #9921: defense-in-depth write-boundary guard.
 
@@ -71,61 +68,70 @@ let test_exec_home_guard ~op path =
   let is_test_exec =
     String.length basename >= 5 && String.starts_with basename ~prefix:"test_"
   in
-  if not is_test_exec then ()
-  else
+  if not is_test_exec
+  then ()
+  else (
     let allow =
       match Sys.getenv_opt "MASC_TEST_ALLOW_HOME_BASE_PATH" with
       | Some v ->
-          let v = String.lowercase_ascii (String.trim v) in
-          String.equal v "1" || String.equal v "true" || String.equal v "yes"
+        let v = String.lowercase_ascii (String.trim v) in
+        String.equal v "1" || String.equal v "true" || String.equal v "yes"
       | None -> false
     in
-    if allow then ()
-    else
+    if allow
+    then ()
+    else (
       match Sys.getenv_opt "HOME" with
       | None | Some "" -> ()
       | Some home ->
-          let home_norm =
-            let trimmed = String.trim home in
-            let len = String.length trimmed in
-            if len > 1 && Char.equal trimmed.[len - 1] '/' then
-              String.sub trimmed 0 (len - 1)
-            else
-              trimmed
-          in
-          let home_len = String.length home_norm in
-          if home_len > 0
-             && String.length path >= home_len
-             && String.starts_with path ~prefix:home_norm
-          then
-            raise
-              (Test_isolation_breach
-                 (Printf.sprintf
-                    "#9921 %s blocked under HOME=%S (path=%S) in test executable %S. \
-                     MASC_BASE_PATH override did not apply — fix the test setup or \
-                     set MASC_TEST_ALLOW_HOME_BASE_PATH=1."
-                    op home_norm path
-                    (Stdlib.Filename.basename Stdlib.Sys.executable_name)))
+        let home_norm =
+          let trimmed = String.trim home in
+          let len = String.length trimmed in
+          if len > 1 && Char.equal trimmed.[len - 1] '/'
+          then String.sub trimmed 0 (len - 1)
+          else trimmed
+        in
+        let home_len = String.length home_norm in
+        if
+          home_len > 0
+          && String.length path >= home_len
+          && String.starts_with path ~prefix:home_norm
+        then
+          raise
+            (Test_isolation_breach
+               (Printf.sprintf
+                  "#9921 %s blocked under HOME=%S (path=%S) in test executable %S. \
+                   MASC_BASE_PATH override did not apply — fix the test setup or set \
+                   MASC_TEST_ALLOW_HOME_BASE_PATH=1."
+                  op
+                  home_norm
+                  path
+                  (Stdlib.Filename.basename Stdlib.Sys.executable_name)))))
+;;
 
 let with_fs_or_fallback ~path ~fallback f =
   match Atomic.get global_fs with
-  | Some fs -> (
-      try with_io ~path (fun () -> f fs)
-      with Stdlib.Effect.Unhandled _ -> fallback ())
+  | Some fs ->
+    (try with_io ~path (fun () -> f fs) with
+     | Stdlib.Effect.Unhandled _ -> fallback ())
   | None -> fallback ()
+;;
 
 let load_file_unix (path : string) : string =
   let ic = Stdlib.open_in path in
-  Stdlib.Fun.protect ~finally:(fun () -> Stdlib.close_in_noerr ic) (fun () ->
-    let len = Stdlib.in_channel_length ic in
-    Stdlib.really_input_string ic len
-  )
+  Stdlib.Fun.protect
+    ~finally:(fun () -> Stdlib.close_in_noerr ic)
+    (fun () ->
+       let len = Stdlib.in_channel_length ic in
+       Stdlib.really_input_string ic len)
+;;
 
 let save_file_unix (path : string) (content : string) : unit =
   let oc = Stdlib.open_out path in
-  Stdlib.Fun.protect ~finally:(fun () -> Stdlib.close_out_noerr oc) (fun () ->
-    Stdlib.output_string oc content
-  )
+  Stdlib.Fun.protect
+    ~finally:(fun () -> Stdlib.close_out_noerr oc)
+    (fun () -> Stdlib.output_string oc content)
+;;
 
 (** LRU fd cache for [append_file_unix].
 
@@ -157,10 +163,10 @@ let save_file_unix (path : string) (content : string) : unit =
 let fd_cache_max_size = 16
 
 module Append_fd_cache = struct
-  type entry = {
-    mutable channel : Stdlib.out_channel;
-    mutable last_used : int;
-  }
+  type entry =
+    { mutable channel : Stdlib.out_channel
+    ; mutable last_used : int
+    }
 
   let cache : (string, entry) Hashtbl.t = Hashtbl.create 17
   let counter = ref 0
@@ -169,61 +175,59 @@ module Append_fd_cache = struct
   let with_lock f =
     Mutex.lock mutex;
     Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+  ;;
 
   let evict_lru_if_needed_locked () =
-    if Hashtbl.length cache >= fd_cache_max_size then begin
+    if Hashtbl.length cache >= fd_cache_max_size
+    then (
       let victim_path = ref None in
       let victim_use = ref max_int in
       Hashtbl.iter
         (fun path entry ->
            if entry.last_used < !victim_use
-           then begin
+           then (
              victim_path := Some path;
-             victim_use := entry.last_used
-           end)
+             victim_use := entry.last_used))
         cache;
       match !victim_path with
       | None -> ()
       | Some path ->
-          (match Hashtbl.find_opt cache path with
-           | Some entry ->
-               Stdlib.close_out_noerr entry.channel;
-               Hashtbl.remove cache path
-           | None -> ())
-    end
+        (match Hashtbl.find_opt cache path with
+         | Some entry ->
+           Stdlib.close_out_noerr entry.channel;
+           Hashtbl.remove cache path
+         | None -> ()))
+  ;;
 
   let get_or_open_locked path =
     match Hashtbl.find_opt cache path with
     | Some entry ->
-        incr counter;
-        entry.last_used <- !counter;
-        entry.channel
+      incr counter;
+      entry.last_used <- !counter;
+      entry.channel
     | None ->
-        evict_lru_if_needed_locked ();
-        let oc =
-          Stdlib.open_out_gen
-            [ Stdlib.Open_append; Stdlib.Open_creat ]
-            0o644 path
-        in
-        incr counter;
-        let entry = { channel = oc; last_used = !counter } in
-        Hashtbl.add cache path entry;
-        oc
+      evict_lru_if_needed_locked ();
+      let oc = Stdlib.open_out_gen [ Stdlib.Open_append; Stdlib.Open_creat ] 0o644 path in
+      incr counter;
+      let entry = { channel = oc; last_used = !counter } in
+      Hashtbl.add cache path entry;
+      oc
+  ;;
 
   let invalidate path =
     with_lock (fun () ->
       match Hashtbl.find_opt cache path with
       | None -> ()
       | Some entry ->
-          Stdlib.close_out_noerr entry.channel;
-          Hashtbl.remove cache path)
+        Stdlib.close_out_noerr entry.channel;
+        Hashtbl.remove cache path)
+  ;;
 
   let close_all () =
     with_lock (fun () ->
-      Hashtbl.iter
-        (fun _ entry -> Stdlib.close_out_noerr entry.channel)
-        cache;
+      Hashtbl.iter (fun _ entry -> Stdlib.close_out_noerr entry.channel) cache;
       Hashtbl.clear cache)
+  ;;
 end
 
 let () = Stdlib.at_exit Append_fd_cache.close_all
@@ -235,41 +239,53 @@ let append_file_unix (path : string) (content : string) : unit =
       Stdlib.output_string oc content;
       Stdlib.flush oc)
   in
-  try write_with_cached ()
-  with exn ->
+  try write_with_cached () with
+  | exn ->
     (* On I/O error invalidate the cached fd so the next call re-opens
        fresh.  Re-raise so callers see the same error class as before
        (Sys_error wrapping Unix_error). *)
     Append_fd_cache.invalidate path;
     raise exn
+;;
 
 let mkdir_p_unix (path : string) : unit =
   let rec ensure_dir (p : string) : unit =
-    if String.equal p "" || String.equal p "." || String.equal p "/" then ()
-    else if Stdlib.Sys.file_exists p then ()
-    else begin
+    if String.equal p "" || String.equal p "." || String.equal p "/"
+    then ()
+    else if Stdlib.Sys.file_exists p
+    then ()
+    else (
       ensure_dir (Stdlib.Filename.dirname p);
-      try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-    end
+      try Unix.mkdir p 0o755 with
+      | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
   in
   ensure_dir path
+;;
 
 (** Load entire file contents as string.
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let load_file (path : string) : string =
-  with_fs_or_fallback ~path ~fallback:(fun () -> load_file_unix path) (fun fs ->
-      let eio_path = Eio.Path.(fs / path) in
-      Eio.Path.load eio_path)
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> load_file_unix path)
+    (fun fs ->
+       let eio_path = Eio.Path.(fs / path) in
+       Eio.Path.load eio_path)
+;;
 
 (** Save string to file (overwrite).
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let save_file (path : string) (content : string) : unit =
   test_exec_home_guard ~op:"save_file" path;
-  with_fs_or_fallback ~path ~fallback:(fun () -> save_file_unix path content) (fun fs ->
-      let eio_path = Eio.Path.(fs / path) in
-      Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> save_file_unix path content)
+    (fun fs ->
+       let eio_path = Eio.Path.(fs / path) in
+       Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
+;;
 
 (* Durable atomic write: tmp → fsync(tmp) → rename → fsync(parent dir).
    Without the fsync pair, a crash between the rename and the kernel's
@@ -278,13 +294,20 @@ let save_file (path : string) (content : string) : unit =
 let fsync_path path =
   let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
   Stdlib.Fun.protect
-    ~finally:(fun () -> try Unix.close fd with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Stdlib.Printf.eprintf "[fs_compat] fsync_path close failed: %s\n%!" (Printexc.to_string exn))
+    ~finally:(fun () ->
+      try Unix.close fd with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Stdlib.Printf.eprintf
+          "[fs_compat] fsync_path close failed: %s\n%!"
+          (Printexc.to_string exn))
     (fun () ->
-      try Unix.fsync fd
-      with Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->
-        (* Some filesystems (tmpfs on some kernels) reject fsync. The data
+       try Unix.fsync fd with
+       | Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->
+         (* Some filesystems (tmpfs on some kernels) reject fsync. The data
            is still durable to the extent the underlying FS offers. *)
-        ())
+         ())
+;;
 
 (* #10205 finding 2: keep the atomic-tmp filename shape in one place
    so the writer ([save_file_atomic]) and the orphan-sweep matcher
@@ -297,22 +320,24 @@ let atomic_tmp_suffix = ".tmp"
 
 let save_file_atomic (path : string) (content : string) : (unit, string) Result.t =
   let dir = Stdlib.Filename.dirname path in
-  let tmp =
-    Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
-  in
+  let tmp = Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix in
   try
     save_file tmp content;
     fsync_path tmp;
     Stdlib.Sys.rename tmp path;
-    (try fsync_path dir with Unix.Unix_error _ -> ());
+    (try fsync_path dir with
+     | Unix.Unix_error _ -> ());
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e ->
-    (try Stdlib.Sys.remove tmp with Sys_error _ -> ());
+    (try Stdlib.Sys.remove tmp with
+     | Sys_error _ -> ());
     raise e
   | exn ->
-    (try Stdlib.Sys.remove tmp with Sys_error _ -> ());
+    (try Stdlib.Sys.remove tmp with
+     | Sys_error _ -> ());
     Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
+;;
 
 (* #10130: orphaned [.atomic_*.tmp] files from [save_file_atomic]
    that accumulated because the owning process was SIGKILL'd or
@@ -340,11 +365,11 @@ let is_atomic_orphan_name name =
   n >= p + s
   && String.starts_with name ~prefix:atomic_tmp_prefix
   && String.ends_with ~suffix:atomic_tmp_suffix name
+;;
 
-let cleanup_atomic_orphans
-    ~(base_path : string)
-    ?(recovered_subdir = ".recovered")
-    () : int * int =
+let cleanup_atomic_orphans ~(base_path : string) ?(recovered_subdir = ".recovered") ()
+  : int * int
+  =
   let recovered_dir = Stdlib.Filename.concat base_path recovered_subdir in
   let deleted = ref 0 in
   let preserved = ref 0 in
@@ -355,26 +380,36 @@ let cleanup_atomic_orphans
      [Unix_error]), and correct when [base_path] itself does not exist
      yet (boot-time race). *)
   let ensure_recovered_dir () =
-    try mkdir_p_unix recovered_dir with Unix.Unix_error _ -> ()
+    try mkdir_p_unix recovered_dir with
+    | Unix.Unix_error _ -> ()
   in
   let handle_file dir name =
     let path = Stdlib.Filename.concat dir name in
     match Unix.stat path with
     | exception Unix.Unix_error _ -> ()
     | stat when stat.Unix.st_size = 0 ->
-        (try Stdlib.Sys.remove path; incr deleted
-         with Sys_error _ -> ())
+      (try
+         Stdlib.Sys.remove path;
+         incr deleted
+       with
+       | Sys_error _ -> ())
     | _stat ->
-        ensure_recovered_dir ();
-        let target =
-          Stdlib.Filename.concat recovered_dir
-            (Printf.sprintf "%s.%.0f" name (Unix.gettimeofday () *. 1000.0))
-        in
-        (try Stdlib.Sys.rename path target; incr preserved
-         with Sys_error _ | Unix.Unix_error _ -> ())
+      ensure_recovered_dir ();
+      let target =
+        Stdlib.Filename.concat
+          recovered_dir
+          (Printf.sprintf "%s.%.0f" name (Unix.gettimeofday () *. 1000.0))
+      in
+      (try
+         Stdlib.Sys.rename path target;
+         incr preserved
+       with
+       | Sys_error _ | Unix.Unix_error _ -> ())
   in
   let scan_dir dir entries =
-    Array.iter (fun name -> if is_atomic_orphan_name name then handle_file dir name) entries
+    Array.iter
+      (fun name -> if is_atomic_orphan_name name then handle_file dir name)
+      entries
   in
   let read_dir_entries dir =
     match Stdlib.Sys.readdir dir with
@@ -387,104 +422,139 @@ let cleanup_atomic_orphans
      the cached entry array. *)
   let entries = read_dir_entries base_path in
   scan_dir base_path entries;
-  Array.iter (fun name -> if String.equal name recovered_subdir then ()
-      else
-        let sub = Stdlib.Filename.concat base_path name in
-        match Unix.stat sub with
-        | exception Unix.Unix_error _ -> ()
-        | stat when (=) stat.Unix.st_kind Unix.S_DIR ->
-            scan_dir sub (read_dir_entries sub)
-        | _ -> ()) entries;
-  (!deleted, !preserved)
+  Array.iter
+    (fun name ->
+       if String.equal name recovered_subdir
+       then ()
+       else (
+         let sub = Stdlib.Filename.concat base_path name in
+         match Unix.stat sub with
+         | exception Unix.Unix_error _ -> ()
+         | stat when stat.Unix.st_kind = Unix.S_DIR -> scan_dir sub (read_dir_entries sub)
+         | _ -> ()))
+    entries;
+  !deleted, !preserved
+;;
 
 (** Append string to file.
     Eio-native when available, fallback to Unix.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let append_file (path : string) (content : string) : unit =
   test_exec_home_guard ~op:"append_file" path;
-  with_fs_or_fallback ~path ~fallback:(fun () -> append_file_unix path content) (fun fs ->
-      let eio_path = Eio.Path.(fs / path) in
-      Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> append_file_unix path content)
+    (fun fs ->
+       let eio_path = Eio.Path.(fs / path) in
+       Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
+;;
 
 (** Check if file exists.
     Uses Stdlib.Sys.file_exists (works in both Eio and non-Eio contexts). *)
 let file_exists (path : string) : bool =
-  with_fs_or_fallback ~path ~fallback:(fun () -> Stdlib.Sys.file_exists path) (fun fs ->
-    try
-      let _ = Eio.Path.stat ~follow:true Eio.Path.(fs / path) in true
-    with Eio.Io _ -> false)
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> Stdlib.Sys.file_exists path)
+    (fun fs ->
+       try
+         let _ = Eio.Path.stat ~follow:true Eio.Path.(fs / path) in
+         true
+       with
+       | Eio.Io _ -> false)
+;;
 
 let file_size (path : string) : int option =
-  with_fs_or_fallback ~path
-    ~fallback:(fun () -> try Some (Unix.stat path).st_size with Unix.Unix_error _ -> None)
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      try Some (Unix.stat path).st_size with
+      | Unix.Unix_error _ -> None)
     (fun _fs ->
-      try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_size))
-      with Unix.Unix_error _ -> None)
+       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_size)) with
+       | Unix.Unix_error _ -> None)
+;;
 
 let file_mtime (path : string) : float option =
-  with_fs_or_fallback ~path
-    ~fallback:(fun () -> try Some (Unix.stat path).st_mtime with Unix.Unix_error _ -> None)
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      try Some (Unix.stat path).st_mtime with
+      | Unix.Unix_error _ -> None)
     (fun _fs ->
-      try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_mtime))
-      with Unix.Unix_error _ -> None)
-
+       try Some (Eio_unix.run_in_systhread (fun () -> (Unix.stat path).st_mtime)) with
+       | Unix.Unix_error _ -> None)
+;;
 
 let rename (src : string) (dst : string) : unit =
-  with_fs_or_fallback ~path:src ~fallback:(fun () -> Stdlib.Sys.rename src dst) (fun fs ->
-    Eio.Path.rename Eio.Path.(fs / src) Eio.Path.(fs / dst))
+  with_fs_or_fallback
+    ~path:src
+    ~fallback:(fun () -> Stdlib.Sys.rename src dst)
+    (fun fs -> Eio.Path.rename Eio.Path.(fs / src) Eio.Path.(fs / dst))
+;;
 
 let rmdir (path : string) : unit =
-  with_fs_or_fallback ~path ~fallback:(fun () -> Unix.rmdir path) (fun fs ->
-    Eio.Path.rmdir Eio.Path.(fs / path))
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> Unix.rmdir path)
+    (fun fs -> Eio.Path.rmdir Eio.Path.(fs / path))
+;;
 
 let realpath (path : string) : string =
-  with_fs_or_fallback ~path
+  with_fs_or_fallback
+    ~path
     ~fallback:(fun () -> Unix.realpath path)
-    (fun _fs ->
-      Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
+    (fun _fs -> Eio_unix.run_in_systhread (fun () -> Unix.realpath path))
+;;
 
 (** Create directory recursively if not exists.
     @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let mkdir_p (path : string) : unit =
   test_exec_home_guard ~op:"mkdir_p" path;
-  with_fs_or_fallback ~path ~fallback:(fun () -> mkdir_p_unix path) (fun fs ->
-      let eio_path = Eio.Path.(fs / path) in
-      Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> mkdir_p_unix path)
+    (fun fs ->
+       let eio_path = Eio.Path.(fs / path) in
+       Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)
+;;
 
 (** Parse pre-read string lines as JSONL.
     Use when lines come from [Keeper_memory.read_file_tail_lines] or
     other non-file sources.  Logs malformed lines with [source] tag. *)
-let parse_jsonl_lines ~(source : string) (lines : string list)
-    : Yojson.Safe.t list * int =
+let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
   let parsed =
-    List.filter_map (fun line ->
-      let trimmed = String.trim line in
-      if String.equal trimmed "" then None
-      else
-        match Yojson.Safe.from_string trimmed with
-        | json -> Some json
-        | exception Yojson.Json_error msg ->
-            incr malformed;
-            Stdlib.Printf.eprintf "[fs_compat] malformed JSONL (%s): %s\n%!" source msg;
-            None
-    ) lines
+    List.filter_map
+      (fun line ->
+         let trimmed = String.trim line in
+         if String.equal trimmed ""
+         then None
+         else (
+           match Yojson.Safe.from_string trimmed with
+           | json -> Some json
+           | exception Yojson.Json_error msg ->
+             incr malformed;
+             Stdlib.Printf.eprintf "[fs_compat] malformed JSONL (%s): %s\n%!" source msg;
+             None))
+      lines
   in
-  (parsed, !malformed)
+  parsed, !malformed
+;;
 
 (** Load JSONL file, returning parsed values and count of malformed lines.
     Delegates to [parse_jsonl_lines] for the actual parsing. *)
 let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
-  if not (file_exists path) then ([], 0)
-  else
+  if not (file_exists path)
+  then [], 0
+  else (
     let content = load_file path in
     let lines = String.split_on_char '\n' content in
-    parse_jsonl_lines ~source:path lines
+    parse_jsonl_lines ~source:path lines)
+;;
 
 (** Load JSONL file as list of JSON values.
     Malformed lines are logged and dropped. *)
-let load_jsonl (path : string) : Yojson.Safe.t list =
-  fst (load_jsonl_diagnostics path)
+let load_jsonl (path : string) : Yojson.Safe.t list = fst (load_jsonl_diagnostics path)
 
 (** Stream JSONL line-by-line, folding [f] over parsed values.
 
@@ -502,35 +572,42 @@ let load_jsonl (path : string) : Yojson.Safe.t list =
     {!load_jsonl_diagnostics}.  Raises [Sys_error] on missing /
     unreadable files (consistent with the rest of the module). *)
 let fold_jsonl_lines ~init ~f path =
-  if not (file_exists path) then init
+  if not (file_exists path)
+  then init
   else
-  with_fs_or_fallback ~path
-    ~fallback:(fun () ->
-      let parsed = fst (load_jsonl_diagnostics path) in
-      let _, result =
-        List.fold_left
-          (fun (n, acc) json -> (n + 1, f acc ~line_no:n json))
-          (1, init) parsed
-      in
-      result)
-    (fun fs ->
-      let eio_path = Eio.Path.(fs / path) in
-      Eio.Path.with_open_in eio_path (fun flow ->
-        let buf = Eio.Buf_read.of_flow ~max_size:Int.max_int flow in
-        let line_idx = ref 0 in
-        let acc = ref init in
-        Eio.Buf_read.lines buf
-        |> Seq.iter (fun raw ->
-               incr line_idx;
-               let trimmed = String.trim raw in
-               if not (String.equal trimmed "") then
-                 match Yojson.Safe.from_string trimmed with
-                 | json -> acc := f !acc ~line_no:!line_idx json
-                 | exception Yojson.Json_error msg ->
-                     Stdlib.Printf.eprintf
-                       "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-                       path !line_idx msg);
-        !acc))
+    with_fs_or_fallback
+      ~path
+      ~fallback:(fun () ->
+        let parsed = fst (load_jsonl_diagnostics path) in
+        let _, result =
+          List.fold_left
+            (fun (n, acc) json -> n + 1, f acc ~line_no:n json)
+            (1, init)
+            parsed
+        in
+        result)
+      (fun fs ->
+         let eio_path = Eio.Path.(fs / path) in
+         Eio.Path.with_open_in eio_path (fun flow ->
+           let buf = Eio.Buf_read.of_flow ~max_size:Int.max_int flow in
+           let line_idx = ref 0 in
+           let acc = ref init in
+           Eio.Buf_read.lines buf
+           |> Seq.iter (fun raw ->
+             incr line_idx;
+             let trimmed = String.trim raw in
+             if not (String.equal trimmed "")
+             then (
+               match Yojson.Safe.from_string trimmed with
+               | json -> acc := f !acc ~line_no:!line_idx json
+               | exception Yojson.Json_error msg ->
+                 Stdlib.Printf.eprintf
+                   "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+                   path
+                   !line_idx
+                   msg));
+           !acc))
+;;
 
 (** Append JSON value as line to JSONL file. *)
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
@@ -538,6 +615,7 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   mkdir_p dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
   append_file path line
+;;
 
 (* ================================================================ *)
 (* Storage Backend Abstraction                                      *)
@@ -547,20 +625,17 @@ type backend_kind =
   | Local
   | Remote of string
 
-type backend = {
-  kind : backend_kind;
-  base_path : string;
-}
+type backend =
+  { kind : backend_kind
+  ; base_path : string
+  }
 
-let create_backend ?(kind = Local) ~base_path () =
-  { kind; base_path }
-
-let backend_base_path (b : backend) =
-  b.base_path
+let create_backend ?(kind = Local) ~base_path () = { kind; base_path }
+let backend_base_path (b : backend) = b.base_path
 
 let backend_kind_to_string = function
   | Local -> "local"
   | Remote url -> Printf.sprintf "remote(%s)" url
+;;
 
-let default_backend ~base_path =
-  { kind = Local; base_path }
+let default_backend ~base_path = { kind = Local; base_path }

@@ -445,10 +445,14 @@ let cleanup (t : t) =
           (Worker_dev_tools.truncate_for_log check_out);
         false
     in
+    (* Probe existence once and reuse across the success/failure branches —
+       each [still_exists] call runs [docker ps -a], which adds latency per
+       cleanup turn. *)
+    let exists_after = still_exists () in
     (match st with
-     | Unix.WEXITED 0 when not (still_exists ()) -> ()
+     | Unix.WEXITED 0 when not exists_after -> ()
      | _ ->
-       if still_exists ()
+       if exists_after
        then (
          Log.Keeper.warn
            "%s: docker rm -f %s failed and container still exists (status=%s, out=%s)"

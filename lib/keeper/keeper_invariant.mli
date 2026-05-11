@@ -25,8 +25,10 @@ type tool_name = string
 (** {1 Sandbox Isolation} *)
 
 (** [sandbox_isolation ~sandbox_roots ~sandbox_paths] checks that every path in
-    [sandbox_paths] is strictly prefixed by at least one root in [sandbox_roots].
-    Violations indicate a potential container escape or mount misconfiguration. *)
+    [sandbox_paths] is equal to or prefixed by at least one root in
+    [sandbox_roots]. A path equal to a root is permitted (the root itself is
+    a valid sandbox path). Violations indicate a potential container escape
+    or mount misconfiguration. *)
 val sandbox_isolation
   :  sandbox_roots:sandbox_path list
   -> sandbox_paths:sandbox_path list

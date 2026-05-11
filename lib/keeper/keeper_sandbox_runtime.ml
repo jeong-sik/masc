@@ -159,6 +159,7 @@ let sandbox_owner_pid_label_key = "masc.mcp.owner_pid"
 let sandbox_started_at_label_key = "masc.mcp.started_at"
 let sandbox_network_label_key = "masc.mcp.network"
 let sandbox_ttl_sec_label_key = "masc.mcp.ttl_sec"
+let sandbox_turn_id_label_key = "masc.mcp.turn_id"
 
 let strip_trailing_slashes path =
   let rec loop i = if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i in
@@ -205,7 +206,7 @@ let docker_label_args
   @ label sandbox_started_at_label_key (Printf.sprintf "%.3f" (Unix.gettimeofday ()))
   @ label sandbox_network_label_key (sanitize_label_value network_label)
   @ (match turn_id with
-     | Some id -> label "masc.turn_id" (string_of_int id)
+     | Some id -> label sandbox_turn_id_label_key (string_of_int id)
      | None -> [])
   @
   match ttl_sec with

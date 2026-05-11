@@ -48,13 +48,10 @@ let cycle_set_key (cycles : string list list) : string =
   |> String.concat "|"
 ;;
 
-let ensure_materialized_json path =
-  match Cascade_toml_materializer.ensure_materialized_json ~config_path:path with
-  | Ok { wrote_json; _ } ->
-    if wrote_json then invalidate_cache_entry path;
-    Ok ()
-  | Error _ as err -> err
-;;
+(* RFC-0058 §9 Phase 9.2: previous [ensure_materialized_json] wrapper
+   removed — it was private (not in [.mli]) and had zero call sites.
+   In-process callers route through [load_toml_in_memory] which never
+   touches the JSON sibling on disk. *)
 
 let read_json_file path =
   let ic = open_in path in

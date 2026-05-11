@@ -83,4 +83,10 @@ val declarative_route_bindings :
 
 val decl_snapshot_profile_names :
   decl_snapshot -> string list
-(** Extract profile names from a declarative snapshot for comparison. *)
+(** Extract profile names from a declarative snapshot as a sorted,
+    deduplicated set.  The sort is required because callers compare
+    this against profile lists from the JSON-shape discovery path,
+    which already runs [List.sort_uniq String.compare] before
+    construction — without matching that contract here, list equality
+    flips on declaration-order differences and produces spurious
+    [profile name mismatch] WARNs. *)

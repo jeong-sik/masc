@@ -28,6 +28,26 @@ let metric_profile_discovery = "masc_cascade_profile_discovery_total"
    keeps serving (currently via legacy fallback). *)
 let metric_declarative_parse_errors = "masc_cascade_declarative_parse_errors_total"
 
+(* Parallel declarative validation (RFC-0058 Phase 3) cross-checks the
+   JSON-shape discovery path against the typed declarative parser
+   inside [validate_path_result].  The previous behavior was WARN-only
+   on mismatch — operators had no Prometheus signal to alert on, and
+   "INFO parallel validation OK" was indistinguishable from "no
+   validation ran".  Counter labels:
+   - "ok"            — both paths agreed (steady state)
+   - "mismatch"      — both paths produced lists but disagreed on the
+                       set (spurious mismatches were possible before
+                       [decl_snapshot_profile_names] gained sort_uniq;
+                       a non-zero rate after that fix is a real
+                       drift signal that warrants operator attention)
+   - "adapter_error" — declarative parser returned errors during
+                       parallel validation (independent of the
+                       [profile_discovery] path observed in
+                       [discover_profile_names])
+   - "no_decl"       — declarative parser produced no result; expected
+                       for pre-RFC-0058 fixture TOML *)
+let metric_parallel_validation = "masc_cascade_parallel_validation_total"
+
 let on_decision ~cascade_name ~decision_label =
   Prometheus.inc_counter metric_decisions
     ~labels:[ ("decision", decision_label); ("cascade", cascade_name) ]
@@ -65,3 +85,9 @@ let on_profile_discovery ~path =
 
 let on_declarative_parse_error () =
   Prometheus.inc_counter metric_declarative_parse_errors ()
+
+(* [result] is one of "ok" | "mismatch" | "adapter_error" | "no_decl". *)
+let on_parallel_validation ~result =
+  Prometheus.inc_counter metric_parallel_validation
+    ~labels:[ ("result", result) ]
+    ()

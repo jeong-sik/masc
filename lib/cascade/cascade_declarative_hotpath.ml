@@ -152,5 +152,14 @@ let declarative_route_bindings (ac : adapted_catalog) :
 
 (* --- Snapshot introspection (for parallel validation) --- *)
 
+(* Returns the snapshot's profile names as a sorted, deduplicated set.
+   Without [sort_uniq] callers comparing this against another profile
+   list (e.g. [validate_path_result]'s parallel validation step) would
+   see spurious mismatches whenever the underlying TOML declaration
+   order differs from the comparison list's order — which is the
+   common case, since the JSON-shape discovery path runs
+   [List.sort_uniq String.compare] before building its
+   [profile_build]s. *)
 let decl_snapshot_profile_names (snap : decl_snapshot) : string list =
   List.map (fun (p : profile) -> p.name) snap.profiles
+  |> List.sort_uniq String.compare

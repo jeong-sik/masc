@@ -238,6 +238,23 @@ let test_decl_snapshot_profile_names () =
   check int "4 profiles" 4 (List.length names);
   check bool "has tier.rerank" true (List.mem "tier.rerank" names)
 
+(* Regression guard: the JSON-shape discovery path in
+   [cascade_catalog_runtime.discover_profile_names] applies
+   [List.sort_uniq String.compare] before constructing its
+   profile_build list, and the parallel validation step compares the
+   two lists with structural [<>].  Without matching that contract
+   here, [decl_snapshot_profile_names] returned names in declaration
+   order and the comparison flipped on order alone, producing
+   spurious "profile name mismatch" WARNs.  This test pins the
+   sort_uniq contract. *)
+let test_decl_snapshot_profile_names_is_sorted_and_unique () =
+  let snapshot = get_snapshot valid_toml in
+  let names = Hotpath.decl_snapshot_profile_names snapshot in
+  let sorted = List.sort String.compare names in
+  check (list string) "names are sorted" sorted names;
+  let deduped = List.sort_uniq String.compare names in
+  check int "names are deduplicated" (List.length deduped) (List.length names)
+
 (* --- Test suite --- *)
 
 let () =
@@ -263,5 +280,11 @@ let () =
       "routes",
       [ test_case "route bindings" `Quick test_route_bindings ];
       "introspection",
-      [ test_case "decl_snapshot_profile_names" `Quick test_decl_snapshot_profile_names ];
+      [
+        test_case "decl_snapshot_profile_names" `Quick test_decl_snapshot_profile_names;
+        test_case
+          "decl_snapshot_profile_names sorted+unique"
+          `Quick
+          test_decl_snapshot_profile_names_is_sorted_and_unique;
+      ];
     ]

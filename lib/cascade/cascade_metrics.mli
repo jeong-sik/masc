@@ -15,3 +15,8 @@ val on_declarative_parse_error : unit -> unit
     that returned [Error _] from the declarative adapter.  The
     individual error bodies are surfaced via WARN logs at the call
     site. *)
+
+val on_parallel_validation : result:string -> unit
+(** Tick the parallel-validation counter for one [validate_path_result]
+    invocation.  [result] must be one of [ok], [mismatch],
+    [adapter_error], [no_decl]. *)

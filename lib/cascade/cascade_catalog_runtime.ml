@@ -822,31 +822,56 @@ let validate_path_result ?sw ?net ~config_path () =
             }
           in
           record_probe_metrics profile_snapshots;
-          (* RFC-0058 Phase 3: parallel declarative validation *)
+          (* RFC-0058 Phase 3: parallel declarative validation.
+
+             The JSON-shape discovery path and the typed declarative
+             parser both produce a profile-name set; we cross-check
+             them to catch silent drift.  Both sides are sorted +
+             deduplicated before [<>] comparison — without that the
+             list-equality check flips on declaration-order
+             differences and produces spurious "profile name mismatch"
+             WARNs ([decl_snapshot_profile_names] now applies
+             [sort_uniq] internally, but we sort [json_names] here as
+             well to make the contract obvious at the call site).
+
+             Each branch emits a Prometheus counter so operators can
+             alert on drift / adapter faults without scraping logs. *)
           (match Cascade_declarative_hotpath.try_load_declarative config_path with
            | Some (Ok decl_snap) ->
              let json_names =
                List.map (fun (p : profile_build) -> p.name)
                  profile_snapshots
+               |> List.sort_uniq String.compare
              in
              let decl_names =
                Cascade_declarative_hotpath.decl_snapshot_profile_names decl_snap
              in
-             if json_names <> decl_names then
+             if json_names <> decl_names then (
+               Cascade_metrics.on_parallel_validation ~result:"mismatch";
+               let only_in xs ys =
+                 List.filter (fun x -> not (List.mem x ys)) xs
+               in
+               let json_only = only_in json_names decl_names in
+               let decl_only = only_in decl_names json_names in
                Log.Misc.warn
                  "[CascadeDeclarative] profile name mismatch: \
-                  json=[%s] decl=[%s]"
+                  json=[%s] decl=[%s] (json_only=[%s] decl_only=[%s])"
                  (String.concat ", " json_names)
                  (String.concat ", " decl_names)
-             else
+                 (String.concat ", " json_only)
+                 (String.concat ", " decl_only))
+             else (
+               Cascade_metrics.on_parallel_validation ~result:"ok";
                Log.Misc.info
                  "[CascadeDeclarative] parallel validation OK, %d profiles"
-                 (List.length decl_names)
+                 (List.length decl_names))
            | Some (Error errs) ->
+             Cascade_metrics.on_parallel_validation ~result:"adapter_error";
              List.iter (fun e ->
                Log.Misc.warn "[CascadeDeclarative] adapter error: %s"
                  (Cascade_declarative_adapter.show_adapter_error e)) errs
-           | None -> ());
+           | None ->
+             Cascade_metrics.on_parallel_validation ~result:"no_decl");
           if rejected_profiles = [] then
             Ok { snapshot; rejected_update = None }
           else

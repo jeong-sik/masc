@@ -593,3 +593,39 @@ let metric_llama_model_not_discovered =
 
 let on_llama_model_not_discovered () =
   Prometheus.inc_counter metric_llama_model_not_discovered ()
+
+(* [Cascade_routes.cascade_name_for_use] has two fallback arms that
+   resolve a route to a hardcoded fallback instead of the
+   operator-declared target:
+
+     catalog_unvalidated    — route_target is set but the live
+                               catalog has zero validated names
+                               (cascade.toml load / validate fault).
+                               The runtime resolves anyway via
+                               fallback_from_entries.
+     target_not_in_catalog  — route_target points at a profile that
+                               is not in the validated catalog.
+                               Typically a typo or a profile removed
+                               from cascade.toml without updating the
+                               [routes] table.
+
+   Distinct from iter 9 [route_config_error{error_type}]: that
+   counter ticks during [validate_path_result] when the catalog is
+   built; this counter ticks during runtime route RESOLUTION when
+   [cascade_name_for_use] is called (e.g. on every keeper turn).
+   The two windows can disagree: validate_path_result may have
+   built a valid catalog (no schema error), but a subsequent
+   [cascade_name_for_use] call may still hit the unvalidated arm if
+   a downstream caller threads in a stale config_path.
+
+   The third arm (None — no route configured for this use) stays
+   silent: normal "operator did not set a route" path.
+
+   Cardinality: 2 reasons = 2 series. *)
+let metric_route_resolve_fallback =
+  "masc_cascade_route_resolve_fallback_total"
+
+let on_route_resolve_fallback ~reason =
+  Prometheus.inc_counter metric_route_resolve_fallback
+    ~labels:[ ("reason", reason) ]
+    ()

@@ -180,3 +180,12 @@ val on_llama_model_not_discovered : unit -> unit
     falls back to the round-robin "auto" endpoint.  A non-zero rate
     means a cascade.toml [llama:specific-model] entry is silently
     routing to whatever endpoint round-robin lands on. *)
+
+val on_route_resolve_fallback : reason:string -> unit
+(** Tick the runtime route-resolution fallback counter at
+    [Cascade_routes.cascade_name_for_use] when a configured route
+    target cannot be honored.  [reason] must be one of
+    [catalog_unvalidated] (no validated catalog names available)
+    or [target_not_in_catalog] (declared target missing from the
+    catalog).  Distinct from iter-9 [route_config_error] which
+    ticks during catalog validation. *)

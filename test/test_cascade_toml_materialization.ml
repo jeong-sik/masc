@@ -768,6 +768,20 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    [Discovery.context_for_model] returns None for a queried model_id
    — driving that from a unit test would need a live discovery
    fixture.  Smoke pins the no-arg helper signature. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_route_resolve_fallback].  Two documented
+   reasons map 1:1 to the two fallback arms in
+   [Cascade_routes.cascade_name_for_use].  A typo at either call
+   site would emit an undocumented label; pinning both strings
+   here keeps the canonical set in lockstep with the code. *)
+let test_route_resolve_fallback_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_route_resolve_fallback
+    ~reason:"catalog_unvalidated";
+  Masc_mcp.Cascade_metrics.on_route_resolve_fallback
+    ~reason:"target_not_in_catalog";
+  check bool "both documented reasons callable without raising"
+    true true
+
 let test_llama_model_not_discovered_helper_callable () =
   Masc_mcp.Cascade_metrics.on_llama_model_not_discovered ();
   check bool "no-arg helper callable without raising" true true
@@ -1157,6 +1171,10 @@ let () =
           test_case
             "llama_model_not_discovered: helper callable" `Quick
             test_llama_model_not_discovered_helper_callable;
+          test_case
+            "route_resolve_fallback: both documented reasons callable"
+            `Quick
+            test_route_resolve_fallback_documented_reasons_are_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

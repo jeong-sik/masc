@@ -262,10 +262,12 @@ let cascade_name_for_use ?config_path use =
   let fallback = fallback_from_entries use entries in
   match route_target with
   | Some target when catalog_names = [] ->
+      Cascade_metrics.on_route_resolve_fallback ~reason:"catalog_unvalidated";
       warn_unvalidated_route_target_once ~route_key ~target ~fallback;
       fallback
   | Some target when List.mem target catalog_names -> target
   | Some target ->
+      Cascade_metrics.on_route_resolve_fallback ~reason:"target_not_in_catalog";
       warn_invalid_route_target_once ~route_key ~target ~fallback;
       fallback
   | None -> fallback

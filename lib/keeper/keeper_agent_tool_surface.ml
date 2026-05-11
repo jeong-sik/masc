@@ -94,6 +94,7 @@ let tool_selection_mode_of_string = function
 let tool_selection_mode_to_yojson m =
   `String (tool_selection_mode_to_string m)
 
+
 (* Closed sum type for tool_surface_class.  Mirrors RFC-0065 §3.2.2
    KeeperToolSurface SurfaceClassSet so the correspondence harness can
    drop the hand-pinned label list.  [@tla.symbol "…"] fixes the wire

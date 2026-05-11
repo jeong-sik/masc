@@ -727,9 +727,24 @@ let review
           by liveness — the operator must fix the cascade definition
           before the safety net can do useful work. *)
             let cascade_permanently_dead =
+              (* Enumerate every [masc_internal_error] variant plus [None]
+                 so the compiler flags any new constructor here. Same
+                 reasoning as [degraded_retry_bypasses_slot_phase_guard]
+                 (closed in PR #14716): a guard whose default direction
+                 is [false] must not absorb new error classes silently. *)
               match Keeper_turn_driver.classify_masc_internal_error err with
               | Some (Keeper_turn_driver.No_tool_capable_provider _) -> true
-              | _ -> false
+              | Some
+                  ( Keeper_turn_driver.Cascade_exhausted _
+                  | Keeper_turn_driver.Resumable_cli_session _
+                  | Keeper_turn_driver.Accept_rejected _
+                  | Keeper_turn_driver.Admission_queue_timeout _
+                  | Keeper_turn_driver.Admission_queue_rejected _
+                  | Keeper_turn_driver.Turn_timeout _
+                  | Keeper_turn_driver.Oas_timeout_budget _
+                  | Keeper_turn_driver.Ambiguous_post_commit _ )
+              | None ->
+                false
             in
             let mode = Env_config.AntiRationalization.fail_mode in
             let mode_str = Env_config.AntiRationalization.fail_mode_to_string mode in

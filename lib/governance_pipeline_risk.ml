@@ -246,9 +246,14 @@ let payload_severity input : payload_severity =
   loop Payload_clean strings
 
 let has_destructive_payload input =
+  (* Enumerate every [payload_severity] variant. A future severity
+     (e.g. [Payload_admin_only], [Payload_data_exfil]) added between
+     Evasion_only and Destructive should be classified deliberately —
+     the [_ -> false] catch-all would have silently inherited
+     "not destructive" for a new high-risk class. *)
   match payload_severity input with
   | Payload_destructive -> true
-  | _ -> false
+  | Payload_clean | Payload_evasion_only -> false
 
 let has_empty_overwrite_payload input =
   collect_string_values ~keys:empty_overwrite_payload_keys input

@@ -59,9 +59,18 @@ let is_known_public name = Hashtbl.mem routing_table name
     Prometheus label so that unrecognised strings never become a new
     time series. *)
 let known_internal_names_tbl : (string, unit) Hashtbl.t =
-  let t = Hashtbl.create 64 in
+  let t = Hashtbl.create 128 in
   Hashtbl.iter (fun _ r -> Hashtbl.replace t r.internal_name ()) routing_table;
-  List.iter (fun n -> Hashtbl.replace t n ()) Tool_catalog_surfaces.keeper_internal_tools;
+  List.iter
+    (fun internal ->
+       Hashtbl.replace t internal ();
+       (* Also admit the public MCP counterpart (e.g. [masc_board_post])
+          so successful MCP routes do not collapse to [tool="unknown"]
+          (PR #14585 review). *)
+       match Tool_catalog_surfaces.keeper_internal_replacement internal with
+       | Some public -> Hashtbl.replace t public ()
+       | None -> ())
+    Tool_catalog_surfaces.keeper_internal_tools;
   t
 ;;
 

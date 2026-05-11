@@ -43,7 +43,7 @@ type canonicalisation_outcome =
       ; internal : string
       }
   | Route_hit of { internal : string }
-  | Already_internal
+  | Already_internal of { canonical : string }
   | Miss
 
 let canonicalise_outcome name =
@@ -53,7 +53,15 @@ let canonicalise_outcome name =
   | None ->
     (match Keeper_tool_alias.route stripped with
      | Some r -> Route_hit { internal = r.internal_name }
-     | None -> if Keeper_tool_alias.is_known_internal name then Already_internal else Miss)
+     | None ->
+       (* Check [stripped] (not the raw [name]) so MCP-prefixed internal
+          names like [mcp__masc__keeper_pr_create] are recognised and
+          canonicalised to [keeper_pr_create]. The unstripped form is
+          never in [is_known_internal] for known prefixed transports
+          (PR #14585 review). *)
+       if Keeper_tool_alias.is_known_internal stripped
+       then Already_internal { canonical = stripped }
+       else Miss)
 ;;
 
 (** Pure canonicalisation — no telemetry. Used by set-logic call sites
@@ -63,7 +71,7 @@ let canonical_name name =
   match canonicalise_outcome name with
   | Mcp_mapped { internal; _ } -> internal
   | Route_hit { internal } -> internal
-  | Already_internal -> name
+  | Already_internal { canonical } -> canonical
   | Miss -> name
 ;;
 
@@ -94,9 +102,12 @@ let canonical_name_observed name =
   | Route_hit { internal } ->
     Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
     internal
-  | Already_internal ->
-    Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:name ~result:"ok";
-    name
+  | Already_internal { canonical } ->
+    Keeper_tool_alias.record_route_outcome
+      ~tool:canonical
+      ~routed_to:canonical
+      ~result:"ok";
+    canonical
   | Miss ->
     Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
     name

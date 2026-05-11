@@ -16,5 +16,7 @@ type t =
   | Migration_save (** Persisting a migrated checkpoint to the OAS store failed. *)
   | Restore_legacy (** Restoring the working context from a legacy checkpoint raised. *)
   | Create_initial_save (** Initial checkpoint save during keeper boot create flow. *)
+  | Cleanup (** Checkpoint-store cleanup pass failure. *)
+  | Malformed_load (** Load attempt aborted because checkpoint payload was malformed. *)
 
 val to_label : t -> string

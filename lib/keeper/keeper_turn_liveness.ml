@@ -37,7 +37,7 @@ let decide_local_only_liveness
       labels
       |> List.filter_map resolve_label
       |> List.filter_map (fun (cfg : Llm_provider.Provider_config.t) ->
-             if Cascade_ollama_probe.is_ollama_url cfg.base_url then
+             if Cascade_capacity_probe.can_probe ~url:cfg.base_url then
                Some cfg.base_url
              else None)
       |> dedupe_keep_order
@@ -72,7 +72,7 @@ let fail_open_local_only_when_unavailable
           (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
            | Some sw, Some net ->
              Some (fun base_url ->
-               Option.is_some (Cascade_ollama_probe.try_probe ~sw ~net base_url))
+               Option.is_some (Cascade_capacity_probe.probe ~sw ~net ~url:base_url ()))
            | _ -> None)
       in
       (match probe_ollama_base_url with
@@ -141,7 +141,7 @@ let is_ollama_saturated
   let capacity_lookup =
     match capacity_lookup with
     | Some f -> f
-    | None -> fun url -> Cascade_ollama_probe.cached_capacity url
+    | None -> fun url -> Cascade_capacity_probe.cached ~url ()
   in
   match capacity_lookup base_url with
   | None -> false

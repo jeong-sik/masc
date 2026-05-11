@@ -482,7 +482,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 saturation_skip_count_reset ~keeper_name:meta.name;
                 None
               end else
-              let info = Cascade_ollama_probe.cached_capacity base_url in
+              let info = Cascade_capacity_probe.cached ~url:base_url () in
               let queue_len =
                 match info with
                 | Some i -> i.process_queue_length

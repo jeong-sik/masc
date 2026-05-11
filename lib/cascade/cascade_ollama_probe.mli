@@ -120,3 +120,27 @@ val cache_clear : unit -> unit
 
 val cache_size : unit -> int
 (** Number of cached entries.  Test helper. *)
+
+(** {1 Probe adapter for {!Cascade_capacity_probe}} *)
+
+module Ollama_probe : sig
+  val can_probe : url:string -> bool
+  val probe :
+    sw:Eio.Switch.t ->
+    net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t ->
+    url:string ->
+    ?timeout_s:float ->
+    unit ->
+    Cascade_throttle.capacity_info option
+  val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
+  val refresh_many :
+    sw:Eio.Switch.t ->
+    net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t ->
+    urls:string list ->
+    ?timeout_s:float ->
+    unit ->
+    unit
+end
+(** First-class probe wrapper for registration with
+    {!Cascade_capacity_probe.register}.  Structurally satisfies
+    {!Cascade_capacity_probe.Probe}. *)

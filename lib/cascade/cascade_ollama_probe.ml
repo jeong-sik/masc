@@ -181,3 +181,25 @@ let refresh_many ~sw ~net ?timeout_s urls =
            let _ = try_probe ~sw ~net ~timeout_s url in
            ())
     urls
+
+(* ── Probe adapter ───────────────────────────────────────────── *)
+
+(* Wraps this module's functions as a first-class [Probe] for
+   {!Cascade_capacity_probe}.  The module structurally satisfies
+   [Cascade_capacity_probe.Probe] without an explicit annotation,
+   avoiding a circular dependency between the two compilation units. *)
+module Ollama_probe = struct
+  let can_probe ~url = is_ollama_url url
+  let probe ~sw ~net ~url ?timeout_s () =
+    (match timeout_s with
+     | None -> try_probe ~sw ~net url
+     | Some v -> try_probe ~sw ~net ~timeout_s:v url)
+  let cached ~url ?now () =
+    (match now with
+     | None -> cached_capacity url
+     | Some v -> cached_capacity ~now:v url)
+  let refresh_many ~sw ~net ~urls ?timeout_s () =
+    (match timeout_s with
+     | None -> refresh_many ~sw ~net urls
+     | Some v -> refresh_many ~sw ~net ~timeout_s:v urls)
+end

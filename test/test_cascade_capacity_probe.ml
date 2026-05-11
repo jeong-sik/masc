@@ -19,15 +19,12 @@ let mock_cap ~total ~active =
 ;;
 
 let make_mock ~recognizes ?(cached_result = None) () =
-  ( module struct
+  (module struct
     let can_probe ~url = recognizes url
-
     let probe ~sw:_ ~net:_ ~url:_ ?timeout_s:_ () = cached_result
-
     let cached ~url ?now:_ () = if recognizes url then cached_result else None
-
     let refresh_many ~sw:_ ~net:_ ~urls:_ ?timeout_s:_ () = ()
-  end : Cp.Probe )
+  end : Cp.Probe)
 ;;
 
 (* ── Registry lifecycle ──────────────────────────────────────── *)
@@ -35,6 +32,7 @@ let make_mock ~recognizes ?(cached_result = None) () =
 let test_clear_registry () =
   Cp.For_testing.clear_registry ();
   check bool "empty after clear" false (Cp.can_probe ~url:"http://127.0.0.1:11434")
+;;
 
 let test_register_can_probe () =
   Cp.For_testing.clear_registry ();
@@ -47,6 +45,7 @@ let test_register_can_probe () =
   Cp.register probe;
   check bool "recognises ollama" true (Cp.can_probe ~url:"http://localhost:11434");
   check bool "ignores non-ollama" false (Cp.can_probe ~url:"http://openai.com")
+;;
 
 let test_with_registry_restores () =
   let probe_a =
@@ -67,6 +66,7 @@ let test_with_registry_restores () =
      before.  Re-register probe_b and verify it takes effect. *)
   Cp.For_testing.with_registry [ probe_b ] (fun () ->
     check bool "probe_b active" true (Cp.can_probe ~url:"any"))
+;;
 
 (* ── Resolution chain ────────────────────────────────────────── *)
 
@@ -74,18 +74,14 @@ let test_cached_returns_first_match () =
   Cp.For_testing.clear_registry ();
   let url = "http://localhost:11434" in
   let cap = mock_cap ~total:1 ~active:0 in
-  let probe =
-    make_mock
-      ~recognizes:(fun u -> u = url)
-      ~cached_result:(Some cap)
-      ()
-  in
+  let probe = make_mock ~recognizes:(fun u -> u = url) ~cached_result:(Some cap) () in
   Cp.register probe;
   match Cp.cached ~url () with
   | None -> fail "expected Some from registered probe"
   | Some info ->
     check int "total" 1 info.total;
     check int "available" 1 info.process_available
+;;
 
 let test_cached_returns_none_when_no_match () =
   Cp.For_testing.clear_registry ();
@@ -99,6 +95,7 @@ let test_cached_returns_none_when_no_match () =
   match Cp.cached ~url:"http://unknown:9999" () with
   | None -> ()
   | Some _ -> fail "expected None for unrecognised URL"
+;;
 
 let test_capacity_falls_through_to_client () =
   Cp.For_testing.clear_registry ();
@@ -111,6 +108,7 @@ let test_capacity_falls_through_to_client () =
        entry for this URL in some test environments.  Accept Some as
        well — the important thing is no exception. *)
     ()
+;;
 
 (* ── Test suite ──────────────────────────────────────────────── *)
 
@@ -124,7 +122,9 @@ let () =
         ] )
     ; ( "resolution"
       , [ test_case "cached returns first match" `Quick test_cached_returns_first_match
-        ; test_case "cached returns None when no match" `Quick
+        ; test_case
+            "cached returns None when no match"
+            `Quick
             test_cached_returns_none_when_no_match
         ; test_case "capacity falls through" `Quick test_capacity_falls_through_to_client
         ] )

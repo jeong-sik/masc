@@ -1,6 +1,6 @@
 # RFC-0059 — IDE LSP Integration + Eio Domain/Actor Parallelism
 
-Status: Phase 1 Complete · Phase 2 PR-5 + PR-6 Complete (PR #14517 Actor mailbox, PR #14520 Domain pool, both merged 2026-05-11) — remaining work: PR-7 review of `Dashboard_cache` internals (see §6 T6)
+Status: Phase 1 Complete · Phase 2 PR-5 + PR-6 Complete (PR #14517 Actor mailbox, PR #14520 Domain pool, both merged 2026-05-11) — remaining work: PR-7 review of `Dashboard_cache` internals (see §10 Tier A Integration row T6)
 Author: jeong-sik (with Claude Opus 4.7)
 Date: 2026-05-10 · Updated 2026-05-11 (Phase 2 PR-5/PR-6 landed, status promoted)
 Supersedes: —

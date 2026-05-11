@@ -63,7 +63,25 @@ type tool_search_hit_partition =
   }
 
 let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_results =
-  let allowed = allowed @ Keeper_tool_alias.public_names () in
+  (* PR #14574 review #1/#7: only expose a public alias (e.g. "Bash") when
+     its routed internal handler (e.g. [keeper_bash]) is actually in the
+     incoming [allowed] set for this preset. Adding all [public_names ()]
+     unconditionally let [keeper_tool_search] return aliases even when
+     their backing tool was not permitted for the turn, which would invite
+     the model to attempt unregistered tool calls. *)
+  let allowed_internal_set =
+    let tbl = Hashtbl.create (List.length allowed) in
+    List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
+    tbl
+  in
+  let aliases_with_allowed_route =
+    Keeper_tool_alias.public_names ()
+    |> List.filter (fun pub ->
+      match Keeper_tool_alias.route pub with
+      | Some r -> Hashtbl.mem allowed_internal_set r.internal_name
+      | None -> false)
+  in
+  let allowed = allowed @ aliases_with_allowed_route in
   let allowed_set =
     let tbl = Hashtbl.create (List.length allowed) in
     List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;

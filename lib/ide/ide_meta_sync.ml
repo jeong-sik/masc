@@ -74,46 +74,11 @@ let flush_regions (config : config) (state : sync_state) : sync_state =
   match state.pending_regions with
   | [] -> state
   | pending ->
-    let index_file = Filename.concat config.base_path ".masc-ide/index.jsonl" in
-    let ensure_dir () =
-      let dir = Filename.dirname index_file in
-      if Sys.file_exists dir
-      then (
-        if not (Sys.is_directory dir)
-        then
-          failwith
-            (Printf.sprintf
-               "ide_meta_sync.flush_regions: %s exists but is not a directory"
-               dir))
-      else Unix.mkdir dir 0o755
-    in
-    ensure_dir ();
-    let oc = open_out_gen [ Open_append; Open_creat; Open_binary ] 0o644 index_file in
-    Eio_guard.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () ->
-         List.iter
-           (fun (region : code_region) ->
-              let json =
-                `Assoc
-                  [ "file_path", `String region.file_path
-                  ; "line_start", `Int region.line_start
-                  ; "line_end", `Int region.line_end
-                  ; "keeper_id", `String region.keeper_id
-                  ; ( "source"
-                    , `String
-                        (match region.source with
-                         | Tool_call { tool_name; turn } ->
-                           Printf.sprintf "tool:%s:turn:%d" tool_name turn
-                         | Manual { note } -> Printf.sprintf "manual:%s" note) )
-                  ; "timestamp_ms", `Intlit (Int64.to_string region.timestamp_ms)
-                  ]
-              in
-              (* Single write per JSONL record so concurrent appenders
-                 cannot interleave a record body with another record's
-                 trailing newline. *)
-              output_string oc (Yojson.Safe.to_string json ^ "\n"))
-           pending);
+    let store_dir = Filename.concat config.base_path ".masc-ide" in
+    let store = Dated_jsonl.create ~base_dir:store_dir () in
+    List.iter
+      (fun (region : code_region) -> Dated_jsonl.append store (region_to_json region))
+      pending;
     { state with
       pending_regions = []
     ; pending_region_count = 0

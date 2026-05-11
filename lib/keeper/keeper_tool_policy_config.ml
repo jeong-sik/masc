@@ -290,13 +290,23 @@ let load ~base_path : (t, string) result =
         (match all_errors with
         | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
-          (* Validate that all tool names in groups/masc_groups/presets are registered.
-             Skip shard-backed groups (resolved at runtime) and MASC tools (injected). *)
+          (* Validate that all tool names in groups/masc_groups/presets are
+             known to Tool_spec.  Skip shard-backed groups (resolved at
+             runtime) and MASC tools (injected).
+
+             Use [Tool_spec.is_known], NOT [Tool_dispatch.is_registered]:
+             dispatch's registry only sees [Direct]/[Shared] handler
+             bindings, while [Tag_dispatch]/[Match_chain] bindings — the
+             majority of the [keeper_*] / [masc_*] surface — are
+             dispatched via match patterns in [keeper_exec_tools.ml] etc.
+             and would falsely register as unknown. The old check was
+             flagging ~135 working tools as "not registered" on every
+             boot. *)
           let unknown_tools =
             Hashtbl.fold (fun group_name (group : group_source) acc ->
               match group with
               | Static tools ->
-                  List.filter (fun t -> not (Tool_dispatch.is_registered t)) tools
+                  List.filter (fun t -> not (Tool_spec.is_known t)) tools
                   |> List.rev_map (fun t ->
                     Printf.sprintf "groups.%s: tool '%s' is not registered" group_name t)
                   |> List.rev_append acc
@@ -305,7 +315,7 @@ let load ~base_path : (t, string) result =
           in
           let unknown_masc_tools =
             Hashtbl.fold (fun group_name tools acc ->
-              List.filter (fun t -> not (Tool_dispatch.is_registered t)) tools
+              List.filter (fun t -> not (Tool_spec.is_known t)) tools
               |> List.rev_map (fun t ->
                 Printf.sprintf "masc_groups.%s: tool '%s' is not registered" group_name t)
               |> List.rev_append acc
@@ -313,7 +323,7 @@ let load ~base_path : (t, string) result =
           in
           let unknown_preset_tools =
             Hashtbl.fold (fun preset_name (def : preset_def) acc ->
-              List.filter (fun t -> not (Tool_dispatch.is_registered t)) def.masc_tools
+              List.filter (fun t -> not (Tool_spec.is_known t)) def.masc_tools
               |> List.rev_map (fun t ->
                 Printf.sprintf "presets.%s.masc_tools: tool '%s' is not registered" preset_name t)
               |> List.rev_append acc

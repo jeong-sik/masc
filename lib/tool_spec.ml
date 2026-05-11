@@ -181,3 +181,5 @@ let verify_handler_coverage () =
 
 let all_registered_names () =
   Hashtbl.fold (fun name () acc -> name :: acc) registered_names []
+
+let is_known name = Hashtbl.mem registered_names name

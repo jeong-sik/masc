@@ -110,3 +110,11 @@ val verify_handler_coverage : unit -> string list
     completes. Empty list means full coverage. *)
 
 val all_registered_names : unit -> string list
+
+val is_known : string -> bool
+(** True iff [name] was passed to {!register} earlier in the boot, regardless
+    of [handler_binding]. Use this — not [Tool_dispatch.is_registered] — when
+    validating user-facing tool policy configs: [Tool_dispatch.is_registered]
+    only sees [Direct]/[Shared] bindings, while [Tag_dispatch]/[Match_chain]
+    tools (the majority of [keeper_*] / [masc_*] surface) are dispatched via
+    match patterns and would falsely register as unknown. *)

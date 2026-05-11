@@ -37,10 +37,15 @@ let tool_requirement_to_yojson = function
   | Optional -> `String "optional"
   | No_tools -> `String "none"
 
-(* Closed sum type for turn_lane.  Pins the alphabet emitted by
-   keeper_run_tools.ml:963-973.  No [@@deriving tla] because the
-   module-level all_symbols binding is reserved for tool_surface_class
-   (a future RFC spec extension can add TurnLaneSet and lift this). *)
+(* Closed sum type for turn_lane.  Two producers emit values:
+   - keeper_run_tools.ml:963-973 emits the five per-turn lanes
+     (text_only, tool_required, tool_optional, tool_disabled, retry).
+   - keeper_turn_helpers.pre_dispatch_tool_surface emits the
+     [Lane_pre_dispatch] placeholder before the per-turn lane logic
+     runs.
+   No [@@deriving tla] because the module-level all_symbols binding
+   is reserved for tool_surface_class (a future RFC spec extension
+   can add TurnLaneSet and lift this). *)
 type turn_lane =
   | Lane_pre_dispatch
   | Lane_text_only

@@ -840,6 +840,15 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    should never fire in production.  Smoke pins the no-arg helper
    signature so the defensive call-site never silently
    dead-codes. *)
+(* Smoke for [Cascade_metrics.on_cascade_metrics_eviction].  The
+   natural code path requires a cascade-counter LRU eviction —
+   exercised end-to-end via cascade_legacy_runner regression
+   harness with > cascade_max_keys distinct cascade names.  Smoke
+   pins the no-arg helper signature. *)
+let test_cascade_metrics_eviction_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_cascade_metrics_eviction ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_cascade_invariant_violation_helper_callable () =
   Masc_mcp.Cascade_metrics.on_cascade_invariant_violation ();
   check bool "no-arg helper callable without raising" true true
@@ -1333,6 +1342,9 @@ let () =
           test_case
             "cascade_invariant_violation: helper callable" `Quick
             test_cascade_invariant_violation_helper_callable;
+          test_case
+            "cascade_metrics_eviction: helper callable" `Quick
+            test_cascade_metrics_eviction_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

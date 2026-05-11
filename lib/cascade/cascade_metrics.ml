@@ -916,6 +916,22 @@ let metric_cascade_invariant_violation =
 let on_cascade_invariant_violation () =
   Prometheus.inc_counter metric_cascade_invariant_violation ()
 
+(* [Cascade_legacy_runner]'s in-memory cascade-counter table is
+   bounded by [cascade_max_keys].  When a new cascade name arrives
+   and the table is full, the LRU entry is silently evicted and the
+   existing WARN-once line logs the eviction event.  Operators
+   couldn't alert on the rate — high eviction frequency means
+   cascade names are churning faster than the table holds, which is
+   a tunability signal (raise [cascade_max_keys]) or a code-quality
+   signal (cascade names being synthesized rather than canonicalized).
+
+   Cardinality: 1 series. *)
+let metric_cascade_metrics_eviction =
+  "masc_cascade_metrics_eviction_total"
+
+let on_cascade_metrics_eviction () =
+  Prometheus.inc_counter metric_cascade_metrics_eviction ()
+
 (* Iter 43 infrastructure: pre-register every counter introduced in
    iter 2-42 with [Prometheus.register_counter] so the
    process startup state exposes all metric names at /metrics with
@@ -1021,7 +1037,8 @@ let register_all () =
      defensive arms). MUST be zero in steady state. Any non-zero \
      rate is a guaranteed FSM bug — not a tunable; alert immediately \
      and investigate the FSM transition that exposed an Accept in \
-     Accept_rejected branch."
+     Accept_rejected branch.";
+  c metric_cascade_metrics_eviction
 ;;
 
 (* Module-load side effect: register every cascade counter as soon

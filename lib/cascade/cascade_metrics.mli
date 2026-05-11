@@ -284,6 +284,13 @@ val on_cascade_invariant_violation : unit -> unit
     code).  Steady-state value must be ZERO; non-zero indicates a
     real FSM contract violation. *)
 
+val on_cascade_metrics_eviction : unit -> unit
+(** Tick the cascade-metrics LRU eviction counter at
+    [Cascade_legacy_runner] when the in-memory cascade-counter
+    table evicts an LRU entry to admit a new cascade name.  High
+    rate signals cascade-name churn — either raise
+    [cascade_max_keys] or canonicalize synthesized names. *)
+
 val register_all : unit -> unit
 (** Pre-register every counter defined in this module with
     [Prometheus.register_counter] so process startup exposes them

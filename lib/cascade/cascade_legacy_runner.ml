@@ -672,6 +672,11 @@ let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
   in
   Option.iter
     (fun candidate ->
+      (* Iter 45: counter ticks on every eviction so the rate is
+         alertable.  WARN log already prints per-eviction detail
+         (cascade name, age, etc.); metric makes rate aggregation
+         tractable. *)
+      Cascade_metrics.on_cascade_metrics_eviction ();
       Log.Misc.warn
         "cascade metrics evicted key=%s calls=%d last_used_at=%.3f to admit %s (limit=%d)"
         candidate.name candidate.calls candidate.last_used_at cascade_name_string

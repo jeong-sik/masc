@@ -20,6 +20,8 @@ on:
       - 'specs/keeper-state-machine/**'
       - 'lib/keeper/keeper_registry.ml'
       - 'lib/keeper/keeper_state_machine.ml'
+      - 'lib/cascade/cascade_fsm.ml'
+      - 'lib/cascade/cascade_fsm.mli'
       - 'scripts/audit-tla-annotation-drift.sh'
       - 'scripts/tla-annotation-drift-baseline.txt'
       - '.github/workflows/tla-annotation-drift.yml'
@@ -30,6 +32,8 @@ on:
       - 'specs/keeper-state-machine/**'
       - 'lib/keeper/keeper_registry.ml'
       - 'lib/keeper/keeper_state_machine.ml'
+      - 'lib/cascade/cascade_fsm.ml'
+      - 'lib/cascade/cascade_fsm.mli'
       - 'scripts/audit-tla-annotation-drift.sh'
       - 'scripts/tla-annotation-drift-baseline.txt'
   workflow_dispatch: {}

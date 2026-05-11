@@ -428,7 +428,7 @@ unknown_field = 1
       check bool "rejection mentions unknown field" true
         (contains_substring rendered "unknown field")
 
-(* Phase 2 regression: when load_json fails (malformed JSON, missing
+(* Phase 2 regression: when load_catalog_source fails (malformed TOML, missing
    IO, or strict-field rejection on TOML side), the resolved
    selection_trace.source must be [Load_failed _], not the bug-prior
    [Hardcoded_defaults].  Without this, an operator viewing the

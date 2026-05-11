@@ -170,7 +170,7 @@ let configured_route_bindings ?config_path () =
   match path_opt with
   | None -> []
   | Some path -> (
-      match Cascade_config_loader.load_json path with
+      match Cascade_config_loader.load_catalog_source path with
       | Ok json -> route_bindings_from_json json
       | Error _ -> [])
 

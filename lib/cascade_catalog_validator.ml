@@ -53,7 +53,7 @@ let discover_profiles_in_json = function
   | _ -> []
 
 let discover_profiles ~config_path =
-  match Cascade_config_loader.load_json config_path with
+  match Cascade_config_loader.load_catalog_source config_path with
   | Ok json -> discover_profiles_in_json json
   | Error _ -> []
 
@@ -356,7 +356,7 @@ let diagnose_profile ~config_path ~profile =
   issues @ capability_issues
 
 let diagnose_catalog ~config_path =
-  match Cascade_config_loader.load_json config_path with
+  match Cascade_config_loader.load_catalog_source config_path with
   | Error msg ->
       [
         {

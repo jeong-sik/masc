@@ -327,15 +327,19 @@ val resolve_model_strings_with_trace :
   unit ->
   string list * selection_trace
 
-(** {1 Raw JSON Access} *)
+(** {1 Catalog Source Access} *)
 
-(** Load and cache the raw JSON config file.
-    Cached with mtime-based hot-reload.
+(** Load and cache the cascade catalog source.
+
+    Returns a [Yojson.Safe.t] view for legacy JSON-shaped consumers,
+    but reads no on-disk JSON: [cascade.toml] is the SSOT and is parsed
+    into the returned value in memory. Cached by source-path mtime.
     Exposed for consumers needing custom fields beyond model lists
     (e.g., per-cascade temperature/max_tokens overrides).
 
-    @since 0.89.1 *)
-val load_json : string -> (Yojson.Safe.t, string) result
+    @since 0.89.1
+    @since RFC-0058 §9 Phase 9.3 renamed from [load_json]. *)
+val load_catalog_source : string -> (Yojson.Safe.t, string) result
 
 (** {1 Inference Parameters} *)
 

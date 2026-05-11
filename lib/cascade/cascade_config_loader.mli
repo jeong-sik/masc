@@ -1,4 +1,4 @@
-(** JSON config loading with mtime-based hot-reload.
+(** Cascade catalog source loading with mtime-based hot-reload.
 
     @since 0.59.0
     @since 0.92.0 extracted from Cascade_config
@@ -6,13 +6,21 @@
     @stability Internal
     @since 0.93.1 *)
 
-(** Load and cache a raw JSON config file.
-    Cached with mtime-based hot-reload. When a sibling [cascade.toml] exists,
-    it is validated/materialized first and this loader then reads the
-    generated [cascade.json]. *)
-val load_json : string -> (Yojson.Safe.t, string) result
+(** Load and cache the cascade catalog source.
 
-(** Drop the cached JSON entry for one [cascade.json] path.
+    Despite returning [Yojson.Safe.t] for backward compatibility with the
+    JSON-shaped consumers (which still walk the value via
+    [Yojson.Safe.Util]), this function does not read any JSON from disk.
+    The on-disk source is [cascade.toml]; it is parsed by [Otoml] and
+    rendered to an in-memory [Yojson.Safe.t] view by
+    [Cascade_toml_materializer]. The cache is keyed by the resolved
+    source-path mtime.
+
+    @since RFC-0058 §9 Phase 9.3 renamed from [load_json] — no on-disk
+    JSON is read or written. *)
+val load_catalog_source : string -> (Yojson.Safe.t, string) result
+
+(** Drop the cached entry for one cascade source path.
 
     Intended for in-process editors/tests that overwrite the file and need
     the next read to bypass the previous mtime cache entry immediately.

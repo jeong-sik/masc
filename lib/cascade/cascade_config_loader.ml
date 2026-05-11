@@ -94,8 +94,13 @@ let load_toml_in_memory config_path =
    JSON-only branch (mtime-cached disk read of cascade.json) has been
    removed along with [source_kind = Json]. All paths flow through
    [load_toml_in_memory], which renders TOML to JSON in memory and
-   caches by source-path mtime. *)
-let load_json path =
+   caches by source-path mtime.
+
+   Named [load_catalog_source] rather than [load_json] because no
+   on-disk JSON is read: a sibling [cascade.toml] is parsed and
+   rendered to an in-memory [Yojson.Safe.t] view that legacy
+   JSON-shaped consumers walk via [Yojson.Safe.Util]. *)
+let load_catalog_source path =
   try load_toml_in_memory path with
   | Sys_error msg -> Error msg
   | Unix.Unix_error (err, fn, arg) ->
@@ -455,7 +460,7 @@ let detect_capability_mismatches (entries : catalog_entry list)
 ;;
 
 let load_catalog ~config_path =
-  match load_json config_path with
+  match load_catalog_source config_path with
   | Error _ as err -> err
   | Ok (`Assoc fields) ->
     (* RFC-0058: register TOML-declared profiles before catalog parsing
@@ -574,7 +579,7 @@ let load_catalog ~config_path =
 
 let load_profile_weighted ~config_path ~name =
   let key = name ^ "_models" in
-  match load_json config_path with
+  match load_catalog_source config_path with
   | Error msg ->
     (* Surface the load failure on the standard logging channel so
          operators see it without tailing stderr. Returning the empty
@@ -654,7 +659,7 @@ let read_bool_field json key =
 ;;
 
 let resolve_inference_params ~config_path ~name =
-  match load_json config_path with
+  match load_catalog_source config_path with
   | Error msg ->
     Log.Misc.warn
       "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
@@ -747,7 +752,7 @@ let read_api_key_env_field json key =
 ;;
 
 let resolve_api_key_env ~config_path ~name =
-  match load_json config_path with
+  match load_catalog_source config_path with
   | Error msg ->
     Log.Misc.warn
       "[CascadeConfig] resolve_api_key_env: %s (name=%s, path=%s)"
@@ -843,7 +848,7 @@ let empty_strategy_config =
 ;;
 
 let resolve_strategy_config ~config_path ~name =
-  match load_json config_path with
+  match load_catalog_source config_path with
   | Error msg ->
     Log.Misc.warn
       "[CascadeConfig] resolve_strategy_config: %s (name=%s, path=%s)"
@@ -910,7 +915,7 @@ let cascade_item_of_weighted_entry (entry : weighted_entry)
 let load_cascade_profile_hierarchical ~(config_path : string) ~(name : string)
   : Cascade_ref.cascade_profile option
   =
-  match load_json config_path with
+  match load_catalog_source config_path with
   | Error _ -> None
   | Ok json ->
     let open Yojson.Safe.Util in

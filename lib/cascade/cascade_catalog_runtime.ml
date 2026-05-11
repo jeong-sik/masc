@@ -670,7 +670,7 @@ let validate_path_result ?sw ?net ~config_path () =
          ~errors:[ Printf.sprintf "active cascade source is missing: %s" source_path ]
          ~profiles:[])
   else
-    match Cascade_config_loader.load_json config_path with
+    match Cascade_config_loader.load_catalog_source config_path with
     | Error msg ->
         Error
           (rejection_of_path ~config_path:source_path ~attempted_mtime ~checked_at

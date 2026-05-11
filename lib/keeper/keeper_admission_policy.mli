@@ -115,9 +115,9 @@ val parse_admission_json :
     — every persona must declare candidates explicitly to make I5
     (drift observability) defensible.
 
-    Pure: no file I/O.  The caller is expected to read the JSON from
-    [cascade_config_loader.load_json] and select the appropriate
-    sub-object before calling this function. *)
+    Pure: no file I/O.  The caller is expected to read the catalog
+    source via [Cascade_config_loader.load_catalog_source] and select
+    the appropriate sub-object before calling this function. *)
 
 (** {1 Query} *)
 

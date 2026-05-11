@@ -95,13 +95,13 @@ let core_discovery_tools =
          the LLM-facing discovery surface. Dual-registration cleanup
          means internal names (keeper_bash, keeper_fs_read, etc.)
          are no longer registered as OAS tools. *)
-        "Bash"
-      ; "Edit"
-      ; "Grep"
-      ; "Read"
-      ; "WebSearch"
-      ; "Write"
-      ]
+      "Bash"
+    ; "Edit"
+    ; "Grep"
+    ; "Read"
+    ; "WebSearch"
+    ; "Write"
+    ]
 ;;
 
 let effective_core_tools () = core_discovery_tools

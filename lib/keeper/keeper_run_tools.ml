@@ -475,7 +475,9 @@ let prepare_agent_setup
       (Keeper_tool_alias.public_names ())
   in
   let allowed_exec_names =
-    List.filter (fun name -> not (List.mem name aliased_internal_names)) allowed_exec_names
+    List.filter
+      (fun name -> not (List.mem name aliased_internal_names))
+      allowed_exec_names
   in
   (* Only include a public alias name when its routed internal target is
      itself in [allowed_exec_names]. Otherwise the public name (e.g. "Bash")

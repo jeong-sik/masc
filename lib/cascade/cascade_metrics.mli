@@ -314,10 +314,20 @@ val on_local_context_clamped : unit -> unit
     Symmetric to iter 46 [max_tokens_clamped] (response-budget
     side). *)
 
+val all_cascade_counters : (string * string) list
+(** SSOT list of every cascade counter in this module, paired with
+    its Prometheus [help] text.  Used by [register_all] and by the
+    iter-50 coverage test in [test_cascade_toml_materialization]
+    to enumerate every metric without re-listing them.  Help text
+    defaults to the metric name for counters that don't need
+    operator-facing description; the iter-44 / iter-48 backfill
+    populates richer help for the 17 most actionable counters. *)
+
 val register_all : unit -> unit
-(** Pre-register every counter defined in this module with
+(** Pre-register every counter in [all_cascade_counters] with
     [Prometheus.register_counter] so process startup exposes them
     at /metrics with zero value.  Idempotent: register_counter is
     a no-op if the metric is already known.  Intended to be
-    called once from [Prometheus.register_all] (or equivalent
-    startup hook). *)
+    called once from the module-load toplevel; see the
+    [let () = register_all ()] at the bottom of
+    [cascade_metrics.ml]. *)

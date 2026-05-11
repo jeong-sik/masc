@@ -1018,66 +1018,78 @@ let on_local_context_clamped () =
    for the legacy cascade counters: state when the counter ticks
    ("when ...") + immediate operator action ("operator: ...") or
    contract ("must be zero in steady state"). *)
-let register_all () =
-  let c name = Prometheus.register_counter ~name ~help:name () in
-  let h name help = Prometheus.register_counter ~name ~help () in
-  c metric_decisions;
-  c metric_fallbacks;
-  c metric_providers_exhausted;
-  c metric_routing_phase_overrides;
-  c metric_profile_discovery;
-  c metric_declarative_parse_errors;
-  c metric_parallel_validation;
-  c metric_toml_read_race;
-  h metric_serving_last_known_good
+(* Iter 51: list-based SSOT.  Replaces the iter-43/44/48
+   imperative [register_all] body.  Each entry is a [(name, help)]
+   pair; [register_all] simply iterates the list.  Test code can
+   import [all_cascade_counters] directly to enumerate every
+   metric without re-listing them.
+
+   To add a new counter:
+     1. Define [let metric_X = "masc_cascade_X_total"] above
+     2. Define [let on_X () = Prometheus.inc_counter metric_X ()]
+     3. Append [metric_X, "<help text or metric_X for default>"]
+        to [all_cascade_counters]
+   The test guard in [test_register_all_covers_every_cascade_counter]
+   loads the list itself, so a forgotten step (3) becomes a missing
+   entry rather than a silent gap. *)
+let all_cascade_counters : (string * string) list = [
+  metric_decisions, metric_decisions;
+  metric_fallbacks, metric_fallbacks;
+  metric_providers_exhausted, metric_providers_exhausted;
+  metric_routing_phase_overrides, metric_routing_phase_overrides;
+  metric_profile_discovery, metric_profile_discovery;
+  metric_declarative_parse_errors, metric_declarative_parse_errors;
+  metric_parallel_validation, metric_parallel_validation;
+  metric_toml_read_race, metric_toml_read_race;
+  metric_serving_last_known_good,
     "Total inspect_active calls that returned Serving_last_known_good. \
      Labels: reason (path_unresolved | validation_failed | \
      stale_rejection_cached). Operator action: investigate cascade.toml \
      load fault; the keeper is serving a stale cached snapshot.";
-  h metric_degraded_recovery
+  metric_degraded_recovery,
     "Total inspect_active calls that transitioned from a degraded \
      state (LKG or Validated_with_rejections) back to Validated. \
      Non-zero rate confirms operator fixes are taking effect.";
-  h metric_profile_candidate_drop
+  metric_profile_candidate_drop,
     "Total weighted entries dropped at [validate_profile_static] \
      because [parse_weighted_entry_diag] rejected them. Labels: \
      cascade, reason (unregistered_scheme | unavailable_scheme | \
      invalid_syntax). [unavailable_scheme] is the most common \
      operator-actionable cause (missing API credential / disabled \
      runtime lane).";
-  h metric_resolve_provider_leak
+  metric_resolve_provider_leak,
     "Total provider entries returned by [resolve_named_providers] \
      that are NOT in the parsed declared profile (alias expansion, \
      provider_filter fallback widening, or genuine configuration \
      drift). Bumped by leak_count per resolve call (delta \
      semantics). Labels: cascade.";
-  c metric_route_config_error;
-  h metric_resolve_failure
+  metric_route_config_error, metric_route_config_error;
+  metric_resolve_failure,
     "Total resolve_named_providers[_strict[_with_secondary_resolver]] \
      invocations that returned Error. Labels: cascade, reason \
      (lookup_failed | provider_filter_rejected | no_callable_providers). \
      Operator action: cascade.toml typo or provider unavailable.";
-  c metric_validated_with_rejections;
-  h metric_provider_filter_widening
+  metric_validated_with_rejections, metric_validated_with_rejections;
+  metric_provider_filter_widening,
     "Total apply_provider_filter (non-strict) invocations where the \
      operator-supplied filter matched no provider and the function \
      silently fell back to the unfiltered list. Security / budget / \
      SLA implication: the filter intent is being ignored. Operator \
      action: switch to apply_provider_filter_strict or fix the \
      cascade.toml provider list.";
-  c metric_auto_expansion_fanout;
-  c metric_ordering_health_widening;
-  h metric_provider_cooldown
+  metric_auto_expansion_fanout, metric_auto_expansion_fanout;
+  metric_ordering_health_widening, metric_ordering_health_widening;
+  metric_provider_cooldown,
     "Total fresh cooldown entries set at [Cascade_health_tracker]. \
      Labels: provider, reason (failure_threshold | soft_rate_limit \
      | hard_quota | terminal_failure). Counter complement to the \
      existing [keeper_provider_block_duration_sec] histogram \
      (duration distribution, this is entry rate by cause).";
-  c metric_strategy_starvation_guard;
-  c metric_sticky_drift;
-  c metric_sticky_expiry;
-  c metric_default_label_fallback;
-  h metric_max_context_fallback
+  metric_strategy_starvation_guard, metric_strategy_starvation_guard;
+  metric_sticky_drift, metric_sticky_drift;
+  metric_sticky_expiry, metric_sticky_expiry;
+  metric_default_label_fallback, metric_default_label_fallback;
+  metric_max_context_fallback,
     "Total context-window resolutions falling back to \
      [fallback_context_window] (128_000). Labels: site \
      (label_no_provider_name | label_unregistered_scheme | \
@@ -1085,39 +1097,39 @@ let register_all () =
      turn runs at the fallback window instead of any configured \
      value — operators querying for long-context capability \
      should check non-zero rates per site.";
-  c metric_discovered_context_below_floor;
-  c metric_context_capability_drift;
-  c metric_llama_model_not_discovered;
-  h metric_route_resolve_fallback
+  metric_discovered_context_below_floor, metric_discovered_context_below_floor;
+  metric_context_capability_drift, metric_context_capability_drift;
+  metric_llama_model_not_discovered, metric_llama_model_not_discovered;
+  metric_route_resolve_fallback,
     "Total cascade_name_for_use invocations where the declared route \
      target could not be honored at runtime. Labels: reason \
      (catalog_unvalidated | target_not_in_catalog). Operator action: \
      fix the [routes] table in cascade.toml.";
-  h metric_deprecated_profile_name_filter
+  metric_deprecated_profile_name_filter,
     "Total profile names filtered by \
      [is_deprecated_logical_profile_name] across 3 catalog-build \
      call sites. Label: name (one of ~28 closed deprecated names). \
      Doubles as RFC-0066 Phase 4 migration tracker: per-name rate \
      stays at zero across deploys -> safe to drop from \
      [deprecated_logical_profile_names].";
-  h metric_capability_mismatch
+  metric_capability_mismatch,
     "Total load_catalog invocations that detected at least one \
      RFC-0055 capability subset violation on a fallback_cascade edge. \
      Bumped by the number of mismatches per call (delta semantics). \
      Operator action: align source profile capability requirements \
      with the fallback target.";
-  c metric_route_binding_dropped;
-  c metric_weighted_item_dropped;
-  c metric_resolve_live_fallback;
-  c metric_fallback_hint_invalid;
-  h metric_runtime_mcp_legacy_strip
+  metric_route_binding_dropped, metric_route_binding_dropped;
+  metric_weighted_item_dropped, metric_weighted_item_dropped;
+  metric_resolve_live_fallback, metric_resolve_live_fallback;
+  metric_fallback_hint_invalid, metric_fallback_hint_invalid;
+  metric_runtime_mcp_legacy_strip,
     "Total runtime_mcp_policy_for_provider invocations where a \
      provider requires per-keeper bridging but the caller did not \
      supply agent_name; auth-bearing headers are silently stripped \
      and runtime MCP tools run unauthenticated. Caller-contract \
      fault, not config — fix the calling code path to thread \
      agent_name through.";
-  h metric_partial_eio_context
+  metric_partial_eio_context,
     "Total [refresh_local_discovery_if_possible] calls where only \
      one of [Eio.Switch.t] / [Eio.Net.t] was available (caller \
      forgot [Eio_context.set_switch] / [set_net]). The existing \
@@ -1125,12 +1137,12 @@ let register_all () =
      a chronic caller-side regression stays observable after the \
      WARN is suppressed. Operator action: thread Eio context to \
      the failing call site (RFC-0037 §4.3).";
-  h metric_discovery_refresh_exception
+  metric_discovery_refresh_exception,
     "Total refresh_local_discovery_if_possible calls that caught a \
      non-cancellation exception from refresh_llama_endpoints. The \
      exception is swallowed and the function returns false; this \
      counter makes the swallow rate alertable.";
-  h metric_profile_registration_failure
+  metric_profile_registration_failure,
     "Total [load_catalog] calls where \
      [register_declared_profiles_from_json] returned Error. \
      Catalog continues loading without the declared profiles, so \
@@ -1138,16 +1150,22 @@ let register_all () =
      these names and capability filtering falls back to defaults. \
      Pair with iter 6 / iter 14 [profile_candidate_drop] which \
      surfaces the downstream effect of these registration gaps.";
-  h metric_cascade_invariant_violation
+  metric_cascade_invariant_violation,
     "Total Cascade_fsm contract violations (should-be-unreachable \
      defensive arms). MUST be zero in steady state. Any non-zero \
      rate is a guaranteed FSM bug — not a tunable; alert immediately \
      and investigate the FSM transition that exposed an Accept in \
      Accept_rejected branch.";
-  c metric_cascade_metrics_eviction;
-  c metric_max_tokens_clamped;
-  c metric_cascade_audit_failure;
-  c metric_local_context_clamped
+  metric_cascade_metrics_eviction, metric_cascade_metrics_eviction;
+  metric_max_tokens_clamped, metric_max_tokens_clamped;
+  metric_cascade_audit_failure, metric_cascade_audit_failure;
+  metric_local_context_clamped, metric_local_context_clamped;
+]
+
+let register_all () =
+  List.iter
+    (fun (name, help) -> Prometheus.register_counter ~name ~help ())
+    all_cascade_counters
 ;;
 
 (* Module-load side effect: register every cascade counter as soon

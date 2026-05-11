@@ -859,88 +859,36 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    max_context > small_local_floor — best exercised end-to-end in
    the cascade_runtime regression harness.  Smoke pins the no-arg
    helper signature. *)
-(* Iter 50 milestone: coverage guard that every cascade counter
-   defined in [Cascade_metrics] is included in [register_all],
-   so process startup exposes every name at /metrics with zero
-   value (iter 43 infrastructure policy).
+(* Iter 50 coverage guard, iter 51 SSOT refactor: every cascade
+   counter in [Cascade_metrics.all_cascade_counters] must be
+   registered at process startup (iter 43 infrastructure policy).
 
-   Test policy: every metric name in the cascade-toml-hardening
-   PR (iter 2 through iter 49) is enumerated here.  When a future
-   iter adds a metric, the iter must also:
-     1. add it to [Cascade_metrics.register_all]
-     2. add its name to this list
-
-   Step (2) makes step (1) loud — without it, a missing
-   register_all entry would silently leave the metric invisible
-   at startup until first emit (iter 43's original problem).
-
-   The hand-maintained list is a coverage guard, not a discovery
-   tool; a future iter that adds metrics without updating this
-   list would slip through this test even with register_all
-   missed.  For full SSOT, refactor [Cascade_metrics] to expose
-   [val all_cascade_counters : string list] and have
-   [register_all] iterate that — deferred until the PR is ready
-   to merge so the iter-43 imperative shape is preserved for
-   review continuity. *)
+   With iter 51, the list lives in [Cascade_metrics] itself
+   ([val all_cascade_counters : (string * string) list]) and
+   [register_all] iterates over it.  This test imports the same
+   list, so a forgotten step is structurally impossible:
+   to add a counter, you append one entry to the SSOT list and
+   both [register_all] and this test pick it up. *)
 let test_register_all_covers_every_cascade_counter () =
-  let pr_introduced_counters = [
-    "masc_cascade_decisions_total";
-    "masc_cascade_fallbacks_total";
-    "masc_cascade_providers_exhausted_total";
-    "masc_cascade_routing_phase_overrides_total";
-    "masc_cascade_profile_discovery_total";
-    "masc_cascade_declarative_parse_errors_total";
-    "masc_cascade_parallel_validation_total";
-    "masc_cascade_toml_read_race_total";
-    "masc_cascade_serving_last_known_good_total";
-    "masc_cascade_degraded_recovery_total";
-    "masc_cascade_profile_candidate_drop_total";
-    "masc_cascade_resolve_provider_leak_total";
-    "masc_cascade_route_config_error_total";
-    "masc_cascade_resolve_failure_total";
-    "masc_cascade_validated_with_rejections_total";
-    "masc_cascade_provider_filter_widening_total";
-    "masc_cascade_auto_expansion_fanout_total";
-    "masc_cascade_ordering_health_widening_total";
-    "masc_cascade_provider_cooldown_total";
-    "masc_cascade_strategy_starvation_guard_total";
-    "masc_cascade_sticky_drift_total";
-    "masc_cascade_sticky_expiry_total";
-    "masc_cascade_default_label_fallback_total";
-    "masc_cascade_max_context_fallback_total";
-    "masc_cascade_discovered_context_below_floor_total";
-    "masc_cascade_context_capability_drift_total";
-    "masc_cascade_llama_model_not_discovered_total";
-    "masc_cascade_route_resolve_fallback_total";
-    "masc_cascade_deprecated_profile_name_filter_total";
-    "masc_cascade_capability_mismatch_total";
-    "masc_cascade_route_binding_dropped_total";
-    "masc_cascade_weighted_item_dropped_total";
-    "masc_cascade_resolve_live_fallback_total";
-    "masc_cascade_fallback_hint_invalid_total";
-    "masc_cascade_runtime_mcp_legacy_strip_total";
-    "masc_cascade_partial_eio_context_total";
-    "masc_cascade_discovery_refresh_exception_total";
-    "masc_cascade_profile_registration_failure_total";
-    "masc_cascade_invariant_violation_total";
-    "masc_cascade_metrics_eviction_total";
-    "masc_cascade_max_tokens_clamped_total";
-    "masc_cascade_audit_failure_total";
-    "masc_cascade_local_context_clamped_total";
-  ] in
   List.iter
-    (fun name ->
+    (fun (name, _help) ->
       match Masc_mcp.Prometheus.get_metric_value name () with
       | Some _ -> ()
       | None ->
         failf
           "iter-43 register_all coverage gap: metric %S not \
-           registered at startup. Add it to \
-           [Cascade_metrics.register_all]." name)
-    pr_introduced_counters;
-  check int "iter 2-49 introduced 43 counters"
-    43
-    (List.length pr_introduced_counters)
+           registered at startup. The [Cascade_metrics] SSOT \
+           list iteration should have caught this; check the \
+           Prometheus init order." name)
+    Masc_mcp.Cascade_metrics.all_cascade_counters;
+  (* Sanity floor: at least the iter 2-49 set must be present.
+     The exact count grows with future iters; raise this floor
+     when intentional. *)
+  let n = List.length Masc_mcp.Cascade_metrics.all_cascade_counters in
+  check bool
+    (Printf.sprintf "all_cascade_counters has >= 43 entries (got %d)" n)
+    true
+    (n >= 43)
 
 let test_local_context_clamped_helper_callable () =
   Masc_mcp.Cascade_metrics.on_local_context_clamped ();

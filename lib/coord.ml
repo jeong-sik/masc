@@ -533,7 +533,7 @@ let record_process_timeout ~program ~timeout_sec =
     process_timeout_metric
     ~labels:
       [ "program", program
-      ; "timeout_bucket", Timeout_bucket.(to_label (of_seconds timeout_sec))
+      ; ("timeout_bucket", Timeout_bucket.(to_label (of_seconds timeout_sec)))
       ]
     ()
 ;;

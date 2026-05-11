@@ -1027,7 +1027,7 @@ function CascadeRawConfigEditor({
   const saving = useSignal(false)
   const saveMessage = useSignal<string | null>(null)
   const mode = rawConfigModeSummary(raw)
-  const sourceEditable = raw?.source_editable !== false
+  const sourceEditable = raw !== null && raw.source_editable !== false
 
   useEffect(() => {
     if (!raw || editorDirty.value) return

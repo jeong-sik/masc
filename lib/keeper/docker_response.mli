@@ -69,16 +69,17 @@ type exec_result =
 
 (** {1 Container snapshot ([docker ps] row)} *)
 
-(** A row from [docker ps --format '\{\{json .\}\}']. The fields are
+(** A row from [docker ps --format '{{json .}}']. The fields are
     *exactly* what cleanup / quarantine logic in Phase 3b-iv.3 needs to
     branch on; richer per-container metadata stays in
     [docker inspect]'s separate response surface (introduced in Phase
     3b-iv.2 alongside [Docker_client.Real]).
 
-    [labels] is the parsed label dictionary. Docker's wire format emits
-    a single comma-separated string ("k1=v1,k2=v2"); the parser splits
-    it before constructing the record so callers see structured data,
-    not the raw string. *)
+    [labels] is an ordered association list, *not* a hash-map: docker's
+    wire format emits a single comma-separated string ("k1=v1,k2=v2"),
+    and the parser splits in input order before constructing the
+    record.  Callers (and tests) treat list order as meaningful for
+    structural equality — see [test_ps_record_labels_order]. *)
 type ps_record =
   { id : string
   ; name : Keeper_container_name.t

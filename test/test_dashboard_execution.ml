@@ -455,7 +455,8 @@ let create_keeper env sw config name =
 let append_execution_receipt
     ?(outcome : Lib.Keeper_execution_receipt.outcome_kind = `Ok)
     ?(terminal_reason_code = "completed")
-    ?(tool_contract_result = "satisfied")
+    ?(tool_contract_result : Lib.Keeper_execution_receipt.tool_contract_result =
+      Contract_satisfied_completion)
     ?(stop_reason = Some Lib.Cascade_runner.Completed)
     config ~keeper_name =
   let meta =
@@ -839,7 +840,7 @@ let test_dashboard_execution_queue_surfaces_keeper_runtime_trust () =
             append_execution_receipt config ~keeper_name:"sangsu"
               ~outcome:`Error
               ~terminal_reason_code:"required_tool_use_unsatisfied"
-              ~tool_contract_result:"violated"
+              ~tool_contract_result:Contract_violated
               ~stop_reason:None;
             let execution_json =
               Lib.Dashboard_execution.json

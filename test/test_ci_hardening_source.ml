@@ -1034,7 +1034,8 @@ let test_keeper_zombie_field_contracts () =
       canonical_tools = [ "Read" ];
       unexpected_tools = [];
       tools_used = [ "Read" ];
-      tool_contract_result = "satisfied";
+      tool_contract_result =
+        Masc_mcp.Keeper_execution_receipt.Contract_satisfied_completion;
       tool_surface =
         {
           (* WORKAROUND: previously "unified" — invalid string never

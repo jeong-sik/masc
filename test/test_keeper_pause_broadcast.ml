@@ -36,7 +36,8 @@ let mk_tool_surface ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Requ
 let mk_receipt
     ?(outcome : R.outcome_kind = `Error)
     ?(terminal_reason_code = "")
-    ?(tool_contract_result = "satisfied")
+    ?(tool_contract_result : R.tool_contract_result =
+      Contract_satisfied_completion)
     ?(tools_used = [ "Read" ])
     ?(observed_tools = [])
     ?(canonical_tools = [])
@@ -103,23 +104,23 @@ let check_disp label receipt expected_disp expected_reason =
 
 (* === Bug class: tool_contract_result violations must pause_human ====== *)
 
-let violation_variants =
+let violation_variants : (string * R.tool_contract_result) list =
   [
-    "violated";
-    "unknown";
-    "needs_execution_progress";
-    "missing_required_tool_use";
-    "passive_only";
-    "claim_only_after_owned_task";
-    "tool_surface_mismatch";
-    "no_tool_capable_provider";
+    ("violated", Contract_violated);
+    ("unknown", Contract_unknown);
+    ("needs_execution_progress", Contract_needs_execution_progress);
+    ("missing_required_tool_use", Contract_missing_required_tool_use);
+    ("passive_only", Contract_passive_only);
+    ("claim_only_after_owned_task", Contract_claim_only_after_owned_task);
+    ("tool_surface_mismatch", Contract_tool_surface_mismatch);
+    ("no_tool_capable_provider", Contract_no_tool_capable_provider);
   ]
 
 let test_pause_human_for_each_violation () =
   List.iter
-    (fun v ->
+    (fun (label, v) ->
       let r = mk_receipt ~tool_contract_result:v () in
-      check_disp ("violation:" ^ v) r "pause_human"
+      check_disp ("violation:" ^ label) r "pause_human"
         "tool_required_unsatisfied")
     violation_variants
 
@@ -138,7 +139,7 @@ let test_pause_human_for_completion_contract_violation_with_satisfied_inner () =
   let r =
     mk_receipt
       ~terminal_reason_code:"completion_contract_violation:require_tool_use"
-      ~tool_contract_result:"satisfied_completion"
+      ~tool_contract_result:Contract_satisfied_completion
       ~error_kind:(Some (R.error_kind_of_string "agent"))
       ~tools_used:[ "keeper_board_list"; "keeper_stay_silent" ]
       ()
@@ -150,7 +151,7 @@ let test_pause_human_for_completion_contract_violation_other_subclause () =
   let r =
     mk_receipt
       ~terminal_reason_code:"completion_contract_violation:other_subclause"
-      ~tool_contract_result:"satisfied"
+      ~tool_contract_result:Contract_satisfied_completion
       ~tools_used:[ "Read" ] ()
   in
   check_disp "completion_contract_violation:other_subclause" r "pause_human"
@@ -204,7 +205,7 @@ let test_unknown_when_unmapped () =
        variant to reach the same path). *)
     mk_receipt ~outcome:`Ok
       ~cascade_outcome:R.Cascade_not_observed
-      ~tool_contract_result:"satisfied" ()
+      ~tool_contract_result:Contract_satisfied_completion ()
   in
   check_disp "unmapped" r "unknown" "unmapped_cascade_state"
 
@@ -213,7 +214,7 @@ let test_unknown_when_unmapped () =
 let test_pass_for_healthy () =
   let r =
     mk_receipt ~outcome:`Ok ~cascade_outcome:R.Cascade_completed
-      ~tool_contract_result:"satisfied" ~terminal_reason_code:"completed"
+      ~tool_contract_result:Contract_satisfied_completion ~terminal_reason_code:"completed"
       ()
   in
   check_disp "healthy" r "pass" "healthy"
@@ -222,14 +223,14 @@ let test_pass_next_for_cascade_fallback () =
   let r =
     mk_receipt ~cascade_fallback_applied:true
       ~cascade_outcome:R.Cascade_passed_to_next_model
-      ~tool_contract_result:"satisfied" ()
+      ~tool_contract_result:Contract_satisfied_completion ()
   in
   check_disp "cascade_fallback" r "pass_next_model" "cascade_fallback"
 
 let test_fail_open_for_degraded_retry () =
   let r =
     mk_receipt ~degraded_retry_applied:true
-      ~tool_contract_result:"satisfied" ()
+      ~tool_contract_result:Contract_satisfied_completion ()
   in
   check_disp "degraded_retry" r "fail_open_next_cascade" "degraded_retry"
 
@@ -250,7 +251,7 @@ let test_needs_broadcast_predicate () =
 
 let test_each_broadcast_disp_is_reachable () =
   (* pause_human via violation *)
-  let r1 = mk_receipt ~tool_contract_result:"violated" () in
+  let r1 = mk_receipt ~tool_contract_result:Contract_violated () in
   let d1, _ = R.operator_disposition r1 in
   check bool "pause_human reachable" true (R.needs_operator_broadcast d1);
   (* alert_exhausted via terminal_reason_code.  Pre-typing this was driven
@@ -269,7 +270,7 @@ let test_each_broadcast_disp_is_reachable () =
        variant to reach the same path). *)
     mk_receipt ~outcome:`Ok
       ~cascade_outcome:R.Cascade_not_observed
-      ~tool_contract_result:"satisfied" ()
+      ~tool_contract_result:Contract_satisfied_completion ()
   in
   let d3, _ = R.operator_disposition r3 in
   check bool "unknown reachable" true (R.needs_operator_broadcast d3)
@@ -281,7 +282,7 @@ let test_broadcast_payload_carries_turn_diagnostics () =
   let receipt =
     mk_receipt
       ~terminal_reason_code:"completion_contract_violation:require_tool_use"
-      ~tool_contract_result:"missing_required_tool_use"
+      ~tool_contract_result:Contract_missing_required_tool_use
       ~tools_used:[ "keeper_tasks_list"; "keeper_stay_silent" ]
       ~observed_tools:[ "keeper_tasks_list"; "keeper_stay_silent" ]
       ~required_tools:[ "keeper_shell"; "masc_worktree_create" ]

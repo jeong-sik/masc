@@ -585,7 +585,10 @@ let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_n
   Masc_mcp.Coord.write_json config agent_file (Masc_domain.agent_to_yojson agent)
 ;;
 
-let append_execution_receipt ?(tool_contract_result = "satisfied")
+let append_execution_receipt
+    ?(tool_contract_result :
+       Masc_mcp.Keeper_execution_receipt.tool_contract_result =
+      Contract_satisfied_completion)
     ?(tools_used = [ "keeper_fs_read" ])
     ?(cascade_fallback_applied = true)
     ?(cascade_outcome : Masc_mcp.Keeper_execution_receipt.cascade_outcome =
@@ -1346,7 +1349,7 @@ let test_composite_routes_surface_runtime_recommended_actions () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
-  append_execution_receipt ~tool_contract_result:"missing_required_tool_use"
+  append_execution_receipt ~tool_contract_result:Contract_missing_required_tool_use
     ~tools_used:[] config ~keeper_name;
   let path = Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name in
   let result = run_curl_get ~port ~path () in
@@ -1449,7 +1452,7 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
-  append_execution_receipt ~tool_contract_result:"satisfied_execution"
+  append_execution_receipt ~tool_contract_result:Contract_satisfied_execution
     ~tools_used:[ "keeper_fs_read" ]
     ~cascade_fallback_applied:false
     ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed

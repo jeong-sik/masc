@@ -106,7 +106,8 @@ let append_keeper_receipt
     ?(observed_tools = [ "keeper_fs_read" ])
     ?(canonical_tools = [ "keeper_fs_read" ])
     ?(tools_used = [ "keeper_fs_read" ])
-    ?(tool_contract_result = "satisfied")
+    ?(tool_contract_result : Keeper_execution_receipt.tool_contract_result =
+      Contract_satisfied_completion)
     ?(tool_requirement = Keeper_agent_tool_surface.Required)
     ?(cascade_outcome : Keeper_execution_receipt.cascade_outcome =
       Cascade_completed) (config : Coord.config)
@@ -844,7 +845,7 @@ let test_goal_detail_uses_receipt_disposition_for_required_tool_failure () =
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt ~reported_tools:[] ~observed_tools:[] ~canonical_tools:[]
-    ~tools_used:[] ~tool_contract_result:"missing_required_tool_use" config meta;
+    ~tools_used:[] ~tool_contract_result:Contract_missing_required_tool_use config meta;
   match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
   | Error msg -> fail msg
   | Ok json ->
@@ -1079,7 +1080,7 @@ let test_goal_detail_derives_attention_from_receipt_disposition () =
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt
-    ~tool_contract_result:"needs_execution_progress"
+    ~tool_contract_result:Contract_needs_execution_progress
     config meta;
   match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
   | Error msg -> fail msg

@@ -48,16 +48,18 @@ type tool_surface_class =
   | Surface_mixed [@tla.symbol "mixed"]
 [@@deriving tla]
 
-let tool_surface_class_to_string = function
-  | Surface_none -> "none"
-  | Surface_public_only -> "public_only"
-  | Surface_mixed -> "mixed"
+(* [@tla.symbol] is the single source of truth for the wire form:
+   - to_tla_symbol (ppx-generated) emits the symbol attached per variant
+   - all_symbols / all_states (ppx-generated) enumerate the type
+   Defining the JSON/Prometheus surface in terms of [to_tla_symbol]
+   guarantees JSON ↔ spec parity cannot drift even if a variant or its
+   symbol changes.  Addresses the SSOT concern in PR #14647 review. *)
+let tool_surface_class_to_string = to_tla_symbol
 
-let tool_surface_class_of_string = function
-  | "none" -> Some Surface_none
-  | "public_only" -> Some Surface_public_only
-  | "mixed" -> Some Surface_mixed
-  | _ -> None
+let tool_surface_class_of_string raw =
+  List.find_opt
+    (fun cls -> String.equal (to_tla_symbol cls) raw)
+    all_states
 
 let tool_surface_class_to_yojson cls =
   `String (tool_surface_class_to_string cls)

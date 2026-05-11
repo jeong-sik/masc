@@ -47,13 +47,20 @@ VARIABLES
 
 vars == << queue_size, enqueued_total, dequeued_total, smart_decision >>
 
-DecisionSet == { "tick", "emit", "skip" }
+\* Class C (NAME COLLISION rename) — DecisionSet identifier in the
+\* cross-spec family refers to keeper-turn decision_stage projection
+\* (KTC/KCAF/KDP/KCascadeLifecycle/KCompositeLifecycle). KEQ's own
+\* decision vocabulary is Heartbeat_smart.should_emit output (see header
+\* §"Runtime entities modelled"), unrelated to that family. Renamed to
+\* SmartHeartbeatDecisionSet to clarify the boundary.
+\* See iter 41 audit docs/tla-audit/cross-spec-3-divergences-classify-2026-05-12.md.
+SmartHeartbeatDecisionSet == { "tick", "emit", "skip" }
 
 TypeOK ==
     /\ queue_size      \in 0..MaxQueueSize
     /\ enqueued_total  \in 0..MaxStimuli
     /\ dequeued_total  \in 0..MaxStimuli
-    /\ smart_decision  \in DecisionSet
+    /\ smart_decision  \in SmartHeartbeatDecisionSet
 
 Init ==
     /\ queue_size      = 0

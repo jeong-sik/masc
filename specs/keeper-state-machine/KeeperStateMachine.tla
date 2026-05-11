@@ -505,10 +505,14 @@ Next ==
 Fairness ==
     /\ WF_vars(HeartbeatOk)
     /\ WF_vars(ContextMeasured)
-    \* Fairness on the *savings* arm only: the spec asserts compaction
-    \* eventually succeeds (saved_tokens > 0), not merely fires.  The
-    \* noop arm has no WF — modelling reality where stuck-overflow keepers
-    \* loop until escalation rather than self-resolve.
+    \* Weak fairness on the *savings* arm only.  This is NOT an
+    \* "eventually saves" guarantee — CompactionCompletedNoSavings can
+    \* fire and disable compaction_active, which in turn disables
+    \* CompactionCompletedWithSavings.  WF here only forces the savings
+    \* arm to fire in behaviors where it stays continuously enabled.
+    \* The noop arm has no WF, modelling reality where stuck-overflow
+    \* keepers loop through repeated noop compactions until escalation
+    \* rather than self-resolve.
     /\ WF_vars(CompactionCompletedWithSavings)
     /\ WF_vars(HandoffCompleted)
     /\ SF_vars(DrainCompleteEv)     \* Strong fairness: drain fires even if intermittently enabled

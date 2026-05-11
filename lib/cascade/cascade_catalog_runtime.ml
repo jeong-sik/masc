@@ -32,6 +32,7 @@ type profile_build = {
   cli_max_concurrent : int option;
   candidates : candidate_runtime list;
   probes : candidate_probe list;
+  required_capability_profile : string option;
 }
 
 type profile_snapshot = profile_build
@@ -127,6 +128,7 @@ let install_snapshot_for_tests ~source_path ~profile_names =
              cli_max_concurrent = None;
              candidates = [];
              probes = [];
+             required_capability_profile = None;
            })
   in
   let snapshot =
@@ -548,7 +550,8 @@ let rejection_of_path ~config_path ~attempted_mtime ~checked_at
 let active_source_state ~config_path =
   Cascade_toml_materializer.source_state ~config_path
 
-let validate_profile_static ~config_path name : (profile_build, profile_rejection) result =
+let validate_profile_static ~config_path ~required_capability_profile name
+    : (profile_build, profile_rejection) result =
   let weighted_entries =
     Cascade_config_loader.load_profile_weighted ~config_path ~name
   in
@@ -627,6 +630,7 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
               cli_max_concurrent;
               candidates;
               probes = profile_probes candidates;
+              required_capability_profile;
             }
 
 let runtime_required_profiles ~config_path =
@@ -724,10 +728,33 @@ let validate_path_result ?sw ?net ~config_path () =
                 required_default_profile;
             ]
         in
+        (* RFC-0066 Phase 3: hoist [load_catalog] out of the per-profile
+           validator so that [required_capability_profile] hints are
+           read once per [validate_path] regardless of how many profiles
+           are being validated. load_catalog has TOML materialization +
+           fallback-cycle metric/warn side-effects; reloading per
+           profile inflated startup work. *)
+        let required_capability_profile_lookup =
+          match Cascade_config_loader.load_catalog ~config_path with
+          | Ok entries ->
+              List.fold_left
+                (fun acc (entry : Cascade_config_loader.catalog_entry) ->
+                  (entry.name, entry.required_capability_profile) :: acc)
+                []
+                entries
+          | Error _ -> []
+        in
         let built_profiles, statically_rejected_profiles =
           List.fold_left
             (fun (ok_acc, err_acc) name ->
-              match validate_profile_static ~config_path name with
+              let required_capability_profile =
+                List.assoc_opt name required_capability_profile_lookup
+                |> Option.value ~default:None
+              in
+              match
+                validate_profile_static ~config_path
+                  ~required_capability_profile name
+              with
               | Ok profile -> (profile :: ok_acc, err_acc)
               | Error rejection -> (ok_acc, rejection :: err_acc))
             ([], [])

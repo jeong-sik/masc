@@ -758,7 +758,8 @@ let run_turn
                         surface: %s"
                        (String.concat ", " unexpected_tool_names)
                    in
-                   acc.receipt_tool_contract_result <- "violated";
+                   acc.receipt_tool_contract_result <-
+                     Keeper_execution_receipt.Contract_violated;
                    Prometheus.inc_counter
                      Keeper_metrics.metric_keeper_contract_violations
                      ~labels:
@@ -849,7 +850,8 @@ let run_turn
                           ; reason
                           })
                    in
-                   let tool_contract_status () =
+                   let tool_contract_status ()
+                       : Keeper_execution_receipt.tool_contract_result =
                      let required_tool_names = acc.tool_surface.required_tool_names in
                      let missing_visible_required =
                        acc.tool_surface.missing_required_tool_names
@@ -868,35 +870,35 @@ let run_turn
                          required_tool_names
                      in
                      if missing_visible_required <> []
-                     then "tool_surface_mismatch"
+                     then Contract_tool_surface_mismatch
                      else if required_tool_names <> [] && not all_required_used
                      then
                        if actual_keeper_tool_names = []
-                       then "missing_required_tool_use"
+                       then Contract_missing_required_tool_use
                        else if
                          all_class Keeper_tool_disclosure.Claim_context
                          && had_owned_active_task_at_turn_start
-                       then "claim_only_after_owned_task"
+                       then Contract_claim_only_after_owned_task
                        else if all_class Keeper_tool_disclosure.Claim_context
-                       then "needs_execution_progress"
+                       then Contract_needs_execution_progress
                        else if all_class Keeper_tool_disclosure.Passive_status
-                       then "passive_only"
-                       else "missing_required_tool_use"
+                       then Contract_passive_only
+                       else Contract_missing_required_tool_use
                      else if actual_keeper_tool_names = []
-                     then "satisfied_completion"
+                     then Contract_satisfied_completion
                      else if
                        all_class Keeper_tool_disclosure.Claim_context
                        && had_owned_active_task_at_turn_start
-                     then "claim_only_after_owned_task"
+                     then Contract_claim_only_after_owned_task
                      else if all_class Keeper_tool_disclosure.Claim_context
-                     then "needs_execution_progress"
+                     then Contract_needs_execution_progress
                      else if all_class Keeper_tool_disclosure.Passive_status
-                     then "passive_only"
+                     then Contract_passive_only
                      else if has_class Keeper_tool_disclosure.Completion
-                     then "satisfied_completion"
+                     then Contract_satisfied_completion
                      else if has_class Keeper_tool_disclosure.Execution
-                     then "satisfied_execution"
-                     else "needs_execution_progress"
+                     then Contract_satisfied_execution
+                     else Contract_needs_execution_progress
                    in
                    (* Required-tool turns are filtered onto providers that declare
             tool support plus tool_choice support. If a text-only response
@@ -914,9 +916,10 @@ let run_turn
                        , actionable_tool_contract_violation_reason )
                      with
                      | Ok (), Some reason ->
-                       let contract_status =
+                       let contract_status
+                           : Keeper_execution_receipt.tool_contract_result =
                          if actual_keeper_tool_names = []
-                         then "missing_required_tool_use"
+                         then Contract_missing_required_tool_use
                          else tool_contract_status ()
                        in
                        acc.receipt_tool_contract_result <- contract_status;
@@ -932,7 +935,9 @@ let run_turn
                        Keeper_tool_disclosure.record_require_tool_use_violation
                          ~keeper_name:meta.name
                          ~has_current_task:(keeper_has_owned_active_task ())
-                         ~contract_status;
+                         ~contract_status:
+                           (Keeper_execution_receipt
+                            .tool_contract_result_to_string contract_status);
                        let signal_label =
                          Keeper_contract_classifier.actionable_signal_label
                            actionable_signal_kind
@@ -959,16 +964,19 @@ let run_turn
                        acc.receipt_tool_contract_result <- tool_contract_status ();
                        Ok (`Provider_text text)
                      | Error reason, _ ->
-                       let contract_status =
+                       let contract_status
+                           : Keeper_execution_receipt.tool_contract_result =
                          if actual_keeper_tool_names = []
-                         then "missing_required_tool_use"
+                         then Contract_missing_required_tool_use
                          else tool_contract_status ()
                        in
                        acc.receipt_tool_contract_result <- contract_status;
                        Keeper_tool_disclosure.record_require_tool_use_violation
                          ~keeper_name:meta.name
                          ~has_current_task:(keeper_has_owned_active_task ())
-                         ~contract_status;
+                         ~contract_status:
+                           (Keeper_execution_receipt
+                            .tool_contract_result_to_string contract_status);
                        let contract_str =
                          match effective_completion_contract with
                          | Keeper_tool_disclosure.Allow_text_or_tool ->
@@ -1459,13 +1467,14 @@ let run_turn
            ( Some (Keeper_execution_receipt.error_kind_of_string (sdk_error_kind err))
            , Some (Agent_sdk.Error.to_string err) )
        in
-       let tool_contract_result =
+       let tool_contract_result
+           : Keeper_execution_receipt.tool_contract_result =
          match turn_result with
          | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _))
            ->
-           if String.equal acc.receipt_tool_contract_result "unknown"
-           then "violated"
-           else acc.receipt_tool_contract_result
+           (match acc.receipt_tool_contract_result with
+            | Contract_unknown -> Contract_violated
+            | other -> other)
          | _ -> acc.receipt_tool_contract_result
        in
        let terminal_reason_code =

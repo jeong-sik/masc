@@ -39,9 +39,18 @@ let all_pr_review_events = [ Comment; Approve; Request_changes ]
 let valid_pr_review_event_strings =
   List.map pr_review_event_to_string all_pr_review_events
 
+(* For a guard predicate a catch-all default loses exhaustiveness:
+   any future preset would silently inherit whichever side of the
+   guard the wildcard happens to land on (the previous [_ -> false]
+   would have defaulted new presets to "disallowed").  Enumerate
+   every variant so the compiler's Warning 8 forces a deliberate
+   classification when [Keeper_meta_tool_access.tool_access_preset]
+   grows, instead of letting policy drift through a wildcard.
+   PR #14716 / #14762 follow-up. *)
 let pr_review_mutation_preset_ok = function
   | Some (Research | Delivery | Coding | Full) -> true
-  | _ -> false
+  | Some (Minimal | Social | Messaging | Dispatch) -> false
+  | None -> false
 
 let pr_review_mutation_preset_reason tool_name =
   Printf.sprintf "%s requires research, delivery, coding, or full preset" tool_name

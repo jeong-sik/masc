@@ -444,6 +444,15 @@ val supports_runtime_mcp_http_headers_for_config :
 val requires_per_keeper_bridging_for_bound_actor_tools_for_config :
   Llm_provider.Provider_config.t -> bool
 
+(** Same as {!requires_per_keeper_bridging_for_bound_actor_tools_for_config}
+    but takes a typed [provider_kind] directly.  Used by call sites that do
+    not have a full {!Llm_provider.Provider_config.t} (e.g. keeper-bound
+    actor authorisation resolution, cascade catalog static validation).
+    Returns [false] when no adapter resolves for [kind].
+    RFC-0058 §2.4: capability flag, not a vendor match. *)
+val requires_per_keeper_bridging_for_bound_actor_tools_for_kind :
+  Llm_provider.Provider_config.provider_kind -> bool
+
 (** OAS-level capabilities for a provider config.  SSOT for the kind →
     capability mapping; centralises what was previously a closed-variant
     [match Llm_provider.Provider_config.provider_kind] in

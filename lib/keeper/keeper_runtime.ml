@@ -611,7 +611,6 @@ let load_or_materialize_boot_meta (ctx : _ context) name
                      name toml_path msg))
 
 type keeper_bootstrap_stats = {
-  enabled: bool;
   scanned: int;
   started: int;
   stale: int;
@@ -620,7 +619,7 @@ type keeper_bootstrap_stats = {
 
 let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
   if not Env_config.KeeperBootstrap.enabled then
-    { enabled = false; scanned = 0; started = 0; stale = 0; recovering = 0 }
+    { scanned = 0; started = 0; stale = 0; recovering = 0 }
   else
     let now_ts = Time_compat.now () in
     let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
@@ -639,12 +638,12 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
            max_int)
     in
     let entries = bootable_keeper_names ctx.config |> take max_scan in
-    let (enabled, scanned, started, stale, recovering) =
+    let (scanned, started, stale, recovering) =
       List.fold_left
-        (fun (enabled_acc, scanned_acc, started_acc, stale_acc, recovering_acc) name ->
+        (fun (scanned_acc, started_acc, stale_acc, recovering_acc) name ->
           match load_or_materialize_boot_meta ctx name with
           | Error _ ->
-              (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
+              (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
           | Ok { meta = m; materialized } ->
               if m.paused then
                 (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
@@ -681,15 +680,14 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                   started_now
                 )
               in
-              ( true,
-                scanned_acc + 1,
+              ( scanned_acc + 1,
                 started_acc + (if started_here then 1 else 0),
                 stale_acc + (if stale_now then 1 else 0),
                 recovering_acc + (if stale_now && started_here then 1 else 0) ))
-        (false, 0, 0, 0, 0)
+        (0, 0, 0, 0)
         entries
     in
-    { enabled; scanned; started; stale; recovering }
+    { scanned; started; stale; recovering }
 
 (** Start the supervisor sweep Pulse loop.
     Runs alongside existing keepalive bootstrap, scanning for
@@ -865,30 +863,20 @@ let has_boot_entries config =
 let should_start_supervisor_sweep
     ~(config : Coord.config)
     ~(stats : keeper_bootstrap_stats) : bool =
-  let _ = stats.enabled in
   stats.started > 0
   || Keeper_registry.count_running ~base_path:config.base_path () > 0
   || has_boot_entries config
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
-  (* #10125: drop the [stats.enabled] precondition.  The previous
-     gate required bootstrap to have processed at least one keeper
-     successfully ([enabled = true] only when [bootable_keeper_names]
-     was non-empty AND at least one entry got past
-     [load_or_materialize_boot_meta]).  In the 2026-04-24 production
-     incident every bootstrap entry hit a transient
-     [load_or_materialize_boot_meta] error after a server restart,
-     so [stats.enabled] stayed [false] even though 14 keeper meta
-     files were on disk — supervisor never started, fleet stayed
-     dead for 4h+.
-
-     Decouple supervisor startup from bootstrap success: if there
-     are bootable keepers on disk OR any are already running OR
-     any started this boot, run the sweep.  The supervisor can
-     recover keepers that bootstrap failed to load, which is
-     exactly what the sweep is for.  Without this change, a
-     transient load failure during bootstrap silently disables
-     auto-recovery for the rest of the server lifetime. *)
+  (* #10125: supervisor startup is decoupled from bootstrap success.
+     If there are bootable keepers on disk OR any are already running
+     OR any started this boot, run the sweep.  The supervisor can
+     recover keepers that bootstrap failed to load — exactly what
+     the sweep is for — so a transient bootstrap failure must not
+     silently disable auto-recovery for the rest of the server
+     lifetime (2026-04-24 incident: 14 keeper meta files on disk,
+     every bootstrap entry hit a transient
+     [load_or_materialize_boot_meta] error, fleet stayed dead 4h+). *)
   if should_start_supervisor_sweep ~config:ctx.config ~stats
   then start_supervisor_sweep ctx
 
@@ -907,8 +895,8 @@ let start_existing_keepalives ctx =
     try
       let stats = bootstrap_existing_keepers ctx in
       if keeper_debug then
-        Log.Keeper.debug "bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d recovering=%d"
-          stats.enabled stats.scanned stats.started stats.stale
+        Log.Keeper.debug "bootstrap_existing_keepers scanned=%d started=%d stale=%d recovering=%d"
+          stats.scanned stats.started stats.stale
           stats.recovering;
       maybe_start_supervisor_sweep ctx stats
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

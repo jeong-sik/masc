@@ -96,7 +96,6 @@ val load_or_materialize_boot_meta :
 (** {1 Supervisor sweep state} *)
 
 type keeper_bootstrap_stats = {
-  enabled : bool;        (** Is supervisor sweep enabled by config? *)
   scanned : int;         (** Keepers inspected during boot. *)
   started : int;         (** Keepers whose keepalive fiber was spawned. *)
   stale : int;           (** Keepers skipped because last heartbeat is stale. *)

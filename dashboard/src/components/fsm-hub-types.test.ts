@@ -31,6 +31,7 @@ function snapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompo
       no_cascade_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
+      phase_derivation_agreement: true,
     },
     fsm_guard_violations: 0,
     is_live: false,
@@ -144,11 +145,12 @@ describe('constants', () => {
     expect(keys).toEqual(['phase', 'turn', 'decision', 'cascade', 'compaction', 'breaker'])
   })
 
-  it('INVARIANT_LABELS has all 4 invariants', () => {
+  it('INVARIANT_LABELS has all 5 invariants', () => {
     const keys = Object.keys(INVARIANT_LABELS)
-    expect(keys).toHaveLength(4)
+    expect(keys).toHaveLength(5)
     expect(keys).toContain('phase_turn_alignment')
     expect(keys).toContain('compaction_atomicity')
+    expect(keys).toContain('phase_derivation_agreement')
   })
 
   it('MAX_OBSERVATIONS and MAX_TRANSITION_HISTORY are positive', () => {

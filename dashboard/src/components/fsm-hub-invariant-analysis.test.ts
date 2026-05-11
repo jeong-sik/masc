@@ -19,6 +19,7 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
       no_cascade_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
+      phase_derivation_agreement: true,
     },
     fsm_guard_violations: 0,
     is_live: true,
@@ -33,9 +34,9 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
 // ================================================================
 
 describe('invariantRows', () => {
-  it('returns 4 rows for all invariants', () => {
+  it('returns 5 rows for all invariants', () => {
     const rows = invariantRows(makeSnapshot())
-    expect(rows).toHaveLength(4)
+    expect(rows).toHaveLength(5)
   })
 
   it('marks all invariants as ok when all true', () => {
@@ -50,10 +51,11 @@ describe('invariantRows', () => {
         no_cascade_before_measurement: true,
         compaction_atomicity: true,
         event_priority_monotone: true,
+        phase_derivation_agreement: true,
       },
     }))
     expect(rows.find(r => r.key === 'phase_turn_alignment')!.ok).toBe(false)
-    expect(rows.filter(r => r.ok).length).toBe(3)
+    expect(rows.filter(r => r.ok).length).toBe(4)
   })
 
   it('includes labels for each invariant', () => {
@@ -63,6 +65,7 @@ describe('invariantRows', () => {
     expect(labels).toContain('Cascade 순서')
     expect(labels).toContain('압축 원자성')
     expect(labels).toContain('이벤트 우선순위')
+    expect(labels).toContain('Phase 유도 일치')
   })
 
   it('includes detail string for each row', () => {
@@ -81,6 +84,7 @@ describe('invariantRows', () => {
         no_cascade_before_measurement: true,
         compaction_atomicity: false,
         event_priority_monotone: true,
+        phase_derivation_agreement: true,
       },
     }))
     const row = rows.find(r => r.key === 'compaction_atomicity')!
@@ -112,6 +116,7 @@ describe('deriveOperationalInsight', () => {
           no_cascade_before_measurement: true,
           compaction_atomicity: true,
           event_priority_monotone: true,
+          phase_derivation_agreement: true,
         },
       }),
       noObservations,

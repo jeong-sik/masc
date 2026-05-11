@@ -409,6 +409,15 @@ export type KeeperRuntimeBlockerClass =
   | 'supervisor_paused'
   | 'synthetic_stall'
   | 'self_imposed_idle'
+  | 'sdk_max_turns_exceeded'
+  | 'sdk_token_budget_exceeded'
+  | 'sdk_cost_budget_exceeded'
+  | 'sdk_unrecognized_stop_reason'
+  | 'sdk_idle_detected'
+  | 'sdk_tool_retry_exhausted'
+  | 'sdk_guardrail_violation'
+  | 'sdk_tripwire_violation'
+  | 'sdk_exit_condition_met'
 
 export interface KeeperTrustLatestEvent {
   kind: string

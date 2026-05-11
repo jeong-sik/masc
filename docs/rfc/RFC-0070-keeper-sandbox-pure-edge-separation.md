@@ -70,7 +70,7 @@ val of_request
 (* Same input ⇒ identical plan. No Random, no Unix.time. *)
 ```
 
-`Container_name.t` is a private string derived as `"masc-keeper-" ^ base36(BLAKE3(turn_id ‖ attempt ‖ suffix)[..16])`. Collision space 1/2^96. Test backdoor `Container_name.of_string_for_test` is exposed only under `let%test_module` and not in the public `.mli`.
+`Container_name.t` is a private string derived as `"masc-keeper-" ^ base36(Hash_algo.digest hash_algo (turn_id ‖ attempt ‖ suffix)[..16])`, where `Hash_algo.t = BLAKE3 | SHA_256 | SHA_512` (closed variant, default `BLAKE3` per §8 Q1). Collision space 1/2^96 at the 16-byte truncation. Test backdoor `Container_name.of_string_for_test` is exposed only under `let%test_module` and not in the public `.mli`. **The algorithm choice is parametric** — wall-clock is the only construction-time dependency that must remain absent.
 
 ### 3.2 Edge layer (Docker_client + Sandbox_executor)
 
@@ -140,7 +140,7 @@ val cleanup_tick
     -> cleanup_outcome
 ```
 
-`Quarantine.t` is a per-server-session Set of `(Container_name.t, retry_attempts:int, first_seen:Mtime.t)`. Three retry attempts with exponential backoff; on the 4th tick, `alert_dispatched` becomes true and an operator alert fires (separate from the existing Prometheus counter, which becomes a *by-product*, not the decision mechanism). The cleanup hook adapter for RFC-0036 §3.1 wraps `cleanup_outcome` into a `unit` via log-and-swallow.
+`Quarantine.t` is a per-server-session Set of `(Container_name.t, attempts:int, first_seen:Mtime.t)`. Retry/alert thresholds are NOT magic numbers — they live in a typed `Backoff_policy.t = { max_attempts : int; backoff : Time.span -> int -> Time.span; alert_after : int }` resolved at edge from `config/sandbox.toml`. Default values (`max_attempts=3`, exponential `backoff` from 1s to 60s, `alert_after=3`) are *defaults*, not literals scattered through the implementation. On `attempts ≥ alert_after`, `alert_dispatched` becomes true and an operator alert fires (separate from the existing Prometheus counter, which becomes a *by-product*, not the decision mechanism). The cleanup hook adapter for RFC-0036 §3.1 wraps `cleanup_outcome` into a `unit` via log-and-swallow.
 
 ### 3.5 Containment with existing modules
 
@@ -194,7 +194,7 @@ Phases 1-5 are independently mergeable and revertable. Phase 5 closes the loop b
 
 ## 8. Open Questions
 
-1. **BLAKE3 vs SHA-256** for container name derivation — Phase 1 decides; SHA-256 acceptable if opam pin friction is high.
+1. **Default Hash_algo.t** — §3.1 now types the choice as `Hash_algo.t = BLAKE3 | SHA_256 | SHA_512`. Phase 1 decides the *default* (BLAKE3 if opam pin friction is acceptable, else SHA_256). The variant remains for future migration without re-deriving persisted names.
 2. **`Container_name.t` representation** — `private string` vs phantom-typed wrapper? Default: `private string` for opam-friendly cross-compilation.
 3. **Mock client thread safety** — single-fiber injection vs concurrent? Default: single-fiber; concurrent injection adds complexity not yet justified by test patterns.
 4. **Quarantine persistence across server restart** — in-memory only, or JSONL trail? Default: in-memory; restart loses state, restart-cleanup catches it via labels.

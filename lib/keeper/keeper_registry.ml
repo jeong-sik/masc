@@ -1404,9 +1404,35 @@ let get_turn_failures ~base_path name =
   | None -> 0
 
 let is_running ~base_path name =
+  (* Enumerate every [Keeper_state_machine.phase] variant so the
+     compiler flags any new phase added to the FSM.
+
+     This predicate is intentionally narrower than
+     [Keeper_state_machine.can_execute_turn] (defined alongside the
+     phase type): [can_execute_turn] returns [true] for both [Running]
+     and [Failing] because a keeper in [Failing] may still complete
+     its in-flight turn before the recovery transition; [is_running]
+     answers the operator-facing question "is this keeper currently
+     running?" and treats only [Running] as such. The 12 other phases
+     (Offline, Failing, Overflowed, Compacting, HandingOff, Draining,
+     Paused, Stopped, Crashed, Restarting, Dead, Zombie) yield [false]
+     here. A future phase variant (e.g. a hypothetical [Migrating] or
+     [Healing]) would silently inherit [false] under the previous
+     [Some _ -> false] catch-all without a review point on whether
+     the new phase should count as "running" for any downstream
+     consumer.
+
+     Same FSM Sparse Match anti-pattern fix as PRs #14716, #14790,
+     #14806, #14810, #14816, #14823, #14829, #14842, #14849. *)
   match get ~base_path name with
   | Some { phase = Running; _ } -> true
-  | Some _ -> false
+  | Some
+      { phase =
+          ( Offline | Failing | Overflowed | Compacting | HandingOff
+          | Draining | Paused | Stopped | Crashed | Restarting | Dead
+          | Zombie )
+      ; _
+      } -> false
   | None -> false
 
 (** True if the keeper has ANY registry entry (regardless of state).

@@ -1,7 +1,7 @@
 # autoresearch subsystem 제거 audit
 
 **날짜**: 2026-05-11
-**대상**: `masc_autoresearch_*` 7 도구 + `lib/autoresearch/` 5 모듈 + `lib/autoresearch_codegen.ml`
+**대상**: `masc_autoresearch_*` 7 도구 + `lib/autoresearch/` **6 모듈** (file/git/metric/serde/storage/types) + 11 top-level lib/ 모듈 (autoresearch{,_codegen,_knowledge,_lineage,_result_bridge} + tool_autoresearch{,_schemas,_cycle,_context,_registry,_broadcast}) + dashboard surface (`lib/dashboard/dashboard_http_autoresearch.ml(.mli)`)
 **근거**: 사용자 결정 "autoresearch는 지운다". plan PR-N2a (docs only audit).
 **Plan**: `~/me/planning/claude-plans/polished-juggling-galaxy.md` §2 PR-N2a
 
@@ -32,7 +32,7 @@
 - `lib/autoresearch_codegen.ml` — LLM 기반 code change prompt builder + cascade 호출. "autonomous research assistant optimizing code" 책임
 - `lib/tool_autoresearch.ml` — 7 도구 dispatch
 - `lib/tool_autoresearch_schemas.ml` — schema 정의
-- `lib/autoresearch_types.ml` (추정 — Autoresearch_types include 발견)
+- `lib/autoresearch/autoresearch_types.ml(.mli)` — shared types (verified, not under top-level `lib/autoresearch_types.ml`)
 
 ## Caller chain 분류
 
@@ -41,10 +41,16 @@
 - `lib/autoresearch_codegen.ml` — `Autoresearch_types`, `Autoresearch_serde` include
 - `lib/tool_autoresearch.ml` + `lib/tool_autoresearch_schemas.ml`
 
-### B. 표면 등록 (정리 대상, ~10 라인)
+### B. 표면 등록 (정리 대상, ~30 라인)
 - `lib/dashboard/dashboard_keeper_feature_catalog.ml`: `"Autoresearch tools"` feature label (7 도구 명시) — feature block 통째 제거
 - `lib/dashboard/dashboard_surface_readiness.ml`: `masc_autoresearch_status` 1 reference
+- `lib/dashboard/dashboard_http_autoresearch.ml(.mli)`: dedicated HTTP routes module (start/stop + GET loops/detail/CSV + POST retry/delete) — module 통째 삭제
 - `lib/keeper/keeper_agent_tool_surface.ml`: 4 도구 label (status/stop/cycle + 1) — 4 라인 제거
+- `lib/keeper/keeper_exec_masc.ml(.mli)`: `handle_keeper_autoresearch_tool` + dispatch arm `Some Tool_dispatch.Mod_autoresearch ->` — module 삭제 + 한 분기 제거
+- `lib/keeper/keeper_tool_policy.ml`: `@ Tool_shard.autoresearch_keeper_tools` (line 594) — 한 줄 제거
+- `lib/tool_dispatch.ml(.mli)`: `Mod_autoresearch` closed-variant + 2 dispatch arms (line 208, 248) — variant + 매치 제거
+- `lib/mcp_server_eio_execute.ml`: `| Mod_autoresearch ->` 분기 (line 849) — 매치 제거
+- `lib/tool_shard.ml(.mli)`: `autoresearch_keeper_tools` 7 도구 리스트 — 정의 제거
 - `lib/server/server_routes_http_routes_dashboard.ml`: start/stop endpoint 등록
 
 ### C. Tool catalog 메타데이터 (자동 정리)

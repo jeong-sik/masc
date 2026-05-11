@@ -9,6 +9,8 @@ type t =
   | Migration_save
   | Restore_legacy
   | Create_initial_save
+  | Cleanup
+  | Malformed_load
 
 let to_label = function
   | Migrate_main_history -> "migrate_main_history"
@@ -21,4 +23,6 @@ let to_label = function
   | Migration_save -> "migration_save"
   | Restore_legacy -> "restore_legacy"
   | Create_initial_save -> "create_initial_save"
+  | Cleanup -> "cleanup"
+  | Malformed_load -> "malformed_load"
 ;;

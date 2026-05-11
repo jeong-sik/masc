@@ -399,9 +399,25 @@ let prior_oas_timeout_budget_strikes ~base_path ~keeper_name =
 ;;
 
 let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
+  (* Enumerate every [masc_internal_error] variant + [None] so the
+     compiler flags any new constructor here. Mirrors the fix in
+     [degraded_retry_bypasses_slot_phase_guard] (PR #14716) and
+     [cascade_permanently_dead] (PR #14762); this site was missed in
+     both sweeps — the same predicate shape exists in three places
+     and only this one still had a catch-all. *)
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
-  | _ -> false
+  | Some
+      ( Keeper_turn_driver.Cascade_exhausted _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.No_tool_capable_provider _
+      | Keeper_turn_driver.Accept_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Ambiguous_post_commit _ )
+  | None ->
+    false
 ;;
 
 let persist_message_cursor_updates ~config (meta : keeper_meta) updates =

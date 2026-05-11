@@ -18,12 +18,19 @@
     below; we lift them into a closed sum so callers cannot drift on
     new docker versions without compiler help. *)
 
+(** Six closed states from docker's [State] field.
+
+    Exit code is NOT carried here. The [State] token alone does not
+    convey [ExitCode]; that field arrives via [docker inspect].
+    Phase 3b-iv.2 will introduce a separate [inspect_record] type
+    that pairs [ps_status] with the inspect-only fields
+    ([ExitCode], [StartedAt], [FinishedAt], ...). *)
 type ps_status =
   | Created
   | Running
   | Paused
   | Restarting
-  | Exited of { code : int }
+  | Exited
   | Dead
 [@@deriving show, eq]
 
@@ -35,23 +42,23 @@ type state_parse_error =
 
 (** [parse_state s] decodes a docker [State] string into the typed
     variant. Pure. The lowercase canonical forms are accepted
-    case-insensitively. [Exited of { code }] requires the caller to
-    supply [code] separately (docker exposes exit code via
-    [ExitCode] / [docker inspect]). For Phase 3b-iv.0 the parser
-    yields [Exited { code = 0 }] on the bare "exited" token; later
-    phases extend the parser to consume the inspect record. *)
+    case-insensitively. The function inspects only the [State] token,
+    so it returns [Exited] without an exit code — callers that need
+    [ExitCode] must consume the inspect record separately (Phase
+    3b-iv.2). *)
 val parse_state : string -> (ps_status, state_parse_error) result
 
-(** [state_to_string s] is the canonical lowercase token. Inverse of
-    [parse_state] for non-Exited variants; Exited's exit code is not
-    encoded in the state token (docker emits separately). *)
+(** [state_to_string s] is the canonical lowercase token. Round-trips
+    through [parse_state] for every variant (no per-variant payload). *)
 val state_to_string : ps_status -> string
 
 (** {1 Exec result}
 
-    What an executed [docker run] or [docker exec] returned to us.
-    Distinct from {!ps_status}: this is per-call result, that is
-    container-lifecycle state. *)
+    [exec_result] is the *per-call result* of an executed [docker run]
+    or [docker exec] — exit code plus captured streams. This is
+    distinct from {!ps_status}, which describes the
+    *container lifecycle state* over time. The two answer different
+    questions: "did this call succeed?" vs "is this container alive?". *)
 
 type exec_result =
   { exit_code : int

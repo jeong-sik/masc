@@ -15,12 +15,12 @@
 #   - PR #14770 (validator script, iter 20)
 #   - PR #14767 (KTC B-1 audit memo)
 
-# R-B-1.a pending: TLA+ §TurnPhaseSet missing `routing` member.
-# OCaml admission: lib/keeper/keeper_registry.ml:168-172.
-# Source: PR #14395 (added Turn_routing/Turn_exhausted to OCaml without
-# spec update).
-turn_phase:turn_routing
-
-# R-B-1.a pending: TLA+ §TurnPhaseSet missing `exhausted` member.
-# Same source as above.
-turn_phase:turn_exhausted
+# (Baseline currently empty.)
+#
+# R-B-1.a landed in iter 28 (this PR): KTC TurnPhaseSet extended to
+# include `routing` and `exhausted`.  Both prior baseline entries
+# removed.  CI now enforces zero turn_phase drift going forward.
+#
+# Per-action transition modeling for routing/exhausted is intentionally
+# deferred — see B-2 follow-up audit
+# (`docs/tla-audit/ktc-b1-turn-phase-spec-gap-2026-05-12.md`).

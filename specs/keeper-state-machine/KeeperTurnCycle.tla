@@ -6,7 +6,8 @@
 (* stores in [Keeper_registry.current_turn_observation]. It is not the old *)
 (* "tool_call/side_effect/done" linear storyboard; the current runtime is  *)
 (* a 3-axis machine:                                                        *)
-(*   - turn_phase      : prompting | executing | compacting | finalizing   *)
+(*   - turn_phase      : prompting | routing | executing | compacting |    *)
+(*                       finalizing | exhausted                            *)
 (*   - decision_stage  : undecided | guard_ok | gate_rejected |            *)
 (*                       tool_policy_selected                              *)
 (*   - cascade_state   : idle | selecting | trying | done | exhausted      *)
@@ -107,7 +108,24 @@ vars ==
     << turn_live, turn_phase, decision_stage, cascade_state,
        measurement_bound, selected_model_bound >>
 
-TurnPhaseSet == {"idle", "prompting", "executing", "compacting", "finalizing"}
+\* TurnPhaseSet: phase membership type.
+\*
+\* R-B-1.a (iter 28, 2026-05-12): `routing` and `exhausted` added to close
+\* the spec drift identified by `audit-tla-annotation-drift.sh`.  OCaml has
+\* carried these since PR #14395 (Turn_routing active + Turn_exhausted
+\* terminal).  This commit extends the type widening only; per-action
+\* transition modeling (e.g. RoutingStart, RoutingExhausted, retry pumps
+\* through routing) is intentionally deferred — see B-2 follow-up audit
+\* (`docs/tla-audit/ktc-b1-turn-phase-spec-gap-2026-05-12.md`).
+\*
+\* The wider set keeps TypeOK total (every OCaml turn_phase is now
+\* spec-typable) without altering the reachable state graph: Init pins
+\* `turn_phase = "idle"` and no existing action transitions into routing
+\* or exhausted, so TLC clean+buggy state counts are unchanged.  The
+\* cross-axis invariants (SelectingRequiresToolPolicy etc.) are
+\* conditional on specific phase membership and are not affected.
+TurnPhaseSet == {"idle", "prompting", "routing", "executing",
+                 "compacting", "finalizing", "exhausted"}
 DecisionSet  == {"undecided", "guard_ok", "gate_rejected", "tool_policy_selected"}
 CascadeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {

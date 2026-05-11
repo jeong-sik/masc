@@ -1,5 +1,4 @@
 type t =
-  | Turn_start
   | Cascade_exhausted
   | Terminal_non_exhaustion
   | Recoverable_cascade_transient
@@ -9,7 +8,6 @@ type t =
   | Overflow_retry_oas_load
 
 let to_label = function
-  | Turn_start -> "turn_start"
   | Cascade_exhausted -> "cascade_exhausted"
   | Terminal_non_exhaustion -> "terminal_non_exhaustion"
   | Recoverable_cascade_transient -> "recoverable_cascade_transient"

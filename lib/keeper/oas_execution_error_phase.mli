@@ -11,7 +11,6 @@
     sites are not exhaustiveness-checked. *)
 
 type t =
-  | Turn_start
   | Cascade_exhausted
   | Terminal_non_exhaustion
   | Recoverable_cascade_transient

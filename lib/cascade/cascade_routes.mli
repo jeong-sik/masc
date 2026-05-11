@@ -45,9 +45,9 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
 val route_bindings_from_json : Yojson.Safe.t -> (string * string) list
 (** Decode the [routes] object of a materialized cascade JSON into a
     [(key, target)] association list. Accepts both the legacy
-    encoding ({{!t}[routes.X = "Y"]}) and the RFC-0058 sub-table
-    encoding ({{!t}[routes.X.target = "Y"]}). Exposed for regression
-    testing of the dual-form decoder. *)
+    encoding [routes.X = "Y"] and the RFC-0058 sub-table encoding
+    [\[routes.X\] target = "Y"]. Exposed for regression testing of
+    the dual-form decoder. *)
 
 val configured_route_targets : ?config_path:string -> unit -> string list
 (** Unique non-empty profile names referenced by [routes]. *)

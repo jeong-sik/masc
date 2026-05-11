@@ -8,7 +8,7 @@ open Alcotest
 open Masc_mcp
 
 let make ?(algo = Keeper_hash_algo.SHA_256) ~turn_id ~attempt ~suffix () =
-  Keeper_container_name.of_hash_hex ~algo ~turn_id ~attempt ~suffix
+  Keeper_container_name.derive ~algo ~turn_id ~attempt ~suffix
 
 (* ── Determinism: same input ⇒ same output ────────────────────── *)
 

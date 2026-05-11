@@ -8,7 +8,7 @@ let hex_chars_taken = 32
 
 let prefix = "masc-keeper-"
 
-let of_hash_hex ~algo ~turn_id ~attempt ~suffix =
+let derive ~algo ~turn_id ~attempt ~suffix =
   let input =
     (* Use unit separators (US, \x1F) so concatenation is unambiguous —
        different (turn_id, attempt, suffix) tuples map to different

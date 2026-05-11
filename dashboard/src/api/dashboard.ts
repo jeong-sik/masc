@@ -22,7 +22,7 @@ import {
   type AgentTimelineResponse,
 } from './schemas/agent-timeline'
 import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
-import { KEEPER_RUNTIME_BLOCKER_CLASSES } from '../types'
+import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type {
   KeeperConfig,
   KeeperFeatureStatus,
@@ -2030,17 +2030,6 @@ function normalizeCascadeCatalogSourceKind(
   }
 }
 
-const RUNTIME_BLOCKER_CLASS_SET: ReadonlySet<string> = new Set(
-  KEEPER_RUNTIME_BLOCKER_CLASSES,
-)
-
-function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['runtime_blocker_class'] {
-  const blockerClass = asNullableString(value)
-  if (blockerClass !== null && RUNTIME_BLOCKER_CLASS_SET.has(blockerClass)) {
-    return blockerClass as KeeperConfig['runtime']['runtime_blocker_class']
-  }
-  return null
-}
 
 function normalizeKeeperSandboxEnvironment(
   raw: unknown,
@@ -2176,7 +2165,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       fiber_health: asNullableString(runtime.fiber_health) ?? 'unknown',
       presence_keepalive: asLooseBoolean(runtime.presence_keepalive),
       presence_keepalive_sec: asInt(runtime.presence_keepalive_sec) ?? 0,
-      runtime_blocker_class: normalizeRuntimeBlockerClass(runtime.runtime_blocker_class),
+      runtime_blocker_class: asKeeperRuntimeBlockerClass(runtime.runtime_blocker_class),
       active_model_label: asNullableString(runtime.active_model_label),
       last_model_used_label: asNullableString(runtime.last_model_used_label),
       runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),

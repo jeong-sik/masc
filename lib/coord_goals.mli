@@ -26,7 +26,8 @@
     inside the 5 public {!handle_goal_*} entries. *)
 
 val handle_goal_list :
-  Coord_types.context -> Yojson.Safe.t -> Coord_types.tool_result
+  tool_name:string -> start_time:float ->
+  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_list ctx args] handles [masc_goal_list].
     Optional filters: [horizon] (short / mid / long), [status]
     (active / paused / done / dropped), [phase] (executing /
@@ -35,7 +36,8 @@ val handle_goal_list :
     [(false, error_json)] without touching the store. *)
 
 val handle_goal_upsert :
-  Coord_types.context -> Yojson.Safe.t -> Coord_types.tool_result
+  tool_name:string -> start_time:float ->
+  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_upsert ctx args] handles [masc_goal_upsert] —
     create-or-update a goal record.  Validates horizon /
     status / phase / priority / policy / principal /
@@ -44,7 +46,8 @@ val handle_goal_upsert :
     [goal_upsert_lifecycle_error] formatter. *)
 
 val handle_goal_transition :
-  Coord_types.context -> Yojson.Safe.t -> Coord_types.tool_result
+  tool_name:string -> start_time:float ->
+  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
     {!goal_transition_action_strings}).  Operator-only
@@ -55,7 +58,8 @@ val handle_goal_transition :
     coverage and sub-goal status before allowing the move. *)
 
 val handle_goal_verify :
-  Coord_types.context -> Yojson.Safe.t -> Coord_types.tool_result
+  tool_name:string -> start_time:float ->
+  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_verify ctx args] handles [masc_goal_verify] —
     record an operator/keeper verification vote (approve /
     reject) on a goal completion claim.  Updates the goal's
@@ -63,7 +67,8 @@ val handle_goal_verify :
     the policy quorum is met. *)
 
 val handle_goal_review :
-  Coord_types.context -> Yojson.Safe.t -> Coord_types.tool_result
+  tool_name:string -> start_time:float ->
+  Coord_types.context -> Yojson.Safe.t -> Tool_result.t
 (** [handle_goal_review ctx args] handles [masc_goal_review] —
     add a periodic review note to a goal with outcome (done /
     progress / blocked / dropped).  Reviews are append-only;

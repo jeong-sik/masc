@@ -557,8 +557,8 @@ let review
       match parse_review_verdict_from_json args with
       | Ok v ->
         verdict_ref := Some v;
-        let msg = match v with Approve -> "Approved" | Reject r -> "Rejected: " ^ r in
-        Tool_result.error ~tool_name:name ~start_time msg
+        Tool_result.error ~tool_name:name ~start_time
+          (match v with Approve -> "Approved" | Reject r -> "Rejected: " ^ r)
       | Error msg ->
         Log.Task.warn "[anti-rationalization] structured verdict parse failed: %s" msg;
         Tool_result.error ~tool_name:name ~start_time

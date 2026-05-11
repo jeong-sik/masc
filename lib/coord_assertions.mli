@@ -82,9 +82,11 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
 
 val handle_check :
   inspect_state:(Coord_types.context -> agent_state) ->
+  tool_name:string ->
+  start_time:float ->
   Coord_types.context ->
   Yojson.Safe.t ->
-  Coord_types.tool_result
+  Tool_result.t
 (** [handle_check ~inspect_state ctx args] is the [masc_check]
     JSON-RPC entry point.
 

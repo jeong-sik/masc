@@ -42,17 +42,18 @@ let dispatch_upsert ctx args =
   | None -> fail "masc_goal_upsert not handled"
 
 let dispatch_upsert_must_fail ctx args =
-  match dispatch_upsert ctx args with
-  | { success = true; message = body } ->
-      fail
-        (Printf.sprintf "expected upsert rejection, got success: %s" body)
-  | { success = false; message = body } -> Yojson.Safe.from_string body
+  let result = dispatch_upsert ctx args in
+  if result.success then
+    fail (Printf.sprintf "expected upsert rejection, got success: %s" (Tool_result.message result))
+  else
+    Yojson.Safe.from_string (Tool_result.message result)
 
 let dispatch_upsert_must_succeed ctx args =
-  match dispatch_upsert ctx args with
-  | { success = true; message = body } -> Yojson.Safe.from_string body
-  | { success = false; message = body } ->
-      fail (Printf.sprintf "expected upsert success, got error: %s" body)
+  let result = dispatch_upsert ctx args in
+  if result.success then
+    Yojson.Safe.from_string (Tool_result.message result)
+  else
+    fail (Printf.sprintf "expected upsert success, got error: %s" (Tool_result.message result))
 
 let body_contains json needle =
   let raw = Yojson.Safe.to_string json in
@@ -94,11 +95,11 @@ let dispatch_transition_must_succeed ctx ~goal_id ~action =
             ("actor", principal_json ~kind:"operator" ~id:"planner");
           ])
   with
-  | Some { success = true; message = _body } -> ()
-  | Some { success = false; message = body } ->
+  | Some result when result.success -> ()
+  | Some result ->
       fail
         (Printf.sprintf "expected transition %s success, got error: %s"
-           action body)
+           action (Tool_result.message result))
   | None -> fail "masc_goal_transition not handled"
 
 let saved_phase config goal_id =

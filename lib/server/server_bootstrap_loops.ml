@@ -532,9 +532,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     match name with
     | "masc_status" -> (
         match Tool_coord.dispatch ctx_room ~name ~args with
-        | Some { Coord_types.success; message } ->
-            if success then Tool_result.ok ~tool_name:name ~start_time message
-            else Tool_result.error ~tool_name:name ~start_time message
+        | Some result -> result
         | None ->
             Tool_result.error ~tool_name:name ~start_time
               "masc_status: dispatch failed")

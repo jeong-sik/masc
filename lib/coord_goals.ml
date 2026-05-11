@@ -20,11 +20,16 @@ module Float = Stdlib.Float
 open Coord_types
 open Tool_args
 
-(* Local helpers: return Coord_types.tool_result record, shadowing Tool_args tuple versions. *)
-let ok_result fields = { success = true; message = ok_response fields }
-let error_result msg = { success = false; message = error_response msg }
-let error_result_typed ~code msg = { success = false; message = error_response_typed ~code msg }
-let validation_error_result errors = { success = false; message = validation_error_response errors }
+(* Local helpers: build Tool_result.t from response helpers.
+   ~tool_name and ~start_time are threaded through from dispatch. *)
+let ok_result ~tool_name ~start_time fields =
+  Tool_result.ok ~tool_name ~start_time (ok_response fields)
+let error_result ~tool_name ~start_time msg =
+  Tool_result.error ~tool_name ~start_time (error_response msg)
+let error_result_typed ~tool_name ~start_time ~code msg =
+  Tool_result.error ~tool_name ~start_time (error_response_typed ~code msg)
+let validation_error_result ~tool_name ~start_time errors =
+  Tool_result.error ~tool_name ~start_time (validation_error_response errors)
 
 let goal_horizon_strings = [ "short"; "mid"; "long" ]
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
@@ -126,8 +131,8 @@ let parse_optional_goal_phase args field =
            ~expected:"string"
            ~received:(Yojson.Safe.to_string json))
 
-let goal_upsert_lifecycle_error field =
-  error_result_typed ~code:Validation_error
+let goal_upsert_lifecycle_error ~tool_name ~start_time field =
+  error_result_typed ~tool_name ~start_time ~code:Validation_error
     (Printf.sprintf
        "masc_goal_upsert does not accept lifecycle field %s; use masc_goal_transition / masc_goal_verify for goal lifecycle moves"
        field)
@@ -410,7 +415,7 @@ let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note
 let emit_goal_event ctx ~goal_id ~event_type ~payload =
   Goal_verification.emit_event ctx.config ~goal_id ~event_type ~payload
 
-let handle_goal_list (ctx : context) args =
+let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.t =
   match
     parse_optional_horizon args "horizon",
     parse_optional_goal_status args "status",
@@ -419,11 +424,11 @@ let handle_goal_list (ctx : context) args =
   | Error err, _, _
   | _, Error err, _
   | _, _, Error err ->
-      validation_error_result [ err ]
+      validation_error_result ~tool_name ~start_time [ err ]
   | Ok horizon, Ok status, Ok phase ->
       let goals = Goal_store.list_goals ctx.config ?horizon ?status ?phase () in
       let rollup = Goal_store.compute_rollup goals in
-      ok_result
+      ok_result ~tool_name ~start_time
         [
           ("generated_at", `String (Masc_domain.now_iso ()));
           ("count", `Int (List.length goals));
@@ -431,7 +436,7 @@ let handle_goal_list (ctx : context) args =
           ("rollup", Goal_store.rollup_to_yojson rollup);
         ]
 
-let handle_goal_upsert (ctx : context) args =
+let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.t =
   match
     parse_optional_horizon args "horizon",
     parse_optional_goal_status args "status",
@@ -446,7 +451,7 @@ let handle_goal_upsert (ctx : context) args =
   | _, _, _, Error err, _, _
   | _, _, _, _, Error err, _
   | _, _, _, _, _, Error err ->
-      validation_error_result [ err ]
+      validation_error_result ~tool_name ~start_time [ err ]
   | Ok horizon, Ok status, Ok phase, Ok priority, Ok verifier_policy,
     Ok require_completion_approval ->
       let id = get_string_opt args "id" in
@@ -457,15 +462,15 @@ let handle_goal_upsert (ctx : context) args =
       let parent_goal_id = get_string_opt args "parent_goal_id" in
       begin
         match phase, status with
-        | Some _, _ -> goal_upsert_lifecycle_error "phase"
-        | _, Some _ -> goal_upsert_lifecycle_error "status"
+        | Some _, _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "phase"
+        | _, Some _ -> goal_upsert_lifecycle_error ~tool_name ~start_time "status"
         | _ -> (
             match
               Goal_store.upsert_goal ctx.config ?id ?horizon ?title ?metric
                 ?target_value ?due_date ?priority ?status ?phase ?parent_goal_id
                 ?verifier_policy ?require_completion_approval ()
             with
-            | Error msg -> error_result_typed ~code:Validation_error msg
+            | Error msg -> error_result_typed ~tool_name ~start_time ~code:Validation_error msg
             | Ok (goal, action) ->
                 let action_name =
                   match action with
@@ -473,7 +478,7 @@ let handle_goal_upsert (ctx : context) args =
                   | `updated -> "updated"
                 in
                 let task_marker = Printf.sprintf "[goal:%s]" goal.id in
-                ok_result
+                ok_result ~tool_name ~start_time
                   [
                     ("action", `String action_name);
                     ("goal_id", `String goal.id);
@@ -492,24 +497,24 @@ let handle_goal_upsert (ctx : context) args =
                   ])
       end
 
-let handle_goal_transition (ctx : context) args =
+let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_result.t =
   match validate_string_required args "goal_id", parse_optional_transition_action args "action",
         parse_optional_principal args "actor" with
   | Error err, _, _
   | _, Error err, _
   | _, _, Error err ->
-      validation_error_result [ err ]
+      validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some action), Ok (Some actor) -> (
       let note = get_string_opt args "note" in
       let override_note = get_string_opt args "override_note" in
       if actor_must_be_operator action
          && not ((=) actor.Goal_verification.kind Goal_verification.Operator)
       then
-        error_result_typed ~code:Validation_error
+        error_result_typed ~tool_name ~start_time ~code:Validation_error
           "actor.kind must be operator for this transition"
       else
         match Goal_store.get_goal ctx.config ~goal_id with
-        | None -> error_result_typed ~code:Not_found "goal not found"
+        | None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
         | Some goal ->
             begin
               match
@@ -519,7 +524,7 @@ let handle_goal_transition (ctx : context) args =
                 else
                   Ok ()
               with
-              | Error msg -> error_result_typed ~code:Conflict msg
+              | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
               | Ok () ->
                   let goals = Goal_store.list_goals ctx.config () in
                   let effective_policy =
@@ -527,7 +532,7 @@ let handle_goal_transition (ctx : context) args =
                       ~goals:(goal_policy_nodes goals) ~goal_id
                   in
                   match effective_policy with
-              | Error msg -> error_result_typed ~code:Validation_error msg
+              | Error msg -> error_result_typed ~tool_name ~start_time ~code:Validation_error msg
               | Ok effective_policy ->
                   let has_effective_verifier_policy =
                     Option.is_some effective_policy
@@ -537,11 +542,11 @@ let handle_goal_transition (ctx : context) args =
                       ~has_effective_verifier_policy
                       ~require_completion_approval:goal.require_completion_approval
                   with
-                  | Error msg -> error_result_typed ~code:Conflict msg
+                  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
                   | Ok Goal_phase.Open_verification -> (
                       match effective_policy with
                       | None ->
-                          error_result_typed ~code:Internal_error
+                          error_result_typed ~tool_name ~start_time ~code:Internal_error
                             "effective verifier policy missing"
                       | Some effective_policy -> (
                           match
@@ -549,14 +554,14 @@ let handle_goal_transition (ctx : context) args =
                               ~policy_snapshot:effective_policy ~requested_by:actor
                           with
                           | Error msg ->
-                              error_result_typed ~code:Validation_error msg
+                              error_result_typed ~tool_name ~start_time ~code:Validation_error msg
                           | Ok policy_snapshot -> (
                               match
                                 Goal_verification.create_request ctx.config ~goal_id
                                   ~requested_by:actor ~policy_snapshot
                               with
                               | Error msg ->
-                                  error_result_typed ~code:Internal_error msg
+                                  error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                               | Ok request -> (
                                   match
                                     update_goal_phase ctx goal
@@ -564,7 +569,7 @@ let handle_goal_transition (ctx : context) args =
                                       ~active_verification_request_id:request.id ()
                                   with
                                   | Error msg ->
-                                      error_result_typed ~code:Internal_error msg
+                                      error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                                   | Ok updated_goal ->
                                       emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
                                         ~payload:
@@ -582,7 +587,7 @@ let handle_goal_transition (ctx : context) args =
                                                 Goal_verification.goal_verification_request_to_yojson
                                                   request );
                                             ]);
-                                      ok_result
+                                      ok_result ~tool_name ~start_time
                                         [
                                           ("goal_id", `String goal_id);
                                           ( "action",
@@ -601,7 +606,7 @@ let handle_goal_transition (ctx : context) args =
                         update_goal_phase ctx goal ~phase:Goal_phase.Awaiting_approval
                           ?note ~clear_active_verification_request:true ()
                       with
-                      | Error msg -> error_result_typed ~code:Internal_error msg
+                      | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                       | Ok updated_goal ->
                           emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
                             ~payload:
@@ -617,7 +622,7 @@ let handle_goal_transition (ctx : context) args =
                                 [
                                   ("actor", Goal_verification.goal_principal_to_yojson actor);
                                 ]);
-                          ok_result
+                          ok_result ~tool_name ~start_time
                             [
                               ("goal_id", `String goal_id);
                               ("action", `String (Goal_phase.action_to_string action));
@@ -631,7 +636,7 @@ let handle_goal_transition (ctx : context) args =
                         update_goal_phase ctx goal ~phase:Goal_phase.Completed ?note
                           ~clear_active_verification_request:true ()
                       with
-                      | Error msg -> error_result_typed ~code:Internal_error msg
+                      | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                       | Ok updated_goal ->
                           emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
                             ~payload:
@@ -640,7 +645,7 @@ let handle_goal_transition (ctx : context) args =
                                   ("phase", Goal_phase.to_yojson updated_goal.phase);
                                   ("actor", Goal_verification.goal_principal_to_yojson actor);
                                 ]);
-                          ok_result
+                          ok_result ~tool_name ~start_time
                             [
                               ("goal_id", `String goal_id);
                               ("action", `String (Goal_phase.action_to_string action));
@@ -676,7 +681,7 @@ let handle_goal_transition (ctx : context) args =
                             (not ((=) next_phase Goal_phase.Awaiting_verification))
                           ()
                       with
-                      | Error msg -> error_result_typed ~code:Internal_error msg
+                      | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                       | Ok updated_goal ->
                           emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
                             ~payload:
@@ -699,7 +704,7 @@ let handle_goal_transition (ctx : context) args =
                                          else
                                            "reject") );
                                   ]);
-                          ok_result
+                          ok_result ~tool_name ~start_time
                             [
                               ("goal_id", `String goal_id);
                               ("action", `String (Goal_phase.action_to_string action));
@@ -710,7 +715,7 @@ let handle_goal_transition (ctx : context) args =
                             ]
             end)
   | Ok _, Ok None, _ ->
-      validation_error_result
+      validation_error_result ~tool_name ~start_time
         [
           {
             field = "action";
@@ -721,7 +726,7 @@ let handle_goal_transition (ctx : context) args =
           };
         ]
   | Ok _, _, Ok None ->
-      validation_error_result
+      validation_error_result ~tool_name ~start_time
         [
           {
             field = "actor";
@@ -732,7 +737,7 @@ let handle_goal_transition (ctx : context) args =
           };
         ]
 
-let handle_goal_verify (ctx : context) args =
+let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result.t =
   match validate_string_required args "goal_id", parse_optional_principal args "principal",
         parse_optional_vote_decision args "decision",
         parse_optional_string_list args "evidence_refs" with
@@ -740,13 +745,13 @@ let handle_goal_verify (ctx : context) args =
   | _, Error err, _, _
   | _, _, Error err, _
   | _, _, _, Error err ->
-      validation_error_result [ err ]
+      validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some principal), Ok (Some decision), Ok evidence_refs -> (
       let note = get_string_opt args "note" in
       let evidence_refs = Option.value evidence_refs ~default:[] in
       let request_id = get_string_opt args "request_id" in
       match Goal_store.get_goal ctx.config ~goal_id with
-      | None -> error_result_typed ~code:Not_found "goal not found"
+      | None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
       | Some goal -> (
           let request_id =
             match request_id with
@@ -755,14 +760,14 @@ let handle_goal_verify (ctx : context) args =
           in
           match request_id with
           | None ->
-              error_result_typed ~code:Conflict
+              error_result_typed ~tool_name ~start_time ~code:Conflict
                 "goal has no active verification request"
           | Some request_id -> (
               match
                 Goal_verification.submit_vote ctx.config ~request_id ~principal
                   ~decision ?note ~evidence_refs ()
               with
-              | Error msg -> error_result_typed ~code:Conflict msg
+              | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
               | Ok (request, quorum_result) ->
                   let goals = Goal_store.list_goals ctx.config () in
                   let effective_policy =
@@ -790,7 +795,7 @@ let handle_goal_verify (ctx : context) args =
                       update_goal_phase ctx goal ~phase ?note
                         ~clear_active_verification_request:true ()
                     with
-                    | Error msg -> error_result_typed ~code:Internal_error msg
+                    | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                     | Ok updated_goal ->
                         emit_goal_event ctx ~goal_id
                           ~event_type:"goal_verification_resolved"
@@ -803,7 +808,7 @@ let handle_goal_verify (ctx : context) args =
                         emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
                           ~payload:
                             (`Assoc [ ("phase", Goal_phase.to_yojson updated_goal.phase) ]);
-                        ok_result
+                        ok_result ~tool_name ~start_time
                           [
                             ("goal_id", `String goal_id);
                             ("goal", Goal_store.goal_to_yojson updated_goal);
@@ -822,7 +827,7 @@ let handle_goal_verify (ctx : context) args =
                   in
                   match quorum_result with
                   | Goal_verification.Pending ->
-                      ok_result
+                      ok_result ~tool_name ~start_time
                         [
                           ("goal_id", `String goal_id);
                           ("goal", Goal_store.goal_to_yojson goal);
@@ -846,7 +851,7 @@ let handle_goal_verify (ctx : context) args =
                       finalize ~phase:Goal_phase.Executing
                         ~event_status:"rejected")))
   | Ok _, Ok None, _, _ ->
-      validation_error_result
+      validation_error_result ~tool_name ~start_time
         [
           {
             field = "principal";
@@ -857,7 +862,7 @@ let handle_goal_verify (ctx : context) args =
           };
         ]
   | Ok _, _, Ok None, _ ->
-      validation_error_result
+      validation_error_result ~tool_name ~start_time
         [
           {
             field = "decision";
@@ -868,27 +873,27 @@ let handle_goal_verify (ctx : context) args =
           };
         ]
 
-let handle_goal_review (ctx : context) args =
+let handle_goal_review ~tool_name ~start_time (ctx : context) args : Tool_result.t =
   match validate_string_required args "goal_id", parse_optional_review_outcome args "outcome",
         parse_optional_horizon args "new_horizon" with
   | Error err, _, _
   | _, Error err, _
   | _, _, Error err ->
-      validation_error_result [ err ]
+      validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some outcome), Ok new_horizon -> (
       let note = get_string_opt args "note" in
       match Goal_store.get_goal ctx.config ~goal_id with
-      | None -> error_result_typed ~code:Not_found "goal not found"
+      | None -> error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
       | Some goal -> (
           match goal.phase with
           | Goal_phase.Awaiting_verification
           | Goal_phase.Awaiting_approval ->
-              error_result_typed ~code:Conflict
+              error_result_typed ~tool_name ~start_time ~code:Conflict
                 "masc_goal_review is ambiguous while verification or approval is pending; use masc_goal_transition / masc_goal_verify"
           | _ -> (
               match outcome with
               | Goal_store.ReviewDone ->
-                  handle_goal_transition ctx
+                  handle_goal_transition ~tool_name ~start_time ctx
                     (`Assoc
                       [
                         ("goal_id", `String goal_id);
@@ -911,15 +916,15 @@ let handle_goal_review (ctx : context) args =
                       ?note ()
                   with
                   | Error msg ->
-                      error_result_typed ~code:Not_found msg
+                      error_result_typed ~tool_name ~start_time ~code:Not_found msg
                   | Ok goal ->
-                      ok_result
+                      ok_result ~tool_name ~start_time
                         [
                           ("goal_id", `String goal.id);
                           ("goal", Goal_store.goal_to_yojson goal);
                         ]))))
   | Ok _, Ok None, _ ->
-      validation_error_result
+      validation_error_result ~tool_name ~start_time
         [
           {
             field = "outcome";

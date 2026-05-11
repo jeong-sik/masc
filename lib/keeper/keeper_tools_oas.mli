@@ -95,7 +95,7 @@ val make_keeper_tool_handler :
   ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t) ->
   failure_counts:failure_counts ->
   unit ->
-  Yojson.Safe.t -> bool * string
+  Yojson.Safe.t -> Tool_result.t
 
 (** Build the keeper's full [tool_bundle]: internal tools +
     alias-registered (public name) tools that translate input to

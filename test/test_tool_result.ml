@@ -4,6 +4,46 @@ module Tool_result = Masc_mcp.Tool_result
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Time_compat = Time_compat
 
+
+let test_ok_json_response () =
+  let start = 1000.0 in
+  let r = Tool_result.ok ~tool_name:"masc_status" ~start_time:start {|{"status":"ok","count":42}|} in
+  Alcotest.(check bool) "success" true r.success;
+  Alcotest.(check string) "tool_name" "masc_status" r.tool_name;
+  (* data should be parsed JSON, not a string *)
+  (match r.data with
+   | `Assoc fields ->
+     Alcotest.(check bool) "has status field"
+       true
+       (List.exists (fun (k, _) -> k = "status") fields)
+   | _ -> Alcotest.fail "expected Assoc");
+  Alcotest.(check bool) "duration >= 0" true (r.duration_ms >= 0.0)
+
+let test_error_plain_string () =
+  let start = Time_compat.now () in
+  let r = Tool_result.error ~tool_name:"masc_transition" ~start_time:start "Something went wrong" in
+  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check string) "tool_name" "masc_transition" r.tool_name;
+  (* Non-JSON string should be wrapped as `String *)
+  (match r.data with
+   | `String s ->
+     Alcotest.(check string) "plain string preserved" "Something went wrong" s
+   | _ -> Alcotest.fail "expected String for non-JSON input")
+
+let test_ok_prefixed_json_response () =
+  let start = 1000.0 in
+  let r = Tool_result.ok ~tool_name:"masc_board_post" ~start_time:start
+    "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
+  in
+  match r.data with
+  | `Assoc fields ->
+      Alcotest.(check string) "id parsed" "post-1"
+        Yojson.Safe.Util.(List.assoc "id" fields |> to_string);
+      Alcotest.(check string) "content parsed" "hello"
+        Yojson.Safe.Util.(List.assoc "content" fields |> to_string)
+  | _ -> Alcotest.fail "expected parsed JSON from prefixed payload"
+
+
 let test_to_json () =
   let start = Time_compat.now () in
   let r = Tool_result.ok ~tool_name:"masc_transition" ~start_time:start "done" in
@@ -40,7 +80,7 @@ let test_dispatch_structured () =
   (* Register a test handler *)
   Tool_dispatch.register
     ~tool_name:"__test_tool"
-    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok {|{"result":"ok"}|}));
+    ~handler:(fun ~name ~args:_ -> Some (Tool_result.quick_ok ~tool_name:name {|{"result":"ok"}|}));
   Tool_dispatch.register_name_tag ~tool_name:"__test_tool" ~tag:Mod_misc;
   let token = match Tool_dispatch.mint_token ~name:"__test_tool" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.dispatch_structured ~token ~args:`Null with
@@ -57,6 +97,12 @@ let test_dispatch_structured_unknown () =
 
 let () =
   Alcotest.run "Tool_result" [
+    "ok/error", [
+      Alcotest.test_case "json response" `Quick test_ok_json_response;
+      Alcotest.test_case "plain string" `Quick test_error_plain_string;
+      Alcotest.test_case "prefixed json response" `Quick
+        test_ok_prefixed_json_response;
+    ];
     "to_json", [
       Alcotest.test_case "fields present" `Quick test_to_json;
     ];

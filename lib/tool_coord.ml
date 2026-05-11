@@ -24,7 +24,8 @@ open Coord_types
 
 open Tool_args
 
-type tool_result = Coord_types.tool_result
+(* [type tool_result = Coord_types.tool_result] DELETED in RFC-0062 Phase 4d-2.
+   All handlers now return Tool_result.t directly. *)
 
 type context = Coord_types.context = {
   config : Coord.config;
@@ -573,21 +574,21 @@ let status_summary_string (ctx : context) =
     ~todo_conflict_task_ids ~binding ~planning_state
     ~suggested_next ~attention_items ~state ~backlog
 
-let handle_status ctx _args =
+let handle_status ~tool_name ~start_time ctx _args =
   let cache_key = Printf.sprintf "%s::%s" ctx.config.base_path ctx.agent_name in
-  { success = true;
-    message = cached_text_by_key _status_cache ~key:cache_key
+  Tool_result.ok ~tool_name ~start_time
+    (cached_text_by_key _status_cache ~key:cache_key
        ~ttl_s:(status_cache_ttl_s ()) (fun () ->
-       status_summary_string ctx) }
+       status_summary_string ctx))
 
-let handle_reset ctx args =
+let handle_reset ~tool_name ~start_time ctx args =
   let confirm = get_bool args "confirm" false in
   if not confirm then
-    { success = false;
-      message = "This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed." }
+    Tool_result.error ~tool_name ~start_time
+      "This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed."
   else begin
     invalidate_status_cache ();
-    { success = true; message = Coord.reset ctx.config }
+    Tool_result.ok ~tool_name ~start_time (Coord.reset ctx.config)
   end
 
 (* ── State inspection (shared by workflow_guide and check) ──────── *)
@@ -645,7 +646,7 @@ let state_to_json st =
 
 (* ── Workflow guide ─────────────────────────────────────────────── *)
 
-let handle_workflow_guide ctx _args =
+let handle_workflow_guide ~tool_name ~start_time ctx _args =
   let st = inspect_state ctx in
   let guidance =
     Workflow_guide.current_state_guidance
@@ -659,14 +660,14 @@ let handle_workflow_guide ctx _args =
       ("guidance", Workflow_guide.guidance_to_json guidance);
     ]
   in
-  { success = true; message = Yojson.Safe.to_string result }
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string result)
 
 (* ── Coordination product FSM snapshot ─────────────────────────── *)
 
-let handle_coordination_fsm_snapshot ctx _args =
-  { success = true;
-    message = Yojson.Safe.to_string
-      (Coordination_product_snapshot.safe_build_tool_yojson ctx.config) }
+let handle_coordination_fsm_snapshot ~tool_name ~start_time ctx _args =
+  Tool_result.ok ~tool_name ~start_time
+    (Yojson.Safe.to_string
+      (Coordination_product_snapshot.safe_build_tool_yojson ctx.config))
 
 (* ── State check (assertion-based verification) ────────────────── *)
 
@@ -676,28 +677,38 @@ let handle_coordination_fsm_snapshot ctx _args =
     single witness that compile-fails when a constructor is added but
     [assertion_kind_to_string] / [assertion_kind_of_string_lenient]
     aren't updated. Same shape as #8546 / #8601 / #8592. *)
-let handle_heartbeat ctx _args =
+let handle_heartbeat ~tool_name ~start_time ctx _args =
   let message = Coord.heartbeat ctx.config ~agent_name:ctx.agent_name in
   (* Coord.heartbeat returns "..." on failure (agent not found, invalid file) *)
   let success = not (String.length message >= 3
     && Char.code message.[0] = 0xe2
     && Char.code message.[1] = 0x9a
     && Char.code message.[2] = 0xa0) in
-  { success; message }
+  if success then
+    Tool_result.ok ~tool_name ~start_time message
+  else
+    Tool_result.error ~tool_name ~start_time message
 
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start_time = Time_compat.now () in
   match name with
-  | "masc_status" -> Some (handle_status ctx args)
-  | "masc_heartbeat" -> Some (handle_heartbeat ctx args)
-  | "masc_goal_list" -> Some (Coord_goals.handle_goal_list ctx args)
-  | "masc_goal_upsert" -> Some (Coord_goals.handle_goal_upsert ctx args)
-  | "masc_goal_review" -> Some (Coord_goals.handle_goal_review ctx args)
-  | "masc_goal_transition" -> Some (Coord_goals.handle_goal_transition ctx args)
-  | "masc_goal_verify" -> Some (Coord_goals.handle_goal_verify ctx args)
+  | "masc_status" -> Some (handle_status ~tool_name:name ~start_time ctx args)
+  | "masc_heartbeat" -> Some (handle_heartbeat ~tool_name:name ~start_time ctx args)
+  | "masc_goal_list" ->
+      Some (Coord_goals.handle_goal_list ~tool_name:name ~start_time ctx args)
+  | "masc_goal_upsert" ->
+      Some (Coord_goals.handle_goal_upsert ~tool_name:name ~start_time ctx args)
+  | "masc_goal_review" ->
+      Some (Coord_goals.handle_goal_review ~tool_name:name ~start_time ctx args)
+  | "masc_goal_transition" ->
+      Some (Coord_goals.handle_goal_transition ~tool_name:name ~start_time ctx args)
+  | "masc_goal_verify" ->
+      Some (Coord_goals.handle_goal_verify ~tool_name:name ~start_time ctx args)
   | "masc_coordination_fsm_snapshot" ->
-      Some (handle_coordination_fsm_snapshot ctx args)
-  | "masc_reset" -> Some (handle_reset ctx args)
-  | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
+      Some (handle_coordination_fsm_snapshot ~tool_name:name ~start_time ctx args)
+  | "masc_reset" -> Some (handle_reset ~tool_name:name ~start_time ctx args)
+  | "masc_workflow_guide" ->
+      Some (handle_workflow_guide ~tool_name:name ~start_time ctx args)
   | "masc_check" ->
       let inspect ctx =
         let s = inspect_state ctx in
@@ -709,7 +720,8 @@ let dispatch ctx ~name ~args : tool_result option =
           worktree_active = s.worktree_active;
         }
       in
-      Some (Coord_assertions.handle_check ~inspect_state:inspect ctx args)
+      Some (Coord_assertions.handle_check ~inspect_state:inspect ~tool_name:name
+              ~start_time ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_coord.schemas

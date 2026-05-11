@@ -7,7 +7,6 @@
     NOT routed through this module's {!dispatch}.
 
     Type re-exports preserve identity with the source modules:
-    - {!tool_result} = {!Coord_types.tool_result}
     - {!context} = {!Coord_types.context}
     - {!assertion_kind} = {!Coord_assertions.assertion_kind}
 
@@ -33,11 +32,7 @@
     [handle_workflow_guide], [handle_check], [handle_assertion]).
     All consumed only inside {!dispatch}'s pipeline. *)
 
-(** {1 Tool result + context} *)
-
-type tool_result = Coord_types.tool_result
-(** Alias for [{ success: bool; message: string }] — re-export of
-    {!Coord_types.tool_result}. *)
+(** {1 Context} *)
 
 type context = Coord_types.context = {
   config : Coord.config;
@@ -94,12 +89,16 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 (** [dispatch ctx ~name ~args] routes [name] to the appropriate
     private handler ([handle_status], [handle_reset],
     [handle_init], [handle_workflow_guide], [handle_check],
     [handle_assertion]).  Returns [None] when [name] is not a
     coord tool — caller treats as "not my tool".
+
+    Captures [start_time] at entry and threads [~tool_name:name
+    ~start_time] to every handler so callers do not need to
+    supply timing data.
 
     Status results are cached for ~2 seconds via the internal
     text-cache to absorb repeated dashboard polls; cache

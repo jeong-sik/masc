@@ -37,10 +37,9 @@ let with_room f =
 let coord_ctx config : Tool_coord.context =
   { Tool_coord.config; agent_name = "planner" }
 
-let parse_json_result (result : Tool_coord.tool_result) =
-  match result with
-  | { success = true; message = body } -> Yojson.Safe.from_string body
-  | { success = false; message = body } -> fail body
+let parse_json_result (result : Tool_result.t) =
+  if result.success then Yojson.Safe.from_string (Tool_result.message result)
+  else Alcotest.fail (Tool_result.message result)
 
 let principal_json ~kind ~id =
   `Assoc [ ("kind", `String kind); ("id", `String id) ]
@@ -94,10 +93,10 @@ let create_done_task config ~goal_id ~title =
   step Masc_domain.Start "test fixture start";
   step Masc_domain.Done_action "test fixture done"
 
-let expect_error (result : Tool_coord.tool_result option) =
+let expect_error (result : Tool_result.t option) =
   match result with
-  | Some { success = false; message = body } -> Yojson.Safe.from_string body
-  | Some { success = true; message = _ } -> fail "expected tool error"
+  | Some r when not r.success -> Yojson.Safe.from_string (Tool_result.message r)
+  | Some r -> fail (Printf.sprintf "expected tool error, got success: %s" (Tool_result.message r))
   | None -> fail "tool not handled"
 
 let test_goal_upsert_and_list () =

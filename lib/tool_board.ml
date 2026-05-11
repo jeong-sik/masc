@@ -36,7 +36,7 @@ open Tool_args
 
 type board_list_cache = {
   mutable key : string option;
-  mutable value : (bool * string) option;
+  mutable value : Tool_result.t option;
   mutable expires_at : float;
 }
 
@@ -468,12 +468,12 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
 let detect_truncated_markdown (text : string) : bool =
   Option.is_some (detect_truncated_markdown_with_reason text)
 
-let handle_post_create args =
+let handle_post_create ~tool_name ~start_time args =
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles *)
   match title with
   | Some t when String.equal (String.trim t) "" ->
-      (false, "Title must not be empty or whitespace-only")
+      Tool_result.error ~tool_name ~start_time "Title must not be empty or whitespace-only"
   | _ ->
   let body_arg = get_string_opt args "body" |> Option.map strip_state_blocks_text in
   let raw_content = match body_arg with Some value -> value | None -> get_string args "content" "" in
@@ -514,11 +514,11 @@ let handle_post_create args =
     | None -> false
   in
   if title_is_empty then
-    (false, "title is required")
+    Tool_result.error ~tool_name ~start_time "title is required"
   else if Option.is_none author || Option.equal String.equal author (Some "") || Option.equal String.equal author (Some "anonymous") then
-    (false, "author is required")
+    Tool_result.error ~tool_name ~start_time "author is required"
   else if String.length content > Board.Limits.max_content_length then
-    (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Content exceeds max length (%d > %d chars)"
        (String.length content) Board.Limits.max_content_length)
   else
   let author = Option.value author ~default:"" in
@@ -538,7 +538,7 @@ let handle_post_create args =
     | None -> Board.Internal
   in
   match resolve_board_post_kind ~author raw_post_kind with
-  | Error msg -> (false, "" ^ msg)
+  | Error msg -> Tool_result.error ~tool_name ~start_time ("" ^ msg)
   | Ok post_kind ->
       match
         Board_dispatch.create_post ~author ~content ?title ?body ~post_kind ?meta_json
@@ -546,9 +546,9 @@ let handle_post_create args =
       with
       | Ok post ->
           let json = Board.post_to_yojson post in
-          (true, Printf.sprintf "Post created:\n%s" (Yojson.Safe.pretty_to_string json))
+          Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Post created:\n%s" (Yojson.Safe.pretty_to_string json))
       | Error e ->
-          (false, Printf.sprintf "%s" (board_error_to_string e))
+          Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" (board_error_to_string e))
 
 (** Issue #8449 PR B: [sort_order] is now a re-export of
     [Board_dispatch.sort_order] (type-alias with definition equality),
@@ -575,7 +575,7 @@ let parse_sort_order value =
 let board_list_cache_key args =
   Yojson.Safe.to_string args
 
-let handle_post_list_uncached args =
+let handle_post_list_uncached ~tool_name ~start_time args =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
   let visibility_str = get_string_opt args "visibility" in
@@ -608,7 +608,7 @@ let handle_post_list_uncached args =
     | Some value -> parse_sort_order value
   in
   match sort_by_result with
-  | Error msg -> (false, Printf.sprintf "%s" msg)
+  | Error msg -> Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" msg)
   | Ok sort_by ->
       (* Fetch exactly what we need: offset posts to skip + limit posts to show.
          Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
@@ -633,7 +633,7 @@ let handle_post_list_uncached args =
           List.filteri (fun i _ -> i < limit) sorted_posts
       in
       if Stdlib.List.length posts = 0 then
-        (true, "No posts found.")
+        Tool_result.ok ~tool_name ~start_time "No posts found."
       else
         (* Check for new activity since timestamp *)
         let has_new_activity (p : Board.post) =
@@ -659,26 +659,26 @@ let handle_post_list_uncached args =
         let separator = if compact then "\n" else "\n\n---\n\n" in
         let mode_label = if compact then " (compact)" else "" in
         let header = Printf.sprintf "Posts (%d) — %s%s:" (List.length posts) sort_label mode_label in
-        (true, header ^ "\n" ^ String.concat separator formatted)
+        Tool_result.ok ~tool_name ~start_time (header ^ "\n" ^ String.concat separator formatted)
 
-let handle_post_list args =
+let handle_post_list ~tool_name ~start_time args =
   (* Skip cache for random=true — non-deterministic by definition *)
   let random = get_bool args "random" false in
   if random then
-    handle_post_list_uncached args
+    handle_post_list_uncached ~tool_name ~start_time args
   else
     let key = board_list_cache_key args in
-    cached_board_list ~key (fun () -> handle_post_list_uncached args)
+    cached_board_list ~key (fun () -> handle_post_list_uncached ~tool_name ~start_time args)
 
-let handle_post_get args =
+let handle_post_get ~tool_name ~start_time args =
   let post_id = get_string args "post_id" "" in
   match Board_dispatch.get_post_and_comments ~post_id with
   | Error (Board.Post_not_found _) ->
       (* Idempotent: post no longer exists (deleted/expired/TTL).
          Return success so keeper tool metrics don't count this as failure.
          The LLM still sees a clear message that the post is gone. *)
-      (true, Printf.sprintf "Post %s no longer exists (deleted or expired)." post_id)
-  | Error e -> (false, Printf.sprintf "%s" (board_error_to_string e))
+      Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Post %s no longer exists (deleted or expired)." post_id)
+  | Error e -> Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" (board_error_to_string e))
   | Ok (post, comments) ->
       let post_str = format_post post in
       let comments_str = if Stdlib.List.length comments = 0 then
@@ -689,31 +689,31 @@ let handle_post_get args =
           (List.length comments)
           (String.concat "\n" formatted)
       in
-      (true, post_str ^ comments_str)
+      Tool_result.ok ~tool_name ~start_time (post_str ^ comments_str)
 
-let handle_comment_add args =
+let handle_comment_add ~tool_name ~start_time args =
   let post_id = get_string args "post_id" "" in
   let content = get_string args "content" "" in
   let author = get_string_opt args "author" |> Option.map String.trim in
   let parent_id = get_string_opt args "parent_id" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   if String.equal (String.trim post_id) "" then
-    (false, "post_id is required")
+    Tool_result.error ~tool_name ~start_time "post_id is required"
   else if String.equal (String.trim content) "" then
-    (false, "Content must not be empty")
+    Tool_result.error ~tool_name ~start_time "Content must not be empty"
   else if Option.is_none author || Option.equal String.equal author (Some "") || Option.equal String.equal author (Some "anonymous") then
-    (false, "author is required")
+    Tool_result.error ~tool_name ~start_time "author is required"
   else if String.length content > Board.Limits.max_content_length then
-    (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Content exceeds max length (%d > %d chars)"
        (String.length content) Board.Limits.max_content_length)
   else
   match Board_dispatch.add_comment ~post_id ~author:(Option.value author ~default:"")
           ~content ?parent_id ~ttl_hours () with
   | Ok comment ->
       let json = Board.comment_to_yojson comment in
-      (true, Printf.sprintf "Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
+      Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
   | Error e ->
-      (false, Printf.sprintf "%s" (board_error_to_string e))
+      Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" (board_error_to_string e))
 
 (** SOUL Evolution callback - registered at startup to break dependency cycle *)
 type evolution_callback = {
@@ -726,7 +726,7 @@ let evolution_hook : evolution_callback option Atomic.t = Atomic.make None
 let register_evolution_callback cb =
   Atomic.set evolution_hook (Some cb)
 
-let handle_vote args =
+let handle_vote ~tool_name ~start_time args =
   let post_id = get_string args "post_id" "" in
   let voter = get_string args "voter" "anonymous" in
   let direction_str =
@@ -762,7 +762,7 @@ let handle_vote args =
                 Log.Misc.warn "[ToolBoard] get_reputation_evolution failed: %s" (board_error_to_string e);
                 ""
       in
-      (true, Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)
+      Tool_result.ok ~tool_name ~start_time (Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)
   | Error (Board.Already_voted _) ->
       (* Idempotent: same-direction duplicate vote is a no-op success.
          The desired state already exists, so the tool call succeeds. *)
@@ -770,73 +770,73 @@ let handle_vote args =
        | Ok post ->
            let score = post.votes_up - post.votes_down in
            let arrow = if (=) direction Board.Up then "↑" else "↓" in
-           (true, Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
+           Tool_result.ok ~tool_name ~start_time (Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
        | Error _ ->
-           (true, "Already voted (idempotent). Score unchanged."))
+           Tool_result.ok ~tool_name ~start_time "Already voted (idempotent). Score unchanged.")
   | Error e ->
-      (false, Printf.sprintf "%s" (board_error_to_string e))
+      Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" (board_error_to_string e))
 
-let handle_stats _args =
+let handle_stats ~tool_name ~start_time _args =
   let stats = Board_dispatch.stats () in
-  (true, Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
+  Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
 
 (** Search posts by keyword *)
-let handle_search args =
+let handle_search ~tool_name ~start_time args =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
-  if String.equal query "" then (false, "query required")
+  if String.equal query "" then Tool_result.error ~tool_name ~start_time "query required"
   else
     let results = Board_dispatch.search ~query ~limit in
-    if Stdlib.List.length results = 0 then (true, Printf.sprintf "'%s' 검색 결과 없음" query)
+    if Stdlib.List.length results = 0 then Tool_result.ok ~tool_name ~start_time (Printf.sprintf "'%s' 검색 결과 없음" query)
     else
       let fmt = if compact then format_post_compact else format_post in
       let formatted = List.map fmt results in
       let separator = if compact then "\n" else "\n---\n" in
-      (true, Printf.sprintf "'%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat separator formatted))
+      Tool_result.ok ~tool_name ~start_time (Printf.sprintf "'%s' 검색 결과 (%d개):\n\n%s" query (List.length results) (String.concat separator formatted))
 
 (** Vote on comment *)
-let handle_comment_vote args =
+let handle_comment_vote ~tool_name ~start_time args =
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
   let direction_str = get_string args "direction" "up" in
   let direction = if String.equal direction_str "down" then Board.Down else Board.Up in
-  if String.equal comment_id "" then (false, "comment_id required")
+  if String.equal comment_id "" then Tool_result.error ~tool_name ~start_time "comment_id required"
   else
     match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
-    | Ok score -> (true, Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if String.equal direction_str "down" then "👎" else "👍") score)
+    | Ok score -> Tool_result.ok ~tool_name ~start_time (Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if String.equal direction_str "down" then "👎" else "👍") score)
     | Error (Board.Already_voted _) ->
-        (true, Printf.sprintf "%s Already voted (idempotent)." (if String.equal direction_str "down" then "👎" else "👍"))
-    | Error e -> (false, Printf.sprintf "%s" (board_error_to_string e))
+        Tool_result.ok ~tool_name ~start_time (Printf.sprintf "%s Already voted (idempotent)." (if String.equal direction_str "down" then "👎" else "👍"))
+    | Error e -> Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" (board_error_to_string e))
 
-let handle_reaction args =
+let handle_reaction ~tool_name ~start_time args =
   let target_type_raw = get_string args "target_type" "" in
   let target_id = get_string args "target_id" "" in
   let user_id = get_string args "user_id" (get_string args "user" "anonymous") in
   let emoji = get_string args "emoji" "" in
   match Board.reaction_target_type_of_string_opt target_type_raw with
-  | None -> (false, "target_type must be post or comment")
+  | None -> Tool_result.error ~tool_name ~start_time "target_type must be post or comment"
   | Some target_type ->
       if String.equal (String.trim target_id) "" then
-        (false, "target_id required")
+        Tool_result.error ~tool_name ~start_time "target_id required"
       else if String.equal (String.trim user_id) ""
               || String.equal (String.trim user_id) "anonymous"
       then
-        (false, "user_id required")
+        Tool_result.error ~tool_name ~start_time "user_id required"
       else
         match
           Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id ~emoji
         with
         | Ok result ->
-            ( true,
-              Yojson.Safe.pretty_to_string
-                (Board.reaction_toggle_result_to_yojson result) )
-        | Error e -> (false, Printf.sprintf "%s" (board_error_to_string e))
+            Tool_result.ok ~tool_name ~start_time
+              (Yojson.Safe.pretty_to_string
+                (Board.reaction_toggle_result_to_yojson result))
+        | Error e -> Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" (board_error_to_string e))
 
 (** Agent profile *)
-let handle_profile args =
+let handle_profile ~tool_name ~start_time args =
   let agent = get_string args "agent" "" in
-  if String.equal agent "" then (false, "agent required")
+  if String.equal agent "" then Tool_result.error ~tool_name ~start_time "agent required"
   else
     let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
     let norm s = String.lowercase_ascii (String.trim s) in
@@ -846,26 +846,26 @@ let handle_profile args =
     let all_comments : Board.comment list = Board_dispatch.list_comments () in
     let agent_comments = List.filter (fun (c : Board.comment) -> String.equal (norm (Board.Agent_id.to_string c.author)) agent_norm) all_comments in
     let comment_votes = List.fold_left (fun acc (c : Board.comment) -> acc + c.votes_up - c.votes_down) 0 agent_comments in
-    (true, Printf.sprintf "**%s** 프로필\n게시물: %d개 (%+d점)\n코멘트: %d개 (%+d점)\n총: %+d점"
+    Tool_result.ok ~tool_name ~start_time (Printf.sprintf "**%s** 프로필\n게시물: %d개 (%+d점)\n코멘트: %d개 (%+d점)\n총: %+d점"
       agent (List.length agent_posts) post_votes (List.length agent_comments) comment_votes (post_votes + comment_votes))
 
 (** Hearth list *)
-let handle_hearth_list _args =
+let handle_hearth_list ~tool_name ~start_time _args =
   let hearths = Board_dispatch.list_hearths () in
-  if Stdlib.List.length hearths = 0 then (true, "No active hearths.")
+  if Stdlib.List.length hearths = 0 then Tool_result.ok ~tool_name ~start_time "No active hearths."
   else
     let formatted = List.map (fun (name, count) ->
       Printf.sprintf "**%s** (%d posts)" name count
     ) hearths in
-    (true, Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted))
+    Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted))
 
-let handle_board_curation_read _args =
+let handle_board_curation_read ~tool_name ~start_time _args =
   match Board_dispatch.latest_curation_snapshot () with
   | None ->
-    (true, Yojson.Safe.to_string `Null)
+    Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string `Null)
   | Some snap ->
     let json = Board_curation.snapshot_to_yojson snap in
-    (true, Yojson.Safe.to_string json)
+    Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
 let assoc_field fields key = List.assoc_opt key fields
 
@@ -965,13 +965,13 @@ let curation_health_components_arg args =
         rationale = string_field fields "rationale" "";
       })
 
-let handle_board_curation_submit args =
+let handle_board_curation_submit ~tool_name ~start_time args =
   let submitted_by = get_string args "submitted_by" "" |> String.trim in
   let rationale = get_string args "rationale" "" |> String.trim in
   if String.equal submitted_by "" then
-    (false, "submitted_by required")
+    Tool_result.error ~tool_name ~start_time "submitted_by required"
   else if String.equal rationale "" then
-    (false, "rationale required")
+    Tool_result.error ~tool_name ~start_time "rationale required"
   else
     let model = string_opt_arg args "model" in
     let summary = string_opt_arg args "summary" in
@@ -982,7 +982,7 @@ let handle_board_curation_submit args =
     let health_score = get_float_opt args "health_score" in
     let health_components = curation_health_components_arg args in
     match provenance_arg args with
-    | Error msg -> (false, msg)
+    | Error msg -> Tool_result.error ~tool_name ~start_time msg
     | Ok provenance ->
       try
         let snap =
@@ -991,9 +991,9 @@ let handle_board_curation_submit args =
             ~tag_suggestions ~answer_matches ?health_score ~health_components
             ~rationale ~provenance ()
         in
-        (true, Yojson.Safe.to_string (Board_curation.snapshot_to_yojson snap))
+        Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string (Board_curation.snapshot_to_yojson snap))
       with
-      | Invalid_argument msg -> (false, msg)
+      | Invalid_argument msg -> Tool_result.error ~tool_name ~start_time msg
 
 (** {1 Tool Definitions} *)
 
@@ -1192,16 +1192,16 @@ let tool_hearth_list : Masc_domain.tool_schema = {
   ];
 }
 
-let handle_delete args =
+let handle_delete ~tool_name ~start_time args =
   let post_id = String.trim (get_string args "post_id" "") in
   if String.equal post_id "" then
-    (false, "post_id is required")
+    Tool_result.error ~tool_name ~start_time "post_id is required"
   else
     match Board_dispatch.delete_post ~post_id with
-    | Ok () -> (true, Printf.sprintf "Deleted post %s" post_id)
-    | Error e -> (false, Printf.sprintf "Delete failed: %s" (board_error_to_string e))
+    | Ok () -> Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Deleted post %s" post_id)
+    | Error e -> Tool_result.error ~tool_name ~start_time (Printf.sprintf "Delete failed: %s" (board_error_to_string e))
 
-let handle_board_cleanup args =
+let handle_board_cleanup ~tool_name ~start_time args =
   let max_age_hours = get_int args "max_age_hours" 24 |> max 1 in
   let require_no_comments = get_bool args "require_no_comments" true in
   let require_no_votes = get_bool args "require_no_votes" true in
@@ -1234,7 +1234,7 @@ let handle_board_cleanup args =
   if dry_run then begin
     let count = List.length targets in
     if count = 0 then
-      (true, Printf.sprintf "Scan complete: 0 candidates (scanned %d posts, age>%dh)"
+      Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Scan complete: 0 candidates (scanned %d posts, age>%dh)"
          (List.length all_posts) max_age_hours)
     else
       let lines = List.map (fun (p : Board.post) ->
@@ -1247,7 +1247,7 @@ let handle_board_cleanup args =
           (p.votes_up + p.votes_down))
         targets
       in
-      (true, Printf.sprintf "Dry-run: %d candidates (scanned %d, age>%dh):\n%s"
+      Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Dry-run: %d candidates (scanned %d, age>%dh):\n%s"
          count (List.length all_posts) max_age_hours
          (String.concat "\n" lines))
   end else begin
@@ -1263,7 +1263,7 @@ let handle_board_cleanup args =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _exn -> Stdlib.incr failed))
       targets;
-    (true, Printf.sprintf "Cleanup done: %d deleted, %d failed (scanned %d, age>%dh)"
+    Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Cleanup done: %d deleted, %d failed (scanned %d, age>%dh)"
        !deleted !failed (List.length all_posts) max_age_hours)
   end
 
@@ -1374,49 +1374,44 @@ let tools = [
     the board_list TTL cache so the next read sees fresh data. *)
 let handle_tool name args =
   let start_time = Time_compat.now () in
-  let result : bool * string =
-    match name with
-    | "masc_board_post" ->
-      let result = handle_post_create args in
-      invalidate_board_list_cache ();
-      result
-    | "masc_board_list" -> handle_post_list args
-    | "masc_board_get" -> handle_post_get args
-    | "masc_board_comment" ->
-      let result = handle_comment_add args in
-      invalidate_board_list_cache ();
-      result
-    | "masc_board_vote" ->
-      let result = handle_vote args in
-      invalidate_board_list_cache ();
-      result
-    | "masc_board_stats" -> handle_stats args
-    | "masc_board_search" -> handle_search args
-    | "masc_board_comment_vote" ->
-      let result = handle_comment_vote args in
-      invalidate_board_list_cache ();
-      result
-    | "masc_board_reaction" ->
-      let result = handle_reaction args in
-      invalidate_board_list_cache ();
-      result
-    | "masc_board_profile" -> handle_profile args
-    | "masc_board_hearths" -> handle_hearth_list args
-    | "masc_board_curation_read" -> handle_board_curation_read args
-    | "masc_board_curation_submit" -> handle_board_curation_submit args
-    | "masc_board_delete" ->
-      let result = handle_delete args in
-      invalidate_board_list_cache ();
-      result
-    | "masc_board_cleanup" ->
-      let result = handle_board_cleanup args in
-      invalidate_board_list_cache ();
-      result
-    | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
-  in
-  let (success, message) = result in
-  if success then Tool_result.ok ~tool_name:name ~start_time message
-  else Tool_result.error ~tool_name:name ~start_time message
+  match name with
+  | "masc_board_post" ->
+    let result = handle_post_create ~tool_name:name ~start_time args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_list" -> handle_post_list ~tool_name:name ~start_time args
+  | "masc_board_get" -> handle_post_get ~tool_name:name ~start_time args
+  | "masc_board_comment" ->
+    let result = handle_comment_add ~tool_name:name ~start_time args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_vote" ->
+    let result = handle_vote ~tool_name:name ~start_time args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_stats" -> handle_stats ~tool_name:name ~start_time args
+  | "masc_board_search" -> handle_search ~tool_name:name ~start_time args
+  | "masc_board_comment_vote" ->
+    let result = handle_comment_vote ~tool_name:name ~start_time args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_reaction" ->
+    let result = handle_reaction ~tool_name:name ~start_time args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_profile" -> handle_profile ~tool_name:name ~start_time args
+  | "masc_board_hearths" -> handle_hearth_list ~tool_name:name ~start_time args
+  | "masc_board_curation_read" -> handle_board_curation_read ~tool_name:name ~start_time args
+  | "masc_board_curation_submit" -> handle_board_curation_submit ~tool_name:name ~start_time args
+  | "masc_board_delete" ->
+    let result = handle_delete ~tool_name:name ~start_time args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_cleanup" ->
+    let result = handle_board_cleanup ~tool_name:name ~start_time args in
+    invalidate_board_list_cache ();
+    result
+  | _ -> Tool_result.error ~tool_name:name ~start_time (Printf.sprintf "Unknown tool: %s" name)
 
 let tool_spec_read_only =
   [

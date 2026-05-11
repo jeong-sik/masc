@@ -108,7 +108,7 @@ let state_to_json st =
     ("session_active", `Bool false);
   ]
 
-let handle_check ~(inspect_state : context -> agent_state) ctx args =
+let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_time ctx args =
   let st = inspect_state ctx in
   let default_assertions =
     [ "project_ready"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
@@ -143,4 +143,4 @@ let handle_check ~(inspect_state : context -> agent_state) ctx args =
       ("fix_hint", fix_hint);
     ]
   in
-  { success = true; message = Yojson.Safe.to_string result }
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string result)

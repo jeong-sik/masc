@@ -826,9 +826,6 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
           ~args:coerced_args
     | Mod_room ->
         Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args:coerced_args
-        |> Option.map (fun { Coord_types.success; message } ->
-          if success then Tool_result.ok ~tool_name:name ~start_time message
-          else Tool_result.error ~tool_name:name ~start_time message)
     | Mod_control ->
         Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:coerced_args
     | Mod_agent_timeline ->

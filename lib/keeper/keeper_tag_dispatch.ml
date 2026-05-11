@@ -87,8 +87,9 @@ let dispatch
       Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
   | Mod_room ->
       Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
-      |> Option.map (fun { Coord_types.success; message } ->
-        if success then ok message else err message)
+      |> Option.map (fun (result : Tool_result.t) ->
+        if result.success then ok (Tool_result.message result)
+        else err (Tool_result.message result))
   | Mod_control ->
       if name = "masc_pause_status" then
         Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args

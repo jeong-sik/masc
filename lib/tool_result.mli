@@ -4,9 +4,6 @@
     Replaces the untyped [(bool * string)] return convention with a
     structured record carrying tool name, timing, and typed payload.
 
-    Backward compatible: existing handlers keep returning [(bool * string)];
-    {!wrap} converts at the dispatch boundary.
-
     @since 2.95.0 *)
 
 (** {1 Failure classification} *)

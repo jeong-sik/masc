@@ -78,12 +78,29 @@ type tool_surface =
   ; missing_required_tools : string list
   }
 
+(* Phase identifier emitted when a cascade rotation releases the in-flight
+   turn slot.  Producer-side closed set; the JSON wire is the lowercase
+   string form via [slot_release_phase_to_string].  [@@deriving tla] so the
+   RFC-0065 correspondence harness picks the symbols up automatically. *)
+type slot_release_phase =
+  | Retry_setup_failed [@tla.symbol "retry_setup_failed"]
+  | Retry_scheduled [@tla.symbol "retry_scheduled"]
+  | Retry_budget_exhausted [@tla.symbol "retry_budget_exhausted"]
+  | Productive_phase_exhausted [@tla.symbol "productive_phase_exhausted"]
+[@@deriving tla]
+
+let slot_release_phase_to_string = function
+  | Retry_setup_failed -> "retry_setup_failed"
+  | Retry_scheduled -> "retry_scheduled"
+  | Retry_budget_exhausted -> "retry_budget_exhausted"
+  | Productive_phase_exhausted -> "productive_phase_exhausted"
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
   ; reason : string
   ; outcome : string
-  ; slot_release_at_phase : string option
+  ; slot_release_at_phase : slot_release_phase option
   ; productive_phase_elapsed_ms : int option
   ; retry_phase_elapsed_ms : int option
   ; error_kind : error_kind option
@@ -184,7 +201,10 @@ let cascade_rotation_attempt_to_json attempt =
       ("to_cascade", `String (cascade_name_to_string attempt.to_cascade));
       ("reason", `String attempt.reason);
       ("outcome", `String attempt.outcome);
-      ("slot_release_at_phase", string_opt_json attempt.slot_release_at_phase);
+      ( "slot_release_at_phase",
+        string_opt_json
+          (Option.map slot_release_phase_to_string
+             attempt.slot_release_at_phase) );
       ( "productive_phase_elapsed_ms",
         match attempt.productive_phase_elapsed_ms with
         | Some value -> `Int value

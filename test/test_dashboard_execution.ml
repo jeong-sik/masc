@@ -525,7 +525,8 @@ let append_execution_receipt ?(outcome = "ok")
                 Lib.Keeper_config.local_recovery_cascade_name;
             reason = "turn_timeout";
             outcome = "retry_scheduled";
-            slot_release_at_phase = Some "productive_phase_exhausted";
+            slot_release_at_phase =
+              Some Lib.Keeper_execution_receipt.Productive_phase_exhausted;
             productive_phase_elapsed_ms = Some 174000;
             retry_phase_elapsed_ms = Some 0;
             error_kind =

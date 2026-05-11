@@ -596,6 +596,22 @@ let test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable () =
    the same labels and a single SSOT.  A future rename of the name
    constant — or removal of the .mli export — trips a compile
    failure here, which preserves dashboard alert continuity. *)
+(* Smoke + contract guard for [Cascade_metrics.on_route_config_error].
+   Same shape as on_resolve_provider_leak: zero is a no-op (callers
+   call unconditionally) and positive is callable with both
+   documented error_type label values. *)
+let test_route_config_error_helper_zero_is_no_op_and_positive_callable () =
+  Masc_mcp.Cascade_metrics.on_route_config_error
+    ~error_type:"missing_target_profile" ~count:0;
+  Masc_mcp.Cascade_metrics.on_route_config_error
+    ~error_type:"missing_target_profile" ~count:2;
+  Masc_mcp.Cascade_metrics.on_route_config_error
+    ~error_type:"unknown_route_key" ~count:0;
+  Masc_mcp.Cascade_metrics.on_route_config_error
+    ~error_type:"unknown_route_key" ~count:1;
+  check bool "both error_type labels callable with zero and positive"
+    true true
+
 let test_provider_health_probe_error_metric_name_is_exported () =
   let name = Masc_mcp.Prometheus.metric_provider_health_probe_error in
   check string "metric name is the documented total"
@@ -794,5 +810,8 @@ let () =
           test_case
             "provider_health_probe_error metric name + call shape" `Quick
             test_provider_health_probe_error_metric_name_is_exported;
+          test_case
+            "route_config_error: zero is no-op, both labels callable" `Quick
+            test_route_config_error_helper_zero_is_no_op_and_positive_callable;
         ] );
     ]

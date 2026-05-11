@@ -51,3 +51,13 @@ val on_resolve_provider_leak : cascade:string -> leak_count:int -> unit
     in the parsed declared profile.  Bumps by [leak_count] (number of
     leaked entries observed in this single resolve call); a [leak_count]
     of zero is a no-op so callers can call unconditionally. *)
+
+val on_route_config_error : error_type:string -> count:int -> unit
+(** Tick the route schema-error counter at [validate_path_result] for
+    each rejection class folded into [top_errors].  [error_type] must
+    be one of [missing_target_profile] (a [\[routes\]] entry points
+    at a profile that doesn't exist) or [unknown_route_key] (a
+    [\[routes\]] key isn't in the known_route_keys allowlist —
+    typo or deprecated key).  Bumps by [count] (number of errors
+    of that type in this single validate call); a [count] of zero
+    is a no-op so callers can call unconditionally. *)

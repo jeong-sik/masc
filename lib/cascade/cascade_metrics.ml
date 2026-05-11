@@ -189,3 +189,34 @@ let on_resolve_provider_leak ~cascade ~leak_count =
       ~labels:[ ("cascade", cascade) ]
       ~delta:(float_of_int leak_count)
       ()
+
+(* [validate_path_result] folds two schema-error sources into the
+   single [top_errors] list before turning the validation into a
+   rejection: missing route targets (a [\[routes\]] entry points at a
+   profile that doesn't exist) and unknown route keys (a [\[routes\]]
+   key isn't in the known_route_keys allowlist — typo or deprecated
+   key).  Iter 5's [serving_last_known_good_total{reason}] tells
+   operators that validation failed but does not split the cause; the
+   actual error reason was only present in the rejection error
+   strings.  These two are by far the most common operator-actionable
+   schema mistakes; split them out so dashboards can show typo-rate
+   vs missing-profile-rate as separate time series.
+
+   Bumped by [count] per validate_path_result invocation rather than
+   +1 per call (same shape as resolve_provider_leak): a single typo
+   commit can land multiple missing targets at once, and dashboards
+   benefit from seeing the magnitude.
+
+   Cardinality: 2 (error_type values).  No cascade name label —
+   validate_path_result runs against a single cascade.toml, and
+   adding the raw route key as a label would explode cardinality
+   on operator typos.  Detail belongs in the rejection error string,
+   not the metric. *)
+let metric_route_config_error = "masc_cascade_route_config_error_total"
+
+let on_route_config_error ~error_type ~count =
+  if count > 0 then
+    Prometheus.inc_counter metric_route_config_error
+      ~labels:[ ("error_type", error_type) ]
+      ~delta:(float_of_int count)
+      ()

@@ -764,6 +764,17 @@ let validate_path_result ?sw ?net ~config_path () =
           |> List.map (fun key ->
                  Printf.sprintf "unknown cascade route key %S" key)
         in
+        (* Emit per-class schema-error counters so operators can tell
+           "typo storm" (unknown_route_key) from "deleted profile"
+           (missing_target_profile) on the dashboard.  Detail (the
+           specific route key / target name) stays in the rejection
+           error string; the counter only quantifies frequency. *)
+        Cascade_metrics.on_route_config_error
+          ~error_type:"missing_target_profile"
+          ~count:(List.length route_target_errors);
+        Cascade_metrics.on_route_config_error
+          ~error_type:"unknown_route_key"
+          ~count:(List.length route_key_errors);
         let top_errors =
           let base =
             if profiles = [] then

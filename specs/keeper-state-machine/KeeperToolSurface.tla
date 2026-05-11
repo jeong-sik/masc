@@ -158,7 +158,20 @@ ComputePipeline ==
          after_pass == lts \ passive_drop
          \* Stage T: truncation — preserves (required ∩ after_pass).
          is_trunc == post_trunc \in TruncatePreservingRequired(after_pass, r)
+         \* Required-affordanced subset (what the contract must preserve).
+         r_aff == r \ AlwaysAffordanceless
        IN
+       \* Pipeline contract — clean stages must preserve required-affordanced
+       \* tools end-to-end.  Each constraint mirrors an OCaml guarantee:
+       \*   - validate gate at keeper_run_tools.ml:805-806/830-836 ensures
+       \*     required (post validate_allow_list) is in pre_floor.
+       \*   - contract_enforcement_filter at keeper_run_tools.ml:882-888
+       \*     does not drop required-affordanced tools.
+       \*   - safe_last_turn_tools at keeper_run_tools.ml:856-865 includes
+       \*     required-affordanced tools when is_last_turn fires.
+       /\ r_aff \subseteq p
+       /\ passive_drop \cap r_aff = {}
+       /\ (~ilt) \/ (r_aff \subseteq lts_safe)
        /\ is_trunc
        /\ required' = r
        /\ pre_floor' = p

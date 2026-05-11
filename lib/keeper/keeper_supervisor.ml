@@ -1751,7 +1751,7 @@ let sweep_and_recover (ctx : _ context) =
               Keeper_metrics.metric_keeper_restart_outcomes
               ~labels:[ "keeper", old_entry.name; "outcome", "refused_budget_exhausted" ]
               ();
-            to_mark_dead := old_entry :: !to_mark_dead
+            to_mark_dead := (old_entry, crash_msg) :: !to_mark_dead
           | Ok reg ->
             Keeper_registry.restore_supervisor_state
               ~base_path

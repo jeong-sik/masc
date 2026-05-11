@@ -48,6 +48,7 @@ type tool_policy = {
   identity_runtime_mcp_header_keys : string list;
   argv_prompt_preflight : bool;
   uses_anthropic_caching : bool;
+  max_turns_per_attempt_hard_cap : int option;
 }
 
 type telemetry_policy = {
@@ -150,6 +151,7 @@ let no_tool_http_headers =
     identity_runtime_mcp_header_keys = [];
     argv_prompt_preflight = false;
     uses_anthropic_caching = false;
+    max_turns_per_attempt_hard_cap = None;
   }
 
 let runtime_mcp_http_headers =
@@ -159,6 +161,7 @@ let runtime_mcp_http_headers =
     identity_runtime_mcp_header_keys = [];
     argv_prompt_preflight = false;
     uses_anthropic_caching = false;
+    max_turns_per_attempt_hard_cap = None;
   }
 
 (* Codex CLI quirk: its cached login cannot natively inject per-keeper auth
@@ -181,6 +184,21 @@ let codex_cli_tool_policy =
       [ "authorization"; "x-masc-agent-name"; "x-masc-keeper-name" ];
     argv_prompt_preflight = true;
     uses_anthropic_caching = false;
+    max_turns_per_attempt_hard_cap = None;
+  }
+
+(* Claude Code clamps per-attempt max_turns: a single subprocess attempt must
+   not be handed the keeper-level turn budget. The runtime is also an
+   Anthropic-wire-format provider, so prompt caching telemetry applies. Other
+   CLI runtimes carry the keeper budget through. *)
+let claude_code_tool_policy =
+  {
+    supports_runtime_mcp_http_headers = true;
+    requires_per_keeper_bridging_for_bound_actor_tools = false;
+    identity_runtime_mcp_header_keys = [];
+    argv_prompt_preflight = false;
+    uses_anthropic_caching = true;
+    max_turns_per_attempt_hard_cap = Some 30;
   }
 let telemetry_reported = { usage_reporting = Reported; runtime_reporting = Reported }
 let telemetry_unknown = { usage_reporting = Unknown; runtime_reporting = Unknown }
@@ -381,8 +399,7 @@ let direct_adapters =
           expand_auto = true;
           family = Generic;
         };
-      tool_policy =
-        { runtime_mcp_http_headers with uses_anthropic_caching = true };
+      tool_policy = claude_code_tool_policy;
       telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
@@ -1594,6 +1611,30 @@ let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
   | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
   | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
 
+(** Clamp [requested] max_turns to the resolved adapter's per-attempt hard cap,
+    if any. When the adapter declares no cap, returns [requested] unchanged. *)
+let provider_effective_max_turns_for_config
+    (cfg : Llm_provider.Provider_config.t)
+    requested =
+  match adapter_of_provider_config cfg with
+  | Some adapter ->
+      (match adapter.tool_policy.max_turns_per_attempt_hard_cap with
+       | Some cap -> min requested cap
+       | None -> requested)
+  | None -> requested
+
+(** Kind-only variant of {!provider_effective_max_turns_for_config}. Resolves
+    the adapter via the canonical_name mapping and applies the same cap. *)
+let provider_effective_max_turns_for_kind
+    (kind : Llm_provider.Provider_config.provider_kind)
+    requested =
+  let cn = adapter_canonical_name_of_provider_kind kind in
+  match resolve_direct_adapter cn with
+  | Some adapter ->
+      (match adapter.tool_policy.max_turns_per_attempt_hard_cap with
+       | Some cap -> min requested cap
+       | None -> requested)
+  | None -> requested
 
 (* ── Generic provider auth detail ─────────────────────────────── *)
 

@@ -83,6 +83,16 @@ type tool_policy = {
           [cache_read_input_tokens] above the cacheable input threshold.
           Used by [Keeper_usage_trust] to flag caching-likely-disabled
           anomalies. RFC-0058 §2.4: capability flag, not a vendor match. *)
+  max_turns_per_attempt_hard_cap : int option;
+      (** Optional per-attempt cap on the [max_turns] value the cascade may
+          request from this runtime. When [Some cap], cascade clamps the
+          requested budget to [min requested cap] before constructing the
+          provider-specific transport. [None] means the keeper-level budget
+          flows through unchanged.
+
+          Currently only [claude_code] sets this (to 30): a single Claude
+          Code subprocess attempt must not be handed the entire keeper-level
+          turn budget. *)
 }
 
 type telemetry_policy = {
@@ -453,6 +463,16 @@ val oas_capabilities_of_config :
 val accepts_runtime_mcp_http_header_for_config :
   Llm_provider.Provider_config.t -> string -> bool
 
+(** Clamp the requested [max_turns] to the resolved adapter's per-attempt
+    hard cap. Adapters without a cap return [requested] unchanged.
+
+    Currently only [claude_code] declares a cap (30 turns per attempt). *)
+val provider_effective_max_turns_for_config :
+  Llm_provider.Provider_config.t -> int -> int
+
+(** Kind-only variant of {!provider_effective_max_turns_for_config}. *)
+val provider_effective_max_turns_for_kind :
+  Llm_provider.Provider_config.provider_kind -> int -> int
 
 (** {1 Misc} *)
 

@@ -22,22 +22,17 @@ type cli_transport_overrides =
      to honour this field there. *)
   }
 
+(* SSOT hard cap kept here for back-compat (re-exported via cascade_runner
+   and consumed by tests). The runtime clamp resolves through the adapter
+   capability [tool_policy.max_turns_per_attempt_hard_cap] — see
+   [provider_effective_max_turns] below. *)
 let claude_code_max_turns_hard_cap = 30
 
+(* RFC-0058 §2.4: dispatch on adapter capability rather than provider_kind.
+   The adapter registry (provider_adapter.ml) carries the per-attempt cap,
+   so consumers do not match on the closed variant here. *)
 let provider_effective_max_turns kind requested =
-  match kind with
-  | Llm_provider.Provider_config.Claude_code ->
-    min requested claude_code_max_turns_hard_cap
-  | Anthropic
-  | OpenAI_compat
-  | Ollama
-  | Gemini
-  | Glm
-  | Kimi
-  | DashScope
-  | Gemini_cli
-  | Kimi_cli
-  | Codex_cli -> requested
+  Provider_adapter.provider_effective_max_turns_for_kind kind requested
 ;;
 
 (* #10097: codex_cli can only expose keeper-bound runtime MCP tools when the
@@ -416,20 +411,28 @@ let runtime_mcp_policy_for_provider
     let trimmed = String.trim agent_name in
     if String.equal trimmed "" then None else Some trimmed
   in
-  match policy_opt, provider_cfg.kind, agent_name with
-  | Some policy, Llm_provider.Provider_config.Codex_cli, Some agent_name ->
+  (* RFC-0058 §2.4: branch on the adapter capability that *causes* the
+     Codex-specific shape (no per-request headers → per-keeper bridging
+     required), not on the provider_kind variant. *)
+  let needs_per_keeper_bridging =
+    Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
+      provider_cfg
+  in
+  match policy_opt, agent_name with
+  | None, _ -> None
+  | Some policy, Some agent_name when needs_per_keeper_bridging ->
     (* Codex CLI still cannot carry arbitrary per-request headers, but OAS
-         routes [Authorization: Bearer ...] through [bearer_token_env_var].
-         Keep only that auth path plus non-secret identity headers so Codex can
-         pre-approve runtime MCP tools without leaking tokens through argv. *)
+       routes [Authorization: Bearer ...] through [bearer_token_env_var].
+       Keep only that auth path plus non-secret identity headers so Codex
+       can pre-approve runtime MCP tools without leaking tokens through
+       argv. *)
     Some (codex_runtime_mcp_policy_for_agent ~agent_name policy)
-  | Some policy, Llm_provider.Provider_config.Codex_cli, None ->
+  | Some policy, None when needs_per_keeper_bridging ->
     (* No agent_name to inject — preserve the legacy strip-all behavior. *)
     Some (runtime_mcp_policy_without_http_headers policy)
-  | Some policy, _, Some agent_name ->
+  | Some policy, Some agent_name ->
     Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
-  | Some policy, _, None -> Some policy
-  | None, _, _ -> None
+  | Some policy, None -> Some policy
 ;;
 
 let kimi_cli_runtime_mcp_jsons
@@ -657,17 +660,27 @@ let resolve_tool_lane_for_oas_tools
       |> dedupe_preserve_order
     | _ -> []
   in
+  (* RFC-0058 §2.4: gate the carve-out on the adapter capability that
+     necessitates per-keeper bridging, not on the closed variant. Today
+     this resolves to [Codex_cli] alone; new providers with the same
+     limitation set the same flag in [tool_policy]. *)
+  let needs_per_keeper_bridging =
+    Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
+      provider_cfg
+  in
   let codex_can_auth_keeper_bound_actor_tools =
-    match provider_cfg.kind, requested_agent_name with
-    | Llm_provider.Provider_config.Codex_cli, Some agent_name
-      when Option.is_some (keeper_name_of_agent_name agent_name) ->
+    match requested_agent_name with
+    | Some agent_name
+      when needs_per_keeper_bridging
+           && Option.is_some (keeper_name_of_agent_name agent_name) ->
       Option.is_some (per_keeper_authorization_header ~agent_name)
     | _ -> false
   in
   let codex_keeper_bound_actor_tools =
-    match provider_cfg.kind, requested_agent_name with
-    | Llm_provider.Provider_config.Codex_cli, Some agent_name
-      when Option.is_some (keeper_name_of_agent_name agent_name)
+    match requested_agent_name with
+    | Some agent_name
+      when needs_per_keeper_bridging
+           && Option.is_some (keeper_name_of_agent_name agent_name)
            && not codex_can_auth_keeper_bound_actor_tools ->
       List.filter
         runtime_mcp_tool_requires_bound_actor
@@ -1522,6 +1535,105 @@ let make_cli_argv_sanitizing_transport (transport : Llm_provider.Llm_transport.t
   }
 ;;
 
+let empty_cli_transport_overrides =
+  { cwd = None
+  ; claude_mcp_config = None
+  ; claude_allowed_tools = None
+  ; claude_permission_mode = None
+  ; claude_max_turns = None
+  ; gemini_yolo = None
+  ; cli_subprocess_idle_sec = None
+  }
+;;
+
+(* Per-vendor CLI transport factories. Each factory consumes the resolved
+   [provider_cfg], the typed [cli_transport_overrides] record, the optional
+   [runtime_mcp_policy], and a live process manager; it produces a fully
+   wired transport ready for per-call switch wrapping.
+
+   RFC-0058 §2.4: this is the CLI registry SSOT — vendor-specific binary
+   names, argv shapes, and config records are inherently per-vendor and
+   live here, not in caller code. The dispatch in
+   [non_http_transport_of_provider] is the registry mapping itself. *)
+
+let claude_code_cli_transport
+      ~(mgr : _ Eio.Resource.t)
+      ~(provider_cfg : Llm_provider.Provider_config.t)
+      ~(overrides : cli_transport_overrides)
+  : Llm_provider.Llm_transport.t
+  =
+  let config =
+    { Llm_provider.Transport_claude_code.default_config with
+      model = cli_model_override provider_cfg.model_id
+    ; cwd = overrides.cwd
+    ; mcp_config = overrides.claude_mcp_config
+    ; allowed_tools = Option.value ~default:[] overrides.claude_allowed_tools
+    ; permission_mode = overrides.claude_permission_mode
+    ; max_turns =
+        Option.map
+          (provider_effective_max_turns provider_cfg.kind)
+          overrides.claude_max_turns
+    }
+  in
+  make_per_call_switch_transport (fun ~sw ->
+    Llm_provider.Transport_claude_code.create ~sw ~mgr ~config)
+;;
+
+let gemini_cli_transport
+      ~(mgr : _ Eio.Resource.t)
+      ~(provider_cfg : Llm_provider.Provider_config.t)
+      ~(overrides : cli_transport_overrides)
+  : Llm_provider.Llm_transport.t
+  =
+  let config =
+    { Llm_provider.Transport_gemini_cli.default_config with
+      model = cli_model_override provider_cfg.model_id
+    ; cwd = overrides.cwd
+    ; yolo = Option.value ~default:true overrides.gemini_yolo
+    }
+  in
+  make_per_call_switch_transport (fun ~sw ->
+    Llm_provider.Transport_gemini_cli.create ~sw ~mgr ~config)
+;;
+
+let kimi_cli_transport
+      ~(mgr : _ Eio.Resource.t)
+      ~(provider_cfg : Llm_provider.Provider_config.t)
+      ~(overrides : cli_transport_overrides)
+      ~(runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option)
+  : Llm_provider.Llm_transport.t
+  =
+  let mcp_config_json = kimi_cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
+  let model = kimi_cli_model_for_provider provider_cfg in
+  let config_json = kimi_cli_config_json_for_provider provider_cfg in
+  let extra_env = kimi_cli_extra_env provider_cfg in
+  let config =
+    { Kimi_cli_transport_local.default_config with
+      model
+    ; cwd = overrides.cwd
+    ; config_json
+    ; mcp_config_json
+    ; extra_env
+    ; stdout_idle_timeout_s = overrides.cli_subprocess_idle_sec
+    }
+  in
+  make_per_call_switch_transport (fun ~sw ->
+    Kimi_cli_transport_local.create ~sw ~mgr ~config)
+;;
+
+let codex_cli_transport
+      ~(mgr : _ Eio.Resource.t)
+      ~(overrides : cli_transport_overrides)
+  : Llm_provider.Llm_transport.t
+  =
+  make_cli_argv_sanitizing_transport
+    (make_per_call_switch_transport (fun ~sw ->
+       Llm_provider.Transport_codex_cli.create
+         ~sw
+         ~mgr
+         ~config:{ Llm_provider.Transport_codex_cli.default_config with cwd = overrides.cwd }))
+;;
+
 let non_http_transport_of_provider
       ~(sw : Eio.Switch.t)
       ~(provider_cfg : Llm_provider.Provider_config.t)
@@ -1531,113 +1643,39 @@ let non_http_transport_of_provider
   : (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result
   =
   let _ = sw in
-  let proc_mgr_result () =
-    match Process_eio.get_proc_mgr () with
-    | Ok mgr -> Ok mgr
-    | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
-  in
-  match provider_cfg.kind with
-  | Llm_provider.Provider_config.Claude_code ->
+  (* RFC-0058 §2.4: short-circuit non-CLI runtimes via the adapter
+     capability rather than enumerating the closed variant. The remaining
+     per-vendor branch below is the registry SSOT — see the
+     [*_cli_transport] helpers above. *)
+  match Provider_adapter.adapter_of_provider_config provider_cfg with
+  | Some { runtime_kind = Local | Direct_api; _ } | None -> Ok None
+  | Some { runtime_kind = Cli_agent; _ } ->
+    let proc_mgr_result () =
+      match Process_eio.get_proc_mgr () with
+      | Ok mgr -> Ok mgr
+      | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
+    in
     (match proc_mgr_result () with
      | Error _ as e -> e
      | Ok mgr ->
        let overrides =
-         Option.value
-           ~default:
-             { cwd = None
-             ; claude_mcp_config = None
-             ; claude_allowed_tools = None
-             ; claude_permission_mode = None
-             ; claude_max_turns = None
-             ; gemini_yolo = None
-             ; cli_subprocess_idle_sec = None
-             }
-           cli_transport_overrides
+         Option.value ~default:empty_cli_transport_overrides cli_transport_overrides
        in
-       let config =
-         { Llm_provider.Transport_claude_code.default_config with
-           model = cli_model_override provider_cfg.model_id
-         ; cwd = overrides.cwd
-         ; mcp_config = overrides.claude_mcp_config
-         ; allowed_tools = Option.value ~default:[] overrides.claude_allowed_tools
-         ; permission_mode = overrides.claude_permission_mode
-         ; max_turns =
-             Option.map
-               (provider_effective_max_turns provider_cfg.kind)
-               overrides.claude_max_turns
-         }
-       in
-       Ok
-         (Some
-            (make_per_call_switch_transport (fun ~sw ->
-               Llm_provider.Transport_claude_code.create ~sw ~mgr ~config))))
-  | Llm_provider.Provider_config.Gemini_cli ->
-    (match proc_mgr_result () with
-     | Error _ as e -> e
-     | Ok mgr ->
-       let overrides =
-         Option.value
-           ~default:
-             { cwd = None
-             ; claude_mcp_config = None
-             ; claude_allowed_tools = None
-             ; claude_permission_mode = None
-             ; claude_max_turns = None
-             ; gemini_yolo = None
-             ; cli_subprocess_idle_sec = None
-             }
-           cli_transport_overrides
-       in
-       let config =
-         { Llm_provider.Transport_gemini_cli.default_config with
-           model = cli_model_override provider_cfg.model_id
-         ; cwd = overrides.cwd
-         ; yolo = Option.value ~default:true overrides.gemini_yolo
-         }
-       in
-       Ok
-         (Some
-            (make_per_call_switch_transport (fun ~sw ->
-               Llm_provider.Transport_gemini_cli.create ~sw ~mgr ~config))))
-  | Llm_provider.Provider_config.Kimi_cli ->
-    (match proc_mgr_result () with
-     | Error _ as e -> e
-     | Ok mgr ->
-       let cwd = Option.bind cli_transport_overrides (fun overrides -> overrides.cwd) in
-       let stdout_idle_timeout_s =
-         Option.bind cli_transport_overrides (fun overrides ->
-           overrides.cli_subprocess_idle_sec)
-       in
-       let mcp_config_json = kimi_cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
-       let model = kimi_cli_model_for_provider provider_cfg in
-       let config_json = kimi_cli_config_json_for_provider provider_cfg in
-       let extra_env = kimi_cli_extra_env provider_cfg in
-       let config =
-         { Kimi_cli_transport_local.default_config with
-           model
-         ; cwd
-         ; config_json
-         ; mcp_config_json
-         ; extra_env
-         ; stdout_idle_timeout_s
-         }
-       in
-       Ok
-         (Some
-            (make_per_call_switch_transport (fun ~sw ->
-               Kimi_cli_transport_local.create ~sw ~mgr ~config))))
-  | Llm_provider.Provider_config.Codex_cli ->
-    (match proc_mgr_result () with
-     | Error _ as e -> e
-     | Ok mgr ->
-       let cwd = Option.bind cli_transport_overrides (fun overrides -> overrides.cwd) in
-       Ok
-         (Some
-            (make_cli_argv_sanitizing_transport
-               (make_per_call_switch_transport (fun ~sw ->
-                  Llm_provider.Transport_codex_cli.create
-                    ~sw
-                    ~mgr
-                    ~config:{ Llm_provider.Transport_codex_cli.default_config with cwd })))))
-  | Anthropic | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> Ok None
+       (* The match below is the per-vendor CLI registry: each Cli_agent
+          binary has a distinct argv shape that cannot collapse to a
+          shared capability. New CLI vendors add a branch and a helper. *)
+       (match provider_cfg.kind with
+        | Llm_provider.Provider_config.Claude_code ->
+          Ok (Some (claude_code_cli_transport ~mgr ~provider_cfg ~overrides))
+        | Gemini_cli ->
+          Ok (Some (gemini_cli_transport ~mgr ~provider_cfg ~overrides))
+        | Kimi_cli ->
+          Ok (Some (kimi_cli_transport ~mgr ~provider_cfg ~overrides ~runtime_mcp_policy))
+        | Codex_cli ->
+          Ok (Some (codex_cli_transport ~mgr ~overrides))
+        | Anthropic | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope ->
+          (* Defensive: adapter declared [Cli_agent] for a non-CLI variant.
+             This should be unreachable given the registry literal, but the
+             closed variant forces the case. Treat as HTTP-only. *)
+          Ok None))
 ;;

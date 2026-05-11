@@ -976,7 +976,11 @@ let make_tool_bundle
   let tool_defs = Keeper_exec_tools.keeper_universe_model_tools meta in
   (* RFC-0064 Phase 2: Remove aliased internal names from Pass A to
      eliminate dual-registration. Aliased tools appear ONLY under their
-     public name in the LLM-facing surface. *)
+     public name in the LLM-facing surface.
+
+     Preserve originals for Pass B alias-tool construction:
+     alias_tools needs [universe_names] membership and [tool_defs] lookup
+     for the routed internal names (keeper_bash, keeper_fs_read, etc.). *)
   let aliased_internal_names =
     List.filter_map
       (fun public ->
@@ -985,10 +989,10 @@ let make_tool_bundle
          | None -> None)
       (Keeper_tool_alias.public_names ())
   in
-  let universe_names =
+  let universe_names_for_pass_a =
     List.filter (fun name -> not (List.mem name aliased_internal_names)) universe_names
   in
-  let tool_defs =
+  let tool_defs_for_pass_a =
     List.filter
       (fun (td : Masc_domain.tool_schema) ->
          not (List.mem td.name aliased_internal_names))
@@ -1008,7 +1012,7 @@ let make_tool_bundle
       ~agent_id:meta.agent_name
       ~profile:"keeper"
       ?preset
-      ~tool_list:universe_names
+      ~tool_list:universe_names_for_pass_a
       ~allow_set:(Keeper_tool_policy.StringSet.elements lookup.allow_set)
       ~deny_set:(Keeper_tool_policy.StringSet.elements lookup.deny_set)
       ~reason:"keeper tool bundle assembly"
@@ -1019,7 +1023,7 @@ let make_tool_bundle
   let internal_tools =
     List.filter_map
       (fun (td : Masc_domain.tool_schema) ->
-         if List.mem td.name universe_names
+         if List.mem td.name universe_names_for_pass_a
          then (
            let h =
              make_keeper_tool_handler
@@ -1045,7 +1049,7 @@ let make_tool_bundle
                    let start_time = Time_compat.now () in
                    Tool_result.wrap ~tool_name:td.name ~start_time (h input))))
          else None)
-      tool_defs
+      tool_defs_for_pass_a
   in
   (* Pass B: RFC-0064 — register LLM-native surface names (Bash/Read/etc)
      via the flat routing table. The handler dispatches with

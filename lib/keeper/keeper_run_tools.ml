@@ -463,9 +463,16 @@ let prepare_agent_setup
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* RFC-0064 Phase 2: Remove aliased internal names from the policy
-     surface. Public aliases are the LLM-visible names; internal
-     counterparts are implementation details. *)
+  (* RFC-0064 Phase 2: Remove aliased internal names from the LLM-visible
+     policy surface. Public aliases are the LLM-visible names; internal
+     counterparts are implementation details.
+
+     Order matters: compute [aliased_public_names] against the UNFILTERED
+     internal allowlist, because tool_policy.toml / presets still express
+     allowlists in internal names (keeper_bash, keeper_fs_read, ...).
+     Stripping internals before the alias-expansion check would leave
+     [aliased_public_names] empty and drop "Bash"/"Read"/... from the
+     visible surface. See PR #14596 review. *)
   let aliased_internal_names =
     List.filter_map
       (fun public ->
@@ -473,11 +480,6 @@ let prepare_agent_setup
          | Some r -> Some r.internal_name
          | None -> None)
       (Keeper_tool_alias.public_names ())
-  in
-  let allowed_exec_names =
-    List.filter
-      (fun name -> not (List.mem name aliased_internal_names))
-      allowed_exec_names
   in
   (* Only include a public alias name when its routed internal target is
      itself in [allowed_exec_names]. Otherwise the public name (e.g. "Bash")
@@ -495,6 +497,13 @@ let prepare_agent_setup
            Keeper_tool_policy.StringSet.mem r.internal_name allowed_set_for_alias_filter
          | None -> false)
       (Keeper_tool_alias.public_names ())
+  in
+  (* Now strip the aliased internal names from the LLM-visible surface,
+     after [aliased_public_names] has been computed. *)
+  let allowed_exec_names =
+    List.filter
+      (fun name -> not (List.mem name aliased_internal_names))
+      allowed_exec_names
   in
   let allowed_exec_names_with_aliases = allowed_exec_names @ aliased_public_names in
   let allowed_exec_set =

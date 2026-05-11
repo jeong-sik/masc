@@ -11,14 +11,9 @@ import { keepers } from '../../store'
 import type { Keeper } from '../../types'
 import { MemoryGraph } from '../common/memory-graph'
 import { PersistenceStatus, type PersistenceState } from '../common/persistence-status'
-import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
-
-const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
-  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
-  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
-  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
-}
+import { useSignalValue } from './use-signal-value'
 
 const REFRESH_MS = 30_000
 
@@ -161,15 +156,6 @@ export function buildMemoryGraphModel(
   return { nodes, edges, visibleUsage, totalUsed, totalCap, saturatedCount }
 }
 
-function useSignalValue<T>(signal: { value: T; subscribe: (fn: (value: T) => void) => () => void }): T {
-  const [value, setValue] = useState(signal.value)
-  useEffect(() => {
-    const unsub = signal.subscribe(next => setValue(next))
-    return () => unsub()
-  }, [signal])
-  return value
-}
-
 function resolveKeeperName(explicit: string | undefined, active: string, rows: readonly Keeper[]): string {
   const fromProp = explicit?.trim()
   if (fromProp) return fromProp
@@ -253,22 +239,12 @@ export function IdePersistencePanel({
   const keeperRows = useSignalValue(keepers)
   const keeperName = resolveKeeperName(explicitKeeperName, activeName, keeperRows)
   const keeper = findKeeper(keeperRows, keeperName)
-  const [, forceRender] = useState(0)
-
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-
-  const presence = globalPresenceSnapshot.value
+  const presence = useSignalValue(globalPresenceSnapshot)
+  const overlay = useSignalValue(cursorOverlaySignal)
   const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
   const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
-  const cursor = keeperName ? cursorOverlaySignal.value.cursors.get(keeperName) : undefined
+  const cursor = keeperName ? overlay.cursors.get(keeperName) : undefined
   const focusLabel = cursor && cursor.file_path && cursor.line >= 1
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null

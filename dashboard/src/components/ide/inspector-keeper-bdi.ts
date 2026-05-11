@@ -5,14 +5,8 @@ import { activeKeeperName } from '../../keeper-state'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
-import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
-
-const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
-  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
-  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
-  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
-}
 // Imported from `./ide-state` rather than `./ide-shell` to avoid the
 // circular dependency `ide-shell -> inspector-keeper-bdi -> ide-shell`
 // (which also drags `router` and other window-touching side effects
@@ -201,7 +195,14 @@ export function InspectorKeeperBDI({
   const [error, setError] = useState<string | null>(null)
   const [, forceRender] = useState(0)
 
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
 
   useEffect(() => {
     if (!keeperName) {

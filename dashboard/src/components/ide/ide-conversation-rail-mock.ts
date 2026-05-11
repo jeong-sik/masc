@@ -21,8 +21,8 @@ import {
 } from './audit-replay-slider'
 import { activeIdeFile } from './ide-shell'
 import { activeKeeperName } from '../../keeper-state'
-import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
+import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 
 interface BoardPost {
   readonly id: string
@@ -49,12 +49,6 @@ const KIND_TOKEN: Record<ThreadKind, string> = {
   approve: 'var(--color-status-ok)',
   note: 'var(--color-fg-muted)',
   suggest: 'var(--color-status-warn)',
-}
-
-const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
-  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
-  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
-  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
 }
 
 const EMPTY_POSTS: ReadonlyArray<BoardPost> = []
@@ -296,7 +290,7 @@ function ReplayRailCard(
   focusedId: string | null,
   onFocus: (id: string) => void,
   entries: ReadonlyArray<KeeperPresenceEntry>,
-  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+  overlay: KeeperCursorOverlay,
 ) {
   if (item.source === 'thread') {
     return PostCard(
@@ -318,7 +312,7 @@ function PostCard(
   focused: boolean,
   onFocus: () => void,
   entries: ReadonlyArray<KeeperPresenceEntry>,
-  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+  overlay: KeeperCursorOverlay,
 ) {
   const kind = boardKindFromPost(post)
   const kindColor = KIND_TOKEN[kind]
@@ -403,7 +397,7 @@ function PostCard(
 function DecisionCard(
   item: Extract<ReplayRailItem, { source: 'decision' }>,
   entries: ReadonlyArray<KeeperPresenceEntry>,
-  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+  overlay: KeeperCursorOverlay,
 ) {
   const decision = item.decision
   const keeper = decision.keeper_name || 'keeper'

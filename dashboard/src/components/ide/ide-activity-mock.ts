@@ -2,8 +2,8 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import { KeeperBadge } from '../keeper-badge'
-import { globalPresenceSnapshot, type KeeperPresenceStatus } from './keeper-presence-store'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceSnapshot } from './keeper-presence-store'
+import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import {
   createRunActivityStore,
   type RunActivityEvent,
@@ -148,16 +148,10 @@ export function IdeActivityMock() {
   `
 }
 
-const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
-  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
-  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
-  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
-}
-
 function ActivityRow(
   item: RunActivityEvent,
-  presence: { readonly entries: ReadonlyArray<{ keeper_id: string; status: KeeperPresenceStatus }> } | null,
-  overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
+  presence: KeeperPresenceSnapshot | null,
+  overlay: KeeperCursorOverlay,
 ) {
   const hue = keeperHueIndex(item.keeper_id)
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`

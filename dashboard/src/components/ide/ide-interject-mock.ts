@@ -8,14 +8,8 @@ import {
   type InterjectActionState,
   type InterjectDispatchRequest,
 } from './interject-store'
-import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
-
-const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
-  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
-  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
-  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
-}
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete

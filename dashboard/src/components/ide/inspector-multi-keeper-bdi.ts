@@ -5,8 +5,9 @@ import {
   KeeperBdiSnapshot,
   normalizeKeeperBdiSnapshot,
 } from './inspector-keeper-bdi'
-import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry, type KeeperPresenceSnapshot } from './keeper-presence-store'
+import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
+import { useSignalValue } from './use-signal-value'
 import { activeIdeFile } from './ide-shell'
 import {
   pinKeeper,
@@ -16,12 +17,6 @@ import {
   reorderPins,
   unpinKeeper,
 } from './multi-keeper-pin-store'
-
-const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
-  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
-  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
-  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
-}
 
 /**
  * RFC-0027 PR-γ drag reorder MIME. Custom token (not text/plain) so
@@ -247,26 +242,17 @@ interface KeeperPanelProps {
   readonly compact: boolean
   readonly focused: boolean
   readonly dropIdx: number
+  readonly presence: KeeperPresenceSnapshot | null
+  readonly overlay: KeeperCursorOverlay
   readonly onUnpin: (keeperName: string) => void
 }
 
-function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: KeeperPanelProps) {
+function KeeperPanel({ entry, slot, compact, focused, dropIdx, presence, overlay, onUnpin }: KeeperPanelProps) {
   const snapshot = slot.snapshot
   const error = slot.error
   const lastTool = snapshot?.last_tool_call ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
-  const cursor = cursorOverlaySignal.value.cursors.get(entry.keeperName)
-  const [, forceRender] = useState(0)
-  // TODO follow-up: each pinned KeeperPanel/KeeperChip subscribes to
-  // globalPresenceSnapshot individually, so N pinned keepers means N
-  // listeners + N state updates per presence event. Move the
-  // subscription up to InspectorMultiKeeperBDI and pass presence via
-  // props so it scales linearly instead of quadratically.
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-  const presence = globalPresenceSnapshot.value
+  const cursor = overlay.cursors.get(entry.keeperName)
   const pEntries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
   const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
   const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
@@ -385,23 +371,16 @@ interface KeeperChipProps {
   readonly entry: PinnedKeeperEntry
   readonly slot: KeeperBdiSlot
   readonly dropIdx: number
+  readonly presence: KeeperPresenceSnapshot | null
+  readonly overlay: KeeperCursorOverlay
   readonly onFocus: (entry: PinnedKeeperEntry) => void
   readonly onUnpin: (keeperName: string) => void
 }
 
-function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps) {
+function KeeperChip({ entry, slot, dropIdx, presence, overlay, onFocus, onUnpin }: KeeperChipProps) {
   const tokens = slot.snapshot?.recent_token_spend?.[0]?.total_tokens ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
-  const cursor = cursorOverlaySignal.value.cursors.get(entry.keeperName)
-  const [, forceRender] = useState(0)
-  // TODO follow-up: see KeeperPanel above — same per-instance
-  // globalPresenceSnapshot subscription pattern; lift the subscription
-  // to InspectorMultiKeeperBDI and pass presence via props.
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-  const presence = globalPresenceSnapshot.value
+  const cursor = overlay.cursors.get(entry.keeperName)
   const pEntries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
   const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
   const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
@@ -492,6 +471,8 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
   const slot2 = useKeeperBdiSnapshot(entries[2]?.keeperName ?? '', pollMs)
   const slot3 = useKeeperBdiSnapshot(entries[3]?.keeperName ?? '', pollMs)
   const slots: ReadonlyArray<KeeperBdiSlot> = [slot0, slot1, slot2, slot3]
+  const presence = useSignalValue(globalPresenceSnapshot)
+  const overlay = useSignalValue(cursorOverlaySignal)
 
   if (entries.length <= 1) {
     return html`<${InspectorKeeperBDI} pollMs=${pollMs} />`
@@ -518,6 +499,8 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
             compact=${idx > 0}
             focused=${idx === 0}
             dropIdx=${idx}
+            presence=${presence}
+            overlay=${overlay}
             onUnpin=${unpinKeeper}
           />
         `)}
@@ -545,6 +528,8 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
         compact=${false}
         focused=${true}
         dropIdx=${0}
+        presence=${presence}
+        overlay=${overlay}
         onUnpin=${unpinKeeper}
       />
       <div role="group" aria-label="other pinned keepers" style=${CHIP_GROUP_STYLE}>
@@ -554,6 +539,8 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
             entry=${entry}
             slot=${activeSlots[idx + 1] ?? EMPTY_SLOT}
             dropIdx=${idx + 1}
+            presence=${presence}
+            overlay=${overlay}
             onFocus=${focusEntry}
             onUnpin=${unpinKeeper}
           />

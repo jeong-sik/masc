@@ -231,6 +231,22 @@ let start_container (t : t) ~(timeout_sec : float) =
                t.state <- Running { container_name };
                Ok container_name
              | _ ->
+               (* Inspect failed after a successful `docker run`. Without an
+                  explicit cleanup the container would leak: t.state stays
+                  Not_started, so [cleanup] would skip `docker rm`. Best-effort
+                  remove the just-started container before returning Error. *)
+               let rm_argv =
+                 Keeper_sandbox_runtime.docker_command_argv ()
+                 @ [ "rm"; "-f"; container_name ]
+               in
+               let _rm_st, _rm_out =
+                 run_argv_with_status_retry_eintr
+                   ~timeout_sec:
+                     (Env_config_sandbox.Shell_timeout.timeout_sec
+                        ~bucket:Cleanup_rm
+                        ())
+                   rm_argv
+               in
                Error
                  (Printf.sprintf
                     "docker_container_inspect_failed (mount verification): %s"
@@ -397,9 +413,12 @@ let cleanup (t : t) =
         rm_argv
     in
     let still_exists () =
+      (* Use `docker ps -a` so a stopped-but-still-existing container is not
+         silently reported as "gone". Without `-a`, only running containers
+         appear and a failed `rm -f` would look successful. *)
       let check_argv =
         Keeper_sandbox_runtime.docker_command_argv ()
-        @ [ "ps"; "-q"; "--filter"; "name=" ^ container_name ]
+        @ [ "ps"; "-a"; "-q"; "--filter"; "name=" ^ container_name ]
       in
       let _st, check_out =
         run_argv_with_status_retry_eintr

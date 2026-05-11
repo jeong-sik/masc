@@ -82,8 +82,10 @@ val docker_label_args
   -> string list
 
 (** Docker network argv fragment and the MASC network label.  In
-    particular, [Network_inherit] intentionally maps to no Docker
-    [--network] argument; Docker has no network named ["inherit"]. *)
+    particular, [Network_inherit] maps to [--network host] so the
+    container shares the host network namespace (needed for
+    `git clone` / `gh push` from keepers running under this profile;
+    see #10431).  The MASC label remains ["inherit"]. *)
 val docker_network_args : Keeper_types.network_mode -> string list * string
 
 (** Docker [--ulimit nofile=<soft>:<hard>] argv fragment for keeper

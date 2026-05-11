@@ -37,7 +37,12 @@ val sandbox_isolation
 (** [credential_isolation ~keeper ~credential ~other_keepers] returns [Ok ()]
     iff no entry in [other_keepers] shares both the same [keeper_id] and
     [github_account] as [credential].  This prevents accidental credential
-    reuse across personas. *)
+    reuse across personas.
+
+    The [~keeper] argument is retained for API compatibility but is not used
+    for the comparison: the authoritative identity is [credential.keeper_id],
+    which avoids the bug where a divergent [~keeper] value would mask
+    legitimate conflicts. *)
 val credential_isolation
   :  keeper:string
   -> credential:credential_scope

@@ -260,13 +260,19 @@ models = ["ollama:qwen3.6:27b-coding-nvfp4"]
 
 let test_loader_catalog_exposes_fallback_cascade () =
   with_temp_dir "cascade-fallback-loader" @@ fun dir ->
+  (* RFC-0058 §9.4: cascade.toml is the on-disk SSOT; the loader path
+     argument may still use the legacy .json convention because the
+     materializer resolves to the .toml sibling. *)
+  let toml_path = Filename.concat dir "cascade.toml" in
   let json_path = Filename.concat dir "cascade.json" in
-  write_file json_path
-    {|{
-       "ollama_only_models": ["ollama:qwen3.6:27b-coding-nvfp4"],
-       "ollama_only_fallback_cascade": "big_three",
-       "big_three_models": ["codex_cli:auto"]
-     }|};
+  write_file toml_path
+    {|[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+fallback_cascade = "big_three"
+
+[big_three]
+models = ["codex_cli:auto"]
+|};
   match
     Masc_mcp.Cascade_config_loader.load_catalog ~config_path:json_path
   with
@@ -293,13 +299,15 @@ let test_keeper_profile_drops_unknown_fallback_target () =
   with_temp_dir "cascade-fallback-unknown" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
-  let json_path = Filename.concat config_dir "cascade.json" in
-  write_file json_path
-    {|{
-       "ollama_only_models": ["ollama:qwen3.6:27b-coding-nvfp4"],
-       "ollama_only_fallback_cascade": "does_not_exist",
-       "big_three_models": ["codex_cli:auto"]
-     }|};
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path
+    {|[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+fallback_cascade = "does_not_exist"
+
+[big_three]
+models = ["codex_cli:auto"]
+|};
   with_config_dir config_dir @@ fun () ->
   check (option string)
     "unknown fallback target is dropped, not propagated"
@@ -310,13 +318,15 @@ let test_keeper_profile_resolves_known_fallback_target () =
   with_temp_dir "cascade-fallback-known" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
-  let json_path = Filename.concat config_dir "cascade.json" in
-  write_file json_path
-    {|{
-       "ollama_only_models": ["ollama:qwen3.6:27b-coding-nvfp4"],
-       "ollama_only_fallback_cascade": "big_three",
-       "big_three_models": ["codex_cli:auto"]
-     }|};
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path
+    {|[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+fallback_cascade = "big_three"
+
+[big_three]
+models = ["codex_cli:auto"]
+|};
   with_config_dir config_dir @@ fun () ->
   check (option string) "known fallback target is exposed"
     (Some "big_three")

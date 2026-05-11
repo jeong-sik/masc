@@ -875,6 +875,89 @@ command = "c"
   | _ -> failwith "expected exactly one provider"
 
 
+(* --- Model capabilities (M1 prep — RFC-0058 Phase 5.3 Model axis) --- *)
+
+let test_model_capabilities_present () =
+  let toml = {|
+[models.m]
+max-context = 4096
+
+[models.m.capabilities]
+max-output-tokens = 8192
+supports-parallel-tool-calls = true
+supports-image-input = true
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] ->
+    (match m.capabilities with
+     | Some c ->
+       check (option int) "max-output-tokens" (Some 8192) c.max_output_tokens;
+       check bool "parallel tool calls" true c.supports_parallel_tool_calls;
+       check bool "image input" true c.supports_image_input;
+       check bool "native streaming default false" false
+         c.supports_native_streaming;
+       check bool "caching default false" false c.supports_caching;
+       check bool "response_format json default false" false
+         c.supports_response_format_json
+     | None -> failwith "expected model capabilities to be parsed")
+  | _ -> failwith "expected exactly one model"
+
+let test_model_capabilities_absent () =
+  let toml = {|
+[models.m]
+max-context = 4096
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] ->
+    check (option string) "no capabilities sub-table → None" None
+      (Option.map show_cascade_model_capabilities m.capabilities)
+  | _ -> failwith "expected exactly one model"
+
+let test_model_capabilities_max_output_zero_rejected () =
+  let toml = {|
+[models.m]
+max-context = 4096
+
+[models.m.capabilities]
+max-output-tokens = 0
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] ->
+    (match m.capabilities with
+     | Some c ->
+       check (option int) "max-output-tokens=0 rejected → None"
+         None c.max_output_tokens
+     | None -> failwith "expected capabilities record")
+  | _ -> failwith "expected exactly one model"
+
+let test_model_capabilities_for_id_lookup () =
+  let toml = {|
+[models.m]
+max-context = 4096
+
+[models.m.capabilities]
+supports-caching = true
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match model_capabilities_for_id cfg "m" with
+  | Some c -> check bool "supports caching via lookup" true c.supports_caching
+  | None ->
+    failwith "expected Some capabilities via model_capabilities_for_id"
+
+let test_model_capabilities_for_id_unknown () =
+  let toml = {|
+[models.m]
+max-context = 4096
+|} in
+  let cfg = ok_config (parse_string toml) in
+  check (option string) "unknown model id → None" None
+    (Option.map show_cascade_model_capabilities
+       (model_capabilities_for_id cfg "does-not-exist"))
+
+
 (* --- capabilities_for_provider_id lookup helper (Phase 5.1 A.3 prep) --- *)
 
 let test_capabilities_for_provider_id_present () =
@@ -1012,5 +1095,17 @@ let () =
           test_capabilities_for_provider_id_absent;
         test_case "unknown provider id returns None" `Quick
           test_capabilities_for_provider_id_unknown_provider;
+      ];
+      "model_capabilities (M1 — Model axis prep)", [
+        test_case "[models.<id>.capabilities] sub-table parses 6 fields"
+          `Quick test_model_capabilities_present;
+        test_case "absent sub-table yields None" `Quick
+          test_model_capabilities_absent;
+        test_case "max-output-tokens=0 rejected → None" `Quick
+          test_model_capabilities_max_output_zero_rejected;
+        test_case "model_capabilities_for_id returns Some for declared"
+          `Quick test_model_capabilities_for_id_lookup;
+        test_case "model_capabilities_for_id returns None for unknown"
+          `Quick test_model_capabilities_for_id_unknown;
       ];
     ]

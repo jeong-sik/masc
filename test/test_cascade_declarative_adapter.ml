@@ -227,6 +227,7 @@ let test_alias_parent_missing () =
       thinking_support = false;
       max_thinking_budget = None;
       streaming = true;
+      capabilities = None;
     }];
     bindings = [];
     aliases = [{
@@ -468,6 +469,7 @@ let test_duplicate_routes () =
       thinking_support = false;
       max_thinking_budget = None;
       streaming = true;
+      capabilities = None;
     }];
     bindings = [{
       provider_id = "claude_code";

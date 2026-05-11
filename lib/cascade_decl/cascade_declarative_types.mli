@@ -99,6 +99,33 @@ type cascade_provider = {
 
 (** {1 Layer 2: Models} *)
 
+(** Per-model capabilities — RFC-0058 Model axis M1 (Phase 5.3 prep).
+
+    Mirrors the dispatch-critical subset of OAS
+    {!Llm_provider.Capabilities.capabilities}. cascade.toml
+    [\[models.<id>.capabilities\]] sub-table becomes the SSOT for the
+    fields below.
+
+    M1 (this PR): schema-only addition; no callers consume.
+    M2 (follow-up): OAS [for_model_id_static] substring-on-model-id
+    derivation replaced by cascade.toml lookup via
+    {!model_capabilities_for_id}.
+
+    Field selection excludes fields already present on
+    {!cascade_model_spec} ([tools_support], [thinking_support],
+    [max_context], [streaming]) to avoid duplicate SSOT. *)
+type cascade_model_capabilities = {
+  max_output_tokens : int option;
+  supports_parallel_tool_calls : bool;
+  supports_image_input : bool;
+  supports_native_streaming : bool;
+  supports_caching : bool;
+  supports_response_format_json : bool;
+}
+[@@deriving show, eq]
+
+val cascade_model_capabilities_default : cascade_model_capabilities
+
 type cascade_model_spec = {
   id : string;
   api_name : string;
@@ -107,6 +134,10 @@ type cascade_model_spec = {
   thinking_support : bool;
   max_thinking_budget : int option;
   streaming : bool;
+  capabilities : cascade_model_capabilities option;
+      (** M1 schema-additive. [None] means
+          [\[models.<id>.capabilities\]] sub-table absent — A.3/M2
+          callers treat as {!cascade_model_capabilities_default}. *)
 }
 [@@deriving show, eq]
 
@@ -239,6 +270,18 @@ val capabilities_for_provider_id :
     Phase 5.1 A.3 caller cutover uses this lookup to replace closed-variant
     [match provider_kind with PK.Codex_cli | PK.Claude_code | ... -> ...]
     patterns. *)
+
+val model_capabilities_for_id :
+  cascade_config -> string -> cascade_model_capabilities option
+(** [model_capabilities_for_id cfg id] returns the cascade-declared
+    per-model capabilities for the model with id [id]. [None] in two
+    collapsed cases (same rationale as
+    {!capabilities_for_provider_id}):
+    - model id not declared in [cfg.models]
+    - model declared but ships no [\[models.<id>.capabilities\]] sub-table
+
+    M2 caller cutover wires OAS [for_model_id_static] to read these
+    fields instead of model-id substring match. *)
 
 val model_of_id : cascade_config -> string -> cascade_model_spec option
 

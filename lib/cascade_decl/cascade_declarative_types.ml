@@ -118,6 +118,55 @@ type cascade_provider = {
 }
 [@@deriving show, eq]
 
+(** Per-model capabilities — RFC-0058 Model axis M1 (Phase 5.3 prep).
+
+    Mirrors the dispatch-critical subset of OAS [Llm_provider.Capabilities.capabilities]
+    so the cascade.toml [\[models.<id>.capabilities\]] sub-table becomes
+    the SSOT for per-model feature flags. Currently OAS derives these
+    via [for_model_id_static] substring match on model_id strings
+    ([starts_with "claude-opus-4"], [starts_with "gpt-5"], etc.). M2
+    replaces that derivation with a cascade.toml lookup so OAS no longer
+    needs to "know model names".
+
+    Schema-additive in M1 (this PR): no callers consume the fields yet.
+    M2 caller cutover wires OAS [for_model_id] to read these fields.
+
+    Field selection prioritises fields that OAS callers branch on but
+    that cascade_model_spec does not already cover ([tools_support],
+    [thinking_support], [max_context], [streaming] live in the parent
+    record). *)
+type cascade_model_capabilities = {
+  max_output_tokens : int option;
+      (** Hard cap on output tokens. None when unknown / model-default. *)
+  supports_parallel_tool_calls : bool;
+      (** Multiple [tool_use] blocks in one assistant response.
+          OpenAI / Anthropic recent models do; CLI wrappers usually
+          don't. *)
+  supports_image_input : bool;
+      (** Vision input via base64 / URL image blocks. *)
+  supports_native_streaming : bool;
+      (** Server-Sent Events streaming on the wire protocol. Distinct
+          from {!cascade_model_spec.streaming} which advertises the
+          model's declared streaming support — this field tracks the
+          provider-protocol-level capability used for runtime dispatch
+          decisions. *)
+  supports_caching : bool;
+      (** Provider supports any form of response caching (Anthropic
+          prompt caching, OpenAI prompt caching, GLM cache). *)
+  supports_response_format_json : bool;
+      (** [response_format = json_object] / JSON mode. *)
+}
+[@@deriving show, eq]
+
+let cascade_model_capabilities_default = {
+  max_output_tokens = None;
+  supports_parallel_tool_calls = false;
+  supports_image_input = false;
+  supports_native_streaming = false;
+  supports_caching = false;
+  supports_response_format_json = false;
+}
+
 type cascade_model_spec = {
   id : string;
   api_name : string;
@@ -126,6 +175,11 @@ type cascade_model_spec = {
   thinking_support : bool;
   max_thinking_budget : int option;
   streaming : bool;
+  capabilities : cascade_model_capabilities option;
+      (** M1 schema-additive (Phase 5.3 Model axis prep). [None] when
+          the [\[models.<id>.capabilities\]] sub-table is absent —
+          callers treat as defaults (see
+          {!cascade_model_capabilities_default}). *)
 }
 [@@deriving show, eq]
 
@@ -228,6 +282,12 @@ let capabilities_for_provider_id (cfg : cascade_config) (id : string) :
     cascade_capabilities option =
   match provider_of_id cfg id with
   | Some p -> p.capabilities
+  | None -> None
+
+let model_capabilities_for_id (cfg : cascade_config) (id : string) :
+    cascade_model_capabilities option =
+  match List.find_opt (fun (m : cascade_model_spec) -> m.id = id) cfg.models with
+  | Some m -> m.capabilities
   | None -> None
 
 let model_of_id (cfg : cascade_config) (id : string) :

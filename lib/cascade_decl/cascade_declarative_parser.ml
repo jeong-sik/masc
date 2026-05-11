@@ -256,6 +256,34 @@ let parse_providers (toml : Otoml.t) : (cascade_provider list, parse_error list)
 
 (* --- Layer 2: Models --- *)
 
+let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
+  : cascade_model_capabilities
+  =
+  let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+  let positive_int_opt_field key =
+    match Otoml.find_opt tbl Otoml.get_integer [ key ] with
+    | None -> None
+    | Some n when n > 0 -> Some n
+    | Some n ->
+      Logs.warn (fun m ->
+        m
+          "cascade_declarative_parser: %s.capabilities.%s = %d — \
+           expected positive integer, ignoring"
+          path
+          key
+          n);
+      None
+  in
+  {
+    max_output_tokens = positive_int_opt_field "max-output-tokens";
+    supports_parallel_tool_calls = b "supports-parallel-tool-calls";
+    supports_image_input = b "supports-image-input";
+    supports_native_streaming = b "supports-native-streaming";
+    supports_caching = b "supports-caching";
+    supports_response_format_json = b "supports-response-format-json";
+  }
+;;
+
 let parse_model (id : string) (tbl : Otoml.t)
   : (cascade_model_spec, parse_error list) result
   =
@@ -282,6 +310,10 @@ let parse_model (id : string) (tbl : Otoml.t)
       Otoml.find_opt tbl Otoml.get_integer [ "max-thinking-budget" ]
     in
     let streaming = Otoml.find_or ~default:true tbl Otoml.get_boolean [ "streaming" ] in
+    let capabilities =
+      Otoml.find_opt tbl Fun.id [ "capabilities" ]
+      |> Option.map (parse_model_capabilities ~path)
+    in
     Ok
       { id
       ; api_name
@@ -290,6 +322,7 @@ let parse_model (id : string) (tbl : Otoml.t)
       ; thinking_support
       ; max_thinking_budget
       ; streaming
+      ; capabilities
       })
 ;;
 

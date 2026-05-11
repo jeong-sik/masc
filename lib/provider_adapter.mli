@@ -462,6 +462,26 @@ val supports_runtime_mcp_http_headers_for_config :
 val requires_per_keeper_bridging_for_bound_actor_tools_for_config :
   Llm_provider.Provider_config.t -> bool
 
+(** RFC-0058 §2.4 SSOT bridge: build a [tool_policy] from a cascade-decl
+    [cascade_capabilities] (the TOML-parsed shape).
+
+    [None] (no [[providers.<id>.capabilities]] sub-table) maps to
+    {!no_tool_http_headers} — the conservative defaults matching the
+    historical hardcoded baseline.
+
+    [Some c] maps each capability field 1-to-1 except for
+    [tolerates_bound_actor_fallback], which is hard-pinned to [false]
+    pending the schema-side mirror PR (#14651) so caller behavior does
+    not regress before the cascade-decl field exists.
+
+    Schema-additive primitive; no callers yet. Future caller cutover
+    will route [adapter_of_provider_config] through this bridge so
+    [config/cascade.toml] becomes the lookup root and the 13 hardcoded
+    [tool_policy = ...] records collapse into a single cascade-toml-
+    driven path. *)
+val tool_policy_of_cascade_capabilities :
+  Cascade_declarative_types.cascade_capabilities option -> tool_policy
+
 (** Same as {!requires_per_keeper_bridging_for_bound_actor_tools_for_config}
     but takes a typed [provider_kind] directly.  Used by call sites that do
     not have a full {!Llm_provider.Provider_config.t} (e.g. keeper-bound

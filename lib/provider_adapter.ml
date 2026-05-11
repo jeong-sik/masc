@@ -1575,6 +1575,45 @@ let requires_per_keeper_bridging_for_bound_actor_tools_for_config
       adapter.tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
   | None -> false
 
+(** RFC-0058 §2.4 SSOT bridge: build a [tool_policy] record from a
+    cascade-decl [cascade_capabilities] (the TOML-parsed shape).
+
+    [None] (no [[providers.<id>.capabilities]] sub-table declared in
+    cascade.toml) maps to [no_tool_http_headers] — the conservative
+    defaults that match the historical hardcoded baseline.
+
+    [Some c] maps each capability field 1-to-1 except for
+    [tolerates_bound_actor_fallback], which the cascade-decl schema does
+    not yet carry; that field is hard-pinned to [false] here pending
+    the schema-side mirror PR (#14651) — callers that need it must keep
+    using the OCaml-side [tool_policy.tolerates_bound_actor_fallback]
+    from the hardcoded adapter records.
+
+    Caller cutover plan: a future PR will route
+    [adapter_of_provider_config] through this bridge so that
+    [config/cascade.toml] becomes the lookup root for [tool_policy] and
+    the 13 hardcoded [tool_policy = ...] records collapse into a single
+    cascade-toml-driven path. This PR adds the primitive only;
+    no caller swaps. *)
+let tool_policy_of_cascade_capabilities
+    (caps : Cascade_declarative_types.cascade_capabilities option) =
+  match caps with
+  | None -> no_tool_http_headers
+  | Some c ->
+      {
+        supports_runtime_mcp_http_headers = c.supports_runtime_mcp_http_headers;
+        requires_per_keeper_bridging_for_bound_actor_tools =
+          c.requires_per_keeper_bridging_for_bound_actor_tools;
+        identity_runtime_mcp_header_keys = c.identity_runtime_mcp_header_keys;
+        argv_prompt_preflight = c.argv_prompt_preflight;
+        uses_anthropic_caching = c.uses_anthropic_caching;
+        max_turns_per_attempt = c.max_turns_per_attempt;
+        tolerates_bound_actor_fallback = false;
+        (* Pending #14651 — cascade_decl schema does not yet carry this
+           field; the hardcoded adapter records remain the SSOT until
+           the schema-side mirror lands and the parser populates it. *)
+      }
+
 let requires_per_keeper_bridging_for_bound_actor_tools_for_kind
     (kind : Llm_provider.Provider_config.provider_kind) =
   match adapter_of_provider_kind kind with

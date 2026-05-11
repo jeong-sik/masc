@@ -1885,7 +1885,12 @@ let rec dispatch_event_with_audit
                   "registry(%s): followup skipped, already terminal: %s (event: %s)"
                   name
                   (Keeper_state_machine.phase_to_string current)
-                  attempted_event)
+                  attempted_event
+            | Error (Keeper_state_machine.Precondition_violation { event = ev; reason }) ->
+                record_followup_dispatch_rejection followup_event;
+                Log.Keeper.warn
+                  "registry(%s): followup skipped, precondition violated: %s (%s)"
+                  name ev reason)
        (List.filter_map
             (followup_event_of_entry_action ~phase:tr.new_phase)
             tr.entry_actions);
@@ -1936,6 +1941,7 @@ let dispatch_event_and_log ~base_path name event =
       match e with
       | Keeper_state_machine.Terminal_state _ -> "terminal_state"
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
+      | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
     in
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_dispatch_event_failures
@@ -1957,6 +1963,7 @@ let dispatch_event_with_audit_and_log ~base_path ?snapshot ?events_fired ?select
       match e with
       | Keeper_state_machine.Terminal_state _ -> "terminal_state"
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
+      | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
     in
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_dispatch_event_failures

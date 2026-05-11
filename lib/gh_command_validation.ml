@@ -6,11 +6,20 @@
 
     @since godfile decomposition pass 2 *)
 
+(* Forbidden ASCII shell metacharacters.  Kept as a [char list] for
+   docs/tests that reference the source definition; the actual scan in
+   [contains_forbidden_shell_chars] uses a closed pattern match so the
+   compiler emits a jump table (O(1) per char) instead of an O(M) list
+   walk for every byte of [cmd]. *)
 let forbidden_shell_chars =
   [ ';'; '|'; '&'; '>'; '<'; '`'; '$'; '\n'; '\r' ]
 
 let contains_forbidden_shell_chars cmd =
-  String.exists (fun ch -> List.mem ch forbidden_shell_chars) cmd
+  String.exists
+    (function
+      | ';' | '|' | '&' | '>' | '<' | '`' | '$' | '\n' | '\r' -> true
+      | _ -> false)
+    cmd
 
 (** Top-level gh CLI commands allowed. Commands not in this list are
     rejected at the allowlist gate. *)

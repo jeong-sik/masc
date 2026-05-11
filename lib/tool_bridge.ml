@@ -175,15 +175,27 @@ let type_string_of_schema_property prop =
 
 let params_of_json_schema schema =
   let open Yojson.Safe.Util in
-  let required_list =
+  (* [required] is conceptually a set (membership semantics, no ordering
+     or duplicates) — materialise as Hashtbl so the per-property check
+     below is O(1) instead of O(R) per property.  Per-call savings scale
+     with property × required-field count; this helper fires from
+     [oas_tool_of_masc] per OAS conversion. *)
+  let required_set =
     match schema |> member "required" with
     | `List items ->
-        List.filter_map
+        (* Constant initial size 16: avoid the extra [List.length items]
+           pass (which itself is O(R)) before [List.iter].  Hashtbl
+           auto-resizes — sizing exactly to the input only saves a
+           handful of resizes per call, which is cheaper than re-walking
+           the list. *)
+        let tbl = Hashtbl.create 16 in
+        List.iter
           (function
-            | `String value -> Some value
-            | _ -> None)
-          items
-    | _ -> []
+            | `String value -> Hashtbl.replace tbl value ()
+            | _ -> ())
+          items;
+        tbl
+    | _ -> Hashtbl.create 0
   in
   match schema |> member "properties" with
   | `Assoc pairs ->
@@ -199,7 +211,7 @@ let params_of_json_schema schema =
             string_of_json_member "description" prop
             |> Option.value ~default:""
           in
-          let required = List.mem name required_list in
+          let required = Hashtbl.mem required_set name in
           { Agent_sdk.Types.name = name; description; param_type; required })
         pairs
   | _ -> []

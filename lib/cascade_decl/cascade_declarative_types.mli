@@ -127,9 +127,9 @@ type cascade_thinking_control_format =
     Schema-additive: no callers consume the fields in this PR. M2
     follow-up wires OAS [for_model_id_static], which currently
     substring-matches on the upstream API model identifier (e.g.
-    [\"claude-sonnet-4-6\"] — Llm_provider.Capabilities.for_model_id
+    ['claude-sonnet-4-6'] — Llm_provider.Capabilities.for_model_id
     receives the api-name, not the cascade [\[models.<id>\]] key
-    [\"sonnet\"]), to read these fields via {!model_capabilities_for_id} —
+    ['sonnet']), to read these fields via {!model_capabilities_for_id} —
     keyed on the cascade [<id>] (the cascade key, not the api-name).
 
     Field selection excludes fields already present on

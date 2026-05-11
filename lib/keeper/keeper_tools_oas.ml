@@ -499,6 +499,7 @@ let make_keeper_tool_handler
     Printf.sprintf "%s:%d" name h
   in
   fun raw_input ->
+    let t0 = Time_compat.now () in
     let input = translate_input raw_input in
     match
       Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()

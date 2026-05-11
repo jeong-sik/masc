@@ -258,6 +258,31 @@ let handle_tool_call
   T.ToolCallResponse.to_bytes result
 ;;
 
+(** LspCall handler placeholder.
+
+    The actual LSP message routing lives in [Server_ide_lsp_proxy] /
+    [Lsp_process_manager] and currently requires an [Eio] switch + filesystem
+    capability that this gRPC service does not yet receive. Until that wiring
+    lands, [handle_lsp_call] returns a structured [error_message] so callers
+    on the dashboard side observe an explicit "not yet implemented" instead
+    of a transport error.
+
+    Success semantics follow [ToolCallResponse]: [error_message = ""] means
+    the JSON-RPC response in [jsonrpc_response_json] is valid; otherwise the
+    request was rejected before reaching the LSP process. *)
+let handle_lsp_call (bytes : string) : string =
+  let _req =
+    decode_request_or_raise ~rpc:"LspCall" T.LspRequest.of_bytes_result bytes
+  in
+  let resp =
+    T.LspResponse.
+      { jsonrpc_response_json = ""
+      ; error_message = "LspCall: server-side LSP dispatcher not yet wired"
+      }
+  in
+  T.LspResponse.to_bytes resp
+;;
+
 (** {1 Streaming Handlers} *)
 
 (** Active heartbeat stream count (atomic for signal safety). *)

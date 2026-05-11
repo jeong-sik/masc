@@ -116,5 +116,5 @@ export interface LspRequest {
 
 export interface LspResponse {
   jsonrpcResponseJson: string
-  errorMessage?: string
+  errorMessage: string
 }

@@ -184,8 +184,13 @@ message LspRequest {
 }
 
 message LspResponse {
-  // JSON-RPC 2.0 response object serialized as a string.
+  // JSON-RPC 2.0 response object serialized as a string. Only valid when
+  // error_message is empty.
   string jsonrpc_response_json = 1;
-  // Error message if the LSP server could not be reached.
+  // Empty string means the request reached the LSP server and the JSON-RPC
+  // response is in jsonrpc_response_json (which may itself carry a JSON-RPC
+  // level error per the JSON-RPC spec). Non-empty means the gRPC service
+  // rejected the request before it reached the LSP process (transport-level
+  // failure, no language server, dispatcher not wired, etc.).
   string error_message = 2;
 }

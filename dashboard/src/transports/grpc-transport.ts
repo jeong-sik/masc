@@ -22,6 +22,8 @@ import type {
   BroadcastResponse,
   StatusRequest,
   StatusResponse,
+  LspRequest,
+  LspResponse,
 } from '../grpc/masc_coordination_pb'
 
 const DEFAULT_RETRY_BASE_MS = 1000
@@ -264,5 +266,6 @@ export function createGrpcTransport(
     toolCall: (req) => unaryRpc(baseUrl, service, 'ToolCall', req, opts, state),
     broadcast: (req) => unaryRpc(baseUrl, service, 'Broadcast', req, opts, state),
     getStatus: (req) => unaryRpc(baseUrl, service, 'GetStatus', req, opts, state),
+    lspCall: (req) => unaryRpc<LspRequest, LspResponse>(baseUrl, service, 'LspCall', req, opts, state),
   }
 }

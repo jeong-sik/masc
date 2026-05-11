@@ -1,9 +1,9 @@
 # RFC-0055: Cascade Fallback Chain Capability-Tier Routing
 
-**Status**: Draft  
+**Status**: Superseded by RFC-0058 (declarative cascade config — RFC-0058 §1 / Supersedes ledger explicitly absorbs the capability-tier routing concern)  
 **Author**: Agent (Claude Sonnet 4.6)  
-**Date**: 2026-05-09  
-**Related**: RFC-0041 (hierarchical cascade config), PR #14358, PR #14360, 2026-05-04 ollama_bench incident
+**Date**: 2026-05-09 · Superseded 2026-05-11  
+**Related**: RFC-0041 (hierarchical cascade config), RFC-0058 (declarative cascade config), PR #14358, PR #14360, 2026-05-04 ollama_bench incident
 
 ---
 

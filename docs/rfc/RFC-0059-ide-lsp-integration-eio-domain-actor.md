@@ -1,10 +1,10 @@
 # RFC-0059 — IDE LSP Integration + Eio Domain/Actor Parallelism
 
-Status: Phase 1 Complete · Phase 2 Verified, Ready for PR-5
+Status: Phase 1 Complete · Phase 2 PR-5 + PR-6 Complete (PR #14517 Actor mailbox, PR #14520 Domain pool, both merged 2026-05-11) — remaining work: PR-7 review of `Dashboard_cache` internals (see §6 T6)
 Author: jeong-sik (with Claude Opus 4.7)
-Date: 2026-05-10 · Updated 2026-05-11 (Phase 2 verification + Tier A integration)
+Date: 2026-05-10 · Updated 2026-05-11 (Phase 2 PR-5/PR-6 landed, status promoted)
 Supersedes: —
-Related: `lib/server/server_ide_lsp_proxy.ml`, `lib/ide/ide_annotations.ml` (functional), RFC-0056 (sub-library extraction pattern), PR #14502 (Tier A perf quick wins), PR #14505 (Tier A simplify follow-up)
+Related: `lib/server/server_ide_lsp_proxy.ml`, `lib/ide/ide_annotations.ml` (functional), RFC-0056 (sub-library extraction pattern), PR #14488 (Phase 1), PR #14502 (Tier A perf quick wins), PR #14505 (Tier A simplify follow-up), PR #14517 (Phase 2 PR-5 Actor mailbox), PR #14520 (Phase 2 PR-6 Domain pool)
 
 ## 1. Problem
 
@@ -35,7 +35,7 @@ LSP method dispatch coverage:
 
 Not yet forwarded: `documentSymbol`, `hover`, `definition`, `references`, `completion`, `documentHighlight`, `foldingRange`, `selectionRange`, `documentLink`, `colorPresentation`, `formatting`, `rangeFormatting`, `onTypeFormatting`, `rename`, `prepareRename`, `codeAction`, `codeLens/resolve`.
 
-### 1.2 Keeper execution is single-fiber (Phase 2 — Verified, Ready for PR-5)
+### 1.2 Keeper execution is single-fiber (Phase 2 — PR-5 + PR-6 Complete, see PR #14517 / #14520)
 
 91K LOC across 421 files in `lib/keeper/`. Verified state on `origin/main` at `662cf59f7d` (2026-05-11):
 

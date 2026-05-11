@@ -183,7 +183,8 @@ a feature, not drift. Track C-beta was closed as no-op for this reason.
 ### SSOT-4: `dashboard/src/styles/tokens.css` (Dark Brass canon)
 
 - Hand-written, 489 LOC, 53 hex defs, header: "MASC Cockpit — Dark Brass tokens"
-- Loads at `main.ts` line 6 — **between SSOT-1 and SSOT-2 in cascade**
+- Loads as the **second** foundation import in `main.ts`,
+  **between `tokens.generated.css` and `variables.css`** in cascade
   (tokens.generated → tokens.css → variables.css → ...)
 - Defines the `--bg-0..4`, `--fg-1..4`, `--line-1..3`, `--brass-1..3`,
   `--brass-glow` namespace consumed by 28+ CSS files via `var(--bg-2)` etc.
@@ -205,11 +206,11 @@ load positions. Actual cascade order in `main.ts`:
 
 | Position | File | SSOT label |
 |----------|------|------------|
-| 1 | `tokens.generated.css` (line 5) | SSOT-1 |
-| 2 | `tokens.css` (line 6) | SSOT-4 |
-| 3 | `variables.css` (line 7) | SSOT-2 |
+| 1 | `tokens.generated.css` (first import) | SSOT-1 |
+| 2 | `tokens.css` (second import) | SSOT-4 |
+| 3 | `variables.css` (third import) | SSOT-2 |
 | 4..N | component CSS files | — |
-| late | `paper-theme.css` (line 37) | SSOT-3 |
+| last CSS import | `paper-theme.css` (after all component CSS) | SSOT-3 |
 
 Later positions cascade over earlier ones for any shared selector. SSOT-3
 is `[data-theme="paper"]` scoped, so it only activates on attribute set.
@@ -240,9 +241,12 @@ in JavaScript:
 For these surfaces, the convention is:
 
 ```ts
-// Literal hex required (Mermaid). Mirror token value for single-source truth.
-const M_HUB_FILL = '#111827'  // --color-bg-surface
-const M_OK_STROKE = '#4ade80' // --ok (variables.css SSOT-2)
+// Example: literal hex mirrors the resolved CSS token value.
+// Production components often use SSOT-1/SSOT-2 aliases
+// (e.g. --color-bg-surface → --bg-1); the comment must name
+// the ultimate canonical token so drift detection can resolve it.
+const PANEL_BG = '#1a1815'   // --bg-2 (SSOT-4 tokens.css)
+const STATUS_OK = '#6b9e6b'   // --ok   (SSOT-4 tokens.css)
 ```
 
 ### Required mirror format
@@ -276,6 +280,11 @@ A drift-detection lint script would:
 
 The lint follows the file-level grep pattern established in
 RFC-0063 §7-B (`scripts/ci/check-drain-loop-yields.sh`).
+
+A structural alternative — typed mirror codegen (e.g. `mirrorOf('--bg-2')`
+with compile-time token lookup or a codemod that verifies the resolved hex
+against the canonical SSOT) — is noted as a future RFC-OAS-018 direction
+to avoid the string-prefix whitelist accumulation risk of `// approx` labels.
 
 ## Preview gallery — SPA hash routing (2026-04-28)
 

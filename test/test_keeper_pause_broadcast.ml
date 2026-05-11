@@ -75,7 +75,7 @@ let mk_receipt
     tool_contract_result;
     tool_surface =
       mk_tool_surface ~tool_requirement ~required_tools ~missing_required_tools ();
-    sandbox_kind = "local";
+    sandbox_kind = Masc_mcp.Keeper_types.Local;
     sandbox_root = None;
     network_mode = "offline";
     approval_profile = None;

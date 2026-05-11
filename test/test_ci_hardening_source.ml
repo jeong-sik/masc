@@ -1052,7 +1052,7 @@ let test_keeper_zombie_field_contracts () =
           required_tools = [ "Read" ];
           missing_required_tools = [];
         };
-      sandbox_kind = "local";
+      sandbox_kind = Masc_mcp.Keeper_types.Local;
       sandbox_root = None;
       network_mode = "offline";
       approval_profile = None;

@@ -1,8 +1,20 @@
 type t =
-  | Ratio_threshold of { ratio : float; threshold : float }
-  | Message_count of { count : int; threshold : int }
-  | Token_count of { count : int; threshold : int }
-  | Tool_heavy of { messages : int; ratio : float }
+  | Ratio_threshold of
+      { ratio : float
+      ; threshold : float
+      }
+  | Message_count of
+      { count : int
+      ; threshold : int
+      }
+  | Token_count of
+      { count : int
+      ; threshold : int
+      }
+  | Tool_heavy of
+      { messages : int
+      ; ratio : float
+      }
   | Manual
 
 let to_label = function
@@ -18,8 +30,7 @@ let to_human = function
     Printf.sprintf "ratio(%.4f>=%.4f)" ratio threshold
   | Message_count { count; threshold } ->
     Printf.sprintf "messages(%d>=%d)" count threshold
-  | Token_count { count; threshold } ->
-    Printf.sprintf "tokens(%d>=%d)" count threshold
+  | Token_count { count; threshold } -> Printf.sprintf "tokens(%d>=%d)" count threshold
   | Tool_heavy { messages; ratio } ->
     Printf.sprintf "tool_heavy(msgs=%d,ratio=%.4f)" messages ratio
   | Manual -> "manual"
@@ -28,28 +39,15 @@ let to_human = function
 let to_detail_json : t -> Yojson.Safe.t = function
   | Ratio_threshold { ratio; threshold } ->
     `Assoc
-      [ "kind", `String "ratio"
-      ; "ratio", `Float ratio
-      ; "threshold", `Float threshold
-      ]
+      [ "kind", `String "ratio"; "ratio", `Float ratio; "threshold", `Float threshold ]
   | Message_count { count; threshold } ->
     `Assoc
-      [ "kind", `String "messages"
-      ; "count", `Int count
-      ; "threshold", `Int threshold
-      ]
+      [ "kind", `String "messages"; "count", `Int count; "threshold", `Int threshold ]
   | Token_count { count; threshold } ->
-    `Assoc
-      [ "kind", `String "tokens"
-      ; "count", `Int count
-      ; "threshold", `Int threshold
-      ]
+    `Assoc [ "kind", `String "tokens"; "count", `Int count; "threshold", `Int threshold ]
   | Tool_heavy { messages; ratio } ->
     `Assoc
-      [ "kind", `String "tool_heavy"
-      ; "messages", `Int messages
-      ; "ratio", `Float ratio
-      ]
+      [ "kind", `String "tool_heavy"; "messages", `Int messages; "ratio", `Float ratio ]
   | Manual -> `Assoc [ "kind", `String "manual" ]
 ;;
 

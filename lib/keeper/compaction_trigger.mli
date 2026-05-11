@@ -7,10 +7,22 @@
     in the JSON receipt via [to_detail_json]. *)
 
 type t =
-  | Ratio_threshold of { ratio : float; threshold : float }
-  | Message_count of { count : int; threshold : int }
-  | Token_count of { count : int; threshold : int }
-  | Tool_heavy of { messages : int; ratio : float }
+  | Ratio_threshold of
+      { ratio : float
+      ; threshold : float
+      }
+  | Message_count of
+      { count : int
+      ; threshold : int
+      }
+  | Token_count of
+      { count : int
+      ; threshold : int
+      }
+  | Tool_heavy of
+      { messages : int
+      ; ratio : float
+      }
   | Manual
 
 (** Closed label set (5 values) for Prometheus / SSE [trigger] label.

@@ -1585,13 +1585,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           if deleted > 0 then
             Prometheus.inc_counter
               Prometheus.metric_fs_atomic_orphans_cleaned
-              ~labels:[ ("size_class", "empty") ]
+              ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label Empty)) ]
               ~delta:(float_of_int deleted)
               ();
           if preserved > 0 then
             Prometheus.inc_counter
               Prometheus.metric_fs_atomic_orphans_cleaned
-              ~labels:[ ("size_class", "with_data") ]
+              ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label With_data)) ]
               ~delta:(float_of_int preserved)
               ();
           if deleted + preserved > 0 then

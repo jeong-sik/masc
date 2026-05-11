@@ -61,3 +61,12 @@ val on_route_config_error : error_type:string -> count:int -> unit
     typo or deprecated key).  Bumps by [count] (number of errors
     of that type in this single validate call); a [count] of zero
     is a no-op so callers can call unconditionally. *)
+
+val on_resolve_failure : cascade:string -> reason:string -> unit
+(** Tick the resolve-failure counter for one [resolve_named_providers]
+    or [resolve_named_providers_strict] invocation that returned
+    [Error _].  [reason] must be one of [lookup_failed],
+    [provider_filter_rejected], [no_callable_providers].  [cascade]
+    uses the normalized cascade name when available, or the raw
+    cascade_name argument when normalization itself failed
+    ([lookup_failed] arm). *)

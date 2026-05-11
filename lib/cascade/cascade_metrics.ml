@@ -220,3 +220,34 @@ let on_route_config_error ~error_type ~count =
       ~labels:[ ("error_type", error_type) ]
       ~delta:(float_of_int count)
       ()
+
+(* [resolve_named_providers] and [resolve_named_providers_strict] each
+   have three Error return points that previously emitted neither
+   counter nor log:
+
+     lookup_failed             — [lookup_active_profile] returned Error
+                                  (snapshot unavailable OR unknown
+                                  cascade name in snapshot)
+     provider_filter_rejected  — strict variant only: provider_filter
+                                  rejected the declared set
+     no_callable_providers     — final filter step left the resolved
+                                  list empty
+
+   Iter 7's [on_resolve_provider_leak] observes the OK arm only;
+   these Error arms were the symmetric blind spot.  When keeper turns
+   experience a sudden spike of "cascade X failed at resolve", the
+   existing [masc_cascade_fallbacks_total] tells operators THAT
+   fallback fired but not WHY the primary failed — that detail used
+   to live only in the WARN log line at the call site (and in some
+   arms not even that).
+
+   Cardinality: cascades (~10) × reasons (3) = ~30 series.  Cascade
+   name uses the normalized form when available; the lookup_failed
+   arm uses the raw [cascade_name] argument because normalization
+   itself failed. *)
+let metric_resolve_failure = "masc_cascade_resolve_failure_total"
+
+let on_resolve_failure ~cascade ~reason =
+  Prometheus.inc_counter metric_resolve_failure
+    ~labels:[ ("cascade", cascade); ("reason", reason) ]
+    ()

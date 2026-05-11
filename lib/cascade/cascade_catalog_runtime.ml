@@ -1187,7 +1187,10 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
     ?(require_tool_support = false)
     ?runtime_mcp_policy ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
-  | Error _ as e -> e
+  | Error _ as e ->
+      Cascade_metrics.on_resolve_failure
+        ~cascade:cascade_name ~reason:"lookup_failed";
+      e
   | Ok (_snapshot, normalized, profile) ->
       let provider_label (c : Llm_provider.Provider_config.t) =
         Printf.sprintf "%s:%s"
@@ -1217,11 +1220,13 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
           ~require_tool_choice_support ~require_tool_support
           ~label:normalized filtered_declared_providers
       in
-      if providers = [] then
+      if providers = [] then (
+        Cascade_metrics.on_resolve_failure
+          ~cascade:normalized ~reason:"no_callable_providers";
         Error
           (Printf.sprintf
              "cascade %s resolved to no callable providers"
-             normalized)
+             normalized))
       else (
         (* Observability for cascade-name -> runtime-provider divergence.  Compare
            against the profile after provider:auto expansion, canonical provider
@@ -1258,7 +1263,10 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
     ?(require_tool_support = false)
     ?runtime_mcp_policy ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
-  | Error _ as e -> e
+  | Error _ as e ->
+      Cascade_metrics.on_resolve_failure
+        ~cascade:cascade_name ~reason:"lookup_failed";
+      e
   | Ok (_snapshot, normalized, profile) ->
       let ordered_entries =
         Cascade_config.order_weighted_entries
@@ -1279,7 +1287,10 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
         | Ok ps -> Ok ps
       in
       (match filtered_declared_providers with
-       | Error _ as e -> e
+       | Error _ as e ->
+           Cascade_metrics.on_resolve_failure
+             ~cascade:normalized ~reason:"provider_filter_rejected";
+           e
        | Ok filtered ->
        let providers =
          Provider_tool_support.apply_required_tool_use_filter
@@ -1287,11 +1298,13 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
            ~require_tool_choice_support ~require_tool_support
            ~label:normalized filtered
        in
-       if providers = [] then
+       if providers = [] then (
+         Cascade_metrics.on_resolve_failure
+           ~cascade:normalized ~reason:"no_callable_providers";
          Error
            (Printf.sprintf
               "cascade %s resolved to no callable providers"
-              normalized)
+              normalized))
        else Ok providers)
 
 type secondary_resolution = {

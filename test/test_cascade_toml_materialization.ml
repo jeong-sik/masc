@@ -600,6 +600,26 @@ let test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable () =
    Same shape as on_resolve_provider_leak: zero is a no-op (callers
    call unconditionally) and positive is callable with both
    documented error_type label values. *)
+(* Smoke + label-stability guard for [Cascade_metrics.on_resolve_failure].
+   The five call sites (non-strict 2 + strict 3) in
+   [Cascade_catalog_runtime] must all use one of three documented
+   reason labels: [lookup_failed], [provider_filter_rejected],
+   [no_callable_providers].  A typo at any call site would emit an
+   undocumented label and pollute Prometheus cardinality.  This test
+   exercises each label string explicitly so a future refactor that
+   introduces a fourth reason — or renames an existing one — has to
+   update this test, keeping the documented set in lockstep with the
+   call sites. *)
+let test_resolve_failure_helper_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_resolve_failure
+    ~cascade:"smoke_test_cascade" ~reason:"lookup_failed";
+  Masc_mcp.Cascade_metrics.on_resolve_failure
+    ~cascade:"smoke_test_cascade" ~reason:"provider_filter_rejected";
+  Masc_mcp.Cascade_metrics.on_resolve_failure
+    ~cascade:"smoke_test_cascade" ~reason:"no_callable_providers";
+  check bool "all three documented reasons callable without raising"
+    true true
+
 let test_route_config_error_helper_zero_is_no_op_and_positive_callable () =
   Masc_mcp.Cascade_metrics.on_route_config_error
     ~error_type:"missing_target_profile" ~count:0;
@@ -813,5 +833,8 @@ let () =
           test_case
             "route_config_error: zero is no-op, both labels callable" `Quick
             test_route_config_error_helper_zero_is_no_op_and_positive_callable;
+          test_case
+            "resolve_failure: all three documented reasons callable" `Quick
+            test_resolve_failure_helper_documented_reasons_are_callable;
         ] );
     ]

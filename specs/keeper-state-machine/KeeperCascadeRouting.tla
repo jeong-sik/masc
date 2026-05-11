@@ -265,10 +265,31 @@ SelectedItemInPath ==
         selected_item[keeper] /= "none"
         => ItemGroup[selected_item[keeper]] \in Range(group_path[keeper])
 
-(* I7: Per-keeper isolation — one keeper's item health does not
-   directly affect another keeper's state.  This is structural:
-   all health updates are keyed by (keeper, item) pair. *)
-PerKeeperIsolation == TRUE  (* Structural invariant: enforced by variable typing *)
+(* I7: Per-keeper isolation — partial truth.
+   --------------------------------------------------------------
+   In this spec, [item_health] and [consecutive_failures] are keyed by
+   <<keeper, item>>, so one keeper's failure history on item i does not
+   poison another keeper's view of the same item.  At this layer the
+   isolation property *is* structural: TLC cannot construct a transition
+   that violates it because the variable typing forbids it.
+
+   Production reality (lib/cascade/cascade_health_tracker.ml) is more
+   nuanced: that module tracks a separate axis of "cooldown" state keyed
+   by [provider_key] rather than <<keeper, item>>, so two keepers using
+   the same provider share the cooldown state.  This is a deliberate
+   design choice in production (one provider's transient 429 should
+   affect everyone), not a bug.  But it means a strict literal reading
+   of "per-keeper isolation" as a project-wide invariant would be false.
+
+   Removed the `PerKeeperIsolation == TRUE` placeholder that previously
+   sat here.  A trivially-true definition is misleading because it
+   suggests an invariant strong enough to enforce keeper-vs-keeper
+   isolation across all axes — including production's cooldown axis —
+   when in fact this spec deliberately abstracts cooldown away.
+
+   See: docs/tla-audit/kcr-c2-health-state-representation-gap-2026-05-12.md
+   for the full audit and RFC-C-2 candidates.
+   -------------------------------------------------------------- *)
 
 Safety ==
     /\ TypeOK

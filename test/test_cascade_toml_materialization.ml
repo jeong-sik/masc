@@ -763,6 +763,15 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    which is brittle to provoke from a unit test (registration
    shape changes with each adapter).  Smoke pins the provider
    label name + helper signature. *)
+(* Smoke for [Cascade_metrics.on_llama_model_not_discovered].  The
+   natural code path requires a registered llama endpoint whose
+   [Discovery.context_for_model] returns None for a queried model_id
+   — driving that from a unit test would need a live discovery
+   fixture.  Smoke pins the no-arg helper signature. *)
+let test_llama_model_not_discovered_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_llama_model_not_discovered ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_context_capability_drift_helper_callable () =
   Masc_mcp.Cascade_metrics.on_context_capability_drift
     ~provider:"smoke_test_provider_iter28";
@@ -1145,6 +1154,9 @@ let () =
           test_case
             "context_capability_drift: provider label helper callable" `Quick
             test_context_capability_drift_helper_callable;
+          test_case
+            "llama_model_not_discovered: helper callable" `Quick
+            test_llama_model_not_discovered_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

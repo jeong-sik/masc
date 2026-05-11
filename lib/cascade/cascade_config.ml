@@ -685,7 +685,12 @@ let resolve_label_context (label : string) : int option =
     (match Llm_provider.Discovery.context_for_model model_id with
      | Some (_url, ctx) -> Some ctx
      | None ->
-       (* Fallback: round-robin endpoint (backward compat for "auto" etc.) *)
+       (* Fallback: round-robin endpoint (backward compat for "auto" etc.).
+          Iter 29 telemetry: requested model_id was not located on any
+          registered endpoint — silently routing to whatever
+          [current_llama_endpoint] happens to be.  Tick a counter so
+          operators can alert on the silent intent loss. *)
+       Cascade_metrics.on_llama_model_not_discovered ();
        let url = Llm_provider.Provider_registry.current_llama_endpoint () in
        if url = "" then None
        else Llm_provider.Discovery.discovered_context_for_url url)

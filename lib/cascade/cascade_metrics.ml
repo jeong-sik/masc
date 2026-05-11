@@ -566,3 +566,30 @@ let on_context_capability_drift ~provider =
   Prometheus.inc_counter metric_context_capability_drift
     ~labels:[ ("provider", provider) ]
     ()
+
+(* [Cascade_config.resolve_label_context] has a llama-specific
+   fallback: when [Llm_provider.Discovery.context_for_model] cannot
+   locate the requested model_id on any registered endpoint, the
+   function falls back to the round-robin "auto" endpoint
+   ([current_llama_endpoint]).  This breaks operator intent — a
+   cascade.toml entry "llama:specific-model" silently routes to
+   whatever endpoint round-robin happens to land on instead of the
+   specific model.
+
+   Causes:
+     - operator referenced a model that hasn't been pulled / loaded
+       on any registered endpoint
+     - Discovery API hasn't synced yet after a fresh ollama serve
+       startup
+     - model name typo in cascade.toml
+
+   No label dimensions: function takes a label string but adding
+   model_id as a label would produce unbounded cardinality from
+   operator typos.  Aggregate rate alerts; drill down via logs.
+
+   Cardinality: 1 series. *)
+let metric_llama_model_not_discovered =
+  "masc_cascade_llama_model_not_discovered_total"
+
+let on_llama_model_not_discovered () =
+  Prometheus.inc_counter metric_llama_model_not_discovered ()

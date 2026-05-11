@@ -1428,7 +1428,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          | Error detail ->
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_checkpoint_failures
-               ~labels:[("operation", "migration_save")]
+               ~labels:[("operation", Checkpoint_failure_operation.(to_label Migration_save))]
                ();
              Log.Keeper.error
                "keeper:%s checkpoint migration save failed: %s"
@@ -1455,7 +1455,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
        with ex ->
          Prometheus.inc_counter
            Keeper_metrics.metric_keeper_checkpoint_failures
-           ~labels:[("operation", "restore_legacy")]
+           ~labels:[("operation", Checkpoint_failure_operation.(to_label Restore_legacy))]
            ();
          Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
            trace_id (Printexc.to_string ex);

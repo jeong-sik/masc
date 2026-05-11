@@ -865,6 +865,11 @@ let optional_existing_path_json ?source = function
   | Some path -> existing_path_json ?source path
   | None -> `Null
 
+(* RFC-0058 §9 Phase 9.3: cascade.json is no longer generated or
+   consumed. [cascade_runtime_json_path] / [cascade_runtime_json_editable]
+   dropped from the status payload because there is no runtime JSON
+   sibling to point at. Source identity is now fully described by the
+   TOML path + the single-arm [source_kind]. *)
 let cascade_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
   let source =
     Cascade_toml_materializer.source_info ~config_path:resolution.cascade.path
@@ -873,8 +878,6 @@ let cascade_catalog_source_fields (resolution : Config_dir_resolver.resolution) 
     ( "cascade_catalog_source_kind",
       `String (Cascade_toml_materializer.source_kind_to_string source.kind) );
     ("cascade_catalog_source_path", `String source.source_path);
-    ("cascade_runtime_json_path", `String source.json_path);
-    ("cascade_runtime_json_editable", `Bool source.raw_json_editable);
   ]
 
 let override_field_source_json ~default_source_kind ~default_manifest_path detail =

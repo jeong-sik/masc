@@ -56,26 +56,21 @@ val config_json : unit -> Yojson.Safe.t
     {[
       {
         "updated_at": "2026-04-21T08:15:00Z",
-        "config_path": "/path/to/cascade.json" | null,
-        "source_kind": "json" | "toml",
-        "source_path": "/path/to/cascade.json" | "/path/to/cascade.toml",
+        "source_kind": "toml",
+        "source_path": "/path/to/cascade.toml",
         "source_editable": true,
-        "source_text": "{ ... }\n" | "comment = ...\n[profile]\n...",
-        "raw_json_editable": true | false,
-        "raw_json": "{ ... }\n"
+        "source_text": "comment = ...\n[providers.X]\n...",
+        "raw_json": "{ ... }\n",
+        "materialization_error": null | "..."
       }
     ]}
 
-    [source_text] is the editable active source file content. In JSON mode it
-    matches [raw_json]; in TOML mode it is the live [cascade.toml] source while
-    [raw_json] remains the generated runtime [cascade.json] preview.
-
-    [config_path] is the resolver's candidate [cascade.json] path under the
-    active config root, even when the file does not exist yet. In that missing
-    JSON-file case, both [source_text] and [raw_json] default to ["{}\n"] so
-    operators can bootstrap a config from the dashboard editor. When
-    [source_kind] is ["toml"], [raw_json_editable] stays [false] because the
-    preview is generated, but [source_editable] remains [true].
+    [source_text] is the editable TOML source file content; [raw_json] is the
+    in-memory rendering returned by
+    {!Cascade_toml_materializer.render_toml_to_json_string}. RFC-0058 §9
+    Phase 9.3 retired the JSON-native authoring mode and the on-disk
+    [cascade.json] sibling, so the [config_path] and [raw_json_editable]
+    fields are gone.
 
     @since 0.160.1 *)
 val raw_config_json : unit -> Yojson.Safe.t
@@ -83,10 +78,9 @@ val raw_config_json : unit -> Yojson.Safe.t
 (** Validate and persist the active cascade authoring source, then return the
     refreshed {!config_json} snapshot.
 
-    In JSON mode, the input must be syntactically valid JSON and is written to
-    the active [cascade.json]. In TOML mode, the input must be syntactically
-    valid TOML and is written to the active [cascade.toml], after which the
-    generated runtime [cascade.json] is materialized from that source.
+    The input must be syntactically valid TOML. RFC-0058 §9 Phase 9.3
+    removed the JSON-native save path; only [cascade.toml] is writable
+    through this endpoint.
 
     Semantic validation is not a hard gate here: invalid cascades are still
     written and surfaced through the returned validation metadata so the

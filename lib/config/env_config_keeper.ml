@@ -145,6 +145,7 @@ module KeeperSupervisor = struct
       back to [Eio.Fiber.fork ~sw:ctx.sw] silently. *)
   let domain_pool_enabled =
     Feature_flag_registry.get_bool "MASC_KEEPER_DOMAIN_POOL_ENABLED"
+  ;;
 
   (** Maximum restart attempts before declaring a keeper dead *)
   let max_restarts = get_int ~default:5 "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"
@@ -1060,4 +1061,3 @@ module CascadeAttemptLiveness = struct
 end
 
 (** Print configuration summary for debugging *)
-

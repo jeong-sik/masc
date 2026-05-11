@@ -285,8 +285,7 @@ let launch_supervised_fiber
       | Some pool ->
         Eio.Fiber.fork ~sw:ctx.sw (fun () ->
           Eio.Executor_pool.submit_exn pool ~weight:0.05 body)
-      | None ->
-        Eio.Fiber.fork ~sw:ctx.sw body
+      | None -> Eio.Fiber.fork ~sw:ctx.sw body
     in
     fork_body (fun () ->
       let resolved = ref false in

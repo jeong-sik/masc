@@ -326,4 +326,3 @@ module CascadeAttemptLiveness : sig
       [off | observe | enforce]. *)
   val mode_label : mode -> string
 end
-

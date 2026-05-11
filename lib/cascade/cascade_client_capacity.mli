@@ -63,8 +63,7 @@ val auto_register_for_candidates :
   unit
 (** For each base URL that looks like an ollama HTTP endpoint
     (heuristic: host/port contains [:11434]) and is not yet
-    registered, register it with the default ollama concurrency
-    (env [MASC_OLLAMA_MAX_CONCURRENT], fallback [1]).
+    registered, register it with concurrency [1].
 
     Idempotent.  Safe to call on every cascade attempt; already-
     registered URLs are left alone. *)

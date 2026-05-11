@@ -144,9 +144,6 @@ let int_of_env ?(default = 0) name =
     Log.Misc.warn "Invalid int for %s=%S, using default %d" name raw default;
     default
 
-let ollama_default_max () =
-  max 1 (int_of_env ~default:1 "MASC_OLLAMA_MAX_CONCURRENT")
-
 let cli_default_max () =
   max 1 (int_of_env ~default:1 "MASC_CLI_MAX_CONCURRENT")
 
@@ -222,7 +219,7 @@ let looks_like_ollama = Masc_network_defaults.is_ollama_url
 let looks_like_cli_sentinel = Masc_network_defaults.is_cli_sentinel_url
 
 let auto_register_for_candidates ~base_urls =
-  let max_concurrent = ollama_default_max () in
+  let max_concurrent = 1 in
   List.iter
     (fun url ->
        if looks_like_ollama url && not (is_registered url) then begin

@@ -569,8 +569,7 @@ val resolve_ollama_max_concurrent :
   int option
 (** Per-cascade override for the ollama client-capacity registration
     default ({!Cascade_client_capacity.auto_register_for_candidates}).
-    [None] means "use the env-var default
-    ([MASC_OLLAMA_MAX_CONCURRENT] or 1)". *)
+    [None] means "use the literal default of 1". *)
 
 val resolve_cli_max_concurrent :
   ?config_path:string ->

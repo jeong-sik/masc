@@ -1308,10 +1308,19 @@ let resolve_strategy ?config_path ~name () =
       | _ -> (parsed_kind, [])
     in
     let sticky_ttl_ms =
+      (* Enumerate every [Cascade_strategy.kind] variant so the compiler
+         flags any new strategy added here. [sticky_ttl_ms] is only
+         meaningful for [Sticky]; the six other strategies today produce
+         0 (no TTL applicable). A future strategy that *also* needs a
+         per-attempt TTL (e.g. [Hash_sticky], [Affinity]) would inherit
+         "no TTL" silently under the previous [_, _ -> 0] catch-all. *)
       match kind, cfg.sticky_ttl_ms with
       | Cascade_strategy.Sticky, Some n -> n
       | Cascade_strategy.Sticky, None -> Cascade_strategy.default_sticky_ttl_ms
-      | _, _ -> 0
+      | ( Cascade_strategy.Failover | Cascade_strategy.Capacity_aware
+        | Cascade_strategy.Weighted_random
+        | Cascade_strategy.Circuit_breaker_cycling
+        | Cascade_strategy.Priority_tier | Cascade_strategy.Round_robin ), _ -> 0
     in
     let defaults = Cascade_strategy.default_scoring_params in
     let scoring = {

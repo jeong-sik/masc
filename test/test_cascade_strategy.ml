@@ -512,30 +512,14 @@ let test_client_capacity_clamp_max () =
   | Some info ->
     check int "max_concurrent <=0 clamped to 1" 1 info.total
 
-let test_ollama_auto_register () =
-  C.unregister_all ();
-  C.auto_register_for_candidates ~base_urls:[
-    "http://127.0.0.1:11434";
-    "http://glm.example.com/api";    (* not ollama: 11434 not in URL *)
-    "http://other:11434/api";        (* ollama-like *)
-  ];
-  let urls = C.registered_urls () in
-  check bool "127.0.0.1:11434 registered"
-    true (List.mem "http://127.0.0.1:11434" urls);
-  check bool "other:11434 registered"
-    true (List.mem "http://other:11434/api" urls);
-  check bool "glm.example.com NOT registered"
-    false (List.mem "http://glm.example.com/api" urls)
-
-let test_ollama_register_with_override () =
-  C.unregister_all ();
-  C.auto_register_ollama_with_override
-    ~base_urls:["http://127.0.0.1:11434"]
-    ~max_concurrent:4;
-  match C.capacity "http://127.0.0.1:11434" with
-  | None -> fail "expected registration"
-  | Some info ->
-    check int "override max=4" 4 info.total
+(* The previous [test_ollama_auto_register] /
+   [test_ollama_register_with_override] tests exercised the substring-scan
+   auto-registration path inside [Cascade_client_capacity]. That path is
+   gone now — the caller ([Keeper_turn_driver]) consults
+   [Provider_adapter.is_http_probe_capable_kind] and calls
+   [Cascade_client_capacity.register] explicitly, so the test surface
+   for the removed [auto_register_for_candidates] /
+   [auto_register_ollama_with_override] functions is gone with them. *)
 
 (* ── Phase C3: CLI sentinel auto-registration ──────────────── *)
 
@@ -1248,10 +1232,6 @@ let () =
         test_client_capacity_unregistered_url;
       test_case "max_concurrent <= 0 clamped to 1" `Quick
         test_client_capacity_clamp_max;
-      test_case "auto-register matches :11434 hosts" `Quick
-        test_ollama_auto_register;
-      test_case "auto_register override sets max" `Quick
-        test_ollama_register_with_override;
       test_case "cli sentinel auto-register filters non-CLI" `Quick
         test_cli_auto_register_filters_sentinels;
       test_case "cli auto_register override sets max" `Quick

@@ -783,6 +783,22 @@ let is_local_provider pname =
   normalized = cn_custom || requires_discovery pname
 ;;
 
+(** [is_http_probe_capable_kind kind] is [true] when the provider
+    serves an HTTP capacity probe endpoint that
+    {!Cascade_http_probe} can poll (currently the ollama [/api/ps]
+    schema).  Used by caller-side registration paths
+    ({!Keeper_turn_driver}) to decide whether to register a cfg's
+    [base_url] with the probe registry.
+
+    RFC-0058 Phase 5.6: capability predicate, not a vendor match —
+    keeper callers stay provider-agnostic.  Adding vLLM/lmstudio
+    requires editing this one boundary site. *)
+let is_http_probe_capable_kind (kind : Llm_provider.Provider_config.provider_kind) : bool =
+  match kind with
+  | Llm_provider.Provider_config.Ollama -> true
+  | _ -> false
+;;
+
 (** Default fallback label for local runtime when no other preferred
     model labels are configured.  Uses "provider:auto" for the first
     [Local] adapter found. *)

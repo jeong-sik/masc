@@ -33,7 +33,8 @@ val register : url:string -> max_concurrent:int -> unit
 
     Typical callers:
     - module init parses [MASC_CLIENT_CAPACITY]
-    - [auto_register_for_candidates] auto-registers ollama URLs *)
+    - [Keeper_turn_driver] registers HTTP-probe-capable candidates
+      gated on [Provider_adapter.is_http_probe_capable_kind] *)
 
 val registered_urls : unit -> string list
 (** Snapshot of currently-registered URLs.  Test helper. *)
@@ -56,28 +57,7 @@ val snapshot : unit -> (string * Cascade_throttle.capacity_info) list
 val unregister_all : unit -> unit
 (** Remove every registration.  Test helper. *)
 
-(** {1 Auto-registration} *)
-
-val auto_register_for_candidates :
-  base_urls:string list ->
-  unit
-(** For each base URL that looks like an ollama HTTP endpoint
-    (heuristic: host/port contains [:11434]) and is not yet
-    registered, register it with concurrency [1].
-
-    Idempotent.  Safe to call on every cascade attempt; already-
-    registered URLs are left alone. *)
-
-val auto_register_ollama_with_override :
-  base_urls:string list ->
-  max_concurrent:int ->
-  unit
-(** Like {!auto_register_for_candidates} but with an explicit
-    [max_concurrent] that overrides the env default.  Used by the
-    per-cascade [<name>_ollama_max_concurrent] field.
-
-    Idempotent and only touches URLs that look like ollama and are
-    not already registered. *)
+(** {1 CLI sentinel auto-registration} *)
 
 val auto_register_cli_for_candidates :
   capacity_keys:string list ->

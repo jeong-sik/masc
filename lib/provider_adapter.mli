@@ -282,6 +282,19 @@ val requires_discovery : string -> bool
 (** Returns true if the provider is self-hosted and always available. *)
 val is_local_provider : string -> bool
 
+(** [is_http_probe_capable_kind kind] is [true] when the provider
+    serves an HTTP capacity probe endpoint that
+    {!Cascade_http_probe} can poll (currently the ollama [/api/ps]
+    schema). Caller-side capacity-register paths consult this flag
+    to decide whether to register the cfg's [base_url] with the
+    probe registry.
+
+    RFC-0058 Phase 5.6: capability predicate, not a vendor match.
+    Adding vLLM / lmstudio support means editing this one boundary
+    site, never the keeper layer. *)
+val is_http_probe_capable_kind :
+  Llm_provider.Provider_config.provider_kind -> bool
+
 (** {1 Voice Adapter Resolution} *)
 
 val resolve_voice_adapter : string -> voice_adapter option

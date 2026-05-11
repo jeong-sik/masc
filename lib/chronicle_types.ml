@@ -57,10 +57,10 @@ let epoch_id ~year ~label =
   Printf.sprintf "%s-%s" year label
 
 let is_active (epoch : chronicle_epoch) =
-  match epoch.status with Active -> true | _ -> false
+  match epoch.status with Active -> true | Completed | Abandoned -> false
 
 let is_completed (epoch : chronicle_epoch) =
-  match epoch.status with Completed -> true | _ -> false
+  match epoch.status with Completed -> true | Active | Abandoned -> false
 
 let lesson_counts (epoch : chronicle_epoch) =
   let pos = ref 0 and neg = ref 0 and mix = ref 0 in

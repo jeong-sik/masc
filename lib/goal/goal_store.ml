@@ -755,9 +755,15 @@ let review_goal config ~goal_id ~(outcome : review_outcome) ?new_horizon ?note (
         last_review_note = note;
         last_review_at = Some now;
         active_verification_request_id =
+          (* Enumerate every [Goal_phase.t] variant. Mirrors the fix
+             applied to [normalize_goal] in PR #14790; this call site
+             was missed in that sweep. Only [Awaiting_verification]
+             retains the active request_id; all other phases clear it. *)
           (match phase with
           | Goal_phase.Awaiting_verification -> goal.active_verification_request_id
-          | _ -> None);
+          | Goal_phase.Executing | Goal_phase.Awaiting_approval
+          | Goal_phase.Blocked | Goal_phase.Paused
+          | Goal_phase.Completed | Goal_phase.Dropped -> None);
         updated_at = now;
       })
 

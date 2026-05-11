@@ -1,4 +1,23 @@
-# RFC PR-1.7 — Awareness Channel Split (Spec)
+---
+rfc: 0069
+title: "Awareness Channel Split"
+status: Active
+created: 2026-04-29
+updated: 2026-05-12
+author: yousleepwhen
+supersedes: []
+superseded_by: null
+related: [0017]
+implementation_prs: [12129]
+---
+
+# RFC-0069 — Awareness Channel Split
+
+> **Renumber note (2026-05-12)**: Originally filed as "RFC PR-1.7" without
+> a sequential RFC number (2026-04-29, pre-dating the RFC-XXXX numbering
+> convention adopted in May 2026). Assigned RFC-0069 to fit the standard
+> registry. File path changed: `docs/rfc/awareness-channel-split.md` →
+> `docs/rfc/RFC-0069-awareness-channel-split.md`.
 
 - Status: PR-1.7a **DONE** (server-side, #12129); PR-1.7b / PR-1.7c outstanding
 - Author: 부모 에이전트 위임 작업 (yousleepwhen)

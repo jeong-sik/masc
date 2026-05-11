@@ -1,10 +1,255 @@
-comment = "Checked-in seed for cascade authoring. Repo defaults expose exactly two profiles: big_three for keeper/workflow calls and tool_rerank for short rerank calls. Logical usage names are configured under [routes] instead of being profile names."
+# Declarative cascade configuration (RFC-0058 v2 5-layer schema).
+# Checked-in seed. Logical usage names are configured under [routes].
 
-# ── RFC-0058: Declarative capability profiles ─────────────────────
-# Builtin profiles mirror the previous closed variant behavior.
-# Custom profiles can be added as new [profiles.X] sections.
-# required_capabilities names must appear in
-# Cascade_capability_schema.known_capability_fields.
+# ── Layer 1: Providers ──────────────────────────────────────────
+
+[providers.claude_code]
+provider-name = "Anthropic Claude Code CLI"
+protocol = "anthropic-cli"
+command = "claude"
+is-non-interactive = true
+
+[providers.codex_cli]
+provider-name = "OpenAI Codex CLI"
+protocol = "openai-http"
+command = "codex"
+is-non-interactive = true
+
+[providers.gemini_cli]
+provider-name = "Google Gemini CLI"
+protocol = "google-cli"
+command = "gemini"
+is-non-interactive = true
+
+[providers.kimi_cli]
+provider-name = "Moonshot Kimi CLI"
+protocol = "kimi-cli"
+command = "kimi"
+is-non-interactive = true
+
+[providers.glm-coding]
+provider-name = "Zhipu GLM Coding"
+protocol = "openai-http"
+endpoint = "https://open.bigmodel.cn/api/paas/v4"
+
+[providers.ollama]
+provider-name = "Ollama Local"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+# ── Layer 2: Models ────────────────────────────────────────────
+
+[models.codex-spark]
+api-name = "gpt-5.3-codex-spark"
+max-context = 128000
+tools-support = true
+
+[models.kimi-coding]
+api-name = "kimi-for-coding"
+max-context = 128000
+tools-support = true
+
+[models.sonnet]
+api-name = "claude-sonnet-4-6"
+max-context = 200000
+tools-support = true
+
+[models.haiku]
+api-name = "claude-haiku-4-5-20251001"
+max-context = 200000
+tools-support = true
+
+[models.gemini-flash]
+api-name = "gemini-3-flash-preview"
+max-context = 128000
+tools-support = true
+
+[models.gemini-flash-lite]
+api-name = "gemini-3.1-flash-lite-preview"
+max-context = 128000
+tools-support = true
+
+[models.glm-5-turbo]
+api-name = "glm-5-turbo"
+max-context = 128000
+tools-support = true
+
+[models.glm-flashx]
+api-name = "glm-4.7-flashx"
+max-context = 128000
+tools-support = true
+
+# ── Layer 3: Provider×Model Bindings ───────────────────────────
+
+[codex_cli.codex-spark]
+is-default = true
+
+[kimi_cli.kimi-coding]
+is-default = true
+
+[claude_code.sonnet]
+is-default = true
+
+[claude_code.haiku]
+is-default = false
+
+[gemini_cli.gemini-flash]
+is-default = true
+
+[gemini_cli.gemini-flash-lite]
+is-default = false
+
+[glm-coding.glm-5-turbo]
+is-default = true
+
+[glm-coding.glm-flashx]
+is-default = false
+
+# ── Layer 4: Aliases ───────────────────────────────────────────
+# (none yet)
+
+# ── Layer 5: Tiers ─────────────────────────────────────────────
+
+[tier.big_three]
+# Canonical keeper/workflow tier. Keep operator-chosen providers here;
+# code must route logical usages through [routes] instead of hardcoding.
+members = ["codex_cli.codex-spark", "kimi_cli.kimi-coding"]
+strategy = "failover"
+
+[tier.keeper_diverse]
+# Fallback tier for contract violation retry. Different model composition
+# from big_three to break correlated failure.
+members = ["claude_code.sonnet", "gemini_cli.gemini-flash", "codex_cli.codex-spark"]
+strategy = "failover"
+
+[tier.tool_rerank]
+# System-only short-output tier for rerank/scoring calls.
+members = ["codex_cli.codex-spark", "kimi_cli.kimi-coding"]
+strategy = "failover"
+
+[tier.tier_small]
+# Operator opt-in slot for 4B-class local models. Empty by default.
+# Routes fall through to tier_medium via tier-group fallback.
+members = []
+strategy = "failover"
+
+[tier.tier_medium]
+# 9B-class models for moderate tasks. Falls back to big_three on exhaustion.
+members = ["glm-coding.glm-flashx"]
+strategy = "failover"
+
+[tier.__safe_lane]
+# System-only baseline tier. Satisfies every capability profile.
+# Used as last-resort fallback target. Not keeper-assignable.
+members = ["kimi_cli.kimi-coding"]
+strategy = "failover"
+
+[tier.local_recovery]
+# Recovery tier for fallback_cascade = "local_recovery".
+# Falls back to big_three on exhaustion.
+members = ["codex_cli.codex-spark"]
+strategy = "failover"
+
+[tier.tier_fast]
+# Cheap+fast tool-capable cloud models for keeper turns.
+# Falls back to big_three on exhaustion.
+members = [
+  "claude_code.haiku",
+  "codex_cli.codex-spark",
+  "gemini_cli.gemini-flash",
+  "gemini_cli.gemini-flash-lite",
+  "glm-coding.glm-5-turbo",
+  "glm-coding.glm-flashx",
+]
+strategy = "failover"
+
+# ── Tier-Groups ─────────────────────────────────────────────────
+
+[tier-group.big_three-with-keeper_diverse]
+tiers = ["big_three", "keeper_diverse"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.tier_small-with-tier_medium]
+tiers = ["tier_small", "tier_medium"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.tier_medium-with-big_three]
+tiers = ["tier_medium", "big_three"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.local_recovery-with-big_three]
+tiers = ["local_recovery", "big_three"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.tier_fast-with-big_three]
+tiers = ["tier_fast", "big_three"]
+strategy = "priority_tier"
+fallback = true
+
+# ── Routes ──────────────────────────────────────────────────────
+
+[routes.keeper_turn]
+target = "tier.big_three"
+
+[routes.phase_recovery]
+target = "tier.big_three"
+
+[routes.phase_buffer]
+target = "tier.big_three"
+
+[routes.tool_required]
+target = "tier.big_three"
+
+[routes.governance_judge]
+target = "tier.big_three"
+
+[routes.operator_judge]
+target = "tier.big_three"
+
+[routes.cross_verifier]
+target = "tier.big_three"
+
+[routes.verifier]
+target = "tier.big_three"
+
+[routes.autoresearch]
+target = "tier.big_three"
+
+[routes.adversarial_reviewer]
+target = "tier.big_three"
+
+[routes.auto_responder]
+target = "tier.big_three"
+
+[routes.routing]
+target = "tier.big_three"
+
+[routes.openai_compat]
+target = "tier.big_three"
+
+[routes.persona_generation]
+target = "tier.big_three"
+
+[routes.provider_benchmark]
+target = "tier.big_three"
+
+[routes.llm_rerank]
+target = "tier.tool_rerank"
+
+[routes.simple_task]
+target = "tier.tier_small"
+
+[routes.moderate_task]
+target = "tier.tier_medium"
+
+[routes.complex_task]
+target = "tier.big_three"
+
+# ── Profiles ────────────────────────────────────────────────────
 
 [profiles.tool_strict]
 required_capabilities = [
@@ -21,147 +266,3 @@ required_capabilities = ["runtime_mcp_tools", "runtime_tool_events"]
 
 [profiles.local]
 required_capabilities = []
-
-[routes]
-keeper_turn = "big_three"
-phase_recovery = "big_three"
-phase_buffer = "big_three"
-tool_required = "big_three"
-governance_judge = "big_three"
-operator_judge = "big_three"
-cross_verifier = "big_three"
-verifier = "big_three"
-autoresearch = "big_three"
-adversarial_reviewer = "big_three"
-auto_responder = "big_three"
-routing = "big_three"
-openai_compat = "big_three"
-persona_generation = "big_three"
-provider_benchmark = "big_three"
-llm_rerank = "tool_rerank"
-simple_task = "tier_small"
-moderate_task = "tier_medium"
-complex_task = "big_three"
-
-[big_three]
-comment = "Canonical keeper/workflow profile. Keep operator-chosen providers here; code must route logical usages through [routes] instead of hardcoding extra profile names."
-models = [
-  "codex_cli:gpt-5.3-codex-spark",
-  "gemini_cli:auto",
-  "kimi_cli:kimi-for-coding",
-  { model = "glm-coding:auto", supports_tool_choice = true },
-  "claude_code:auto",
-]
-temperature = 0.2
-max_tokens = 16384
-thinking_enabled = false
-keeper_assignable = true
-fallback_cascade = "keeper_diverse"
-
-[keeper_diverse]
-comment = "Fallback cascade for contract violation retry. Different model composition from big_three to break correlated failure."
-models = [
-  "claude_code:claude-sonnet-4-6",
-  "gemini_cli:gemini-3-flash-preview",
-  "codex_cli:gpt-5.3-codex-spark",
-]
-temperature = 0.3
-max_tokens = 16384
-keeper_assignable = true
-
-[tool_rerank]
-comment = "System-only short-output profile for rerank/scoring calls."
-models = [
-  "codex_cli:gpt-5.3-codex-spark",
-  "gemini_cli:auto",
-  "kimi_cli:kimi-for-coding",
-  "glm-coding:auto",
-  "claude_code:auto",
-]
-temperature = 0.0
-max_tokens = 200
-keeper_assignable = false
-
-[tier_small]
-# Operator opt-in slot for 4B-class local models. Empty by default — every
-# route that points at "tier_small" falls through to tier_medium via
-# fallback_cascade until at least one model is uncommented below (and
-# Ollama is running locally). Keeping the profile here documents the
-# intended fallback chain rather than removing it; we'd otherwise need
-# to either rewrite every "tier_small" route or silently ignore them.
-comment = "Operator opt-in slot for 4B-class local models. Empty by default; routes fall through to tier_medium."
-# models = [
-#   "ollama:llama3.2:3b",
-#   "ollama:phi-3-mini",
-# ]
-models = []
-temperature = 0.3
-max_tokens = 1000
-keeper_assignable = false
-fallback_cascade = "tier_medium"
-
-[tier_medium]
-comment = "9B-class models for moderate tasks (extraction, reformat, medium-length generation). Falls back to big_three on exhaustion."
-models = [
-  "glm-coding:glm-4.7-flashx",
-]
-temperature = 0.2
-max_tokens = 4096
-keeper_assignable = false
-fallback_cascade = "big_three"
-
-[__safe_lane]
-# RFC-0027 PR-4: system-only baseline cascade that satisfies every
-# capability profile (tool_strict / inline_tools / lite / local).
-# All entries carry runtime MCP HTTP headers AND inline tools, so
-# any keeper-bound MCP turn or any inline-tools turn can route here
-# as last-resort fallback after upstream cascades exhaust.
-#
-# Members must remain (provider, model) pairs that:
-#   - support_runtime_mcp_http_headers = true (claude_code, kimi_cli)
-#   - or expose direct inline tools (HTTP-based glm-coding)
-# Adding gemini_cli or codex_cli here breaks the safe-lane contract.
-comment = "System-only baseline cascade. Satisfies every capability profile. Used as last-resort fallback target. Not keeper-assignable."
-models = [
-  "claude_code:auto",
-  { model = "glm-coding:auto", supports_tool_choice = true },
-  "kimi_cli:kimi-for-coding",
-]
-temperature = 0.2
-max_tokens = 16384
-keeper_assignable = false
-required_capability_profile = "tool_strict"
-
-[local_recovery]
-# P1-2 fix: profiles may declare fallback_cascade = "local_recovery" (a
-# logical route key that resolves to the Failing-phase cascade).  The runtime
-# cascade loader looks up profile names, not route keys, so a missing
-# [local_recovery] section caused the fallback hint to be silently ignored.
-# This profile makes the name resolvable with a recovery-focused primary list,
-# then falls through to big_three on exhaustion rather than pretending the route
-# key and profile composition are identical.
-comment = "P1-2 fix: recovery profile for fallback_cascade = \"local_recovery\". Uses a curated local/CLI primary list, then falls back to big_three on exhaustion. Not keeper-assignable."
-models = [
-  "codex_cli:gpt-5.3-codex-spark",
-  "gemini_cli:auto",
-  "claude_code:auto",
-]
-temperature = 0.2
-max_tokens = 16384
-keeper_assignable = false
-fallback_cascade = "big_three"
-
-[tier_fast]
-comment = "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion."
-models = [
-  "claude_code:claude-haiku-4-5-20251001",
-  "codex_cli:gpt-5.3-codex-spark",
-  "gemini_cli:gemini-3-flash-preview",
-  "gemini_cli:gemini-3.1-flash-lite-preview",
-  { model = "glm-coding:glm-5-turbo", supports_tool_choice = true },
-  { model = "glm-coding:glm-4.7-flashx", supports_tool_choice = true },
-]
-temperature = 0.2
-max_tokens = 8192
-keeper_assignable = true
-fallback_cascade = "big_three"

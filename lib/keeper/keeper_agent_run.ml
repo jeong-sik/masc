@@ -1520,7 +1520,7 @@ let run_turn
              }
          ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
          ; sandbox_root = Some keeper_visible_sandbox_root
-         ; network_mode = Keeper_types.network_mode_to_string meta.network_mode
+         ; network_mode = meta.network_mode
          ; approval_profile = acc.tool_surface.approval_mode_effective
          ; approval_profile_derived = acc.tool_surface.approval_mode_derived
          ; cascade_name

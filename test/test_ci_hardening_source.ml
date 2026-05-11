@@ -1054,7 +1054,7 @@ let test_keeper_zombie_field_contracts () =
         };
       sandbox_kind = Masc_mcp.Keeper_types.Local;
       sandbox_root = None;
-      network_mode = "offline";
+      network_mode = Masc_mcp.Keeper_types.Network_none;
       approval_profile = None;
       approval_profile_derived = false;
       cascade_name = R.cascade_name_of_string "default";

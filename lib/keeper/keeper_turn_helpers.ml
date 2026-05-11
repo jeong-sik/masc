@@ -274,7 +274,7 @@ let record_pre_dispatch_terminal_observation
     ; tool_surface = pre_dispatch_tool_surface
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta)
-    ; network_mode = Keeper_types.network_mode_to_string meta.network_mode
+    ; network_mode = meta.network_mode
     ; approval_profile = None
     ; approval_profile_derived = false
     ; cascade_name

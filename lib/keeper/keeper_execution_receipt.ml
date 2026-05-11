@@ -113,7 +113,7 @@ type t =
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types.sandbox_profile
   ; sandbox_root : string option
-  ; network_mode : string
+  ; network_mode : Keeper_types.network_mode
   ; approval_profile : string option
   ; approval_profile_derived : bool
   ; cascade_name : cascade_name
@@ -417,7 +417,7 @@ let to_json (receipt : t) =
       ~sandbox_profile:
         (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
       ?sandbox_root:receipt.sandbox_root
-      ~network_mode:receipt.network_mode
+      ~network_mode:(Keeper_types.network_mode_to_string receipt.network_mode)
       ?approval_mode:receipt.approval_profile
       ~tool_surface_class:
         (Keeper_agent_tool_surface.tool_surface_class_to_string
@@ -514,7 +514,9 @@ let to_json (receipt : t) =
               match receipt.sandbox_root with
               | Some value -> `String value
               | None -> `Null );
-            ("network_mode", `String receipt.network_mode);
+            ( "network_mode"
+            , `String (Keeper_types.network_mode_to_string receipt.network_mode)
+            );
           ] );
       ( "approval",
         `Assoc
@@ -657,7 +659,9 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
         `Assoc
           [ "kind", `String (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
           ; "sandbox_root", string_opt_json receipt.sandbox_root
-          ; "network_mode", `String receipt.network_mode
+          ; ( "network_mode"
+            , `String (Keeper_types.network_mode_to_string receipt.network_mode)
+            )
           ] )
     ; ( "model_used",
         match receipt.model_used with

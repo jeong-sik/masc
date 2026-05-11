@@ -77,7 +77,7 @@ let mk_receipt
       mk_tool_surface ~tool_requirement ~required_tools ~missing_required_tools ();
     sandbox_kind = Masc_mcp.Keeper_types.Local;
     sandbox_root = None;
-    network_mode = "offline";
+    network_mode = Masc_mcp.Keeper_types.Network_none;
     approval_profile = None;
     approval_profile_derived = false;
     cascade_name = R.cascade_name_of_string "default";

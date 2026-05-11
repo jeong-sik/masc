@@ -16,17 +16,13 @@ let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
   | None -> false
 ;;
 
-(** CLI providers (Claude Code, Kimi CLI, Gemini CLI, Codex CLI) use runtime
-    MCP for tool invocation, not inline function-calling.  The OAS base
-    capabilities for CLI kinds may disagree on [supports_runtime_mcp_tools]
-    (e.g. Gemini CLI defaults to [false] in OAS despite supporting MCP via
-    its --mcp-config flag).  Normalize all CLI runtimes to the same
-    contract: disable inline tools, enable runtime MCP. *)
-let normalize_cli_provider_caps
-      ~(provider_cfg : Llm_provider.Provider_config.t)
-      (caps : Llm_provider.Capabilities.capabilities)
-  =
-  if is_cli_agent_provider provider_cfg
+(** [normalize_cli_caps_when ~is_cli caps] overrides CLI runtime caps when
+    [is_cli] is [true]. Decoupled from [is_cli_agent_provider] so callers
+    that have already resolved the adapter (e.g. [oas_capabilities_of_config]
+    below) can avoid re-resolving for the same provider. See
+    [normalize_cli_provider_caps] for the legacy entry point. *)
+let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
+  if is_cli
   then
     { caps with
       supports_tools = false
@@ -37,6 +33,19 @@ let normalize_cli_provider_caps
   else caps
 ;;
 
+(** CLI providers (Claude Code, Kimi CLI, Gemini CLI, Codex CLI) use runtime
+    MCP for tool invocation, not inline function-calling.  The OAS base
+    capabilities for CLI kinds may disagree on [supports_runtime_mcp_tools]
+    (e.g. Gemini CLI defaults to [false] in OAS despite supporting MCP via
+    its --mcp-config flag).  Normalize all CLI runtimes to the same
+    contract: disable inline tools, enable runtime MCP. *)
+let normalize_cli_provider_caps
+      ~(provider_cfg : Llm_provider.Provider_config.t)
+      (caps : Llm_provider.Capabilities.capabilities)
+  =
+  normalize_cli_caps_when ~is_cli:(is_cli_agent_provider provider_cfg) caps
+;;
+
 (** Resolve OAS-level capabilities for a provider config.
 
     CLI runtimes (Claude_code, Gemini_cli, Kimi_cli, Codex_cli) bypass
@@ -45,16 +54,21 @@ let normalize_cli_provider_caps
     API model identifier that OAS can look up.  All other adapters consult
     [for_model_id] first, falling back to the kind-level base. *)
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
+  (* Resolve the adapter once via [is_cli_agent_provider]; reuse the
+     boolean for both the [for_model_id] bypass and the CLI cap override
+     so we do not call [Provider_adapter.adapter_of_provider_config]
+     twice for the same config. *)
+  let is_cli = is_cli_agent_provider provider_cfg in
   let caps = Provider_adapter.oas_capabilities_of_config provider_cfg in
   let caps =
-    if is_cli_agent_provider provider_cfg
+    if is_cli
     then caps
     else (
       match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
       | Some override -> override
       | None -> caps)
   in
-  let caps = normalize_cli_provider_caps ~provider_cfg caps in
+  let caps = normalize_cli_caps_when ~is_cli caps in
   match provider_cfg.supports_tool_choice_override with
   | Some supports_tool_choice -> { caps with supports_tool_choice }
   | None -> caps

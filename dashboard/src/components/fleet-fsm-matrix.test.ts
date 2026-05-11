@@ -68,6 +68,7 @@ function snapshot(
       no_cascade_before_measurement: allHold,
       compaction_atomicity: allHold,
       event_priority_monotone: allHold,
+      phase_derivation_agreement: allHold,
       ...overrides.violate,
     },
     fsm_guard_violations: 0,
@@ -168,6 +169,7 @@ describe('tallyInvariantViolations', () => {
       no_cascade_before_measurement: 0,
       compaction_atomicity: 0,
       event_priority_monotone: 0,
+      phase_derivation_agreement: 0,
     })
   })
 
@@ -190,6 +192,7 @@ describe('tallyInvariantViolations', () => {
       no_cascade_before_measurement: 0,
       compaction_atomicity: 0,
       event_priority_monotone: 0,
+      phase_derivation_agreement: 0,
     })
   })
 })

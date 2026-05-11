@@ -42,6 +42,13 @@ function invariantDetail(
       return ok
         ? '이 turn 은 경쟁 measurement snapshot 을 emit 하지 않았음.'
         : '동일 turn 을 소유하려는 measurement event 가 둘 이상 등장.'
+    case 'phase_derivation_agreement': {
+      const diag = snapshot.phase_diagnosis
+      if (ok) return '저장된 KSM phase 와 derive_phase(conditions) 결과가 일치.'
+      return diag
+        ? `current=${diag.current_phase}, derived=${diag.derived_phase} 불일치 — KSM 상태 drift.`
+        : 'KSM 저장 phase 와 derive_phase(conditions) 결과가 불일치.'
+    }
   }
 }
 

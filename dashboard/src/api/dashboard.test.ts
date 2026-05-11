@@ -1029,6 +1029,15 @@ describe('fetchKeeperConfig', () => {
       ['supervisor_paused', 'Supervisor 일시정지'],
       ['synthetic_stall', '합성 상태 정체'],
       ['self_imposed_idle', '자체 대기'],
+      ['sdk_max_turns_exceeded', 'SDK 최대 턴 초과'],
+      ['sdk_token_budget_exceeded', 'SDK 토큰 예산 초과'],
+      ['sdk_cost_budget_exceeded', 'SDK 비용 예산 초과'],
+      ['sdk_unrecognized_stop_reason', 'SDK 미식별 정지 사유'],
+      ['sdk_idle_detected', 'SDK Idle 감지'],
+      ['sdk_tool_retry_exhausted', 'SDK 도구 재시도 소진'],
+      ['sdk_guardrail_violation', 'SDK 가드레일 위반'],
+      ['sdk_tripwire_violation', 'SDK Tripwire 위반'],
+      ['sdk_exit_condition_met', 'SDK 종료 조건 충족'],
     ] as const
 
     for (const [blockerClass, label] of cases) {

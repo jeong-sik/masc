@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { KEEPER_RUNTIME_BLOCKER_CLASSES } from '../types'
 import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import {
   keeperActivityDisplay,
@@ -162,6 +163,24 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe(
       '필수 도구 미충족',
     )
+  })
+
+  it('labels the 9 RFC-0062 SDK blocker variants', () => {
+    expect(keeperRuntimeBlockerLabel('sdk_max_turns_exceeded')).toBe('SDK 최대 턴 초과')
+    expect(keeperRuntimeBlockerLabel('sdk_token_budget_exceeded')).toBe('SDK 토큰 예산 초과')
+    expect(keeperRuntimeBlockerLabel('sdk_cost_budget_exceeded')).toBe('SDK 비용 예산 초과')
+    expect(keeperRuntimeBlockerLabel('sdk_unrecognized_stop_reason')).toBe('SDK 미식별 정지 사유')
+    expect(keeperRuntimeBlockerLabel('sdk_idle_detected')).toBe('SDK Idle 감지')
+    expect(keeperRuntimeBlockerLabel('sdk_tool_retry_exhausted')).toBe('SDK 도구 재시도 소진')
+    expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')
+    expect(keeperRuntimeBlockerLabel('sdk_tripwire_violation')).toBe('SDK Tripwire 위반')
+    expect(keeperRuntimeBlockerLabel('sdk_exit_condition_met')).toBe('SDK 종료 조건 충족')
+  })
+
+  it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {
+    for (const cls of KEEPER_RUNTIME_BLOCKER_CLASSES) {
+      expect(keeperRuntimeBlockerLabel(cls), `missing label for ${cls}`).not.toBeNull()
+    }
   })
 })
 

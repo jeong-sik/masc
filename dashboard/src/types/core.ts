@@ -384,31 +384,43 @@ export interface ProviderHealth {
   last_updated: number
 }
 
-export type KeeperRuntimeBlockerClass =
-  | 'ambiguous_post_commit_timeout'
-  | 'ambiguous_post_commit_failure'
-  | 'autonomous_slot_wait_timeout'
-  | 'admission_queue_wait_timeout'
-  | 'turn_timeout_after_queue_wait'
-  | 'oas_timeout_budget'
-  | 'turn_timeout'
-  | 'completion_contract_violation'
-  | 'cascade_exhausted'
-  | 'no_tool_capable_provider'
-  | 'provider_runtime_error'
-  | 'tool_required_unsatisfied'
-  | 'fiber_unresolved'
-  | 'stale_turn_timeout'
-  | 'stale_termination_storm'
-  | 'heartbeat_failures'
-  | 'turn_failures'
-  | 'exception'
-  | 'stale_fleet_batch'
-  | 'awaiting_operator'
-  | 'awaiting_sandbox_egress'
-  | 'supervisor_paused'
-  | 'synthetic_stall'
-  | 'self_imposed_idle'
+export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
+  'ambiguous_post_commit_timeout',
+  'ambiguous_post_commit_failure',
+  'autonomous_slot_wait_timeout',
+  'admission_queue_wait_timeout',
+  'turn_timeout_after_queue_wait',
+  'oas_timeout_budget',
+  'turn_timeout',
+  'completion_contract_violation',
+  'cascade_exhausted',
+  'no_tool_capable_provider',
+  'provider_runtime_error',
+  'tool_required_unsatisfied',
+  'fiber_unresolved',
+  'stale_turn_timeout',
+  'stale_termination_storm',
+  'heartbeat_failures',
+  'turn_failures',
+  'exception',
+  'stale_fleet_batch',
+  'awaiting_operator',
+  'awaiting_sandbox_egress',
+  'supervisor_paused',
+  'synthetic_stall',
+  'self_imposed_idle',
+  'sdk_max_turns_exceeded',
+  'sdk_token_budget_exceeded',
+  'sdk_cost_budget_exceeded',
+  'sdk_unrecognized_stop_reason',
+  'sdk_idle_detected',
+  'sdk_tool_retry_exhausted',
+  'sdk_guardrail_violation',
+  'sdk_tripwire_violation',
+  'sdk_exit_condition_met',
+] as const
+
+export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
 
 export interface KeeperTrustLatestEvent {
   kind: string

@@ -98,6 +98,7 @@ const ZERO_VIOLATIONS: InvariantViolationCounts = {
   no_cascade_before_measurement: 0,
   compaction_atomicity: 0,
   event_priority_monotone: 0,
+  phase_derivation_agreement: 0,
 }
 
 export const initialHubState: HubState = {
@@ -125,6 +126,7 @@ export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> =
   no_cascade_before_measurement: 'Cascade 순서',
   compaction_atomicity: '압축 원자성',
   event_priority_monotone: '이벤트 우선순위',
+  phase_derivation_agreement: 'Phase 유도 일치',
 }
 
 export const LANE_LABELS: Record<LaneKey, string> = {

@@ -96,6 +96,8 @@ const INVARIANT_DESCRIPTIONS: Record<string, string> = {
     'Compaction 은 atomic 해야 함 — turn 이 old context 또는 new context 만 보고 half-compacted state 는 안 봄. break 시 message ordering 손상 또는 content 중복.',
   event_priority_monotone:
     'Event_bus priority 는 monotone 해야 함 (higher priority 먼저 delivered). break 시 critical event 가 lower priority 뒤에 도착해 keeper decision 왜곡.',
+  phase_derivation_agreement:
+    '저장된 KSM phase 가 derive_phase(conditions) 결과와 일치해야 함. drift 는 registry 가 phase 를 갱신하지 않았거나 condition source 가 신호를 흘렸음을 의미.',
 }
 
 export function invariantDescription(key: string): string {

@@ -75,6 +75,7 @@ const KeeperCompositeInvariantsSchema = object({
   no_cascade_before_measurement: boolean(),
   compaction_atomicity: boolean(),
   event_priority_monotone: boolean(),
+  phase_derivation_agreement: boolean(),
 })
 
 const KeeperPhaseDiagnosisRowSchema = object({

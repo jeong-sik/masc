@@ -1,0 +1,62 @@
+name: TLA+ Scheduled Sweep
+
+# Periodic main-branch TLA verification. Catches spec violations that slip
+# past ci.yml's tla-specs job when rapid back-to-back merges trigger
+# workflow-level cancel-in-progress (see #14668 / #14670 background).
+#
+# Trade-off: latency-bounded detection (≤1h) vs zero-cost per-commit
+# verification. Cheapest option of the four (A/B/C/D evaluation) but accepts
+# a window where a spec violation can sit on main undetected.
+#
+# Pairs well with ci.yml's path-scoped PR-time check — most spec-affecting
+# changes are still caught at PR time; this is the safety net for spec
+# violations introduced by non-tla-path PRs via admin-merge fast-track.
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # hourly
+  workflow_dispatch:
+
+concurrency:
+  group: tla-scheduled
+  cancel-in-progress: true  # if a sweep is running, the new hour's sweep
+                             # can supersede — they verify the same HEAD
+
+permissions:
+  contents: read
+
+jobs:
+  tla-specs:
+    name: TLA+ Model Checking (scheduled main HEAD)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Download tla2tools.jar (pinned v1.8.0)
+        run: |
+          curl -fsSL -o specs/keeper-state-machine/tla2tools.jar \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+
+      - name: Run TLA+ model checking
+        run: |
+          make -C specs check-clean
+          make -C specs check-buggy
+
+      - name: Record sweep result
+        if: always()
+        run: |
+          printf 'TLA sweep at %s on main HEAD %s — conclusion: %s\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "$(git rev-parse HEAD)" \
+            "${{ job.status }}"

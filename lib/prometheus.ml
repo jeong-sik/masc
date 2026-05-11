@@ -1688,7 +1688,8 @@ let init () =
   add
     Keeper_metrics.metric_keeper_paused_state_persist_errors
     "Total keeper paused-state persistence failures, labeled by phase \
-     (boot_resume_check|boot_resume_persist) and reason (read_meta_error|meta_missing)"
+     (boot_resume_check|boot_resume_persist|directive) and reason \
+     (read_meta_error|meta_missing)"
     Counter;
   add
     Keeper_metrics.metric_keeper_unexpected_tool_partial_tolerance

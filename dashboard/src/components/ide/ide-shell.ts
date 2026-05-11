@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { activeIdeFile } from './ide-state'
 import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -23,7 +23,9 @@ import {
   serializeActive,
 } from '../../../design-system/headless-core/layered-overlay'
 
-export const activeIdeFile = signal<string>('package.json')
+// Re-export to preserve the public path used by existing callers. The
+// canonical source now lives in `./ide-state` to avoid circular imports.
+export { activeIdeFile }
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'

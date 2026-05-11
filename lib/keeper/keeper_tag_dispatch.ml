@@ -40,6 +40,32 @@ let require_net () =
 (** Helper: get optional net. *)
 let get_net_opt () = Eio_context.get_net_opt ()
 
+(** Stable string label for Prometheus bucketing — keeps the
+    metric [tag] dimension separated from per-tool [name]. *)
+let string_of_tag (tag : Tool_dispatch.module_tag) : string =
+  match tag with
+  | Mod_keeper -> "keeper"
+  | Mod_library -> "library"
+  | Mod_task -> "task"
+  | Mod_shard -> "shard"
+  | Mod_plan -> "plan"
+  | Mod_autoresearch -> "autoresearch"
+  | Mod_local_runtime -> "local_runtime"
+  | Mod_worktree -> "worktree"
+  | Mod_code -> "code"
+  | Mod_code_write -> "code_write"
+  | Mod_run -> "run"
+  | Mod_agent -> "agent"
+  | Mod_room -> "room"
+  | Mod_control -> "control"
+  | Mod_agent_timeline -> "agent_timeline"
+  | Mod_misc -> "misc"
+  | Mod_suspend -> "suspend"
+  | Mod_inline -> "inline"
+  | Mod_operator -> "operator"
+  | Mod_compact -> "compact"
+;;
+
 (** Helper: get optional fs. *)
 let get_fs_opt () = Fs_compat.get_fs_opt ()
 
@@ -162,7 +188,7 @@ let dispatch
     in
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_tag_dispatch_failures
-      ~labels:[ "tag", name ]
+      ~labels:[ "tag", string_of_tag tag ]
       ();
     Log.Keeper.warn "tag dispatch exception for %s: %s" name (Printexc.to_string exn);
     Some (err (Printf.sprintf "keeper dispatch error for %s: %s" name exn_type))

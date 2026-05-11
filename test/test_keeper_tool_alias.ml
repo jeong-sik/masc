@@ -220,6 +220,19 @@ let test_hallucinated_builtin_still_unexpected () =
     unexpected
 ;;
 
+let test_mcp_prefixed_anthropic_alias_routes () =
+  (* Regression guard for PR #14574 review #5: [canonical_name] must
+     route ["mcp__masc__Bash"] the same way as ["Bash"]. Earlier the
+     route lookup used the raw [name] instead of the stripped form,
+     so MCP-prefixed Anthropic Code calls regressed into routing
+     misses. *)
+  let canonical = Disclosure.canonical_tool_name "mcp__masc__Bash" in
+  Alcotest.(check string)
+    "mcp__masc__Bash routes through stripped form to keeper_bash"
+    "keeper_bash"
+    canonical
+;;
+
 let test_partial_tolerance_still_works () =
   let observed = [ "Skill"; "Bash" ] in
   let canonical = List.map Disclosure.canonical_tool_name observed in
@@ -261,7 +274,7 @@ let test_public_input_schema_present () =
          (Printf.sprintf "%s has tailored schema" name)
          true
          (Option.is_some (Alias.public_input_schema name)))
-    [ "Bash"; "Edit"; "Grep"; "Read"; "WebSearch"; "Write" ];
+    [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ];
   Alcotest.(check bool)
     "unknown public name has no schema"
     true
@@ -641,6 +654,10 @@ let () =
             "hallucinated builtin still unexpected"
             `Quick
             test_hallucinated_builtin_still_unexpected
+        ; Alcotest.test_case
+            "mcp-prefixed anthropic alias routes"
+            `Quick
+            test_mcp_prefixed_anthropic_alias_routes
         ; Alcotest.test_case
             "partial tolerance still works"
             `Quick

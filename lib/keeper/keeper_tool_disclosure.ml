@@ -35,13 +35,17 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
    Conflating them under a single [route] lookup loses (2) silently and
    misattributes (3) as routing misses; see PR #14574 review. *)
 let canonical_name name =
+  (* MCP and direct LLM-native paths both lookup against [stripped] so that
+     a name like ["mcp__masc__Bash"] routes the same as ["Bash"]. Using the
+     raw [name] for [route] would regress prefixed Anthropic-Code calls
+     into routing misses (PR #14574 review #5). *)
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
   match Keeper_tool_alias.public_masc_to_internal stripped with
   | Some internal ->
     Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:internal ~result:"ok";
     internal
   | None ->
-    (match Keeper_tool_alias.route name with
+    (match Keeper_tool_alias.route stripped with
      | Some r ->
        Keeper_tool_alias.record_route_outcome
          ~tool:name

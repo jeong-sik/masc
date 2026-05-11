@@ -1,8 +1,10 @@
 (** Per-cascade inference parameters — thin delegation to MASC Cascade_config.
 
     Previously (v2.128.0-v2.148.0) this module maintained its own JSON cache
-    and field extraction. Since OAS v0.89.1 exposes [Cascade_config.load_json]
-    and [Cascade_config.resolve_inference_params], we now delegate entirely.
+    and field extraction. Since OAS v0.89.1 exposes
+    [Cascade_config.load_catalog_source] (renamed from [load_json] in
+    RFC-0058 §9 Phase 9.3) and [Cascade_config.resolve_inference_params],
+    we now delegate entirely.
 
     Public API preserved for backward compatibility:
     - [resolve_temperature], [resolve_max_tokens] (16 call sites in MASC)

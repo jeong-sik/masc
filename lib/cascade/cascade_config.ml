@@ -16,7 +16,7 @@ let resolve_auto_model_id = Cascade_model_resolve.resolve_auto_model_id
 let parse_custom_model = Cascade_model_resolve.parse_custom_model
 
 (* Config loader *)
-let load_json = Cascade_config_loader.load_json
+let load_catalog_source = Cascade_config_loader.load_catalog_source
 let load_profile = Cascade_config_loader.load_profile
 
 type inference_params = Cascade_config_loader.inference_params = {
@@ -818,12 +818,12 @@ let resolve_model_strings_traced_with
     ~rand_int ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
-    (* Probe load_json before delegating to load_profile_weighted so we
+    (* Probe load_catalog_source before delegating to load_profile_weighted so we
        can distinguish a load failure (Load_failed source) from a
        successful-but-empty profile (Hardcoded_defaults source).  The
        load is cached, so the subsequent call inside
        load_profile_weighted is a cache hit. *)
-    (match Cascade_config_loader.load_json path with
+    (match Cascade_config_loader.load_catalog_source path with
      | Error msg -> (defaults, Load_failed msg)
      | Ok _ ->
     let from_file_weighted =
@@ -972,7 +972,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
   | Some path ->
     (* Phase 2b: same probe pattern as resolve_model_strings_traced_with —
        distinguish a load fault from operator-intended absence. *)
-    (match Cascade_config_loader.load_json path with
+    (match Cascade_config_loader.load_catalog_source path with
      | Error msg ->
        let candidates =
          List.map (fun m ->
@@ -1240,13 +1240,13 @@ let model_ids_of_specs (specs : string list) : string list =
   |> List.sort_uniq String.compare
 
 let normalize_priority_tiers ~config_path ~name raw_tiers =
-  (* Phase 2c: probe load_json before delegating so that an unreadable
+  (* Phase 2c: probe load_catalog_source before delegating so that an unreadable
      cascade.toml/json surfaces as a load-failure error instead of the
      generic "no configured models" message — the latter mis-leads
      operators into thinking the profile is empty when the file is
      actually broken.  Mirrors the probe pattern in
      resolve_model_strings_traced_with / _with_trace (PR #11361). *)
-  match Cascade_config_loader.load_json config_path with
+  match Cascade_config_loader.load_catalog_source config_path with
   | Error msg ->
       Error
         (Printf.sprintf

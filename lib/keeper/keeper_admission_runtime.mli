@@ -27,8 +27,12 @@
 
 val init_once_from_base_path : base_path:string -> unit
 (** Idempotent init.  First successful call:
-      1. Reads [<base_path>/.masc/config/cascade.json] via
-         [Cascade_config_loader.load_json] (mtime-cached).
+      1. Reads the cascade catalog source via
+         [Cascade_config_loader.load_catalog_source] (mtime-cached).
+         The [<base_path>/.masc/config/cascade.json] path is passed
+         for backward compatibility; the loader redirects to the
+         sibling [cascade.toml] which is the actual SSOT
+         (RFC-0058 §9 Phase 9.3).
       2. Builds [Keeper_admission_registry] from the [admission]
          sub-object.
       3. Sets [policy_lookup] to [Keeper_admission_registry.lookup].
@@ -40,8 +44,8 @@ val init_once_from_base_path : base_path:string -> unit
     Concurrency model: a three-state flag (Idle/In_progress/Done) is
     guarded by a [Mutex.protect] that is held ONLY across state
     transitions, never across the file I/O step.  This prevents
-    domain-wide stalls when [Cascade_config_loader.load_json] traces
-    via [Eio.traceln] or blocks on disk.
+    domain-wide stalls when [Cascade_config_loader.load_catalog_source]
+    traces via [Eio.traceln] or blocks on disk.
 
     Failure model: a transient load failure logs via [Log.Keeper.warn],
     reverts the flag to Idle, and returns.  The next heartbeat tick

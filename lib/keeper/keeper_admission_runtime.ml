@@ -134,14 +134,14 @@ let init_once_from_base_path ~base_path =
   if not (try_claim_init ())
   then ()
   else (
-    (* I/O outside the critical section.  [Cascade_config_loader.load_json]
-       can call [Eio.traceln] and may block on disk — holding [init_mutex]
-       across that risks domain-wide stalls of any other fiber that hits
-       this code. *)
+    (* I/O outside the critical section.
+       [Cascade_config_loader.load_catalog_source] can call [Eio.traceln]
+       and may block on disk — holding [init_mutex] across that risks
+       domain-wide stalls of any other fiber that hits this code. *)
     let cascade_json_path =
       Filename.concat (Filename.concat base_path ".masc/config") "cascade.json"
     in
-    match Cascade_config_loader.load_json cascade_json_path with
+    match Cascade_config_loader.load_catalog_source cascade_json_path with
     | Error msg ->
       (* Transient or permanent read failure — leave registry empty,
            revert to Idle so the next heartbeat tick can retry. *)

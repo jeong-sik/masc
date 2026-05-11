@@ -1,7 +1,9 @@
 (** Declarative cascade config cross-reference validator (RFC-0058 v2).
 
-    Validates 10 load-time invariants (R1–R10) on a parsed [cascade_config].
-    Returns all errors found (does not stop at first). *)
+    [validate] checks 10 base load-time invariants (R1–R10) on a parsed
+    [cascade_config]; [validate_strict] additionally enforces R11
+    (binding max-concurrent required & positive). Each returns all errors
+    found rather than stopping at the first. *)
 
 type validation_error =
   { rule : string

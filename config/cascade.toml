@@ -20,6 +20,9 @@ is-non-interactive = true
 type = "env"
 key = "ANTHROPIC_API_KEY"
 
+[providers.claude_code.liveness]
+class = "cloud_fast"
+
 [providers.codex_cli]
 display-name = "OpenAI Codex CLI"
 protocol = "openai-http"
@@ -29,6 +32,9 @@ is-non-interactive = true
 [providers.codex_cli.credentials]
 type = "env"
 key = "OPENAI_API_KEY"
+
+[providers.codex_cli.liveness]
+class = "cloud_fast"
 
 [providers.gemini_cli]
 display-name = "Google Gemini CLI"
@@ -40,6 +46,9 @@ is-non-interactive = true
 type = "env"
 key = "GEMINI_API_KEY"
 
+[providers.gemini_cli.liveness]
+class = "cloud_fast"
+
 [providers.kimi_cli]
 display-name = "Moonshot Kimi CLI"
 protocol = "kimi-cli"
@@ -50,6 +59,9 @@ is-non-interactive = true
 type = "env"
 key = "MOONSHOT_API_KEY"
 
+[providers.kimi_cli.liveness]
+class = "cloud_thinking"
+
 [providers.glm-coding]
 display-name = "Zhipu GLM Coding"
 protocol = "openai-http"
@@ -59,10 +71,20 @@ endpoint = "https://api.z.ai/api/coding/paas/v4"
 type = "env"
 key = "ZAI_API_KEY"
 
+[providers.glm-coding.liveness]
+class = "cloud_thinking"
+
+# Provider liveness class (RFC-0058 §3.2.1) feeds attempt-wall budgets
+# in Cascade_attempt_liveness_config. Values: cloud_fast | cloud_thinking
+# | local_27b | local_70b_plus.
+
 [providers.ollama]
 display-name = "Ollama Local"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
+
+[providers.ollama.liveness]
+class = "local_27b"
 
 # ── Layer 2: Models ────────────────────────────────────────────
 
@@ -280,9 +302,12 @@ fallback = true
 
 # ── Routes (logical usage → tier-group) ────────────────────────
 #
-# RFC-0058 §4 R6: route targets must resolve to tier-groups. This
-# keeps fallback chains explicit and prevents callers from depending
-# on a single tier without a documented degradation path.
+# RFC-0058 §4 R6: route targets resolve to tier-groups, tiers,
+# bindings, or aliases (validated by `Cascade_declarative_validator`
+# rule R7). The seed below targets tier-groups exclusively because
+# routing through a tier-group keeps fallback chains explicit and
+# discourages callers from depending on a single tier without a
+# documented degradation path.
 
 [routes.keeper_turn]
 target = "tier-group.big_three"

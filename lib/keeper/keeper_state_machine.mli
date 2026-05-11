@@ -266,6 +266,12 @@ type transition_result = {
 type transition_error =
   | Terminal_state of { current : phase; attempted_event : string }
   | Invalid_transition of { from_phase : phase; to_phase : phase; reason : string }
+  | Precondition_violation of { event : string; reason : string }
+        (** Event was dispatched at a phase/conditions state that the TLA+
+            spec's corresponding action would not enable.  Used to surface
+            silent state-machine corruption caused by mis-ordered callers.
+            See [docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md]
+            (iter 9 #14730) for the systematic gap analysis and R-A-9. *)
 
 val transition_error_to_string : transition_error -> string
 

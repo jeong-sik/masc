@@ -2609,6 +2609,78 @@ let outcome_kind_of = function
   | A.Partial_pass _ -> "partial_pass"
 ;;
 
+(* ── Compact_retry_exhausted precondition (R-A-9 PR-1) ─────── *)
+
+(** Helper: pin both the variant tag and the short stable reason. *)
+let expect_precondition_reason ~current_phase ~conditions ~event ~expected_reason =
+  match SM.apply_event ~current_phase ~conditions ~event ~now:1000.0 with
+  | Error (SM.Precondition_violation r) ->
+    check string "precondition reason" expected_reason r.reason
+  | Error e ->
+    fail
+      ("expected Precondition_violation, got " ^ SM.transition_error_to_string e)
+  | Ok _ -> fail "expected Precondition_violation, got Ok"
+;;
+
+let test_precondition_compact_retry_no_overflow () =
+  (* TLA+ §CompactRetryExhausted requires context_overflow=true.
+     Without it the dispatch must reject with the
+     [context_overflow=false] tag. *)
+  let c = { running_conditions with context_overflow = false } in
+  expect_precondition_reason
+    ~current_phase:SM.Running
+    ~conditions:c
+    ~event:SM.Compact_retry_exhausted
+    ~expected_reason:"context_overflow=false"
+;;
+
+let test_precondition_compact_retry_compaction_active () =
+  (* In-flight compaction (compaction_active=true) must reject. *)
+  let c =
+    { running_conditions with context_overflow = true; compaction_active = true }
+  in
+  expect_precondition_reason
+    ~current_phase:SM.Compacting
+    ~conditions:c
+    ~event:SM.Compact_retry_exhausted
+    ~expected_reason:"compaction_active=true"
+;;
+
+let test_precondition_compact_retry_already_latched () =
+  (* Retry latch is idempotent — re-latching must reject as duplicate
+     dispatch from the caller. *)
+  let c =
+    { running_conditions with
+      context_overflow = true
+    ; compaction_active = false
+    ; compact_retry_exhausted = true
+    }
+  in
+  expect_precondition_reason
+    ~current_phase:SM.Paused
+    ~conditions:c
+    ~event:SM.Compact_retry_exhausted
+    ~expected_reason:"already_latched"
+;;
+
+let test_precondition_compact_retry_accepts_when_preconditions_satisfied () =
+  (* Sanity: when all three preconditions hold, dispatch succeeds. *)
+  let c =
+    { running_conditions with
+      context_overflow = true
+    ; compaction_active = false
+    ; compact_retry_exhausted = false
+    }
+  in
+  let tr =
+    apply_ok
+      ~current_phase:SM.Overflowed
+      ~conditions:c
+      ~event:SM.Compact_retry_exhausted
+  in
+  check bool "compact_retry_exhausted latched" true tr.updated_conditions.compact_retry_exhausted
+;;
+
 let test_attribution_ok_passed () =
   let tr =
     apply_ok
@@ -3003,6 +3075,24 @@ let () =
             "every condition field has setter and clearer"
             `Quick
             test_setclear_coverage
+        ] )
+    ; ( "compact_retry_precondition"
+      , [ test_case
+            "rejects when context_overflow=false"
+            `Quick
+            test_precondition_compact_retry_no_overflow
+        ; test_case
+            "rejects when compaction_active=true"
+            `Quick
+            test_precondition_compact_retry_compaction_active
+        ; test_case
+            "rejects when already_latched"
+            `Quick
+            test_precondition_compact_retry_already_latched
+        ; test_case
+            "accepts when all preconditions satisfied"
+            `Quick
+            test_precondition_compact_retry_accepts_when_preconditions_satisfied
         ] )
     ; ( "attribution"
       , [ test_case "successful transition → Passed" `Quick test_attribution_ok_passed

@@ -295,6 +295,10 @@ type transition_error =
       ; to_phase : phase
       ; reason : string
       }
+  | Precondition_violation of
+      { event : string
+      ; reason : string
+      }
 
 let transition_error_to_string = function
   | Terminal_state r ->
@@ -308,6 +312,8 @@ let transition_error_to_string = function
       (phase_to_string r.from_phase)
       (phase_to_string r.to_phase)
       r.reason
+  | Precondition_violation r ->
+    Printf.sprintf "precondition_violation: %s — %s" r.event r.reason
 ;;
 
 (* ── Transition Matrix ─────────────────────────────────── *)
@@ -936,6 +942,70 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     []
 ;;
 
+(* ── Event preconditions (R-A-9 minimal layer) ──────────
+
+   TLA+ KeeperStateMachine.tla enumerates state preconditions per
+   action (e.g. CompactRetryExhausted requires
+   [context_overflow /\ ~compaction_active /\ ~compact_retry_exhausted]).
+   [update_conditions] is a pure record-update and ignores them — a
+   mis-ordered caller can set [compact_retry_exhausted = TRUE] on a
+   non-overflowed keeper, which then latches the keeper into [Paused]
+   the next time an overflow event arrives (silent forced operator
+   intervention).
+
+   This helper enforces a subset of those preconditions at the
+   [apply_event] boundary so silent corruption becomes a typed
+   [Precondition_violation] result.  Only the most operationally
+   dangerous event is covered in this first PR; the remaining four
+   (Auto_compact_triggered, Operator_compact_requested,
+   Context_overflow_detected, Operator_clear_requested) follow in
+   subsequent PRs as the spec/code refinement chain (R-A-9 PR-2/PR-3)
+   matures.
+
+   Background:
+     - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
+     - iter 9 PR #14730 (systematic gap class)
+     - TLA+ §CompactRetryExhausted in KeeperStateMachine.tla *)
+let check_event_precondition (c : conditions) (ev : event)
+  : (unit, transition_error) result
+  =
+  (* [reason] strings are short stable tags ("context_overflow=false" etc).
+     They flow into [transition_error_to_string] log lines and the
+     [Attribution.policy_failed.reason] telemetry field — keeping them
+     low-cardinality lets operators aggregate / alert on the exact
+     precondition that failed, while the long explanatory text stays
+     in source comments above each branch.
+
+     TLA+ §CompactRetryExhausted predicates: context_overflow=true /\
+     ~compaction_active /\ ~compact_retry_exhausted. *)
+  match ev with
+  | Compact_retry_exhausted ->
+    if not c.context_overflow
+    then
+      (* Latching the retry flag on a non-overflowed keeper would force
+         Paused on the next overflow event (TLA+ violation). *)
+      Error
+        (Precondition_violation
+           { event = event_to_string ev; reason = "context_overflow=false" })
+    else if c.compaction_active
+    then
+      (* Latching the retry flag while a compaction is in flight
+         conflates the in-progress attempt with budget exhaustion. *)
+      Error
+        (Precondition_violation
+           { event = event_to_string ev; reason = "compaction_active=true" })
+    else if c.compact_retry_exhausted
+    then
+      (* Retry latch is idempotent — re-latching surfaces a duplicate
+         dispatch in the caller. *)
+      Error
+        (Precondition_violation
+           { event = event_to_string ev; reason = "already_latched" })
+    else Ok ()
+  (* Remaining 4 events covered in follow-up PRs (R-A-9 PR-2/PR-3). *)
+  | _ -> Ok ()
+;;
+
 (* ── apply_event ───────────────────────────────────────── *)
 
 let apply_event ~current_phase ~conditions ~event ~now =
@@ -945,6 +1015,9 @@ let apply_event ~current_phase ~conditions ~event ~now =
     Error
       (Terminal_state { current = current_phase; attempted_event = event_to_string event })
   | _ ->
+    (match check_event_precondition conditions event with
+     | Error _ as e -> e
+     | Ok () ->
     let updated_conditions = update_conditions conditions event in
     let new_phase = derive_phase updated_conditions in
     (* Validate transition is allowed *)
@@ -983,7 +1056,7 @@ let apply_event ~current_phase ~conditions ~event ~now =
                  (event_to_string event)
                  (phase_to_string new_phase)
                  (phase_to_string current_phase)
-           })
+           }))
 ;;
 
 (* ── JSON Serialization ────────────────────────────────── *)
@@ -1238,6 +1311,15 @@ let attribution_of_transition
         "keeper in terminal phase %s, event %s ignored"
         (phase_to_string current)
         attempted_event
+    in
+    Attribution.policy_failed ~origin:Det ~gate:"keeper_fsm" ~evidence ~reason
+  | Error (Precondition_violation { event = ev; reason }) ->
+    let evidence : Yojson.Safe.t =
+      `Assoc
+        [ "event", `String event_name
+        ; "violated_event", `String ev
+        ; "precondition_reason", `String reason
+        ]
     in
     Attribution.policy_failed ~origin:Det ~gate:"keeper_fsm" ~evidence ~reason
 ;;

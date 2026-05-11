@@ -7,40 +7,30 @@
     {!Keeper_agent_run} so the compaction-policy evaluation can be
     tested without driving the full turn pipeline. *)
 
-type pre_dispatch_checkpoint_hygiene_result = {
-  context : Keeper_types.working_context;
-  resume_checkpoint : Agent_sdk.Checkpoint.t option;
-  compacted : bool;
-  (** Equal to [applied].  Kept for surface clarity at call sites. *)
-  applied : bool;
-  meaningful_reduction : bool;
-  (** [after_tokens < before_tokens].  Used to suppress no-op
+type pre_dispatch_checkpoint_hygiene_result =
+  { context : Keeper_types.working_context
+  ; resume_checkpoint : Agent_sdk.Checkpoint.t option
+  ; compacted : bool (** Equal to [applied].  Kept for surface clarity at call sites. *)
+  ; applied : bool
+  ; meaningful_reduction : bool
+    (** [after_tokens < before_tokens].  Used to suppress no-op
       compaction logs. *)
-  before_tokens : int;
-  after_tokens : int;
-  trigger : Compaction_trigger.t option;
-  (** [Some _] when {!Keeper_compact_policy.compact_if_needed_typed}
+  ; before_tokens : int
+  ; after_tokens : int
+  ; trigger : Compaction_trigger.t option
+    (** [Some _] when {!Keeper_compact_policy.compact_if_needed_typed}
       classified a trigger; [None] when no compaction fired.  Use
       {!Compaction_trigger.to_label} for Prometheus emission and
       {!Compaction_trigger.to_detail_json} for SSE / JSON receipt. *)
-  decision : Keeper_compact_policy.compaction_decision;
-  (** Typed decision tag from the policy. Render with
+  ; decision : Keeper_compact_policy.compaction_decision
+    (** Typed decision tag from the policy. Render with
       {!Keeper_compact_policy.compaction_decision_to_string} at telemetry
       boundaries. *)
-  save_error : string option;
-  (** [Some err] when the checkpoint save attempt failed.  The
+  ; save_error : string option
+    (** [Some err] when the checkpoint save attempt failed.  The
       working context is still populated from the compacted one. *)
-}
+  }
 
-val prepare_resume_checkpoint_for_dispatch :
-  meta:Keeper_types.keeper_meta ->
-  now_ts:float ->
-  loaded_checkpoint_present:bool ->
-  save_checkpoint:
-    (Keeper_types.working_context ->
-    (Agent_sdk.Checkpoint.t, string) result) ->
-  Keeper_types.working_context ->
-  pre_dispatch_checkpoint_hygiene_result
 (** [prepare_resume_checkpoint_for_dispatch ~meta ~now_ts
     ~loaded_checkpoint_present ~save_checkpoint ctx]:
 
@@ -61,3 +51,11 @@ val prepare_resume_checkpoint_for_dispatch :
        [save_error] surfaces the detail so the caller can block dispatch.
     5. When no compaction fired, returns the derived checkpoint of
        the unchanged context. *)
+val prepare_resume_checkpoint_for_dispatch
+  :  meta:Keeper_types.keeper_meta
+  -> now_ts:float
+  -> loaded_checkpoint_present:bool
+  -> save_checkpoint:
+       (Keeper_types.working_context -> (Agent_sdk.Checkpoint.t, string) result)
+  -> Keeper_types.working_context
+  -> pre_dispatch_checkpoint_hygiene_result

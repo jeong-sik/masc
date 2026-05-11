@@ -22,6 +22,7 @@ import {
   type AgentTimelineResponse,
 } from './schemas/agent-timeline'
 import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
+import { KEEPER_RUNTIME_BLOCKER_CLASSES } from '../types'
 import type {
   KeeperConfig,
   KeeperFeatureStatus,
@@ -2029,37 +2030,16 @@ function normalizeCascadeCatalogSourceKind(
   }
 }
 
+const RUNTIME_BLOCKER_CLASS_SET: ReadonlySet<string> = new Set(
+  KEEPER_RUNTIME_BLOCKER_CLASSES,
+)
+
 function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['runtime_blocker_class'] {
   const blockerClass = asNullableString(value)
-  switch (blockerClass) {
-    case 'ambiguous_post_commit_timeout':
-    case 'ambiguous_post_commit_failure':
-    case 'autonomous_slot_wait_timeout':
-    case 'admission_queue_wait_timeout':
-    case 'turn_timeout_after_queue_wait':
-    case 'oas_timeout_budget':
-    case 'turn_timeout':
-    case 'completion_contract_violation':
-    case 'cascade_exhausted':
-    case 'no_tool_capable_provider':
-    case 'provider_runtime_error':
-    case 'tool_required_unsatisfied':
-    case 'fiber_unresolved':
-    case 'stale_turn_timeout':
-    case 'stale_termination_storm':
-    case 'heartbeat_failures':
-    case 'turn_failures':
-    case 'exception':
-    case 'stale_fleet_batch':
-    case 'awaiting_operator':
-    case 'awaiting_sandbox_egress':
-    case 'supervisor_paused':
-    case 'synthetic_stall':
-    case 'self_imposed_idle':
-      return blockerClass
-    default:
-      return null
+  if (blockerClass !== null && RUNTIME_BLOCKER_CLASS_SET.has(blockerClass)) {
+    return blockerClass as KeeperConfig['runtime']['runtime_blocker_class']
   }
+  return null
 }
 
 function normalizeKeeperSandboxEnvironment(

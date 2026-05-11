@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { KEEPER_RUNTIME_BLOCKER_CLASSES } from '../types'
 import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import {
   keeperActivityDisplay,
@@ -174,6 +175,12 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')
     expect(keeperRuntimeBlockerLabel('sdk_tripwire_violation')).toBe('SDK Tripwire 위반')
     expect(keeperRuntimeBlockerLabel('sdk_exit_condition_met')).toBe('SDK 종료 조건 충족')
+  })
+
+  it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {
+    for (const cls of KEEPER_RUNTIME_BLOCKER_CLASSES) {
+      expect(keeperRuntimeBlockerLabel(cls), `missing label for ${cls}`).not.toBeNull()
+    }
   })
 })
 

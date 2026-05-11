@@ -1704,9 +1704,28 @@ let non_http_transport_of_provider
   =
   let _ = sw in
   match Hashtbl.find_opt non_http_transport_registry provider_cfg.kind with
-  | None -> Ok None
   | Some ctor ->
     (match ctor ~provider_cfg ~runtime_mcp_policy ~cli_transport_overrides with
      | Ok transport -> Ok (Some transport)
      | Error _ as e -> e)
+  | None ->
+    (* Fail-fast for subprocess CLI kinds that have no registered ctor:
+       falling through to [Ok None] would route the request to the HTTP
+       lane, which cannot serve a CLI provider. HTTP-shaped providers
+       (Anthropic / OpenAI_compat / Ollama / Gemini / Glm / Kimi /
+       DashScope) correctly return [Ok None]; they live behind a
+       different transport selector upstream. *)
+    if Llm_provider.Provider_config.is_subprocess_cli provider_cfg.kind
+    then
+      Error
+        (invalid_runtime_config
+           "non_http_transport_registry"
+           (Printf.sprintf
+              "no non-HTTP transport constructor registered for subprocess \
+               CLI kind %s — registry initializer (cascade_transport.ml \
+               top-level [let ()]) is out of sync with the \
+               Llm_provider.Provider_config.provider_kind variant"
+              (Llm_provider.Provider_config.string_of_provider_kind
+                 provider_cfg.kind)))
+    else Ok None
 ;;

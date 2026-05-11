@@ -326,11 +326,3 @@ module CascadeAttemptLiveness : sig
   val mode_label : mode -> string
 end
 
-(** {1 Keeper Tool Alias Configuration} *)
-
-module KeeperToolAlias : sig
-  val default_aliases : (string * string) list
-  val default_oas_dual_register : (string * string) list
-  val default_hallucinated : string list
-end
-

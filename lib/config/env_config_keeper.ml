@@ -1052,34 +1052,3 @@ end
 
 (** Print configuration summary for debugging *)
 
-(** {1 Keeper Tool Alias Configuration} *)
-
-module KeeperToolAlias = struct
-  let default_aliases : (string * string) list =
-    [ "Bash", "keeper_bash"
-    ; "Edit", "keeper_fs_edit"
-    ; "Grep", "keeper_shell"
-    ; "Read", "keeper_fs_read"
-    ; "Shell", "keeper_bash"
-    ; "WebFetch", "masc_web_fetch"
-    ; "WebSearch", "masc_web_search"
-    ; "Write", "keeper_fs_edit"
-    ]
-  ;;
-
-  let default_oas_dual_register : (string * string) list =
-    [ "Bash", "keeper_bash"
-    ; "Edit", "keeper_fs_edit"
-    ; "Grep", "keeper_shell"
-    ; "Read", "keeper_fs_read"
-    ; "WebFetch", "masc_web_fetch"
-    ; "WebSearch", "masc_web_search"
-    ; "Write", "keeper_fs_edit"
-    ]
-  ;;
-
-  let default_hallucinated : string list =
-    [ "Agent"; "Skill"; "TodoWrite"; "NotebookEdit" ]
-  ;;
-end
-

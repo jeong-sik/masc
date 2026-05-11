@@ -12,7 +12,17 @@
 
 (* (public_name, internal_name).
    Keep alphabetical by public name to make diffs reviewable. *)
-let aliases : (string * string) list = Env_config_keeper.KeeperToolAlias.default_aliases
+let aliases : (string * string) list =
+  [ "Bash", "keeper_bash"
+  ; "Edit", "keeper_fs_edit"
+  ; "Grep", "keeper_shell" (* op=rg routed at dispatch layer, Phase A.4 *)
+  ; "Read", "keeper_fs_read"
+  ; "Shell", "keeper_bash" (* LLM occasionally hallucinates "Shell" for bash *)
+  ; "WebFetch", "masc_web_fetch"
+  ; "WebSearch", "masc_web_search"
+  ; "Write", "keeper_fs_edit" (* create-vs-update collapsed at dispatch layer *)
+  ]
+;;
 
 (* Subset of [aliases] safe for OAS dual registration. Phase A.4
    (#8963 follow-up) added Edit/Write/Grep once their input adapters
@@ -21,13 +31,20 @@ let aliases : (string * string) list = Env_config_keeper.KeeperToolAlias.default
    keeper_shell op=rg. WebSearch is a read-only alias over the existing
    masc_web_search schema. *)
 let oas_dual_register : (string * string) list =
-  Env_config_keeper.KeeperToolAlias.default_oas_dual_register
+  [ "Bash", "keeper_bash"
+  ; "Edit", "keeper_fs_edit"
+  ; "Grep", "keeper_shell"
+  ; "Read", "keeper_fs_read"
+  ; "WebFetch", "masc_web_fetch"
+  ; "WebSearch", "masc_web_search"
+  ; "Write", "keeper_fs_edit"
+  ]
 ;;
 
 (* Anthropic Code surface names without a keeper cognate. The disclosure
    check should not nuke a turn solely because these appeared — instead a
    teaching tool_result tells the LLM what surface to use. RFC-0006 §3.1. *)
-let hallucinated_builtins = Env_config_keeper.KeeperToolAlias.default_hallucinated
+let hallucinated_builtins = [ "Agent"; "Skill"; "TodoWrite"; "NotebookEdit" ]
 
 let public_to_internal_tbl =
   let t = Hashtbl.create (List.length aliases) in

@@ -8,6 +8,7 @@ import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
 import { KeeperBadge } from '../keeper-badge'
+import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
 
 interface IdeExplorerProps {
   readonly fileTreeStore: FileTreeStore
@@ -111,6 +112,9 @@ export function IdeExplorer({
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   useEffect(() => activeIdeFile.subscribe(file => setActiveFile(file)), [])
 
+  const [cursorOverlay, setCursorOverlay] = useState(cursorOverlaySignal.value)
+  useEffect(() => cursorOverlaySignal.subscribe(v => setCursorOverlay(v)), [])
+
   const handleRepositoryScan = async (): Promise<void> => {
     if (!onRepositoryScan || isScanningRepositories) return
     setIsScanningRepositories(true)
@@ -141,6 +145,19 @@ export function IdeExplorer({
   }, [visible, filter])
   const fileCount = filtered.filter(n => !n.hasChildren).length
   const scopeLabel = explorerScopeLabel(source, keeperName, repoList)
+
+  // Reverse map: file_path → keepers currently focused on that file
+  const keepersByFile = useMemo(() => {
+    const map = new Map<string, Array<{ readonly keeperId: string; readonly color: string; readonly focusMode: string }>>()
+    for (const [keeperId, cursor] of cursorOverlay.cursors) {
+      if (!cursor.file_path) continue
+      const entry = { keeperId, color: getKeeperColor(keeperId).cursor, focusMode: cursor.focus_mode }
+      const existing = map.get(cursor.file_path)
+      if (existing) existing.push(entry)
+      else map.set(cursor.file_path, [entry])
+    }
+    return map
+  }, [cursorOverlay])
 
   return html`
     <div
@@ -285,6 +302,7 @@ export function IdeExplorer({
               if (node.hasChildren) store.toggle(node.path)
               else activeIdeFile.value = node.path
             },
+            keepersByFile.get(node.path),
           ))}
         </ul>
       </div>
@@ -334,7 +352,13 @@ function fileIcon(node: FileTreeNode, expanded: boolean): string {
   return ICONS[ext] ?? '📄'
 }
 
-function TreeRow(node: FileTreeNode, expanded: boolean, selected: boolean, onClick: () => void) {
+function TreeRow(
+  node: FileTreeNode,
+  expanded: boolean,
+  selected: boolean,
+  onClick: () => void,
+  activeKeepers?: ReadonlyArray<{ readonly keeperId: string; readonly color: string; readonly focusMode: string }>,
+) {
   const indent = node.depth * 12
   const chevron = node.hasChildren ? (expanded ? '▾' : '▸') : ''
   const onKeyDown = (e: KeyboardEvent): void => {
@@ -361,6 +385,24 @@ function TreeRow(node: FileTreeNode, expanded: boolean, selected: boolean, onCli
         ? html`<${KeeperBadge} id=${node.keeperId} variant="sigil" size="sm" />`
         : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px', textAlign: 'center', fontSize: '12px', lineHeight: '14px' }}>${fileIcon(node, expanded)}</span>`}
       <span class="ide-explorer-row-label">${node.label}</span>
+      ${activeKeepers && activeKeepers.length > 0
+        ? html`<span
+            aria-label=${`${activeKeepers.map(k => k.keeperId).join(', ')} focusing`}
+            style=${{ display: 'inline-flex', gap: '2px', marginLeft: 'auto', flexShrink: 0 }}
+          >${activeKeepers.map(k => html`
+            <span
+              key=${k.keeperId}
+              title=${`${k.keeperId} (${k.focusMode})`}
+              style=${{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: k.color,
+                display: 'inline-block',
+              }}
+            />
+          `)}</span>`
+        : null}
       ${node.diff !== null
         ? html`<span style=${{ color: 'var(--color-fg-muted)', font: 'var(--fs-11)' }}>${node.diff}</span>`
         : null}

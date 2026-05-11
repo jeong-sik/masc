@@ -678,12 +678,12 @@ let test_secondary_resolver_empty_cascade_returns_error () =
 (* Smoke + behavior guard for the iter-14 wrapper
    [Cascade_config.parse_weighted_entry_with_drop_metric].
 
-   Ok path: a valid provider:model entry still returns [Some _] like
-   the legacy [parse_weighted_entry].
+   Ok path: a valid provider:model entry returns [Some _] like the
+   iter-21-removed plain [parse_weighted_entry] used to.
 
    Drop path: an invalid-syntax entry returns [None] (matching the
-   legacy contract) AND ticks the iter-6 candidate-drop counter via
-   the typed [Drop_invalid_syntax] reason from
+   removed plain contract) AND ticks the iter-6 candidate-drop
+   counter via the typed [Drop_invalid_syntax] reason from
    [parse_weighted_entry_diag].
 
    Prometheus state is process-global and not asserted; the goal is

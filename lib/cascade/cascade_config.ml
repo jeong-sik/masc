@@ -377,22 +377,14 @@ let parse_model_string
                   ?keep_alive ?num_ctx
                   ~provider_name ~model_id entry)
 
-(** Parse a {!Cascade_config_loader.weighted_entry} into a
-    {!Llm_provider.Provider_config.t}, forwarding the entry's
-    [supports_tool_choice] override. The [weight] is not part of the
-    Provider_config; it drives cascade ordering separately. *)
-let parse_weighted_entry
-    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
-    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
-    ?system_prompt ?(api_key_env_overrides = [])
-    ?keep_alive ?num_ctx
-    (entry : Cascade_config_loader.weighted_entry)
-  : Llm_provider.Provider_config.t option =
-  parse_model_string ~temperature ~max_tokens ?system_prompt
-    ~api_key_env_overrides
-    ?supports_tool_choice_override:entry.supports_tool_choice
-    ?keep_alive ?num_ctx
-    entry.model
+(* RFC-0058 iter 21 cleanup: the plain [parse_weighted_entry] that
+   returned a silent [None] was removed.  All callers migrated to
+   [parse_weighted_entry_with_drop_metric] in iter 14 — the wrapper
+   that delegates to [parse_weighted_entry_diag] and ticks the iter-6
+   candidate-drop counter on rejection.  The plain function was
+   external-API-exported with zero external callers (audit at iter 14).
+   Removed in iter 21 to prevent regression to silent-None paths in
+   future code. *)
 
 (** Categorised diagnostic for a failed weighted-entry parse. *)
 type weighted_entry_drop =
@@ -449,14 +441,13 @@ let parse_weighted_entry_diag
             ~provider_name ~model_id reg_entry)
 
 (** Resolve-path wrapper around {!parse_weighted_entry_diag} that
-    preserves the historical [option] return shape AND ticks the
-    iter-6 [Cascade_metrics.on_profile_candidate_drop] counter on
-    drop.  The plain {!parse_weighted_entry} silently swallows the
-    drop reason — fine for catalog-validation paths that have their
-    own diagnostic loop, but in resolve paths the silent drop
-    surfaces only as [providers = []] downstream and the WHY is
-    lost.  Use this when a [cascade] context exists, so the drop
-    rate is observable per cascade alongside the validation-time
+    returns an [option] AND ticks the iter-6
+    [Cascade_metrics.on_profile_candidate_drop] counter on drop.
+    Replaces the iter-21-removed [parse_weighted_entry] which
+    silently swallowed the drop reason: the resolve path surfaced
+    drops only as [providers = []] downstream with no WHY.  Use
+    when a [cascade] context exists, so the drop rate is observable
+    per cascade alongside the validation-time
     [profile_candidate_drop] counter. *)
 let parse_weighted_entry_with_drop_metric
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)

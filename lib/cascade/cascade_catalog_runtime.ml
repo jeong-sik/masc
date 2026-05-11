@@ -1480,8 +1480,9 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
     model_id)], read its [secondary] field. When present, the secondary
     string is wrapped in a synthesised {!Cascade_config_loader.weighted_entry}
     (preserving [secondary_supports_tool_choice] -> [supports_tool_choice]
-    if set) and parsed via {!Cascade_config.parse_weighted_entry}, which
-    applies the cascade's [api_key_env_overrides]. Returns [None] when:
+    if set) and parsed via {!Cascade_config.parse_weighted_entry_with_drop_metric},
+    which applies the cascade api_key_env_overrides and ticks the
+    iter-6 candidate-drop counter on parse failure. Returns [None] when:
     - the cascade has no entries with a secondary,
     - no entry's primary parse matches [primary],
     - or secondary parsing yields no provider (unregistered/unavailable

@@ -12,6 +12,7 @@ open Alcotest
 module SM = Masc_mcp.Keeper_state_machine
 module Meas = Masc_mcp.Keeper_measurement
 module Guard = Masc_mcp.Keeper_guard
+module IC = Masc_mcp.Keeper_invariant_check
 
 let phase_t = testable (Fmt.of_to_string SM.phase_to_string) ( = )
 
@@ -2964,6 +2965,64 @@ let test_pre_restart_budget_already_exhausted () =
   assert_precondition_violation ~event_name:"restart_budget_exhausted" err
 ;;
 
+(* ── check_snapshot_invariants tests (R-A-6.c) ────────────
+
+   Snapshot form takes only (phase, conditions), suitable for
+   sweep-time scans without a prev-state. *)
+
+let assert_snapshot_clean phase conditions =
+  match IC.check_snapshot_invariants ~phase ~conditions with
+  | [] -> ()
+  | vs ->
+    let names = List.map (fun (v : IC.violation) -> v.property) vs in
+    Alcotest.fail
+      ("expected no violations, got: " ^ String.concat ", " names)
+;;
+
+let assert_snapshot_fails ~property phase conditions =
+  let vs = IC.check_snapshot_invariants ~phase ~conditions in
+  check
+    bool
+    ("snapshot reports " ^ property)
+    true
+    (List.exists (fun (v : IC.violation) -> v.property = property) vs)
+;;
+
+let test_snapshot_running_ok () =
+  assert_snapshot_clean SM.Running running_conditions
+;;
+
+let test_snapshot_running_requires_fiber () =
+  (* fiber_alive=false but recorded phase=Running — but derive_phase would
+     not actually produce Running, so DerivePhaseAgreement *also* fires.
+     We just confirm RunningRequiresFiber is among reported violations. *)
+  let c = { running_conditions with fiber_alive = false } in
+  assert_snapshot_fails ~property:"RunningRequiresFiber" SM.Running c
+;;
+
+let test_snapshot_stopped_requires_drain () =
+  let c = { running_conditions with stop_requested = false; drain_complete = false } in
+  assert_snapshot_fails ~property:"StoppedRequiresDrain" SM.Stopped c
+;;
+
+let test_snapshot_dead_requires_no_budget () =
+  (* The canonical R-A-6.c case: Dead phase observed with budget=true.
+     This is the direct signature of a [register_restarting] revival
+     of an already-dead entry, the third vector documented in iter 14
+     audit memo. *)
+  let c = { running_conditions with fiber_alive = false; restart_budget_remaining = true } in
+  (* derive_phase from these conditions produces Restarting (since
+     backoff_elapsed is false by default), not Dead — so we manually
+     pass Dead as the recorded phase to simulate a corrupted entry. *)
+  assert_snapshot_fails ~property:"DeadRequiresNoBudget" SM.Dead c
+;;
+
+let test_snapshot_derive_disagreement () =
+  let c = SM.default_conditions in  (* derive_phase = Dead *)
+  (* Manually claim phase is Running while conditions imply Dead. *)
+  assert_snapshot_fails ~property:"DerivePhaseAgreement" SM.Running c
+;;
+
 (* ── Test suite ────────────────────────────────────────── *)
 
 let () =
@@ -3339,6 +3398,25 @@ let () =
             "Restart_budget_exhausted is non-idempotent (R-A-6.b)"
             `Quick
             test_pre_restart_budget_already_exhausted
+        ] )
+    ; ( "snapshot_invariants"
+      , [ test_case "Running healthy → no violations" `Quick test_snapshot_running_ok
+        ; test_case
+            "Running with fiber_alive=false → RunningRequiresFiber"
+            `Quick
+            test_snapshot_running_requires_fiber
+        ; test_case
+            "Stopped without drain/stop flags → StoppedRequiresDrain"
+            `Quick
+            test_snapshot_stopped_requires_drain
+        ; test_case
+            "Dead with budget=true → DeadRequiresNoBudget (R-A-6.c primary signal)"
+            `Quick
+            test_snapshot_dead_requires_no_budget
+        ; test_case
+            "phase ≠ derive_phase(conditions) → DerivePhaseAgreement"
+            `Quick
+            test_snapshot_derive_disagreement
         ] )
     ]
 ;;

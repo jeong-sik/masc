@@ -79,3 +79,62 @@ let check_step_invariants
          (SM.phase_to_string prev_phase) (SM.phase_to_string new_phase));
 
   List.rev !violations
+;;
+
+(* ── Snapshot invariants (R-A-6.c) ─────────────────────────
+
+   Point-in-time invariants derivable from a single (phase, conditions)
+   pair, no history required.  Useful for sweep-time scans (e.g.
+   keeper_supervisor periodic audit) where prev-state tracking is not
+   available.
+
+   Subset of [check_step_invariants] — only invariants 1, 6, 7, 8, 9.
+   The history-dependent invariants (DeadIsForever, StoppedIsForever,
+   BudgetNeverRevives, RestartCountMonotonic, TransitionMatrixAgreement)
+   require a prev-state and are excluded here.
+
+   Iter 14 audit (`docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md`)
+   identified that [check_step_invariants] has no production callers —
+   only PBT and trace validator.  This snapshot form is the structural
+   foundation for production sweep-time invariant scanning; wiring into
+   [keeper_supervisor.sweep_and_recover] is a follow-up. *)
+let check_snapshot_invariants
+    ~(phase : SM.phase)
+    ~(conditions : SM.conditions)
+  : violation list =
+  let violations = ref [] in
+  let fail property detail =
+    violations := { property; detail } :: !violations
+  in
+
+  (* 1. TypeOK *)
+  if not (List.mem phase SM.all_phases) then
+    fail "TypeOK" (Printf.sprintf "unknown phase: %s" (SM.phase_to_string phase));
+
+  (* 6. RunningRequiresFiber *)
+  if phase = SM.Running && not conditions.fiber_alive then
+    fail "RunningRequiresFiber" "phase=Running but fiber_alive=false";
+
+  (* 7. StoppedRequiresDrain *)
+  if phase = SM.Stopped
+     && not (conditions.stop_requested && conditions.drain_complete) then
+    fail "StoppedRequiresDrain"
+      (Printf.sprintf "phase=Stopped but stop_requested=%b, drain_complete=%b"
+         conditions.stop_requested conditions.drain_complete);
+
+  (* 8. DeadRequiresNoBudget — pairs with BudgetNeverRevives.  A keeper
+     observed in Dead phase with [restart_budget_remaining=true] is the
+     direct signal of a revival via [register_restarting] on an already-
+     dead entry (one of three vectors documented in iter 14 audit). *)
+  if phase = SM.Dead && conditions.restart_budget_remaining then
+    fail "DeadRequiresNoBudget" "phase=Dead but restart_budget_remaining=true";
+
+  (* 9. DerivePhaseAgreement *)
+  let derived = SM.derive_phase conditions in
+  if derived <> phase then
+    fail "DerivePhaseAgreement"
+      (Printf.sprintf "derive_phase=%s but recorded=%s"
+         (SM.phase_to_string derived) (SM.phase_to_string phase));
+
+  List.rev !violations
+;;

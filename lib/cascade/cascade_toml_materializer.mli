@@ -25,53 +25,53 @@
     migrate. *)
 type source_kind = Toml [@@deriving tla]
 
-type source_info = {
-  kind : source_kind;
-  source_path : string;
-}
+type source_info =
+  { kind : source_kind
+  ; source_path : string
+  }
 
-type source_state = {
-  info : source_info;
-  source_exists : bool;
-  source_mtime : float option;
-}
+type source_state =
+  { info : source_info
+  ; source_exists : bool
+  ; source_mtime : float option
+  }
 
-val source_kind_to_string : source_kind -> string
 (** Always returns ["toml"] after RFC-0058 §9 Phase 9.3. *)
+val source_kind_to_string : source_kind -> string
 
-val source_info : config_path:string -> source_info
 (** Resolve to the [cascade.toml] alongside [config_path]. *)
+val source_info : config_path:string -> source_info
 
-val source_state : config_path:string -> source_state
 (** {!source_info} plus the existence flag and mtime of the source
     file (used by the dashboard staleness banner). *)
+val source_state : config_path:string -> source_state
 
 (** {1 Rendering} *)
 
-val render_toml_string_to_json_string : string -> (string, string) result
 (** Parse [content] as TOML and render the result as a pretty-printed
     JSON string (with a trailing newline). [Error msg] when the TOML
     fails to parse or contains a value the strict whitelist rejects. *)
+val render_toml_string_to_json_string : string -> (string, string) result
 
-val render_toml_file_to_json_string : string -> (string, string) result
 (** {!render_toml_string_to_json_string} applied to the contents of
     [toml_path]; surfaces filesystem errors as [Error msg]. *)
+val render_toml_file_to_json_string : string -> (string, string) result
 
 (** {1 Validator hook (#10259)} *)
 
-val toml_section_names_result :
-  config_path:string -> (string list, string) result
 (** Best-effort enumeration of cascade names defined in the TOML
     catalog, used by the keeper-name validator as a degraded
     fallback when {!render_toml_to_yojson} rejects a key.
 
     Returns [Ok names] on success (meta keys starting with [_] are
     filtered), and [Error msg] when the TOML cannot be parsed at all. *)
+val toml_section_names_result : config_path:string -> (string list, string) result
 
 (** {1 Rendering} *)
 
-val render_toml_to_json_string :
-  config_path:string -> (source_info * string, string) result
 (** Render the TOML source into a JSON string without writing to disk.
     Returns the {!source_info} and the rendered JSON string.
     [Error] when rendering fails. *)
+val render_toml_to_json_string
+  :  config_path:string
+  -> (source_info * string, string) result

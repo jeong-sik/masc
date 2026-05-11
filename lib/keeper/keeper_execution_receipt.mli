@@ -84,7 +84,7 @@ val assert_receipt_authoritative :
 type tool_requirement = Keeper_agent_tool_surface.tool_requirement
 
 type tool_surface =
-  { turn_lane : string
+  { turn_lane : Keeper_agent_tool_surface.turn_lane
   ; tool_surface_class : Keeper_agent_tool_surface.tool_surface_class
   ; tool_requirement : tool_requirement
   ; visible_tool_count : int

@@ -133,7 +133,7 @@ let append_keeper_receipt ?(outcome = "ok")
       tool_contract_result;
       tool_surface =
         {
-          turn_lane = "tool";
+          turn_lane = Keeper_agent_tool_surface.Lane_tool_required;
           tool_surface_class = Keeper_agent_tool_surface.Surface_mixed;
           tool_requirement;
           visible_tool_count = 1;

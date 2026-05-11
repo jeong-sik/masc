@@ -16,7 +16,10 @@ let mk_tool_surface ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Requ
     ?(required_tools = []) ?(missing_required_tools = []) () :
     R.tool_surface =
   {
-    turn_lane = "unified";
+    (* WORKAROUND: previously "unified" — invalid string never emitted
+       by producer.  Typed enum now forces a valid value.
+       Root: closed sum type rejects ad-hoc fixture strings. *)
+    turn_lane = Masc_mcp.Keeper_agent_tool_surface.Lane_tool_required;
     (* WORKAROUND: previously "post_dispatch" — a string the producer
        never emits.  Typed enum forces a real value; Surface_mixed
        matches the prior test intent of a tool-using turn.

@@ -1037,7 +1037,10 @@ let test_keeper_zombie_field_contracts () =
       tool_contract_result = "satisfied";
       tool_surface =
         {
-          turn_lane = "unified";
+          (* WORKAROUND: previously "unified" — invalid string never
+             emitted by producer.  Typed enum forces valid value.
+             Root: closed sum type rejects ad-hoc fixture strings. *)
+          turn_lane = Masc_mcp.Keeper_agent_tool_surface.Lane_tool_required;
           (* WORKAROUND: previously "post_dispatch" — invalid string never
              emitted by producer.  Typed enum forces a real value.
              Root: closed sum type disallows ad-hoc fixture strings. *)

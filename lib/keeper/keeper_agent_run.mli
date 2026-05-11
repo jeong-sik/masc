@@ -49,8 +49,10 @@ type ctx_composition_metrics =
 type tool_requirement = Keeper_agent_tool_surface.tool_requirement
 type tool_surface_class = Keeper_agent_tool_surface.tool_surface_class
 
+type turn_lane = Keeper_agent_tool_surface.turn_lane
+
 type tool_surface_metrics =
-  { turn_lane : string
+  { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; visible_tool_count : int

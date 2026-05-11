@@ -250,6 +250,30 @@ type cascade_model_spec =
           the [\[models.<id>.capabilities\]] sub-table is absent —
           callers treat as defaults (see
           {!cascade_model_capabilities_default}). *)
+  ; match_prefixes : string list
+    (** Prefixes for matching against requested model_id strings.
+          Empty list = the spec matches a single specific model_id given
+          by [api_name].
+
+          M2 OAS cutover replaces the substring if/elsif tree in
+          {!Llm_provider.Capabilities.for_model_id_static} with a
+          longest-prefix-first scan over cascade.toml [\[models.*\]]
+          entries — given a request for [model_id], find the spec whose
+          [match_prefixes] contain the longest string [p] such that
+          [model_id] starts with [p].
+
+          Single-spec example: [\[models.sonnet\]] with [api-name =
+          "claude-sonnet-4-6"] and [match-prefixes = []] matches only
+          [claude-sonnet-4-6]. Family example: [\[models.sonnet-family\]]
+          with [match-prefixes = ["claude-sonnet-4"]] matches every
+          [claude-sonnet-4-*] release.
+
+          Longest-prefix-first resolves precedence without an explicit
+          priority field: [match-prefixes = ["glm-5-turbo"]] beats
+          [match-prefixes = ["glm-5"]] because the former is longer.
+          Mirrors the implicit ordering of OAS's if/elsif tree
+          ([starts_with "glm-5-turbo"] checked before [starts_with
+          "glm-5"]). *)
   }
 [@@deriving show, eq]
 
@@ -364,6 +388,59 @@ let model_capabilities_for_id (cfg : cascade_config) (id : string)
   : cascade_model_capabilities option
   =
   Option.bind (model_of_id cfg id) (fun (m : cascade_model_spec) -> m.capabilities)
+;;
+
+let model_spec_for_api_name (cfg : cascade_config) (model_id : string)
+  : cascade_model_spec option
+  =
+  (* Longest-prefix-first scan over [models.*] entries.
+     - Exact api_name match wins outright (longest possible match).
+     - Otherwise the spec whose match_prefixes contains the longest
+       string p with String.starts_with model_id p wins.
+     - Ties on length resolve to the first-declared entry (List.fold_left
+       keeps the earlier-seen winner unless a strictly-longer match arrives).
+     - Returns None if no entry matches. *)
+  let starts_with ~prefix s =
+    let plen = String.length prefix in
+    String.length s >= plen && String.sub s 0 plen = prefix
+  in
+  let best_match =
+    List.fold_left
+      (fun acc (m : cascade_model_spec) ->
+         (* Exact api_name match: synthetic prefix of full length. *)
+         let exact_candidate =
+           if m.api_name = model_id then Some (String.length model_id, m) else None
+         in
+         let prefix_candidates =
+           List.filter_map
+             (fun p ->
+                if starts_with ~prefix:p model_id then Some (String.length p, m) else None)
+             m.match_prefixes
+         in
+         let candidates =
+           match exact_candidate with
+           | Some c -> c :: prefix_candidates
+           | None -> prefix_candidates
+         in
+         List.fold_left
+           (fun acc' (len, spec) ->
+              match acc' with
+              | None -> Some (len, spec)
+              | Some (best_len, _) when len > best_len -> Some (len, spec)
+              | Some _ -> acc')
+           acc
+           candidates)
+      None
+      cfg.models
+  in
+  Option.map snd best_match
+;;
+
+let model_capabilities_for_api_name (cfg : cascade_config) (model_id : string)
+  : cascade_model_capabilities option
+  =
+  Option.bind (model_spec_for_api_name cfg model_id) (fun (m : cascade_model_spec) ->
+    m.capabilities)
 ;;
 
 let binding_of_key (cfg : cascade_config) (provider_id : string) (model_id : string)

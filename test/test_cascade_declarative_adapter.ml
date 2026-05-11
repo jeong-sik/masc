@@ -276,6 +276,7 @@ let test_alias_parent_missing () =
           ; max_thinking_budget = None
           ; streaming = true
           ; capabilities = None
+          ; match_prefixes = []
           }
         ]
     ; bindings = []
@@ -540,6 +541,7 @@ let test_duplicate_routes () =
           ; max_thinking_budget = None
           ; streaming = true
           ; capabilities = None
+          ; match_prefixes = []
           }
         ]
     ; bindings =

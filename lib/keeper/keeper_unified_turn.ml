@@ -875,7 +875,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Prometheus.inc_counter
                   Keeper_metrics.metric_keeper_write_meta_failures
                   ~labels:
-                    [("keeper", entry.meta.name); ("phase", Oas_execution_error_phase.(to_label Turn_start))]
+                    [("keeper", entry.meta.name); ("phase", "turn_start")]
                   ();
                 Log.Keeper.warn
                   "%s: turn-start write_meta_with_merge failed: %s"

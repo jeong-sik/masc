@@ -506,6 +506,10 @@ let get_cascade_audit_store store_opt =
       | store -> Some store
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception exn ->
+          (* Iter 47: tick counter so audit-subsystem health is
+             observable.  Audit failure here disables the subsystem
+             for the process lifetime — operators need to know. *)
+          Cascade_metrics.on_cascade_audit_failure ~stage:"store_creation";
           Log.Misc.warn "cascade audit store creation failed: %s"
             (Printexc.to_string exn);
           None)
@@ -565,6 +569,10 @@ let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
        with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
+          (* Iter 47: tick counter per-record append failure rate
+             alertable.  Single-event audit loss compounds over
+             time for post-incident analysis. *)
+          Cascade_metrics.on_cascade_audit_failure ~stage:"append";
           Log.Misc.warn "cascade audit append failed cascade=%s error=%s"
             cascade_name_string (Printexc.to_string exn))
 

@@ -947,6 +947,29 @@ let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 let on_max_tokens_clamped () =
   Prometheus.inc_counter metric_max_tokens_clamped ()
 
+(* [Cascade_legacy_runner] persists cascade-decision audit records
+   to [Dated_jsonl] storage for post-incident analysis.  Two
+   exception arms swallow non-cancellation failures with only a
+   WARN log:
+
+     store_creation — [get_cascade_audit_store] catches startup
+                       errors creating the JSONL store; entire
+                       cascade audit subsystem stays disabled for
+                       the process lifetime.
+     append         — [record_cascade_audit] catches per-record
+                       append errors; that single event lost.
+
+   Counter rate makes the audit subsystem health observable.
+   Steady state should be zero or near-zero; non-zero rate flags
+   filesystem / quota / permission problems affecting the
+   post-incident analysis pipeline. *)
+let metric_cascade_audit_failure = "masc_cascade_audit_failure_total"
+
+let on_cascade_audit_failure ~stage =
+  Prometheus.inc_counter metric_cascade_audit_failure
+    ~labels:[ ("stage", stage) ]
+    ()
+
 (* Iter 43 infrastructure: pre-register every counter introduced in
    iter 2-42 with [Prometheus.register_counter] so the
    process startup state exposes all metric names at /metrics with
@@ -1054,7 +1077,8 @@ let register_all () =
      and investigate the FSM transition that exposed an Accept in \
      Accept_rejected branch.";
   c metric_cascade_metrics_eviction;
-  c metric_max_tokens_clamped
+  c metric_max_tokens_clamped;
+  c metric_cascade_audit_failure
 ;;
 
 (* Module-load side effect: register every cascade counter as soon

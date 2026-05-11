@@ -849,6 +849,19 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    code path requires a provider with a non-None ceiling lower
    than the operator's [max_tokens] — exercised end-to-end in
    the inference suite.  Smoke pins the no-arg helper signature. *)
+(* Smoke + label-stability for
+   [Cascade_metrics.on_cascade_audit_failure].  Two documented
+   stage labels match the two exception arms in
+   [Cascade_legacy_runner].  Pinning both keeps the canonical set
+   in lockstep with the call sites. *)
+let test_cascade_audit_failure_documented_stages_are_callable () =
+  Masc_mcp.Cascade_metrics.on_cascade_audit_failure
+    ~stage:"store_creation";
+  Masc_mcp.Cascade_metrics.on_cascade_audit_failure
+    ~stage:"append";
+  check bool "both documented stages callable without raising"
+    true true
+
 let test_max_tokens_clamped_helper_callable () =
   Masc_mcp.Cascade_metrics.on_max_tokens_clamped ();
   check bool "no-arg helper callable without raising" true true
@@ -1356,6 +1369,10 @@ let () =
           test_case
             "max_tokens_clamped: helper callable" `Quick
             test_max_tokens_clamped_helper_callable;
+          test_case
+            "cascade_audit_failure: both documented stages callable"
+            `Quick
+            test_cascade_audit_failure_documented_stages_are_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

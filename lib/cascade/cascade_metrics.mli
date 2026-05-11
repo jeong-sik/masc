@@ -298,6 +298,14 @@ val on_max_tokens_clamped : unit -> unit
     and is silently reduced.  Symmetric to iter-26
     [max_context_fallback] (context-window side). *)
 
+val on_cascade_audit_failure : stage:string -> unit
+(** Tick the cascade-audit subsystem failure counter at
+    [Cascade_legacy_runner].  [stage] must be one of
+    [store_creation] (JSONL store init failed) or [append]
+    (single record append failed).  Audit subsystem failures
+    don't break keeper turns but compromise post-incident
+    analysis. *)
+
 val register_all : unit -> unit
 (** Pre-register every counter defined in this module with
     [Prometheus.register_counter] so process startup exposes them

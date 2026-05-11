@@ -307,8 +307,11 @@ let validate_strategy_fields (cfg : cascade_config) : validation_error list =
    flag the omission instead of silently throttling the binding to 1.
 
    Run unconditionally as part of {!validate} (RFC-0058 Phase 5.5
-   unified the previous laxer/strict surfaces — every cascade.toml load
-   site now enforces capacity declaration). *)
+   unified the previous laxer/strict surfaces). The validator itself
+   is not auto-invoked by the parser hotpath — callers that opt into
+   validation (e.g. `cascade_catalog_validator`, declarative-config
+   tests) now get R11 enforcement; the parser's tolerant load path
+   is unchanged. *)
 
 let validate_binding_capacity (cfg : cascade_config) : validation_error list =
   List.filter_map

@@ -2422,7 +2422,7 @@ let sample_ctx_composition ?(system_prompt = "You are a keeper.")
 
 let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metrics =
   {
-    turn_lane = "tool_optional";
+    turn_lane = Masc_mcp.Keeper_agent_tool_surface.Lane_tool_optional;
     tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_mixed;
     tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Optional;
     visible_tool_count = 0;

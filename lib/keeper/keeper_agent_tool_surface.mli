@@ -23,6 +23,29 @@ val tool_requirement_to_string : tool_requirement -> string
 val tool_requirement_of_string : string -> tool_requirement option
 val tool_requirement_to_yojson : tool_requirement -> Yojson.Safe.t
 
+(** Per-turn lane classification.  Closed sum type; the OCaml side
+    pins the alphabet emitted at keeper_run_tools.ml:963-973
+    ({"text_only", "tool_required", "tool_optional", "tool_disabled",
+    "retry"}).  Plain to_string/of_string (no [@@deriving tla] — that
+    derives module-level all_symbols which is already bound to
+    [tool_surface_class] below).  A future RFC-0065 spec extension
+    can add a TurnLaneSet catalog and lift this to deriving. *)
+type turn_lane =
+  | Lane_pre_dispatch
+      (** Pre-turn placeholder before [compute_tool_surface] runs.
+          Emitted only by [keeper_turn_helpers.pre_dispatch_tool_surface];
+          never produced by the per-turn lane logic at
+          keeper_run_tools.ml:963-973. *)
+  | Lane_text_only
+  | Lane_tool_required
+  | Lane_tool_optional
+  | Lane_tool_disabled
+  | Lane_retry
+
+val turn_lane_to_string : turn_lane -> string
+val turn_lane_of_string : string -> turn_lane option
+val turn_lane_to_yojson : turn_lane -> Yojson.Safe.t
+
 (** Classification of the per-turn tool surface.  Closed sum type; the
     OCaml side mirrors the RFC-0065 §3.2.2 KeeperToolSurface
     SurfaceClassSet ({"none", "public_only", "mixed"}).
@@ -41,7 +64,7 @@ val tool_surface_class_to_yojson : tool_surface_class -> Yojson.Safe.t
 
 (** Diagnostic surface metrics emitted into trajectory entries. *)
 type tool_surface_metrics =
-  { turn_lane : string
+  { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; visible_tool_count : int
@@ -77,7 +100,7 @@ type computed_tool_surface =
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
   ; missing_required_tool_names : string list
-  ; lane : string
+  ; lane : turn_lane
   ; query_text : string
   }
 

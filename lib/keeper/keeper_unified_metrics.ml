@@ -896,7 +896,9 @@ let append_decision_record
               in
               let tool_surface_fields =
                 [
-                  ("turn_lane", `String r.tool_surface.turn_lane);
+                  ( "turn_lane"
+                  , Keeper_agent_tool_surface.turn_lane_to_yojson
+                      r.tool_surface.turn_lane );
                   ( "tool_surface_class"
                   , Keeper_agent_tool_surface.tool_surface_class_to_yojson
                       r.tool_surface.tool_surface_class );

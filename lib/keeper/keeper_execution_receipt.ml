@@ -68,7 +68,7 @@ let assert_receipt_authoritative ~outcome ~turn_state =
 type tool_requirement = Keeper_agent_tool_surface.tool_requirement
 
 type tool_surface =
-  { turn_lane : string
+  { turn_lane : Keeper_agent_tool_surface.turn_lane
   ; tool_surface_class : Keeper_agent_tool_surface.tool_surface_class
   ; tool_requirement : Keeper_agent_tool_surface.tool_requirement
   ; visible_tool_count : int
@@ -490,7 +490,9 @@ let to_json (receipt : t) =
       ( "tool_surface",
         `Assoc
           [
-            ("turn_lane", `String receipt.tool_surface.turn_lane);
+            ( "turn_lane",
+              Keeper_agent_tool_surface.turn_lane_to_yojson
+                receipt.tool_surface.turn_lane );
             ( "tool_surface_class",
               Keeper_agent_tool_surface.tool_surface_class_to_yojson
                 receipt.tool_surface.tool_surface_class );

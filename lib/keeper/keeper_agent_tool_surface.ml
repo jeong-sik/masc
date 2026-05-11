@@ -37,6 +37,42 @@ let tool_requirement_to_yojson = function
   | Optional -> `String "optional"
   | No_tools -> `String "none"
 
+(* Closed sum type for turn_lane.  Two producers emit values:
+   - keeper_run_tools.ml:963-973 emits the five per-turn lanes
+     (text_only, tool_required, tool_optional, tool_disabled, retry).
+   - keeper_turn_helpers.pre_dispatch_tool_surface emits the
+     [Lane_pre_dispatch] placeholder before the per-turn lane logic
+     runs.
+   No [@@deriving tla] because the module-level all_symbols binding
+   is reserved for tool_surface_class (a future RFC spec extension
+   can add TurnLaneSet and lift this). *)
+type turn_lane =
+  | Lane_pre_dispatch
+  | Lane_text_only
+  | Lane_tool_required
+  | Lane_tool_optional
+  | Lane_tool_disabled
+  | Lane_retry
+
+let turn_lane_to_string = function
+  | Lane_pre_dispatch -> "pre_dispatch"
+  | Lane_text_only -> "text_only"
+  | Lane_tool_required -> "tool_required"
+  | Lane_tool_optional -> "tool_optional"
+  | Lane_tool_disabled -> "tool_disabled"
+  | Lane_retry -> "retry"
+
+let turn_lane_of_string = function
+  | "pre_dispatch" -> Some Lane_pre_dispatch
+  | "text_only" -> Some Lane_text_only
+  | "tool_required" -> Some Lane_tool_required
+  | "tool_optional" -> Some Lane_tool_optional
+  | "tool_disabled" -> Some Lane_tool_disabled
+  | "retry" -> Some Lane_retry
+  | _ -> None
+
+let turn_lane_to_yojson lane = `String (turn_lane_to_string lane)
+
 (* Closed sum type for tool_surface_class.  Mirrors RFC-0065 §3.2.2
    KeeperToolSurface SurfaceClassSet so the correspondence harness can
    drop the hand-pinned label list.  [@tla.symbol "…"] fixes the wire
@@ -65,7 +101,7 @@ let tool_surface_class_to_yojson cls =
   `String (tool_surface_class_to_string cls)
 
 type tool_surface_metrics =
-  { turn_lane : string
+  { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; visible_tool_count : int
@@ -99,7 +135,7 @@ type computed_tool_surface =
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
   ; missing_required_tool_names : string list
-  ; lane : string
+  ; lane : turn_lane
   ; query_text : string
   }
 

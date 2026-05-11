@@ -199,7 +199,7 @@ let prepare_agent_setup
          | Some r -> !r
          | None -> Agent_sdk.Tool_op.Keep_all)
     ; tool_surface =
-        { turn_lane = "text_only"
+        { turn_lane = Keeper_agent_tool_surface.Lane_text_only
         ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
         ; tool_requirement = No_tools
         ; visible_tool_count = 0
@@ -960,17 +960,17 @@ let prepare_agent_setup
       then Required
       else Optional
     in
-    let lane =
+    let lane : Keeper_agent_tool_surface.turn_lane =
       if is_retry
-      then "retry"
+      then Lane_retry
       else (
         match tool_requirement with
-        | Required -> "tool_required"
-        | Optional -> "tool_optional"
+        | Required -> Lane_tool_required
+        | Optional -> Lane_tool_optional
         | No_tools ->
           (match current_tool_choice with
-           | Some Agent_sdk.Types.None_ -> "tool_disabled"
-           | _ -> "text_only"))
+           | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
+           | _ -> Lane_text_only))
     in
     { all_allowed
     ; absolute_turn = turn
@@ -1042,7 +1042,9 @@ let prepare_agent_setup
         Prometheus.metric_empty_tool_universe_observed
         ~labels:
           [ "keeper_name", meta.name
-          ; "turn_lane", initial_tool_surface.lane
+          ; ( "turn_lane"
+            , Keeper_agent_tool_surface.turn_lane_to_string
+                initial_tool_surface.lane )
           ; ( "fallback_used"
             , string_of_bool initial_tool_surface.tool_surface_fallback_used )
           ]
@@ -1052,7 +1054,9 @@ let prepare_agent_setup
            (sdk_error_of_keeper_internal_error
               (Keeper_tool_surface_empty
                  { keeper_name = meta.name
-                 ; turn_lane = initial_tool_surface.lane
+                 ; turn_lane =
+                     Keeper_agent_tool_surface.turn_lane_to_string
+                       initial_tool_surface.lane
                  ; affordances = turn_affordances
                  ; fallback_used = initial_tool_surface.tool_surface_fallback_used
                  }));
@@ -1499,7 +1503,8 @@ let prepare_agent_setup
                 Keeper_tool_call_log.set_turn_context
                   ~keeper_name:meta.name
                   ~agent_name:meta.agent_name
-                  ~lane
+                  ~lane:
+                    (Keeper_agent_tool_surface.turn_lane_to_string lane)
                   ?tool_choice:
                     (Option.map
                        (fun choice ->
@@ -1583,7 +1588,8 @@ let prepare_agent_setup
                      ; "discovered_count", `Int computed_surface.discovered_count
                      ; "llm_selected_count", `Int computed_surface.llm_selected_count
                      ; "final_visible", `Int (List.length all_allowed)
-                     ; "turn_lane", `String lane
+                     ; ( "turn_lane"
+                       , Keeper_agent_tool_surface.turn_lane_to_yojson lane )
                      ; ( "tool_surface_class"
                        , Keeper_agent_tool_surface.tool_surface_class_to_yojson
                            computed_surface.tool_surface_class )

@@ -105,9 +105,15 @@ let draft_request_allowed args =
    tried a Docker PR-lifecycle proof. Mirrors
    [Keeper_tool_pr_review.pr_review_mutation_preset_ok], which already
    includes Research. *)
+(* For a guard predicate the catch-all default is the wrong safety
+   direction: any future preset would silently inherit "allowed".
+   Enumerate every variant so the compiler forces a deliberate
+   classification when [Keeper_meta_tool_access.tool_access_preset]
+   grows.  PR #14716 / #14762 follow-up. *)
 let mutation_preset_ok = function
   | Some (Research | Delivery | Coding | Full) -> true
-  | _ -> false
+  | Some (Minimal | Social | Messaging | Dispatch) -> false
+  | None -> false
 
 let scoped_credential_or_error ~config ~meta =
   match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with

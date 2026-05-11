@@ -37,11 +37,30 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
 let canonical_name name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
   match Keeper_tool_alias.public_masc_to_internal stripped with
-  | Some internal -> internal
+  | Some internal ->
+    Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:internal ~result:"ok";
+    internal
   | None ->
     (match Keeper_tool_alias.route name with
-     | Some r -> r.internal_name
-     | None -> name)
+     | Some r ->
+       Keeper_tool_alias.record_route_outcome
+         ~tool:name
+         ~routed_to:r.internal_name
+         ~result:"ok";
+       r.internal_name
+     | None ->
+       if Keeper_tool_alias.is_known_internal name
+       then (
+         (* Already-internal pass-through: legitimate tool already
+            named [keeper_*] or [masc_*]. Not a routing miss. *)
+         Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:name ~result:"ok";
+         name)
+       else (
+         Keeper_tool_alias.record_route_outcome
+           ~tool:name
+           ~routed_to:"none"
+           ~result:"miss";
+         name))
 ;;
 
 let merge_observed_tool_names

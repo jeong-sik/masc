@@ -36,6 +36,12 @@ val route_or_miss : string -> route option
     Replaces the old [canonicalize_observed] check for known names. *)
 val is_known_public : string -> bool
 
+(** [is_known_internal name] is [true] when [name] is a recognised
+    internal handler name (any [routing_table] target plus the full
+    [Tool_catalog_surfaces.keeper_internal_tools] set). Callers use this
+    to keep Prometheus label cardinality bounded. *)
+val is_known_internal : string -> bool
+
 (** [public_names ()] returns all LLM-native public names in stable order.
     Replaces [expand_universe] — callers should add these names directly
     to allowlists at construction time. *)
@@ -45,6 +51,13 @@ val public_names : unit -> string list
 
 (** [record_route_outcome ~tool ~routed_to ~result] increments the
     [masc_keeper_tool_call_total] counter with the given labels.
+
+    Cardinality is bounded: [tool] / [routed_to] are normalised to
+    ["unknown"] when the supplied value is neither a known public name
+    nor a known internal handler. Raw unrecognised strings never become
+    new label values, so hallucinated tool names cannot inflate the
+    Prometheus time series.
+
     [result] is ["ok"] for a successful route or ["miss"] for an unknown name. *)
 val record_route_outcome : tool:string -> routed_to:string -> result:string -> unit
 

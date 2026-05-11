@@ -108,7 +108,12 @@ let test_route_or_miss_records_ok () =
 ;;
 
 let test_route_or_miss_records_miss () =
-  let labels = [ "tool", "Skill"; "routed_to", "none"; "result", "miss" ] in
+  (* Cardinality bound (RFC-0064 PR #14574 review #4): a miss for a
+     hallucinated name like "Skill" is recorded against the
+     [tool="unknown"] / [routed_to="none"] bucket — never against the
+     raw observed string, otherwise each unique hallucination would
+     allocate its own Prometheus time series. *)
+  let labels = [ "tool", "unknown"; "routed_to", "none"; "result", "miss" ] in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
       Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
@@ -123,7 +128,7 @@ let test_route_or_miss_records_miss () =
       ()
   in
   Alcotest.(check (float 0.001))
-    "telemetry counter incremented for miss"
+    "telemetry counter incremented for miss (unknown bucket)"
     (before +. 1.0)
     after
 ;;

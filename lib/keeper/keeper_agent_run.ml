@@ -713,20 +713,20 @@ let run_turn
                      ~reported_tool_names
                      ~observed_tool_names
                  in
-                 (* RFC-0064: route LLM-native tool names (Bash/Read/etc) to their
-          keeper_* internal cognates before the disclosure check. Without
-          this, the disclosure check flags every Bash/Read call as "unexpected"
-          and nukes turns where the LLM only used the alias names (≈18% of
-          turns per #8778). Unknown names (routing misses) are left as-is and
-          may still trigger a teaching error — recorded via result-based
-          telemetry by [route_or_miss]. *)
-                 (* Canonicalise observed tool names across all three input
-                    surfaces (LLM-native public / MCP protocol /
-                    already-internal). Using Keeper_tool_alias.route_or_miss
-                    directly would record every internal "keeper_*"/"masc_*"
-                    call as a routing miss, inflating
-                    masc_keeper_tool_call_total{result="miss"} and skewing
-                    the alias dashboards (see PR #14574 review). *)
+                 (* RFC-0064: canonicalise observed tool names across all three
+                    input surfaces (LLM-native public / MCP protocol /
+                    already-internal) before the disclosure check. Without
+                    this, the disclosure check flags every Bash/Read call as
+                    "unexpected" and nukes turns where the LLM only used the
+                    alias names (≈18% of turns per #8778).
+
+                    [Keeper_tool_disclosure.canonical_tool_name] emits the
+                    per-branch result-based telemetry
+                    ([masc_keeper_tool_call_total] with bounded labels) — see
+                    that module for the full path. Using the lower-level
+                    [Keeper_tool_alias.route_or_miss] here would mis-attribute
+                    every internal "keeper_*"/"masc_*" pass-through as a
+                    routing miss. *)
                  let canonical_tool_names =
                    List.map Keeper_tool_disclosure.canonical_tool_name tool_names
                  in

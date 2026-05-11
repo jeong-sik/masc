@@ -70,6 +70,19 @@ type tool_policy = {
           [bearer_token_env_var]) plus the non-secret MASC identity
           headers ([x-masc-agent-name], [x-masc-keeper-name]).
           Keys are matched case-insensitively after trimming. *)
+  argv_prompt_preflight : bool;
+      (** When true, callers must run a prompt argv/context-window preflight
+          before spawning a turn (the runtime serialises the full prompt on
+          a single argv vector and rejects oversize input). Codex CLI's
+          [codex exec] subprocess transport is the canonical case.
+          RFC-0058 §2.4: capability flag, not a vendor match. *)
+  uses_anthropic_caching : bool;
+      (** When true, the provider's wire format supports Anthropic-style
+          prompt caching via [cache_control] blocks, so usage telemetry
+          should report [cache_creation_input_tokens] /
+          [cache_read_input_tokens] above the cacheable input threshold.
+          Used by [Keeper_usage_trust] to flag caching-likely-disabled
+          anomalies. RFC-0058 §2.4: capability flag, not a vendor match. *)
 }
 
 type telemetry_policy = {
@@ -382,6 +395,12 @@ val gemini_vertex_openai_base_url : project:string -> location:string -> string
 (** Resolve the concrete provider adapter for a provider config. *)
 val adapter_of_provider_config :
   Llm_provider.Provider_config.t -> adapter option
+
+(** Resolve the concrete provider adapter for an OAS [provider_kind].
+    Used by call sites that only have the typed kind (no full config)
+    and need adapter-level capability flags. RFC-0058 §2.4 boundary. *)
+val adapter_of_provider_kind :
+  Llm_provider.Provider_config.provider_kind -> adapter option
 
 (** Stable provider label/cascade prefix for a provider config. *)
 val provider_label_of_config :

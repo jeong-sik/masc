@@ -46,6 +46,8 @@ type tool_policy = {
   supports_runtime_mcp_http_headers : bool;
   requires_per_keeper_bridging_for_bound_actor_tools : bool;
   identity_runtime_mcp_header_keys : string list;
+  argv_prompt_preflight : bool;
+  uses_anthropic_caching : bool;
 }
 
 type telemetry_policy = {
@@ -142,15 +144,23 @@ let csv_items raw =
   |> List.filter (fun s -> s <> "")
 
 let no_tool_http_headers =
-  { supports_runtime_mcp_http_headers = false;
+  {
+    supports_runtime_mcp_http_headers = false;
     requires_per_keeper_bridging_for_bound_actor_tools = false;
     identity_runtime_mcp_header_keys = [];
+    argv_prompt_preflight = false;
+    uses_anthropic_caching = false;
   }
+
 let runtime_mcp_http_headers =
-  { supports_runtime_mcp_http_headers = true;
+  {
+    supports_runtime_mcp_http_headers = true;
     requires_per_keeper_bridging_for_bound_actor_tools = false;
     identity_runtime_mcp_header_keys = [];
+    argv_prompt_preflight = false;
+    uses_anthropic_caching = false;
   }
+
 (* Codex CLI quirk: its cached login cannot natively inject per-keeper auth
    headers, so any runtime MCP policy that uses bound-actor tools requires
    per-keeper bridging at the cascade layer. The
@@ -164,10 +174,13 @@ let runtime_mcp_http_headers =
    [identity_runtime_mcp_header_keys] enumerates the keys accepted via this
    carve-out even with [supports_runtime_mcp_http_headers = false]. *)
 let codex_cli_tool_policy =
-  { supports_runtime_mcp_http_headers = false;
+  {
+    supports_runtime_mcp_http_headers = false;
     requires_per_keeper_bridging_for_bound_actor_tools = true;
     identity_runtime_mcp_header_keys =
       [ "authorization"; "x-masc-agent-name"; "x-masc-keeper-name" ];
+    argv_prompt_preflight = true;
+    uses_anthropic_caching = false;
   }
 let telemetry_reported = { usage_reporting = Reported; runtime_reporting = Reported }
 let telemetry_unknown = { usage_reporting = Unknown; runtime_reporting = Unknown }
@@ -368,7 +381,8 @@ let direct_adapters =
           expand_auto = true;
           family = Generic;
         };
-      tool_policy = runtime_mcp_http_headers;
+      tool_policy =
+        { runtime_mcp_http_headers with uses_anthropic_caching = true };
       telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
@@ -495,7 +509,8 @@ let direct_adapters =
           expand_auto = false;
           family = Generic;
         };
-      tool_policy = no_tool_http_headers;
+      tool_policy =
+        { no_tool_http_headers with uses_anthropic_caching = true };
       telemetry_policy = telemetry_reported;
     };
     {
@@ -1493,6 +1508,18 @@ let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
   | Glm
   | OpenAI_compat ->
       resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
+
+(* RFC-0058 §2.4 boundary: callers with only the typed [provider_kind]
+   (no full provider config) resolve to an adapter through the same
+   registry lookup as [adapter_of_provider_config]. Returns [None] for
+   kinds that need a [cascade_prefix] string to disambiguate (Glm /
+   OpenAI_compat) — those callers must use [adapter_of_provider_config]
+   or a label-based resolver instead. *)
+let adapter_of_provider_kind
+    (kind : Llm_provider.Provider_config.provider_kind) =
+  match kind with
+  | Glm | OpenAI_compat -> None
+  | _ -> resolve_direct_adapter (adapter_canonical_name_of_provider_kind kind)
 
 let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   match adapter_of_provider_config cfg with

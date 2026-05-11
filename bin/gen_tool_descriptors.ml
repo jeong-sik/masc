@@ -345,6 +345,33 @@ let masc_tool_admin_update_spec : tool_spec =
   }
 ;;
 
+let masc_pause_spec : tool_spec =
+  { name = "masc_pause"
+  ; description =
+      "Pause the server. Stops orchestrator from spawning new agents. Broadcasts \
+       notification to all agents. Use when you need to stop automated work temporarily."
+  ; parameters =
+      [ { p_name = "reason"
+        ; p_type = T_string { enum = None; default = Some "Manual pause" }
+        ; p_description =
+            "Reason for pausing (e.g., 'Need to review', 'Taking a break')"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_resume_spec : tool_spec =
+  { name = "masc_resume"
+  ; description =
+      "Resume the server after pause. Allows orchestrator to spawn agents again. \
+       Broadcasts notification to all agents."
+  ; parameters = []
+  ; additional_properties = false
+  }
+;;
+
 let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_code_read_spec
@@ -359,6 +386,9 @@ let phase6_specs : tool_spec list =
   ; masc_webrtc_offer_spec
   ; masc_webrtc_answer_spec
   ; masc_tool_admin_update_spec
+    (* PR-1 (paving stone): control group *)
+  ; masc_pause_spec
+  ; masc_resume_spec
   ]
 ;;
 

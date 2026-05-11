@@ -27,7 +27,6 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
   filter_retired_front_door_schemas
     (dedupe_schemas
        (Tools.raw_schemas
-       @ Tool_schemas_control.schemas
        @ Tool_schemas_misc.schemas
        @ Tool_board.tools
        @ Keeper_types.schemas

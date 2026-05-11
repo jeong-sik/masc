@@ -316,7 +316,7 @@ let () =
             `Quick
             test_fold_jsonl_lines_streaming_memory
         ; test_case
-            "missing file raises Sys_error"
+            "missing file returns init"
             `Quick
             test_fold_jsonl_lines_missing_file
         ] )

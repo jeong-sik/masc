@@ -99,12 +99,18 @@ val load_jsonl_diagnostics : string -> Yojson.Safe.t list * int
 val parse_jsonl_lines : source:string -> string list -> Yojson.Safe.t list * int
 
 (** Stream JSONL line-by-line via [Eio.Buf_read.lines] when the global
-    fs is registered, falling back to {!load_jsonl} + [List.fold_left]
-    otherwise.  [line_no] is the 1-based index of {b non-blank} JSONL
-    rows (matches {!load_jsonl_diagnostics}).  Use when the file may be
-    too large to materialize as a list, e.g. audit/metrics JSONL on
-    HTTP hot paths.  Returns [init] when [path] is missing (consistent
-    with {!load_jsonl}); raises [Sys_error] on read failures of an
+    fs is registered, falling back to a raw-line iterator over the
+    Stdlib channel otherwise (both branches share the same [line_no]
+    counting).  [line_no] is the 1-based index of {b non-blank}
+    JSONL rows — blank lines are skipped, malformed lines emit a
+    stderr warning and are skipped but {i still consume} the index
+    so the counter tracks the printed JSONL row number rather than
+    the count of successfully parsed values.  Use when the file may
+    be too large to materialize as a list, e.g. audit/metrics JSONL
+    on HTTP hot paths.
+
+    Returns [init] when [path] is missing (consistent with
+    {!load_jsonl}); raises [Sys_error] on read failures of an
     existing file. *)
 val fold_jsonl_lines
   :  init:'acc

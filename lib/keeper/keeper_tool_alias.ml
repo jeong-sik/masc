@@ -109,24 +109,6 @@ let route name =
   | None -> None
 ;;
 
-(** [route_or_miss name] returns the route if found, or records a routing
-    miss via result-based telemetry and returns [None].
-
-    Used by direct OAS-edge dispatch where a [None] result short-circuits
-    the call. General canonicalisation (which also has to handle MCP
-    prefixes and pass-through of already-internal names) goes through
-    [Keeper_tool_disclosure.canonical_tool_name], which emits its own
-    per-branch telemetry — see that module for the wider path. *)
-let route_or_miss name =
-  match route name with
-  | Some r ->
-    record_route_outcome ~tool:name ~routed_to:r.internal_name ~result:"ok";
-    Some r
-  | None ->
-    record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
-    None
-;;
-
 (** [public_names ()] returns all LLM-native public names in stable order.
     Used by callers that previously used [expand_universe] to add alias names
     to allowlists — they should now add these names directly. *)

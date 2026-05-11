@@ -27,15 +27,6 @@ type route =
     [None] means the name is not in our surface — a routing miss. *)
 val route : string -> route option
 
-(** [route_or_miss name] is like [route] but records result-based telemetry:
-    - [ok] with [routed_to = internal_name] when the name resolves
-    - [miss] with [routed_to = "none"] when the name is unknown *)
-val route_or_miss : string -> route option
-
-(** [is_known_public name] is [true] when [name] has a routing entry.
-    Replaces the old [canonicalize_observed] check for known names. *)
-val is_known_public : string -> bool
-
 (** [is_known_internal name] is [true] when [name] is a recognised
     internal handler name (any [routing_table] target plus the full
     [Tool_catalog_surfaces.keeper_internal_tools] set). Callers use this

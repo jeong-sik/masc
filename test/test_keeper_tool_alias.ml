@@ -86,72 +86,11 @@ let test_route_unknown_returns_none () =
   Alcotest.(check (option string)) "empty string has no route" None (route_internal "")
 ;;
 
-let test_route_or_miss_records_ok () =
-  let labels = [ "tool", "Bash"; "routed_to", "keeper_bash"; "result", "ok" ] in
-  let before =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
-      ~labels
-      ()
-  in
-  let _ = Alias.route_or_miss "Bash" in
-  let after =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
-      ~labels
-      ()
-  in
-  Alcotest.(check (float 0.001))
-    "telemetry counter incremented for ok route"
-    (before +. 1.0)
-    after
-;;
-
-let test_route_or_miss_records_miss () =
-  (* Cardinality bound (RFC-0064 PR #14574 review #4): a miss for a
-     hallucinated name like "Skill" is recorded against the
-     [tool="unknown"] / [routed_to="none"] bucket — never against the
-     raw observed string, otherwise each unique hallucination would
-     allocate its own Prometheus time series. *)
-  let labels = [ "tool", "unknown"; "routed_to", "none"; "result", "miss" ] in
-  let before =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
-      ~labels
-      ()
-  in
-  let _ = Alias.route_or_miss "Skill" in
-  let after =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
-      ~labels
-      ()
-  in
-  Alcotest.(check (float 0.001))
-    "telemetry counter incremented for miss (unknown bucket)"
-    (before +. 1.0)
-    after
-;;
-
-let test_known_public_names () =
-  (* Names with a route entry are known public names. *)
-  Alcotest.(check bool) "Bash is known public" true (Alias.is_known_public "Bash");
-  Alcotest.(check bool) "Read is known public" true (Alias.is_known_public "Read");
-  Alcotest.(check bool)
-    "WebSearch is known public"
-    true
-    (Alias.is_known_public "WebSearch");
-  Alcotest.(check bool) "WebFetch is known public" true (Alias.is_known_public "WebFetch");
-  (* Internal names and arbitrary names are NOT public surface names. *)
-  Alcotest.(check bool) "Skill is NOT known public" false (Alias.is_known_public "Skill");
-  Alcotest.(check bool) "Agent is NOT known public" false (Alias.is_known_public "Agent");
-  Alcotest.(check bool)
-    "keeper_bash is NOT known public (it's internal)"
-    false
-    (Alias.is_known_public "keeper_bash")
-;;
-
 let test_alias_table_is_stable () =
+  (* [public_names ()] is the canonical listing of LLM-native public names.
+     Every entry must have a real [route] mapping; pinning length and
+     route resolution catches accidental additions/deletions to the
+     routing table. *)
   let names = Alias.public_names () in
   Alcotest.(check int) "seven public names" 7 (List.length names);
   List.iter
@@ -159,7 +98,7 @@ let test_alias_table_is_stable () =
        Alcotest.(check bool)
          (Printf.sprintf "%s has a route" public)
          true
-         (Alias.is_known_public public))
+         (Option.is_some (Alias.route public)))
     names
 ;;
 
@@ -723,15 +662,6 @@ let () =
             "route unknown returns None"
             `Quick
             test_route_unknown_returns_none
-        ; Alcotest.test_case
-            "route_or_miss records ok"
-            `Quick
-            test_route_or_miss_records_ok
-        ; Alcotest.test_case
-            "route_or_miss records miss"
-            `Quick
-            test_route_or_miss_records_miss
-        ; Alcotest.test_case "known public names" `Quick test_known_public_names
         ; Alcotest.test_case "table is stable" `Quick test_alias_table_is_stable
         ] )
     ; ( "disclosure-integration"

@@ -352,9 +352,16 @@ let tfidf_vector (tokens : string list) (idf : float StringMap.t) : sparse_vec =
     (term, tf_val *. idf_val) :: acc
   ) tf []
 
+let sparse_vec_norm (v : sparse_vec) : float =
+  Stdlib.Float.sqrt
+    (List.fold_left (fun acc (_, w) -> acc +. (w *. w)) 0.0 v)
+
+let sparse_vec_to_map (v : sparse_vec) : float StringMap.t =
+  List.fold_left (fun m (t, w) -> StringMap.add t w m) StringMap.empty v
+
 (** Cosine similarity between two sparse vectors. *)
 let cosine (a : sparse_vec) (b : sparse_vec) : float =
-  let b_tbl = List.fold_left (fun m (t, w) -> StringMap.add t w m) StringMap.empty b in
+  let b_tbl = sparse_vec_to_map b in
   let dot = List.fold_left (fun acc (t, wa) ->
     match StringMap.find_opt t b_tbl with
     | Some wb -> acc +. (wa *. wb)
@@ -362,11 +369,32 @@ let cosine (a : sparse_vec) (b : sparse_vec) : float =
   ) 0.0 a in
   if Stdlib.Float.compare dot 0.0 = 0 then 0.0
   else
-    let norm v = Stdlib.Float.sqrt (List.fold_left (fun acc (_, w) -> acc +. (w *. w)) 0.0 v) in
-    let na = norm a in
-    let nb = norm b in
+    let na = sparse_vec_norm a in
+    let nb = sparse_vec_norm b in
     if Stdlib.Float.compare na 0.0 = 0 || Stdlib.Float.compare nb 0.0 = 0 then 0.0
     else dot /. (na *. nb)
+
+(** Cosine similarity where the reference vector's [StringMap] and norm
+    are pre-computed.  [filter_with_scores] scores N tools against a
+    fixed query — without this helper [cosine] rebuilds the query's
+    [StringMap] and recomputes its [norm] on every call, so per-filter
+    work scaled as N x (|query|).  Now: 1 x (|query|) + N x (|vec|). *)
+let cosine_with_precomp
+    ~(ref_map : float StringMap.t)
+    ~(ref_norm : float)
+    (other : sparse_vec) : float =
+  let dot = List.fold_left (fun acc (t, w) ->
+    match StringMap.find_opt t ref_map with
+    | Some rw -> acc +. (rw *. w)
+    | None -> acc
+  ) 0.0 other in
+  if Stdlib.Float.compare dot 0.0 = 0 then 0.0
+  else
+    let other_norm = sparse_vec_norm other in
+    if Stdlib.Float.compare ref_norm 0.0 = 0
+       || Stdlib.Float.compare other_norm 0.0 = 0
+    then 0.0
+    else dot /. (ref_norm *. other_norm)
 
 (* ================================================================ *)
 (* Public API                                                       *)
@@ -380,9 +408,15 @@ let filter_with_scores ~(tools : Masc_domain.tool_schema list) ~(query : string)
     let docs = List.map build_document tools in
     let idf = compute_idf (query_tokens :: docs) in
     let query_vec = tfidf_vector query_tokens idf in
+    (* Hoist query-side cosine work out of the per-tool loop: the map
+       and norm of [query_vec] are constant across all N scoring calls. *)
+    let query_vec_map = sparse_vec_to_map query_vec in
+    let query_norm = sparse_vec_norm query_vec in
     let tool_vecs = List.map (fun doc -> tfidf_vector doc idf) docs in
     let scored = List.map2 (fun schema vec ->
-      let score = cosine query_vec vec in
+      let score =
+        cosine_with_precomp ~ref_map:query_vec_map ~ref_norm:query_norm vec
+      in
       (schema, score)
     ) tools tool_vecs in
     (* Filter zero-score results *)

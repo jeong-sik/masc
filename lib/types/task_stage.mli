@@ -12,7 +12,7 @@ type t =
   | Implement
   | Verify
   | Review
-[@@deriving show]
+[@@deriving show, eq, ord]
 
 val to_string : t -> string
 val of_string : string -> (t, string) result
@@ -23,11 +23,8 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 (** All stages in canonical order. *)
 val all : t list
 
-(** Index of a stage (0-based). *)
-val index : t -> int
-
 (** Can transition from [current] to [target]?
-    Forward transitions (index target > index current) are allowed.
+    Forward transitions (target > current under {!compare}) are allowed.
     Same-stage re-entry is allowed (idempotent).
     Backward transitions are forbidden. *)
 val can_transition : current:t -> target:t -> bool

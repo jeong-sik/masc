@@ -19,9 +19,13 @@ let test_of_string_invalid () =
   | Ok _ -> fail "expected error for invalid stage"
 
 let test_index_order () =
-  let indices = List.map Task_stage.index Task_stage.all in
-  let sorted = List.sort Int.compare indices in
-  check (list int) "indices are ordered" sorted indices;
+  (* [all] must be in ascending canonical order under [compare].
+     Sorting it should be a no-op. *)
+  let sorted = List.sort Task_stage.compare Task_stage.all in
+  check (list string)
+    "canonical [all] is sorted"
+    (List.map Task_stage.to_string sorted)
+    (List.map Task_stage.to_string Task_stage.all);
   check int "5 stages" 5 (List.length Task_stage.all)
 
 let test_forward_transition () =

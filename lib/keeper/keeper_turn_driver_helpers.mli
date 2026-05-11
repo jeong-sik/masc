@@ -9,7 +9,12 @@ val provider_health_keys_of_config :
 val first_health_cooldown :
   Llm_provider.Provider_config.t -> (string * string) option
 
-type provider_attempt_timeout_constraints = {
+(** Per-attempt timeout bounds.  RFC-0058 Phase 5.6 moved the kind-dispatch
+    into {!Provider_adapter.provider_attempt_timeout_constraints_of_config};
+    re-exported here as a manifest alias so existing field-access callers
+    ([constraints.min_timeout_s]) keep compiling. *)
+type provider_attempt_timeout_constraints =
+      Provider_adapter.provider_attempt_timeout_constraints = {
   min_timeout_s : float option;
   max_timeout_s : float option;
 }

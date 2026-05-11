@@ -444,6 +444,18 @@ val requires_per_keeper_bridging_for_bound_actor_tools_for_config :
 val oas_capabilities_of_config :
   Llm_provider.Provider_config.t -> Llm_provider.Capabilities.capabilities
 
+(** Per-attempt timeout bounds for a provider config.  SSOT for the kind →
+    bounds mapping (RFC-0058 Phase 5.6) — centralises what was previously
+    a closed-variant [match Llm_provider.Provider_config.provider_kind]
+    in [Keeper_turn_driver_helpers]. *)
+type provider_attempt_timeout_constraints = {
+  min_timeout_s : float option;
+  max_timeout_s : float option;
+}
+
+val provider_attempt_timeout_constraints_of_config :
+  Llm_provider.Provider_config.t -> provider_attempt_timeout_constraints
+
 (** Whether a runtime-MCP HTTP header key is acceptable for the resolved
     adapter, even when general HTTP-header support is off.  Covers the
     Codex CLI identity header carve-out

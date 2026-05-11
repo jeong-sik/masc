@@ -1594,6 +1594,28 @@ let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
   | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
   | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
 
+(** SSOT for the OAS provider_kind → per-attempt timeout bounds mapping
+    (RFC-0058 Phase 5.6).  Consumer [Keeper_turn_driver_helpers] previously
+    pattern-matched on [Llm_provider.Provider_config.provider_kind] to
+    derive these bounds; centralising here keeps the consumer off the
+    closed variant. *)
+type provider_attempt_timeout_constraints = {
+  min_timeout_s : float option;
+  max_timeout_s : float option;
+}
+
+let provider_attempt_timeout_constraints_of_config
+    (cfg : Llm_provider.Provider_config.t) =
+  match cfg.kind with
+  | Llm_provider.Provider_config.Ollama ->
+      { min_timeout_s = Some 300.0; max_timeout_s = None }
+  | Claude_code -> { min_timeout_s = None; max_timeout_s = Some 120.0 }
+  | Gemini | Gemini_cli ->
+      { min_timeout_s = None; max_timeout_s = Some 180.0 }
+  | Kimi_cli -> { min_timeout_s = None; max_timeout_s = Some 60.0 }
+  | Anthropic | Kimi | OpenAI_compat | Glm | DashScope | Codex_cli ->
+      { min_timeout_s = None; max_timeout_s = None }
+
 
 (* ── Generic provider auth detail ─────────────────────────────── *)
 

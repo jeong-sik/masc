@@ -183,7 +183,12 @@ let params_of_json_schema schema =
   let required_set =
     match schema |> member "required" with
     | `List items ->
-        let tbl = Hashtbl.create (List.length items) in
+        (* Constant initial size 16: avoid the extra [List.length items]
+           pass (which itself is O(R)) before [List.iter].  Hashtbl
+           auto-resizes — sizing exactly to the input only saves a
+           handful of resizes per call, which is cheaper than re-walking
+           the list. *)
+        let tbl = Hashtbl.create 16 in
         List.iter
           (function
             | `String value -> Hashtbl.replace tbl value ()

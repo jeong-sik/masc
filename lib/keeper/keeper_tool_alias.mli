@@ -1,95 +1,76 @@
-(** Keeper_tool_alias — bidirectional map between LLM-facing tool names
-    (Anthropic Code built-ins like [Bash], [Read]) and the internal
-    keeper surface names ([keeper_bash], [keeper_fs_read], ...).
+(** Keeper_tool_alias — flat routing table for two-surface tool naming.
 
-    The internal name remains the SSOT for metrics, decisions.jsonl,
-    audit logs and dashboards. Aliases live alongside, not instead of,
-    the internal names. *)
+    RFC-0064: replaces the 3-tier classification with a single [route]
+    type. Each LLM-native tool name maps to one route record containing
+    the internal handler name, an input translator, and an optional
+    public schema.
 
-(** [to_internal public_name] returns the internal [keeper_*] name when
-    [public_name] is a known alias. Returns [None] otherwise.
+    Two surfaces:
+    - LLM native tools (Bash, Read, Edit, Write, Grep, WebSearch, WebFetch)
+    - MCP tools (masc_*, handled via Tool_catalog_surfaces)
 
-    Examples: [to_internal "Bash" = Some "keeper_bash"],
-    [to_internal "WebSearch" = Some "masc_web_search"],
-    [to_internal "Skill" = None] (no cognate). *)
-val to_internal : string -> string option
+    Internal [keeper_*] names are implementation details of the routing
+    layer, not a public surface. A tool call for a name not in the routing
+    table is a routing miss — outcome-based telemetry captures this.
 
-(** [to_public internal_name] returns the LLM-facing alias for an
-    internal [keeper_*] or keeper-visible [masc_*] tool. Falls back
-    to [internal_name] verbatim
-    when the tool has no Anthropic Code cognate (board/task/etc.) or
-    when only part of the internal tool has a public alias, such as
-    [Grep] for [keeper_shell op=rg]. *)
-val to_public : string -> string
+    @since 2.187.0 — RFC-0064 two-surface model *)
 
-(** [canonicalize_observed names] maps every recognized public alias
-    to its internal name and leaves all other names untouched. Used
-    by the disclosure check to treat [Bash] as [keeper_bash] when
-    counting unexpected tools. *)
-val canonicalize_observed : string list -> string list
+(** {1 Route type} *)
 
-(** [canonicalize_observed_with_telemetry names] is the runtime variant of
-    [canonicalize_observed]. It returns the same canonical names and increments
-    [masc_keeper_tool_alias_canonicalizations_total] for every observed public
-    or MCP-prefixed name rewritten to a keeper-facing name. *)
-val canonicalize_observed_with_telemetry : string list -> string list
+type route = {
+  internal_name : string;
+  translate : Yojson.Safe.t -> Yojson.Safe.t;
+  public_schema : Yojson.Safe.t option;
+}
 
-(** [hallucinated_builtins] lists the public names from the Anthropic
-    Code surface that have **no** cognate in the keeper surface
-    (e.g. [Skill], [Agent], [WebFetch]). These should be flagged with
-    a teaching message rather than nuking the turn. *)
-val hallucinated_builtins : string list
+(** [route public_name] returns routing info for a known LLM-native tool.
+    [None] means the name is not in our surface — a routing miss. *)
+val route : string -> route option
 
-(** [is_hallucinated_builtin name] is [true] iff [name] appears in
-    [hallucinated_builtins]. *)
-val is_hallucinated_builtin : string -> bool
+(** [route_or_miss name] is like [route] but records result-based telemetry:
+    - [ok] with [routed_to = internal_name] when the name resolves
+    - [miss] with [routed_to = "none"] when the name is unknown *)
+val route_or_miss : string -> route option
 
-(** [all_aliases ()] returns the full alias table as
-    [(public, internal)] pairs. Stable order; suitable for tests and
-    documentation generation. *)
-val all_aliases : unit -> (string * string) list
+(** [is_known_public name] is [true] when [name] has a routing entry.
+    Replaces the old [canonicalize_observed] check for known names. *)
+val is_known_public : string -> bool
 
-(** {1 OAS dual registration (Phase A.2)} *)
+(** [public_names ()] returns all LLM-native public names in stable order.
+    Replaces [expand_universe] — callers should add these names directly
+    to allowlists at construction time. *)
+val public_names : unit -> string list
 
-(** [oas_dual_register_aliases ()] is the subset of [all_aliases ()]
-    safe to register with OAS as additional [Tool.t] entries sharing
-    the keeper handler.
+(** {1 Result-based telemetry} *)
 
-    Membership requires (a) a known input-shape translation back to the
-    internal tool's schema and (b) a tailored public input_schema so
-    the LLM sees the Anthropic-Code shape it expects.
+(** [record_route_outcome ~tool ~routed_to ~result] increments the
+    [masc_keeper_tool_call_total] counter with the given labels.
+    [result] is ["ok"] for a successful route or ["miss"] for an unknown name. *)
+val record_route_outcome : tool:string -> routed_to:string -> result:string -> unit
 
-    Phase A.2: [Bash], [Read].
-    Phase A.4: [Edit] (via new keeper_fs_edit mode=patch), [Write]
-    (via mode=overwrite), [Grep] (synthesized as keeper_shell op=rg).
-    WebSearch maps directly to [masc_web_search]. *)
-val oas_dual_register_aliases : unit -> (string * string) list
+(** {1 MCP surface routing (separate concern)} *)
+
+(** [public_masc_to_internal name] resolves an MCP-prefixed public name
+    (e.g. [masc_board_get]) to its internal keeper name, via the
+    [Tool_catalog_surfaces.keeper_internal_replacement] table. *)
+val public_masc_to_internal : string -> string option
+
+(** [strip_mcp_masc_prefix name] removes the ["mcp__masc__"] prefix if
+    present. *)
+val strip_mcp_masc_prefix : string -> string
+
+(** {1 Public schemas} *)
 
 (** [public_input_schema public_name] returns the LLM-facing JSON schema
-    for an aliased tool. [None] means there is no tailored schema yet
-    — callers should fall back to the internal tool's schema (which is
-    not ideal because the LLM expects the Anthropic-Code field names). *)
+    for a known public tool name. [None] means no tailored schema exists —
+    callers should fall back to the internal tool's schema. *)
 val public_input_schema : string -> Yojson.Safe.t option
+
+(** {1 Input translation} *)
 
 (** [translate_input ~public input] reshapes an LLM call payload from
     the public schema (Anthropic Code field names) to the internal
     keeper tool's expected payload.
 
-    For unknown public names this is the identity. Defined for every
-    name in [oas_dual_register_aliases ()].
-
-    Examples:
-    - [translate_input ~public:"Bash" {| {"command":"ls","timeout":30} |}]
-      → [{| {"cmd":"ls","timeout_sec":30} |}]
-    - [translate_input ~public:"Read" {| {"file_path":"x"} |}]
-      → [{| {"path":"x"} |}] *)
+    For unknown public names this is the identity. *)
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
-
-(** [expand_universe internal_names] returns [internal_names] with the
-    public-name aliases of every member of [oas_dual_register_aliases ()]
-    appended (deduplicated, original order preserved).
-
-    Callers building AllowList / universe / allowed_exec sets in
-    [keeper_agent_run.ml] must apply this so the public alias names are
-    not pruned before reaching the LLM-facing tool list. *)
-val expand_universe : string list -> string list

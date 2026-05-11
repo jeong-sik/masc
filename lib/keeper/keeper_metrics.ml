@@ -98,7 +98,7 @@ type t =
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
   | RequireToolUseViolations
-  | ToolAliasCanonicalizations
+  | ToolCallTotal
   | ProfileConfigConflicts
   | OasTimeoutClassifications
   | NoToolProvider
@@ -292,10 +292,9 @@ let to_string = function
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
   | PausedStatePersistErrors -> "masc_keeper_paused_state_persist_errors_total"
-  | UnexpectedToolPartialTolerance ->
-    "masc_keeper_unexpected_tool_partial_tolerance_total"
+  | UnexpectedToolPartialTolerance -> "masc_keeper_unexpected_tool_partial_tolerance_total"
   | RequireToolUseViolations -> "masc_keeper_require_tool_use_violations_total"
-  | ToolAliasCanonicalizations -> "masc_keeper_tool_alias_canonicalizations_total"
+  | ToolCallTotal -> "masc_keeper_tool_call_total"
   | ProfileConfigConflicts -> "masc_keeper_profile_config_conflicts_total"
   | OasTimeoutClassifications -> "masc_keeper_oas_timeout_classifications_total"
   | NoToolProvider -> "masc_keeper_no_tool_provider_total"
@@ -354,8 +353,7 @@ let to_string = function
   | SupervisorCleanupFailures -> "masc_keeper_supervisor_cleanup_failures_total"
   | SlotForceReleased -> "masc_keeper_slot_force_released_total"
   | RegistryUpdateDropped -> "masc_keeper_registry_update_dropped_total"
-  | RegistryOrphanThresholdBreached ->
-    "masc_keeper_registry_orphan_threshold_breached_total"
+  | RegistryOrphanThresholdBreached -> "masc_keeper_registry_orphan_threshold_breached_total"
   | StaleWatchdogTickFailures -> "masc_keeper_stale_watchdog_tick_failures_total"
   | DeadTotal -> "masc_keeper_dead_total"
   | AutoResumedTotal -> "masc_keeper_auto_resumed_total"
@@ -378,10 +376,8 @@ let to_string = function
   | OasTimeoutBudgetStrike -> "masc_keeper_oas_timeout_budget_strike_total"
   | StaleTerminationTotal -> "masc_keeper_stale_termination_total"
   | StaleTerminationByClass -> "masc_keeper_stale_termination_by_class_total"
-  | OasTimeoutBudgetWatchdogTermination ->
-    "masc_keeper_oas_timeout_budget_watchdog_termination_total"
-  | StaleTerminationThresholdBreached ->
-    "masc_keeper_stale_termination_threshold_breached_total"
+  | OasTimeoutBudgetWatchdogTermination -> "masc_keeper_oas_timeout_budget_watchdog_termination_total"
+  | StaleTerminationThresholdBreached -> "masc_keeper_stale_termination_threshold_breached_total"
   | StaleTerminationBatch -> "masc_keeper_stale_termination_batch_total"
   | StaleBroadcastEmitFailures -> "masc_keeper_stale_broadcast_emit_failures"
   | OasRunTimeout -> "masc_keeper_oas_run_timeout_total"
@@ -400,7 +396,6 @@ let to_string = function
   | PostTurnWireinFailures -> "masc_keeper_post_turn_wirein_failures_total"
   | RecurringFailures -> "masc_keeper_recurring_failures_total"
   | TurnCleanupFailures -> "masc_keeper_turn_cleanup_failures_total"
-;;
 
 (** Backward-compatible string constants
 
@@ -421,15 +416,8 @@ let metric_keeper_idle_seconds = "masc_keeper_idle_seconds"
 let metric_keeper_contract_violations = "masc_keeper_contract_violations_total"
 let metric_keeper_alive_but_stuck = "masc_keeper_alive_but_stuck_total"
 let metric_keeper_alive_but_stuck_seconds = "masc_keeper_alive_but_stuck_seconds"
-
-let metric_keeper_alive_but_stuck_threshold_seconds =
-  "masc_keeper_alive_but_stuck_threshold_seconds"
-;;
-
-let metric_keeper_alive_but_stuck_recovery_requests =
-  "masc_keeper_alive_but_stuck_recovery_requests_total"
-;;
-
+let metric_keeper_alive_but_stuck_threshold_seconds = "masc_keeper_alive_but_stuck_threshold_seconds"
+let metric_keeper_alive_but_stuck_recovery_requests = "masc_keeper_alive_but_stuck_recovery_requests_total"
 let metric_keeper_alive_but_stuck_recovery = "masc_keeper_alive_but_stuck_recovery_total"
 let metric_keeper_metric_emit_dropped = "masc_keeper_metric_emit_dropped_total"
 let metric_keeper_context_max_observed = "masc_keeper_context_max_observed_total"
@@ -438,37 +426,17 @@ let metric_keeper_turn_reattempts = "masc_keeper_turn_reattempts_total"
 let metric_keeper_turn_regressions = "masc_keeper_turn_regressions_total"
 let metric_keeper_turn_livelock_blocks = "masc_keeper_turn_livelock_blocks_total"
 let metric_keeper_turn_latency_bucket = "masc_keeper_turn_latency_bucket_total"
-
-let metric_keeper_turn_latency_by_model_bucket =
-  "masc_keeper_turn_latency_by_model_bucket_total"
-;;
-
+let metric_keeper_turn_latency_by_model_bucket = "masc_keeper_turn_latency_by_model_bucket_total"
 let metric_keeper_provider_cooldown_skip = "masc_keeper_provider_cooldown_skip_total"
-
-let metric_keeper_provider_cooldown_remaining_sec =
-  "masc_keeper_provider_cooldown_remaining_sec"
-;;
-
+let metric_keeper_provider_cooldown_remaining_sec = "masc_keeper_provider_cooldown_remaining_sec"
 let metric_keeper_provider_block_duration_sec = "masc_keeper_provider_block_duration_sec"
 let metric_keeper_turn_queue_depth = "masc_keeper_turn_queue_depth"
 let metric_keeper_supervisor_sweep_starts = "masc_keeper_supervisor_sweep_starts_total"
-
-let metric_keeper_supervisor_last_sweep_unixtime =
-  "masc_keeper_supervisor_last_sweep_unixtime"
-;;
-
+let metric_keeper_supervisor_last_sweep_unixtime = "masc_keeper_supervisor_last_sweep_unixtime"
 let metric_keeper_semaphore_wait_timeout = "masc_keeper_semaphore_wait_timeout_total"
-
-let metric_keeper_turn_slot_bookkeeping_failures =
-  "masc_keeper_turn_slot_bookkeeping_failures_total"
-;;
-
+let metric_keeper_turn_slot_bookkeeping_failures = "masc_keeper_turn_slot_bookkeeping_failures_total"
 let metric_keeper_semaphore_wait_seconds = "masc_keeper_semaphore_wait_seconds"
-
-let metric_keeper_semaphore_wait_seconds_bucket =
-  "masc_keeper_semaphore_wait_seconds_bucket"
-;;
-
+let metric_keeper_semaphore_wait_seconds_bucket = "masc_keeper_semaphore_wait_seconds_bucket"
 let metric_keeper_slot_yield_total = "masc_keeper_slot_yield_total"
 let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change = "masc_keeper_compaction_ratio_change"
@@ -478,26 +446,14 @@ let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 let metric_keeper_compaction_noop = "masc_keeper_compaction_noop_total"
 let metric_keeper_tool_emission_registry_size = "masc_keeper_tool_emission_registry_size"
 let metric_keeper_tool_emission_pushes = "masc_keeper_tool_emission_pushes_total"
-
-let metric_keeper_tool_underused_allowed_count =
-  "masc_keeper_tool_underused_allowed_count"
-;;
-
+let metric_keeper_tool_underused_allowed_count = "masc_keeper_tool_underused_allowed_count"
 let metric_keeper_tool_underused_allowed = "masc_keeper_tool_underused_allowed"
 let metric_keeper_path_rejection = "masc_keeper_path_rejection_total"
-
-let metric_keeper_path_resolver_identity_mismatch =
-  "masc_keeper_path_resolver_identity_mismatch_total"
-;;
-
+let metric_keeper_path_resolver_identity_mismatch = "masc_keeper_path_resolver_identity_mismatch_total"
 let metric_keeper_admission_shadow_outcome = "masc_keeper_admission_shadow_outcome_total"
 let metric_keeper_heartbeat_successes = "masc_keeper_heartbeat_successes_total"
 let metric_keeper_heartbeat_failures = "masc_keeper_heartbeat_failures_total"
-
-let metric_keeper_cleanup_tracking_failures =
-  "masc_keeper_cleanup_tracking_failures_total"
-;;
-
+let metric_keeper_cleanup_tracking_failures = "masc_keeper_cleanup_tracking_failures_total"
 let metric_keeper_dispatch_event_failures = "masc_keeper_dispatch_event_failures_total"
 let metric_keeper_directive_failures = "masc_keeper_directive_failures_total"
 let metric_keeper_tool_call_duration = "masc_keeper_tool_call_duration_seconds"
@@ -508,27 +464,13 @@ let metric_keeper_guards_failures = "masc_keeper_guards_failures_total"
 let metric_keeper_profile_load_failures = "masc_keeper_profile_load_failures_total"
 let metric_keeper_compact_audit_failures = "masc_keeper_compact_audit_failures_total"
 let metric_keeper_fs_failures = "masc_keeper_fs_failures_total"
-
-let metric_keeper_crash_persistence_failures =
-  "masc_keeper_crash_persistence_failures_total"
-;;
-
-let metric_keeper_generation_lineage_failures =
-  "masc_keeper_generation_lineage_failures_total"
-;;
-
-let metric_keeper_keepalive_signal_failures =
-  "masc_keeper_keepalive_signal_failures_total"
-;;
-
+let metric_keeper_crash_persistence_failures = "masc_keeper_crash_persistence_failures_total"
+let metric_keeper_generation_lineage_failures = "masc_keeper_generation_lineage_failures_total"
+let metric_keeper_keepalive_signal_failures = "masc_keeper_keepalive_signal_failures_total"
 let metric_keeper_board_signal_no_wake_total = "masc_keeper_board_signal_no_wake_total"
 let metric_keeper_meta_json_failures = "masc_keeper_meta_json_failures_total"
 let metric_keeper_tools_oas_failures = "masc_keeper_tools_oas_failures_total"
-
-let metric_keeper_oas_hook_output_parse_failures =
-  "masc_keeper_oas_hook_output_parse_failures_total"
-;;
-
+let metric_keeper_oas_hook_output_parse_failures = "masc_keeper_oas_hook_output_parse_failures_total"
 let metric_keeper_turn_up_update_failures = "masc_keeper_turn_up_update_failures_total"
 let metric_keeper_exec_tools_failures = "masc_keeper_exec_tools_failures_total"
 let metric_keeper_circuit_breaker_trips = "masc_keeper_circuit_breaker_trips_total"
@@ -537,45 +479,18 @@ let metric_keeper_run_context_failures = "masc_keeper_run_context_failures_total
 let metric_keeper_shell_ops_failures = "masc_keeper_shell_ops_failures_total"
 let metric_keeper_tag_dispatch_failures = "masc_keeper_tag_dispatch_failures_total"
 let metric_keeper_trace_emit_failures = "masc_keeper_trace_emit_failures_total"
-
-let metric_keeper_transition_audit_failures =
-  "masc_keeper_transition_audit_failures_total"
-;;
-
-let metric_keeper_execution_receipt_failures =
-  "masc_keeper_execution_receipt_failures_total"
-;;
-
+let metric_keeper_transition_audit_failures = "masc_keeper_transition_audit_failures_total"
+let metric_keeper_execution_receipt_failures = "masc_keeper_execution_receipt_failures_total"
 let metric_keeper_llm_bridge_failures = "masc_keeper_llm_bridge_failures_total"
 let metric_keeper_shell_bash_failures = "masc_keeper_shell_bash_failures_total"
 let metric_keeper_rollover_failures = "masc_keeper_rollover_failures_total"
-
-let metric_keeper_lifecycle_dispatch_rejections =
-  "masc_keeper_lifecycle_dispatch_rejections_total"
-;;
-
-let metric_keeper_paused_state_persist_errors =
-  "masc_keeper_paused_state_persist_errors_total"
-;;
-
-let metric_keeper_unexpected_tool_partial_tolerance =
-  "masc_keeper_unexpected_tool_partial_tolerance_total"
-;;
-
-let metric_keeper_require_tool_use_violations =
-  "masc_keeper_require_tool_use_violations_total"
-;;
-
-let metric_keeper_tool_alias_canonicalizations =
-  "masc_keeper_tool_alias_canonicalizations_total"
-;;
-
+let metric_keeper_lifecycle_dispatch_rejections = "masc_keeper_lifecycle_dispatch_rejections_total"
+let metric_keeper_paused_state_persist_errors = "masc_keeper_paused_state_persist_errors_total"
+let metric_keeper_unexpected_tool_partial_tolerance = "masc_keeper_unexpected_tool_partial_tolerance_total"
+let metric_keeper_require_tool_use_violations = "masc_keeper_require_tool_use_violations_total"
+let metric_keeper_tool_call_total = "masc_keeper_tool_call_total"
 let metric_keeper_profile_config_conflicts = "masc_keeper_profile_config_conflicts_total"
-
-let metric_keeper_oas_timeout_classifications =
-  "masc_keeper_oas_timeout_classifications_total"
-;;
-
+let metric_keeper_oas_timeout_classifications = "masc_keeper_oas_timeout_classifications_total"
 let metric_keeper_no_tool_provider = "masc_keeper_no_tool_provider_total"
 let metric_keeper_proactive_outcome = "masc_keeper_proactive_outcome_total"
 let metric_keeper_ollama_saturation_skip = "masc_keeper_ollama_saturation_skip_total"
@@ -583,121 +498,57 @@ let metric_keeper_task_load_failures = "masc_keeper_task_load_failures_total"
 let metric_keeper_tool_selection_failures = "masc_keeper_tool_selection_failures_total"
 let metric_keeper_tool_policy_failures = "masc_keeper_tool_policy_failures_total"
 let metric_keeper_reconcile_failures = "masc_keeper_reconcile_failures_total"
-
-let metric_keeper_decision_audit_flush_failures =
-  "masc_keeper_decision_audit_flush_failures_total"
-;;
-
+let metric_keeper_decision_audit_flush_failures = "masc_keeper_decision_audit_flush_failures_total"
 let metric_keeper_oas_cancel = "masc_keeper_oas_cancel_total"
 let metric_keeper_claim_auto_provision = "masc_keeper_claim_auto_provision_total"
 let metric_keeper_toml_invalid = "masc_keeper_toml_invalid_total"
 let metric_keeper_persona_drift_missing = "masc_keeper_persona_drift_missing_total"
 let metric_keeper_room_init_failures = "masc_keeper_room_init_failures_total"
 let metric_keeper_presence_sync_failures = "masc_keeper_presence_sync_failures_total"
-
-let metric_keeper_self_preservation_universal =
-  "masc_keeper_self_preservation_universal_total"
-;;
-
+let metric_keeper_self_preservation_universal = "masc_keeper_self_preservation_universal_total"
 let metric_keeper_stale_storm_paused = "masc_keeper_stale_storm_paused_total"
 let metric_keeper_stale_fleet_batch_paused = "masc_keeper_stale_fleet_batch_paused_total"
-
-let metric_keeper_oas_timeout_budget_loop_paused =
-  "masc_keeper_oas_timeout_budget_loop_paused_total"
-;;
-
+let metric_keeper_oas_timeout_budget_loop_paused = "masc_keeper_oas_timeout_budget_loop_paused_total"
 let metric_keeper_cycle_exceptions = "masc_keeper_cycle_exceptions_total"
 let metric_keeper_snapshot_write_failures = "masc_keeper_snapshot_write_failures_total"
-
-let metric_keeper_progress_updated_line_failures =
-  "masc_keeper_progress_updated_line_failures_total"
-;;
-
+let metric_keeper_progress_updated_line_failures = "masc_keeper_progress_updated_line_failures_total"
 let metric_keeper_sse_broadcast_failures = "masc_keeper_sse_broadcast_failures_total"
 let metric_keeper_room_heartbeat_failures = "masc_keeper_room_heartbeat_failures_total"
-
-let metric_keeper_turn_metrics_snapshot_failures =
-  "masc_keeper_turn_metrics_snapshot_failures_total"
-;;
-
+let metric_keeper_turn_metrics_snapshot_failures = "masc_keeper_turn_metrics_snapshot_failures_total"
 let metric_keeper_oas_execution_errors = "masc_keeper_oas_execution_errors_total"
 let metric_keeper_episode_create_failures = "masc_keeper_episode_create_failures_total"
-
-let metric_keeper_memory_activity_emit_failures =
-  "masc_keeper_memory_activity_emit_failures_total"
-;;
-
-let metric_keeper_supervisor_sweep_failures =
-  "masc_keeper_supervisor_sweep_failures_total"
-;;
-
-let metric_keeper_toml_reconcile_sweep_failures =
-  "masc_keeper_toml_reconcile_sweep_failures_total"
-;;
-
-let metric_keeper_tool_usage_flush_failures =
-  "masc_keeper_tool_usage_flush_failures_total"
-;;
-
+let metric_keeper_memory_activity_emit_failures = "masc_keeper_memory_activity_emit_failures_total"
+let metric_keeper_supervisor_sweep_failures = "masc_keeper_supervisor_sweep_failures_total"
+let metric_keeper_toml_reconcile_sweep_failures = "masc_keeper_toml_reconcile_sweep_failures_total"
+let metric_keeper_tool_usage_flush_failures = "masc_keeper_tool_usage_flush_failures_total"
 let metric_keeper_turn_timeout_committed = "masc_keeper_turn_timeout_committed_total"
 let metric_keeper_turn_error_after_tools = "masc_keeper_turn_error_after_tools_total"
 let metric_keeper_cascade_sync_failures = "masc_keeper_cascade_sync_failures_total"
 let metric_keeper_local_discovery_failures = "masc_keeper_local_discovery_failures_total"
-
-let metric_keeper_thinking_persist_failures =
-  "masc_keeper_thinking_persist_failures_total"
-;;
-
+let metric_keeper_thinking_persist_failures = "masc_keeper_thinking_persist_failures_total"
 let metric_keeper_checkpoint_failures = "masc_keeper_checkpoint_failures_total"
 let metric_keeper_memory_write_failures = "masc_keeper_memory_write_failures_total"
 let metric_keeper_memory_consolidations = "masc_keeper_memory_consolidations_total"
-
-let metric_keeper_write_meta_cycle_failures =
-  "masc_keeper_write_meta_cycle_failures_total"
-;;
-
+let metric_keeper_write_meta_cycle_failures = "masc_keeper_write_meta_cycle_failures_total"
 let metric_keeper_alert_persist_failures = "masc_keeper_alert_persist_failures_total"
 let metric_keeper_metrics_sse_failures = "masc_keeper_metrics_sse_failures_total"
 let metric_keeper_chat_store_failures = "masc_keeper_chat_store_failures_total"
-
-let metric_keeper_observation_query_failures =
-  "masc_keeper_observation_query_failures_total"
-;;
-
+let metric_keeper_observation_query_failures = "masc_keeper_observation_query_failures_total"
 let metric_keeper_oas_on_stop = "masc_keeper_oas_on_stop_total"
 let metric_keeper_oas_on_idle_escalated = "masc_keeper_oas_on_idle_escalated_total"
-
-let metric_keeper_quantitative_claim_rejections =
-  "masc_keeper_quantitative_claim_rejections_total"
-;;
-
+let metric_keeper_quantitative_claim_rejections = "masc_keeper_quantitative_claim_rejections_total"
 let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
 let metric_keeper_fsm_edge_transitions = "masc_keeper_fsm_edge_transitions_total"
 let metric_keeper_turn_fsm_transitions = "masc_keeper_turn_fsm_transitions_total"
 let metric_keeper_turn_phase_duration = "masc_keeper_turn_phase_duration_seconds"
 let metric_keeper_lifecycle_transitions = "masc_keeper_lifecycle_transitions_total"
-
-let metric_keeper_lifecycle_callback_failures =
-  "masc_keeper_lifecycle_callback_failures_total"
-;;
-
+let metric_keeper_lifecycle_callback_failures = "masc_keeper_lifecycle_callback_failures_total"
 let metric_keeper_event_bus_drain = "masc_keeper_event_bus_drain_total"
-
-let metric_keeper_supervisor_cleanup_failures =
-  "masc_keeper_supervisor_cleanup_failures_total"
-;;
-
+let metric_keeper_supervisor_cleanup_failures = "masc_keeper_supervisor_cleanup_failures_total"
 let metric_keeper_slot_force_released = "masc_keeper_slot_force_released_total"
 let metric_keeper_registry_update_dropped = "masc_keeper_registry_update_dropped_total"
-
-let metric_keeper_registry_orphan_threshold_breached =
-  "masc_keeper_registry_orphan_threshold_breached_total"
-;;
-
-let metric_keeper_stale_watchdog_tick_failures =
-  "masc_keeper_stale_watchdog_tick_failures_total"
-;;
-
+let metric_keeper_registry_orphan_threshold_breached = "masc_keeper_registry_orphan_threshold_breached_total"
+let metric_keeper_stale_watchdog_tick_failures = "masc_keeper_stale_watchdog_tick_failures_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
 let metric_keeper_auto_resumed_total = "masc_keeper_auto_resumed_total"
 let metric_keeper_auto_resume_blocked_total = "masc_keeper_auto_resume_blocked_total"
@@ -708,91 +559,35 @@ let metric_keeper_unsupported_stimulus = "masc_keeper_unsupported_stimulus_total
 let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
 let metric_keeper_restart_attempts = "masc_keeper_restart_attempts_total"
 let metric_keeper_restart_outcomes = "masc_keeper_restart_outcomes_total"
-
-let metric_keeper_liveness_recovery_attempts =
-  "masc_keeper_liveness_recovery_attempts_total"
-;;
-
-let metric_keeper_liveness_recovery_outcomes =
-  "masc_keeper_liveness_recovery_outcomes_total"
-;;
-
+let metric_keeper_liveness_recovery_attempts = "masc_keeper_liveness_recovery_attempts_total"
+let metric_keeper_liveness_recovery_outcomes = "masc_keeper_liveness_recovery_outcomes_total"
 let metric_keeper_passive_loop_detected_total = "masc_keeper_passive_loop_detected_total"
-
-let metric_keeper_required_tool_loop_detected_total =
-  "masc_keeper_required_tool_loop_detected_total"
-;;
-
+let metric_keeper_required_tool_loop_detected_total = "masc_keeper_required_tool_loop_detected_total"
 let metric_keeper_zombie_loop_detected_total = "masc_keeper_zombie_loop_detected_total"
-
-let metric_keeper_required_tool_gate_suppressed_total =
-  "masc_keeper_required_tool_gate_suppressed_total"
-;;
-
+let metric_keeper_required_tool_gate_suppressed_total = "masc_keeper_required_tool_gate_suppressed_total"
 let metric_keeper_consecutive_idle = "masc_keeper_consecutive_idle"
 let metric_keeper_last_productive_ts = "masc_keeper_last_productive_ts"
-
-let metric_keeper_oas_timeout_budget_strike =
-  "masc_keeper_oas_timeout_budget_strike_total"
-;;
-
+let metric_keeper_oas_timeout_budget_strike = "masc_keeper_oas_timeout_budget_strike_total"
 let metric_keeper_stale_termination_total = "masc_keeper_stale_termination_total"
-
-let metric_keeper_stale_termination_by_class =
-  "masc_keeper_stale_termination_by_class_total"
-;;
-
-let metric_keeper_oas_timeout_budget_watchdog_termination =
-  "masc_keeper_oas_timeout_budget_watchdog_termination_total"
-;;
-
-let metric_keeper_stale_termination_threshold_breached =
-  "masc_keeper_stale_termination_threshold_breached_total"
-;;
-
+let metric_keeper_stale_termination_by_class = "masc_keeper_stale_termination_by_class_total"
+let metric_keeper_oas_timeout_budget_watchdog_termination = "masc_keeper_oas_timeout_budget_watchdog_termination_total"
+let metric_keeper_stale_termination_threshold_breached = "masc_keeper_stale_termination_threshold_breached_total"
 let metric_keeper_stale_termination_batch = "masc_keeper_stale_termination_batch_total"
-
-let metric_keeper_stale_broadcast_emit_failures =
-  "masc_keeper_stale_broadcast_emit_failures"
-;;
-
+let metric_keeper_stale_broadcast_emit_failures = "masc_keeper_stale_broadcast_emit_failures"
 let metric_keeper_oas_run_timeout = "masc_keeper_oas_run_timeout_total"
 let metric_keeper_tool_use_failure = "masc_keeper_tool_use_failure_total"
 let metric_keeper_tool_not_allowed = "masc_keeper_tool_not_allowed_total"
-
-let metric_keeper_turn_gate_rejected_terminal =
-  "masc_keeper_turn_gate_rejected_terminal_total"
-;;
-
-let metric_keeper_receipt_unmapped_disposition =
-  "masc_keeper_receipt_unmapped_disposition_total"
-;;
-
+let metric_keeper_turn_gate_rejected_terminal = "masc_keeper_turn_gate_rejected_terminal_total"
+let metric_keeper_receipt_unmapped_disposition = "masc_keeper_receipt_unmapped_disposition_total"
 let metric_keeper_bash_network_upgrade = "masc_keeper_bash_network_upgrade_total"
 let metric_keeper_bash_local_execution = "masc_keeper_bash_local_execution_total"
 let metric_keeper_docker_runtime_discarded = "masc_keeper_docker_runtime_discarded_total"
 let metric_keeper_proactive_skip = "masc_keeper_proactive_skip_total"
-
-let metric_keeper_stay_silent_loop_detected =
-  "masc_keeper_stay_silent_loop_detected_total"
-;;
-
+let metric_keeper_stay_silent_loop_detected = "masc_keeper_stay_silent_loop_detected_total"
 let metric_keeper_usage_trust = "masc_keeper_usage_trust_total"
 let metric_keeper_usage_anomaly_reason = "masc_keeper_usage_anomaly_reason_total"
-
-let metric_keeper_config_env_parse_failures =
-  "masc_keeper_config_env_parse_failures_total"
-;;
-
-let metric_keeper_post_turn_wirein_failures =
-  "masc_keeper_post_turn_wirein_failures_total"
-;;
-
+let metric_keeper_config_env_parse_failures = "masc_keeper_config_env_parse_failures_total"
+let metric_keeper_post_turn_wirein_failures = "masc_keeper_post_turn_wirein_failures_total"
 let metric_keeper_recurring_failures = "masc_keeper_recurring_failures_total"
 let metric_keeper_turn_cleanup_failures = "masc_keeper_turn_cleanup_failures_total"
 let metric_keeper_session_cleanup_failures = "masc_keeper_session_cleanup_failures_total"
-let metric_keeper_passive_loop_streak = "masc_keeper_passive_loop_streak"
-
-let metric_keeper_passive_loop_streak_exceeded =
-  "masc_keeper_passive_loop_streak_exceeded_total"
-;;

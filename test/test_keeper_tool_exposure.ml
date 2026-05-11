@@ -294,7 +294,7 @@ let test_research_preset_has_read_tools () =
 
 let test_last_turn_safe_keeps_discovery_and_web_search () =
   let tools = Keeper_tool_policy.last_turn_safe_tool_names () in
-  let alias_expanded = Keeper_tool_alias.expand_universe tools in
+  let alias_expanded = tools @ Keeper_tool_alias.public_names () in
   check bool "last turn allows keeper_tool_search" true
     (has_tool "keeper_tool_search" tools);
   check bool "last turn allows masc_web_search" true

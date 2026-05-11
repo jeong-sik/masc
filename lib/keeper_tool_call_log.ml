@@ -82,8 +82,8 @@ let pending_turn_context : (string, turn_context) Hashtbl.t = Hashtbl.create 8
 
 let handler_logged_key ~keeper_name ~tool_name ~output_text ~success =
   let canonical_tool_name =
-    match Keeper_tool_alias.to_internal tool_name with
-    | Some internal -> internal
+    match Keeper_tool_alias.route tool_name with
+    | Some r -> r.internal_name
     | None -> tool_name
   in
   Printf.sprintf "%s\000%s\000%b\000%d"

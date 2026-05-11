@@ -1,142 +1,130 @@
 (** Tests for Keeper_tool_alias.
 
-    Phase A.1 of RFC-0006. The module is data-only at this point;
-    these tests pin the alias table so subsequent runtime wiring
-    (Phase A.2/A.3) can rely on stable contracts. *)
+    RFC-0064: two-surface routing table. Public names (Bash, Read, …)
+    map to internal handler names (keeper_bash, keeper_fs_read, …)
+    via a single [route] type. No reverse lookup or tier classification. *)
 
 module Alias = Masc_mcp.Keeper_tool_alias
 module Disclosure = Masc_mcp.Keeper_tool_disclosure
 
+let route_internal name =
+  match Alias.route name with
+  | Some r -> Some r.internal_name
+  | None -> None
+
 let test_known_aliases_resolve () =
   Alcotest.(check (option string)) "Bash -> keeper_bash"
-    (Some "keeper_bash") (Alias.to_internal "Bash");
+    (Some "keeper_bash") (route_internal "Bash");
   Alcotest.(check (option string)) "Read -> keeper_fs_read"
-    (Some "keeper_fs_read") (Alias.to_internal "Read");
+    (Some "keeper_fs_read") (route_internal "Read");
   Alcotest.(check (option string)) "Edit -> keeper_fs_edit"
-    (Some "keeper_fs_edit") (Alias.to_internal "Edit");
+    (Some "keeper_fs_edit") (route_internal "Edit");
   Alcotest.(check (option string)) "Write -> keeper_fs_edit"
-    (Some "keeper_fs_edit") (Alias.to_internal "Write");
+    (Some "keeper_fs_edit") (route_internal "Write");
   Alcotest.(check (option string)) "Grep -> keeper_shell"
-    (Some "keeper_shell") (Alias.to_internal "Grep");
+    (Some "keeper_shell") (route_internal "Grep");
   Alcotest.(check (option string)) "WebSearch -> masc_web_search"
-    (Some "masc_web_search") (Alias.to_internal "WebSearch")
+    (Some "masc_web_search") (route_internal "WebSearch")
 
 let test_unknown_returns_none () =
   Alcotest.(check (option string)) "Skill has no cognate"
-    None (Alias.to_internal "Skill");
+    None (route_internal "Skill");
   Alcotest.(check (option string)) "keeper_bash is internal, not public"
-    None (Alias.to_internal "keeper_bash");
+    None (route_internal "keeper_bash");
   Alcotest.(check (option string)) "empty string"
-    None (Alias.to_internal "");
+    None (route_internal "");
   Alcotest.(check (option string)) "case sensitive"
-    None (Alias.to_internal "bash")
+    None (route_internal "bash")
 
-let test_to_public_round_trip () =
-  Alcotest.(check string) "keeper_bash -> Bash"
-    "Bash" (Alias.to_public "keeper_bash");
-  Alcotest.(check string) "keeper_fs_read -> Read"
-    "Read" (Alias.to_public "keeper_fs_read");
-  Alcotest.(check string) "keeper_shell stays internal"
-    "keeper_shell" (Alias.to_public "keeper_shell");
-  Alcotest.(check string) "masc_web_search -> WebSearch"
-    "WebSearch" (Alias.to_public "masc_web_search");
-  (* Edit/Write collapse: first occurrence wins for stability *)
-  Alcotest.(check string) "keeper_fs_edit -> Edit (first wins)"
-    "Edit" (Alias.to_public "keeper_fs_edit")
+let test_route_round_trip () =
+  (* Every public name must resolve to a non-empty internal handler. *)
+  List.iter
+    (fun public ->
+       match Alias.route public with
+       | Some r ->
+           Alcotest.(check bool)
+             (Printf.sprintf "%s resolves to non-empty internal_name" public)
+             true (r.internal_name <> "")
+       | None ->
+           Alcotest.fail (Printf.sprintf "%s should have a route but got None" public))
+    (Alias.public_names ());
+  (* Edit and Write both route to keeper_fs_edit. *)
+  Alcotest.(check (option string)) "Edit -> keeper_fs_edit"
+    (Some "keeper_fs_edit") (route_internal "Edit");
+  Alcotest.(check (option string)) "Write -> keeper_fs_edit"
+    (Some "keeper_fs_edit") (route_internal "Write")
 
-let test_to_public_pass_through () =
-  (* Tools without an Anthropic Code cognate should fall through verbatim. *)
-  Alcotest.(check string) "keeper_board_post passes through"
-    "keeper_board_post" (Alias.to_public "keeper_board_post");
-  Alcotest.(check string) "unknown name passes through"
-    "anything" (Alias.to_public "anything")
+let test_route_unknown_returns_none () =
+  Alcotest.(check (option string)) "internal name has no route"
+    None (route_internal "keeper_bash");
+  Alcotest.(check (option string)) "arbitrary name has no route"
+    None (route_internal "anything");
+  Alcotest.(check (option string)) "empty string has no route"
+    None (route_internal "")
 
-let test_canonicalize_observed () =
-  let input =
-    [
-      "Bash";
-      "keeper_board_post";
-      "masc_board_post";
-      "Read";
-      "Skill";
-      "WebSearch";
-      "Write";
-    ]
-  in
-  let expected =
-    [
-      "keeper_bash";
-      "keeper_board_post";
-      "keeper_board_post";
-      "keeper_fs_read";
-      "Skill";
-      "masc_web_search";
-      "keeper_fs_edit";
-    ]
-  in
-  Alcotest.(check (list string)) "mixed list canonicalizes only known aliases"
-    expected (Alias.canonicalize_observed input)
-
-let test_canonicalize_observed_with_telemetry_records_public_masc () =
+let test_route_or_miss_records_ok () =
   let labels =
-    [
-      ("alias_kind", "public_masc");
-      ("public_tool", "masc_board_post");
-      ("canonical_tool", "keeper_board_post");
-    ]
+    [ ("tool", "Bash"); ("routed_to", "keeper_bash"); ("result", "ok") ]
   in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_alias_canonicalizations
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
       ~labels ()
   in
-  let canonical =
-    Alias.canonicalize_observed_with_telemetry [ "masc_board_post" ]
-  in
+  let _ = Alias.route_or_miss "Bash" in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_alias_canonicalizations
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
       ~labels ()
   in
-  Alcotest.(check (list string)) "public MASC tool canonicalized"
-    [ "keeper_board_post" ] canonical;
-  Alcotest.(check (float 0.001)) "telemetry counter incremented"
+  Alcotest.(check (float 0.001)) "telemetry counter incremented for ok route"
     (before +. 1.0) after
 
-let test_hallucinated_builtins () =
-  Alcotest.(check bool) "Skill is hallucinated"
-    true (Alias.is_hallucinated_builtin "Skill");
-  Alcotest.(check bool) "Agent is hallucinated"
-    true (Alias.is_hallucinated_builtin "Agent");
-  Alcotest.(check bool) "WebSearch is NOT hallucinated (has cognate)"
-    false (Alias.is_hallucinated_builtin "WebSearch");
-  Alcotest.(check bool) "WebFetch is NOT hallucinated (has cognate)"
-    false (Alias.is_hallucinated_builtin "WebFetch");
-  Alcotest.(check bool) "Bash is NOT hallucinated (has cognate)"
-    false (Alias.is_hallucinated_builtin "Bash");
-  Alcotest.(check bool) "keeper_bash is NOT hallucinated"
-    false (Alias.is_hallucinated_builtin "keeper_bash")
+let test_route_or_miss_records_miss () =
+  let labels =
+    [ ("tool", "Skill"); ("routed_to", "none"); ("result", "miss") ]
+  in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels ()
+  in
+  let _ = Alias.route_or_miss "Skill" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels ()
+  in
+  Alcotest.(check (float 0.001)) "telemetry counter incremented for miss"
+    (before +. 1.0) after
 
-let test_no_overlap_alias_and_hallucinated () =
-  let aliased = List.map fst (Alias.all_aliases ()) in
-  List.iter
-    (fun b ->
-       Alcotest.(check bool)
-         (Printf.sprintf "%s must not appear in alias table" b)
-         false (List.mem b aliased))
-    Alias.hallucinated_builtins
+let test_known_public_names () =
+  (* Names with a route entry are known public names. *)
+  Alcotest.(check bool) "Bash is known public"
+    true (Alias.is_known_public "Bash");
+  Alcotest.(check bool) "Read is known public"
+    true (Alias.is_known_public "Read");
+  Alcotest.(check bool) "WebSearch is known public"
+    true (Alias.is_known_public "WebSearch");
+  Alcotest.(check bool) "WebFetch is known public"
+    true (Alias.is_known_public "WebFetch");
+  (* Internal names and arbitrary names are NOT public surface names. *)
+  Alcotest.(check bool) "Skill is NOT known public"
+    false (Alias.is_known_public "Skill");
+  Alcotest.(check bool) "Agent is NOT known public"
+    false (Alias.is_known_public "Agent");
+  Alcotest.(check bool) "keeper_bash is NOT known public (it's internal)"
+    false (Alias.is_known_public "keeper_bash")
 
 let test_alias_table_is_stable () =
-  let pairs = Alias.all_aliases () in
-  Alcotest.(check int) "eight canonical aliases" 8 (List.length pairs);
-  (* Round-trip: every alias should round-trip via to_internal then to_public,
-     except where collapse happens (Write -> keeper_fs_edit -> Edit). *)
+  let names = Alias.public_names () in
+  Alcotest.(check int) "seven public names" 7 (List.length names);
   List.iter
-    (fun (public, internal) ->
-       Alcotest.(check (option string))
-         (Printf.sprintf "%s resolves to %s" public internal)
-         (Some internal) (Alias.to_internal public))
-    pairs
+    (fun public ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s has a route" public)
+         true (Alias.is_known_public public))
+    names
 
 (* ── Phase A.3 integration: canonicalize before the disclosure check ─── *)
 
@@ -150,7 +138,7 @@ let allowed_keeper_surface =
 
 let test_pure_alias_turn_no_longer_unexpected () =
   let observed = [ "Bash" ] in
-  let canonical = Alias.canonicalize_observed observed in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -162,7 +150,7 @@ let test_pure_alias_turn_no_longer_unexpected () =
 
 let test_mixed_alias_and_internal_no_unexpected () =
   let observed = [ "Read"; "keeper_board_post"; "Edit"; "WebSearch" ] in
-  let canonical = Alias.canonicalize_observed observed in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -173,7 +161,7 @@ let test_mixed_alias_and_internal_no_unexpected () =
 
 let test_hallucinated_builtin_still_unexpected () =
   let observed = [ "Skill"; "Bash" ] in
-  let canonical = Alias.canonicalize_observed observed in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -185,7 +173,7 @@ let test_hallucinated_builtin_still_unexpected () =
 
 let test_partial_tolerance_still_works () =
   let observed = [ "Skill"; "Bash" ] in
-  let canonical = Alias.canonicalize_observed observed in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -199,33 +187,25 @@ let test_partial_tolerance_still_works () =
   Alcotest.(check bool) "Bash counts as valid -> partial tolerance kicks in"
     true has_valid
 
-(* ── Phase A.2 OAS dual registration ─────────────────────────────── *)
+(* ── Routing table and schemas ─────────────────────────────── *)
 
 let yojson_field name j =
   match j with
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
 
-let test_oas_dual_register_subset () =
-  let pairs = Alias.oas_dual_register_aliases () in
-  let names = List.map fst pairs in
-  Alcotest.(check (list string)) "dual-reg covers shell/fs/search/fetch aliases"
-    [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ] names;
-  (* Every entry must also appear in the full alias table. *)
-  let full = List.map fst (Alias.all_aliases ()) in
-  List.iter
-    (fun (public, _) ->
-      Alcotest.(check bool)
-        (Printf.sprintf "%s is in all_aliases" public)
-        true (List.mem public full))
-    pairs
+let test_public_names_stable_order () =
+  (* public_names returns all LLM-native surface names in stable order. *)
+  let names = Alias.public_names () in
+  Alcotest.(check (list string)) "stable public name order"
+    [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ] names
 
 let test_public_input_schema_present () =
   List.iter
     (fun name ->
-      Alcotest.(check bool)
-        (Printf.sprintf "%s has tailored schema" name)
-        true (Option.is_some (Alias.public_input_schema name)))
+       Alcotest.(check bool)
+         (Printf.sprintf "%s has tailored schema" name)
+         true (Option.is_some (Alias.public_input_schema name)))
     [ "Bash"; "Edit"; "Grep"; "Read"; "WebSearch"; "Write" ];
   Alcotest.(check bool) "unknown public name has no schema"
     true (Option.is_none (Alias.public_input_schema "Nope"))
@@ -302,9 +282,9 @@ let test_edit_schema_uses_anthropic_fields () =
   let props = Option.get (yojson_field "properties" schema) in
   List.iter
     (fun field ->
-      Alcotest.(check bool)
-        (Printf.sprintf "Edit schema exposes %S" field)
-        true (Option.is_some (yojson_field field props)))
+       Alcotest.(check bool)
+         (Printf.sprintf "Edit schema exposes %S" field)
+         true (Option.is_some (yojson_field field props)))
     [ "file_path"; "old_string"; "new_string"; "replace_all" ];
   Alcotest.(check bool) "Edit schema does not expose internal 'mode' to LLM"
     true (Option.is_none (yojson_field "mode" props))
@@ -314,9 +294,9 @@ let test_write_schema_uses_anthropic_fields () =
   let props = Option.get (yojson_field "properties" schema) in
   List.iter
     (fun field ->
-      Alcotest.(check bool)
-        (Printf.sprintf "Write schema exposes %S" field)
-        true (Option.is_some (yojson_field field props)))
+       Alcotest.(check bool)
+         (Printf.sprintf "Write schema exposes %S" field)
+         true (Option.is_some (yojson_field field props)))
     [ "file_path"; "content" ];
   Alcotest.(check bool) "Write schema does not expose internal 'mode' to LLM"
     true (Option.is_none (yojson_field "mode" props))
@@ -470,58 +450,35 @@ let test_translate_malformed_input_is_identity () =
   Alcotest.(check string) "non-object payload passes through"
     (Yojson.Safe.to_string input) (Yojson.Safe.to_string translated)
 
-let test_expand_universe_adds_aliases () =
-  let internal =
-    [ "keeper_bash"; "keeper_fs_read"; "masc_web_search"; "keeper_board_post" ]
-  in
-  let expanded = Alias.expand_universe internal in
-  Alcotest.(check bool) "Bash appears after expansion"
-    true (List.mem "Bash" expanded);
-  Alcotest.(check bool) "Read appears after expansion"
-    true (List.mem "Read" expanded);
-  Alcotest.(check bool) "WebSearch appears after expansion"
-    true (List.mem "WebSearch" expanded);
-  Alcotest.(check bool) "internal names preserved"
-    true (List.for_all (fun n -> List.mem n expanded) internal);
-  Alcotest.(check bool) "no duplicate Bash entries"
-    true
-    (List.length (List.filter (String.equal "Bash") expanded) = 1)
-
-let test_expand_universe_skips_when_internal_absent () =
-  let internal = [ "keeper_board_post"; "keeper_tasks_list" ] in
-  let expanded = Alias.expand_universe internal in
-  Alcotest.(check bool) "Bash NOT added when keeper_bash absent"
-    true (not (List.mem "Bash" expanded));
-  Alcotest.(check bool) "Read NOT added when keeper_fs_read absent"
-    true (not (List.mem "Read" expanded));
-  Alcotest.(check bool) "WebSearch NOT added when masc_web_search absent"
-    true (not (List.mem "WebSearch" expanded));
-  Alcotest.(check int) "expanded length unchanged"
-    (List.length internal) (List.length expanded)
-
-let test_expand_universe_dedup_existing_public () =
-  (* If a caller already has the public name in the input list, expand
-     must not duplicate it. *)
-  let internal = [ "keeper_bash"; "Bash"; "keeper_fs_read" ] in
-  let expanded = Alias.expand_universe internal in
-  Alcotest.(check int) "Bash appears exactly once"
-    1
-    (List.length (List.filter (String.equal "Bash") expanded))
+let test_public_names_adds_to_allowlist () =
+  (* public_names returns LLM-native surface names that callers should
+     add to their allowlists. These are the names the LLM will call,
+     not the internal keeper_* names. *)
+  let names = Alias.public_names () in
+  Alcotest.(check bool) "Bash is in public_names"
+    true (List.mem "Bash" names);
+  Alcotest.(check bool) "Read is in public_names"
+    true (List.mem "Read" names);
+  Alcotest.(check bool) "WebSearch is in public_names"
+    true (List.mem "WebSearch" names);
+  (* Internal names are NOT in public_names. *)
+  Alcotest.(check bool) "keeper_bash is NOT in public_names"
+    false (List.mem "keeper_bash" names)
 
 let () =
   Alcotest.run "Keeper_tool_alias"
     [
-      ( "alias-table",
+      ( "routing-table",
         [
           Alcotest.test_case "known aliases resolve" `Quick test_known_aliases_resolve;
           Alcotest.test_case "unknown returns None" `Quick test_unknown_returns_none;
-          Alcotest.test_case "to_public round-trip" `Quick test_to_public_round_trip;
-          Alcotest.test_case "to_public pass-through" `Quick test_to_public_pass_through;
-          Alcotest.test_case "canonicalize_observed" `Quick test_canonicalize_observed;
-          Alcotest.test_case "canonicalize_observed telemetry" `Quick
-            test_canonicalize_observed_with_telemetry_records_public_masc;
-          Alcotest.test_case "hallucinated builtins" `Quick test_hallucinated_builtins;
-          Alcotest.test_case "no overlap" `Quick test_no_overlap_alias_and_hallucinated;
+          Alcotest.test_case "route round-trip" `Quick test_route_round_trip;
+          Alcotest.test_case "route unknown returns None" `Quick test_route_unknown_returns_none;
+          Alcotest.test_case "route_or_miss records ok" `Quick
+            test_route_or_miss_records_ok;
+          Alcotest.test_case "route_or_miss records miss" `Quick
+            test_route_or_miss_records_miss;
+          Alcotest.test_case "known public names" `Quick test_known_public_names;
           Alcotest.test_case "table is stable" `Quick test_alias_table_is_stable;
         ] );
       ( "disclosure-integration",
@@ -535,9 +492,9 @@ let () =
           Alcotest.test_case "partial tolerance still works" `Quick
             test_partial_tolerance_still_works;
         ] );
-      ( "oas-dual-register",
+      ( "routing-and-schemas",
         [
-          Alcotest.test_case "dual registration subset is stable" `Quick test_oas_dual_register_subset;
+          Alcotest.test_case "public names stable order" `Quick test_public_names_stable_order;
           Alcotest.test_case "tailored input schema present" `Quick test_public_input_schema_present;
           Alcotest.test_case "Bash schema uses 'command' field" `Quick test_bash_schema_uses_command_field;
           Alcotest.test_case "Read schema uses 'file_path' field" `Quick test_read_schema_uses_file_path;
@@ -554,8 +511,6 @@ let () =
           Alcotest.test_case "translate WebSearch input shape" `Quick test_translate_web_search_input_is_identity;
           Alcotest.test_case "translate unknown is identity" `Quick test_translate_unknown_is_identity;
           Alcotest.test_case "translate malformed is identity" `Quick test_translate_malformed_input_is_identity;
-          Alcotest.test_case "expand_universe adds aliases" `Quick test_expand_universe_adds_aliases;
-          Alcotest.test_case "expand_universe skips when internal absent" `Quick test_expand_universe_skips_when_internal_absent;
-          Alcotest.test_case "expand_universe dedup existing public" `Quick test_expand_universe_dedup_existing_public;
+          Alcotest.test_case "public_names adds to allowlist" `Quick test_public_names_adds_to_allowlist;
         ] );
     ]

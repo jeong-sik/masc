@@ -105,7 +105,6 @@
   keeper_rollover
   keeper_approval_queue
   keeper_post_turn
-  keeper_tool_alias
   keeper_tool_disclosure
   keeper_turn_telemetry
   keeper_agent_prompt_metrics

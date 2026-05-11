@@ -39,8 +39,8 @@ val merge_reported_and_observed_tool_names
   -> observed_tool_names:string list
   -> string list
 
-(** Compose [merge_reported_and_observed_tool_names] +
-    [Keeper_tool_alias.canonicalize_observed] and filter to the
+(** Compose [merge_reported_and_observed_tool_names] with public-name
+    canonicalization (via [Keeper_tool_alias.route]) and filter to the
     keeper's [allowed_tool_names]. *)
 val final_keeper_tool_names
   :  reported_tool_names:string list

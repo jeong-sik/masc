@@ -144,8 +144,8 @@ let test_tool_count_matches_allowed () =
             (fun name ->
                List.mem name allowed
                ||
-               match Keeper_tool_alias.to_internal name with
-               | Some internal -> List.mem internal allowed
+               match Keeper_tool_alias.route name with
+               | Some r -> List.mem r.internal_name allowed
                | None -> false)
             tool_names))
 ;;

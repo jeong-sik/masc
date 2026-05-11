@@ -714,18 +714,19 @@ let run_turn
                      ~reported_tool_names
                      ~observed_tool_names
                  in
-                 (* RFC-0006 Phase A.3: canonicalize Anthropic Code built-in names
-          (Bash/Read/Edit/Grep/Write) to their keeper_* internal cognates
-          before the surface check. Without this, the disclosure check
-          flags every Bash/Read call as "unexpected" and nukes turns where
-          the LLM only used the alias names (≈18% of turns per #8778).
-
-          Phase A.2 (OAS dual registration) makes the actual call succeed
-          end-to-end. This step alone just stops the turn loss. Names with
-          no cognate (Skill/Agent/WebSearch) remain unexpected and may
-          still trigger a teaching error — see Keeper_tool_alias.is_hallucinated_builtin. *)
+                 (* RFC-0064: route LLM-native tool names (Bash/Read/etc) to their
+          keeper_* internal cognates before the disclosure check. Without
+          this, the disclosure check flags every Bash/Read call as "unexpected"
+          and nukes turns where the LLM only used the alias names (≈18% of
+          turns per #8778). Unknown names (routing misses) are left as-is and
+          may still trigger a teaching error — recorded via result-based
+          telemetry by [route_or_miss]. *)
                  let canonical_tool_names =
-                   Keeper_tool_alias.canonicalize_observed_with_telemetry tool_names
+                   List.map (fun name ->
+                     match Keeper_tool_alias.route_or_miss name with
+                     | Some r -> r.internal_name
+                     | None -> name
+                   ) tool_names
                  in
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =

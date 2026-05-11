@@ -63,7 +63,7 @@ type tool_search_hit_partition =
   }
 
 let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_results =
-  let allowed = allowed |> Keeper_tool_alias.expand_universe in
+  let allowed = allowed @ Keeper_tool_alias.public_names () in
   let allowed_set =
     let tbl = Hashtbl.create (List.length allowed) in
     List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
@@ -446,7 +446,7 @@ let prepare_agent_setup
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let allowed_exec_names_with_aliases =
-    Keeper_tool_alias.expand_universe allowed_exec_names
+    allowed_exec_names @ Keeper_tool_alias.public_names ()
   in
   let allowed_exec_set =
     let base = Keeper_tool_policy.tool_name_set allowed_exec_names_with_aliases in
@@ -791,7 +791,7 @@ let prepare_agent_setup
       else all_allowed, false
     in
     let safe_last_turn_tools =
-      Keeper_tool_policy.last_turn_safe_tool_names () |> Keeper_tool_alias.expand_universe
+      Keeper_tool_policy.last_turn_safe_tool_names () @ Keeper_tool_alias.public_names ()
     in
     let all_allowed =
       if is_last_turn && required_tool_names = []

@@ -44,13 +44,12 @@ let mark_task_link ~keeper ~task_id ~trace_id =
   Stdlib.Mutex.protect link_task_cache_mutex (fun () ->
     if Hashtbl.mem link_task_cache key
     then ()
-    else begin
+    else (
       while Hashtbl.length link_task_cache >= link_task_cache_max_entries do
         evict_oldest_locked ()
       done;
       Hashtbl.add link_task_cache key ();
-      Queue.add key link_task_cache_order
-    end)
+      Queue.add key link_task_cache_order))
 ;;
 
 let task_link_already_recorded ~keeper ~task_id ~trace_id =
@@ -714,18 +713,22 @@ let run_turn
                      ~reported_tool_names
                      ~observed_tool_names
                  in
-                 (* RFC-0006 Phase A.3: canonicalize Anthropic Code built-in names
-          (Bash/Read/Edit/Grep/Write) to their keeper_* internal cognates
-          before the surface check. Without this, the disclosure check
-          flags every Bash/Read call as "unexpected" and nukes turns where
-          the LLM only used the alias names (≈18% of turns per #8778).
-
-          Phase A.2 (OAS dual registration) makes the actual call succeed
-          end-to-end. This step alone just stops the turn loss. Names with
-          no cognate (Skill/Agent/WebSearch) remain unexpected and may
-          still trigger a teaching error — see Keeper_tool_alias.is_hallucinated_builtin. *)
+                 (* RFC-0064: route LLM-native tool names (Bash/Read/etc) to their
+          keeper_* internal cognates before the disclosure check. Without
+          this, the disclosure check flags every Bash/Read call as "unexpected"
+          and nukes turns where the LLM only used the alias names (≈18% of
+          turns per #8778). Unknown names (routing misses) are left as-is and
+          may still trigger a teaching error — recorded via result-based
+          telemetry by [route_or_miss]. *)
+                 (* Canonicalise observed tool names across all three input
+                    surfaces (LLM-native public / MCP protocol /
+                    already-internal). Using Keeper_tool_alias.route_or_miss
+                    directly would record every internal "keeper_*"/"masc_*"
+                    call as a routing miss, inflating
+                    masc_keeper_tool_call_total{result="miss"} and skewing
+                    the alias dashboards (see PR #14574 review). *)
                  let canonical_tool_names =
-                   Keeper_tool_alias.canonicalize_observed_with_telemetry tool_names
+                   List.map Keeper_tool_disclosure.canonical_tool_name tool_names
                  in
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =
@@ -1600,7 +1603,6 @@ let run_turn
                 (Printexc.to_string gap_exn));
            Error err_msg
        in
-
        (* Phase 5: wire goal/task/board with keeper tool results.
           Link execution artifacts to the current task if one exists.
 
@@ -1617,12 +1619,13 @@ let run_turn
          | Some task_id ->
            let task_id_str = Keeper_id.Task_id.to_string task_id in
            let trace_id_str = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-           if task_link_already_recorded
-                ~keeper:meta.name
-                ~task_id:task_id_str
-                ~trace_id:trace_id_str
+           if
+             task_link_already_recorded
+               ~keeper:meta.name
+               ~task_id:task_id_str
+               ~trace_id:trace_id_str
            then ()
-           else begin
+           else (
              (* Pass trace_id as both session_id and operation_id to match
                 the existing keeper_run_tools.ml convention (session_id
                 fields elsewhere are populated from trace_id). *)
@@ -1648,20 +1651,18 @@ let run_turn
                    (Masc_domain.System
                       (Masc_domain.System_error.IoError (Printexc.to_string exn)))
              in
-             (match result with
-              | Ok _ ->
-                mark_task_link
-                  ~keeper:meta.name
-                  ~task_id:task_id_str
-                  ~trace_id:trace_id_str
-              | Error err ->
-                Log.Keeper.warn
-                  "keeper:%s link_task_execution_artifacts failed for \
-                   task=%s: %s"
-                  meta.name
-                  task_id_str
-                  (Masc_domain.masc_error_to_string err))
-           end
+             match result with
+             | Ok _ ->
+               mark_task_link
+                 ~keeper:meta.name
+                 ~task_id:task_id_str
+                 ~trace_id:trace_id_str
+             | Error err ->
+               Log.Keeper.warn
+                 "keeper:%s link_task_execution_artifacts failed for task=%s: %s"
+                 meta.name
+                 task_id_str
+                 (Masc_domain.masc_error_to_string err))
        in
        (match turn_result, receipt_append_outcome with
         | Error _, _ ->

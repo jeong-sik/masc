@@ -1027,65 +1027,70 @@ let make_tool_bundle
          else None)
       tool_defs
   in
-  (* Pass B: RFC-0006 Phase A.2 — register dual aliases so the LLM can
-     call Anthropic Code names (Bash/Read) successfully. The handler
-     dispatches with [~name:internal] so all telemetry SSOT remains
-     internal; only the Tool.schema.name (LLM-visible) is the public
-     alias. translate_input reshapes the LLM's payload before dispatch. *)
+  (* Pass B: RFC-0064 — register LLM-native surface names (Bash/Read/etc)
+     via the flat routing table. The handler dispatches with
+     [~name:r.internal_name] so all telemetry SSOT remains internal;
+     only the Tool.schema.name (LLM-visible) is the public name.
+     [r.translate] reshapes the LLM's payload before dispatch;
+     [r.public_schema] provides the LLM-facing schema. *)
   let alias_tools =
     List.filter_map
-      (fun (public, internal) ->
-         if not (List.mem internal universe_names)
-         then None
-         else (
-           match
-             List.find_opt
-               (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
-               tool_defs
-           with
-           | None -> None
-           | Some internal_def ->
-             let input_schema =
-               match Keeper_tool_alias.public_input_schema public with
-               | Some s -> s
-               | None -> internal_def.input_schema
-             in
-             let description =
-               match public with
-               | "Grep" ->
-                 "Search file contents with ripgrep. This is a public alias for \
-                  keeper_shell op=rg only; use Bash/keeper_bash for command execution."
-               | "Bash" ->
-                 "Execute one shell command through keeper_bash, including Legendary \
-                  Bash safety gates, write gating, background execution, and sandbox \
-                  routing."
-               | _ -> internal_def.description
-             in
-             let h =
-               make_keeper_tool_handler
-                 ~name:internal
-                 ~input_schema:internal_def.input_schema
-                 ~config
-                 ~meta
-                 ~ctx_snapshot
-                 ?turn_sandbox_factory
-                 ?turn_sandbox_factory_git
-                 ~exec_cache
-                 ?search_fn
-                 ?on_tool_called
-                 ~translate_input:(fun j -> Keeper_tool_alias.translate_input ~public j)
-                 ~failure_counts
-                 ()
-             in
-             Some
-               (Tool_bridge.oas_tool_of_masc
-                  ~name:public
-                  ~description
-                  ~input_schema
-                  (fun input ->
-                     let start_time = Time_compat.now () in
-                     Tool_result.wrap ~tool_name:public ~start_time (h input)))))
-      (Keeper_tool_alias.oas_dual_register_aliases ())
+      (fun public ->
+         match Keeper_tool_alias.route public with
+         | None -> None (* routing miss — should not happen for public_names *)
+         | Some r ->
+           let internal = r.internal_name in
+           if not (List.mem internal universe_names)
+           then None
+           else (
+             match
+               List.find_opt
+                 (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
+                 tool_defs
+             with
+             | None -> None
+             | Some internal_def ->
+               let input_schema =
+                 match r.public_schema with
+                 | Some s -> s
+                 | None -> internal_def.input_schema
+               in
+               let description =
+                 match public with
+                 | "Grep" ->
+                   "Search file contents with ripgrep. This is a public alias for \
+                    keeper_shell op=rg only; use Bash/keeper_bash for command execution."
+                 | "Bash" ->
+                   "Execute one shell command through keeper_bash, including Legendary \
+                    Bash safety gates, write gating, background execution, and sandbox \
+                    routing."
+                 | _ -> internal_def.description
+               in
+               let h =
+                 make_keeper_tool_handler
+                   ~name:internal
+                   ~input_schema:internal_def.input_schema
+                   ~config
+                   ~meta
+                   ~ctx_snapshot
+                   ?turn_sandbox_factory
+                   ?turn_sandbox_factory_git
+                   ~exec_cache
+                   ?search_fn
+                   ?on_tool_called
+                   ~translate_input:r.translate
+                   ~failure_counts
+                   ()
+               in
+               Some
+                 (Tool_bridge.oas_tool_of_masc
+                    ~name:public
+                    ~description
+                    ~input_schema
+                    (fun input ->
+                       let start_time = Time_compat.now () in
+                       Tool_result.wrap ~tool_name:public ~start_time (h input)))))
+      (Keeper_tool_alias.public_names ())
   in
   { tools = internal_tools @ alias_tools
   ; cleanup =

@@ -1856,6 +1856,15 @@ let init () =
      consecutive turns. Labeled by keeper."
     Counter;
   add
+    Keeper_metrics.metric_keeper_passive_loop_streak
+    "Current passive-loop streak length per keeper.  Resets to 0 on any \
+     execution/completion turn.  Labeled by keeper."
+    Gauge;
+  add
+    Keeper_metrics.metric_keeper_passive_loop_streak_exceeded
+    "Total passive-loop streak threshold exceeded events.  Labeled by keeper."
+    Counter;
+  add
     Keeper_metrics.metric_keeper_required_tool_loop_detected_total
     "#13362 Total required-tool contract loops: keeper hit N consecutive actionable \
      required-tool failures before making execution/completion progress. Labeled by \
@@ -1879,26 +1888,14 @@ let init () =
      to 0 on the next execution/completion turn.  Labeled by keeper."
     Gauge;
   add
-    Keeper_metrics.metric_keeper_passive_loop_streak
-    "Current passive-loop detector streak per keeper.  Reflects the dominant turn \
-     progress class (passive_status/claim_context/required_tool_*), not the selected \
-     tool surface composition.  Labeled by keeper."
-    Gauge;
-  add
-    Keeper_metrics.metric_keeper_passive_loop_streak_exceeded
-    "Total turns where the passive-loop detector streak exceeded the threshold (>=3) \
-     while an actionable signal was present.  Not latched per episode; increments on \
-     every qualifying turn.  Labeled by keeper."
-    Counter;
-  add
     Keeper_metrics.metric_keeper_last_productive_ts
     "Task-138 Unix timestamp of the most recent productive turn (execution/completion \
      class) per keeper.  0 until the keeper has produced anything.  Labeled by keeper."
     Gauge;
   add
-    Keeper_metrics.metric_keeper_tool_alias_canonicalizations
-    "Total observed LLM-facing tool names canonicalized to keeper internal tool names. \
-     Labeled by alias_kind, public_tool, and canonical_tool."
+    Keeper_metrics.metric_keeper_tool_call_total
+    "Total tool call routing outcomes. Labeled by tool (public name), routed_to \
+     (internal name or 'none' for miss), and result (ok|miss)."
     Counter;
   add
     Keeper_metrics.metric_keeper_profile_config_conflicts

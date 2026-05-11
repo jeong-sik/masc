@@ -144,8 +144,8 @@ let test_tool_count_matches_allowed () =
             (fun name ->
                List.mem name allowed
                ||
-               match Keeper_tool_alias.to_internal name with
-               | Some internal -> List.mem internal allowed
+               match Keeper_tool_alias.route name with
+               | Some r -> List.mem r.internal_name allowed
                | None -> false)
             tool_names))
 ;;
@@ -838,7 +838,11 @@ let test_library_search_returns_results () =
        let ctx = Tool_library.{ agent_name = "test-keeper" } in
        (* Search *)
        let search_result =
-         Tool_library.handle_search ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ "query", `String "mlfq" ])
+         Tool_library.handle_search
+           ~tool_name:"test_tool"
+           ~start_time:0.0
+           ctx
+           (`Assoc [ "query", `String "mlfq" ])
        in
        check bool "search succeeds" true search_result.Tool_result.success;
        check
@@ -850,26 +854,42 @@ let test_library_search_returns_results () =
           && not (Tool_library.string_contains ~sub:"no documents" low));
        (* Read *)
        let read_result =
-         Tool_library.handle_read ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ "topic", `String "test-mlfq" ])
+         Tool_library.handle_read
+           ~tool_name:"test_tool"
+           ~start_time:0.0
+           ctx
+           (`Assoc [ "topic", `String "test-mlfq" ])
        in
        check bool "read succeeds" true read_result.Tool_result.success;
        check
          bool
          "read contains MLFQ content"
          true
-         (Tool_library.string_contains ~sub:"Multi-Level Feedback Queue" read_result.Tool_result.legacy_message))
+         (Tool_library.string_contains
+            ~sub:"Multi-Level Feedback Queue"
+            read_result.Tool_result.legacy_message))
 ;;
 
 let test_library_search_empty_query () =
   let ctx = Tool_library.{ agent_name = "test-keeper" } in
-  let result = Tool_library.handle_search ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ "query", `String "" ]) in
+  let result =
+    Tool_library.handle_search
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "query", `String "" ])
+  in
   check bool "empty query fails" false result.Tool_result.success
 ;;
 
 let test_library_read_missing_topic () =
   let ctx = Tool_library.{ agent_name = "test-keeper" } in
   let result =
-    Tool_library.handle_read ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ "topic", `String "nonexistent-topic-xyz-999" ])
+    Tool_library.handle_read
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "topic", `String "nonexistent-topic-xyz-999" ])
   in
   check bool "missing topic fails" false result.Tool_result.success
 ;;

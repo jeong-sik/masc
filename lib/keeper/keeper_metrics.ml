@@ -98,7 +98,7 @@ type t =
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
   | RequireToolUseViolations
-  | ToolAliasCanonicalizations
+  | ToolCallTotal
   | ProfileConfigConflicts
   | OasTimeoutClassifications
   | NoToolProvider
@@ -295,7 +295,7 @@ let to_string = function
   | UnexpectedToolPartialTolerance ->
     "masc_keeper_unexpected_tool_partial_tolerance_total"
   | RequireToolUseViolations -> "masc_keeper_require_tool_use_violations_total"
-  | ToolAliasCanonicalizations -> "masc_keeper_tool_alias_canonicalizations_total"
+  | ToolCallTotal -> "masc_keeper_tool_call_total"
   | ProfileConfigConflicts -> "masc_keeper_profile_config_conflicts_total"
   | OasTimeoutClassifications -> "masc_keeper_oas_timeout_classifications_total"
   | NoToolProvider -> "masc_keeper_no_tool_provider_total"
@@ -566,10 +566,7 @@ let metric_keeper_require_tool_use_violations =
   "masc_keeper_require_tool_use_violations_total"
 ;;
 
-let metric_keeper_tool_alias_canonicalizations =
-  "masc_keeper_tool_alias_canonicalizations_total"
-;;
-
+let metric_keeper_tool_call_total = "masc_keeper_tool_call_total"
 let metric_keeper_profile_config_conflicts = "masc_keeper_profile_config_conflicts_total"
 
 let metric_keeper_oas_timeout_classifications =
@@ -718,6 +715,11 @@ let metric_keeper_liveness_recovery_outcomes =
 ;;
 
 let metric_keeper_passive_loop_detected_total = "masc_keeper_passive_loop_detected_total"
+let metric_keeper_passive_loop_streak = "masc_keeper_passive_loop_streak"
+
+let metric_keeper_passive_loop_streak_exceeded =
+  "masc_keeper_passive_loop_streak_exceeded_total"
+;;
 
 let metric_keeper_required_tool_loop_detected_total =
   "masc_keeper_required_tool_loop_detected_total"
@@ -791,8 +793,3 @@ let metric_keeper_post_turn_wirein_failures =
 let metric_keeper_recurring_failures = "masc_keeper_recurring_failures_total"
 let metric_keeper_turn_cleanup_failures = "masc_keeper_turn_cleanup_failures_total"
 let metric_keeper_session_cleanup_failures = "masc_keeper_session_cleanup_failures_total"
-let metric_keeper_passive_loop_streak = "masc_keeper_passive_loop_streak"
-
-let metric_keeper_passive_loop_streak_exceeded =
-  "masc_keeper_passive_loop_streak_exceeded_total"
-;;

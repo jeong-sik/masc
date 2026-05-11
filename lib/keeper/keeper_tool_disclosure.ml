@@ -25,6 +25,25 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
     List.init (max 0 (after_count - before_count)) (fun _ -> tool_name))
 ;;
 
+(* Three input surfaces feed this canonicalisation:
+   1. LLM-native public names (Bash/Edit/...) — go through
+      [Keeper_tool_alias.route].
+   2. MCP protocol names ([mcp__masc__masc_board_post] etc.) — strip the
+      prefix then map via [public_masc_to_internal].
+   3. Already-internal names ([keeper_*], [masc_*]) — pass through.
+
+   Conflating them under a single [route] lookup loses (2) silently and
+   misattributes (3) as routing misses; see PR #14574 review. *)
+let canonical_name name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  match Keeper_tool_alias.public_masc_to_internal stripped with
+  | Some internal -> internal
+  | None ->
+    (match Keeper_tool_alias.route name with
+     | Some r -> r.internal_name
+     | None -> name)
+;;
+
 let merge_observed_tool_names
       ~(registry_observed_tool_names : string list)
       ~(hook_observed_tool_names : string list)
@@ -77,7 +96,7 @@ let final_keeper_tool_names
   : string list
   =
   merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
-  |> Keeper_tool_alias.canonicalize_observed
+  |> List.map canonical_name
   |> List.filter (fun tool_name -> List.mem tool_name allowed_tool_names)
 ;;
 
@@ -194,11 +213,7 @@ let tool_progress_class_to_string = function
   | Completion -> "completion"
 ;;
 
-let canonical_tool_name name =
-  match Keeper_tool_alias.canonicalize_observed [ name ] with
-  | canonical :: _ -> canonical
-  | [] -> name
-;;
+let canonical_tool_name = canonical_name
 
 let claim_context_tool_names : string list =
   Tool_name.[ Masc Claim_next; Masc Claim_task; Keeper Task_claim ]

@@ -63,7 +63,7 @@ type tool_search_hit_partition =
   }
 
 let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_results =
-  let allowed = allowed |> Keeper_tool_alias.expand_universe in
+  let allowed = allowed @ Keeper_tool_alias.public_names () in
   let allowed_set =
     let tbl = Hashtbl.create (List.length allowed) in
     List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
@@ -445,9 +445,24 @@ let prepare_agent_setup
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let allowed_exec_names_with_aliases =
-    Keeper_tool_alias.expand_universe allowed_exec_names
+  (* Only include a public alias name when its routed internal target is
+     itself in [allowed_exec_names]. Otherwise the public name (e.g. "Bash")
+     could let the LLM invoke a tool whose internal handler the current
+     keeper/preset has explicitly excluded — the alias would dispatch to
+     a registered-but-disallowed tool. See PR #14574 review. *)
+  let allowed_set_for_alias_filter =
+    Keeper_tool_policy.tool_name_set allowed_exec_names
   in
+  let aliased_public_names =
+    List.filter
+      (fun public ->
+         match Keeper_tool_alias.route public with
+         | Some r ->
+           Keeper_tool_policy.StringSet.mem r.internal_name allowed_set_for_alias_filter
+         | None -> false)
+      (Keeper_tool_alias.public_names ())
+  in
+  let allowed_exec_names_with_aliases = allowed_exec_names @ aliased_public_names in
   let allowed_exec_set =
     let base = Keeper_tool_policy.tool_name_set allowed_exec_names_with_aliases in
     Keeper_tool_policy.StringSet.union
@@ -790,9 +805,21 @@ let prepare_agent_setup
         if fallback_allowed <> [] then fallback_allowed, true else all_allowed, false)
       else all_allowed, false
     in
-    let safe_last_turn_tools =
-      Keeper_tool_policy.last_turn_safe_tool_names () |> Keeper_tool_alias.expand_universe
+    let last_turn_safe = Keeper_tool_policy.last_turn_safe_tool_names () in
+    (* Mirror allowed_exec_names_with_aliases: only include a public alias
+       in the last-turn-safe set when its routed internal handler is also
+       last-turn-safe. Otherwise the public name could re-introduce a tool
+       the policy explicitly excluded from the final turn. PR #14574. *)
+    let safe_set = Keeper_tool_policy.tool_name_set last_turn_safe in
+    let aliased_safe_public =
+      List.filter
+        (fun public ->
+           match Keeper_tool_alias.route public with
+           | Some r -> Keeper_tool_policy.StringSet.mem r.internal_name safe_set
+           | None -> false)
+        (Keeper_tool_alias.public_names ())
     in
+    let safe_last_turn_tools = last_turn_safe @ aliased_safe_public in
     let all_allowed =
       if is_last_turn && required_tool_names = []
       then

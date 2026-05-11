@@ -90,7 +90,7 @@ type t =
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
   | RequireToolUseViolations
-  | ToolAliasCanonicalizations
+  | ToolCallTotal
   | ProfileConfigConflicts
   | OasTimeoutClassifications
   | NoToolProvider
@@ -282,7 +282,7 @@ val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string
 val metric_keeper_unexpected_tool_partial_tolerance : string
 val metric_keeper_require_tool_use_violations : string
-val metric_keeper_tool_alias_canonicalizations : string
+val metric_keeper_tool_call_total : string
 val metric_keeper_profile_config_conflicts : string
 val metric_keeper_oas_timeout_classifications : string
 val metric_keeper_no_tool_provider : string

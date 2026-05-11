@@ -1,0 +1,61 @@
+name: tla-annotation-drift
+
+# R-B-1.c CI integration — enforce that OCaml `[@tla.idle|active|terminal]`
+# annotated constructors map to existing TLA+ spec set members.
+#
+# Background and rationale: `scripts/audit-tla-annotation-drift.sh` and
+# `docs/tla-audit/ktc-b1-turn-phase-spec-gap-2026-05-12.md`.
+#
+# Baseline policy: `scripts/tla-annotation-drift-baseline.txt` lists drifts
+# that are knowingly outstanding (awaiting their spec-extension RFC, e.g.
+# R-B-1.a for TurnPhaseSet routing/exhausted).  The validator skips
+# baseline entries so this job fails only on NEW regressions.  When an
+# RFC lands and adds the missing spec symbol, the corresponding baseline
+# line must be removed in the same PR — otherwise the next PR that
+# re-introduces the same drift would slip through.
+
+on:
+  pull_request:
+    paths:
+      - 'specs/keeper-state-machine/**'
+      - 'lib/keeper/keeper_registry.ml'
+      - 'lib/keeper/keeper_state_machine.ml'
+      - 'scripts/audit-tla-annotation-drift.sh'
+      - 'scripts/tla-annotation-drift-baseline.txt'
+      - '.github/workflows/tla-annotation-drift.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'specs/keeper-state-machine/**'
+      - 'lib/keeper/keeper_registry.ml'
+      - 'lib/keeper/keeper_state_machine.ml'
+      - 'scripts/audit-tla-annotation-drift.sh'
+      - 'scripts/tla-annotation-drift-baseline.txt'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tla-annotation-drift-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: TLA+ annotation drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y ripgrep
+
+      - name: Run drift validator
+        run: |
+          bash scripts/audit-tla-annotation-drift.sh \
+            --baseline scripts/tla-annotation-drift-baseline.txt

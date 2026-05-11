@@ -16,8 +16,7 @@
     {!Cascade_legacy_runner} and {!Keeper_turn_driver}.
 
     Internal helpers stay private at this boundary
-    ([lowercase_enum_case_name],
-    [invalid_runtime_config],
+    ([invalid_runtime_config],
     [cli_model_override],
     [provider_supports_inline_tools],
     [provider_supports_runtime_mcp_lane],

@@ -522,8 +522,19 @@ let resolve_tool_capable_provider_across_cascades
   | Error _ -> None
   | Ok all_names ->
     let assignable_names = Keeper_cascade_profile.keeper_catalog_names () in
-    let assignable_set = List.fold_left (fun acc n -> n :: acc) [] assignable_names in
-    let is_keeper_assignable name = List.mem name assignable_set in
+    (* Name had said "set" but the prior implementation was
+       [List.fold_left (fun acc n -> n :: acc) [] assignable_names] —
+       i.e. a reversed list with O(N) [List.mem] semantics.
+       [is_keeper_assignable] fires once per cascade in the
+       [List.concat_map] below; with N cascades x M assignable_names
+       that was O(N x M).  Materialise an actual Hashtbl so the
+       lookup is O(1) and the name matches the behaviour. *)
+    let assignable_set : (string, unit) Hashtbl.t =
+      let tbl = Hashtbl.create (List.length assignable_names) in
+      List.iter (fun n -> Hashtbl.replace tbl n ()) assignable_names;
+      tbl
+    in
+    let is_keeper_assignable name = Hashtbl.mem assignable_set name in
     let scored_candidates =
       all_names
       |> List.filter (fun name -> name <> exclude_cascade)

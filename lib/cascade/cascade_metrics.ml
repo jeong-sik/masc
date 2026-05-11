@@ -405,3 +405,26 @@ let on_strategy_starvation_guard ~cascade ~strategy =
   Prometheus.inc_counter metric_strategy_starvation_guard
     ~labels:[ ("cascade", cascade); ("strategy", strategy) ]
     ()
+
+(* [Cascade_strategy.sticky_order] looks up a per-(keeper, cascade)
+   sticky pin via [Cascade_state.lookup_sticky] and three outcomes
+   are possible:
+     - None        : no pin (first lookup, or TTL expired) — normal
+     - Some + hit  : pin still in candidate list — normal stick
+     - Some + miss : pin no longer in candidate list — DRIFT
+                     (e.g. operator removed the provider from
+                     cascade.toml, or a registry reload dropped it)
+
+   The drift arm silently falls back to plain Failover, breaking
+   the operator-expressed intent to stick to one provider, with
+   only a code comment as evidence.  Counter only ticks on drift
+   (not on the normal hit/miss-no-pin paths) so a non-zero rate
+   directly maps to "sticky intent broken N times".
+
+   Cardinality: cascades (~10) = ~10 series. *)
+let metric_sticky_drift = "masc_cascade_sticky_drift_total"
+
+let on_sticky_drift ~cascade =
+  Prometheus.inc_counter metric_sticky_drift
+    ~labels:[ ("cascade", cascade) ]
+    ()

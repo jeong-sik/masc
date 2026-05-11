@@ -573,7 +573,12 @@ let sticky_order adapter ctx cands =
      | Some c -> [c]
      | None ->
        (* Pinned provider no longer in candidate list (config drift,
-          cascade.json reload).  Fall back to plain Failover. *)
+          cascade.toml reload, provider deprecation).  Fall back to
+          plain Failover.  Iter 23 telemetry: ticks
+          [Cascade_metrics.on_sticky_drift] so the drift rate is
+          observable per cascade rather than living only in this
+          comment. *)
+       Cascade_metrics.on_sticky_drift ~cascade;
        cands)
 
 (* ── Round-robin ────────────────────────────────────────────────── *)

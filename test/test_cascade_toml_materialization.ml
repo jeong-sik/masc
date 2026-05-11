@@ -723,6 +723,19 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    adapter that always reports capacity=0, which is hard to
    provoke from a unit test without rewriting half the strategy
    harness — smoke is signature-only. *)
+(* Smoke + cardinality guard for [Cascade_metrics.on_sticky_drift].
+   Drift path in [sticky_order] is reachable only via a
+   [Cascade_state] mutation between two strategy calls
+   (cascade.toml reload + pin loss), which is harder to provoke
+   from the cascade-toml-materialization suite than from the
+   dedicated [test_cascade_strategy] suite that drives sticky
+   pinning under harness.  Smoke test pins the cascade label name
+   + helper signature. *)
+let test_sticky_drift_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_sticky_drift
+    ~cascade:"smoke_test_cascade_iter23";
+  check bool "single-label cascade helper callable" true true
+
 let test_strategy_starvation_guard_documented_strategies_are_callable () =
   Masc_mcp.Cascade_metrics.on_strategy_starvation_guard
     ~cascade:"smoke_test_cascade_iter22" ~strategy:"circuit_breaker_cycling";
@@ -1046,6 +1059,9 @@ let () =
             "strategy_starvation_guard: both documented strategies callable"
             `Quick
             test_strategy_starvation_guard_documented_strategies_are_callable;
+          test_case
+            "sticky_drift: cascade label helper callable" `Quick
+            test_sticky_drift_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

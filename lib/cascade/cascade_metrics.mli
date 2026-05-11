@@ -125,3 +125,10 @@ val on_strategy_starvation_guard : cascade:string -> strategy:string -> unit
     reported capacity=0.  [strategy] must be one of
     [circuit_breaker_cycling] or [priority_tier] (the only two
     branches with this fail-open). *)
+
+val on_sticky_drift : cascade:string -> unit
+(** Tick the sticky-drift counter at [Cascade_strategy.sticky_order]
+    when a pinned provider is no longer in the candidate list
+    (cascade.toml reload, provider deprecation, registry shift)
+    and the strategy silently falls back to plain Failover.  Ticks
+    only on the drift case, not on normal hit / miss-no-pin paths. *)

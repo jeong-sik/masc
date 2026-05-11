@@ -59,16 +59,14 @@ let test_load_cascade_profile_hierarchical () =
   with_temp_dir "cascade_hier" @@ fun config_dir ->
   with_config_dir config_dir @@ fun () ->
   let toml_path = Filename.concat config_dir "cascade.toml" in
+  (* Inline tables are kept on a single line each — TOML v1.0 forbids
+     multi-line inline tables.  Each group's [items] is itself a
+     single-line array of inline tables. *)
   let toml_content =
     {|[test_profile]
 groups = [
-  { name = "primary", items = [
-      { id = "ollama-qwen", provider = "ollama", model = "qwen3:14b", timeout_ms = 30000, priority = 1 },
-      { id = "ollama-llama", provider = "ollama", model = "llama3:8b", timeout_ms = 30000, priority = 2 }
-    ], strategy = "priority", fallback_group = "fallback" },
-  { name = "fallback", items = [
-      { id = "gemini-flash", provider = "gemini_cli", model = "gemini-3-flash-preview", timeout_ms = 60000, priority = 1 }
-    ], strategy = "priority" }
+  { name = "primary", items = [{ id = "ollama-qwen", provider = "ollama", model = "qwen3:14b", timeout_ms = 30000, priority = 1 }, { id = "ollama-llama", provider = "ollama", model = "llama3:8b", timeout_ms = 30000, priority = 2 }], strategy = "priority", fallback_group = "fallback" },
+  { name = "fallback", items = [{ id = "gemini-flash", provider = "gemini_cli", model = "gemini-3-flash-preview", timeout_ms = 60000, priority = 1 }], strategy = "priority" }
 ]
 |}
   in
@@ -173,16 +171,13 @@ models = [
 (* -------------------------------------------------------------------------- *)
 
 let test_toml_materializer_groups () =
+  (* Same single-line inline-table convention as the loader fixtures
+     above; required for TOML v1.0 compliance. *)
   let toml_content =
     {|[demo]
 groups = [
-  { name = "primary", items = [
-      { id = "ollama-qwen", provider = "ollama", model = "qwen3:14b", timeout_ms = 30000, priority = 1 },
-      { id = "ollama-llama", provider = "ollama", model = "llama3:8b", timeout_ms = 30000, priority = 2 }
-    ], strategy = "priority", fallback_group = "fallback" },
-  { name = "fallback", items = [
-      { id = "gemini-flash", provider = "gemini_cli", model = "gemini-3-flash-preview", timeout_ms = 60000, priority = 1 }
-    ], strategy = "priority" }
+  { name = "primary", items = [{ id = "ollama-qwen", provider = "ollama", model = "qwen3:14b", timeout_ms = 30000, priority = 1 }, { id = "ollama-llama", provider = "ollama", model = "llama3:8b", timeout_ms = 30000, priority = 2 }], strategy = "priority", fallback_group = "fallback" },
+  { name = "fallback", items = [{ id = "gemini-flash", provider = "gemini_cli", model = "gemini-3-flash-preview", timeout_ms = 60000, priority = 1 }], strategy = "priority" }
 ]
 |}
   in

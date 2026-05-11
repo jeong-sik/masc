@@ -59,6 +59,20 @@ let simulate_llm_call clock = Eio.Time.sleep clock 1.0
 (** Simulate a tool execution: 50ms CPU-bound computation. *)
 let simulate_tool_call () = compute_intensive ()
 
+(* ── Warm-up ──────────────────────────────────────────────── *)
+
+(** One warm-up iteration per workload to amortise JIT cold-start,
+    page-fault, and cache-cold noise before the timed runs. *)
+let warmup clock dm =
+  Eio.Switch.run (fun sw ->
+    let p =
+      Eio.Fiber.fork_promise ~sw (fun () ->
+        simulate_llm_call clock;
+        simulate_tool_call ())
+    in
+    ignore (Eio.Promise.await_exn p))
+;;
+
 (* ── Scenario 1: single-Domain fiber baseline ────────────── *)
 
 (** Pure IO: each keeper does one LLM call. *)
@@ -66,11 +80,7 @@ let measure_single_pure_io clock sw n =
   let t0 = Unix.gettimeofday () in
   let ps =
     Array.init n (fun _ ->
-      let p, r = Eio.Promise.create () in
-      Eio.Fiber.fork ~sw (fun () ->
-        simulate_llm_call clock;
-        Eio.Promise.resolve_ok r ());
-      p)
+      Eio.Fiber.fork_promise ~sw (fun () -> simulate_llm_call clock))
   in
   Array.iter Eio.Promise.await_exn ps;
   Unix.gettimeofday () -. t0
@@ -81,11 +91,7 @@ let measure_single_pure_cpu sw n =
   let t0 = Unix.gettimeofday () in
   let ps =
     Array.init n (fun _ ->
-      let p, r = Eio.Promise.create () in
-      Eio.Fiber.fork ~sw (fun () ->
-        simulate_tool_call ();
-        Eio.Promise.resolve_ok r ());
-      p)
+      Eio.Fiber.fork_promise ~sw (fun () -> simulate_tool_call ()))
   in
   Array.iter Eio.Promise.await_exn ps;
   Unix.gettimeofday () -. t0
@@ -96,12 +102,9 @@ let measure_single_mixed clock sw n =
   let t0 = Unix.gettimeofday () in
   let ps =
     Array.init n (fun _ ->
-      let p, r = Eio.Promise.create () in
-      Eio.Fiber.fork ~sw (fun () ->
+      Eio.Fiber.fork_promise ~sw (fun () ->
         simulate_llm_call clock;
-        simulate_tool_call ();
-        Eio.Promise.resolve_ok r ());
-      p)
+        simulate_tool_call ()))
   in
   Array.iter Eio.Promise.await_exn ps;
   Unix.gettimeofday () -. t0
@@ -117,7 +120,7 @@ let measure_pool_pure_io clock dm sw n dc =
       Eio.Executor_pool.submit_fork ~sw pool ~weight:weight_io (fun () ->
         simulate_llm_call clock))
   in
-  Array.iter (fun p -> ignore (Eio.Promise.await_exn p)) ps;
+  Array.iter Eio.Promise.await_exn ps;
   Unix.gettimeofday () -. t0
 ;;
 
@@ -129,7 +132,7 @@ let measure_pool_pure_cpu dm sw n dc =
       Eio.Executor_pool.submit_fork ~sw pool ~weight:weight_cpu (fun () ->
         simulate_tool_call ()))
   in
-  Array.iter (fun p -> ignore (Eio.Promise.await_exn p)) ps;
+  Array.iter Eio.Promise.await_exn ps;
   Unix.gettimeofday () -. t0
 ;;
 
@@ -144,7 +147,7 @@ let measure_pool_mixed clock dm sw n dc =
         simulate_llm_call clock;
         simulate_tool_call ()))
   in
-  Array.iter (fun p -> ignore (Eio.Promise.await_exn p)) ps;
+  Array.iter Eio.Promise.await_exn ps;
   Unix.gettimeofday () -. t0
 ;;
 
@@ -154,6 +157,7 @@ let () =
   Eio_main.run (fun env ->
     let dm = Eio.Stdenv.domain_mgr env in
     let clock = Eio.Stdenv.clock env in
+    warmup clock dm;
     Printf.printf "scenario,workload,keeper_count,domain_count,wall_clock_s,run\n%!";
     (* ── Pure IO ──────────────────────────────────────────── *)
     for k = 0 to Array.length keeper_counts - 1 do

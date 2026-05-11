@@ -38,11 +38,13 @@ LIB_DIR="${REPO_ROOT}/lib"
 
 VERBOSE=0
 BASELINE_FILE=""
+CHECK_CROSS_SPEC=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --verbose) VERBOSE=1; shift ;;
     --baseline) BASELINE_FILE="$2"; shift 2 ;;
     --baseline=*) BASELINE_FILE="${1#*=}"; shift ;;
+    --check-cross-spec) CHECK_CROSS_SPEC=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -128,6 +130,39 @@ extract_spec_members() {
     | rg -o '"[a-z_]+"' \
     | tr -d '"' \
     | sort -u
+}
+
+# Aux: extract a spec set's members PER SPEC FILE, so the caller can
+# detect cross-spec drift (e.g. KTC.tla defines TurnPhaseSet with 7
+# members but KCL.tla defines it with 5 — R-E-1.b finding from iter 38
+# audit `docs/tla-audit/kcl-e1-cross-spec-projection-drift-2026-05-12.md`).
+#
+# Output: one line per spec file that contains the set:
+#   <spec_basename>: <space-sorted member1> <member2> ...
+#
+# Empty output means the set is not defined in any spec.
+extract_set_members_per_spec() {
+  local set_name="$1"
+  local spec
+  for spec in "${SPEC_DIR}"/*.tla; do
+    local members
+    members=$(awk -v set="${set_name}" '
+      BEGIN { capturing = 0 }
+      $0 ~ "^" set "[[:space:]]*==" { capturing = 1 }
+      capturing == 1 {
+        buf = buf $0 " "
+        if (index($0, "}") > 0) { capturing = 0; print buf; buf = "" }
+      }
+    ' "${spec}" 2>/dev/null \
+      | rg -o '"[a-z_]+"' \
+      | tr -d '"' \
+      | sort -u \
+      | tr '\n' ' ')
+    members="${members% }"   # strip trailing space
+    if [[ -n "${members}" ]]; then
+      echo "$(basename "${spec}" .tla): ${members}"
+    fi
+  done
 }
 
 # Aux: extract TLC cfg CONSTANT members.  Greps the
@@ -239,13 +274,72 @@ for pair in "${TYPE_SET_PAIRS[@]}"; do
   done <<< "${ocaml_members}"
 done
 
-echo ""
-echo "tla-annotation-drift summary: ${TOTAL_CHECKED} constructors checked across ${TOTAL_PAIRS} type/set pairs, ${VIOLATIONS} new drift(s), ${KNOWN_DRIFTS} baseline-known drift(s)"
+# ── Cross-spec set uniformity check (R-E-1.b, iter 40) ─────────────
+#
+# When a set name appears in MULTIPLE *.tla files, check that all
+# occurrences define the same member set.  Detects drift where one
+# spec is widened (e.g. iter 28 KTC TurnPhaseSet 5→7) but observer
+# specs (KCL) are not synced — the bug class identified in iter 38
+# audit (`docs/tla-audit/kcl-e1-cross-spec-projection-drift-2026-05-12.md`).
+#
+# Rule of thumb: spec set names that appear verbatim in multiple
+# specs are EXPECTED to be uniform.  Deliberate projection collapses
+# (e.g. KCL's KcafPhaseSet collapses KCAF's PhaseSet 6→3) use a
+# DIFFERENT set name on purpose, so they don't appear here.
+#
+# Listed sets are the cross-spec-shared identifiers most likely to
+# drift across spec extensions.  Extend as new shared sets emerge.
+# Each entry should appear in 2+ *.tla files for the check to be
+# meaningful.  Entries that appear in only one spec are silently
+# skipped — see the empty-output guard inside the loop.
+declare -a CROSS_SPEC_UNIFORM_SETS=(
+  # KTC + KCL: turn-phase projection (synced in iter 39 R-E-1.a).
+  "TurnPhaseSet"
+  # KTC + KCL: decision projection.
+  "DecisionSet"
+  # KTC + KCL: cascade-state projection.
+  "CascadeSet"
+)
 
-if [[ "${VIOLATIONS}" -gt 0 ]]; then
+CROSS_SPEC_DRIFTS=0
+CROSS_SPEC_CHECKED=0
+if [[ "${CHECK_CROSS_SPEC}" == "1" ]]; then
+for shared_set in "${CROSS_SPEC_UNIFORM_SETS[@]}"; do
+  [[ -z "${shared_set}" ]] && continue
+  CROSS_SPEC_CHECKED=$((CROSS_SPEC_CHECKED + 1))
+  per_spec_output=$(extract_set_members_per_spec "${shared_set}" || true)
+  if [[ -z "${per_spec_output}" ]]; then
+    if [[ "${VERBOSE}" == "1" ]]; then
+      echo "── ${shared_set} cross-spec ──  (not defined in any spec, skipping)"
+    fi
+    continue
+  fi
+  unique_member_signatures=$(echo "${per_spec_output}" | awk -F': ' '{print $2}' | sort -u | wc -l | tr -d ' ')
+  occurrences=$(echo "${per_spec_output}" | wc -l | tr -d ' ')
+  if [[ "${VERBOSE}" == "1" ]]; then
+    echo "── ${shared_set} cross-spec (${occurrences} spec(s), ${unique_member_signatures} unique signature(s)) ──"
+    echo "${per_spec_output}" | sed 's/^/  /'
+  fi
+  if [[ "${unique_member_signatures}" -gt 1 ]]; then
+    echo "cross-spec-drift: set '${shared_set}' has divergent definitions across spec files"
+    echo "${per_spec_output}" | sed 's/^/  /'
+    CROSS_SPEC_DRIFTS=$((CROSS_SPEC_DRIFTS + 1))
+  fi
+done
+fi
+
+echo ""
+if [[ "${CHECK_CROSS_SPEC}" == "1" ]]; then
+  echo "tla-annotation-drift summary: ${TOTAL_CHECKED} constructors checked across ${TOTAL_PAIRS} type/set pairs, ${VIOLATIONS} new drift(s), ${KNOWN_DRIFTS} baseline-known drift(s); ${CROSS_SPEC_CHECKED} cross-spec set(s) checked, ${CROSS_SPEC_DRIFTS} cross-spec drift(s)"
+else
+  echo "tla-annotation-drift summary: ${TOTAL_CHECKED} constructors checked across ${TOTAL_PAIRS} type/set pairs, ${VIOLATIONS} new drift(s), ${KNOWN_DRIFTS} baseline-known drift(s) (cross-spec scan available via --check-cross-spec, opt-in)"
+fi
+
+if [[ "${VIOLATIONS}" -gt 0 || "${CROSS_SPEC_DRIFTS}" -gt 0 ]]; then
   echo ""
-  echo "RFC reference: R-B-1.c (iter 19 KTC B-1 audit)."
-  echo "Fix: either (a) add missing members to TLA+ spec set, or (b) remove obsolete OCaml constructor."
+  echo "RFC reference: R-B-1.c (iter 19 KTC B-1 audit), R-E-1.b (iter 38 KCL E-1 audit, cross-spec pass)."
+  echo "Fix (annotation drift): either (a) add missing members to TLA+ spec set, or (b) remove obsolete OCaml constructor."
+  echo "Fix (cross-spec drift): sync all spec files defining the same set name to the same members.  If the projection is DELIBERATE (observer pattern), rename to a distinct identifier (e.g. KcafPhaseSet vs PhaseSet) and document in the spec header."
   echo "Note: this validator extracts constructor names only — it does not yet parse [@tla.symbol] PPX overrides, so (c) alias-based reconciliation is not available until the extractor learns that attribute (tracked under R-B-1.d follow-up)."
   exit 1
 fi

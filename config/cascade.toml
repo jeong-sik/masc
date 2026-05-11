@@ -23,6 +23,15 @@ key = "ANTHROPIC_API_KEY"
 [providers.claude_code.liveness]
 class = "cloud_fast"
 
+# Behavioral capabilities — RFC-0058 §2.4 Phase 5.1.
+# Replaces the OCaml `tool_policy` record and per-kind matches in
+# cascade_transport / provider_tool_support / keeper_usage_trust.
+# Field defaults (when omitted) are all false / [] / None.
+[providers.claude_code.capabilities]
+supports-runtime-mcp-http-headers = true
+uses-anthropic-caching = true
+max-turns-per-attempt = 30
+
 [providers.codex_cli]
 display-name = "OpenAI Codex CLI"
 protocol = "openai-http"
@@ -35,6 +44,14 @@ key = "OPENAI_API_KEY"
 
 [providers.codex_cli.liveness]
 class = "cloud_fast"
+
+[providers.codex_cli.capabilities]
+# Codex CLI's cached login cannot inject arbitrary per-request headers,
+# so keeper-bound actor tools must be bridged via argv (per-keeper auth
+# token routed through bearer_token_env_var) — see masc-mcp#10097.
+requires-per-keeper-bridging-for-bound-actor-tools = true
+identity-runtime-mcp-header-keys = ["authorization", "x-masc-agent-name", "x-masc-keeper-name"]
+argv-prompt-preflight = true
 
 [providers.gemini_cli]
 display-name = "Google Gemini CLI"
@@ -49,6 +66,11 @@ key = "GEMINI_API_KEY"
 [providers.gemini_cli.liveness]
 class = "cloud_fast"
 
+# Gemini CLI ships no [capabilities] sub-table — needs none of the
+# behavioral quirks (no runtime MCP HTTP headers, no anthropic caching,
+# no max-turns cap). Parser yields `capabilities = None`; A.3 callers
+# treat `None` as the conservative defaults (all-false / empty / None).
+
 [providers.kimi_cli]
 display-name = "Moonshot Kimi CLI"
 protocol = "kimi-cli"
@@ -62,6 +84,9 @@ key = "MOONSHOT_API_KEY"
 [providers.kimi_cli.liveness]
 class = "cloud_thinking"
 
+[providers.kimi_cli.capabilities]
+supports-runtime-mcp-http-headers = true
+
 [providers.glm-coding]
 display-name = "Zhipu GLM Coding"
 protocol = "openai-http"
@@ -74,6 +99,10 @@ key = "ZAI_API_KEY"
 [providers.glm-coding.liveness]
 class = "cloud_thinking"
 
+# glm-coding ships no [capabilities] sub-table — no runtime MCP HTTP
+# headers, no anthropic caching. Parser yields `capabilities = None`;
+# A.3 callers treat `None` as the conservative defaults.
+
 # Provider liveness class (RFC-0058 §3.2.1) feeds attempt-wall budgets
 # in Cascade_attempt_liveness_config. Values: cloud_fast | cloud_thinking
 # | local_27b | local_70b_plus.
@@ -85,6 +114,9 @@ endpoint = "http://localhost:11434"
 
 [providers.ollama.liveness]
 class = "local_27b"
+
+# Ollama ships no [capabilities] sub-table. Parser yields
+# `capabilities = None`; A.3 callers treat `None` as defaults.
 
 # ── Layer 2: Models ────────────────────────────────────────────
 

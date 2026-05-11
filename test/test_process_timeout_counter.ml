@@ -23,7 +23,8 @@ let counter_for ~program ~timeout_sec =
     Masc_mcp.Coord.process_timeout_metric
     ~labels:[
       ("program", program);
-      ("timeout_sec", Printf.sprintf "%.0f" timeout_sec);
+      ( "timeout_bucket"
+      , Masc_mcp.Timeout_bucket.(to_label (of_seconds timeout_sec)) );
     ]
     ()
 

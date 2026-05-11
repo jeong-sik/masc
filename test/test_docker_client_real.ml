@@ -50,10 +50,21 @@ let sample_container () =
 
 (* ── Each S function returns the typed placeholder ──────────── *)
 
-let test_run_placeholder () =
+(* Phase 3b-iv.2.3 — run is no longer a placeholder. It spawns
+   [docker run --rm --name <name> <image> sh -lc <cmd>]. Same typed
+   contract as [exec]: either [Ok exec_result] (daemon present) or
+   [Error Daemon_unreachable] (daemon / CLI missing). No other
+   [sandbox_error] variant is semantically valid for [run]. *)
+let test_run_returns_typed_result () =
   match Docker_client_real.run (sample_plan ()) with
-  | Error Docker_client.Cleanup_failed -> ()
-  | _ -> fail "expected Cleanup_failed placeholder"
+  | Ok _ -> ()                                     (* daemon present *)
+  | Error Docker_client.Daemon_unreachable -> ()   (* daemon / CLI missing *)
+  | Error Docker_client.Cleanup_failed
+  | Error Docker_client.Image_pull_failed
+  | Error Docker_client.Container_oom
+  | Error Docker_client.Exec_timeout
+  | Error Docker_client.Probe_format_drift ->
+    fail "run should only surface Ok exec_result or Error Daemon_unreachable"
 
 (* Phase 3b-iv.2.2 — exec is no longer a placeholder. It spawns
    [docker exec <container> sh -lc <cmd>]. The test environment may
@@ -97,18 +108,27 @@ let test_rm_returns_typed_error () =
 
 (* ── Functor instantiation works with Real ───────────────────── *)
 
-let test_executor_with_real_returns_placeholder () =
-  let r = Real_executor.execute_plan (sample_plan ()) in
-  match r with
-  | Error Docker_client.Cleanup_failed -> ()
-  | _ -> fail "executor with Real placeholder should surface Cleanup_failed"
+(* Phase 3b-iv.2.3 — executor.execute_plan calls Real.run, which is
+   now wired. Same typed contract as test_run_returns_typed_result. *)
+let test_executor_with_real_returns_typed_result () =
+  match Real_executor.execute_plan (sample_plan ()) with
+  | Ok _ -> ()
+  | Error Docker_client.Daemon_unreachable -> ()
+  | Error Docker_client.Cleanup_failed
+  | Error Docker_client.Image_pull_failed
+  | Error Docker_client.Container_oom
+  | Error Docker_client.Exec_timeout
+  | Error Docker_client.Probe_format_drift ->
+    fail "executor with Real should only surface Ok or Daemon_unreachable"
 
 let () =
-  run "Docker_client_real (skeleton)"
+  run "Docker_client_real (Phase 3b-iv.2.3)"
     [
       ( "S placeholder",
         [
-          test_case "run → Cleanup_failed" `Quick test_run_placeholder;
+          test_case "run → Ok exec_result | Error Daemon_unreachable"
+            `Quick
+            test_run_returns_typed_result;
           test_case "exec → Ok exec_result | Error Daemon_unreachable"
             `Quick
             test_exec_returns_typed_result;
@@ -121,6 +141,6 @@ let () =
         [
           test_case "Sandbox_executor.Make (Real) instantiates + forwards placeholder"
             `Quick
-            test_executor_with_real_returns_placeholder;
+            test_executor_with_real_returns_typed_result;
         ] );
     ]

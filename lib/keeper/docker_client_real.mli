@@ -1,10 +1,11 @@
-(** RFC-0070 Phase 3b-iv.2.2 — Real {!Docker_client.S} ([rm] + [exec] wired).
+(** RFC-0070 Phase 3b-iv.2.3 — Real {!Docker_client.S}
+    ([rm] + [exec] + [run] wired).
 
     Phase 3a's stub kept [Docker_client.S] as a *signature only*. Phase
     3b-iv.1b added [Docker_client_mock] for tests. Phase 3b-iv.2.0
     added the *production* skeleton. Phase 3b-iv.2.1 (#14844) wired
-    [rm]; Phase 3b-iv.2.2 (this) wires [exec]. [run] and [ps_query]
-    remain placeholders pending 3b-iv.2.{3,4}.
+    [rm]; 3b-iv.2.2 (#14854) wired [exec]; 3b-iv.2.3 (this) wires
+    [run]. Only [ps_query] remains a placeholder pending 3b-iv.2.4.
 
     Reference: docs/rfc/RFC-0070-keeper-sandbox-pure-edge-separation.md §3.2
 
@@ -35,9 +36,19 @@
         {- [WSIGNALED _] / [WSTOPPED _]}}
       All other [WEXITED n] values surface as
       [Ok { exit_code = n; stdout; stderr }].
-    - [run], [ps_query] — still [Error Cleanup_failed] placeholder
-      pending 3b-iv.2.{3,4}. Each sub-phase replaces one body without
-      changing the public surface.
+    - [run] — wired: spawns
+      [docker run --rm --name <name> <image> sh -lc <cmd>] via
+      [Process_eio.run_argv_with_status_split], passing
+      [Keeper_sandbox_plan.timeout_budget_sec] as the
+      [?timeout_sec] parameter. Status mapping is the same as [exec]
+      ({!Docker_response.exec_result} on container-command exit;
+      [Error Daemon_unreachable] on daemon-level status). [--rm]
+      flag removes the container after exit (RFC §3.1's interim
+      default cleanup; a typed cleanup-policy field on
+      {!Keeper_sandbox_plan.t} is deferred to a follow-up RFC).
+    - [ps_query] — still [Error Cleanup_failed] placeholder pending
+      3b-iv.2.4 (JSON parser for
+      [docker ps --format '\{\{json .\}\}']).
 
     **Why a placeholder skeleton and not [failwith]**: returning
     [Error Cleanup_failed] keeps the signature in {!result}; a caller

@@ -376,14 +376,14 @@ let () =
     ~name:Keeper_metrics.metric_keeper_receipt_unmapped_disposition
     ~help:
       "Total receipts whose (outcome, cascade_outcome) tuple did not match any branch of \
-       operator_disposition and fell through to (\"unknown\", \
-       \"unmapped_cascade_state\").  PR #11651 fixed the historical 'blocked' -> \
-       'unknown' silent path; this counter alerts operators if a future refactor \
-       reintroduces such a path. A non-zero rate is a regression signal — investigate \
-       which receipt.outcome / cascade_outcome / terminal_reason_code combination is \
-       unclassified.  Labels are intentionally omitted: receipt fields are \
-       high-cardinality free-form strings; structured detail goes to the WARN log line \
-       at the firing site."
+       operator_disposition and fell through to the typed catch-all \
+       (Disp_unknown, Reason_unmapped_cascade_state).  PR #11651 fixed the historical \
+       'blocked' -> 'unknown' silent path; this counter alerts operators if a future \
+       refactor reintroduces such a path. A non-zero rate is a regression signal — \
+       investigate which receipt.outcome / cascade_outcome / terminal_reason_code \
+       combination is unclassified.  Labels are intentionally omitted: receipt fields \
+       are high-cardinality free-form strings; structured detail goes to the WARN log \
+       line at the firing site."
     ()
 ;;
 

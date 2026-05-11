@@ -191,7 +191,8 @@ let permissions_for_role = function
    allocation.  Hot path: [Auth.check_permission] runs this on every
    protected operation; [Auth_doctor] runs it 10+ times per snapshot.
    The previous [List.mem permission (permissions_for_role role)] form
-   built a fresh 12-14 element list each call.
+   built a fresh 12-element (Worker) / 15-element (Admin) list each
+   call.
 
    Parallel to [permissions_for_role]: both forms are compiler-checked
    exhaustive against the [permission] variant, so adding a new

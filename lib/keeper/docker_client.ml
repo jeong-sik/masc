@@ -1,6 +1,4 @@
-(* RFC-0070 Phase 3a — Docker daemon client stub. See docker_client.mli
-   for the contract. Phase 3b adds [module Real], Phase 3c adds
-   [module Mock]; both satisfy [S]. *)
+(* RFC-0070 Phase 3b-iv.1a — concrete module type S. See .mli. *)
 
 type sandbox_error =
   | Daemon_unreachable
@@ -11,21 +9,18 @@ type sandbox_error =
   | Cleanup_failed
 
 module type S = sig
-  type plan
-  type exec_result
-  type ps_record
-  type container_name
-
-  val run : plan -> (exec_result, sandbox_error) result
+  val run
+    :  Keeper_sandbox_plan.t
+    -> (Docker_response.exec_result, sandbox_error) result
 
   val exec
-    :  container:container_name
+    :  container:Keeper_container_name.t
     -> cmd:string
-    -> (exec_result, sandbox_error) result
+    -> (Docker_response.exec_result, sandbox_error) result
 
   val ps_query
     :  labels:(string * string) list
-    -> (ps_record list, sandbox_error) result
+    -> (Docker_response.ps_record list, sandbox_error) result
 
-  val rm : container_name -> (unit, sandbox_error) result
+  val rm : Keeper_container_name.t -> (unit, sandbox_error) result
 end

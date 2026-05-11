@@ -1,12 +1,13 @@
-(** RFC-0070 Phase 3a — Docker daemon client (signature only).
+(** RFC-0070 Phase 3b-iv.1a — Docker daemon client (signature, concrete).
 
-    Stub signatures. Implementation arrives in Phase 3b (Real) and
-    Phase 3c (Mock + property tests). Phase 3a establishes the
-    sandbox_error closed sum and the module type so that future caller
-    cutover (Phase 3d) has a compilation-checked contract to migrate
-    against.
+    Phase 3a stub kept the four payload types abstract; Phase 3b-iv.1a
+    closes them to the concrete shared types now that
+    {!Keeper_sandbox_plan}, {!Keeper_container_name}, and
+    {!Docker_response} are on main. With the signature concrete, the
+    upcoming [Mock] and [Real] implementations are *interchangeable*
+    at any call site that takes [(module Docker_client.S)].
 
-    Reference: docs/rfc/RFC-0070-keeper-sandbox-pure-edge-separation.md §3.2
+    Reference: docs/rfc/RFC-0070-keeper-sandbox-pure-edge-separation.md §3.2, §3.3
 
     Non-determinism contract: every function in {!S} is at the
     process boundary (docker daemon, network, host clock). All such
@@ -19,8 +20,9 @@
     failure. The reader is forced to handle each by exhaustive match.
 
     Phase 3b may refine arms with concrete payload fields (image
-    digest, container name, exit code). Phase 3a keeps the variant
-    skeleton minimal. *)
+    digest, container name, exit code). Phase 3a kept the variant
+    skeleton minimal; Phase 3b-iv.1a preserves that minimum until a
+    caller surfaces an actual payload need. *)
 type sandbox_error =
   | Daemon_unreachable
   | Image_pull_failed
@@ -31,39 +33,24 @@ type sandbox_error =
 
 (** {1 Client interface} *)
 
-(** Sandbox executor client. [Real] (Phase 3b) spawns docker via
-    [Eio.Process]; [Mock] (Phase 3c) feeds injected responses for
-    property-seeded replay tests. *)
+(** Sandbox executor client. [Real] (Phase 3b-iv.2) spawns docker via
+    [Eio.Process]; [Mock] (Phase 3b-iv.1b) feeds injected responses
+    for property-seeded replay tests. Both satisfy {!S} so callers
+    parameterising on [(module S)] swap them without conditional
+    branches. *)
 module type S = sig
-  (** Sandbox plan accepted by [run]. Concrete type bound at
-      implementation time to {!Keeper_sandbox_plan.t} or a mock
-      stand-in. *)
-  type plan
-
-  (** Captured execution result (exit code + stdout + stderr).
-      Concrete shape lands in Phase 3b. *)
-  type exec_result
-
-  (** Parsed [docker ps] line. Phase 3b parses
-      [docker ps --format '\{\{json .\}\}'] via ppx_deriving_yojson. *)
-  type ps_record
-
-  (** Opaque container handle (derived from
-      {!Keeper_sandbox_plan.t}'s container_name in Phase 3b). *)
-  type container_name
-
   val run
-    :  plan
-    -> (exec_result, sandbox_error) result
+    :  Keeper_sandbox_plan.t
+    -> (Docker_response.exec_result, sandbox_error) result
 
   val exec
-    :  container:container_name
+    :  container:Keeper_container_name.t
     -> cmd:string
-    -> (exec_result, sandbox_error) result
+    -> (Docker_response.exec_result, sandbox_error) result
 
   val ps_query
     :  labels:(string * string) list
-    -> (ps_record list, sandbox_error) result
+    -> (Docker_response.ps_record list, sandbox_error) result
 
-  val rm : container_name -> (unit, sandbox_error) result
+  val rm : Keeper_container_name.t -> (unit, sandbox_error) result
 end

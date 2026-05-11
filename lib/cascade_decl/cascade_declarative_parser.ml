@@ -356,6 +356,32 @@ let parse_model (id : string) (tbl : Otoml.t)
       Otoml.find_opt tbl Fun.id [ "capabilities" ]
       |> Option.map (parse_model_capabilities ~path:(path ^ ".capabilities"))
     in
+    let match_prefixes =
+      match Otoml.find_opt tbl Fun.id [ "match-prefixes" ] with
+      | None -> []
+      | Some v ->
+        (try
+           Otoml.get_array Otoml.get_string v
+           |> List.filter_map (fun s ->
+             let trimmed = String.trim s in
+             if String.length trimmed = 0
+             then (
+               Logs.warn (fun m ->
+                 m
+                   "cascade_declarative_parser: %s.match-prefixes contains empty entry, \
+                    ignoring"
+                   path);
+               None)
+             else Some trimmed)
+         with
+         | _ ->
+           Logs.warn (fun m ->
+             m
+               "cascade_declarative_parser: %s.match-prefixes — expected string array, \
+                ignoring"
+               path);
+           [])
+    in
     Ok
       { id
       ; api_name
@@ -365,6 +391,7 @@ let parse_model (id : string) (tbl : Otoml.t)
       ; max_thinking_budget
       ; streaming
       ; capabilities
+      ; match_prefixes
       })
 ;;
 

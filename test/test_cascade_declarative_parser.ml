@@ -1138,6 +1138,139 @@ max-context = 4096
        (model_capabilities_for_id cfg "does-not-exist"))
 ;;
 
+(* --- M1c: match_prefixes + longest-prefix-first lookup --- *)
+
+let test_match_prefixes_parses () =
+  let toml =
+    {|
+[models.sonnet-family]
+api-name = "claude-sonnet-4-6"
+max-context = 200000
+match-prefixes = ["claude-sonnet-4", "claude-sonnet-3.5"]
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] ->
+    check
+      (list string)
+      "match-prefixes parsed in order"
+      [ "claude-sonnet-4"; "claude-sonnet-3.5" ]
+      m.match_prefixes
+  | _ -> failwith "expected exactly one model"
+;;
+
+let test_match_prefixes_absent_defaults_empty () =
+  let toml =
+    {|
+[models.m]
+max-context = 4096
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] -> check (list string) "match_prefixes default []" [] m.match_prefixes
+  | _ -> failwith "expected exactly one model"
+;;
+
+let test_match_prefixes_empty_strings_dropped () =
+  let toml =
+    {|
+[models.m]
+api-name = "x"
+max-context = 4096
+match-prefixes = ["", "good-prefix", "  "]
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.models with
+  | [ m ] ->
+    check (list string) "blank entries filtered" [ "good-prefix" ] m.match_prefixes
+  | _ -> failwith "expected exactly one model"
+;;
+
+let test_model_spec_for_api_name_exact () =
+  (* Exact api_name match beats any prefix match. *)
+  let toml =
+    {|
+[models.sonnet]
+api-name = "claude-sonnet-4-6"
+max-context = 200000
+
+[models.sonnet-family]
+api-name = "claude-sonnet-4-other"
+max-context = 200000
+match-prefixes = ["claude-sonnet-4"]
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match model_spec_for_api_name cfg "claude-sonnet-4-6" with
+  | Some m -> check string "exact api_name wins" "sonnet" m.id
+  | None -> failwith "expected exact-match resolution"
+;;
+
+let test_model_spec_for_api_name_longest_prefix () =
+  (* When multiple prefixes match, longest wins (mirrors OAS if/elsif
+     ordering: glm-5-turbo checked before glm-5 catchall). *)
+  let toml =
+    {|
+[models.glm-5-turbo]
+api-name = "glm-5-turbo"
+max-context = 128000
+match-prefixes = ["glm-5-turbo"]
+
+[models.glm-5-family]
+api-name = "glm-5-family-default"
+max-context = 200000
+match-prefixes = ["glm-5"]
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match model_spec_for_api_name cfg "glm-5-turbo-2026" with
+  | Some m -> check string "longer prefix wins" "glm-5-turbo" m.id
+  | None -> failwith "expected longest-prefix resolution"
+;;
+
+let test_model_spec_for_api_name_no_match () =
+  let toml =
+    {|
+[models.m]
+api-name = "x"
+max-context = 4096
+match-prefixes = ["claude-"]
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  check
+    (option string)
+    "no prefix or exact match → None"
+    None
+    (Option.map
+       (fun (m : cascade_model_spec) -> m.id)
+       (model_spec_for_api_name cfg "gpt-5"))
+;;
+
+let test_model_capabilities_for_api_name_via_prefix () =
+  let toml =
+    {|
+[models.gpt-5-family]
+api-name = "gpt-5-family-default"
+max-context = 1050000
+match-prefixes = ["gpt-5"]
+
+[models.gpt-5-family.capabilities]
+supports-parallel-tool-calls = true
+supports-image-input = true
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match model_capabilities_for_api_name cfg "gpt-5.3-codex-spark" with
+  | Some c ->
+    check bool "parallel via prefix lookup" true c.supports_parallel_tool_calls;
+    check bool "image via prefix lookup" true c.supports_image_input
+  | None -> failwith "expected capabilities via prefix lookup"
+;;
+
 (* --- M1b: expanded schema fields (15 additions) --- *)
 
 let test_model_capabilities_m1b_full () =
@@ -1476,6 +1609,34 @@ let () =
             "M1b expanded — prompt-cache-alignment=0 rejected → None"
             `Quick
             test_prompt_cache_alignment_zero_rejected
+        ; test_case
+            "M1c — match-prefixes parses sorted list"
+            `Quick
+            test_match_prefixes_parses
+        ; test_case
+            "M1c — match-prefixes absent defaults to []"
+            `Quick
+            test_match_prefixes_absent_defaults_empty
+        ; test_case
+            "M1c — match-prefixes empty/blank strings dropped"
+            `Quick
+            test_match_prefixes_empty_strings_dropped
+        ; test_case
+            "M1c — model_spec_for_api_name: exact api_name wins"
+            `Quick
+            test_model_spec_for_api_name_exact
+        ; test_case
+            "M1c — model_spec_for_api_name: longest prefix wins"
+            `Quick
+            test_model_spec_for_api_name_longest_prefix
+        ; test_case
+            "M1c — model_spec_for_api_name: no match → None"
+            `Quick
+            test_model_spec_for_api_name_no_match
+        ; test_case
+            "M1c — model_capabilities_for_api_name via prefix"
+            `Quick
+            test_model_capabilities_for_api_name_via_prefix
         ] )
     ]
 ;;

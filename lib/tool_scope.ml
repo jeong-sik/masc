@@ -68,8 +68,20 @@ let keeper_internal_list : string list =
 
 let keeper_internal_names () = keeper_internal_list
 
+(* O(1) membership table built once at module load.  Previously
+   [classify] scanned [keeper_internal_list] (~41 entries) via
+   [List.mem] on every call; [classify] is invoked in [Config]'s
+   visible_tool_schemas filter (length × |list|) and indirectly on
+   surface-trim hot paths. *)
+let keeper_internal_set : (string, unit) Hashtbl.t =
+  let table = Hashtbl.create (List.length keeper_internal_list * 2) in
+  List.iter
+    (fun name -> Hashtbl.replace table name ())
+    keeper_internal_list;
+  table
+
 let classify ~name =
-  if List.mem name keeper_internal_list then Keeper_internal else Surface
+  if Hashtbl.mem keeper_internal_set name then Keeper_internal else Surface
 
 let scope_to_string = function
   | Surface -> "surface"

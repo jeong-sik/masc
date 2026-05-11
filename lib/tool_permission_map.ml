@@ -131,8 +131,24 @@ let legacy_permission_entries : (string * permission) list =
     ("sidecar", CanBroadcast);
   ]
 
+(* O(1) lookup table built once at module load.  Previously
+   [legacy_permission_for_tool] scanned [legacy_permission_entries]
+   (~97 entries) via [List.assoc_opt] on every call; this is hot on the
+   auth path ([Auth.authorize] → [permission_for_tool] → here for every
+   request that misses the declared metadata).  The entries list
+   remains the readable source-of-truth and feeds [known_tool_names]
+   below. *)
+let legacy_permission_table : (string, permission) Hashtbl.t =
+  let table =
+    Hashtbl.create (List.length legacy_permission_entries * 2)
+  in
+  List.iter
+    (fun (tool_name, perm) -> Hashtbl.replace table tool_name perm)
+    legacy_permission_entries;
+  table
+
 let legacy_permission_for_tool tool_name =
-  List.assoc_opt tool_name legacy_permission_entries
+  Hashtbl.find_opt legacy_permission_table tool_name
 
 let known_tool_names =
   let metadata_tools =

@@ -875,6 +875,52 @@ command = "c"
   | _ -> failwith "expected exactly one provider"
 
 
+(* --- capabilities_for_provider_id lookup helper (Phase 5.1 A.3 prep) --- *)
+
+let test_capabilities_for_provider_id_present () =
+  (* Provider declares capabilities sub-table → lookup returns Some caps. *)
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[providers.p.capabilities]
+requires-per-keeper-bridging-for-bound-actor-tools = true
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match capabilities_for_provider_id cfg "p" with
+  | Some c ->
+    check bool "requires per-keeper bridging" true
+      c.requires_per_keeper_bridging_for_bound_actor_tools
+  | None -> failwith "expected Some capabilities"
+
+let test_capabilities_for_provider_id_absent () =
+  (* Provider exists but ships no capabilities sub-table → None. *)
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+|} in
+  let cfg = ok_config (parse_string toml) in
+  check (option string) "provider without capabilities → None" None
+    (Option.map show_cascade_capabilities
+       (capabilities_for_provider_id cfg "p"))
+
+let test_capabilities_for_provider_id_unknown_provider () =
+  (* Provider id not in cfg.providers → None.
+     Collapsed with the "declared without caps" case by design — A.3
+     callers treat both as "use defaults". *)
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+|} in
+  let cfg = ok_config (parse_string toml) in
+  check (option string) "unknown provider id → None" None
+    (Option.map show_cascade_capabilities
+       (capabilities_for_provider_id cfg "does-not-exist"))
+
+
 (* --- Test suite --- *)
 
 let () =
@@ -958,5 +1004,13 @@ let () =
         test_case "absent yields None" `Quick test_headers_absent;
         test_case "declared but empty yields Some []" `Quick
           test_headers_declared_but_empty;
+      ];
+      "capabilities_for_provider_id (A.3 prep)", [
+        test_case "present provider with caps returns Some" `Quick
+          test_capabilities_for_provider_id_present;
+        test_case "present provider without caps returns None" `Quick
+          test_capabilities_for_provider_id_absent;
+        test_case "unknown provider id returns None" `Quick
+          test_capabilities_for_provider_id_unknown_provider;
       ];
     ]

@@ -220,6 +220,25 @@ type cascade_config = {
 
 val provider_of_id : cascade_config -> string -> cascade_provider option
 
+val capabilities_for_provider_id :
+  cascade_config -> string -> cascade_capabilities option
+(** [capabilities_for_provider_id cfg id] returns the cascade-declared
+    capabilities for the provider with id [id]. Resolves [None] in two
+    distinct cases collapsed into one option:
+    - The provider id is not declared in [cfg.providers].
+    - The provider is declared but ships no [\[providers.<id>.capabilities\]]
+      sub-table (parser yields [capabilities = None]).
+
+    A.3 callers treat [None] as "use defaults" — equivalent to
+    {!cascade_capabilities_default}. The two cases are not distinguished
+    here because A.3 callers cannot remediate either: an id misspelled
+    in code is a static bug, and a provider that opts out of declaring
+    capabilities relies on runtime defaults.
+
+    Phase 5.1 A.3 caller cutover uses this lookup to replace closed-variant
+    [match provider_kind with PK.Codex_cli | PK.Claude_code | ... -> ...]
+    patterns. *)
+
 val model_of_id : cascade_config -> string -> cascade_model_spec option
 
 val binding_of_key : cascade_config -> string -> string -> cascade_binding option

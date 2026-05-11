@@ -654,7 +654,6 @@ let metric_sse_client_evictions = "masc_sse_client_evictions_total"
 let metric_coord_broadcast_duration = "masc_coord_broadcast_duration_seconds"
 let metric_file_lock_retries = "masc_file_lock_retries_total"
 let metric_file_lock_acquire_duration = "masc_file_lock_acquire_seconds"
-let metric_file_lock_acquire_seconds = metric_file_lock_acquire_duration
 let metric_grpc_active_streams = "masc_grpc_active_streams_total"
 let metric_grpc_heartbeat_latency = "masc_grpc_heartbeat_latency_seconds"
 let metric_grpc_subscribers = "masc_grpc_subscribers_total"

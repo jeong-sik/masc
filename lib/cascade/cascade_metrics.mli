@@ -108,3 +108,12 @@ val on_ordering_health_widening : cascade:string -> unit
     tracker judged every provider in this cascade unhealthy yet
     keeper turns continue to route — either the health tracker is
     wrong or the cascade should fail closed. *)
+
+val on_provider_cooldown : provider:string -> reason:string -> unit
+(** Tick the per-provider cooldown-entry counter at
+    [Cascade_health_tracker.record] when a fresh cooldown_until is
+    set.  [reason] must be one of [failure_threshold],
+    [soft_rate_limit], [hard_quota], [terminal_failure].  Distinct
+    from the existing [keeper_provider_block_duration_sec]
+    histogram, which captures duration distribution but not entry
+    rate or reason. *)

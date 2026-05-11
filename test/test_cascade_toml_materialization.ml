@@ -705,6 +705,25 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    shared across the suite).  Smoke test pins the cascade label name
    + helper signature so a future refactor that breaks the call shape
    trips here rather than silently dead-coding the counter. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_provider_cooldown].  Four reasons map to the
+   four cooldown-entry branches in [Cascade_health_tracker.record]
+   (failure_threshold, soft_rate_limit, hard_quota, terminal_failure).
+   A typo at any call site would produce an undocumented label and
+   pollute Prometheus cardinality; pinning the four strings here
+   keeps the documented set canonical. *)
+let test_provider_cooldown_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_provider_cooldown
+    ~provider:"smoke_test_provider_iter20" ~reason:"failure_threshold";
+  Masc_mcp.Cascade_metrics.on_provider_cooldown
+    ~provider:"smoke_test_provider_iter20" ~reason:"soft_rate_limit";
+  Masc_mcp.Cascade_metrics.on_provider_cooldown
+    ~provider:"smoke_test_provider_iter20" ~reason:"hard_quota";
+  Masc_mcp.Cascade_metrics.on_provider_cooldown
+    ~provider:"smoke_test_provider_iter20" ~reason:"terminal_failure";
+  check bool "all four documented reasons callable without raising"
+    true true
+
 let test_ordering_health_widening_helper_callable () =
   Masc_mcp.Cascade_metrics.on_ordering_health_widening
     ~cascade:"smoke_test_cascade_iter18";
@@ -1001,6 +1020,9 @@ let () =
           test_case
             "ordering_health_widening: cascade label helper callable" `Quick
             test_ordering_health_widening_helper_callable;
+          test_case
+            "provider_cooldown: all four documented reasons callable" `Quick
+            test_provider_cooldown_documented_reasons_are_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

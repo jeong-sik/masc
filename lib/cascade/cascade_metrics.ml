@@ -358,3 +358,26 @@ let on_ordering_health_widening ~cascade =
   Prometheus.inc_counter metric_ordering_health_widening
     ~labels:[ ("cascade", cascade) ]
     ()
+
+(* [Cascade_health_tracker.record] has four distinct cooldown-entry
+   branches (Failure-threshold, Soft_rate_limited, Hard_quota,
+   Terminal_failure) that each set a fresh [cooldown_until].  Until
+   iter 20 these only emitted a [keeper_provider_block_duration_sec]
+   histogram, so dashboards saw duration distribution but no entry
+   rate and no reason attribution.  A spike of "all providers down"
+   downstream (iter 18 ordering_health_widening) could be driven by
+   any of the four reasons, and operators had no way to distinguish
+   "global outage shapes" (hard_quota across providers) from
+   "single-provider flap" (failure_threshold on one key).
+
+   The counter ticks ONLY when [new_until > state.cooldown_until],
+   matching the same gate that protects the histogram — already-longer
+   cooldowns don't re-trigger.
+
+   Cardinality: providers (~10) x reasons (4) = ~40 series. *)
+let metric_provider_cooldown = "masc_cascade_provider_cooldown_total"
+
+let on_provider_cooldown ~provider ~reason =
+  Prometheus.inc_counter metric_provider_cooldown
+    ~labels:[ ("provider", provider); ("reason", reason) ]
+    ()

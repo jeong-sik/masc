@@ -1527,12 +1527,12 @@ let run_turn
                 ()
             with
             | Ok _ -> ()
-            | Error msg ->
+            | Error err ->
               Log.Keeper.warn
                 "keeper:%s link_task_execution_artifacts failed for task=%s: %s"
                 meta.name
                 task_id_str
-                msg)
+                (Masc_domain.masc_error_to_string err))
        in
        let receipt_append_outcome : (unit, string) result =
          try

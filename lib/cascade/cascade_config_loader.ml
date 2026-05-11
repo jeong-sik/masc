@@ -571,11 +571,14 @@ let load_catalog ~config_path =
       (* RFC-0058 Phase 5 catalog discovery bridge: augment legacy
          [<name>_models]-derived entries with declarative tier/tier-group
          names so route targets like [tier-group.big_three] resolve in
-         [Cascade_routes.cascade_name_for_use].  Declarative entries
-         default to [keeper_assignable=true] / [fallback_cascade=None]
-         because the declarative schema has no equivalent knob yet (Phase
-         5.x follow-up).  Names already present in [legacy_entries] win
-         to preserve any legacy [_keeper_assignable]/[_fallback_cascade]
+         [Cascade_routes.cascade_name_for_use].  [keeper_assignable] is
+         derived from route usage (fail-closed): a declarative entry is
+         keeper-assignable iff it is targeted by some [routes.X] entry.
+         Profiles reachable only via [system_targets.X] (governance,
+         dispatch, etc.) stay [keeper_assignable=false] — matching the
+         spirit of legacy [<name>_keeper_assignable] overrides without
+         hard-coding [true] for every system-only tier.  Names already
+         present in [legacy_entries] win to preserve any legacy
          overrides during the transition. *)
       let declarative_entries =
         Cascade_declarative_legacy_bridge.declarative_profile_names
@@ -587,7 +590,9 @@ let load_catalog ~config_path =
           else
             Some
               { name
-              ; keeper_assignable = true
+              ; keeper_assignable =
+                  Cascade_declarative_legacy_bridge.is_keeper_routable
+                    ~config_path ~name
               ; fallback_cascade = None
               ; required_capability_profile = None
               })

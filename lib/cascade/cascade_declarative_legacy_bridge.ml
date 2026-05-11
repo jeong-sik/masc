@@ -19,7 +19,18 @@
     directly against [cascade_binding]/[cascade_alias]/[cascade_model_spec]
     to emit [cascade_prefix:api_name] strings, deliberately avoiding
     [Cascade_declarative_adapter] (which depends on [Cascade_config]
-    and would create a cycle with [Cascade_config_loader]). *)
+    and would create a cycle with [Cascade_config_loader]).
+
+    Tier-group strategy limitation: tier-groups with
+    [strategy = "priority_tier"] (see config/cascade.toml) flatten into
+    a single weighted_entry list here — tier boundaries are lost.  The
+    legacy loader represents priority_tier via [<name>_tiers] +
+    [<name>_strategy], which is not bridged yet.  Callers that need
+    priority_tier semantics for a declarative tier-group must wire
+    [Cascade_declarative_adapter] (with cycle-safe access) into
+    [Cascade_strategy.resolve] in a follow-up; for now this bridge
+    surfaces only the union of candidates, which is correct for
+    round_robin / failover but loses ordering for priority_tier. *)
 
 open Cascade_declarative_types
 
@@ -78,25 +89,48 @@ let member_to_model_string (cfg : cascade_config) (member : string)
        Some (Printf.sprintf "%s:%s" prefix spec.api_name)
      | _ -> None)
 
-let weighted_entry_of_model_string (model : string) : Cascade_weighted_entry.t =
-  {
-    Cascade_weighted_entry.model;
-    weight = 1;
-    supports_tool_choice = None;
-    secondary = None;
-    secondary_supports_tool_choice = None;
-  }
+(* Resolve members and surface drops as a single bounded warning per
+   call site.  Silent drops can mask config typos (unknown binding,
+   missing provider/model row); the legacy loader hard-fails on the
+   equivalent, so the bridge logs at WARN.  The dropped names are
+   inlined in the message — bounded by the tier/tier-group member list
+   length, which is in the single digits in practice. *)
+let resolve_members ~profile_name (cfg : cascade_config) (members : string list)
+    : Cascade_weighted_entry.t list =
+  let resolved, dropped =
+    List.partition_map
+      (fun member ->
+        match member_to_model_string cfg member with
+        | Some s -> Left s
+        | None -> Right member)
+      members
+  in
+  (match dropped with
+   | [] -> ()
+   | _ ->
+     Log.warn ~ctx:"CascadeDeclLegacyBridge"
+       "profile=%s dropped %d unresolvable member(s): [%s]"
+       profile_name
+       (List.length dropped)
+       (String.concat "; " dropped));
+  List.map
+    (fun model ->
+      { Cascade_weighted_entry.model
+      ; weight = 1
+      ; supports_tool_choice = None
+      ; secondary = None
+      ; secondary_supports_tool_choice = None
+      })
+    resolved
 
 let entries_of_tier (cfg : cascade_config) (tier : cascade_tier)
     : (string * Cascade_weighted_entry.t list) =
-  let entries =
-    List.filter_map (member_to_model_string cfg) tier.members
-    |> List.map weighted_entry_of_model_string
-  in
-  Printf.sprintf "tier.%s" tier.name, entries
+  let profile_name = Printf.sprintf "tier.%s" tier.name in
+  profile_name, resolve_members ~profile_name cfg tier.members
 
 let entries_of_tier_group (cfg : cascade_config) (tg : cascade_tier_group)
     : (string * Cascade_weighted_entry.t list) =
+  let profile_name = Printf.sprintf "tier-group.%s" tg.name in
   let tier_members =
     List.concat_map
       (fun tier_name ->
@@ -109,17 +143,46 @@ let entries_of_tier_group (cfg : cascade_config) (tg : cascade_tier_group)
         | None -> [])
       tg.tiers
   in
-  let entries =
-    List.filter_map (member_to_model_string cfg) tier_members
-    |> List.map weighted_entry_of_model_string
-  in
-  Printf.sprintf "tier-group.%s" tg.name, entries
+  profile_name, resolve_members ~profile_name cfg tier_members
 
+(* Parsed-config cache keyed by (config_path, mtime).  Mirrors the
+   pattern in [Cascade_config_loader] — declarative bridge is consulted
+   on every [load_profile_weighted] / [discover_profiles] call, so
+   reparsing the TOML each time would amplify boot + dashboard refresh
+   cost.  Cache invalidates automatically when the file mtime moves. *)
+let cache_lock = Mutex.create ()
+let cache : (string, float * cascade_config) Hashtbl.t = Hashtbl.create 4
+
+let read_mtime (path : string) : float option =
+  try Some (Unix.stat path).Unix.st_mtime
+  with _ -> None
+
+let parse_cached (config_path : string) : cascade_config option =
+  let current_mtime = read_mtime config_path in
+  let cached =
+    Mutex.protect cache_lock (fun () -> Hashtbl.find_opt cache config_path)
+  in
+  match current_mtime, cached with
+  | Some mt, Some (cmt, cfg) when Float.equal mt cmt -> Some cfg
+  | _ ->
+    (match Cascade_declarative_parser.parse_file config_path with
+     | Error _ -> None
+     | Ok cfg ->
+       (match current_mtime with
+        | Some mt ->
+          Mutex.protect cache_lock (fun () ->
+            Hashtbl.replace cache config_path (mt, cfg))
+        | None -> ());
+       Some cfg)
+
+(* Names of declarative tier/tier-group profiles that the runtime
+   should expose, in the order [(tiers, tier_groups)] — same shape the
+   parser emits. *)
 let all_declarative_entries ~config_path :
     (string * Cascade_weighted_entry.t list) list option =
-  match Cascade_declarative_parser.parse_file config_path with
-  | Error _ -> None
-  | Ok cfg ->
+  match parse_cached config_path with
+  | None -> None
+  | Some cfg ->
     let tier_entries = List.map (entries_of_tier cfg) cfg.tiers in
     let group_entries = List.map (entries_of_tier_group cfg) cfg.tier_groups in
     Some (tier_entries @ group_entries)
@@ -137,3 +200,17 @@ let declarative_profile_names ~config_path : string list =
   match all_declarative_entries ~config_path with
   | None -> []
   | Some all -> List.map fst all
+
+(* Whether a declarative profile name is reachable from any
+   [routes.X] target (vs only [system_targets.X]).  Used by the
+   catalog loader to default [keeper_assignable] fail-closed: a
+   declarative tier-group only flips to [keeper_assignable=true] when
+   it is wired into a keeper-facing route, mirroring the legacy
+   [<name>_keeper_assignable] override semantics. *)
+let is_keeper_routable ~config_path ~name : bool =
+  match parse_cached config_path with
+  | None -> false
+  | Some cfg ->
+    List.exists
+      (fun (r : cascade_route) -> String.equal r.target name)
+      cfg.routes

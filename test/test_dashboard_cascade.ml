@@ -399,7 +399,11 @@ models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
         (contains_substring
            Yojson.Safe.Util.(j |> member "raw_json" |> to_string)
            "big_three_models");
-      check bool "runtime json materialized on read" true
+      (* RFC-0058 §9 Phase 9.2 (#14581): raw_config_json now renders
+         the JSON in memory and does NOT write the cascade.json sibling.
+         The runtime JSON is observable only through the [raw_json]
+         field above; the disk file must stay absent. *)
+      check bool "runtime json not materialized on disk (Phase 9.2)" false
         (Sys.file_exists json_path))
 
 let test_save_raw_config_json_rejects_invalid_json () =
@@ -492,8 +496,17 @@ models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
           check string "toml source persisted verbatim"
             next_toml
             (read_file toml_path);
-          check bool "materialized json refreshed" true
-            (contains_substring (read_file json_path) "beta_editor_models"))
+          (* RFC-0058 §9 Phase 9.2 (#14581): save_raw_config_json no
+             longer materialises the cascade.json sibling. The
+             dashboard exposes the refreshed render through the
+             [raw_json] field of [raw_config_json ()] (in-memory). *)
+          let after = Masc_mcp.Dashboard_cascade.raw_config_json () in
+          check bool "refreshed json visible in-memory via raw_config_json" true
+            (contains_substring
+               Yojson.Safe.Util.(after |> member "raw_json" |> to_string)
+               "beta_editor_models");
+          check bool "cascade.json sibling stays absent (Phase 9.2)" false
+            (Sys.file_exists json_path))
 
 (* ── health_json ───────────────────────────────────── *)
 

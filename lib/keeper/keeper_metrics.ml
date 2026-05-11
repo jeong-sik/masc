@@ -591,3 +591,5 @@ let metric_keeper_post_turn_wirein_failures = "masc_keeper_post_turn_wirein_fail
 let metric_keeper_recurring_failures = "masc_keeper_recurring_failures_total"
 let metric_keeper_turn_cleanup_failures = "masc_keeper_turn_cleanup_failures_total"
 let metric_keeper_session_cleanup_failures = "masc_keeper_session_cleanup_failures_total"
+let metric_keeper_tool_selection_passive_streak = "masc_keeper_tool_selection_passive_streak"
+let metric_keeper_tool_selection_passive_streak_exceeded = "masc_keeper_tool_selection_passive_streak_exceeded_total"

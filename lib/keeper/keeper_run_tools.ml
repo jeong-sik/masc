@@ -801,16 +801,26 @@ let prepare_agent_setup
           all_allowed
       else all_allowed
     in
+    let passive_streak =
+      Keeper_passive_loop_detector.current_streak ~keeper_name:meta.name
+    in
+    Prometheus.set_gauge
+      Keeper_metrics.metric_keeper_tool_selection_passive_streak
+      ~labels:[("keeper", meta.name)]
+      (float_of_int passive_streak);
     let all_allowed =
-      let passive_streak =
-        Keeper_passive_loop_detector.current_streak ~keeper_name:meta.name
-      in
       Keeper_tool_disclosure.contract_enforcement_filter
         ~passive_streak
         ~streak_threshold:3
         ~actionable_signal
         all_allowed
     in
+    if passive_streak >= 3 && actionable_signal then
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_tool_selection_passive_streak_exceeded
+        ~labels:[("keeper", meta.name)]
+        ()
+    else ();
     let tool_gate_requested =
       required_tool_names <> []
       || tool_gate_requested_for_turn

@@ -1708,6 +1708,15 @@ let init () =
      keeper.  Resets to 0 on the next execution/completion turn.  Labeled \
      by keeper."
     Gauge;
+  add Keeper_metrics.metric_keeper_tool_selection_passive_streak
+    "Consecutive turns where the selected tool surface contains only \
+     Passive_status tools (no Execution or Completion).  Labeled by keeper."
+    Gauge;
+  add Keeper_metrics.metric_keeper_tool_selection_passive_streak_exceeded
+    "Total times a keeper's tool selection produced only Passive_status \
+     tools for N consecutive turns (threshold = 3).  Labeled by keeper."
+    Counter;
+
   add Keeper_metrics.metric_keeper_last_productive_ts
     "Task-138 Unix timestamp of the most recent productive turn \
      (execution/completion class) per keeper.  0 until the keeper has \

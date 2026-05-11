@@ -386,3 +386,5 @@ val metric_keeper_recurring_failures : string
 val metric_keeper_turn_cleanup_failures : string
 val metric_keeper_session_cleanup_failures : string
 val metric_keeper_path_resolver_identity_mismatch : string
+val metric_keeper_tool_selection_passive_streak : string
+val metric_keeper_tool_selection_passive_streak_exceeded : string

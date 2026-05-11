@@ -729,7 +729,7 @@ let run_turn
                     masc_keeper_tool_call_total{result="miss"} and skewing
                     the alias dashboards (see PR #14574 review). *)
                  let canonical_tool_names =
-                   List.map Keeper_tool_disclosure.canonical_name tool_names
+                   List.map Keeper_tool_disclosure.canonical_tool_name tool_names
                  in
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =

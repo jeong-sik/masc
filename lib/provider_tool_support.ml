@@ -6,62 +6,49 @@ type capabilities = {
   supports_runtime_mcp_http_headers : bool;
 }
 
+(** Whether the resolved provider adapter is a CLI runtime (Claude Code,
+    Codex CLI, Gemini CLI, Kimi CLI).  Capability normalisation and the
+    [for_model_id] bypass both key off this predicate rather than matching
+    on [Provider_config.provider_kind] (RFC-0058 §2.4). *)
+let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
+  match Provider_adapter.adapter_of_provider_config provider_cfg with
+  | Some adapter -> adapter.runtime_kind = Provider_adapter.Cli_agent
+  | None -> false
+
 (** CLI providers (Claude Code, Kimi CLI, Gemini CLI, Codex CLI) use runtime
     MCP for tool invocation, not inline function-calling.  The OAS base
     capabilities for CLI kinds may disagree on [supports_runtime_mcp_tools]
     (e.g. Gemini CLI defaults to [false] in OAS despite supporting MCP via
-    its --mcp-config flag).  Normalize all CLI kinds to the same contract:
-    disable inline tools, enable runtime MCP. *)
+    its --mcp-config flag).  Normalize all CLI runtimes to the same
+    contract: disable inline tools, enable runtime MCP. *)
 let normalize_cli_provider_caps
     ~(provider_cfg : Llm_provider.Provider_config.t)
     (caps : Llm_provider.Capabilities.capabilities) =
-  match provider_cfg.kind with
-  | Llm_provider.Provider_config.Claude_code
-  | Llm_provider.Provider_config.Kimi_cli
-  | Llm_provider.Provider_config.Gemini_cli
-  | Llm_provider.Provider_config.Codex_cli ->
-      {
-        caps with
-        supports_tools = false;
-        supports_tool_choice = false;
-        supports_runtime_mcp_tools = true;
-        supports_runtime_tool_events = true;
-      }
-  | _ -> caps
+  if is_cli_agent_provider provider_cfg then
+    {
+      caps with
+      supports_tools = false;
+      supports_tool_choice = false;
+      supports_runtime_mcp_tools = true;
+      supports_runtime_tool_events = true;
+    }
+  else caps
 
 (** Resolve OAS-level capabilities for a provider config.
 
-    CLI kinds (Claude_code, Gemini_cli, Kimi_cli, Codex_cli) bypass
+    CLI runtimes (Claude_code, Gemini_cli, Kimi_cli, Codex_cli) bypass
     [for_model_id] because the CLI tool selects the underlying model
     internally — the model_id in the config is a routing hint, not an
-    API model identifier that OAS can look up.  All other kinds consult
+    API model identifier that OAS can look up.  All other adapters consult
     [for_model_id] first, falling back to the kind-level base. *)
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
+  let caps = Provider_adapter.oas_capabilities_of_config provider_cfg in
   let caps =
-    match provider_cfg.kind with
-    | Llm_provider.Provider_config.Ollama ->
-        Llm_provider.Capabilities.ollama_capabilities
-    | Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
-    | Kimi -> Llm_provider.Capabilities.kimi_capabilities
-    | Glm -> Llm_provider.Capabilities.glm_capabilities
-    | Gemini -> Llm_provider.Capabilities.gemini_capabilities
-    | DashScope -> Llm_provider.Capabilities.dashscope_capabilities
-    | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
-    | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
-    | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
-    | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
-    | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
-  in
-  let caps =
-    match provider_cfg.kind with
-    | Llm_provider.Provider_config.Claude_code
-    | Gemini_cli
-    | Kimi_cli
-    | Codex_cli -> caps
-    | _ -> (
-        match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
-        | Some override -> override
-        | None -> caps)
+    if is_cli_agent_provider provider_cfg then caps
+    else
+      match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
+      | Some override -> override
+      | None -> caps
   in
   let caps = normalize_cli_provider_caps ~provider_cfg caps in
   match provider_cfg.supports_tool_choice_override with
@@ -99,29 +86,15 @@ let runtime_mcp_policy_requires_http_headers
       | _ -> false)
     policy.servers
 
-let normalize_header_key key = String.lowercase_ascii (String.trim key)
-
-let codex_cli_identity_runtime_mcp_header key =
-  (* OAS Codex transport turns [Authorization: Bearer ...] into
-     bearer_token_env_var, so the token is carried through the subprocess
-     environment rather than argv. Other auth-bearing headers remain
-     unsupported. *)
-  match normalize_header_key key with
-  | "authorization"
-  | "x-masc-agent-name"
-  | "x-masc-keeper-name" ->
-      true
-  | _ -> false
-
 let provider_supports_runtime_mcp_http_header
     (provider_cfg : Llm_provider.Provider_config.t)
     key =
-  if supports_runtime_mcp_http_headers provider_cfg then true
-  else
-    match provider_cfg.kind with
-    | Llm_provider.Provider_config.Codex_cli ->
-        codex_cli_identity_runtime_mcp_header key
-    | _ -> false
+  (* General HTTP-header support OR adapter-specific identity-header
+     carve-out (e.g. Codex CLI carries [Authorization]/[x-masc-*] via
+     [bearer_token_env_var] + non-secret routing labels).  The carve-out
+     set lives on the adapter row, not in this consumer module. *)
+  Provider_adapter.accepts_runtime_mcp_http_header_for_config
+    provider_cfg key
 
 let runtime_mcp_policy_requires_unsupported_http_headers
     (provider_cfg : Llm_provider.Provider_config.t)

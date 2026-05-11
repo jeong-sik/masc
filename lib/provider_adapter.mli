@@ -63,6 +63,13 @@ type tool_policy = {
           Codex CLI is currently the only adapter that sets this to [true]:
           its cached login does not allow per-keeper authorization headers
           to be injected on each request without bridging. *)
+  identity_runtime_mcp_header_keys : string list;
+      (** Header keys the provider can carry even when
+          [supports_runtime_mcp_http_headers = false].  Empty for most
+          providers.  Codex CLI carries [authorization] (via
+          [bearer_token_env_var]) plus the non-secret MASC identity
+          headers ([x-masc-agent-name], [x-masc-keeper-name]).
+          Keys are matched case-insensitively after trimming. *)
 }
 
 type telemetry_policy = {
@@ -410,6 +417,23 @@ val supports_runtime_mcp_http_headers_for_config :
     flag to gate entries without dispatching on provider name. *)
 val requires_per_keeper_bridging_for_bound_actor_tools_for_config :
   Llm_provider.Provider_config.t -> bool
+
+(** OAS-level capabilities for a provider config.  SSOT for the kind →
+    capability mapping; centralises what was previously a closed-variant
+    [match Llm_provider.Provider_config.provider_kind] in
+    [Provider_tool_support]. *)
+val oas_capabilities_of_config :
+  Llm_provider.Provider_config.t -> Llm_provider.Capabilities.capabilities
+
+(** Whether a runtime-MCP HTTP header key is acceptable for the resolved
+    adapter, even when general HTTP-header support is off.  Covers the
+    Codex CLI identity header carve-out
+    ([authorization], [x-masc-agent-name], [x-masc-keeper-name]).
+    Returns [true] unconditionally for adapters with
+    [supports_runtime_mcp_http_headers = true]. *)
+val accepts_runtime_mcp_http_header_for_config :
+  Llm_provider.Provider_config.t -> string -> bool
+
 
 (** {1 Misc} *)
 

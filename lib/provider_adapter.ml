@@ -45,6 +45,7 @@ type model_policy = {
 type tool_policy = {
   supports_runtime_mcp_http_headers : bool;
   requires_per_keeper_bridging_for_bound_actor_tools : bool;
+  identity_runtime_mcp_header_keys : string list;
 }
 
 type telemetry_policy = {
@@ -143,20 +144,30 @@ let csv_items raw =
 let no_tool_http_headers =
   { supports_runtime_mcp_http_headers = false;
     requires_per_keeper_bridging_for_bound_actor_tools = false;
+    identity_runtime_mcp_header_keys = [];
   }
 let runtime_mcp_http_headers =
   { supports_runtime_mcp_http_headers = true;
     requires_per_keeper_bridging_for_bound_actor_tools = false;
+    identity_runtime_mcp_header_keys = [];
   }
 (* Codex CLI quirk: its cached login cannot natively inject per-keeper auth
    headers, so any runtime MCP policy that uses bound-actor tools requires
    per-keeper bridging at the cascade layer. The
    [Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp] predicate is
    what the cascade filter consults to decide whether such bridging is in
-   place for a given keeper before admitting codex_cli for runtime MCP. *)
+   place for a given keeper before admitting codex_cli for runtime MCP.
+
+   OAS Codex transport additionally converts [Authorization: Bearer ...] into
+   [bearer_token_env_var] so the token is carried via subprocess env rather
+   than argv.  The MASC identity headers are non-secret routing labels.
+   [identity_runtime_mcp_header_keys] enumerates the keys accepted via this
+   carve-out even with [supports_runtime_mcp_http_headers = false]. *)
 let codex_cli_tool_policy =
   { supports_runtime_mcp_http_headers = false;
     requires_per_keeper_bridging_for_bound_actor_tools = true;
+    identity_runtime_mcp_header_keys =
+      [ "authorization"; "x-masc-agent-name"; "x-masc-keeper-name" ];
   }
 let telemetry_reported = { usage_reporting = Reported; runtime_reporting = Reported }
 let telemetry_unknown = { usage_reporting = Unknown; runtime_reporting = Unknown }
@@ -1520,6 +1531,42 @@ let requires_per_keeper_bridging_for_bound_actor_tools_for_config
   | Some adapter ->
       adapter.tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
   | None -> false
+
+(** Normalize a header key for case-insensitive comparison against
+    [tool_policy.identity_runtime_mcp_header_keys]. *)
+let normalize_header_key key = String.lowercase_ascii (String.trim key)
+
+let accepts_runtime_mcp_http_header_for_config
+    (cfg : Llm_provider.Provider_config.t) (key : string) =
+  match adapter_of_provider_config cfg with
+  | None -> false
+  | Some adapter ->
+      if adapter.tool_policy.supports_runtime_mcp_http_headers then true
+      else
+        let normalized = normalize_header_key key in
+        List.exists
+          (fun k -> normalize_header_key k = normalized)
+          adapter.tool_policy.identity_runtime_mcp_header_keys
+
+(** SSOT for the OAS provider_kind → capabilities mapping.  This is the
+    one place that pattern-matches on [Llm_provider.Provider_config.provider_kind]
+    for capability lookup — RFC-0058 §2.4 forbids the dispatch in consumer
+    modules; centralising it here keeps consumers off the closed variant. *)
+let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
+  match cfg.kind with
+  | Llm_provider.Provider_config.Ollama ->
+      Llm_provider.Capabilities.ollama_capabilities
+  | Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
+  | Kimi -> Llm_provider.Capabilities.kimi_capabilities
+  | Glm -> Llm_provider.Capabilities.glm_capabilities
+  | Gemini -> Llm_provider.Capabilities.gemini_capabilities
+  | DashScope -> Llm_provider.Capabilities.dashscope_capabilities
+  | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
+  | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
+  | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
+  | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
+  | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
+
 
 (* ── Generic provider auth detail ─────────────────────────────── *)
 

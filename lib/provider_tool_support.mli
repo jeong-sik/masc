@@ -35,15 +35,16 @@ val oas_capabilities_of_config :
 (** [oas_capabilities_of_config cfg] returns the OAS-side
     {!Llm_provider.Capabilities.capabilities}.  Resolution order:
 
-    + Built-in per-kind defaults (Ollama / Anthropic / Kimi / Glm /
-      Gemini / DashScope / OpenAI_compat / Claude_code / Gemini_cli /
-      Kimi_cli / Codex_cli).
-    + For non-CLI kinds, override with
+    + Per-kind base via
+      {!Provider_adapter.oas_capabilities_of_config} (SSOT for the
+      [provider_kind → capabilities] mapping).
+    + For non-CLI-agent adapters, override with
       {!Llm_provider.Capabilities.for_model_id} when present.
-    + CLI normalisation: Claude_code / Kimi_cli / Gemini_cli force
-      [supports_tools = false], [supports_tool_choice = false],
-      [supports_runtime_mcp_tools = true], and
-      [supports_runtime_tool_events = true].
+    + CLI-agent normalisation: adapters with
+      [runtime_kind = Cli_agent] (Claude Code / Codex CLI / Gemini CLI /
+      Kimi CLI) force [supports_tools = false],
+      [supports_tool_choice = false], [supports_runtime_mcp_tools = true],
+      and [supports_runtime_tool_events = true].
     + [provider_cfg.supports_tool_choice_override] (if [Some _])
       overrides the resolved [supports_tool_choice]. *)
 

@@ -32,11 +32,6 @@ data/tool-metrics/
 # Local heartbeat model-pool override
 config/llm_cascade.json
 
-# RFC-0058 §9 Phase 9: cascade.json is a runtime-only derived artifact
-# materialised from cascade.toml (the SSOT). Tracking it would re-anchor
-# JSON as a second source of truth and let TOML edits diverge silently.
-config/cascade.json
-
 # Database files
 *.db
 *.sqlite3

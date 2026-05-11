@@ -536,10 +536,15 @@ Doing it as one PR risks breaking runtime callers during the migration.
 
 - **Phase 9.1 — Stop tracking the committed JSON** *(this PR)*: drop the
   committed `config/cascade.json` and the byte-equality test that pinned
-  it to the TOML render, add `.gitignore` so the runtime-materialised
-  artefact stays out of source control. Runtime behaviour is unchanged
-  because `Cascade_toml_materializer.ensure_materialized_json` writes the
-  JSON sibling on first read.
+  it to the TOML render, add `.gitignore` so any runtime-materialised
+  copy stays out of source control. Runtime behaviour is unchanged
+  because the loaders that hit disk (`Cascade_config_loader.load_json`
+  and the dashboard's explicit
+  `Cascade_toml_materializer.ensure_materialized_json` call) still
+  recreate `config/cascade.json` on demand; in-memory consumers that go
+  through `render_toml_to_json_string` already never opened the JSON
+  file, so this PR neither helps nor hurts them. Phase 9.2 migrates the
+  remaining on-disk readers onto the in-memory path.
 - **Phase 9.2 — Migrate consumers to in-memory render**: replace
   `Cascade_config_loader.load_json (json_path)` plus
   `ensure_materialized_json` call sites with

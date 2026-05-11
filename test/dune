@@ -594,6 +594,7 @@
         test_keeper_container_name
         test_keeper_sandbox_plan
         test_docker_response
+        test_docker_client_mock
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -807,6 +808,7 @@
         test_keeper_container_name
         test_keeper_sandbox_plan
         test_docker_response
+        test_docker_client_mock
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify

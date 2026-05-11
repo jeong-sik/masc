@@ -629,6 +629,71 @@ sticky-ttl-ms = 600000
 
 (* --- Test suite --- *)
 
+(* --- R12: Protocol ↔ transport consistency --- *)
+
+let test_r12_cli_protocol_with_cli_transport () =
+  let toml = {|
+[providers.claude-code]
+protocol = "anthropic-cli"
+command = "claude"
+
+[models.haiku]
+max-context = 200000
+
+[claude-code.haiku]
+is-default = true
+max-concurrent = 1
+|} in
+  let errs = validate_toml toml in
+  check bool "no R12 errors" false
+    (List.exists (fun (e : validation_error) -> e.rule = "R12") errs)
+
+let test_r12_http_protocol_with_http_transport () =
+  let toml = {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+max-context = 32768
+
+[ollama.qwen3]
+max-concurrent = 1
+|} in
+  let errs = validate_toml toml in
+  check bool "no R12 errors" false
+    (List.exists (fun (e : validation_error) -> e.rule = "R12") errs)
+
+let test_r12_cli_protocol_with_http_transport () =
+  let toml = {|
+[providers.bad]
+protocol = "anthropic-cli"
+endpoint = "http://localhost:8080"
+
+[models.m]
+max-context = 4096
+
+[bad.m]
+max-concurrent = 1
+|} in
+  let errs = validate_toml toml in
+  has_rule_at "R12" "providers.bad.protocol" errs
+
+let test_r12_http_protocol_with_cli_transport () =
+  let toml = {|
+[providers.bad]
+protocol = "openai-http"
+command = "my-cli"
+
+[models.m]
+max-context = 4096
+
+[bad.m]
+max-concurrent = 1
+|} in
+  let errs = validate_toml toml in
+  has_rule_at "R12" "providers.bad.protocol" errs
+
 let () =
   run "RFC-0058 Declarative Validator"
     [ "valid", [
@@ -679,5 +744,11 @@ let () =
         test_case "scoring on correct strategy" `Quick test_r10_scoring_on_correct_strategy;
         test_case "no strategy fields is ok" `Quick test_r10_no_strategy_fields_is_ok;
         test_case "multiple mismatches" `Quick test_r10_multiple_mismatches;
+      ];
+      "R12_protocol_transport", [
+        test_case "cli protocol with cli transport ok" `Quick test_r12_cli_protocol_with_cli_transport;
+        test_case "http protocol with http transport ok" `Quick test_r12_http_protocol_with_http_transport;
+        test_case "cli protocol with http transport mismatch" `Quick test_r12_cli_protocol_with_http_transport;
+        test_case "http protocol with cli transport mismatch" `Quick test_r12_http_protocol_with_cli_transport;
       ];
     ]

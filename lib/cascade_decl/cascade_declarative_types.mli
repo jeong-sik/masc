@@ -73,6 +73,7 @@ val cascade_capabilities_default : cascade_capabilities
 type cascade_provider =
   { id : string
   ; display_name : string
+  ; protocol : string
   ; api_format : cascade_api_format
   ; transport : cascade_transport
   ; is_non_interactive : bool

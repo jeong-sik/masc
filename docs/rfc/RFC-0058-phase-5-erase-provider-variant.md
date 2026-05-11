@@ -133,16 +133,24 @@ Closed by an 8-PR sweep (2026-05-11):
 End-state invariant verified against `origin/main` HEAD `d3dd1086b`:
 
 ```bash
-rg "match.*provider_cfg\.kind" lib/keeper/ | grep -v provider_adapter
+rg "match provider_cfg\.kind with" lib/keeper/ | grep -v provider_adapter
 # (no matches — keeper layer is variant-agnostic)
 ```
 
-The only remaining `match provider_cfg.kind` sites in `lib/`
-(`cascade_transport.ml:1706` Hashtbl registry lookup,
-`cascade_catalog_runtime.ml:511` and `cascade_catalog_validator.ml:318`
-*strategy* kind dispatch) are out of scope — they encode legitimate
-runtime registries or non-provider variants and pass the workaround
-rejection bar.
+The `with` anchor is intentional: it matches OCaml `match … with`
+expressions only, so the two `[match provider_cfg.kind]` references that
+remain inside `keeper_turn_driver_helpers.{ml,mli}` docstrings (Phase 5.6
+history notes) do not trip the invariant.
+
+The only `provider_cfg.kind` reads left in `lib/` outside
+`provider_adapter` are out of scope:
+
+- `cascade_transport.ml:1706` uses `provider_cfg.kind` as a `Hashtbl`
+  registry key (lookup, not variant dispatch) — legitimate runtime
+  registry, passes the workaround rejection bar.
+- `cascade_catalog_runtime.ml:511` matches `strategy_cfg.kind`, not a
+  provider kind — strategy-side dispatch over a separate
+  `Cascade_strategy_config` type, unrelated to Phase 5.
 
 ## 5. Acceptance Gates
 

@@ -6,7 +6,7 @@ type ps_status =
   | Running
   | Paused
   | Restarting
-  | Exited of { code : int }
+  | Exited
   | Dead
 [@@deriving show, eq]
 
@@ -19,11 +19,7 @@ let parse_state s =
   | "running" -> Ok Running
   | "paused" -> Ok Paused
   | "restarting" -> Ok Restarting
-  | "exited" ->
-    (* Phase 3b-iv.0: bare "exited" — exit code 0 placeholder.
-       Phase 3b-iv.2 will consume the docker-inspect record and
-       supply the real ExitCode. *)
-    Ok (Exited { code = 0 })
+  | "exited" -> Ok Exited
   | "dead" -> Ok Dead
   | _ -> Error (Unknown_state s)
 
@@ -32,7 +28,7 @@ let state_to_string = function
   | Running -> "running"
   | Paused -> "paused"
   | Restarting -> "restarting"
-  | Exited _ -> "exited"
+  | Exited -> "exited"
   | Dead -> "dead"
 
 type exec_result =

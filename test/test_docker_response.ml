@@ -40,8 +40,8 @@ let test_parse_restarting () =
     (Docker_response.parse_state "restarting")
 
 let test_parse_exited () =
-  check (result status_t err_t) "exited → code 0 placeholder"
-    (Ok (Docker_response.Exited { code = 0 }))
+  check (result status_t err_t) "exited (state token only — exit code via inspect, Phase 3b-iv.2)"
+    (Ok Docker_response.Exited)
     (Docker_response.parse_state "exited")
 
 let test_parse_dead () =
@@ -85,14 +85,14 @@ let test_to_string_canonical () =
     (Docker_response.state_to_string Docker_response.Paused);
   check string "Restarting → restarting" "restarting"
     (Docker_response.state_to_string Docker_response.Restarting);
-  check string "Exited → exited (code not encoded in token)" "exited"
-    (Docker_response.state_to_string (Docker_response.Exited { code = 42 }));
+  check string "Exited → exited" "exited"
+    (Docker_response.state_to_string Docker_response.Exited);
   check string "Dead → dead" "dead"
     (Docker_response.state_to_string Docker_response.Dead)
 
-(* ── Round-trip: parse ∘ to_string = id (except Exited code) ─── *)
+(* ── Round-trip: parse ∘ to_string = id (all variants, no per-variant payload) ── *)
 
-let roundtrip_non_exited cases =
+let roundtrip_all cases =
   List.iter
     (fun s ->
       check (result status_t err_t) (Printf.sprintf "round-trip %s" s)
@@ -105,15 +105,15 @@ let roundtrip_non_exited cases =
     cases
 
 let test_roundtrip () =
-  roundtrip_non_exited [ "created"; "running"; "paused"; "restarting"; "dead" ]
+  roundtrip_all [ "created"; "running"; "paused"; "restarting"; "exited"; "dead" ]
 
 (* ── exec_result equality + show ──────────────────────────────── *)
 
-let test_exec_result_equal () =
+let test_exec_result_structural_equality () =
   let a = Docker_response.{ exit_code = 0; stdout = "hi"; stderr = "" } in
   let b = Docker_response.{ exit_code = 0; stdout = "hi"; stderr = "" } in
   let c = Docker_response.{ exit_code = 1; stdout = "hi"; stderr = "" } in
-  check bool "equal reflexive" true (Docker_response.equal_exec_result a b);
+  check bool "structural equality (a ≡ b by field)" true (Docker_response.equal_exec_result a b);
   check bool "exit_code distinguishes" false (Docker_response.equal_exec_result a c)
 
 let () =
@@ -142,7 +142,11 @@ let () =
       ( "canonical form",
         [ test_case "state_to_string canonical" `Quick test_to_string_canonical ] );
       ( "round-trip",
-        [ test_case "parse ∘ to_string = id for non-Exited" `Quick test_roundtrip ] );
+        [ test_case "parse ∘ to_string = id (all variants)" `Quick test_roundtrip ] );
       ( "exec_result",
-        [ test_case "equal + exit_code distinguishes" `Quick test_exec_result_equal ] );
+        [
+          test_case "structural equality + exit_code distinguishes"
+            `Quick
+            test_exec_result_structural_equality;
+        ] );
     ]

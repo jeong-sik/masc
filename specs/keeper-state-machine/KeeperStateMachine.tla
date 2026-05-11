@@ -170,9 +170,12 @@ CompactionStarted ==
                    context_overflow, compact_retry_exhausted,
                    terminal_failure_latched, restart_count>>
 
-\* Successful compaction clears the overflow flags together with the
-\* retry latch; the keeper returns to a fresh post-compact state.
-CompactionCompleted ==
+\* Successful compaction with token savings (saved_tokens > 0).
+\* Clears the overflow flags together with the retry latch; the keeper
+\* returns to a fresh post-compact state.  Mirrors the OCaml
+\* [Compaction_completed] arm when [before_tokens > after_tokens]
+\* (lib/keeper/keeper_state_machine.ml §saved_tokens > 0).
+CompactionCompletedWithSavings ==
     /\ NotTerminal /\ compaction_active
     /\ compaction_active' = FALSE
     /\ context_overflow' = FALSE
@@ -182,6 +185,26 @@ CompactionCompleted ==
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete, terminal_failure_latched, restart_count>>
+
+\* Noop completion (saved_tokens <= 0) — clears only [compaction_active];
+\* [context_overflow] and [compact_retry_exhausted] are preserved so the
+\* keeper re-enters Overflowed for the retry loop to escalate (stronger
+\* compaction profile, handoff, operator alert).  Mirrors the OCaml fix
+\* in #9988 that prevented the #9935 infinite noop loop (45-71
+\* imminent-overflow events/day clearing the flag against unchanged
+\* token counts).  Structurally identical to CompactionFailed; kept
+\* separate so the action alphabet discriminates "attempted but no
+\* savings" from "attempt errored", matching #8710 / R-A-8.
+CompactionCompletedNoSavings ==
+    /\ NotTerminal /\ compaction_active
+    /\ compaction_active' = FALSE
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
+                   handoff_active, operator_paused, stop_requested,
+                   restart_budget_remaining, backoff_elapsed,
+                   guardrail_triggered, drain_complete,
+                   context_overflow, compact_retry_exhausted,
+                   terminal_failure_latched, restart_count>>
 
 \* Compaction attempt failed — clears the in-flight compaction flag but
 \* deliberately leaves [context_overflow] set so the keeper re-enters
@@ -460,7 +483,9 @@ Next ==
     \/ HeartbeatOk      \/ HeartbeatFailed
     \/ TurnSucceeded    \/ TurnFailed
     \/ ContextMeasured
-    \/ CompactionStarted \/ CompactionCompleted \/ CompactionFailed
+    \/ CompactionStarted
+    \/ CompactionCompletedWithSavings \/ CompactionCompletedNoSavings
+    \/ CompactionFailed
     \/ HandoffStarted   \/ HandoffCompleted    \/ HandoffFailed
     \/ OperatorPause    \/ OperatorResume
     \/ StopRequested    \/ OperatorStop        \/ DrainCompleteEv
@@ -480,7 +505,15 @@ Next ==
 Fairness ==
     /\ WF_vars(HeartbeatOk)
     /\ WF_vars(ContextMeasured)
-    /\ WF_vars(CompactionCompleted)
+    \* Weak fairness on the *savings* arm only.  This is NOT an
+    \* "eventually saves" guarantee — CompactionCompletedNoSavings can
+    \* fire and disable compaction_active, which in turn disables
+    \* CompactionCompletedWithSavings.  WF here only forces the savings
+    \* arm to fire in behaviors where it stays continuously enabled.
+    \* The noop arm has no WF, modelling reality where stuck-overflow
+    \* keepers loop through repeated noop compactions until escalation
+    \* rather than self-resolve.
+    /\ WF_vars(CompactionCompletedWithSavings)
     /\ WF_vars(HandoffCompleted)
     /\ SF_vars(DrainCompleteEv)     \* Strong fairness: drain fires even if intermittently enabled
     /\ WF_vars(FiberStarted)
@@ -550,13 +583,19 @@ ZombieRequiresTerminalFailureLatched ==
 \*      runaway is caught by the retry latch + OverflowedResolves
 \*      instead.
 
-\* S11: CompactionClearsOverflow — action property: a successful
-\*      [CompactionCompleted] must clear the overflow flags.  A failed
-\*      compaction is allowed to leave [context_overflow] set so the
-\*      retry loop can re-enter [Overflowed] or latch [Paused] via
-\*      [compact_retry_exhausted].
+\* S11: CompactionClearsOverflow — action property: a *successful*
+\*      compaction (token savings observed) must clear the overflow
+\*      flags.  A failed compaction is allowed to leave [context_overflow]
+\*      set so the retry loop can re-enter [Overflowed] or latch
+\*      [Paused] via [compact_retry_exhausted].  Noop completion
+\*      ([CompactionCompletedNoSavings], #9988 path) is *also* allowed
+\*      to leave the flags set — the OCaml runtime escalates via
+\*      operator alert / handoff once the retry budget exhausts.  See
+\*      docs/tla-audit/ksm-compaction-completed-divergence-2026-05-12.md
+\*      (iter 7 #14722) for the production reality and #8710 unblock
+\*      path.
 CompactionClearsOverflow ==
-    [][CompactionCompleted =>
+    [][CompactionCompletedWithSavings =>
          (~context_overflow' /\ ~compact_retry_exhausted')]_vars
 
 \* ── Liveness Properties ───────────────────────────────────

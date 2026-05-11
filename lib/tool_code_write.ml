@@ -227,7 +227,7 @@ let observe_policy_config_load_error ~base_path ~env_config_dir msg =
     Option.value ~default:"<resolved-from-base-path>" env_config_dir
   in
   Prometheus.inc_counter Keeper_metrics.metric_keeper_tool_policy_failures
-    ~labels:[("site", "tool_code_write_load_failed"); ("preset", "n/a")]
+    ~labels:[("site", Tool_policy_failure_site.(to_label Tool_code_write_load_failed)); ("preset", "n/a")]
     ();
   Log.Keeper.warn
     "tool_code_write: tool_policy.toml load failed; git clone policy is \

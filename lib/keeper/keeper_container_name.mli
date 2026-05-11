@@ -20,7 +20,7 @@
     serialised wire form. *)
 type t
 
-(** [of_hash_hex ~algo ~turn_id ~attempt ~suffix] derives the
+(** [derive ~algo ~turn_id ~attempt ~suffix] derives the
     container name. Pure function of declared inputs.
 
     [suffix] is the keeper-derived disambiguator (typically the keeper
@@ -29,7 +29,7 @@ type t
     names. The implementation hashes the raw bytes so any string is
     accepted, including the empty string (uncommon but not rejected
     — the caller is expected to pass a meaningful identifier). *)
-val of_hash_hex
+val derive
   :  algo:Keeper_hash_algo.t
   -> turn_id:int
   -> attempt:int

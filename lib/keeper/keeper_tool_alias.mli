@@ -17,11 +17,11 @@
 
 (** {1 Route type} *)
 
-type route = {
-  internal_name : string;
-  translate : Yojson.Safe.t -> Yojson.Safe.t;
-  public_schema : Yojson.Safe.t option;
-}
+type route =
+  { internal_name : string
+  ; translate : Yojson.Safe.t -> Yojson.Safe.t
+  ; public_schema : Yojson.Safe.t option
+  }
 
 (** [route public_name] returns routing info for a known LLM-native tool.
     [None] means the name is not in our surface — a routing miss. *)

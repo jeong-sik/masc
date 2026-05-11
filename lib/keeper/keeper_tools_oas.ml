@@ -1037,12 +1037,13 @@ let make_tool_bundle
     List.filter_map
       (fun public ->
          match Keeper_tool_alias.route public with
-         | None -> None  (* routing miss — should not happen for public_names *)
+         | None -> None (* routing miss — should not happen for public_names *)
          | Some r ->
            let internal = r.internal_name in
            if not (List.mem internal universe_names)
            then None
-           else match
+           else (
+             match
                List.find_opt
                  (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
                  tool_defs
@@ -1088,9 +1089,8 @@ let make_tool_bundle
                     ~input_schema
                     (fun input ->
                        let start_time = Time_compat.now () in
-                       Tool_result.wrap ~tool_name:public ~start_time (h input)))
-       )
-    (Keeper_tool_alias.public_names ())
+                       Tool_result.wrap ~tool_name:public ~start_time (h input)))))
+      (Keeper_tool_alias.public_names ())
   in
   { tools = internal_tools @ alias_tools
   ; cleanup =

@@ -462,9 +462,7 @@ let prepare_agent_setup
          | None -> false)
       (Keeper_tool_alias.public_names ())
   in
-  let allowed_exec_names_with_aliases =
-    allowed_exec_names @ aliased_public_names
-  in
+  let allowed_exec_names_with_aliases = allowed_exec_names @ aliased_public_names in
   let allowed_exec_set =
     let base = Keeper_tool_policy.tool_name_set allowed_exec_names_with_aliases in
     Keeper_tool_policy.StringSet.union

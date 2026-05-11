@@ -5,6 +5,8 @@ import { activeKeeperName } from '../../keeper-state'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { activeIdeFile } from './ide-shell'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 
 export interface KeeperBdiTokenSpend {
@@ -226,8 +228,16 @@ export function InspectorKeeperBDI({
     knownBdiKeys.current = bridgeBdiSnapshotsToTrace([snapshot], knownBdiKeys.current)
   }, [snapshot])
 
+  const cursor = cursorOverlaySignal.value.cursors.get(keeperName)
+  const focusLabel = cursor?.file_path
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
   const tokenRows = snapshot?.recent_token_spend ?? []
   const lastTool = snapshot?.last_tool_call ?? null
+
+  const navigateToFocus = (): void => {
+    if (cursor?.file_path) activeIdeFile.value = cursor.file_path
+  }
 
   return html`
     <section
@@ -242,13 +252,34 @@ export function InspectorKeeperBDI({
         minHeight: '180px',
       }}
     >
-      <header style=${{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-2)' }}>
+      <header style=${{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
         <h3 style=${{ margin: 0, font: 'var(--type-eyebrow)', color: 'var(--color-fg-primary)' }}>
           Keeper BDI
         </h3>
         <span style=${{ color: 'var(--color-accent-fg)', fontSize: 'var(--fs-12)' }}>
           ${keeperName || '—'}
         </span>
+        ${focusLabel ? html`
+          <span
+            role="button"
+            tabIndex=${0}
+            onClick=${navigateToFocus}
+            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToFocus() } }}
+            title=${cursor?.file_path ?? ''}
+            style=${{
+              color: 'var(--color-accent-fg)',
+              fontSize: 'var(--fs-11)',
+              maxWidth: '160px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+              borderRadius: 'var(--r-0)',
+              padding: '0 var(--sp-1)',
+              transition: 'background 0.15s',
+            }}
+          >${focusLabel}</span>
+        ` : null}
         ${pin?.line
           ? html`<span style=${{ marginLeft: 'auto', color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${pin.line}</span>`
           : null}

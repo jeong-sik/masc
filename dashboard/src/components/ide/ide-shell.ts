@@ -14,6 +14,7 @@ import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
+import { KeeperMemoryTierPanel } from '../keeper-memory-tier-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
@@ -240,7 +241,7 @@ export function IdeShell() {
               class="ide-plane-conversation"
               style=${{
                 display: 'grid',
-                gridTemplateRows: 'auto auto auto auto 1fr',
+                gridTemplateRows: 'auto auto auto auto auto 1fr',
                 minHeight: 0,
                 overflow: 'auto',
               }}
@@ -253,6 +254,7 @@ export function IdeShell() {
               <${IdePersistencePanel} keeperName=${terminalKeeper} />
               <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
               <${IdeConversationRailMock} />
+              ${terminalKeeper.trim() ? html`<${KeeperMemoryTierPanel} keeperName=${terminalKeeper} />` : null}
             </div>
           `}
         ${railsCollapsed

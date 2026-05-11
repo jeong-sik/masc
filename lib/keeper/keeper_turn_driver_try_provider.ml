@@ -177,12 +177,15 @@ let run_try_provider
   | Error err -> Error err, None
   | Ok config ->
     let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
+    (* Compute provider_id once so the liveness budget lookup and the
+       [outer_wall_for_attempt] dispatch key cannot diverge if
+       [provider_label_of_config] ever changes behavior. *)
+    let provider_id = Provider_adapter.provider_label_of_config provider_cfg in
     let liveness_observer_opt =
       match liveness_mode with
       | Cascade_attempt_liveness_config.Off -> None
       | Cascade_attempt_liveness_config.Observe | Cascade_attempt_liveness_config.Enforce
         ->
-        let provider_id = Provider_adapter.provider_label_of_config provider_cfg in
         let budget =
           Cascade_attempt_liveness_config.budget_for_provider_id ~provider_id
         in
@@ -284,8 +287,7 @@ let run_try_provider
                     ~mode:liveness_mode
                     ~observer_attached:(Option.is_some liveness_observer_opt)
                     ~per_provider_timeout_s
-                    ~provider_id:
-                      (Provider_adapter.provider_label_of_config provider_cfg)
+                    ~provider_id
                 in
                 match outer_wall_for_provider with
                 | None -> run_fn ()

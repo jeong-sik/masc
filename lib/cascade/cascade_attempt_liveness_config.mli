@@ -69,11 +69,14 @@ val outer_wall_for_attempt
       the authority and drives [Switch.fail] on TTFT, inter-chunk, or
       attempt wall budget breach. The legacy outer wall must not
       pre-empt it.
-    - [Off] / [Observe], or no observer: returns
+    - [Off] / [Observe] + observer attached: returns
       [Some (max t (budget_for_provider_id ~provider_id).attempt_wall_max)]
       when [per_provider_timeout_s = Some t]. Slow-but-legitimate
       streams (local Ollama 27B / 70B+) get the profile's attempt wall
       so the legacy 120s knob cannot prematurely fall back the cascade.
+    - No observer attached (any mode): returns [per_provider_timeout_s]
+      unchanged. Without an observer there is no per-provider budget
+      to clamp against, so the caller's legacy knob is honored as-is.
     - No legacy timeout configured ([per_provider_timeout_s = None]):
       returns [None] (no outer wall).
 

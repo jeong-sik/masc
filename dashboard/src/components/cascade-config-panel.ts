@@ -114,13 +114,8 @@ function sourceTone(source: CascadeProfile['source']): string {
 }
 
 function catalogSourceSummary(config: CascadeConfigResponse): string {
-  if (config.source_kind === 'toml') {
-    const sourcePath = config.source_path ?? 'cascade.toml'
-    const jsonPath = config.config_path ?? 'cascade.json'
-    return `SSOT: ${sourcePath} → generated ${jsonPath}`
-  }
-  const path = config.source_path ?? config.config_path ?? 'config 없음'
-  return `SSOT: ${path} (direct runtime edit)`
+  const sourcePath = config.source_path ?? 'cascade.toml'
+  return `SSOT: ${sourcePath}`
 }
 
 interface RawConfigModeSummary {
@@ -128,38 +123,23 @@ interface RawConfigModeSummary {
   primary: string
   secondary: string
   saveLabel: string
-  previewTitle: string | null
 }
 
 function rawConfigModeSummary(
   raw: Pick<
     CascadeRawConfigResponse,
-    'source_kind' | 'source_path' | 'config_path'
+    'source_path'
   > | null,
 ): RawConfigModeSummary {
-  const sourcePath = raw?.source_path ?? raw?.config_path ?? 'unresolved'
-  const jsonPath = raw?.config_path ?? 'unresolved'
-  if (raw?.source_kind !== 'toml') {
-    return {
-      title: 'Active Cascade Source Editor',
-      primary:
-        `dashboard에서 직접 ${sourcePath} 를 수정합니다. 저장 경로는 ${jsonPath} 이고, ` +
-        '저장 후 current cascade snapshot 을 다시 읽습니다.',
-      secondary:
-        'semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.',
-      saveLabel: 'Save cascade.json',
-      previewTitle: null,
-    }
-  }
+  const sourcePath = raw?.source_path ?? 'cascade.toml'
   return {
     title: 'Active Cascade Source Editor (TOML SSOT)',
     primary:
       `현재 active source는 ${sourcePath} 이고, 이 editor에서 직접 cascade.toml SSOT 를 수정합니다. ` +
-      '저장 시 TOML parse 검증 뒤 generated runtime JSON을 다시 materialize 합니다.',
+      '저장 시 TOML parse 검증 뒤 cascade snapshot 을 다시 읽습니다.',
     secondary:
-      `아래 preview는 ${jsonPath} 에 기록되는 generated cascade.json runtime artifact 입니다.`,
+      'semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.',
     saveLabel: 'cascade.toml 저장',
-    previewTitle: '생성된 cascade.json 미리보기',
   }
 }
 
@@ -205,12 +185,11 @@ function availableKeeperAssignments(
 }
 
 function validateSourceConfigText(
-  raw: Pick<CascadeRawConfigResponse, 'source_kind'> | null,
-  sourceText: string,
+  raw: Pick<CascadeRawConfigResponse, never> | null,
+  _sourceText: string,
 ): string | null {
   if (!raw) return null
-  if (raw?.source_kind === 'toml') return null
-  return validateJsonText(sourceText)
+  return null
 }
 
 function validationTone(status: CascadeValidationStatus): 'ok' | 'warn' | 'bad' {
@@ -1037,15 +1016,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function validateJsonText(raw: string): string | null {
-  try {
-    JSON.parse(raw)
-    return null
-  } catch (error) {
-    return errorMessage(error)
-  }
-}
-
 function CascadeRawConfigEditor({
   raw,
   onRefresh,
@@ -1053,7 +1023,7 @@ function CascadeRawConfigEditor({
   raw: CascadeRawConfigResponse | null
   onRefresh: () => Promise<void>
 }) {
-  const editorText = useSignal(raw?.source_text ?? raw?.raw_json ?? '')
+  const editorText = useSignal(raw?.source_text ?? '')
   const editorDirty = useSignal(false)
   const saving = useSignal(false)
   const saveMessage = useSignal<string | null>(null)
@@ -1063,17 +1033,16 @@ function CascadeRawConfigEditor({
   useEffect(() => {
     if (!raw || editorDirty.value) return
     editorText.value = raw.source_text
-  }, [raw?.config_path, raw?.updated_at, raw?.source_path, raw?.source_text])
+  }, [raw?.updated_at, raw?.source_path, raw?.source_text])
 
   const syntaxError = validateSourceConfigText(raw, editorText.value)
   const saveDisabled = saving.value
     || !editorDirty.value
     || !sourceEditable
-    || raw?.config_path == null
     || syntaxError != null
 
   const handleReset = () => {
-    editorText.value = raw?.source_text ?? raw?.raw_json ?? ''
+    editorText.value = raw?.source_text ?? ''
     editorDirty.value = false
     saveMessage.value = 'Latest source snapshot restored in the editor.'
   }
@@ -1082,15 +1051,11 @@ function CascadeRawConfigEditor({
     event.preventDefault()
     const currentSyntaxError = validateSourceConfigText(raw, editorText.value)
     if (currentSyntaxError) {
-      saveMessage.value = `Invalid JSON: ${currentSyntaxError}`
-      return
-    }
-    if (raw?.config_path == null) {
-      saveMessage.value = 'Resolved cascade config path is unavailable.'
+      saveMessage.value = `Invalid TOML: ${currentSyntaxError}`
       return
     }
     if (!sourceEditable) {
-      saveMessage.value = `Active source is not editable: ${raw?.source_path ?? raw?.config_path ?? 'unresolved'}`
+      saveMessage.value = `Active source is not editable: ${raw?.source_path ?? 'unresolved'}`
       return
     }
     saving.value = true
@@ -1112,8 +1077,6 @@ function CascadeRawConfigEditor({
     }
   }
 
-  const materializationError = raw?.materialization_error ?? null
-
   return html`
     <${Card} title=${mode.title}>
       <div class="flex flex-col gap-3 p-4">
@@ -1121,21 +1084,6 @@ function CascadeRawConfigEditor({
         <p class="text-xs text-[var(--color-fg-muted)]">
           ${mode.secondary}
         </p>
-
-        ${materializationError
-          ? html`
-            <div
-              role="alert"
-              class="rounded-[var(--r-1)] border border-[var(--bad-light)] bg-[var(--bad-bg-soft, var(--color-bg-page))] px-3 py-2 text-xs text-[var(--bad-light)]"
-            >
-              <strong class="font-semibold">cascade.toml 적용 실패:</strong>
-              <span class="ml-1 font-mono break-all">${materializationError}</span>
-              <p class="mt-1 text-[var(--color-fg-muted)]">
-                아래 표시되는 raw_json 은 마지막으로 정상 머터리얼라이즈된 스냅샷입니다.
-                source_text 의 변경분은 strict-field 검증에 의해 거절되어 적용되지 않았습니다.
-              </p>
-            </div>`
-          : ''}
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
@@ -1159,7 +1107,7 @@ function CascadeRawConfigEditor({
               ? html`<span class="text-[var(--bad-light)]">syntax: ${syntaxError}</span>`
               : html`
                 <span class="text-[var(--color-status-ok)]">
-                  ${raw?.source_kind === 'toml' ? 'syntax: validated on save (TOML)' : 'syntax: valid JSON'}
+                  syntax: validated on save (TOML)
                 </span>
               `}
             ${saveMessage.value
@@ -1196,25 +1144,6 @@ function CascadeRawConfigEditor({
             <//>
           </div>
         </form>
-        ${mode.previewTitle
-          ? html`
-            <div class="flex flex-col gap-2">
-              <div class="text-xs font-medium text-[var(--color-fg-primary)]">
-                ${mode.previewTitle}
-              </div>
-              <div class="text-xs text-[var(--color-fg-muted)]">
-                ${raw?.config_path ?? 'unresolved'}
-              </div>
-              <textarea
-                aria-label="설정 미리보기"
-                class="h-72 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"
-                spellcheck="false"
-                readonly
-                value=${raw?.raw_json ?? ''}
-              />
-            </div>
-          `
-          : null}
       </div>
     <//>
   `

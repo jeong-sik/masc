@@ -1228,8 +1228,6 @@ interface KeeperConfigSources {
   override_fields: string[]
   cascade_catalog_source_kind: 'json' | 'toml' | null
   cascade_catalog_source_path: string | null
-  cascade_runtime_json_path: string | null
-  cascade_runtime_json_editable: boolean
 }
 
 interface KeeperConfigMetrics {

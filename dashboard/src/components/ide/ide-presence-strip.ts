@@ -191,9 +191,15 @@ export function IdePresenceStrip() {
     return unsub
   }, [presenceStore])
 
-  useEffect(() => presenceStore.subscribe(() => forceRender(tick => tick + 1)), [presenceStore])
+  useEffect(() => {
+    const unsub = presenceStore.subscribe(() => forceRender(tick => tick + 1))
+    return unsub
+  }, [presenceStore])
 
-  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1)), [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
+    return unsub
+  }, [])
 
   const current = presenceStore.snapshot()
   const entries = presenceStore.entries()
@@ -252,18 +258,23 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
     ? prLabel(wt.pr_number, wt.pr_state)
     : null
 
+  const canNavigate = cursor?.file_path != null
   const navigate = (): void => {
     if (cursor?.file_path) activeIdeFile.value = cursor.file_path
   }
+  const onKeyDown = canNavigate
+    ? (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate() } }
+    : undefined
 
   return html`
     <li
       title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}${prBadge ? ` · ${prBadge}` : ''}`}
       aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}${focusLabel ? ` editing ${focusLabel}` : ''}`}
-      role="button"
-      tabIndex=${cursor?.file_path ? 0 : undefined}
-      onClick=${navigate}
-      onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate() } }}
+      role=${canNavigate ? 'button' : undefined}
+      aria-disabled=${canNavigate ? undefined : 'true'}
+      tabIndex=${canNavigate ? 0 : undefined}
+      onClick=${canNavigate ? navigate : undefined}
+      onKeyDown=${onKeyDown}
       style=${{
         display: 'inline-flex',
         alignItems: 'center',
@@ -311,7 +322,7 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
   `
 }
 
-function prLabel(prNumber: number, prState: string | null): string {
+export function prLabel(prNumber: number, prState: string | null): string {
   if (prState === 'open') return `#${prNumber}`
   if (prState === 'closed') return `#${prNumber}✕`
   if (prState === 'merged') return `#${prNumber}✓`

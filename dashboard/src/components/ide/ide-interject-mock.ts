@@ -46,12 +46,24 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
     }))
   const [, forceRender] = useState(0)
 
-  useEffect(() => interjectStore.subscribe(() => forceRender((t: number) => t + 1)), [interjectStore])
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
-  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1)), [])
-  useEffect(() => activeKeeperName.subscribe(name => {
-    interjectStore.setActiveKeeper(keeperName?.trim() || name)
-  }), [interjectStore, keeperName])
+  useEffect(() => {
+    const unsub = interjectStore.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [interjectStore])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = activeKeeperName.subscribe(name => {
+      interjectStore.setActiveKeeper(keeperName?.trim() || name)
+    })
+    return () => unsub()
+  }, [interjectStore, keeperName])
   useEffect(() => {
     interjectStore.setActiveKeeper(resolveActiveKeeper(keeperName))
   }, [interjectStore, keeperName])
@@ -65,7 +77,7 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
   const entry = keeperId ? entries.find(e => e.keeper_id === keeperId) : null
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
   const cursor = keeperId ? cursorOverlaySignal.value.cursors.get(keeperId) : undefined
-  const focusLabel = cursor?.file_path
+  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
 

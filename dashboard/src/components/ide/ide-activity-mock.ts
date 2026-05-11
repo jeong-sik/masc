@@ -107,9 +107,18 @@ export function IdeActivityMock() {
     return () => { cancelled = true }
   }, [store])
 
-  useEffect(() => store.subscribe(() => forceRender(tick => tick + 1)), [store])
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1)), [])
-  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1)), [])
+  useEffect(() => {
+    const unsub = store.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [store])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const events = store.events()
   const keepers = store.knownKeepers()
@@ -155,7 +164,11 @@ function ActivityRow(
   const entry = presence?.entries.find(e => e.keeper_id === item.keeper_id)
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
   const cursor = overlay.cursors.get(item.keeper_id)
-  const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
+  // cursor stream normalizes missing line to 0; only render the focus
+  // label when both file_path and a 1-based line are present so we
+  // don't show `filename:0` placeholders.
+  const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
+  const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
 
   return html`
     <li
@@ -199,7 +212,7 @@ function ActivityRow(
           ` : null}
         </span>
         ${item.detail ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${item.detail}</span>` : null}
-        ${focusFile ? html`
+        ${hasFocus ? html`
           <span style=${{
             fontSize: 'var(--fs-10)',
             fontFamily: 'var(--font-mono)',
@@ -208,8 +221,8 @@ function ActivityRow(
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
-          title=${cursor?.file_path}
-          >↗ ${focusFile}:${cursor?.line}</span>
+          title=${cursor.file_path}
+          >↗ ${focusFile}:${cursor.line}</span>
         ` : null}
       </div>
     </li>

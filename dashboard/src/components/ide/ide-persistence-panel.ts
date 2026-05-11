@@ -163,7 +163,10 @@ export function buildMemoryGraphModel(
 
 function useSignalValue<T>(signal: { value: T; subscribe: (fn: (value: T) => void) => () => void }): T {
   const [value, setValue] = useState(signal.value)
-  useEffect(() => signal.subscribe(next => setValue(next)), [signal])
+  useEffect(() => {
+    const unsub = signal.subscribe(next => setValue(next))
+    return () => unsub()
+  }, [signal])
   return value
 }
 
@@ -252,15 +255,21 @@ export function IdePersistencePanel({
   const keeper = findKeeper(keeperRows, keeperName)
   const [, forceRender] = useState(0)
 
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
-  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1)), [])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
 
   const presence = globalPresenceSnapshot.value
   const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
   const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
   const cursor = keeperName ? cursorOverlaySignal.value.cursors.get(keeperName) : undefined
-  const focusLabel = cursor?.file_path
+  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
   const [diagram, setDiagram] = useState<KeeperStateDiagramResponse | null>(null)

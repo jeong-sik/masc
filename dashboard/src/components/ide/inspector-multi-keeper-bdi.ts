@@ -202,7 +202,10 @@ function useKeeperBdiSnapshot(keeperName: string, pollMs: number): KeeperBdiSlot
 
 function usePinnedKeepers(): ReadonlyArray<PinnedKeeperEntry> {
   const [snapshot, setSnapshot] = useState(pinnedKeepers.value)
-  useEffect(() => pinnedKeepers.subscribe(value => setSnapshot(value)), [])
+  useEffect(() => {
+    const unsub = pinnedKeepers.subscribe(value => setSnapshot(value))
+    return () => unsub()
+  }, [])
   return snapshot.entries
 }
 
@@ -254,12 +257,20 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: Keeper
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
   const cursor = cursorOverlaySignal.value.cursors.get(entry.keeperName)
   const [, forceRender] = useState(0)
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
+  // TODO follow-up: each pinned KeeperPanel/KeeperChip subscribes to
+  // globalPresenceSnapshot individually, so N pinned keepers means N
+  // listeners + N state updates per presence event. Move the
+  // subscription up to InspectorMultiKeeperBDI and pass presence via
+  // props so it scales linearly instead of quadratically.
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
   const presence = globalPresenceSnapshot.value
   const pEntries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
   const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
   const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
-  const focusLabel = cursor?.file_path
+  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
   const navigateToFocus = (): void => {
@@ -383,12 +394,18 @@ function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps)
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
   const cursor = cursorOverlaySignal.value.cursors.get(entry.keeperName)
   const [, forceRender] = useState(0)
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
+  // TODO follow-up: see KeeperPanel above — same per-instance
+  // globalPresenceSnapshot subscription pattern; lift the subscription
+  // to InspectorMultiKeeperBDI and pass presence via props.
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
   const presence = globalPresenceSnapshot.value
   const pEntries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
   const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
   const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
-  const focusLabel = cursor?.file_path
+  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
   const navigateToFocus = (): void => {

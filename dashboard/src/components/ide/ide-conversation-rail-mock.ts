@@ -133,8 +133,14 @@ export function IdeConversationRailMock() {
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
   const [, forceRender] = useState(0)
 
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
-  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1)), [])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -150,8 +156,14 @@ export function IdeConversationRailMock() {
     })
     return () => { cancelled = true }
   }, [])
-  useEffect(() => activeIdeFile.subscribe(file => setActiveFile(file)), [])
-  useEffect(() => activeKeeperName.subscribe(name => setKeeperName(name)), [])
+  useEffect(() => {
+    const unsub = activeIdeFile.subscribe(file => setActiveFile(file))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = activeKeeperName.subscribe(name => setKeeperName(name))
+    return () => unsub()
+  }, [])
 
   // RFC-0028 PR-δ anchored-thread producer: each fetched post becomes a
   // keeper-trace event the first time it is observed, deduplicated by id
@@ -317,7 +329,8 @@ function PostCard(
   const entry = entries.find(e => e.keeper_id === post.author_identity)
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
   const cursor = overlay.cursors.get(post.author_identity)
-  const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
+  const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
+  const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
 
   return html`
     <li class="ide-rail-item">
@@ -366,7 +379,7 @@ function PostCard(
           </div>
         ` : null}
         <p class="ide-conversation-body">${bodyText}</p>
-        ${focusFile ? html`
+        ${hasFocus ? html`
           <span style=${{
             fontSize: 'var(--fs-10)',
             fontFamily: 'var(--font-mono)',
@@ -376,8 +389,8 @@ function PostCard(
             whiteSpace: 'nowrap',
             display: 'block',
           }}
-          title=${cursor?.file_path}
-          >↗ ${focusFile}:${cursor?.line}</span>
+          title=${cursor.file_path}
+          >↗ ${focusFile}:${cursor.line}</span>
         ` : null}
         <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
           ${post.comment_count > 0 ? `${post.comment_count} replies · ` : ''}${(post.votes ?? 0) > 0 ? `${post.votes ?? 0} votes` : ''}
@@ -405,7 +418,8 @@ function DecisionCard(
   const entry = entries.find(e => e.keeper_id === keeper)
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
   const cursor = overlay.cursors.get(keeper)
-  const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
+  const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
+  const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
   return html`
     <li style=${{ display: 'block' }}>
       <div
@@ -450,7 +464,7 @@ function DecisionCard(
           <span style=${{ marginLeft: 'auto', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatThreadTime(item.timestamp_ms)}</span>
         </div>
         <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>${summary || 'decision event'}</p>
-        ${focusFile ? html`
+        ${hasFocus ? html`
           <span style=${{
             fontSize: 'var(--fs-10)',
             fontFamily: 'var(--font-mono)',
@@ -459,8 +473,8 @@ function DecisionCard(
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
-          title=${cursor?.file_path}
-          >↗ ${focusFile}:${cursor?.line}</span>
+          title=${cursor.file_path}
+          >↗ ${focusFile}:${cursor.line}</span>
         ` : null}
       </div>
     </li>

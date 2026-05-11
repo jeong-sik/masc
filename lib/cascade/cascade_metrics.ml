@@ -282,3 +282,27 @@ let on_validated_with_rejections ~reason =
   Prometheus.inc_counter metric_validated_with_rejections
     ~labels:[ ("reason", reason) ]
     ()
+
+(* [apply_provider_filter] (non-strict) is a fail-OPEN filter: when
+   the operator-supplied [provider_filter] matches no provider in the
+   declared set, the function falls back to the UNFILTERED list
+   instead of rejecting.  The strict variant
+   [apply_provider_filter_strict] is fail-CLOSED (returns Error,
+   counted by [on_resolve_failure ~reason:"provider_filter_rejected"]
+   in iter 10), but the non-strict path was silent except for a WARN
+   line at the call site.
+
+   A non-zero rate here means the operator's filter expressed an
+   intent ("use only anthropic for this cascade") that the runtime
+   silently widened to "use any provider in this cascade", with
+   security / budget / SLA implications.  Different signal from
+   iter 7's [on_resolve_provider_leak] (which compares
+   declared-vs-returned, not filter-vs-result).
+
+   Cardinality: cascades (~10) = ~10 series. *)
+let metric_provider_filter_widening = "masc_cascade_provider_filter_widening_total"
+
+let on_provider_filter_widening ~cascade =
+  Prometheus.inc_counter metric_provider_filter_widening
+    ~labels:[ ("cascade", cascade) ]
+    ()

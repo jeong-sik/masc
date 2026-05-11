@@ -78,3 +78,11 @@ val on_validated_with_rejections : reason:string -> unit
     newly produced a partial rejection on this call) or
     [stale_partial_rejection_cached] (same-mtime cache replay of a
     previously-cached partial rejection). *)
+
+val on_provider_filter_widening : cascade:string -> unit
+(** Tick the provider-filter widening counter for one
+    [apply_provider_filter] (non-strict) invocation whose filter
+    matched no provider in the declared set, causing the function
+    to fall back to the unfiltered list.  A non-zero rate signals
+    the operator-supplied filter is being silently widened with
+    security / budget / SLA implications. *)

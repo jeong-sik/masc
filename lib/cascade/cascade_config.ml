@@ -1071,6 +1071,7 @@ let apply_provider_filter ~provider_filter ~label providers =
     in
     let filtered = List.filter matches providers in
     if filtered = [] then (
+      Cascade_metrics.on_provider_filter_widening ~cascade:label;
       Log.warn ~ctx:"CascadeConfig"
         "provider_filter matched no providers (%s); \
          falling back to unfiltered (filter=[%s] providers=[%s])"

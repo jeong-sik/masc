@@ -617,6 +617,19 @@ let test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable () =
    must stay in lockstep with the two call sites in
    [inspect_active].  A future refactor that introduces a third
    reason — or renames an existing one — must update this test. *)
+(* Smoke + name-stability guard for
+   [Cascade_metrics.on_provider_filter_widening].  The non-strict
+   [apply_provider_filter] fall-OPEN arm is hit only when the
+   operator-supplied filter expresses an intent the cascade can't
+   satisfy — a hard scenario to provoke from a unit test without
+   constructing a full Provider_config.t list with mismatched
+   kinds.  This smoke test exercises the call surface directly so
+   the [cascade] label name and helper signature are pinned. *)
+let test_provider_filter_widening_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_provider_filter_widening
+    ~cascade:"smoke_test_cascade";
+  check bool "single-label cascade helper callable" true true
+
 let test_validated_with_rejections_helper_documented_reasons_are_callable () =
   Masc_mcp.Cascade_metrics.on_validated_with_rejections
     ~reason:"fresh_partial_rejection";
@@ -855,5 +868,8 @@ let () =
             "validated_with_rejections: both documented reasons callable"
             `Quick
             test_validated_with_rejections_helper_documented_reasons_are_callable;
+          test_case
+            "provider_filter_widening: cascade label helper callable" `Quick
+            test_provider_filter_widening_helper_callable;
         ] );
     ]

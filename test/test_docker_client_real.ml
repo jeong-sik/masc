@@ -31,12 +31,22 @@ let sample_plan () =
   | Ok p -> p
   | Error _ -> failwith "test fixture"
 
+(* Container-name derivation is deterministic in [(turn_id, attempt,
+   suffix)], so a literal suffix like ["alice"] could collide with a
+   real keeper-derived container on a developer machine and have the
+   subsequent [docker rm -f] silently destroy it. Inject PID + a
+   nonce into the suffix so the derived SHA-256 is effectively unique
+   per test invocation. *)
+let () = Random.self_init ()
+
 let sample_container () =
+  let pid = Unix.getpid () in
+  let nonce = Random.bits () in
   Keeper_container_name.derive
     ~algo:Keeper_hash_algo.SHA_256
     ~turn_id:1
     ~attempt:0
-    ~suffix:"alice"
+    ~suffix:(Printf.sprintf "test-pid%d-%d" pid nonce)
 
 (* ── Each S function returns the typed placeholder ──────────── *)
 

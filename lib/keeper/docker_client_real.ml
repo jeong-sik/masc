@@ -17,11 +17,16 @@ let placeholder = Error Docker_client.Cleanup_failed
      0   — container removed successfully
      1   — container not found, or removal blocked (generic failure)
      125 — daemon error / docker CLI itself errored
-   We map 0 → Ok, any other WEXITED → Cleanup_failed, and signal /
-   stopped statuses → Daemon_unreachable. *)
+     127 — synthesized by [Process_eio.run_argv_with_status] when the
+           CLI binary cannot be spawned (missing executable / exec
+           error). Functionally identical to "daemon unreachable" from
+           the caller's POV.
+   Mapping: 0 → Ok, 127 → Daemon_unreachable, any other WEXITED →
+   Cleanup_failed, and signal / stopped statuses → Daemon_unreachable. *)
 let map_exit_status_for_rm (status : Unix.process_status) =
   match status with
   | Unix.WEXITED 0 -> Ok ()
+  | Unix.WEXITED 127 -> Error Docker_client.Daemon_unreachable
   | Unix.WEXITED _ -> Error Docker_client.Cleanup_failed
   | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error Docker_client.Daemon_unreachable
 
@@ -35,6 +40,14 @@ let rm container =
   let argv =
     [ "docker"; "rm"; "-f"; Keeper_container_name.to_string container ]
   in
-  match Process_eio.run_argv_with_status argv with
-  | status, _stdout -> map_exit_status_for_rm status
-  | exception Unix.Unix_error _ -> Error Docker_client.Daemon_unreachable
+  (* [Process_eio.run_argv_with_status] swallows [Unix.Unix_error] from
+     spawn and surfaces it as [WEXITED 127] (see
+     [test/test_process_eio_coverage.ml]: "missing command exit code"
+     = 127), so the previous [exception Unix.Unix_error _] branch was
+     dead. The 127 mapping in [map_exit_status_for_rm] now picks up
+     missing-CLI / exec-failure as [Daemon_unreachable]. Eio-level
+     cancellation ([Eio.Cancel.Cancelled]) is still propagated to the
+     caller intentionally — RFC-0070 requires cancellation to remain
+     observable. *)
+  let status, _stdout = Process_eio.run_argv_with_status argv in
+  map_exit_status_for_rm status

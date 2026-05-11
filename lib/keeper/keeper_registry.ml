@@ -765,14 +765,37 @@ let register_offline ~base_path name meta =
   let phase = Keeper_state_machine.derive_phase conditions in
   register_with_state ~base_path name meta ~phase ~conditions
 
-let register_restarting ~base_path name meta =
-  let conditions = {
-    Keeper_state_machine.default_conditions with
-    restart_budget_remaining = true;
-    backoff_elapsed = true;
-  } in
-  let phase = Keeper_state_machine.derive_phase conditions in
-  register_with_state ~base_path name meta ~phase ~conditions
+(** R-A-6.a — refuse to revive a keeper whose restart_budget was previously
+    exhausted.  Pairs with TLA+ §S3 BudgetNeverRevives:
+
+      []( ~restart_budget_remaining => []( ~restart_budget_remaining ))
+
+    Without this guard, [register_restarting] unconditionally writes
+    [restart_budget_remaining = true], which would silently revive a
+    keeper whose budget was cleared via [Restart_budget_exhausted] event
+    or [mark_dead] in a prior sweep.  Three concrete revival vectors are
+    documented in `docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md`
+    (iter 14 audit memo).  This refusal turns those silent corruptions
+    into a typed error the caller must handle. *)
+type register_restarting_error =
+  | Budget_already_exhausted of { name : string }
+
+let register_restarting ~base_path name meta
+  : (registry_entry, register_restarting_error) result
+  =
+  let key = registry_key ~base_path name in
+  let existing = StringMap.find_opt key (Atomic.get registry) in
+  match existing with
+  | Some prior when not prior.conditions.restart_budget_remaining ->
+    Error (Budget_already_exhausted { name })
+  | _ ->
+    let conditions = {
+      Keeper_state_machine.default_conditions with
+      restart_budget_remaining = true;
+      backoff_elapsed = true;
+    } in
+    let phase = Keeper_state_machine.derive_phase conditions in
+    Ok (register_with_state ~base_path name meta ~phase ~conditions)
 
 let unregister ~base_path name =
   Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;

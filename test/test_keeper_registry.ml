@@ -166,7 +166,12 @@ let test_register_offline_and_start () =
 
 let test_register_restarting_and_start () =
   R.clear ();
-  let entry = R.register_restarting ~base_path:bp "k1-restart" (make_meta "k1-restart") in
+  let entry =
+    match R.register_restarting ~base_path:bp "k1-restart" (make_meta "k1-restart") with
+    | Ok e -> e
+    | Error (R.Budget_already_exhausted _) ->
+      fail "register_restarting should succeed on a fresh keeper (no prior entry)"
+  in
   check string "restarting phase" "restarting" (KSM.phase_to_string entry.phase);
   check bool "not running yet" false (R.is_running ~base_path:bp "k1-restart");
   ignore (R.dispatch_event ~base_path:bp "k1-restart" KSM.Fiber_started);
@@ -181,7 +186,12 @@ let test_register_restarting_and_start () =
 let test_prepare_fiber_launch_resets_stale_runtime_latches () =
   R.clear ();
   let name = "k1-stale-stop" in
-  let entry = R.register_restarting ~base_path:bp name (make_meta name) in
+  let entry =
+    match R.register_restarting ~base_path:bp name (make_meta name) with
+    | Ok e -> e
+    | Error (R.Budget_already_exhausted _) ->
+      fail "register_restarting should succeed on a fresh keeper (no prior entry)"
+  in
   Atomic.set entry.fiber_stop true;
   Atomic.set entry.fiber_wakeup true;
   Atomic.set entry.waiting_for_inference true;
@@ -200,6 +210,32 @@ let test_prepare_fiber_launch_resets_stale_runtime_latches () =
       check string "running after prepare launch" "running"
         (KSM.phase_to_string updated.phase);
       check bool "fsm stop_requested reset" false updated.conditions.stop_requested
+
+(* R-A-6.a — register_restarting must refuse to revive a keeper whose
+   restart_budget_remaining=false (TLA+ §S3 BudgetNeverRevives). *)
+let test_register_restarting_refuses_exhausted_budget () =
+  R.clear ();
+  let name = "k-budget-exhausted" in
+  (* Phase 1: register fresh keeper (budget=true initially) and dispatch
+     Restart_budget_exhausted to clear the flag in-place. *)
+  let _ = R.register ~base_path:bp name (make_meta name) in
+  (* Drive to a non-terminal state, then exhaust budget.  We use a
+     synthetic update via R.update_entry-like path: dispatch a heartbeat
+     failure to leave Running, then the supervisor-side mark_dead path
+     would normally clear budget — here we simulate by direct dispatch. *)
+  (match
+     R.dispatch_event ~base_path:bp name KSM.Restart_budget_exhausted
+   with
+   | Ok _ -> ()
+   | Error err -> fail (KSM.transition_error_to_string err));
+  (* Phase 2: attempt to revive — must be refused by R-A-6.a guard. *)
+  match R.register_restarting ~base_path:bp name (make_meta name) with
+  | Ok _ ->
+    fail
+      "register_restarting must refuse when prior entry has \
+       restart_budget_remaining=false (BudgetNeverRevives violation)"
+  | Error (R.Budget_already_exhausted r) ->
+    check string "refusal carries keeper name" name r.name
 
 let test_dispatch_event_with_audit_preserves_snapshot () =
   R.clear ();
@@ -1482,6 +1518,8 @@ let () =
           eio_test "register and get" test_register_and_get;
           eio_test "register offline and start" test_register_offline_and_start;
           eio_test "register restarting and start" test_register_restarting_and_start;
+          eio_test "R-A-6.a register_restarting refuses exhausted budget"
+            test_register_restarting_refuses_exhausted_budget;
           eio_test "prepare fiber launch resets stale latches"
             test_prepare_fiber_launch_resets_stale_runtime_latches;
           eio_test "dispatch event with audit preserves snapshot"

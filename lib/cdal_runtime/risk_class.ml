@@ -3,7 +3,7 @@ type t =
   | Medium
   | High
   | Critical
-[@@deriving show]
+[@@deriving show, eq, ord]
 
 let to_string = function
   | Low -> "low"
@@ -26,16 +26,6 @@ let of_yojson = function
   | `String s -> of_string s
   | j -> Error (Printf.sprintf "expected string, got %s" (Yojson.Safe.to_string j))
 ;;
-
-let to_int = function
-  | Low -> 0
-  | Medium -> 1
-  | High -> 2
-  | Critical -> 3
-;;
-
-let equal a b = to_int a = to_int b
-let compare a b = Int.compare (to_int a) (to_int b)
 
 let max_mode = function
   | Low -> Some Execution_mode.Execute

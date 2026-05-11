@@ -43,6 +43,14 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
 let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
 
+(* Hashtbl materialisation helper for membership-only checks.  Used
+   below where we'd otherwise scan a name list per element of a
+   filter loop — replaces O(N x M) with O(N + M). *)
+let name_set names =
+  let tbl = Hashtbl.create (List.length names) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
+  tbl
+
 let lookup_schemas_by_name_exn ~label all_schemas values =
   let requested =
     values
@@ -121,7 +129,7 @@ let local_worker_spawn_schemas : Masc_domain.tool_schema list =
     Tool_schemas_inline_infra.schemas
 
 let select_public_local_worker_schemas () =
-  let wanted = local_worker_public_tool_names in
+  let wanted_set = name_set local_worker_public_tool_names in
   dedupe_schemas
     (Tool_board.tools
     @ Tool_schemas_coord_core.schemas
@@ -132,7 +140,7 @@ let select_public_local_worker_schemas () =
     @ local_worker_run_schemas
     @ local_worker_spawn_schemas)
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-         List.mem schema.name wanted)
+         Hashtbl.mem wanted_set schema.name)
 
 let resolve_named_schemas all_schemas values :
     (Masc_domain.tool_schema list, string) Result.t =
@@ -142,19 +150,28 @@ let resolve_named_schemas all_schemas values :
     |> List.filter (fun value -> not (String.equal value ""))
     |> unique_preserve_order
   in
+  (* Materialise both directions of the membership relation once:
+     - [requested_set] for the first filter (per-schema lookup),
+     - [found_set] for the missing-name check (per-requested lookup).
+     Previous shape ran [List.mem] / [List.exists] per element in each
+     filter — O(S x R) and O(R x found) respectively. *)
+  let requested_set = name_set requested in
   let schemas =
     all_schemas
     |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-           List.mem schema.name requested)
+           Hashtbl.mem requested_set schema.name)
+  in
+  let found_set =
+    let tbl = Hashtbl.create (List.length schemas) in
+    List.iter
+      (fun (schema : Masc_domain.tool_schema) ->
+        Hashtbl.replace tbl schema.name ())
+      schemas;
+    tbl
   in
   let missing =
     requested
-    |> List.filter (fun tool_name ->
-           not
-             (List.exists
-                (fun (schema : Masc_domain.tool_schema) ->
-                  String.equal schema.name tool_name)
-                schemas))
+    |> List.filter (fun tool_name -> not (Hashtbl.mem found_set tool_name))
   in
   match missing with [] ->
     Ok schemas
@@ -217,10 +234,10 @@ let build_tool_catalog ~(role : string) () : string list =
     | "coordinator" | "fleet_leader" ->
         filter_catalog_to_available ~available:all_names coordination_tool_names
     | _ ->
-        (* autonomous: all except admin *)
-        List.filter
-          (fun name -> not (List.mem name admin_tool_names))
-          all_names
+        (* autonomous: all except admin.  Replace per-name [List.mem]
+           scan over [admin_tool_names] with O(1) Hashtbl lookup. *)
+        let admin_set = name_set admin_tool_names in
+        List.filter (fun name -> not (Hashtbl.mem admin_set name)) all_names
   in
   unique_preserve_order filtered
 

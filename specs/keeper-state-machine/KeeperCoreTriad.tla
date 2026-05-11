@@ -365,19 +365,29 @@ Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 \*
 \* On the OCaml side (`lib/keeper/keeper_cascade_routing.ml` +
 \* `lib/cascade/cascade_routes.ml`), cascade names are resolved through a
-\* typed `logical_use` enum (`Phase_recovery`, `Phase_buffer`) →
-\* `cascade_name_for_use` → catalog/route lookup → first-alias fallback.
+\* typed `logical_use` enum (`Phase_recovery`, `Phase_buffer`) and a
+\* prioritised resolution chain in `cascade_name_for_use`:
+\*   (a) operator-supplied `routes.<key>` binding, if its target exists
+\*       in the live catalog;
+\*   (b) first catalog entry name (the boot-time default profile);
+\*   (c) `route_spec.aliases` first element, or the route key — *only*
+\*       when the catalog is empty (a state boot validation rejects).
 \* The literal string produced at runtime depends on operator catalog and
 \* routes (RFC-0058 declarative route mapping); only the *default empty
-\* catalog* boot path produces the literal strings written here.
+\* catalog* boot path produces the literal strings written below.
 \*
-\* These invariants therefore assert ROLE identity, not string equality:
+\* The invariants below are written as TLA+ string equalities, but those
+\* literals should be read as canonical *role identifiers* — they stand
+\* in for the typed `logical_use` role that production resolves through
+\* the chain above:
 \*   - "none"           ↔ "no cascade is active for this turn"
 \*   - "local_recovery" ↔ `Phase_recovery` role
 \*   - "local_only"     ↔ `Phase_buffer` role
+\* TLC still compares strings; the *semantic* claim is role identity.
 \* See `docs/tla-audit/kct-c3-terminal-cascade-contract-gap-2026-05-12.md`
 \* and `docs/tla-audit/kct-s2s3-failing-buffer-cascade-alignment-2026-05-12.md`
-\* for the production indirection analysis.
+\* (the latter lands via PR #14787) for the production indirection
+\* analysis.
 
 \* S1: Terminal phase never has an active cascade.
 \* OCaml note: `select_cascade` returns `base_cascade` for terminal phases

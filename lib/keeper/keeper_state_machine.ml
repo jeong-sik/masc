@@ -618,26 +618,37 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     [Start_compaction] is additionally consumed for the auto-compact
     [Overflowed] path; the remaining variants stay descriptive here
     because their side effects are still owned elsewhere
-    (post-turn lifecycle or supervisor). *)
+    (post-turn lifecycle or supervisor).
+
+    Structure (Iteration 2, /loop FSM drift hunt — Phase A-2):
+    Outer match is on [new_phase] so every phase variant is exhaustively
+    enumerated and the compiler warns on future phase addition. Inner
+    matches on [prev_phase] enumerate every variant explicitly (no
+    wildcard) so the same future-proofing applies to prev-dependent arms.
+    Pre-refactor behaviour is preserved verbatim — the four classes that
+    previously fell through the [| _ -> []] catch-all (transitions into
+    Offline, Crashed, into Running from non-{Restarting,Failing,Paused},
+    into Restarting from non-Crashed) now return [] from explicit arms
+    with comments documenting *why* the no-op is intentional. *)
 let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action list =
   let lifecycle name detail =
     Publish_lifecycle { event_name = name; detail }
   in
-  match prev_phase, new_phase with
-  | _, Compacting ->
+  match new_phase with
+  | Compacting ->
     [ Start_compaction; lifecycle "compaction_started" "" ]
-  | _, HandingOff ->
+  | HandingOff ->
     [ Start_handoff; lifecycle "handoff_started" "" ]
-  | _, Draining ->
+  | Draining ->
     [ Start_drain; lifecycle "draining" "" ]
-  | _, Dead ->
+  | Dead ->
     [ Mark_dead_tombstone;
       lifecycle "dead" (event_to_string event);
       Trigger_immediate_cleanup;
       Cancel_pending_oas ]
-  | _, Zombie ->
+  | Zombie ->
     [ Mark_zombie_tombstone; lifecycle "zombie" "terminal structural failure" ]
-  | _, Stopped ->
+  | Stopped ->
     [ Cleanup_and_unregister;
       lifecycle "stopped"
         (match event with
@@ -655,15 +666,11 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Terminal_failure_detected _ | Auto_compact_triggered
          | Operator_compact_requested | Operator_clear_requested _ ->
            event_to_string event) ]
-  | Crashed, Restarting ->
-    [ lifecycle "restarting" "backoff elapsed" ]
-  | Restarting, Running ->
-    [ lifecycle "restarted" "fiber launched" ]
   (* [Overflowed] entry actions: request a compaction so the registry can
      promote the committed [Overflowed] transition into the follow-up
      [Auto_compact_triggered] event, and publish the transition so
      operators can see "context overflow" distinctly from generic failure. *)
-  | _, Overflowed ->
+  | Overflowed ->
     [ Start_compaction;
       lifecycle "overflowed"
         (match event with
@@ -684,11 +691,9 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Terminal_failure_detected _ | Auto_compact_triggered
          | Operator_compact_requested | Operator_clear_requested _ ->
            event_to_string event) ]
-  | _, Failing ->
+  | Failing ->
     [ lifecycle "failing" (event_to_string event) ]
-  | Failing, Running ->
-    [ lifecycle "recovered" "failure counters reset" ]
-  | _, Paused ->
+  | Paused ->
     (* Distinguish operator-pause from overflow-induced pause so the
        dashboard can surface the right message.
        Issue #8728: Compact_retry_exhausted (added in #8581 specifically
@@ -717,35 +722,76 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
         event_to_string event
     in
     [ lifecycle "paused" detail ]
-  | Paused, Running ->
-    (* Issue #8732 (sibling of #8728): resume is event-driven, not always
-       operator-initiated. [Compaction_completed] / [Fiber_terminated]
-       clear the latched [compact_retry_exhausted] flag and let
-       [derive_phase] leave Paused; if we hardcode "operator request"
-       the dashboard claims a human resumed the keeper when in fact
-       auto-compact recovered. Mirror the per-event arms used in the
-       Paused-detail label. *)
-    let detail =
-      match event with
-      | Operator_resume -> "operator request"
-      | Compaction_completed _ -> "auto-compact recovered"
-      | Fiber_terminated _ -> "fiber recovered"
-      | Heartbeat_ok | Heartbeat_failed _ | Turn_succeeded | Turn_failed _
-      | Context_measured _ | Compaction_started | Compaction_failed _
-      | Handoff_started | Handoff_completed _ | Handoff_failed _
-      | Operator_stop _ | Operator_pause | Stop_requested | Drain_complete
-      | Fiber_started | Supervisor_restart_attempt _
-      | Restart_budget_exhausted | Credential_archived | Zombie_timeout
-      | Guardrail_stop _ | Terminal_failure_detected _
-      | Auto_compact_triggered | Operator_compact_requested
-      | Context_overflow_detected _ | Compact_retry_exhausted
-      | Operator_clear_requested _ ->
-        (* These events should not normally trigger a Paused→Running
-           transition; label generically via [event_to_string]. *)
-        event_to_string event
-    in
-    [ lifecycle "resumed" detail ]
-  | _ -> []
+  | Restarting ->
+    (match prev_phase with
+     | Crashed ->
+       [ lifecycle "restarting" "backoff elapsed" ]
+     | Offline | Running | Failing | Overflowed | Compacting | HandingOff
+     | Draining | Paused | Stopped | Restarting | Dead | Zombie ->
+       (* Direct transitions to Restarting from non-Crashed phases are not
+          a normal lifecycle path; the supervisor / registry owns publishing
+          for those rare corner cases. Intentional no-op (matches the
+          pre-refactor catch-all [| _ -> []]). *)
+       [])
+  | Running ->
+    (match prev_phase with
+     | Restarting ->
+       [ lifecycle "restarted" "fiber launched" ]
+     | Failing ->
+       [ lifecycle "recovered" "failure counters reset" ]
+     | Paused ->
+       (* Issue #8732 (sibling of #8728): resume is event-driven, not always
+          operator-initiated. [Compaction_completed] / [Fiber_terminated]
+          clear the latched [compact_retry_exhausted] flag and let
+          [derive_phase] leave Paused; if we hardcode "operator request"
+          the dashboard claims a human resumed the keeper when in fact
+          auto-compact recovered. Mirror the per-event arms used in the
+          Paused-detail label. *)
+       let detail =
+         match event with
+         | Operator_resume -> "operator request"
+         | Compaction_completed _ -> "auto-compact recovered"
+         | Fiber_terminated _ -> "fiber recovered"
+         | Heartbeat_ok | Heartbeat_failed _ | Turn_succeeded | Turn_failed _
+         | Context_measured _ | Compaction_started | Compaction_failed _
+         | Handoff_started | Handoff_completed _ | Handoff_failed _
+         | Operator_stop _ | Operator_pause | Stop_requested | Drain_complete
+         | Fiber_started | Supervisor_restart_attempt _
+         | Restart_budget_exhausted | Credential_archived | Zombie_timeout
+         | Guardrail_stop _ | Terminal_failure_detected _
+         | Auto_compact_triggered | Operator_compact_requested
+         | Context_overflow_detected _ | Compact_retry_exhausted
+         | Operator_clear_requested _ ->
+           (* These events should not normally trigger a Paused→Running
+              transition; label generically via [event_to_string]. *)
+           event_to_string event
+       in
+       [ lifecycle "resumed" detail ]
+     | Offline | Running | Overflowed | Compacting | HandingOff | Draining
+     | Stopped | Crashed | Dead | Zombie ->
+       (* [register] takes Init → Running without traversing this function
+          (it uses [register_with_state] directly). For other prevs (e.g.
+          Compacting → Running on auto-compact success, Overflowed →
+          Running similarly), the registry runtime publishes its own
+          lifecycle event covering the recovery semantics. Intentional
+          no-op (matches the pre-refactor catch-all [| _ -> []]). *)
+       [])
+  | Offline ->
+    (* Returning to Offline is rare and typically driven by registry-level
+       lifecycle (register_offline or unregister-then-readmit). Intentional
+       no-op (matches the pre-refactor catch-all [| _ -> []]). Future RFC
+       candidate: emit a distinct "offline" lifecycle when transitioning
+       *from* a non-Offline phase, for dashboard auditability. *)
+    []
+  | Crashed ->
+    (* The fiber terminated unexpectedly. The supervisor publishes its own
+       lifecycle event via [Supervisor_restart_attempt] follow-up, so we
+       avoid double-publishing here. Intentional no-op (matches the
+       pre-refactor catch-all [| _ -> []]). Future RFC candidate: emit a
+       distinct "crashed" lifecycle with the terminating event's detail
+       so dashboards can distinguish crash cause without relying on the
+       supervisor's follow-up. *)
+    []
 
 (* ── apply_event ───────────────────────────────────────── *)
 

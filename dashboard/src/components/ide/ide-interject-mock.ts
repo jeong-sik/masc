@@ -8,8 +8,8 @@ import {
   type InterjectActionState,
   type InterjectDispatchRequest,
 } from './interject-store'
-import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { globalPresenceSnapshot, type KeeperPresenceStatus } from './keeper-presence-store'
+import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete
@@ -41,17 +41,9 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
   const [, forceRender] = useState(0)
 
   useEffect(() => {
-    const unsub = interjectStore.subscribe(() => forceRender((t: number) => t + 1))
+    const unsub = interjectStore.subscribe(() => forceRender(tick => tick + 1))
     return () => unsub()
   }, [interjectStore])
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
   useEffect(() => {
     const unsub = activeKeeperName.subscribe(name => {
       interjectStore.setActiveKeeper(keeperName?.trim() || name)
@@ -62,8 +54,31 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
     interjectStore.setActiveKeeper(resolveActiveKeeper(keeperName))
   }, [interjectStore, keeperName])
 
+  const [presence, setPresence] = useState(globalPresenceSnapshot.value)
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(v => setPresence(v))
+    return () => unsub()
+  }, [])
+
+  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
+    return () => unsub()
+  }, [])
+
   const snapshot = interjectStore.snapshot()
   const actions = interjectStore.actions()
+  const keeperId = snapshot.active_keeper_id ?? ''
+  // InterjectStore only .trim()s keeper IDs; route keeper names may differ
+  // in casing. Compare on lowercase+trim so a presence entry from the route
+  // matches the (cased) interject keeper id.
+  const keeperIdNorm = keeperId.trim().toLowerCase()
+  const presenceEntry = keeperIdNorm
+    ? presence?.entries.find(e => e.keeper_id.trim().toLowerCase() === keeperIdNorm) ?? null
+    : null
+  const cursor = keeperId
+    ? resolveCursor(keeperId, overlay.cursors)
+    : null
 
   const presence = globalPresenceSnapshot.value
   const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
@@ -100,46 +115,13 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
         }}
       >
         <span>INTERJECT</span>
-        <span style=${{ fontSize: 'var(--fs-11)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          ${snapshot.active_keeper_id ?? 'No active keeper'}
-          ${statusDot ? html`
-            <span
-              role="status"
-              aria-label=${`Keeper status: ${statusDot.label}`}
-              style=${{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '2px',
-                fontSize: 'var(--fs-10)',
-                fontWeight: 600,
-                letterSpacing: '0.04em',
-                color: statusDot.color,
-              }}
-            >
-              <span style=${{
-                width: '4px',
-                height: '4px',
-                borderRadius: '50%',
-                background: statusDot.color,
-                display: 'inline-block',
-              }} />
-              ${statusDot.label}
-            </span>
-          ` : null}
-          ${focusLabel ? html`
-            <span style=${{
-              fontSize: 'var(--fs-10)',
-              fontFamily: 'var(--font-mono)',
-              color: 'var(--color-accent-fg)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              maxWidth: '120px',
-            }}
-            title=${cursor?.file_path}
-            >↗ ${focusLabel}</span>
-          ` : null}
-        </span>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+          <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)' }}>
+            ${keeperId || 'No active keeper'}
+          </span>
+          ${presenceEntry ? KeeperPresencePill(presenceEntry.status) : null}
+        </div>
+        ${cursor ? CursorLocation(cursor) : null}
       </div>
       <input
         class="ide-interject-input"
@@ -201,4 +183,99 @@ function InterjectButton(action: InterjectActionState, onClick: () => void) {
       }}
     >${action.label}</button>
   `
+}
+
+const PRESENCE_STYLES: Record<KeeperPresenceStatus, { color: string; bg: string; label: string }> = {
+  active: { color: 'var(--color-status-ok)', bg: 'rgba(46, 160, 67, 0.15)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', bg: 'rgba(248, 81, 73, 0.15)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', bg: 'var(--color-bg-surface)', label: 'IDLE' },
+}
+
+function KeeperPresencePill(status: KeeperPresenceStatus) {
+  const style = PRESENCE_STYLES[status]
+  return html`
+    <span
+      role="status"
+      aria-label=${`Keeper status: ${style.label}`}
+      style=${{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '3px',
+        padding: '1px 5px',
+        fontSize: 'var(--fs-10)',
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        color: style.color,
+        background: style.bg,
+        borderRadius: 'var(--r-1)',
+        lineHeight: 1,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style=${{
+          width: '5px',
+          height: '5px',
+          borderRadius: '50%',
+          background: style.color,
+          display: 'inline-block',
+        }}
+      />
+      ${style.label}
+    </span>
+  `
+}
+
+function CursorLocation(cursor: {
+  keeper_id: string
+  file_path: string
+  line: number
+  focus_mode: string
+  tool_name?: string
+}) {
+  const fileName = cursor.file_path.split('/').pop() ?? cursor.file_path
+  const color = getKeeperColor(cursor.keeper_id)
+  return html`
+    <div
+      style=${{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--sp-1)',
+        fontSize: 'var(--fs-10)',
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--color-fg-muted)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
+      title=${cursor.file_path}
+    >
+      <span
+        aria-hidden="true"
+        style=${{
+          width: '4px',
+          height: '4px',
+          borderRadius: '50%',
+          background: color.cursor,
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+      />
+      <span>${fileName}:${cursor.line}</span>
+      ${cursor.tool_name
+        ? html`<span style=${{ color: 'var(--color-fg-disabled)' }}>· ${cursor.tool_name}</span>`
+        : null}
+    </div>
+  `
+}
+
+function resolveCursor(
+  keeperId: string,
+  cursors: Map<string, { keeper_id: string; file_path: string; line: number; focus_mode: string; tool_name?: string }>,
+) {
+  const target = keeperId.toLowerCase().trim()
+  for (const [id, cursor] of cursors) {
+    if (id.toLowerCase() === target) return cursor
+  }
+  return null
 }

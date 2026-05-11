@@ -1,9 +1,10 @@
 (* RFC-0070 Phase 3b-iv.1b — Mock Docker_client. See .mli. *)
 
 (* Injection queues — proper FIFO via [Queue.t] (amortized O(1) push +
-   O(1) peek/pop), replacing the iter-20 [list @ [x]] form (O(n²)
-   across many injections). Behaviour is identical from the caller's
-   perspective. *)
+   O(1) peek/pop), replacing the previous [q := !q @ [x]] list-append
+   form which was O(n) per push and O(n²) across many injections (the
+   ref-cell + list-append idiom from the original mock).  Behaviour
+   is identical from the caller's perspective. *)
 
 let run_queue
   : (Keeper_sandbox_plan.t
@@ -30,8 +31,15 @@ let rm_queue
 (* ── Injection API ──────────────────────────────────────────── *)
 
 let inject_run plan response = Queue.add (plan, response) run_queue
-let inject_exec ~container ~cmd response = Queue.add ((container, cmd), response) exec_queue
-let inject_ps_query ~labels response = Queue.add (labels, response) ps_query_queue
+
+let inject_exec ~container ~cmd response =
+  Queue.add ((container, cmd), response) exec_queue
+;;
+
+let inject_ps_query ~labels response =
+  Queue.add (labels, response) ps_query_queue
+;;
+
 let inject_rm container response = Queue.add (container, response) rm_queue
 
 (* ── Docker_client.S implementation ─────────────────────────── *)

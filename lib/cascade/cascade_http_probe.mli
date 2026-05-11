@@ -56,9 +56,8 @@ val cached_capacity : ?now:float -> string -> Cascade_throttle.capacity_info opt
     (and does not touch the cache) on timeout, non-200, or parse
     failure.
 
-    Default [timeout_s] is read from [MASC_OLLAMA_PROBE_TIMEOUT_SEC]
-    on every call (range [0.05, 30.0], literal fallback [0.5]).
-    Pass an explicit [?timeout_s] argument to override per-call.
+    Default [timeout_s] is [0.5] seconds; pass an explicit
+    [?timeout_s] argument to override per-call.
 
     Caller is responsible for picking [url]s that look like ollama
     (use {!is_ollama_url}); calling on a non-ollama URL will fail

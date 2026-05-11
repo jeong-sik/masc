@@ -14,5 +14,7 @@ export function asKeeperRuntimeBlockerClass(
   value: unknown,
 ): KeeperRuntimeBlockerClass | null {
   if (typeof value !== 'string') return null
-  return isKeeperRuntimeBlockerClass(value) ? value : null
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  return isKeeperRuntimeBlockerClass(trimmed) ? trimmed : null
 }

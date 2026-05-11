@@ -11,7 +11,6 @@
    tool_schemas_misc
    tool_schemas_coord_core
    tool_schemas_coord_extra
-   tool_schemas_inline_coord
 
    tool_schemas_inline_infra
    tool_schemas_inline_episodes

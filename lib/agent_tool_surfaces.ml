@@ -92,9 +92,12 @@ let local_worker_compat_passthrough_tool_names =
 let local_worker_compat_passthrough_schemas : Masc_domain.tool_schema list =
   lookup_schemas_by_name_exn
     ~label:"agent_tool_surfaces.local_worker_compat_passthrough_schemas"
+    (* Tool_schemas_inline_coord.schemas tools (masc_start/join/leave/
+       broadcast/messages/who) now come from Tool_descriptors_gen via
+       Tool_schemas_misc.schemas — RFC-0057 PR-2d. *)
     (Tool_schemas_coord_core.schemas
      @ Tool_task_schemas.schemas
-     @ Tool_schemas_inline_coord.schemas)
+     @ Tool_schemas_misc.schemas)
     local_worker_compat_passthrough_tool_names
 
 let local_worker_internal_schemas : Masc_domain.tool_schema list =

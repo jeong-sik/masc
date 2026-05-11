@@ -588,6 +588,132 @@ let masc_spawn_spec : tool_spec =
   }
 ;;
 
+(* === PR-2d: inline_coord group (6 tools) === *)
+
+let masc_start_spec : tool_spec =
+  { name = "masc_start"
+  ; description =
+      "One-step onboarding: sets the active project root, joins as agent, and \
+       optionally creates+claims a task."
+  ; parameters =
+      [ { p_name = "path"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description =
+            "Project directory path (absolute, relative, or ~/...). Omit if the active \
+             project scope is already set."
+        ; p_required = false
+        }
+      ; { p_name = "task_title"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description =
+            "If provided, creates a task with this title, claims it, and sets it as \
+             current_task. Omit to just join without a task."
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_join_spec : tool_spec =
+  { name = "masc_join"
+  ; description =
+      "Join the active MASC project as agent_name to collaborate with other AI agents. \
+       Call at session start or to re-register presence. Other agents can @mention \
+       you. Check masc_status after joining to see active agents and available tasks."
+  ; parameters =
+      [ { p_name = "agent_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Your identity: 'claude', 'gemini', or 'codex'"
+        ; p_required = true
+        }
+      ; { p_name = "capabilities"
+        ; p_type = T_string_array { default = None }
+        ; p_description =
+            "Your strengths (e.g., ['typescript', 'code-review', 'testing'])"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_leave_spec : tool_spec =
+  { name = "masc_leave"
+  ; description =
+      "Leave the active MASC project and mark yourself as offline. Call when: (1) \
+       session ends, (2) switching projects, (3) work complete. Side effects: releases \
+       all your locks, sets presence to offline. Other agents will see you've left via \
+       SSE. Example: masc_leave({agent_name: 'claude-xyz'})"
+  ; parameters =
+      [ { p_name = "agent_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Your agent name"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_broadcast_spec : tool_spec =
+  { name = "masc_broadcast"
+  ; description =
+      "Send a message visible to ALL agents via SSE push. Use for: status updates \
+       ('Starting task X'), help requests ('@gemini can you review this?'), \
+       completions. Use @agent_name to ping specific agent."
+  ; parameters =
+      [ { p_name = "agent_name"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Your agent name"
+        ; p_required = true
+        }
+      ; { p_name = "message"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description = "Message content (use @mention for specific agents)"
+        ; p_required = true
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_messages_spec : tool_spec =
+  { name = "masc_messages"
+  ; description =
+      "Get recent broadcast messages from all agents. Use to: catch up after joining, \
+       check if someone @mentioned you, see project activity. Returns chronological \
+       list with sender, timestamp, content. Default: last 20 messages. Use limit \
+       param for more/less. Tip: Search for '@your-name' in results to find mentions."
+  ; parameters =
+      [ { p_name = "since_seq"
+        ; p_type = T_int { min = None; max = None; default = Some 0 }
+        ; p_description = "Get messages after this sequence number"
+        ; p_required = false
+        }
+      ; { p_name = "limit"
+        ; p_type = T_int { min = None; max = None; default = Some 10 }
+        ; p_description = "Max messages to return"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  }
+;;
+
+let masc_who_spec : tool_spec =
+  { name = "masc_who"
+  ; description =
+      "List all agents currently in the active project with their capabilities. \
+       Shows: agent name, join time, capabilities (e.g., ['typescript', 'testing']). \
+       Use to: find who can help, check if specific agent is online, see team \
+       composition. Agents appear after masc_join, disappear after masc_leave. Tip: \
+       Use capabilities to find the right agent for @mentions."
+  ; parameters = []
+  ; additional_properties = false
+  }
+;;
+
 let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_code_read_spec
@@ -618,6 +744,13 @@ let phase6_specs : tool_spec list =
   ; masc_approval_pending_spec
   ; masc_approval_get_spec
   ; masc_spawn_spec
+    (* PR-2d: inline_coord group *)
+  ; masc_start_spec
+  ; masc_join_spec
+  ; masc_leave_spec
+  ; masc_broadcast_spec
+  ; masc_messages_spec
+  ; masc_who_spec
   ]
 ;;
 

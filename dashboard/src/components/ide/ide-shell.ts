@@ -15,7 +15,6 @@ import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
-import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -307,21 +306,12 @@ function IdeBreadcrumb() {
   const [filePath, setFilePath] = useState(activeIdeFile.value)
   useEffect(() => activeIdeFile.subscribe(f => setFilePath(f)), [])
 
-  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
-  useEffect(() => cursorOverlaySignal.subscribe(v => setOverlay(v)), [])
-
   const segments = filePath.split('/')
-  const fileName = segments[segments.length - 1]
+  // segments is non-empty because String.prototype.split('/') always returns ≥1 element
+  // (even '' → ['']), but TS noUncheckedIndexedAccess requires a fallback.
+  const fileName = segments[segments.length - 1] ?? ''
   const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : ''
   const icon = FILE_ICONS[ext] ?? '📄'
-
-  // Keepers currently on this file
-  const activeOnFile: Array<{ readonly keeperId: string; readonly color: string }> = []
-  for (const [keeperId, cursor] of overlay.cursors) {
-    if (cursor.file_path === filePath) {
-      activeOnFile.push({ keeperId, color: getKeeperColor(keeperId).cursor })
-    }
-  }
 
   return html`
     <div
@@ -345,28 +335,6 @@ function IdeBreadcrumb() {
           </span>
         `)}
       </span>
-      ${activeOnFile.length > 0
-        ? html`
-          <span class="flex items-center gap-1 ml-auto shrink-0 text-[var(--color-fg-muted)]">
-            <span class="flex gap-0.5">
-              ${activeOnFile.map(k => html`
-                <span
-                  key=${k.keeperId}
-                  title=${k.keeperId}
-                  style=${{
-                    width: '7px',
-                    height: '7px',
-                    borderRadius: '50%',
-                    background: k.color,
-                    display: 'inline-block',
-                  }}
-                />
-              `)}
-            </span>
-            <span>${activeOnFile.length === 1 ? activeOnFile[0].keeperId : `${activeOnFile.length} keepers`}</span>
-          </span>
-        `
-        : null}
     </div>
   `
 }

@@ -107,8 +107,8 @@ let record_codex_cli_omission_for_agent
     List.iter
       (fun tool ->
          Prometheus.inc_counter
-           Prometheus.metric_codex_cli_mcp_tool_omission
-           ~labels:[ "tool", tool ]
+           Prometheus.metric_provider_mcp_tool_omission
+           ~labels:[ "provider", "codex_cli"; "tool", tool ]
            ())
       tools;
     let tool_fingerprint = codex_cli_omission_fingerprint tools in
@@ -120,7 +120,7 @@ let record_codex_cli_omission_for_agent
         "codex_cli omitting keeper-bound runtime MCP tool(s) that require request-scoped \
          auth headers: %s (no per-keeper bearer-token lane available for %s; subsequent \
          omissions of this same set are counted in \
-         masc_codex_cli_mcp_tool_omission_total and not re-logged)"
+         masc_provider_mcp_tool_omission_total{provider=\"codex_cli\"} and not re-logged)"
         (String.concat ", " (List.sort String.compare tools))
         agent_name_key
 ;;

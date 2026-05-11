@@ -505,15 +505,22 @@ let metric_persistence_read_drops = "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair = "masc_persistence_utf8_repair_total"
 let metric_discovery_history_failures = "masc_discovery_history_failures_total"
 
-(* #10097: codex_cli provider cannot carry keeper-bound runtime MCP
-   tools that need request-scoped auth headers.  Every time
+(* #10097: a provider cannot carry keeper-bound runtime MCP tools that
+   need request-scoped auth headers.  Every time
    oas_worker_exec_transport strips such a tool, this counter
-   increments with the tool name so dashboards can track WHICH
-   tools are being omitted and at WHAT rate.  Paired with a
-   once-per-session WARN log ([fingerprint]-deduplicated) so the
-   operator sees the structural fact exactly once while the
-   counter carries the frequency signal. *)
-let metric_codex_cli_mcp_tool_omission = "masc_codex_cli_mcp_tool_omission_total"
+   increments with the [provider] and [tool] labels so dashboards can
+   track WHICH provider strips WHICH tools and at WHAT rate.  Paired
+   with a once-per-session WARN log ([fingerprint]-deduplicated) so
+   the operator sees the structural fact exactly once while the
+   counter carries the frequency signal.
+
+   RFC-0058 §2.4 / Phase 5.4 big-bang rename: the old
+   `masc_codex_cli_mcp_tool_omission_total` time series is RETIRED.
+   Operators must point Grafana queries to the new
+   `masc_provider_mcp_tool_omission_total{provider="codex_cli"}`
+   series.  No dual-emit alias — the rename is intentional to keep
+   provider identity out of the metric name. *)
+let metric_provider_mcp_tool_omission = "masc_provider_mcp_tool_omission_total"
 
 (* #9520: durable coverage-gap records must also have an alertable
    Prometheus surface.  The labels deliberately avoid raw paths and

@@ -309,11 +309,14 @@ val metric_persistence_utf8_repair : string
 
 val metric_discovery_history_failures : string
 
-(** #10097: per-tool counter for codex_cli keeper-bound runtime
-    MCP omissions.  Paired with a once-per-fingerprint WARN log
-    so logs carry structural facts and Prometheus carries
-    frequency. *)
-val metric_codex_cli_mcp_tool_omission : string
+(** #10097: per-(provider, tool) counter for keeper-bound runtime MCP
+    omissions.  Paired with a once-per-fingerprint WARN log so logs
+    carry structural facts and Prometheus carries frequency.
+
+    RFC-0058 §2.4 / Phase 5.4: renamed from
+    `masc_codex_cli_mcp_tool_omission_total` to keep provider identity
+    out of the metric name; `provider` is now a label. *)
+val metric_provider_mcp_tool_omission : string
 
 (** #9520: total telemetry coverage gaps recorded. Labels:
     [source, producer, dashboard_surface, stale_reason]. This is the

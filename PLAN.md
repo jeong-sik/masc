@@ -3,8 +3,9 @@
 ## Current Status (as of 2026-05-11)
 - PRs #14507–#14519 merged
 - Dashboard multi-transport abstraction layer implemented (#14497, #14500)
-- SSE consumer hardcoding removed in branch `fix/dashboard-sse-transport-hardcoding` (pending push)
-- `keeper_invariant.mli` committed in branch `feat/keeper-invariant-framework` (in progress)
+- SSE consumer hardcoding removed in branch `fix/dashboard-sse-transport-hardcoding` (merged #14526)
+- `keeper_invariant.mli` + `keeper_invariant.ml` committed (#14527)
+- `feat/keeper-invariant-tests-and-wiring` in progress (PR #14532)
 
 ## Remaining Work
 
@@ -16,17 +17,17 @@
 
 ### Phase 2: Keeper Invariants
 - [x] Commit `keeper_invariant.mli`
-- [ ] Commit `keeper_invariant.ml` + tests
-- [ ] Add test module for sandbox isolation, credential isolation, tool monotonicity
-- [ ] Wire `sandbox_isolation` check into `keeper_exec_fs.ml` before writes
+- [x] Commit `keeper_invariant.ml` + tests
+- [x] Add test module for sandbox isolation, credential isolation, tool monotonicity
+- [x] Wire `sandbox_isolation` check into `keeper_exec_fs.ml` before writes
 
 ### Phase 3: Sandbox Hardening
+- [x] Add `turn_id` to Docker container labels in `keeper_turn_sandbox_runtime.ml`
+- [x] Verify container removal on cleanup failure
 - [ ] Fail-fast on missing required mounts
-- [ ] Add `turn_id` to Docker container labels in `keeper_turn_sandbox_runtime.ml`
-- [ ] Verify container removal on cleanup failure
 
 ### Phase 4: Tool Selection
-- [ ] Move hardcoded alias table from `keeper_tool_alias.ml` to config
+- [x] Move hardcoded alias table from `keeper_tool_alias.ml` to config
 - [ ] Add passive-streak metric for tool selection validation
 
 ### Phase 5: IDE/Dashboard Integration
@@ -35,7 +36,6 @@
 - [ ] IDE right-side memory component
 
 ### Phase 6: Logging/Observability
-- [ ] Add turn_id label to Docker containers
 - [ ] Per-keeper log sampling
 - [ ] Ensure warnings/errors are not swallowed
 

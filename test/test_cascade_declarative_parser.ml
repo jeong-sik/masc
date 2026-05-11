@@ -630,6 +630,78 @@ command = "c"
       (Option.map show_cascade_liveness_class p.liveness_class)
   | _ -> failwith "expected exactly one provider"
 
+let test_capabilities_present () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[providers.p.capabilities]
+supports-inline-tools = true
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = false
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    (match p.capabilities with
+     | Some c ->
+       check bool "inline tools" true c.supports_inline_tools;
+       check bool "runtime mcp tools" true c.supports_runtime_mcp_tools;
+       check bool "runtime tool events" false c.supports_runtime_tool_events;
+       (* Unspecified field defaults to false *)
+       check bool "runtime mcp http headers default false" false
+         c.supports_runtime_mcp_http_headers
+     | None -> failwith "expected capabilities to be parsed")
+  | _ -> failwith "expected exactly one provider"
+
+let test_capabilities_absent () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    check (option string) "no capabilities sub-table → None" None
+      (Option.map show_cascade_capabilities p.capabilities)
+  | _ -> failwith "expected exactly one provider"
+
+let test_headers_present () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-http"
+endpoint = "https://api.anthropic.com"
+
+[providers.p.headers]
+anthropic-version = "2023-06-01"
+anthropic-beta = "prompt-caching-2024-07-31"
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    (match p.headers with
+     | Some hs ->
+       (* Sorted by key for determinism *)
+       check (list (pair string string)) "headers sorted"
+         [ ("anthropic-beta", "prompt-caching-2024-07-31");
+           ("anthropic-version", "2023-06-01") ]
+         hs
+     | None -> failwith "expected headers to be parsed")
+  | _ -> failwith "expected exactly one provider"
+
+let test_headers_absent () =
+  let toml = {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+|} in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] -> check bool "no headers sub-table → None" true (p.headers = None)
+  | _ -> failwith "expected exactly one provider"
+
 (* --- Test suite --- *)
 
 let () =
@@ -693,5 +765,13 @@ let () =
       "liveness_class", [
         test_case "unknown value yields None" `Quick test_liveness_class_unknown;
         test_case "absent yields None" `Quick test_liveness_class_absent;
+      ];
+      "capabilities", [
+        test_case "present parses with defaults" `Quick test_capabilities_present;
+        test_case "absent yields None" `Quick test_capabilities_absent;
+      ];
+      "headers", [
+        test_case "present sorted by key" `Quick test_headers_present;
+        test_case "absent yields None" `Quick test_headers_absent;
       ];
     ]

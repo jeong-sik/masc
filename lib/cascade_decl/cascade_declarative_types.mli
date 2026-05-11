@@ -48,6 +48,20 @@ type cascade_liveness_class =
   | Local_70b_plus
 [@@deriving show, eq]
 
+(** Per-provider runtime capabilities — RFC-0058 §3.2 + Phase 5.1 caller
+    cutover prerequisite. Reserved as schema-only here: a follow-up phase
+    will replace the hardcoded variant match in
+    [Llm_provider.Capabilities.{claude_code,gemini_cli,kimi_cli,codex_cli}_capabilities]
+    with a cascade.toml lookup. Boolean defaults are [false] — explicit
+    declaration in TOML is required for any non-false capability. *)
+type cascade_capabilities = {
+  supports_inline_tools : bool;
+  supports_runtime_mcp_tools : bool;
+  supports_runtime_tool_events : bool;
+  supports_runtime_mcp_http_headers : bool;
+}
+[@@deriving show, eq]
+
 type cascade_provider = {
   id : string;
   display_name : string;
@@ -56,6 +70,13 @@ type cascade_provider = {
   is_non_interactive : bool;
   credentials : cascade_credential option;
   liveness_class : cascade_liveness_class option;
+  capabilities : cascade_capabilities option;
+  (** Reserved (Phase 5.6) — caller cutover in follow-up. *)
+  headers : (string * string) list option;
+  (** Reserved (Phase 5.6) — additional HTTP headers per provider,
+      e.g. [("anthropic-version", "2023-06-01")] for Anthropic HTTP API.
+      Sorted by key for deterministic show/eq. Caller cutover in follow-up
+      replaces [Cascade_config.headers_with_auth] variant match. *)
 }
 [@@deriving show, eq]
 

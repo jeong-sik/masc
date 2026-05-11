@@ -39,6 +39,14 @@ type cascade_liveness_class =
   | Local_70b_plus
 [@@deriving show, eq]
 
+type cascade_capabilities = {
+  supports_inline_tools : bool;
+  supports_runtime_mcp_tools : bool;
+  supports_runtime_tool_events : bool;
+  supports_runtime_mcp_http_headers : bool;
+}
+[@@deriving show, eq]
+
 type cascade_provider = {
   id : string;
   display_name : string;
@@ -47,6 +55,8 @@ type cascade_provider = {
   is_non_interactive : bool;
   credentials : cascade_credential option;
   liveness_class : cascade_liveness_class option;
+  capabilities : cascade_capabilities option;
+  headers : (string * string) list option;
 }
 [@@deriving show, eq]
 

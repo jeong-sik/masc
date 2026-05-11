@@ -11,5 +11,6 @@ type t =
   | Cursor_stale
   | Board_events
   | Empty_run_reasons
+  | Reconcile_read_meta (** Supervisor reconcile-loop meta read failure (#14828 sweep). *)
 
 val to_label : t -> string

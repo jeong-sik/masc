@@ -28,11 +28,12 @@
 val init_once_from_base_path : base_path:string -> unit
 (** Idempotent init.  First successful call:
       1. Reads the cascade catalog source via
-         [Cascade_config_loader.load_catalog_source] (mtime-cached).
-         The [<base_path>/.masc/config/cascade.json] path is passed
-         for backward compatibility; the loader redirects to the
-         sibling [cascade.toml] which is the actual SSOT
-         (RFC-0058 §9 Phase 9.3).
+         [Cascade_config_loader.load_catalog_source] (mtime-cached)
+         from [<base_path>/.masc/config/cascade.toml] — the sole
+         on-disk SSOT post-RFC-0058 §9 Phase 9.3.  Iter 17 cleaned
+         up the previous iter-1-deferred construction of a
+         [cascade.json] literal at this call site (the loader was
+         redirecting to the [.toml] sibling but the name lied).
       2. Builds [Keeper_admission_registry] from the [admission]
          sub-object.
       3. Sets [policy_lookup] to [Keeper_admission_registry.lookup].

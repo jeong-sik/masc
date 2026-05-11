@@ -162,7 +162,7 @@ let sidecar_status_config = function
   | id -> invalid_arg (Printf.sprintf "unknown sidecar id: %s" id)
 ;;
 
-let read_file path = In_channel.with_open_text path In_channel.input_all
+let read_file path = Fs_compat.load_file path
 
 let strip_matching_quotes value =
   let len = String.length value in
@@ -1148,7 +1148,7 @@ let handle_get_config _state request reqd =
             ])
     else (
       let content =
-        try In_channel.with_open_text path In_channel.input_all with
+        try Fs_compat.load_file path with
         | Sys_error _ -> ""
       in
       match Keeper_toml_loader.parse_toml content with

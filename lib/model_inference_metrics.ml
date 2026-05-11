@@ -697,29 +697,13 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
       (fun fname ->
          let path = Filename.concat keeper_dir fname in
          try
-           let ic = open_in path in
-           let entries = ref [] in
-           Eio_guard.protect
-             ~finally:(fun () -> close_in_noerr ic)
-             (fun () ->
-                (try
-                   while true do
-                     let line = input_line ic in
-                     if String.length line > 2
-                     then (
-                       match Yojson.Safe.from_string line with
-                       | json ->
-                         (match parse_telemetry_entry json ~since_unix with
-                          | Some e -> entries := e :: !entries
-                          | None -> ())
-                       | exception (Eio.Cancel.Cancelled _ as exn) ->
-                         let bt = Printexc.get_raw_backtrace () in
-                         Printexc.raise_with_backtrace exn bt
-                       | exception Yojson.Json_error _ -> ())
-                   done
-                 with
-                 | End_of_file -> ());
-                !entries)
+           Fs_compat.fold_jsonl_lines
+             ~init:[]
+             ~f:(fun acc ~line_no:_ json ->
+               match parse_telemetry_entry json ~since_unix with
+               | Some e -> e :: acc
+               | None -> acc)
+             path
          with
          | Eio.Cancel.Cancelled _ as exn ->
            let bt = Printexc.get_raw_backtrace () in
@@ -734,29 +718,13 @@ let read_cost_entries_legacy ~base_path ~since_unix : raw_entry list =
   then []
   else (
     try
-      let ic = open_in path in
-      let entries = ref [] in
-      Eio_guard.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () ->
-           (try
-              while true do
-                let line = input_line ic in
-                if String.length line > 2
-                then (
-                  match Yojson.Safe.from_string line with
-                  | json ->
-                    (match parse_cost_entry json ~since_unix with
-                     | Some e -> entries := e :: !entries
-                     | None -> ())
-                  | exception (Eio.Cancel.Cancelled _ as exn) ->
-                    let bt = Printexc.get_raw_backtrace () in
-                    Printexc.raise_with_backtrace exn bt
-                  | exception Yojson.Json_error _ -> ())
-              done
-            with
-            | End_of_file -> ());
-           !entries)
+      Fs_compat.fold_jsonl_lines
+        ~init:[]
+        ~f:(fun acc ~line_no:_ json ->
+          match parse_cost_entry json ~since_unix with
+          | Some e -> e :: acc
+          | None -> acc)
+        path
     with
     | Eio.Cancel.Cancelled _ as exn ->
       let bt = Printexc.get_raw_backtrace () in

@@ -374,23 +374,33 @@ let cosine (a : sparse_vec) (b : sparse_vec) : float =
     if Stdlib.Float.compare na 0.0 = 0 || Stdlib.Float.compare nb 0.0 = 0 then 0.0
     else dot /. (na *. nb)
 
-(** Cosine similarity where the reference vector's [StringMap] and norm
-    are pre-computed.  [filter_with_scores] scores N tools against a
-    fixed query — without this helper [cosine] rebuilds the query's
-    [StringMap] and recomputes its [norm] on every call, so per-filter
-    work scaled as N x (|query|).  Now: 1 x (|query|) + N x (|vec|). *)
+(** Cosine similarity where the reference (query) vector's [StringMap]
+    and norm are pre-computed.  [filter_with_scores] scores N tools
+    against a fixed query — without this helper [cosine query_vec vec]
+    rebuilt a fresh [StringMap] from the {b tool} vector and
+    recomputed the query's [norm] on every call, so per-filter work
+    scaled as N x (|query| + |vec|).  This helper inverts the
+    iteration direction: the query is hoisted into [ref_map]/[ref_norm]
+    once, and each call folds the tool vector once, accumulating both
+    the dot product and the tool-side sum-of-squares in a single pass
+    so [other] is traversed only once instead of twice. *)
 let cosine_with_precomp
     ~(ref_map : float StringMap.t)
     ~(ref_norm : float)
     (other : sparse_vec) : float =
-  let dot = List.fold_left (fun acc (t, w) ->
-    match StringMap.find_opt t ref_map with
-    | Some rw -> acc +. (rw *. w)
-    | None -> acc
-  ) 0.0 other in
+  let dot, other_sq =
+    List.fold_left (fun (dot_acc, sq_acc) (t, w) ->
+      let dot_acc =
+        match StringMap.find_opt t ref_map with
+        | Some rw -> dot_acc +. (rw *. w)
+        | None -> dot_acc
+      in
+      dot_acc, sq_acc +. (w *. w)
+    ) (0.0, 0.0) other
+  in
   if Stdlib.Float.compare dot 0.0 = 0 then 0.0
   else
-    let other_norm = sparse_vec_norm other in
+    let other_norm = Stdlib.Float.sqrt other_sq in
     if Stdlib.Float.compare ref_norm 0.0 = 0
        || Stdlib.Float.compare other_norm 0.0 = 0
     then 0.0

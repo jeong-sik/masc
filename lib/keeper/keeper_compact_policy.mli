@@ -20,7 +20,7 @@ val tool_heavy_ratio_floor : float
 (** Typed result for the compaction policy gate. String rendering is kept
     at telemetry/persistence boundaries via {!compaction_decision_to_string}. *)
 type compaction_decision =
-  | Applied of string
+  | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
   | Skipped_continuity_reflection of {
@@ -42,16 +42,18 @@ val compaction_policy_of_keeper :
 
     Return triple:
     - the (possibly compacted) working context;
-    - [Some reason] when compaction was applied, [None] otherwise;
+    - [Some trigger] when compaction was applied, [None] otherwise;
     - a typed decision tag describing the gate outcome. *)
 val compact_if_needed_typed :
   meta:Keeper_types.keeper_meta ->
   now_ts:float ->
   Keeper_context_core.working_context ->
-  Keeper_context_core.working_context * string option * compaction_decision
+  Keeper_context_core.working_context * Compaction_trigger.t option * compaction_decision
 
 (** Compatibility wrapper around {!compact_if_needed_typed}; the third
-    return value is {!compaction_decision_to_string}. *)
+    return value is {!compaction_decision_to_string}.  The [string option]
+    in the second position is the human-readable rendering of the
+    {!Compaction_trigger.t} (via {!Compaction_trigger.to_human}). *)
 val compact_if_needed :
   meta:Keeper_types.keeper_meta ->
   now_ts:float ->

@@ -54,12 +54,14 @@ type pre_compact_event = {
   strategies : string list;
   context_window : int;
   is_local_model : bool;
-  trigger : string;
+  trigger : Compaction_trigger.t;
 }
 (** Pre-compact telemetry record returned by
     {!record_pre_compact}.  Reached by record-pattern
     access in [keeper_compact_policy] when assembling the
-    snapshot JSON. *)
+    snapshot JSON.  [trigger] is the closed-sum classification
+    of the gate that fired — pair with [Compaction_trigger.to_label]
+    for Prometheus emission and [to_detail_json] for SSE/JSON. *)
 
 (** {1 Wake-payload event} *)
 
@@ -95,7 +97,7 @@ val record_pre_compact :
   strategies:string list ->
   context_window:int ->
   is_local_model:bool ->
-  trigger:string ->
+  trigger:Compaction_trigger.t ->
   pre_compact_event
 (** Records one pre-compact event into the in-memory
     rolling store and returns the constructed event.
@@ -112,7 +114,7 @@ val record_pre_compact_at :
   strategies:string list ->
   context_window:int ->
   is_local_model:bool ->
-  trigger:string ->
+  trigger:Compaction_trigger.t ->
   pre_compact_event
 (** Timestamp-injection variant of {!record_pre_compact}.
     Test-only seam — production callers thread the wall

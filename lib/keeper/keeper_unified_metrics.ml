@@ -1443,7 +1443,11 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("compaction_saved_tokens", `Int compaction.saved_tokens);
         ("compaction_trigger",
           match compaction.trigger with
-          | Some reason -> `String reason
+          | Some trigger -> `String (Compaction_trigger.to_label trigger)
+          | None -> `Null);
+        ("compaction_trigger_detail",
+          match compaction.trigger with
+          | Some trigger -> Compaction_trigger.to_detail_json trigger
           | None -> `Null);
         ("turn_mode", `String (turn_mode_to_string turn_mode));
         ( "scheduled_autonomous_outcome",
@@ -1533,9 +1537,15 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
    | Some trigger
      when compaction.before_tokens > 0
        && compaction.before_tokens = compaction.after_tokens ->
+       (* Closed label set (5 values) keeps the metric cardinality bound; the
+          full numerical detail is preserved in the snapshot's
+          [compaction_trigger_detail] JSON above. *)
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_compaction_noop
-         ~labels:[ ("keeper", meta.name); ("trigger", trigger) ]
+         ~labels:
+           [ ("keeper", meta.name)
+           ; ("trigger", Compaction_trigger.to_label trigger)
+           ]
          ()
    | _ -> ())
 
@@ -1557,11 +1567,15 @@ let broadcast_lifecycle_events ~(name : string)
              ("saved_tokens", `Int compaction.saved_tokens);
              ( "trigger",
                match compaction.trigger with
-               | Some reason -> `String reason
+               | Some trigger -> `String (Compaction_trigger.to_label trigger)
                | None ->
                    `String
                      (Keeper_exec_context.compaction_decision_to_string
                         compaction.decision) );
+             ( "trigger_detail",
+               match compaction.trigger with
+               | Some trigger -> Compaction_trigger.to_detail_json trigger
+               | None -> `Null );
              ("ts_unix", `Float now_ts);
            ])
      with

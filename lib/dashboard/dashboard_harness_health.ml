@@ -29,7 +29,7 @@ type pre_compact_event = {
   strategies : string list;
   context_window : int;
   is_local_model : bool;
-  trigger : string;
+  trigger : Compaction_trigger.t;
 }
 
 (** Wake-time payload observation.
@@ -218,7 +218,8 @@ let pre_compact_record_json (event : pre_compact_event) =
       ("strategies", `List (List.map (fun value -> `String value) event.strategies));
       ("context_window", `Int event.context_window);
       ("is_local_model", `Bool event.is_local_model);
-      ("trigger", `String event.trigger);
+      ("trigger", `String (Compaction_trigger.to_label event.trigger));
+      ("trigger_detail", Compaction_trigger.to_detail_json event.trigger);
     ]
 
 let pre_compact_event_json (event : pre_compact_event) =
@@ -232,7 +233,8 @@ let pre_compact_event_json (event : pre_compact_event) =
       ("strategies", `List (List.map (fun value -> `String value) event.strategies));
       ("context_window", `Int event.context_window);
       ("is_local_model", `Bool event.is_local_model);
-      ("trigger", `String event.trigger);
+      ("trigger", `String (Compaction_trigger.to_label event.trigger));
+      ("trigger_detail", Compaction_trigger.to_detail_json event.trigger);
     ]
 
 let pre_compact_event_of_json json =
@@ -249,7 +251,15 @@ let pre_compact_event_of_json json =
         strategies = Safe_ops.json_string_list "strategies" json;
         context_window = Safe_ops.json_int ~default:Cascade_runtime.fallback_context_window "context_window" json;
         is_local_model = Safe_ops.json_bool ~default:false "is_local_model" json;
-        trigger = string_field json "trigger";
+        trigger =
+          (match
+             List.assoc_opt "trigger_detail" (match json with `Assoc kv -> kv | _ -> [])
+           with
+           | Some detail ->
+             (match Compaction_trigger.of_detail_json detail with
+              | Some t -> t
+              | None -> Compaction_trigger.Manual)
+           | None -> Compaction_trigger.Manual);
       }
 
 let role_counts_to_json (counts : (string * int) list) : Yojson.Safe.t =

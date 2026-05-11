@@ -18,9 +18,11 @@ type pre_dispatch_checkpoint_hygiene_result = {
       compaction logs. *)
   before_tokens : int;
   after_tokens : int;
-  trigger : string option;
-  (** [Some _] when {!Keeper_compact_policy.compact_if_needed}
-      identified a trigger; [None] when no compaction fired. *)
+  trigger : Compaction_trigger.t option;
+  (** [Some _] when {!Keeper_compact_policy.compact_if_needed_typed}
+      classified a trigger; [None] when no compaction fired.  Use
+      {!Compaction_trigger.to_label} for Prometheus emission and
+      {!Compaction_trigger.to_detail_json} for SSE / JSON receipt. *)
   decision : Keeper_compact_policy.compaction_decision;
   (** Typed decision tag from the policy. Render with
       {!Keeper_compact_policy.compaction_decision_to_string} at telemetry

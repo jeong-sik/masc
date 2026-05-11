@@ -24,7 +24,7 @@ let tool_heavy_msg_threshold = 40
 let tool_heavy_ratio_floor = 0.15
 
 type compaction_decision =
-  | Applied of string
+  | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
   | Skipped_continuity_reflection of {
@@ -33,7 +33,7 @@ type compaction_decision =
     }
 
 let compaction_decision_to_string = function
-  | Applied reason -> "applied:" ^ reason
+  | Applied trigger -> "applied:" ^ Compaction_trigger.to_human trigger
   | Blocked_below_thresholds -> "blocked:below_thresholds"
   | Skipped_no_checkpoint -> "skipped:no_checkpoint"
   | Skipped_continuity_reflection { hold_s; cooldown_sec } ->
@@ -97,20 +97,24 @@ let compact_if_needed_typed
       Skipped_continuity_reflection
         { hold_s; cooldown_sec = meta.compaction.cooldown_sec }
     else if ratio >= ratio_gate then
-      Applied (Printf.sprintf "ratio(%.4f>=%.4f)" ratio ratio_gate)
+      Applied (Compaction_trigger.Ratio_threshold { ratio; threshold = ratio_gate })
     else if message_gate > 0 && msg_count >= message_gate then
-      Applied (Printf.sprintf "messages(%d>=%d)" msg_count message_gate)
+      Applied
+        (Compaction_trigger.Message_count
+           { count = msg_count; threshold = message_gate })
     else if token_gate > 0 && tok_count >= token_gate then
-      Applied (Printf.sprintf "tokens(%d>=%d)" tok_count token_gate)
+      Applied
+        (Compaction_trigger.Token_count
+           { count = tok_count; threshold = token_gate })
     else if tool_heavy then
-      Applied (Printf.sprintf "tool_heavy(msgs=%d,ratio=%.4f)" msg_count ratio)
+      Applied (Compaction_trigger.Tool_heavy { messages = msg_count; ratio })
     else Blocked_below_thresholds
   in
   match decision with
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
   | Skipped_continuity_reflection _ -> (ctx, None, decision)
-  | Applied reason ->
+  | Applied trigger ->
       (* PreCompact observability: log strategy and context state (#3165) *)
       let strategies = Context_compact_oas.[
         PruneToolOutputs; MergeContiguous;
@@ -123,9 +127,12 @@ let compact_if_needed_typed
         List.map Context_compact_oas.strategy_name strategies
         @ ["StubToolResults"]
       in
+      let trigger_human = Compaction_trigger.to_human trigger in
+      let trigger_label = Compaction_trigger.to_label trigger in
+      let trigger_detail = Compaction_trigger.to_detail_json trigger in
       Log.Harness.info
         "[pre_compact] keeper=%s ratio=%.4f messages=%d tokens=%d trigger=%s"
-        meta.name ratio msg_count tok_count reason;
+        meta.name ratio msg_count tok_count trigger_human;
       let model_meta =
         let model_labels =
           match dedupe_keep_order (List.filter (fun s -> String.trim s <> "") meta.models) with
@@ -143,7 +150,7 @@ let compact_if_needed_typed
           ~keeper_name:meta.name ~context_ratio:ratio ~message_count:msg_count
           ~token_count:tok_count ~strategies:strategy_names
           ~context_window:model_meta.context_window
-          ~is_local_model:model_meta.is_local ~trigger:reason
+          ~is_local_model:model_meta.is_local ~trigger
       in
       (try
          Sse.broadcast
@@ -165,7 +172,8 @@ let compact_if_needed_typed
                             pre_compact_event.strategies) );
                      ("context_window", `Int pre_compact_event.context_window);
                      ("is_local_model", `Bool pre_compact_event.is_local_model);
-                     ("trigger", `String pre_compact_event.trigger);
+                     ("trigger", `String trigger_label);
+                     ("trigger_detail", trigger_detail);
                    ] );
              ])
        with
@@ -215,7 +223,8 @@ let compact_if_needed_typed
             (`Assoc
               [
                 ("keeper_name", `String meta.name);
-                ("trigger", `String reason);
+                ("trigger", `String trigger_label);
+                ("trigger_detail", trigger_detail);
                 ("before_ratio", `Float ratio);
                 ("after_ratio", `Float new_ratio);
                 ("before_messages", `Int msg_count);
@@ -227,9 +236,10 @@ let compact_if_needed_typed
               ])
           (Printf.sprintf
              "post_compact keeper=%s trigger=%s saved_tokens=%d"
-             meta.name reason saved_tokens);
-        (compacted_ctx, Some reason, decision)
+             meta.name trigger_human saved_tokens);
+        (compacted_ctx, Some trigger, decision)
 
 let compact_if_needed ~meta ~now_ts ctx =
   let ctx, trigger, decision = compact_if_needed_typed ~meta ~now_ts ctx in
-  (ctx, trigger, compaction_decision_to_string decision)
+  let trigger_str = Option.map Compaction_trigger.to_human trigger in
+  (ctx, trigger_str, compaction_decision_to_string decision)

@@ -803,7 +803,7 @@ let test_declared_provider_schemes_reads_all_profiles () =
      contributes to the declared provider scheme set. *)
   let cascade_contents =
     {|
-_comment = "Fixture for declared_provider_schemes_of_config"
+comment = "Fixture for declared_provider_schemes_of_config"
 
 [primary_route]
 models = [

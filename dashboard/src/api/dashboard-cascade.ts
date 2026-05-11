@@ -62,8 +62,6 @@ export type CascadeValidationStatus =
 
 export interface CascadeConfigResponse {
   updated_at: string
-  config_path: string | null
-  source_kind: 'json' | 'toml'
   source_path: string
   validation_status: CascadeValidationStatus
   validation_errors: string[]
@@ -74,20 +72,9 @@ export interface CascadeConfigResponse {
 
 export interface CascadeRawConfigResponse {
   updated_at: string
-  config_path: string | null
-  source_kind: 'json' | 'toml'
   source_path: string
   source_editable: boolean
   source_text: string
-  raw_json_editable: boolean
-  raw_json: string
-  /** Surfaced when ensure_materialized_json fails (cascade.toml parse
-   *  error / IO error / unknown field).  Non-null means [raw_json]
-   *  may be a stale snapshot; the latest source_text edit was rejected
-   *  by the strict-field validator.  Backend always emits the field
-   *  (null on success) — frontend may treat undefined as null for
-   *  forward compat. */
-  materialization_error?: string | null
 }
 
 /** Operational state reported next to [provider_key] on the dashboard.

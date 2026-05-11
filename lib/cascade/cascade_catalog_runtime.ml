@@ -143,7 +143,17 @@ let install_snapshot_for_tests ~source_path ~profile_names =
           rejected_update = None;
         })
 
-let discover_profiles = function
+(* RFC-0066 §3.1 Phase 1: profile name discovery flows through the
+   declarative adapter ({!Cascade_declarative_hotpath.try_load_declarative})
+   reading [cascade.toml] as the sole SSOT (RFC-0058 §9.4).
+
+   Legacy JSON [<name>_models] scan retained as fallback while RFC-0066
+   Phase 4 migrates per-profile test fixtures off the legacy materializer
+   arm.  When the active source is 5-layer declarative, the JSON path
+   would render the same key set, so the fallback never wins on real
+   production configs — it only catches per-profile fixture TOML that
+   pre-dates the declarative schema. *)
+let discover_legacy_profile_names_from_json = function
   | `Assoc fields ->
       fields
       |> List.filter_map (fun (key, value) ->
@@ -161,6 +171,20 @@ let discover_profiles = function
              | _ -> None)
       |> List.sort_uniq String.compare
   | _ -> []
+
+let discover_profile_names ~config_path ~json : string list =
+  match Cascade_declarative_hotpath.try_load_declarative config_path with
+  | Some (Ok snap) ->
+      Cascade_declarative_hotpath.decl_snapshot_profile_names snap
+      |> List.filter (fun profile ->
+             not
+               (Cascade_config_loader.is_deprecated_logical_profile_name
+                  profile))
+      |> List.sort_uniq String.compare
+  | Some (Error _) | None ->
+      (* RFC-0066 Phase 4 target: this branch goes away once test
+         fixtures migrate to 5-layer declarative TOML. *)
+      discover_legacy_profile_names_from_json json
 
 let float_opt_to_json = function
   | Some value -> `Float value
@@ -647,12 +671,12 @@ let validate_path_result ?sw ?net ~config_path () =
                ]
              ~profiles:[])
     | Ok json ->
-        let profiles = discover_profiles json in
+        let profiles = discover_profile_names ~config_path ~json in
         if profiles = [] then
           Error
             (rejection_of_path ~config_path:source_path ~attempted_mtime
                ~checked_at
-               ~errors:[ "active cascade catalog has no <name>_models profiles" ]
+               ~errors:[ "active cascade catalog declares no profiles" ]
                ~profiles:[])
         else
           let required_default_profile =
@@ -678,7 +702,7 @@ let validate_path_result ?sw ?net ~config_path () =
         let top_errors =
           let base =
             if profiles = [] then
-              [ "active cascade catalog has no <name>_models profiles" ]
+              [ "active cascade catalog declares no profiles" ]
             else
               []
           in

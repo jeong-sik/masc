@@ -534,29 +534,42 @@ unwinds in three steps because ~20 files in `lib/cascade/`,
 `lib/dashboard/`, and `lib/server/` still consume the materialised JSON.
 Doing it as one PR risks breaking runtime callers during the migration.
 
-- **Phase 9.1 — Stop tracking the committed JSON** *(this PR)*: drop the
-  committed `config/cascade.json` and the byte-equality test that pinned
-  it to the TOML render, add `.gitignore` so any runtime-materialised
-  copy stays out of source control. Runtime behaviour is unchanged
-  because the loaders that hit disk (`Cascade_config_loader.load_json`
-  and the dashboard's explicit
-  `Cascade_toml_materializer.ensure_materialized_json` call) still
-  recreate `config/cascade.json` on demand; in-memory consumers that go
-  through `render_toml_to_json_string` already never opened the JSON
-  file, so this PR neither helps nor hurts them. Phase 9.2 migrates the
-  remaining on-disk readers onto the in-memory path.
-- **Phase 9.2 — Migrate consumers to in-memory render**: replace
-  `Cascade_config_loader.load_json (json_path)` plus
-  `ensure_materialized_json` call sites with
-  `Cascade_toml_materializer.render_toml_to_json_string` followed by
-  `Yojson` parsing — no disk write. Each migrated module is one focused
-  PR. Disk JSON keeps working as a fallback for the few remaining
-  callers.
+- **Phase 9.1 — Stop tracking the committed JSON** *(landed in #14578)*:
+  drop the committed `config/cascade.json` and the byte-equality test
+  that pinned it to the TOML render. Runtime behaviour is unchanged
+  because the disk JSON has only two writers, and consumers that read
+  the cascade do not depend on its presence on disk:
+  - `Cascade_config_loader.load_json` (lib/cascade/cascade_config_loader.ml:96)
+    branches on `source_info.kind`. Under the current TOML SSOT the
+    branch is always `Toml`, which routes through
+    `load_toml_in_memory` → `Cascade_toml_materializer.render_toml_to_json_string`
+    and never opens the JSON sibling. The `Json` branch (which would
+    `read_json_file`) is unreachable until someone removes the TOML.
+  - The two writers that *do* materialise `config/cascade.json` on disk
+    are `lib/dashboard_cascade.ml` (two `ensure_materialized_json` call
+    sites, kept so the dashboard can serve the rendered file) and the
+    `bin/cascade_materialize` CLI. Both keep working after Phase 9.1 —
+    the JSON they emit is now a runtime artefact rather than a tracked
+    source.
+  Net effect of Phase 9.1: nothing in the runtime read path changes;
+  the only behavioural delta is that `git status` no longer reports the
+  regenerated JSON because the source-tracked copy is gone (and
+  ignoring it would be premature — Phase 9.3 deletes the write path
+  outright).
+- **Phase 9.2 — Migrate the remaining disk writers off JSON**: rework
+  `lib/dashboard_cascade.ml` and `bin/cascade_materialize` to serve /
+  emit the rendered JSON in memory via
+  `Cascade_toml_materializer.render_toml_to_json_string`. After this
+  phase no production code calls `ensure_materialized_json`. (The
+  earlier framing of "migrate ~20 consumers off `load_json`" was based
+  on the incorrect assumption that `load_json` still hit disk; it does
+  not, so this phase shrinks to the two real writers.)
 - **Phase 9.3 — Delete the JSON path entirely**: remove
   `ensure_materialized_json`, drop the `Json` variant from
-  `Cascade_toml_materializer.source_kind`, retire the disk
-  `cascade.json` write, and audit-grep `lib/` for any residual
-  `cascade.json` references.
+  `Cascade_toml_materializer.source_kind` (now unreachable), retire the
+  `read_json_file` branch in `Cascade_config_loader.load_json`, and
+  audit-grep `lib/` + `bin/` for any residual `cascade.json`
+  references.
 
 ## 9. Acceptance Criteria
 

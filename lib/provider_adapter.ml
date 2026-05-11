@@ -150,8 +150,10 @@ let runtime_mcp_http_headers =
   }
 (* Codex CLI quirk: its cached login cannot natively inject per-keeper auth
    headers, so any runtime MCP policy that uses bound-actor tools requires
-   per-keeper bridging via [Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp].
-   The cascade filter relies on this flag to gate codex_cli entries. *)
+   per-keeper bridging at the cascade layer. The
+   [Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp] predicate is
+   what the cascade filter consults to decide whether such bridging is in
+   place for a given keeper before admitting codex_cli for runtime MCP. *)
 let codex_cli_tool_policy =
   { supports_runtime_mcp_http_headers = false;
     requires_per_keeper_bridging_for_bound_actor_tools = true;

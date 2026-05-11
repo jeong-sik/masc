@@ -61,7 +61,7 @@ type tool_policy = {
           filter must reject the policy for this provider.
 
           Codex CLI is currently the only adapter that sets this to [true]:
-          it cached login does not allow per-keeper authorization headers
+          its cached login does not allow per-keeper authorization headers
           to be injected on each request without bridging. *)
 }
 

@@ -836,7 +836,7 @@ let post_turn_resilience_handles
     with
     | Error detail ->
         Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_execution_errors
-          ~labels:[("keeper", meta.name); ("phase", "resilience_audit_store")]
+          ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Resilience_audit_store))]
           ();
         Log.Keeper.error
           "keeper:%s resilience audit store unavailable; execution disabled: %s"

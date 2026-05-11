@@ -946,7 +946,7 @@ let metadata_to_fields name =
   in
   match meta.required_permission with
   | Some permission ->
-      ("requiredPermission", `String (Masc_domain.show_permission permission))
+      ("requiredPermission", `String (Masc_domain.permission_to_string permission))
       :: with_actor_binding
   | None -> with_actor_binding
 

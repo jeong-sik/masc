@@ -126,6 +126,14 @@ type permission =
   | CanAdmin
 [@@deriving show { with_path = false }]
 
+val permission_to_string : permission -> string
+(** Stable wire format for {!permission}.  Returns the same string
+    {!show_permission} does today (PascalCase constructor name) but
+    locks the contract against [@@deriving show] template drift and
+    accidental renames.  Public API/SSE/error output depends on these
+    exact strings — prefer this over [show_permission] at any
+    externally-observable boundary. *)
+
 val permissions_for_role : agent_role -> permission list
 (** [Worker] permissions exclude [CanInit] / [CanReset] / [CanAdmin].
     [Admin] adds those three to the [Worker] set. *)

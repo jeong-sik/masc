@@ -212,9 +212,9 @@ let fallback_cascade_for_unavailable_profile
   then Some normalized_base
   else if
     String.equal normalized_effective Keeper_config.local_only_cascade_name
-    || String.equal normalized_effective Keeper_config.default_cascade_name
+    || String.equal normalized_effective (Keeper_config.default_cascade_name ())
   then None
-  else Some Keeper_config.default_cascade_name
+  else Some (Keeper_config.default_cascade_name ())
 
 let degraded_retry_after_recoverable_error
     ~(effective_cascade : string)
@@ -382,7 +382,7 @@ let required_tool_rotation_candidate ~catalog_names name =
     not
       (String.equal
          Keeper_config.local_only_cascade_name
-         Keeper_config.default_cascade_name)
+         (Keeper_config.default_cascade_name ()))
   in
   (* Required-tool turns may still use [local_recovery] when the catalog
      declares it as a tool-capable fallback profile.  Keep excluding the
@@ -398,7 +398,7 @@ let legacy_degraded_rotation_candidates
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
   let normalized_base = normalized_cascade_name ~catalog_names base_cascade in
   let default_cascade =
-    normalized_cascade_name ~catalog_names Keeper_config.default_cascade_name
+    normalized_cascade_name ~catalog_names (Keeper_config.default_cascade_name ())
   in
   let local_recovery_cascade =
     normalized_cascade_name ~catalog_names

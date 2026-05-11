@@ -352,7 +352,7 @@ let test_autoboot_policy_resync_from_declarative_toml () =
       Config_dir_resolver.reset ();
       Cascade_catalog_runtime.install_snapshot_for_tests
         ~source_path:cascade_path
-        ~profile_names:[ Keeper_config.default_cascade_name ];
+        ~profile_names:[ (Keeper_config.default_cascade_name ()) ];
       write_keeper_meta_exn
         ~autoboot_enabled:true config ~name:"sangsu" ~trace_id:"trace-sangsu";
       match Keeper_runtime.ensure_keeper_meta config "sangsu" with

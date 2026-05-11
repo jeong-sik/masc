@@ -912,20 +912,36 @@ let lookup_active_profile ?sw ?net ?clock raw_name =
   | Error _ as e -> e
   | Ok snapshot -> (
       let trimmed = String.trim raw_name in
-      let normalized =
-        if (not (String.equal trimmed ""))
-           && Option.is_some (profile_lookup snapshot.profiles trimmed)
-        then trimmed
-        else normalize_declared_name raw_name
-      in
-      match profile_lookup snapshot.profiles normalized with
-      | Some profile -> Ok (snapshot, normalized, profile)
-      | None ->
-          let known = profile_names_of_snapshot snapshot |> String.concat ", " in
+      if String.equal trimmed ""
+      then (
+        (* RFC-0066 Phase 1: blank raw means "the active default cascade".
+           The legacy [normalize_declared_name] path routes blank through
+           [cascade_name_for_use Keeper_turn], which consults the legacy
+           [Cascade_config_loader.load_catalog] — empty for declarative
+           production configs.  Return the first profile in the live
+           snapshot instead so [(Keeper_config.default_cascade_name ())] and
+           every other "no name supplied" caller sees the live answer. *)
+        match snapshot.profiles with
+        | first :: _ -> Ok (snapshot, first.name, first)
+        | [] ->
           Error
-            (Printf.sprintf
-               "unknown cascade_name %S (active profiles: %s)"
-               normalized known))
+            "snapshot has no profiles; cannot resolve blank cascade name")
+      else
+        let normalized =
+          if Option.is_some (profile_lookup snapshot.profiles trimmed)
+          then trimmed
+          else normalize_declared_name raw_name
+        in
+        match profile_lookup snapshot.profiles normalized with
+        | Some profile -> Ok (snapshot, normalized, profile)
+        | None ->
+            let known =
+              profile_names_of_snapshot snapshot |> String.concat ", "
+            in
+            Error
+              (Printf.sprintf
+                 "unknown cascade_name %S (active profiles: %s)"
+                 normalized known))
 
 let resolve_declared_name ?sw ?net ?clock ~raw_name () =
   match lookup_active_profile ?sw ?net ?clock raw_name with

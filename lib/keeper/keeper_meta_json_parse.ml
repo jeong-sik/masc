@@ -128,7 +128,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       (* Preserve the raw cascade_name as persisted in runtime JSON so the
        dashboard can distinguish "declared in TOML" from "canonicalized
        fallback".  Downstream code canonicalizes at point-of-use. *)
-      Safe_ops.json_string ~default:Keeper_config.default_cascade_name "cascade_name" json
+      Safe_ops.json_string ~default:(Keeper_config.default_cascade_name ()) "cascade_name" json
     in
     let pk_models =
       match json |> Yojson.Safe.Util.member "models" with

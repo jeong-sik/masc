@@ -7,11 +7,15 @@
 
 (** {1 Core Constants} *)
 
-(** Default cascade name for keeper turns. Resolved from [routes.keeper_turn];
-    all keeper code must reference this constant instead of using a profile
-    string literal.
-    @since v2.128.0 *)
-val default_cascade_name : string
+(** Default cascade name for keeper turns. Resolved each call against
+    the live [Cascade_catalog_runtime] snapshot so the answer reflects
+    the currently-installed catalog rather than module-init state. Falls
+    back to [Cascade_routes.cascade_name_for_use Keeper_turn] when the
+    snapshot is not yet available (early boot).
+    @since v2.128.0
+    @since RFC-0066 Phase 1: changed from a string value to a thunk
+    (issue #14624). *)
+val default_cascade_name : unit -> string
 
 (** Cascade name for recovery turns (Failing phase). In the two-profile
     catalog this resolves to the canonical keeper cascade.

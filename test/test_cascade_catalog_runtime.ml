@@ -511,7 +511,7 @@ let test_valid_catalog_records_probe_error_without_eio_caps () =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ())
   in
-  (* [Keeper_config.default_cascade_name] is evaluated at module init
+  (* [(Keeper_config.default_cascade_name ())] is evaluated at module init
      when no catalog is loaded, so it freezes to the
      [first_alias_or_key] fallback ("default").  After the fixture
      installs a catalog whose first profile is "big_three",
@@ -733,7 +733,7 @@ let test_legacy_runtime_wrapper_does_not_fallback_to_defaults () =
   check (list string) "legacy wrapper still resolves known profile"
     [ valid_model ]
     (Cascade_runtime.models_of_cascade_name
-       (Keeper_cascade_profile.Runtime_name Keeper_config.default_cascade_name));
+       (Keeper_cascade_profile.Runtime_name (Keeper_config.default_cascade_name ())));
   check (list string) "unknown profile no longer falls back to defaults"
     []
     (Cascade_runtime.models_of_cascade_name
@@ -770,7 +770,7 @@ let test_legacy_runtime_wrapper_preserves_configured_label_order () =
     List.init 8 (fun _ ->
         Cascade_runtime.models_of_cascade_name
           (Keeper_cascade_profile.Runtime_name
-             Keeper_config.default_cascade_name))
+             (Keeper_config.default_cascade_name ())))
   in
   check (list string) "legacy wrapper keeps configured order" expected
     (List.hd observed_orders);
@@ -815,7 +815,7 @@ let test_partial_catalog_keeps_validated_subset_available () =
     (contains_substring rejection_json
        "__nonexistent_provider_sentinel__:fake");
   (* Same caveat as test_valid_catalog_records_probe_error_without_eio_caps:
-     [Keeper_config.default_cascade_name] is module-init-cached; assert
+     [(Keeper_config.default_cascade_name ())] is module-init-cached; assert
      against the fixture's first profile name directly. *)
   check (list string) "dashboard only advertises validated profiles"
     [ "big_three"; "tool_rerank" ]
@@ -914,7 +914,7 @@ let test_resolve_named_providers_tool_choice_filters_runtime_only_providers () =
     require_ok
       (Cascade_catalog_runtime.resolve_named_providers
          ~require_tool_choice_support:true
-         ~cascade_name:Keeper_config.default_cascade_name
+         ~cascade_name:(Keeper_config.default_cascade_name ())
          ())
   in
   check bool "every surviving provider supports inline tool choice" true
@@ -944,7 +944,7 @@ let test_resolve_named_providers_tool_support_keeps_runtime_mcp_providers () =
     require_ok
       (Cascade_catalog_runtime.resolve_named_providers
          ~require_tool_support:true
-         ~cascade_name:Keeper_config.default_cascade_name
+         ~cascade_name:(Keeper_config.default_cascade_name ())
          ())
   in
   check bool "tool-support path keeps at least one callable provider" true
@@ -978,7 +978,7 @@ let test_resolve_named_providers_runtime_mcp_headers_drop_unsupported_providers 
       (Cascade_catalog_runtime.resolve_named_providers
          ~require_tool_support:true
          ~runtime_mcp_policy:runtime_mcp_policy_with_headers
-         ~cascade_name:Keeper_config.default_cascade_name
+         ~cascade_name:(Keeper_config.default_cascade_name ())
          ())
   in
   check bool "keeps codex_cli with identity header support" true
@@ -1194,7 +1194,7 @@ let test_strict_resolve_rejects_nonmatching_provider_filter () =
   match
     Cascade_catalog_runtime.resolve_named_providers_strict
       ~provider_filter:[ "ollama"; "gemini" ]
-      ~cascade_name:Keeper_config.default_cascade_name
+      ~cascade_name:(Keeper_config.default_cascade_name ())
       ()
   with
   | Ok providers ->
@@ -1224,7 +1224,7 @@ let test_strict_resolve_ok_when_filter_matches () =
     require_ok
       (Cascade_catalog_runtime.resolve_named_providers_strict
          ~provider_filter:[ "codex_cli" ]
-         ~cascade_name:Keeper_config.default_cascade_name
+         ~cascade_name:(Keeper_config.default_cascade_name ())
          ())
   in
   check int "only codex_cli providers survive" 1 (List.length providers);
@@ -1253,7 +1253,7 @@ let test_non_strict_resolve_tolerates_nonmatching_filter () =
     require_ok
       (Cascade_catalog_runtime.resolve_named_providers
          ~provider_filter:[ "nonexistent_provider_xyz" ]
-         ~cascade_name:Keeper_config.default_cascade_name
+         ~cascade_name:(Keeper_config.default_cascade_name ())
          ())
   in
   check int "non-strict returns all providers despite bad filter" 2
@@ -1281,7 +1281,7 @@ let test_secondary_resolution_disambiguates_duplicate_primary_slots () =
     require_ok
       (Cascade_catalog_runtime
        .resolve_named_providers_strict_with_secondary_resolver
-         ~cascade_name:Keeper_config.default_cascade_name
+         ~cascade_name:(Keeper_config.default_cascade_name ())
          ())
   in
   check int "duplicate primaries remain distinct" 2
@@ -1329,7 +1329,7 @@ let test_secondary_resolution_applies_provider_filter_to_secondary () =
       (Cascade_catalog_runtime
        .resolve_named_providers_strict_with_secondary_resolver
          ~provider_filter:[ "codex_cli" ]
-         ~cascade_name:Keeper_config.default_cascade_name
+         ~cascade_name:(Keeper_config.default_cascade_name ())
          ())
   in
   check int "primary survives provider filter" 1

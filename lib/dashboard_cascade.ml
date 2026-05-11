@@ -252,7 +252,7 @@ let config_json () =
           let cascade_name =
             match doc.Keeper_types_profile.cascade_name with
             | Some c -> c
-            | None -> Keeper_config.default_cascade_name
+            | None -> (Keeper_config.default_cascade_name ())
           in
           Some (`Assoc (keeper_profile_fields ~keeper:name ~cascade_name))))
     with

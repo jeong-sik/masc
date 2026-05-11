@@ -27,7 +27,7 @@ let fail_open_rotation_cascades_from_catalog
   if catalog_names = [] then None
   else
     let is_reserved_recovery name =
-      String.equal name Keeper_config.default_cascade_name
+      String.equal name (Keeper_config.default_cascade_name ())
       || String.equal name Keeper_config.local_recovery_cascade_name
     in
     let is_keeper_assignable name =

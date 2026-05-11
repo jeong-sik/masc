@@ -50,7 +50,7 @@ let keeper_meta name =
           [ "name", `String name
           ; "agent_name", `String name
           ; "trace_id", `String ("trace-" ^ name)
-          ; "cascade_name", `String Keeper_config.default_cascade_name
+          ; "cascade_name", `String (Keeper_config.default_cascade_name ())
           ])
   with
   | Ok meta -> meta

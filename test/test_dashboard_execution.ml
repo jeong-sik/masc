@@ -519,7 +519,7 @@ let append_execution_receipt ?(outcome = "ok")
           {
             from_cascade =
               Lib.Keeper_execution_receipt.cascade_name_of_string
-                Lib.Keeper_config.default_cascade_name;
+                Lib.(Keeper_config.default_cascade_name ());
             to_cascade =
               Lib.Keeper_execution_receipt.cascade_name_of_string
                 Lib.Keeper_config.local_recovery_cascade_name;
@@ -680,10 +680,10 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
             check bool "diagnostic next action surfaced" true
               (row |> member "diagnostic" |> member "next_action_path" <> `Null);
             check string "raw cascade surfaced on execution keeper row"
-              Lib.Keeper_config.default_cascade_name
+              Lib.(Keeper_config.default_cascade_name ())
               (row |> member "cascade_name" |> to_string);
             check string "canonical cascade surfaced on execution keeper row"
-              Lib.Keeper_config.default_cascade_name
+              Lib.(Keeper_config.default_cascade_name ())
               (row |> member "cascade_canonical" |> to_string);
             check bool "primary model surfaced on execution keeper row" true
               (row |> member "primary_model" <> `Null);

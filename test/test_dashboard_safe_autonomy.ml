@@ -59,7 +59,7 @@ let make_meta ?(name = "bench-analyst") ?(trace_id = "trace-safe-autonomy") () =
           ("name", `String name);
           ("agent_name", `String "bench-analyst-agent");
           ("trace_id", `String trace_id);
-          ("cascade_name", `String Keeper_config.default_cascade_name);
+          ("cascade_name", `String (Keeper_config.default_cascade_name ()));
           ("last_model_used", `String "openai:gpt-5.4");
           ("sandbox_profile", `String "local");
           (* PR #13113 review: align with the canonical local-keeper

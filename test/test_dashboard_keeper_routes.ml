@@ -522,7 +522,7 @@ let make_keeper_meta_json ?(name = "route_shadow_demo") ?(paused = true) () =
           ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
           ; "trace_id", `String ("trace-" ^ name ^ "-seed")
           ; "goal", `String "Route shadow regression fixture"
-          ; "cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name
+          ; "cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ())
           ; "updated_at", `String "2026-04-04T00:00:00Z"
           ; "paused", `Bool paused
           ])
@@ -1172,7 +1172,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   in
   require_status "cascade config GET before assignment returns 200" 200 before;
   check string "dashboard starts with seeded meta cascade"
-    Masc_mcp.Keeper_config.default_cascade_name
+    Masc_mcp.(Keeper_config.default_cascade_name ())
     (keeper_profile_cascade_name before.body keeper_name);
   let assign_result =
     run_curl_post

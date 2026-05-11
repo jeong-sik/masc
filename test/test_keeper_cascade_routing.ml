@@ -16,7 +16,7 @@ let routing_t = testable
      Printf.sprintf "{cascade=%s, reason=%s}" r.effective_cascade r.reason))
   (fun a b -> a.effective_cascade = b.effective_cascade)
 
-let base = Masc_mcp.Keeper_config.default_cascade_name
+let base = Masc_mcp.(Keeper_config.default_cascade_name ())
 
 let select phase =
   Routing.select_cascade ~base_cascade:base ~phase

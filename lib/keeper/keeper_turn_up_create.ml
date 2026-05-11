@@ -307,7 +307,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               let cascade_models =
                 Cascade_runtime.models_of_cascade_name
                   (Keeper_cascade_profile.Runtime_name
-                     Keeper_config.default_cascade_name)
+                     (Keeper_config.default_cascade_name ()))
               in
               (match
                  Keeper_turn_helpers.ensure_local_discovery_ready
@@ -456,7 +456,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           Some Cascade_ref.{
             group = (match p.profile_defaults.cascade_name with
               | Some name -> name
-              | None -> Keeper_config.default_cascade_name);
+              | None -> (Keeper_config.default_cascade_name ()));
             item = None;
           };
         (* RFC-0041 (post-step-4): cascade_ref is the SSOT; the legacy

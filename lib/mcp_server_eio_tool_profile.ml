@@ -116,11 +116,17 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
       if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
         internal_keeper_runtime
       else
-        let allowed_schema_names =
-          Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
-          |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-        in
-        List.mem tool_name allowed_schema_names
+        (* Equivalent to [List.mem tool_name (names from
+           visible_tool_schemas ~include_hidden:true
+           ~include_deprecated:true)]: that helper composes raw schemas
+           → dedupe → canonicalize → filter is_visible.  Dedupe and
+           canonicalize do not change the name set, so the name set is
+           exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
+           Two O(1) checks replace ~150 schema canonicalizations + a
+           List.mem per dispatch. *)
+        Config.is_raw_tool_name tool_name
+        && Tool_catalog.is_visible ~include_hidden:true ~include_deprecated:true
+             tool_name
   | Managed_agent ->
       Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent

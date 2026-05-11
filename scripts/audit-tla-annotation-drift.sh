@@ -21,6 +21,17 @@
 # RFC: R-B-1.c (iter 19 KTC B-1 audit memo).
 set -euo pipefail
 
+# Hard dependency check.  Without this, [set -euo pipefail] plus the
+# [|| true] guards on the extraction calls would silently turn a missing
+# binary into a "warn: ... empty" line and an exit-0 — drift would slip
+# through CI.  Fail-fast so unhealthy environments are visible.
+for tool in rg awk sed sort grep tr; do
+  command -v "${tool}" >/dev/null 2>&1 || {
+    echo "error: required tool '${tool}' not found in PATH" >&2
+    exit 2
+  }
+done
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPEC_DIR="${REPO_ROOT}/specs/keeper-state-machine"
 LIB_DIR="${REPO_ROOT}/lib"
@@ -79,6 +90,14 @@ declare -a TYPE_SET_PAIRS=(
 # bounded to the same set definition (stops at the closing `}` or the
 # next top-level identifier).  Greedy multi-line capture would pull
 # members from adjacent sets.
+#
+# Scope note: the awk pass aggregates across every `${SPEC_DIR}/*.tla`
+# and the trailing `sort -u` unions the results.  This is intentional —
+# the validator's job is to verify that *somewhere* in the TLA+ corpus
+# the OCaml symbol is declared.  Per-spec consistency (some specs
+# omitting a member that another defines, e.g. for scope-restricted
+# proofs) is a *separate* audit; tracking it here would over-fire on
+# legitimately-narrow specs.  R-B-1.d follow-up.
 extract_spec_members() {
   local set_name="$1"
   # Use awk to extract from `XxxSet ==` line until the closing `}`.
@@ -97,6 +116,12 @@ extract_spec_members() {
 
 # Aux: extract OCaml constructor names tagged with `[@tla.*]` for a
 # given type.  Returns lowercase symbols (cd.pcd_name.txt → lowercased).
+#
+# Regex note: ripgrep's default Rust regex engine *does* support lazy
+# quantifiers (`*?`, `+?`), so `[\s\S]*?` is portable here — verified by
+# empirical run against the repo (16 constructors across 3 type/set
+# pairs).  We do not need `-P`/PCRE2 unless `\s\S` semantics ever diverge
+# from "any whitespace including newline" / "any non-whitespace".
 extract_ocaml_members() {
   local type_name="$1"
   # Find the type definition, then read up to the closing `]` annotation
@@ -170,7 +195,8 @@ echo "tla-annotation-drift summary: ${TOTAL_CHECKED} constructors checked across
 if [[ "${VIOLATIONS}" -gt 0 ]]; then
   echo ""
   echo "RFC reference: R-B-1.c (iter 19 KTC B-1 audit)."
-  echo "Fix: either (a) add missing members to TLA+ spec set, or (b) remove obsolete OCaml constructor, or (c) add an explicit [@tla.symbol \"explicit_name\"] override on the OCaml constructor if the spec uses a different name."
+  echo "Fix: either (a) add missing members to TLA+ spec set, or (b) remove obsolete OCaml constructor."
+  echo "Note: this validator extracts constructor names only — it does not yet parse [@tla.symbol] PPX overrides, so (c) alias-based reconciliation is not available until the extractor learns that attribute (tracked under R-B-1.d follow-up)."
   exit 1
 fi
 exit 0

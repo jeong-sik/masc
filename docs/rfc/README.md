@@ -17,16 +17,16 @@
 
 ```yaml
 ---
-rfc: 0070                          # zero-pad 4자리, 파일명의 NNNN 과 일치
+rfc: "0070"                        # zero-pad 4자리 문자열 (YAML 1.1 octal 회피), 파일명의 NNNN 과 일치
 title: "Short Imperative Title"
 status: Draft                      # Draft | Active | Implemented | Superseded | Withdrawn
 created: 2026-05-12                # ISO date
 updated: 2026-05-12                # 본문 의미 변경 시 갱신, typo 수정은 생략 가능
 author: <github-handle 또는 vincent>
-supersedes: []                     # [0042, 0055] 형식. 없으면 빈 배열
-superseded_by: null                # NNNN 또는 null
-related: [0042, 0046]              # 직접 참조 RFC. 없으면 빈 배열
-implementation_prs: []             # [14181, 14550] 형식. RFC body 머지 PR 은 제외, spec 구현 PR 만
+supersedes: []                     # ["0042", "0055"] 형식 (문자열). 없으면 빈 배열
+superseded_by: null                # "NNNN" 문자열 또는 null
+related: ["0042", "0046"]          # 직접 참조 RFC 문자열. 없으면 빈 배열
+implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body 머지 PR 은 제외, spec 구현 PR 만
 ---
 ```
 

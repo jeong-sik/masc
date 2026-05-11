@@ -8,6 +8,14 @@ import {
   type InterjectActionState,
   type InterjectDispatchRequest,
 } from './interject-store'
+import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
+
+const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
+  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
+}
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete
@@ -38,7 +46,9 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
     }))
   const [, forceRender] = useState(0)
 
-  useEffect(() => interjectStore.subscribe(() => forceRender(tick => tick + 1)), [interjectStore])
+  useEffect(() => interjectStore.subscribe(() => forceRender((t: number) => t + 1)), [interjectStore])
+  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
+  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1)), [])
   useEffect(() => activeKeeperName.subscribe(name => {
     interjectStore.setActiveKeeper(keeperName?.trim() || name)
   }), [interjectStore, keeperName])
@@ -48,6 +58,16 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
 
   const snapshot = interjectStore.snapshot()
   const actions = interjectStore.actions()
+
+  const presence = globalPresenceSnapshot.value
+  const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const keeperId = snapshot.active_keeper_id
+  const entry = keeperId ? entries.find(e => e.keeper_id === keeperId) : null
+  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
+  const cursor = keeperId ? cursorOverlaySignal.value.cursors.get(keeperId) : undefined
+  const focusLabel = cursor?.file_path
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
 
   return html`
     <div
@@ -74,8 +94,45 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
         }}
       >
         <span>INTERJECT</span>
-        <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)' }}>
+        <span style=${{ fontSize: 'var(--fs-11)', display: 'flex', alignItems: 'center', gap: '4px' }}>
           ${snapshot.active_keeper_id ?? 'No active keeper'}
+          ${statusDot ? html`
+            <span
+              role="status"
+              aria-label=${`Keeper status: ${statusDot.label}`}
+              style=${{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '2px',
+                fontSize: 'var(--fs-10)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                color: statusDot.color,
+              }}
+            >
+              <span style=${{
+                width: '4px',
+                height: '4px',
+                borderRadius: '50%',
+                background: statusDot.color,
+                display: 'inline-block',
+              }} />
+              ${statusDot.label}
+            </span>
+          ` : null}
+          ${focusLabel ? html`
+            <span style=${{
+              fontSize: 'var(--fs-10)',
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--color-accent-fg)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: '120px',
+            }}
+            title=${cursor?.file_path}
+            >↗ ${focusLabel}</span>
+          ` : null}
         </span>
       </div>
       <input

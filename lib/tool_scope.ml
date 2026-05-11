@@ -5,8 +5,9 @@ type scope =
 (* keeper-internal: tools that keeper personas invoke during their own
    work but that the external MCP orchestrator surface should not
    expose. Wave 1 (PR-N1, #14627): code/web/worktree (8). Wave 2
-   (PR-N2d): coord/inline admin observability audit verdict (5),
-   plan_* (6), run_* (6), webrtc (2). *)
+   (PR-N2d, #14633): coord/inline admin observability audit verdict
+   (5), plan_* (6), run_* (6), webrtc (2). Wave 3 (PR-N3, this PR):
+   keeper_board_* duplicates (12). *)
 let keeper_internal_list : string list =
   [ (* === Wave 1 (PR #14627) === *)
     (* code helpers *)
@@ -20,7 +21,7 @@ let keeper_internal_list : string list =
   ; "masc_worktree_create"
   ; "masc_worktree_list"
   ; "masc_worktree_remove"
-    (* === Wave 2 (this PR) === *)
+    (* === Wave 2 (PR #14633) === *)
     (* coord/inline admin observability (PR-N5 audit verdict, #14618) *)
   ; "masc_check"
   ; "masc_coordination_fsm_snapshot"
@@ -44,6 +45,25 @@ let keeper_internal_list : string list =
     (* webrtc (experimental, not in user surface definition) *)
   ; "masc_webrtc_offer"
   ; "masc_webrtc_answer"
+    (* === Wave 3 (this PR) — keeper_board_* duplicates === *)
+    (* The board domain has parallel keeper_board_* / masc_board_*
+       definitions. masc_board_* stays in the orchestrator surface
+       (user-confirmed "board" category). keeper_board_* is the
+       keeper-internal handle the keeper persona uses for its own
+       board interactions. Cleanup/dedupe of the parallel handlers
+       is a separate RFC; this PR only narrows the surface. *)
+  ; "keeper_board_cleanup"
+  ; "keeper_board_comment"
+  ; "keeper_board_comment_vote"
+  ; "keeper_board_curation_read"
+  ; "keeper_board_curation_submit"
+  ; "keeper_board_delete"
+  ; "keeper_board_get"
+  ; "keeper_board_list"
+  ; "keeper_board_post"
+  ; "keeper_board_search"
+  ; "keeper_board_stats"
+  ; "keeper_board_vote"
   ]
 
 let keeper_internal_names () = keeper_internal_list

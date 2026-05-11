@@ -1,58 +1,58 @@
 (* RFC-0070 Phase 3b-iv.1b — Mock Docker_client. See .mli. *)
 
-(* Injection queues. Each pair is (expected-input, prepared-response).
-   FIFO consumption: only the head is consulted on each call. *)
+(* Injection queues — proper FIFO via [Queue.t] (amortized O(1) push +
+   O(1) peek/pop), replacing the iter-20 [list @ [x]] form (O(n²)
+   across many injections). Behaviour is identical from the caller's
+   perspective. *)
 
 let run_queue
   : (Keeper_sandbox_plan.t
      * (Docker_response.exec_result, Docker_client.sandbox_error) result)
-      list ref
-  = ref []
+      Queue.t
+  = Queue.create ()
 
 let exec_queue
   : ((Keeper_container_name.t * string)
      * (Docker_response.exec_result, Docker_client.sandbox_error) result)
-      list ref
-  = ref []
+      Queue.t
+  = Queue.create ()
 
 let ps_query_queue
   : ((string * string) list
      * (Docker_response.ps_record list, Docker_client.sandbox_error) result)
-      list ref
-  = ref []
+      Queue.t
+  = Queue.create ()
 
 let rm_queue
-  : (Keeper_container_name.t * (unit, Docker_client.sandbox_error) result) list ref
-  = ref []
+  : (Keeper_container_name.t * (unit, Docker_client.sandbox_error) result) Queue.t
+  = Queue.create ()
 
 (* ── Injection API ──────────────────────────────────────────── *)
 
-let inject_run plan response = run_queue := !run_queue @ [ plan, response ]
-
-let inject_exec ~container ~cmd response =
-  exec_queue := !exec_queue @ [ (container, cmd), response ]
-
-let inject_ps_query ~labels response =
-  ps_query_queue := !ps_query_queue @ [ labels, response ]
-
-let inject_rm container response =
-  rm_queue := !rm_queue @ [ container, response ]
+let inject_run plan response = Queue.add (plan, response) run_queue
+let inject_exec ~container ~cmd response = Queue.add ((container, cmd), response) exec_queue
+let inject_ps_query ~labels response = Queue.add (labels, response) ps_query_queue
+let inject_rm container response = Queue.add (container, response) rm_queue
 
 (* ── Docker_client.S implementation ─────────────────────────── *)
 
+(* Consume-on-match: peek the head; if it matches, pop and reply.
+   Otherwise leave the queue intact and return Daemon_unreachable.
+   Strict FIFO — out-of-order calls fail closed without consuming. *)
+
 let run plan =
-  match !run_queue with
-  | (expected, response) :: rest when Keeper_sandbox_plan.equal plan expected ->
-    run_queue := rest;
+  match Queue.peek_opt run_queue with
+  | Some (expected, response) when Keeper_sandbox_plan.equal plan expected ->
+    ignore (Queue.pop run_queue);
     response
   | _ -> Error Docker_client.Daemon_unreachable
 
 let exec ~container ~cmd =
-  match !exec_queue with
-  | ((expected_c, expected_cmd), response) :: rest
+  match Queue.peek_opt exec_queue with
+  | Some ((expected_c, expected_cmd), response)
     when Keeper_container_name.equal container expected_c
          && String.equal cmd expected_cmd ->
-    exec_queue := rest;
+    ignore (Queue.pop exec_queue);
     response
   | _ -> Error Docker_client.Daemon_unreachable
 
@@ -65,29 +65,29 @@ let labels_equal a b =
        a b
 
 let ps_query ~labels =
-  match !ps_query_queue with
-  | (expected, response) :: rest when labels_equal labels expected ->
-    ps_query_queue := rest;
+  match Queue.peek_opt ps_query_queue with
+  | Some (expected, response) when labels_equal labels expected ->
+    ignore (Queue.pop ps_query_queue);
     response
   | _ -> Error Docker_client.Daemon_unreachable
 
 let rm container =
-  match !rm_queue with
-  | (expected, response) :: rest when Keeper_container_name.equal container expected ->
-    rm_queue := rest;
+  match Queue.peek_opt rm_queue with
+  | Some (expected, response) when Keeper_container_name.equal container expected ->
+    ignore (Queue.pop rm_queue);
     response
   | _ -> Error Docker_client.Daemon_unreachable
 
 (* ── Fixture lifecycle ──────────────────────────────────────── *)
 
 let reset () =
-  run_queue := [];
-  exec_queue := [];
-  ps_query_queue := [];
-  rm_queue := []
+  Queue.clear run_queue;
+  Queue.clear exec_queue;
+  Queue.clear ps_query_queue;
+  Queue.clear rm_queue
 
 let pending_calls () =
-  List.length !run_queue
-  + List.length !exec_queue
-  + List.length !ps_query_queue
-  + List.length !rm_queue
+  Queue.length run_queue
+  + Queue.length exec_queue
+  + Queue.length ps_query_queue
+  + Queue.length rm_queue

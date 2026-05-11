@@ -15,7 +15,7 @@ import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
-import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
+import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -305,10 +305,16 @@ const FILE_ICONS: Readonly<Record<string, string>> = {
 
 function IdeBreadcrumb() {
   const [filePath, setFilePath] = useState(activeIdeFile.value)
-  useEffect(() => activeIdeFile.subscribe(f => setFilePath(f)), [])
+  useEffect(() => {
+    const unsub = activeIdeFile.subscribe(f => setFilePath(f))
+    return () => unsub()
+  }, [])
 
   const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
-  useEffect(() => cursorOverlaySignal.subscribe(v => setOverlay(v)), [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
+    return () => unsub()
+  }, [])
 
   const segments = filePath.split('/')
   const fileName = segments[segments.length - 1]

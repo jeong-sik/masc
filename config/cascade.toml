@@ -265,6 +265,411 @@ max-output-tokens = 128000
 supports-native-streaming = true
 supports-response-format-json = true
 
+# ── OAS for_model_id_static parity entries (RFC-0058 Phase 1) ──
+#
+# Each [models.<id>] below mirrors one OAS
+# Llm_provider.Capabilities.for_model_id_static branch using M1c
+# match-prefixes for longest-prefix-first lookup. Sole source of
+# capability values is OAS lib/llm_provider/capabilities.ml:380-740
+# (verified against origin/main 2026-05-12).
+#
+# Bindings are NOT auto-added here — these entries exist solely to
+# feed Cascade_capabilities_bridge.lookup. Provider routing remains
+# the responsibility of existing bindings + the 8 production model
+# entries above.
+
+# ── Anthropic family ──────────────────────────────
+
+[models.claude-opus-4]
+api-name = "claude-opus-4"
+match-prefixes = ["claude-opus-4"]
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.claude-opus-4.capabilities]
+max-output-tokens = 128000
+supports-parallel-tool-calls = true
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-structured-output = true
+supports-native-streaming = true
+supports-caching = true
+supports-prompt-caching = true
+prompt-cache-alignment = 1024
+supports-top-k = true
+supports-computer-use = true
+
+# ── OpenAI family ─────────────────────────────────
+
+[models.gpt-4-1]
+api-name = "gpt-4.1"
+match-prefixes = ["gpt-4.1"]
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[models.gpt-4-1.capabilities]
+max-output-tokens = 32000
+supports-parallel-tool-calls = true
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
+[models.gpt-4o]
+api-name = "gpt-4o"
+match-prefixes = ["gpt-4o"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.gpt-4o.capabilities]
+max-output-tokens = 16384
+supports-parallel-tool-calls = true
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
+# ── Qwen / Llama / Deepseek (OpenAI-compatible) ───
+
+[models.qwen3]
+api-name = "qwen3"
+match-prefixes = ["qwen3"]
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.qwen3.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-top-k = true
+supports-min-p = true
+
+[models.llama-4]
+api-name = "llama-4"
+match-prefixes = ["llama-4", "llama4"]
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[models.llama-4.capabilities]
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+match-prefixes = ["deepseek-v4-flash"]
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-flash.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "thinking-object"
+supports-response-format-json = true
+supports-native-streaming = true
+supports-caching = true
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+match-prefixes = ["deepseek-v4-pro"]
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "thinking-object"
+supports-response-format-json = true
+supports-native-streaming = true
+supports-caching = true
+
+# ── Mistral / Cohere / xAI ─────────────────────────
+
+[models.mistral-large]
+api-name = "mistral-large"
+match-prefixes = ["mistral-large"]
+max-context = 260000
+tools-support = true
+streaming = true
+
+[models.mistral-large.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
+[models.mistral-small]
+api-name = "mistral-small"
+match-prefixes = ["mistral-small"]
+max-context = 256000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.mistral-small.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
+[models.command]
+api-name = "command"
+match-prefixes = ["command"]
+max-context = 256000
+tools-support = true
+streaming = true
+
+[models.command.capabilities]
+max-output-tokens = 32000
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-structured-output = true
+supports-native-streaming = true
+
+[models.grok]
+api-name = "grok"
+match-prefixes = ["grok"]
+max-context = 2000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.grok.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-structured-output = true
+supports-native-streaming = true
+supports-caching = true
+
+# ── NVIDIA Nemotron (chat_template_kwargs thinking) ──
+
+[models.nemotron]
+api-name = "nemotron"
+match-prefixes = ["nemotron", "nvidia/nemotron"]
+max-context = 131072
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.nemotron.capabilities]
+max-output-tokens = 16384
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "chat-template-kwargs"
+supports-response-format-json = true
+supports-structured-output = true
+supports-native-streaming = true
+supports-caching = true
+supports-top-k = true
+supports-min-p = true
+
+# VL variant: longest-prefix-first puts this ahead of [nemotron].
+[models.nemotron-vl]
+api-name = "nemotron-vl"
+match-prefixes = ["nemotron-vl", "nvidia/nemotron-vl"]
+max-context = 131072
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.nemotron-vl.capabilities]
+max-output-tokens = 16384
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "chat-template-kwargs"
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+supports-top-k = true
+supports-min-p = true
+
+# ── Gemma 4 (Visual_first modality priority elided — masc-mcp doesn't
+# encode modality_priority in cascade_model_capabilities yet) ──
+
+[models.gemma-4]
+api-name = "gemma-4"
+match-prefixes = ["gemma-4", "google/gemma-4"]
+max-context = 262144
+tools-support = true
+streaming = true
+
+[models.gemma-4.capabilities]
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-seed = true
+
+# ── GLM variants (not covered by existing glm-5-turbo / glm-flashx) ──
+
+# Flash family: covers OAS "glm-4.7-flash || glm-4.5-flash || glm-4.5-air"
+# branch. Existing [models.glm-flashx] (api-name glm-4.7-flashx) keeps
+# its exact-match semantics; this entry adds prefix matching for the
+# other flash variants without disturbing the binding layer.
+[models.glm-flash-air]
+api-name = "glm-4.5-flash"
+match-prefixes = ["glm-4.7-flash", "glm-4.5-flash", "glm-4.5-air"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-flash-air.capabilities]
+max-output-tokens = 16384
+supports-response-format-json = true
+supports-native-streaming = true
+
+[models.glm-5v-turbo]
+api-name = "glm-5v-turbo"
+match-prefixes = ["glm-5v-turbo"]
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-5v-turbo.capabilities]
+max-output-tokens = 128000
+supports-extended-thinking = true
+supports-response-format-json = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+[models.glm-ocr]
+api-name = "glm-ocr"
+match-prefixes = ["glm-ocr"]
+max-context = 128000
+streaming = true
+
+[models.glm-ocr.capabilities]
+max-output-tokens = 16384
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+# glm-4.5v / glm-4.6v: vision variants (no native tool_choice per Z.AI docs)
+[models.glm-vision]
+api-name = "glm-4.5v"
+match-prefixes = ["glm-4.5v", "glm-4.6v"]
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-vision.capabilities]
+max-output-tokens = 32768
+supports-extended-thinking = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+[models.glm-5-code]
+api-name = "glm-5-code"
+match-prefixes = ["glm-5-code"]
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-5-code.capabilities]
+max-output-tokens = 128000
+supports-extended-thinking = true
+supports-response-format-json = true
+supports-native-streaming = true
+
+# Full-text GLM (broad OR clause): glm-4.5 / glm-4.6 / glm-4.7 / glm-5.
+# Longest-prefix-first ensures more specific entries (glm-5-turbo,
+# glm-5-code, glm-5v-turbo, glm-flash-air) win where applicable.
+[models.glm-5-text]
+api-name = "glm-5"
+match-prefixes = ["glm-4.5", "glm-4.6", "glm-4.7", "glm-5"]
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-5-text.capabilities]
+max-output-tokens = 128000
+supports-extended-thinking = true
+supports-response-format-json = true
+supports-native-streaming = true
+
+[models.glm-4-flash]
+api-name = "glm-4-flash"
+match-prefixes = ["glm-4-flash"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-4-flash.capabilities]
+max-output-tokens = 4096
+supports-native-streaming = true
+
+[models.glm-4v]
+api-name = "glm-4v"
+match-prefixes = ["glm-4v"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-4v.capabilities]
+max-output-tokens = 4096
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+# Broad glm-4 catch-all: lower priority than glm-4-flash / glm-4v
+# via longest-prefix-first.
+[models.glm-4]
+api-name = "glm-4"
+match-prefixes = ["glm-4"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-4.capabilities]
+max-output-tokens = 4096
+supports-native-streaming = true
+
 # ── Layer 3: Provider×Model Bindings ───────────────────────────
 #
 # `max-concurrent` is REQUIRED (RFC-0058 §3.4). Defaults reflect

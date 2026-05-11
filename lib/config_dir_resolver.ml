@@ -380,14 +380,37 @@ let resolve_with inputs =
   let keepers = child_item config_root "keepers" in
   let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
-    [ ("cascade.json/cascade.toml", cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
+    (* RFC-0058 §9: [cascade.toml] is the SSOT; the [cascade.json] sibling
+       is no longer read from disk.  Key the missing-child warning off the
+       authoring file so a [.json]-only directory surfaces as degraded
+       instead of silently passing as Ready. *)
+    [ ("cascade.toml", cascade_authoring.exists)
+    ; ("prompts", prompts.exists)
+    ; ("keepers", keepers.exists)
+    ; ("personas", personas.exists)
+    ]
     |> List.filter_map (fun (label, exists) ->
            if exists then None
            else
              Some
                (Printf.sprintf "Resolved config child is missing: %s" label))
   in
-  let warnings = root_warnings @ persona_warnings @ missing_child_warnings in
+  let degraded_legacy_json_warnings =
+    (* Operator left a stale [cascade.json] in place after migrating off
+       it.  We do not read it, but a present-but-unread file is a
+       footgun; surface it as a warning so the dashboard / startup log
+       call it out. *)
+    if (not cascade_authoring.exists)
+       && existing_file (Filename.concat config_root.path cascade_json_filename)
+    then
+      [ "Found cascade.json but no cascade.toml; cascade.json is no longer \
+         read (RFC-0058 §9). Rename or convert it to cascade.toml." ]
+    else []
+  in
+  let warnings =
+    root_warnings @ persona_warnings @ missing_child_warnings
+    @ degraded_legacy_json_warnings
+  in
   let status =
     match config_root.source with
     | Invalid_env -> Invalid_env_status
@@ -419,23 +442,13 @@ let resolve () =
 let reset () =
   _cached_resolution := None
 
+(* RFC-0058 §9: the on-disk cascade source is [cascade.toml]; the legacy
+   [cascade.json] sibling is materialized in memory by
+   [Cascade_toml_materializer] and never read from disk. Callers feed the
+   returned path through that materializer, which accepts either suffix,
+   so returning the [.toml] path is consistent with the actual source of
+   truth. *)
 let cascade_path_opt () =
-  let resolution = resolve () in
-  match resolution.config_root.source with
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
-    when resolution.cascade.exists ->
-      Some resolution.cascade.path
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
-  | Invalid_env | Missing ->
-      None
-
-let cascade_path_candidate () =
-  (resolve ()).cascade.path
-
-let cascade_toml_path_candidate () =
-  Filename.concat (resolve ()).config_root.path cascade_toml_filename
-
-let cascade_toml_path_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with
   | Env | Local_masc | Home_masc | Exe_relative | Cwd
@@ -444,6 +457,12 @@ let cascade_toml_path_opt () =
   | Env | Local_masc | Home_masc | Exe_relative | Cwd
   | Invalid_env | Missing ->
       None
+
+let cascade_path_candidate () =
+  (resolve ()).cascade_authoring.path
+
+let cascade_toml_path_candidate () =
+  Filename.concat (resolve ()).config_root.path cascade_toml_filename
 
 let prompts_dir () =
   (resolve ()).prompts.path

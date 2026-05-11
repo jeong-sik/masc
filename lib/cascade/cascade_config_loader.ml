@@ -882,9 +882,9 @@ let provider_model_of_string (s : string) : (string * string) option =
   | _ -> None
 ;;
 
-(** Convert a [weighted_entry] (from legacy cascade.json) into a
-    [Cascade_ref.cascade_item].  [timeout_ms] defaults to 30000;
-    [priority] uses the entry's [weight]. *)
+(** Convert a [weighted_entry] (from the flat [<name>_models] wire format
+    emitted by the TOML materializer) into a [Cascade_ref.cascade_item].
+    [timeout_ms] defaults to 30000; [priority] uses the entry's [weight]. *)
 let cascade_item_of_weighted_entry (entry : weighted_entry)
   : Cascade_ref.cascade_item option
   =
@@ -901,8 +901,9 @@ let cascade_item_of_weighted_entry (entry : weighted_entry)
 ;;
 
 (** Load a [Cascade_ref.cascade_profile] from the hierarchical
-    [{name}_groups] format in cascade.json.  Each object in the array
-    is parsed through [Cascade_ref.cascade_group_of_json].
+    [<name>_groups] keys emitted by the TOML materializer when a profile
+    declares a [groups] field (RFC-0041). Each object in the array is
+    parsed through [Cascade_ref.cascade_group_of_json].
 
     Returns [None] when the key is absent or no groups parse
     successfully. *)
@@ -920,15 +921,16 @@ let load_cascade_profile_hierarchical ~(config_path : string) ~(name : string)
      | _ -> None)
 ;;
 
-(** Load a [Cascade_ref.cascade_profile] from the legacy cascade.json
-    format.  Each profile section becomes a single-group profile;
-    [models] become [cascade_item]s and [fallback_cascade] becomes
-    [fallback_group].
+(** Load a [Cascade_ref.cascade_profile] from the flat [<name>_models]
+    wire format emitted by the TOML materializer (the default layout when
+    a profile declares a [models] field rather than a [groups] field).
+    Each profile section becomes a single-group profile; [models] become
+    [cascade_item]s and [fallback_cascade] becomes [fallback_group].
 
     Returns [None] when the profile has no parsable model entries.
-    This is the bridge between the existing flat cascade.json format
-    and the RFC-0041 hierarchical profile model. *)
-let load_cascade_profile_legacy ~(config_path : string) ~(name : string)
+    This is the bridge between the flat [<name>_models] layout and the
+    RFC-0041 hierarchical profile model. *)
+let load_cascade_profile_flat_models ~(config_path : string) ~(name : string)
   : Cascade_ref.cascade_profile option
   =
   let items =
@@ -952,17 +954,18 @@ let load_cascade_profile_legacy ~(config_path : string) ~(name : string)
       })
 ;;
 
-(** Load a [Cascade_ref.cascade_profile] from cascade.json.
+(** Load a [Cascade_ref.cascade_profile] from the in-memory JSON view
+    produced by the TOML materializer.
 
-    Tries the hierarchical [{name}_groups] format first (RFC-0041).
-    Falls back to the legacy flat [{name}_models] format for backward
-    compatibility.
+    Tries the hierarchical [<name>_groups] layout first (RFC-0041, opt-in
+    via [groups] field). Falls back to the flat [<name>_models] layout,
+    which is the default wire format for profiles that declare [models].
 
-    Returns [None] when neither format yields a valid profile. *)
+    Returns [None] when neither layout yields a valid profile. *)
 let load_cascade_profile ~(config_path : string) ~(name : string)
   : Cascade_ref.cascade_profile option
   =
   match load_cascade_profile_hierarchical ~config_path ~name with
   | Some profile -> Some profile
-  | None -> load_cascade_profile_legacy ~config_path ~name
+  | None -> load_cascade_profile_flat_models ~config_path ~name
 ;;

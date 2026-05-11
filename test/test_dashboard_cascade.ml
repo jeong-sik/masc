@@ -288,18 +288,13 @@ keeper_assignable = false
        assert_keeper_assignable "custom_live" true;
        assert_keeper_assignable "system_review" false;
        assert_keeper_assignable "tool_rerank" false;
-       (* RFC-0058 §9.3: [config_path] surfaced by config_json reflects
-         the legacy resolver field, which still points at the
-         cascade.json sibling path (the resolver itself is out of
-         scope for Phase 9.3 — only the materializer's Json arm is
-         deleted). Derive the expected sibling from the toml seed. *)
-       let json_sibling =
-         Filename.concat (Filename.dirname cascade_path) "cascade.json"
-       in
+       (* RFC-0058 §9.4: the resolver now returns the [cascade.toml]
+          path directly. [cascade_path] is already a [.toml] path so we
+          can compare it verbatim against the surfaced [config_path]. *)
        check
          (option string)
          "config_path reflects active root"
-         (Some json_sibling)
+         (Some cascade_path)
          Yojson.Safe.Util.(j |> member "config_path" |> to_string_option))
 ;;
 

@@ -424,8 +424,18 @@ let parse_bindings_and_aliases (toml : Otoml.t)
   : cascade_binding list * cascade_alias list
   =
   let top_entries = Otoml.get_table toml in
+  (* Only top-level tables can describe a provider alias; scalar / array
+     entries (e.g. an operator-authored ["comment = ..."]) would crash
+     [Otoml.get_table] in [parse_provider_alias_table]. *)
   let provider_aliases =
-    List.filter (fun (name, _) -> not (is_reserved name)) top_entries
+    List.filter
+      (fun (name, value) ->
+         (not (is_reserved name))
+         &&
+         match value with
+         | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> true
+         | _ -> false)
+      top_entries
   in
   let all_entries =
     List.concat_map

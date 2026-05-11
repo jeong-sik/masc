@@ -588,7 +588,8 @@ let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_n
 let append_execution_receipt ?(tool_contract_result = "satisfied")
     ?(tools_used = [ "keeper_fs_read" ])
     ?(cascade_fallback_applied = true)
-    ?(cascade_outcome = "passed_to_next_model")
+    ?(cascade_outcome : Masc_mcp.Keeper_execution_receipt.cascade_outcome =
+      Cascade_passed_to_next_model)
     ?(degraded_retry_applied = true)
     ?(degraded_retry_cascade =
       Some Masc_mcp.Keeper_config.local_recovery_cascade_name)
@@ -1211,7 +1212,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   append_execution_receipt
     ~cascade_fallback_applied:false
-    ~cascade_outcome:"completed"
+    ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
     ~degraded_retry_applied:false
     ~degraded_retry_cascade:None
     ~fallback_reason:None
@@ -1451,7 +1452,7 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
   append_execution_receipt ~tool_contract_result:"satisfied_execution"
     ~tools_used:[ "keeper_fs_read" ]
     ~cascade_fallback_applied:false
-    ~cascade_outcome:"completed"
+    ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
     ~degraded_retry_applied:false
     ~degraded_retry_cascade:None
     ~fallback_reason:None config ~keeper_name;

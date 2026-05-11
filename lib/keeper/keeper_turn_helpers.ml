@@ -281,7 +281,7 @@ let record_pre_dispatch_terminal_observation
     ; cascade_selected_model = None
     ; cascade_attempt_count = 0
     ; cascade_fallback_applied = false
-    ; cascade_outcome = "not_dispatched"
+    ; cascade_outcome = Keeper_execution_receipt.Cascade_not_dispatched
     ; degraded_retry_applied = false
     ; degraded_retry_cascade = None
     ; fallback_reason = None

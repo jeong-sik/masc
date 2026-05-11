@@ -814,10 +814,10 @@ let prepare_agent_setup
       Keeper_types.dedupe_keep_order
         (merged @ visible_required_tool_names @ visible_affordance_tool_names)
     in
-    let selection_mode =
+    let selection_mode : Keeper_agent_tool_surface.tool_selection_mode =
       if llm_rerank_enabled
-      then "deterministic_plus_llm_hint"
-      else "core_plus_prefilter_plus_discovered"
+      then Selection_deterministic_plus_llm_hint
+      else Selection_core_plus_prefilter_plus_discovered
     in
     let deterministic_floor_set =
       Keeper_types.dedupe_keep_order
@@ -1360,7 +1360,8 @@ let prepare_agent_setup
                     (Keeper_config.keeper_llm_rerank_enabled ())
                     (List.length computed_surface.all_allowed)
                     (String.length computed_surface.query_text)
-                    computed_surface.selection_mode;
+                    (Keeper_agent_tool_surface.tool_selection_mode_to_string
+                       computed_surface.selection_mode);
                 let append_ctx ctx text =
                   Some
                     (match ctx with
@@ -1581,7 +1582,9 @@ let prepare_agent_setup
                        , `Int computed_surface.checkpoint_start_turn )
                      ; "per_call_turn", `Int computed_surface.per_call_turn
                      ; "per_call_max_turns", `Int computed_surface.per_call_max_turns
-                     ; "selection_mode", `String computed_surface.selection_mode
+                     ; ( "selection_mode"
+                       , Keeper_agent_tool_surface.tool_selection_mode_to_yojson
+                           computed_surface.selection_mode )
                      ; "core_count", `Int computed_surface.core_count
                      ; ( "deterministic_prefilter_count"
                        , `Int computed_surface.deterministic_prefilter_count )

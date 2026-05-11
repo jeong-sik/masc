@@ -73,6 +73,27 @@ let turn_lane_of_string = function
 
 let turn_lane_to_yojson lane = `String (turn_lane_to_string lane)
 
+(* Closed sum type for tool-surface selection mode.  See .mli for
+   rationale (avoids name collision with Keeper_skill_routing and
+   Keeper_alerting, each of which owns its own selection_mode). *)
+type tool_selection_mode =
+  | Selection_deterministic_plus_llm_hint
+  | Selection_core_plus_prefilter_plus_discovered
+
+let tool_selection_mode_to_string = function
+  | Selection_deterministic_plus_llm_hint -> "deterministic_plus_llm_hint"
+  | Selection_core_plus_prefilter_plus_discovered ->
+    "core_plus_prefilter_plus_discovered"
+
+let tool_selection_mode_of_string = function
+  | "deterministic_plus_llm_hint" -> Some Selection_deterministic_plus_llm_hint
+  | "core_plus_prefilter_plus_discovered" ->
+    Some Selection_core_plus_prefilter_plus_discovered
+  | _ -> None
+
+let tool_selection_mode_to_yojson m =
+  `String (tool_selection_mode_to_string m)
+
 (* Closed sum type for tool_surface_class.  Mirrors RFC-0065 §3.2.2
    KeeperToolSurface SurfaceClassSet so the correspondence harness can
    drop the hand-pinned label list.  [@tla.symbol "…"] fixes the wire
@@ -126,7 +147,7 @@ type computed_tool_surface =
   ; deterministic_prefilter_count : int
   ; discovered_count : int
   ; llm_selected_count : int
-  ; selection_mode : string
+  ; selection_mode : tool_selection_mode
   ; is_last_turn : bool
   ; is_warning_zone : bool
   ; tool_surface_class : tool_surface_class

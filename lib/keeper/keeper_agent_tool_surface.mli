@@ -46,6 +46,28 @@ val turn_lane_to_string : turn_lane -> string
 val turn_lane_of_string : string -> turn_lane option
 val turn_lane_to_yojson : turn_lane -> Yojson.Safe.t
 
+(** Tool-surface selection mode.  Closed sum type pinning the two
+    possible outputs of [keeper_run_tools.ml::compute_tool_surface]'s
+    [selection_mode] field:
+
+    - [Selection_deterministic_plus_llm_hint] when the keeper has
+      [llm_rerank_enabled = true] and the per-turn TopK_llm path
+      decorated the deterministic selection with an LLM-reranked hint.
+    - [Selection_core_plus_prefilter_plus_discovered] when the keeper
+      relies on the deterministic prefilter + discovered-tool union
+      only (no LLM rerank for this turn).
+
+    Disambiguated as [tool_selection_mode] (the [Keeper_skill_routing]
+    and [Keeper_alerting] modules each own their own [selection_mode]
+    sum type unrelated to tool-surface composition). *)
+type tool_selection_mode =
+  | Selection_deterministic_plus_llm_hint
+  | Selection_core_plus_prefilter_plus_discovered
+
+val tool_selection_mode_to_string : tool_selection_mode -> string
+val tool_selection_mode_of_string : string -> tool_selection_mode option
+val tool_selection_mode_to_yojson : tool_selection_mode -> Yojson.Safe.t
+
 (** Classification of the per-turn tool surface.  Closed sum type; the
     OCaml side mirrors the RFC-0065 §3.2.2 KeeperToolSurface
     SurfaceClassSet ({"none", "public_only", "mixed"}).
@@ -91,7 +113,7 @@ type computed_tool_surface =
   ; deterministic_prefilter_count : int
   ; discovered_count : int
   ; llm_selected_count : int
-  ; selection_mode : string
+  ; selection_mode : tool_selection_mode
   ; is_last_turn : bool
   ; is_warning_zone : bool
   ; tool_surface_class : tool_surface_class

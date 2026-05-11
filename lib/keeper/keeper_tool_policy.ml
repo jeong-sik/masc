@@ -374,7 +374,7 @@ let preset_allowlist preset =
     ~on_none:(fun () ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_tool_policy_failures
-        ~labels:[("site", "policy_config_not_loaded"); ("preset", name)]
+        ~labels:[("site", Tool_policy_failure_site.(to_label Policy_config_not_loaded)); ("preset", name)]
         ();
       Log.Keeper.error
         "tool policy config not loaded; preset '%s' returns empty. \

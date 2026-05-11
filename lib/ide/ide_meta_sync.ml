@@ -36,8 +36,7 @@ let stamp_tool_name ~tool_name (regions : code_region list) : code_region list =
   List.map
     (fun (region : code_region) ->
        match region.source with
-       | Tool_call { turn; _ } ->
-         { region with source = Tool_call { tool_name; turn } }
+       | Tool_call { turn; _ } -> { region with source = Tool_call { tool_name; turn } }
        | Manual _ -> region)
     regions
 ;;
@@ -53,7 +52,8 @@ let extract_regions_from_tool_call
   =
   let raw =
     match diff_text, full_content with
-    | Some diff, _ -> extract_regions_from_diff ~keeper_id ~file_path ~turn ~diff_text:diff
+    | Some diff, _ ->
+      extract_regions_from_diff ~keeper_id ~file_path ~turn ~diff_text:diff
     | None, Some content ->
       let region = extract_region_from_full_file ~keeper_id ~file_path ~turn ~content in
       [ region ]

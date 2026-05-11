@@ -75,15 +75,16 @@ let init_config_root config_dir =
   mkdir_p (Filename.concat config_dir "keepers");
   mkdir_p (Filename.concat config_dir "personas")
 
-let repo_toml_path () =
-  match Sys.getenv_opt "MASC_CASCADE_TOML_PATH" with
-  | Some path when String.trim path <> "" -> path
-  | _ -> failwith "MASC_CASCADE_TOML_PATH not set"
-
-let repo_json_path () =
-  match Sys.getenv_opt "MASC_CASCADE_JSON_PATH" with
-  | Some path when String.trim path <> "" -> path
-  | _ -> failwith "MASC_CASCADE_JSON_PATH not set"
+(* Removed alongside the JSON-match invariant tests (RFC-0058 §9):
+   - [repo_toml_path] / [repo_json_path] helpers
+   - [render_or_fail], [model_names_for_profile],
+     [model_entry_for_profile], [supports_tool_choice_for_profile]
+   These keyed off the pre-RFC-0058 cascade.json shape
+   ([<name>_models] arrays) and the [MASC_CASCADE_JSON_PATH] env var
+   that the now-deleted byte-equality stanza injected. Note that
+   [MASC_CASCADE_TOML_PATH] still exists project-wide (e.g.
+   [test_cascade_config_validity.inc] uses it) — only the JSON-keyed
+   helpers and the JSON env var are gone from this suite. *)
 
 let minimal_toml =
   {|
@@ -91,105 +92,14 @@ let minimal_toml =
 models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
 |}
 
-let render_or_fail toml_path =
-  match Masc_mcp.Cascade_toml_materializer.render_toml_file_to_json_string toml_path with
-  | Ok rendered -> rendered
-  | Error msg -> failf "unexpected TOML render failure: %s" msg
-
-let model_names_for_profile json profile_name =
-  json
-  |> member (profile_name ^ "_models")
-  |> to_list
-  |> List.map (function
-       | `String model -> model
-       | value -> value |> member "model" |> to_string)
-
-let model_entry_for_profile json profile_name model_name =
-  json
-  |> member (profile_name ^ "_models")
-  |> to_list
-  |> List.find_opt (function
-       | `String model -> String.equal model model_name
-       | value -> String.equal (value |> member "model" |> to_string) model_name)
-
-let supports_tool_choice_for_profile json profile_name model_name =
-  match model_entry_for_profile json profile_name model_name with
-  | None -> failf "%s missing from %s models" model_name profile_name
-  | Some (`String _) -> None
-  | Some value -> (
-      match value |> member "supports_tool_choice" with
-      | `Null -> None
-      | `Bool enabled -> Some enabled
-      | other ->
-          failf "unexpected supports_tool_choice value for %s/%s: %s"
-            profile_name model_name (Yojson.Safe.to_string other))
-
-let test_repo_seed_uses_two_profiles_plus_routes () =
-  let rendered = render_or_fail (repo_toml_path ()) |> Yojson.Safe.from_string in
-  let expect_profile_models profile_name expected =
-    check (list string) (profile_name ^ " models")
-      expected
-      (model_names_for_profile rendered profile_name)
-  in
-  expect_profile_models "big_three"
-    [
-      "codex_cli:gpt-5.3-codex-spark";
-      "gemini_cli:auto";
-      "kimi_cli:kimi-for-coding";
-      "glm-coding:auto";
-      "claude_code:auto";
-    ];
-  expect_profile_models "tool_rerank"
-    [
-      "codex_cli:gpt-5.3-codex-spark";
-      "gemini_cli:auto";
-      "kimi_cli:kimi-for-coding";
-      "glm-coding:auto";
-      "claude_code:auto";
-    ];
-  check (option bool) "big_three GLM declares tool choice support"
-    (Some true)
-    (supports_tool_choice_for_profile rendered "big_three" "glm-coding:auto");
-  check (option bool) "__safe_lane GLM declares tool choice support"
-    (Some true)
-    (supports_tool_choice_for_profile rendered "__safe_lane" "glm-coding:auto");
-  check (option bool) "tier_fast GLM 5 turbo declares tool choice support"
-    (Some true)
-    (supports_tool_choice_for_profile rendered "tier_fast"
-       "glm-coding:glm-5-turbo");
-  check (option bool) "tier_fast GLM 4.7 flashx declares tool choice support"
-    (Some true)
-    (supports_tool_choice_for_profile rendered "tier_fast"
-       "glm-coding:glm-4.7-flashx");
-  check bool "default profile removed" true
-    (match rendered |> member "default_models" with `Null -> true | _ -> false);
-  check bool "governance profile removed" true
-    (match rendered |> member "governance_judge_models" with `Null -> true | _ -> false);
-  check bool "operator profile removed" true
-    (match rendered |> member "operator_judge_models" with `Null -> true | _ -> false);
-  let routes = rendered |> member "routes" in
-  let route_keys =
-    match routes with
-    | `Assoc fields -> fields |> List.map fst |> List.sort String.compare
-    | _ -> []
-  in
-  check (list string) "repo seed routes cover known logical uses"
-    (Masc_mcp.Cascade_routes.known_route_keys |> List.sort String.compare)
-    route_keys;
-  check string "governance route" "big_three"
-    (routes |> member "governance_judge" |> to_string);
-  check string "operator route" "big_three"
-    (routes |> member "operator_judge" |> to_string);
-  check string "rerank route" "tool_rerank"
-    (routes |> member "llm_rerank" |> to_string);
-  check string "simple task route" "tier_small"
-    (routes |> member "simple_task" |> to_string);
-  check string "moderate task route" "tier_medium"
-    (routes |> member "moderate_task" |> to_string);
-  check string "complex task route" "big_three"
-    (routes |> member "complex_task" |> to_string);
-  check bool "tool_rerank is system-only" false
-    (rendered |> member "tool_rerank_keeper_assignable" |> to_bool)
+(* RFC-0058 §9: legacy profile-shape assertions on the repo seed
+   (big_three / tool_rerank / __safe_lane / tier_fast / default_models)
+   referred to the pre-RFC-0058 flat cascade.json shape.  After PR #14550
+   migrated cascade.toml to the 5-layer declarative schema those names
+   no longer exist as top-level [<name>] tables in TOML.  The legacy
+   assertion was dropped along with the JSON-match invariant — the
+   declarative parser/validator/adapter test suites cover the same
+   ground for the new schema. *)
 
 let test_routes_table_is_parsed () =
   match
@@ -243,11 +153,12 @@ models = ["gemini_cli:auto"]
              | Ok names -> names
              | Error msg -> failf "section fallback failed: %s" msg))
 
-let test_repo_toml_renders_to_committed_json () =
-  let rendered = render_or_fail (repo_toml_path ()) in
-  check string "repo cascade json stays in sync with toml"
-    (read_file (repo_json_path ()))
-    rendered
+(* RFC-0058 §9: the JSON↔TOML byte-equality round-trip was the SSOT
+   anchor for the pre-RFC-0058 cascade.json file.  §9 declares that
+   "cascade.json [is] no longer generated or consumed"; re-asserting the
+   round-trip would re-anchor the to-be-removed file as ground truth.
+   Consumer migration to in-memory materialization continues in follow-up
+   PRs; this drop unblocks main without committing a JSON regen. *)
 
 let test_fallback_cascade_field_is_parsed () =
   match
@@ -634,13 +545,6 @@ models = [
 let () =
   run "cascade_toml_materialization"
     [
-      ( "repo_sync",
-        [
-          test_case "repo toml renders to committed json" `Quick
-            test_repo_toml_renders_to_committed_json;
-          test_case "repo seed uses two profiles plus routes" `Quick
-            test_repo_seed_uses_two_profiles_plus_routes;
-        ] );
       ( "validation",
         [
           test_case "unknown profile field is rejected" `Quick

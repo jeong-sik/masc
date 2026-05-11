@@ -10,8 +10,12 @@ val create :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   ?network_mode:Keeper_types.network_mode ->
+  turn_id:int ->
   unit ->
   t
+
+val turn_id : t -> int
+val host_root : t -> string
 
 val cleanup : t -> unit
 (** Best-effort teardown. Safe to call multiple times. *)

@@ -32,6 +32,8 @@
         test_keeper_turn_disposition
         test_keeper_turn_terminal_disposition_field
         test_attempt_state
+        test_actor_mailbox
+        test_domain_pool
         test_sse test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -208,6 +210,7 @@
         test_tool_deep_review
         test_tool_call_quality_benchmark
         test_keeper_prompt_metrics
+        test_keeper_provider_health
         test_cache_metrics_wiring
         test_tool_surface_ssot
         test_keeper_retrieval_quality
@@ -218,6 +221,8 @@
         test_cascade_toml_section_fallback_10259
         test_cascade_declarative_parser
         test_cascade_declarative_validator
+        test_cascade_declarative_adapter
+        test_cascade_declarative_hotpath
         test_doctor_dispatch
         test_disk_hygiene_script
         test_run_local_script
@@ -267,6 +272,8 @@
           test_keeper_turn_disposition
           test_keeper_turn_terminal_disposition_field
           test_attempt_state
+          test_actor_mailbox
+          test_domain_pool
           test_sse test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
@@ -444,6 +451,7 @@
           test_tool_deep_review
           test_tool_call_quality_benchmark
           test_keeper_prompt_metrics
+          test_keeper_provider_health
           test_cache_metrics_wiring
           test_tool_surface_ssot
           test_keeper_retrieval_quality
@@ -454,6 +462,8 @@
           test_cascade_toml_section_fallback_10259
           test_cascade_declarative_parser
           test_cascade_declarative_validator
+          test_cascade_declarative_adapter
+          test_cascade_declarative_hotpath
           test_doctor_dispatch
           test_disk_hygiene_script
           test_run_local_script
@@ -666,6 +676,7 @@
         test_transport_metrics
         test_adaptive_cache_ttl
         test_keeper_compact_audit
+        test_keeper_telemetry_consumer
         test_oas_bus_instrument
         test_trajectory
         test_eval_gate
@@ -874,6 +885,7 @@
         test_transport_metrics
         test_adaptive_cache_ttl
         test_keeper_compact_audit
+        test_keeper_telemetry_consumer
         test_oas_bus_instrument
         test_trajectory
         test_eval_gate
@@ -1214,6 +1226,7 @@
 (include stanzas/test_keeper_fs_write_containment.inc)
 (include stanzas/test_keeper_gh_timeout_floor.inc)
 (include stanzas/test_keeper_identity_drift_counter.inc)
+(include stanzas/test_keeper_invariant.inc)
 (include stanzas/test_keeper_long_turn_9943.inc)
 (include stanzas/test_keeper_memory_bank_consensus_re_10399.inc)
 (include stanzas/test_keeper_meta_canonical_seed.inc)

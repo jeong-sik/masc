@@ -317,6 +317,11 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     ~base_path:(Env_config.base_path ())
     ~retention_days:14
     event_bus;
+  (* Telemetry feedback loop: consume OAS per-turn signals into
+     per-(provider,model) EWMA health state.  See
+     lib/keeper/keeper_provider_health.ml for the aggregator and
+     lib/keeper/keeper_telemetry_consumer.ml for the subscriber. *)
+  Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk_metrics_bridge.subscribe
       ~purpose:"lifecycle_listener"

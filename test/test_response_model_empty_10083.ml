@@ -69,6 +69,8 @@ let make_telemetry ?canonical_model_id () : Agent_sdk.Types.inference_telemetry 
     canonical_model_id;
     effective_context_window = None;
     provider_internal_action_count = None;
+    ttfrc_ms = None;
+    prefill_ms = None;
   }
 
 (* Raw model is non-empty — resolver must return it verbatim and

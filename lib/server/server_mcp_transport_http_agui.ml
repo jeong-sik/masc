@@ -74,6 +74,7 @@ let handle_ag_ui_events ~deps request reqd =
       let client_id, event_stream, evicted =
         Sse.register ~kind:Sse.Observer session_id
           ~last_event_id:(Option.value ~default:0 last_event_id)
+          ~on_disconnect:(fun () -> stop_sse_session session_id)
       in
       (match evicted with
       | Some evicted_sid -> stop_sse_session evicted_sid
@@ -184,6 +185,8 @@ let handle_presence_events ~deps request reqd =
           let mutex = Eio.Mutex.create () in
           let client_id, event_stream, evicted =
             Sse.register ~kind:Sse.Presence session_id ~last_event_id:0
+              ~on_disconnect:(fun () ->
+                stop_sse_session_preserve_guard session_id)
           in
           (match evicted with
           | Some evicted_sid -> stop_sse_session evicted_sid

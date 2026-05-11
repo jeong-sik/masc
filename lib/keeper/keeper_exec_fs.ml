@@ -229,6 +229,17 @@ let validate_write_target ~config ~meta ~target =
   | Ok () -> Ok ()
   | Error e -> Error (error_json ~fields:[ "path", `String target ] e)
 
+
+let check_invariant_sandbox_isolation ~(turn_sandbox_factory : Keeper_sandbox_factory.t option) ~target =
+  match turn_sandbox_factory with
+  | None -> Ok ()
+  | Some factory ->
+    let cwd = Filename.dirname target in
+    (match Keeper_sandbox_factory.resolve_opt (Some factory) ~cwd with
+     | None -> Ok ()
+     | Some runtime ->
+       let host_root = Keeper_turn_sandbox_runtime.host_root runtime in
+       Keeper_invariant.sandbox_isolation ~sandbox_roots:[host_root] ~sandbox_paths:[target])
 let handle_keeper_fs_edit
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
@@ -269,6 +280,9 @@ let handle_keeper_fs_edit
        | Ok target ->
          (match validate_write_target ~config ~meta ~target with
           | Error json -> json
+          | Ok () ->
+         (match check_invariant_sandbox_isolation ~turn_sandbox_factory ~target with
+          | Error msg -> error_json ~fields:[ "path", `String target ] msg
           | Ok () ->
          (match Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
             ~base_path:(Keeper_alerting_path.project_root_of_config config)
@@ -335,7 +349,7 @@ let handle_keeper_fs_edit
           | Sys_error e -> error_json ~fields:[ "path", `String target ] e
           | Unix.Unix_error (err, _, _) ->
             error_json ~fields:[ "path", `String target ]
-              (Unix.error_message err)))))
+              (Unix.error_message err))))))
   | Some ((Overwrite | Append) as mode) ->
   let mode_label = fs_write_mode_to_string mode in
   if String.trim content = "" then
@@ -346,6 +360,9 @@ let handle_keeper_fs_edit
   | Ok target ->
     (match validate_write_target ~config ~meta ~target with
      | Error json -> json
+     | Ok () ->
+    (match check_invariant_sandbox_isolation ~turn_sandbox_factory ~target with
+     | Error msg -> error_json ~fields:[ "path", `String target ] msg
      | Ok () ->
     (match Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
        ~base_path:(Keeper_alerting_path.project_root_of_config config)
@@ -402,5 +419,4 @@ let handle_keeper_fs_edit
     | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
      | Sys_error e -> error_json ~fields:[ "path", `String target ] e
      | Unix.Unix_error (err, _, _) ->
-       error_json ~fields:[ "path", `String target ] (Unix.error_message err))))
-;;
+       error_json ~fields:[ "path", `String target ] (Unix.error_message err)))))

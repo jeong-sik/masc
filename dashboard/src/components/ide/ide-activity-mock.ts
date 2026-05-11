@@ -8,28 +8,10 @@ import {
   type RunActivityVerb,
 } from './run-activity-store'
 
-const KIND_TO_VERB: Readonly<Record<string, RunActivityVerb>> = {
-  'task.created': 'noted',
-  'task.claimed': 'flagged',
-  'task.started': 'edited',
-  'task.released': 'noted',
-  'task.done': 'committed',
-  'task.cancelled': 'noted',
-  'task.submit_for_verification': 'noted',
-  'task.approved': 'approved',
-  'task.rejected': 'flagged',
-  'task.linked': 'noted',
-  'message.broadcast': 'commented on',
-  'message.mentioned': 'asked on',
-  'board.posted': 'noted',
-  'board.commented': 'commented on',
-  'board.voted': 'noted',
-  'board.deleted': 'noted',
-  'keeper.turn_completed': 'committed',
-  'keeper.contract_verdict': 'noted',
-  'keeper.friction': 'flagged',
-  'keeper.operator_broadcast_required': 'asked on',
-  'episode.flush': 'noted',
+const FALLBACK_VERB_MAP: Readonly<Record<string, RunActivityVerb>> = {
+  approved: 'approved',
+  committed: 'committed',
+  flagged: 'flagged',
 }
 const DEFAULT_VERB: RunActivityVerb = 'noted'
 
@@ -55,7 +37,8 @@ const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 const DEFAULT_ROOM_ID = 'run-default'
 
 function verbFromKind(kind: string): RunActivityVerb {
-  return KIND_TO_VERB[kind] ?? DEFAULT_VERB
+  const tail = kind.includes(".") ? kind.slice(kind.lastIndexOf(".") + 1) : kind
+  return FALLBACK_VERB_MAP[tail] ?? DEFAULT_VERB
 }
 
 function targetFromSubject(subject: ApiActivityEvent['subject']): string {

@@ -414,9 +414,9 @@ function FieldWidget({ id, field, value, revealed }: {
       `
     default:
       return html`
-        <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--color-status-warn)]">
+        <${SurfaceCard} class="!border-[var(--warn-20)] !bg-[var(--warn-10)] !px-2 !py-1 text-3xs text-[var(--color-status-warn)]">
           unsupported type — refactor BotConfig?
-        </div>
+        </${SurfaceCard}>
       `
   }
 }
@@ -545,7 +545,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               const hint = getFieldHint(field.name)
               if (hint === null) return null
               return html`
-                <div class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
+                <${SurfaceCard} class="!border-[var(--accent-20)] !bg-[var(--accent-10)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
                   <span class="mr-1" aria-hidden="true">📍</span>
                   <span>${hint.where}</span>
                   ${hint.url
@@ -558,7 +558,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                         >열기 ↗</a>
                       `
                     : null}
-                </div>
+                </${SurfaceCard}>
               `
             })()}
           </div>

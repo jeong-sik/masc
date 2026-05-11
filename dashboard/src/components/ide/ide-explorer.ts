@@ -317,6 +317,23 @@ function SourceHint(source: WorkspaceSource) {
   `
 }
 
+function fileIcon(node: FileTreeNode, expanded: boolean): string {
+  if (node.hasChildren) return expanded ? '📂' : '📁'
+  const dot = node.label.lastIndexOf('.')
+  const ext = dot >= 0 ? node.label.slice(dot) : ''
+  const ICONS: Readonly<Record<string, string>> = {
+    '.ts': '🟦', '.tsx': '🟦',
+    '.js': '🟨', '.jsx': '🟨',
+    '.py': '🐍',
+    '.ml': '🐫', '.mli': '🐫',
+    '.rs': '🦀', '.go': '🔵',
+    '.json': '📋', '.md': '📝',
+    '.html': '🌐', '.css': '🎨',
+    '.toml': '⚙️', '.yaml': '⚙️', '.yml': '⚙️',
+  }
+  return ICONS[ext] ?? '📄'
+}
+
 function TreeRow(node: FileTreeNode, expanded: boolean, selected: boolean, onClick: () => void) {
   const indent = node.depth * 12
   const chevron = node.hasChildren ? (expanded ? '▾' : '▸') : ''
@@ -342,7 +359,7 @@ function TreeRow(node: FileTreeNode, expanded: boolean, selected: boolean, onCli
       <span aria-hidden="true" style=${{ color: 'var(--color-fg-muted)', width: '12px', textAlign: 'center' }}>${chevron}</span>
       ${node.keeperId
         ? html`<${KeeperBadge} id=${node.keeperId} variant="sigil" size="sm" />`
-        : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px' }} />`}
+        : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px', textAlign: 'center', fontSize: '12px', lineHeight: '14px' }}>${fileIcon(node, expanded)}</span>`}
       <span class="ide-explorer-row-label">${node.label}</span>
       ${node.diff !== null
         ? html`<span style=${{ color: 'var(--color-fg-muted)', font: 'var(--fs-11)' }}>${node.diff}</span>`

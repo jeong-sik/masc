@@ -148,10 +148,20 @@ let record_turn_start ~(keeper : string) ~(turn_id : int) : start_outcome =
   record_started_metrics ~keeper outcome
 
 let guard_and_record_turn_start ?(now = now_unix) ~(keeper : string)
-    ~(turn_id : int) ~(max_attempts : int) ~(stuck_after_sec : float) () :
+    ~(turn_id : int) ~(max_attempts : int) ~(stuck_after_sec : float)
+    ?(provider : string option) ?(model : string option) () :
     guarded_start_outcome =
   let max_attempts = Int.max 1 max_attempts in
   let stuck_after_sec = Float.max 0.0 stuck_after_sec in
+  (* Heuristic: if the model is known-unhealthy, halve the stuck threshold
+     so the livelock gate reacts faster.  This is a best-effort signal:
+     the exact provider is not resolved until turn dispatch. *)
+  let stuck_after_sec =
+    match model with
+    | Some m when Keeper_provider_health.is_any_unhealthy_for_model ~model:m ->
+        stuck_after_sec *. 0.5
+    | _ -> stuck_after_sec
+  in
   let now_value = now () in
   let outcome =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->

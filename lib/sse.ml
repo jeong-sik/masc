@@ -204,8 +204,20 @@ let event_counter = Atomic.make 0
     [event_buffer] is written by every [broadcast_impl] / [send_to] and
     drained by the periodic [cleanup_expired_events] background fiber.
     The buffer is a newest-first persistent list behind [Atomic.t];
-    all mutations are pure list rewrites committed via CAS. *)
-let max_buffer_size = 100
+    all mutations are pure list rewrites committed via CAS.
+
+    Read from [MASC_SSE_REPLAY_BUFFER_SIZE] (default 1000, clamped 50..1000).
+    Sized to bound replay work for clients reconnecting with [Last-Event-Id]
+    after a network blip; previously fixed at 100, which was too small to
+    cover transient disconnects under 64+ keeper broadcast load and forced
+    operators to manually refresh the dashboard.  The upper bound matches
+    [test/test_sse_coverage.ml] expectations. *)
+let max_buffer_size =
+  let default = 1000 in
+  let lower = 50 and upper = 1000 in
+  let clamp n = max lower (min upper n) in
+  clamp
+    (Env_config_core.get_int ~default "MASC_SSE_REPLAY_BUFFER_SIZE")
 let buffer_ttl_seconds = Env_config.InternalTimers.sse_buffer_ttl_sec
 let event_buffer : (int * string * float) list Atomic.t = Atomic.make []
 
@@ -362,17 +374,70 @@ let next_id () =
   (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
   Atomic.fetch_and_add event_counter 1 + 1
 
+(** Per-session disconnect hook registry.
+
+    A disconnect hook fires when [unregister] / [unregister_if_current]
+    removes a session from [clients].  Its purpose is to wake the
+    transport-layer drain fiber that is otherwise blocked on
+    [Eio.Stream.take]: removing the session from the broadcast registry
+    stops new events from arriving, but the drain fiber holds the HTTP
+    connection's [info.stop] flag and must be signalled separately.
+
+    Without this hook, queue-overflow [unregister] calls (broadcast skip
+    fixup at [broadcast_impl]) leak HTTP connections with stale drain
+    fibers — manifesting as "WS events stop arriving but the browser
+    still shows connected" until keep-alive timeout reaps the socket
+    minutes later.  This was the silent half of the
+    [Transport_metrics.inc_broadcast_failure] path.
+
+    The hook is invoked exactly once: it is removed from the registry
+    inside the same atomic update that observes its presence, so even
+    racing [unregister] / [unregister_if_current] calls cannot double-fire.
+    Hook callbacks are wrapped in try/with — exceptions are logged and
+    swallowed (except [Eio.Cancel.Cancelled]) so a misbehaving callback
+    cannot strand the broadcast fan-out. *)
+let session_disconnect_hooks : (unit -> unit) SMap.t Atomic.t =
+  Atomic.make SMap.empty
+
+let set_disconnect_hook session_id hook =
+  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
+    { next_state = SMap.add session_id hook map; result = () })
+
+let clear_disconnect_hook session_id =
+  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
+    { next_state = SMap.remove session_id map; result = () })
+
+let take_disconnect_hook session_id =
+  let hook_ref = ref None in
+  Lockfree_atomic.update_with_commit session_disconnect_hooks (fun map ->
+    match SMap.find_opt session_id map with
+    | None -> { next_state = map; result = () }
+    | Some hook ->
+        hook_ref := Some hook;
+        { next_state = SMap.remove session_id map; result = () });
+  !hook_ref
+
+let invoke_disconnect_hook_for session_id =
+  match take_disconnect_hook session_id with
+  | None -> ()
+  | Some hook ->
+      (try hook () with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Server.error "SSE disconnect hook failed for %s: %s"
+             session_id (Printexc.to_string exn))
+
 (** Register a new SSE client.
     Returns (client_id, event_stream, evicted_session_id option).
-    The caller should spawn a fiber that drains [event_stream] and
-    writes events to the transport.  Evicts the oldest client when at
-    capacity.  The client stream/id are allocated once; map installation
-    is linearized via CAS over the immutable registry state.
-    [kind] defaults to [Coordinator] for backward compatibility. *)
-let register ?(kind = Coordinator) session_id ~last_event_id =
+    [?on_disconnect], if supplied, is installed BEFORE the client is
+    published to [clients] — closes the race window where a concurrent
+    [broadcast] could observe the new entry, hit queue overflow, fire
+    [unregister], and find no hook to wake the drain fiber. *)
+let register ?(kind = Coordinator) ?on_disconnect session_id ~last_event_id =
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
   let last_event_id = Atomic.make last_event_id in
   let event_stream = Eio.Stream.create stream_capacity in
+  Option.iter (fun hook -> set_disconnect_hook session_id hook) on_disconnect;
   let base_client = {
     id = client_id;
     kind;
@@ -424,7 +489,14 @@ let register ?(kind = Coordinator) session_id ~last_event_id =
   (match evicted with
    | Some sid ->
        Transport_metrics.inc_sse_client_evicted ();
-       Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients
+       Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients;
+       (* Eviction is a form of disconnect: the broadcast-registry entry
+          is gone, so the evicted session's drain fiber will block on
+          [Eio.Stream.take] forever unless we wake it.  Callers also
+          invoke [stop_sse_session evicted_sid] explicitly today (legacy
+          path); that double-invocation is idempotent because
+          [close_sse_conn] guards on [info.closed]. *)
+       invoke_disconnect_hook_for sid
    | None ->
        ());
   sync_transport_snapshot ();
@@ -456,8 +528,20 @@ let unregister session_id =
           result = false;
         })
   in
-  if removed then
+  if removed then begin
+    (* Invoke the per-session disconnect hook BEFORE [sync_transport_snapshot].
+       The hook typically calls back into [Server_mcp_transport_http_conn.
+       stop_sse_session], which closes the HTTP body writer and re-enters
+       [unregister_if_current].  That re-entry is a no-op here because we
+       already removed the entry above, so there is no double-decrement risk
+       and no infinite-loop risk.  Snapshot recording is sequenced AFTER the
+       hook so observers see [info.closed = true] in the same tick. *)
+    invoke_disconnect_hook_for session_id;
     sync_transport_snapshot ()
+  end else
+    (* Even on no-op unregister we still clear any orphaned hook to avoid
+       slow leaks across reconnects.  [clear_disconnect_hook] is idempotent. *)
+    clear_disconnect_hook session_id
 
 (** Unregister only if the current client matches the given client_id.
     Prevents an old connection's cleanup from unregistering a newer connection
@@ -483,8 +567,11 @@ let unregister_if_current session_id client_id =
             result = false;
           })
   in
-  if removed then
+  if removed then begin
+    (* See [unregister] for the hook ordering rationale. *)
+    invoke_disconnect_hook_for session_id;
     sync_transport_snapshot ()
+  end
 
 (** Check if client exists *)
 let exists session_id =
@@ -750,11 +837,23 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
          See TLA+ SSEBroadcastBlock spec. *)
       (let queue_len = Eio.Stream.length client.event_stream in
        if queue_len >= stream_capacity then begin
-         (* P1 silent-failure fix: previously only logged.  Counter
-            lets operators see "all clients backlogged" as a Prometheus
-            rate, distinct from successful broadcasts. *)
+         (* Tier-A perf fix: queue overflow is now a {b disconnect}
+            signal, not a silent drop.  The session is added to
+            [failed] (so [unregister] runs below); the disconnect hook
+            installed at register-time wakes the drain fiber via
+            [stop_sse_session], closing the HTTP writer.  The client's
+            EventSource will reconnect with [Last-Event-Id]; the bumped
+            [max_buffer_size] (1000 vs. previous 100) covers the gap.
+
+            Previously the [unregister] removed the broadcast entry but
+            left the drain fiber blocked on [Eio.Stream.take], holding
+            the HTTP socket open until keep-alive timeout — operators
+            saw "WS events stop arriving" with no error indication and
+            had to manually refresh.  See plan
+            [planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-radiant-piglet.md]. *)
          Transport_metrics.inc_broadcast_failure ~target:target_label ();
-         Log.Server.warn "Broadcast skip: session %s stream full (%d/%d)"
+         Log.Server.warn
+           "Broadcast skip: session %s stream full (%d/%d) — disconnecting"
            session_id queue_len stream_capacity;
          failed := session_id :: !failed
        end else

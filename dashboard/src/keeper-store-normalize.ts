@@ -8,6 +8,7 @@ import type {
   KeeperTrustTerminalReason,
   PipelineStage,
   PromptTelemetry,
+  ProviderHealth,
 } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
@@ -360,6 +361,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         reasoning_tokens: asNumber(rawTel.reasoning_tokens) ?? null,
         peak_memory_gb: asNumber(rawTel.peak_memory_gb) ?? null,
         request_latency_ms: asNumber(rawTel.request_latency_ms) ?? null,
+        ttfrc_ms: asNumber(rawTel.ttfrc_ms) ?? null,
+        prefill_ms: asNumber(rawTel.prefill_ms) ?? null,
       } : null
       const cascadeObj = isRecord(item.cascade) ? item.cascade : null
       const fallbackEvents = cascadeObj && Array.isArray(cascadeObj.fallback_events) ? cascadeObj.fallback_events : []
@@ -506,6 +509,20 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
             }
           : undefined
 
+      const rawProviderHealth = isRecord(row.provider_health) ? row.provider_health : null
+      const providerHealth: ProviderHealth | null =
+        rawProviderHealth != null
+          ? {
+              provider: asString(rawProviderHealth.provider) ?? '',
+              model: asString(rawProviderHealth.model) ?? '',
+              status: (asString(rawProviderHealth.status) as ProviderHealth['status']) ?? 'healthy',
+              ttfrc_ms_ewma: asNumber(rawProviderHealth.ttfrc_ms_ewma) ?? 0,
+              timeout_count_5m: asNumber(rawProviderHealth.timeout_count_5m) ?? 0,
+              prefill_ms_ewma: asNumber(rawProviderHealth.prefill_ms_ewma) ?? 0,
+              last_updated: asNumber(rawProviderHealth.last_updated) ?? 0,
+            }
+          : null
+
       return {
         name,
         runtime_class: 'keeper' as const,
@@ -649,6 +666,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
         agent: normalizedAgent,
+        provider_health: providerHealth,
       }
     })
     .filter((row): row is Keeper => row !== null)

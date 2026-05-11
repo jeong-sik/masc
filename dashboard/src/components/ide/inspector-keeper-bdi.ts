@@ -5,6 +5,12 @@ import { activeKeeperName } from '../../keeper-state'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
+// Imported from `./ide-state` rather than `./ide-shell` to avoid the
+// circular dependency `ide-shell -> inspector-keeper-bdi -> ide-shell`
+// (which also drags `router` and other window-touching side effects
+// into this module's tests).
+import { activeIdeFile } from './ide-state'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 
 export interface KeeperBdiTokenSpend {
@@ -226,8 +232,22 @@ export function InspectorKeeperBDI({
     knownBdiKeys.current = bridgeBdiSnapshotsToTrace([snapshot], knownBdiKeys.current)
   }, [snapshot])
 
+  const cursor = cursorOverlaySignal.value.cursors.get(keeperName)
+  // The SSE adapter defaults a missing `line` to 0 (see
+  // `keeper-cursor-overlay.ts::connectKeeperCursorStream` —
+  // `line: entry.line || 0`), so requiring a 1-based line here avoids
+  // labels like `foo.ts:0` and prevents click-to-navigate firing for
+  // placeholder cursors.
+  const hasValidFocus = !!cursor?.file_path && typeof cursor.line === 'number' && cursor.line >= 1
+  const focusLabel = hasValidFocus
+    ? `${cursor!.file_path.split('/').pop()}:${cursor!.line}`
+    : null
   const tokenRows = snapshot?.recent_token_spend ?? []
   const lastTool = snapshot?.last_tool_call ?? null
+
+  const navigateToFocus = (): void => {
+    if (hasValidFocus && cursor) activeIdeFile.value = cursor.file_path
+  }
 
   return html`
     <section
@@ -242,13 +262,38 @@ export function InspectorKeeperBDI({
         minHeight: '180px',
       }}
     >
-      <header style=${{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-2)' }}>
+      <header style=${{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
         <h3 style=${{ margin: 0, font: 'var(--type-eyebrow)', color: 'var(--color-fg-primary)' }}>
           Keeper BDI
         </h3>
         <span style=${{ color: 'var(--color-accent-fg)', fontSize: 'var(--fs-12)' }}>
           ${keeperName || '—'}
         </span>
+        ${focusLabel ? html`
+          <button
+            type="button"
+            data-testid="bdi-focus-label"
+            onClick=${navigateToFocus}
+            title=${cursor?.file_path ?? ''}
+            style=${{
+              color: 'var(--color-accent-fg)',
+              fontSize: 'var(--fs-11)',
+              maxWidth: '160px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+              borderRadius: 'var(--r-0)',
+              padding: '0 var(--sp-1)',
+              transition: 'background 0.15s',
+              background: 'transparent',
+              border: 'none',
+              font: 'inherit',
+              lineHeight: 'inherit',
+              textAlign: 'left',
+            }}
+          >${focusLabel}</button>
+        ` : null}
         ${pin?.line
           ? html`<span style=${{ marginLeft: 'auto', color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${pin.line}</span>`
           : null}

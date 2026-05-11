@@ -180,6 +180,23 @@ let read_file_in_container ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~
   match container_path_of_host ~config ~meta ~host_path with
   | Error _ as e -> e
   | Ok container_path ->
-    run_command_in_container ?turn_sandbox_factory ~config ~meta
-      ~command_argv:[ "cat"; container_path ]
-      ~max_bytes ~timeout_sec ()
+    (* Pre-flight: verify the host path exists before spawning a container.
+       This avoids wasteful docker runs that inevitably fail with
+       "No such file or directory", and lets us emit a precise error
+       that names the host path the keeper actually asked for. *)
+    if not (Sys.file_exists host_path) then
+      Error
+        (Printf.sprintf
+           "docker_cat_failed: path_not_found: %s (host path does not exist; verify the \
+            relative path under your playground before calling keeper_fs_read)"
+           host_path)
+    else if Sys.is_directory host_path then
+      Error
+        (Printf.sprintf
+           "docker_cat_failed: path_is_directory: %s (keeper_fs_read requires a file, \
+            not a directory; use keeper_shell op=ls for directory listings)"
+           host_path)
+    else
+      run_command_in_container ?turn_sandbox_factory ~config ~meta
+        ~command_argv:[ "cat"; container_path ]
+        ~max_bytes ~timeout_sec ()

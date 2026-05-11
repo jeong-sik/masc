@@ -159,19 +159,19 @@ let run_once ~base_path =
     results
 ;;
 
-let rec probe_loop ~base_path ~interval_sec () =
+let rec probe_loop ~base_path ~interval_sec ~clock () =
   (* Cancel-aware: Safe_ops.protect re-raises Eio.Cancel.Cancelled and swallows
      other exceptions so a transient registry I/O failure cannot kill the fiber
      and freeze [is_healthy] at [false] forever. *)
   Safe_ops.protect ~default:() (fun () -> run_once ~base_path);
-  Eio_unix.sleep interval_sec;
-  probe_loop ~base_path ~interval_sec ()
+  Eio.Time.sleep clock interval_sec;
+  probe_loop ~base_path ~interval_sec ~clock ()
 ;;
 
-let start_probe ~sw ~base_path ~interval_sec =
+let start_probe ~sw ~base_path ~interval_sec ~clock =
   if interval_sec <= 0.0
   then ()
   else
     Eio.Fiber.fork ~sw (fun () ->
-      Eio.Switch.run (fun _sw -> probe_loop ~base_path ~interval_sec ()))
+      Eio.Switch.run (fun _sw -> probe_loop ~base_path ~interval_sec ~clock ()))
 ;;

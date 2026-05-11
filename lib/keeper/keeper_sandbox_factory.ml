@@ -1,6 +1,7 @@
 type t = {
   config : Coord.config;
   meta : Keeper_types.keeper_meta;
+  turn_id : int;
   default_network_override : Keeper_types.network_mode option;
   cache :
     ((bool * string), Keeper_turn_sandbox_runtime.t) Hashtbl.t;
@@ -8,10 +9,11 @@ type t = {
 }
 
 let create ?default_network_override
-    ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) () =
+    ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) ?(turn_id = 0) () =
   {
     config;
     meta;
+    turn_id;
     default_network_override;
     cache = Hashtbl.create 4;
     mutex = Eio.Mutex.create ();
@@ -64,6 +66,7 @@ let resolve (t : t) ~cwd =
             ~config:t.config
             ~meta:t.meta
             ~network_mode:actual_network
+            ~turn_id:t.turn_id
             ()
         in
         Hashtbl.add t.cache key r;

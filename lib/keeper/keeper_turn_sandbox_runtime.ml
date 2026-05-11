@@ -8,6 +8,7 @@ type t =
   {
     config : Coord.config;
     meta : keeper_meta;
+    turn_id : int;
     host_root : string;
     container_root : string;
     uid : int;
@@ -16,11 +17,14 @@ type t =
     mutable state : state;
   }
 
+let turn_id t = t.turn_id
+let host_root t = t.host_root
+
 let normalize_path path =
   Keeper_alerting_path.normalize_path_for_check_stripped path
 
 let create ~(config : Coord.config) ~(meta : keeper_meta)
-    ?(network_mode = Network_none) () =
+    ?(network_mode = Network_none) ~turn_id () =
   let network_mode =
     if Env_config_keeper.KeeperSandbox.hard_mode () then
       Network_none
@@ -30,6 +34,7 @@ let create ~(config : Coord.config) ~(meta : keeper_meta)
   {
     config;
     meta;
+    turn_id;
     host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path;
     container_root =
       Keeper_sandbox.container_root meta.name
@@ -342,10 +347,22 @@ let cleanup (t : t) =
         Keeper_sandbox_runtime.docker_command_argv ()
         @ [ "rm"; "-f"; container_name ]
       in
-      let _st, _out =
+      let st, out =
         run_argv_with_status_retry_eintr
           ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec
                           ~bucket:Cleanup_rm ())
           argv
       in
+      (match st with
+      | Unix.WEXITED 0 -> ()
+      | _ ->
+          Log.Keeper.warn
+            "%s: docker rm -f %s failed (status=%s, out=%s)" t.meta.name
+            container_name
+            (match st with Unix.WEXITED n -> Printf.sprintf "exited(%d)" n | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
+            out;
+          Prometheus.inc_counter
+            Keeper_metrics.metric_keeper_turn_cleanup_failures
+            ~labels:[("keeper", t.meta.name); ("site", "docker_rm")]
+            ());
       ()

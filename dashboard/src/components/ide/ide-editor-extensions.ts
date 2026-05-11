@@ -378,6 +378,161 @@ const ocamlStreamParser: StreamParser<OcamlStreamState> = {
 
 const ocamlLanguage = StreamLanguage.define(ocamlStreamParser)
 
+// ── TOML StreamLanguage ──────────────────────────────
+
+interface TomlStreamState {
+  readonly inSection: boolean
+}
+
+const tomlStreamParser: StreamParser<TomlStreamState> = {
+  name: 'toml',
+  startState: () => ({ inSection: false }),
+  copyState: state => ({ ...state }),
+  languageData: {
+    name: 'toml',
+    commentTokens: { line: '#' },
+  },
+  token(stream, state) {
+    if (stream.eatSpace()) return null
+
+    if (stream.sol() && stream.peek() === '#') {
+      stream.skipToEnd()
+      return 'comment'
+    }
+
+    if (stream.sol() && stream.peek() === '[') {
+      stream.skipToEnd()
+      return 'heading'
+    }
+
+    if (stream.peek() === '=') {
+      stream.next()
+      return 'operator'
+    }
+
+    if (stream.peek() === '"' || stream.peek() === '\'') {
+      const quote = stream.next()!
+      let escaped = false
+      while (!stream.eol()) {
+        const ch = stream.next()!
+        if (escaped) { escaped = false; continue }
+        if (ch === '\\') { escaped = true; continue }
+        if (ch === quote) break
+      }
+      return 'string'
+    }
+
+    if (/[0-9\-]/.test(stream.peek() ?? '') && stream.match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/)) {
+      return 'number'
+    }
+
+    if (stream.match(/^true\b/) || stream.match(/^false\b/)) {
+      return 'atom'
+    }
+
+    if (stream.match(/^\d{4}-\d{2}-\d{2}/)) {
+      stream.eatWhile(/[T :\d.Z]/)
+      return 'number'
+    }
+
+    if (/[A-Za-z_]/.test(stream.peek() ?? '')) {
+      stream.eatWhile(/[A-Za-z0-9_.\-]/)
+      return state.inSection ? 'propertyName' : 'variableName'
+    }
+
+    stream.next()
+    return null
+  },
+}
+
+const tomlLanguage = StreamLanguage.define(tomlStreamParser)
+
+// ── YAML StreamLanguage ──────────────────────────────
+
+interface YamlStreamState {
+  inKey: boolean
+}
+
+const YAML_KEYWORDS = new Set(['true', 'false', 'null', '~', 'yes', 'no', 'on', 'off'])
+
+const yamlStreamParser: StreamParser<YamlStreamState> = {
+  name: 'yaml',
+  startState: () => ({ inKey: true }),
+  copyState: state => ({ ...state }),
+  languageData: {
+    name: 'yaml',
+    commentTokens: { line: '#' },
+  },
+  token(stream, state) {
+    if (stream.eatSpace()) return null
+
+    if (stream.peek() === '#') {
+      stream.skipToEnd()
+      return 'comment'
+    }
+
+    if (stream.sol() && (stream.match(/^---/) || stream.match(/^\.\.\./))) {
+      stream.eatSpace()
+      return 'operator'
+    }
+
+    if (stream.sol() && stream.peek() === '-') {
+      stream.next()
+      if (stream.eatSpace()) return 'operator'
+    }
+
+    if (stream.peek() === '"' || stream.peek() === '\'') {
+      const quote = stream.next()!
+      let escaped = false
+      while (!stream.eol()) {
+        const ch = stream.next()!
+        if (escaped) { escaped = false; continue }
+        if (ch === '\\') { escaped = true; continue }
+        if (ch === quote) break
+      }
+      state.inKey = false
+      return 'string'
+    }
+
+    if (stream.peek() === ':') {
+      stream.next()
+      if (stream.eatSpace()) {
+        state.inKey = true
+        return 'operator'
+      }
+      return null
+    }
+
+    if (/[0-9\-]/.test(stream.peek() ?? '') && stream.match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/)) {
+      state.inKey = false
+      return 'number'
+    }
+
+    if (/[A-Za-z_]/.test(stream.peek() ?? '')) {
+      stream.eatWhile(/[A-Za-z0-9_.\-]/)
+      const word = stream.current()
+      if (YAML_KEYWORDS.has(word)) {
+        state.inKey = false
+        return 'atom'
+      }
+      if (state.inKey) return 'propertyName'
+      state.inKey = false
+      return 'string'
+    }
+
+    if (stream.peek() === '[' || stream.peek() === ']' || stream.peek() === '{' || stream.peek() === '}' || stream.peek() === ',') {
+      stream.next()
+      return 'operator'
+    }
+
+    stream.next()
+    state.inKey = false
+    return null
+  },
+}
+
+const yamlLanguage = StreamLanguage.define(yamlStreamParser)
+
 function readOcamlComment(stream: StringStream, state: OcamlStreamState): string {
   while (!stream.eol()) {
     if (stream.match('(*')) {
@@ -426,9 +581,11 @@ const LANGUAGE_MAP: Readonly<Record<string, LanguageEntry>> = {
   '.ocaml': { id: 'ocaml', load: () => Promise.resolve(ocamlLanguage) },
   '.ml': { id: 'ocaml', load: () => Promise.resolve(ocamlLanguage) },
   '.mli': { id: 'ocaml', load: () => Promise.resolve(ocamlLanguage) },
-  '.toml': { id: 'json', load: () => import('@codemirror/lang-json').then(m => m.json()) },
-  '.yaml': { id: 'json', load: () => import('@codemirror/lang-json').then(m => m.json()) },
-  '.yml': { id: 'json', load: () => import('@codemirror/lang-json').then(m => m.json()) },
+  '.rs': { id: 'rust', load: () => import('@codemirror/lang-rust').then(m => m.rust()) },
+  '.go': { id: 'go', load: () => import('@codemirror/lang-go').then(m => m.go()) },
+  '.toml': { id: 'toml', load: () => Promise.resolve(tomlLanguage) },
+  '.yaml': { id: 'yaml', load: () => Promise.resolve(yamlLanguage) },
+  '.yml': { id: 'yaml', load: () => Promise.resolve(yamlLanguage) },
 }
 
 export function languageIdForFilePath(filePath: string): string | null {

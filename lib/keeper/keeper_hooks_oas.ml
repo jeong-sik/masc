@@ -919,6 +919,10 @@ let cost_event_payload
      ?telemetry
      ()).payload
 
+(** Date-split cost ledger root inside [masc_root].  See
+    [Dated_jsonl] for the [costs/YYYY-MM/DD.jsonl] layout. *)
+let costs_dated_dir masc_root = Filename.concat masc_root "costs"
+
 let emit_cost_event
     ~(masc_root : string)
     ~(agent_name : string)
@@ -931,7 +935,19 @@ let emit_cost_event
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
     () : unit =
-  let path = Filename.concat masc_root "costs.jsonl" in
+  (* Tier-A perf change: previously appended to a single unbounded
+     [masc_root/costs.jsonl] (14k lines, 7.5MB observed in [~/me/.masc]),
+     so every emit grew a hot single-writer file and the reader scanned
+     the entire blob.  Migrated to [Dated_jsonl] under
+     [masc_root/costs/YYYY-MM/DD.jsonl] — same per-day mutex registry
+     used by tracing / coverage_gap / audit appenders, so concurrent
+     keepers serialise on a per-day file rather than a single global
+     one.  Legacy [costs.jsonl] is left in place for read compatibility
+     ([Model_inference_metrics.read_cost_entries] reads both sources
+     until operators archive the legacy file). *)
+  let store =
+    Dated_jsonl.create ~base_dir:(costs_dated_dir masc_root) ()
+  in
   let assembled =
     assemble_cost_event_payload
       ~agent_name
@@ -956,8 +972,7 @@ let emit_cost_event
     ();
   record_cost_emit_source assembled.cost_usd_source;
   let entry = assembled.payload in
-  let line = Yojson.Safe.to_string entry ^ "\n" in
-  (try Fs_compat.append_file path line
+  (try Dated_jsonl.append store entry
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
@@ -965,7 +980,7 @@ let emit_cost_event
           ~labels:[("keeper", agent_name); ("site", "cost_event_write")]
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
-          path (Printexc.to_string exn))
+          (Dated_jsonl.base_dir store) (Printexc.to_string exn))
 
 (** Build OAS hooks for a keeper agent.
 

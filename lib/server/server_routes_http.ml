@@ -36,5 +36,6 @@ let make_routes ~port ~host ~sw ~clock =
   |> Server_routes_http_routes_repositories.add_routes
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_ide_http.add_routes
+  |> Server_ide_lsp_proxy.add_routes ~sw ~clock
   |> Server_routes_http_routes_credentials.add_routes
   |> Server_routes_http_routes_keeper_repos.add_routes

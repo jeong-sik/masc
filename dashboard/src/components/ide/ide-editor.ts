@@ -23,8 +23,10 @@ import {
   internalDocumentSync,
   syntaxHighlightExt,
 } from './ide-editor-extensions'
+import { lspExtension, getSelectedAnnotation, clearSelectedAnnotation, type SelectedAnnotation } from './ide-lsp-client'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
+import { keeperCursorExtension } from './keeper-cursor-cm-extension'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -464,6 +466,8 @@ function CodeMirrorEditor({
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
   const [ready, setReady] = useState(false)
+  const [selectedAnn, setSelectedAnn] = useState<SelectedAnnotation | null>(null)
+  const prevAnnRef = useRef<SelectedAnnotation | null>(null)
 
   const document = documentStore.document()
   const ownership = ownershipStore.ownership()
@@ -489,6 +493,15 @@ function CodeMirrorEditor({
           lineNumberExt(),
           syntaxHighlightExt(),
           lang,
+          lspExtension({ filePath: mountDocument.file_path }),
+          keeperCursorExtension(),
+          EditorView.updateListener.of((update) => {
+            const sel = getSelectedAnnotation(update.view)
+            if (sel !== prevAnnRef.current) {
+              prevAnnRef.current = sel
+              setSelectedAnn(sel)
+            }
+          }),
           ...(onKeeperLineSelect
             ? [keeperLineSelectExt(() => ownershipStore.ownership(), onKeeperLineSelect)]
             : []),
@@ -548,6 +561,17 @@ function CodeMirrorEditor({
     <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>
       ${showBlame ? BlameTimeline(ownership, keepers) : null}
       <div ref=${containerRef} class="ide-codemirror-host" />
+      ${selectedAnn && editorRef.current ? AnnotationPopover({
+        annotation: selectedAnn,
+        view: editorRef.current,
+        onClose: () => {
+          if (editorRef.current) {
+            clearSelectedAnnotation(editorRef.current)
+            prevAnnRef.current = null
+            setSelectedAnn(null)
+          }
+        },
+      }) : null}
     </div>
   `
 }
@@ -709,4 +733,119 @@ function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: Re
   if (kind === 'keeper-trace') return 'stitched trace'
   if (kind === 'explode') return 'exclusive ghost view'
   return ''
+}
+
+// ── Annotation Popover ────────────────────────────────────────────
+
+const KIND_LABEL: Record<string, string> = {
+  Comment: 'comment',
+  Decision: 'decision',
+  Question: 'question',
+  Bookmark: 'bookmark',
+}
+
+const KIND_COLOR: Record<string, string> = {
+  Comment: 'var(--color-accent-fg)',
+  Decision: 'var(--color-success-fg)',
+  Question: 'var(--color-fg-warning)',
+  Bookmark: 'var(--color-fg-muted)',
+}
+
+function AnnotationPopover({
+  annotation,
+  view,
+  onClose,
+}: {
+  readonly annotation: SelectedAnnotation
+  readonly view: EditorView
+  readonly onClose: () => void
+}) {
+  const line = annotation.line_start
+  const lineInfo = line >= 1 && line <= view.state.doc.lines
+    ? view.state.doc.line(line)
+    : null
+  const coords = lineInfo
+    ? view.coordsAtPos(lineInfo.from)
+    : null
+
+  if (!coords) return null
+
+  const shellRect = view.dom.closest('.ide-codemirror-shell')?.getBoundingClientRect()
+  if (!shellRect) return null
+
+  const top = coords.bottom - shellRect.top + 4
+  const left = Math.max(8, coords.left - shellRect.left)
+
+  return html`
+    <div
+      class="ide-annotation-popover"
+      role="dialog"
+      aria-label="Annotation detail"
+      style=${{
+        position: 'absolute',
+        top: top + 'px',
+        left: left + 'px',
+        zIndex: 40,
+        minWidth: '240px',
+        maxWidth: '380px',
+        background: 'var(--color-bg-elevated)',
+        border: '1px solid var(--color-border-default)',
+        borderRadius: 'var(--r-2)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+        padding: 'var(--sp-3)',
+        fontFamily: 'var(--font-sans)',
+        fontSize: '13px',
+        lineHeight: 1.5,
+      }}
+    >
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', marginBottom: 'var(--sp-2)' }}>
+        <span style=${{
+          padding: '1px 6px',
+          borderRadius: 'var(--r-1)',
+          fontSize: '11px',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          color: KIND_COLOR[annotation.kind] ?? 'var(--color-fg-muted)',
+          background: 'var(--color-bg-muted)',
+        }}>${KIND_LABEL[annotation.kind] ?? annotation.kind}</span>
+        <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px', flex: 1 }}>
+          L${annotation.line_start}${annotation.line_start !== annotation.line_end ? `-${annotation.line_end}` : ''}
+        </span>
+        <button
+          type="button"
+          aria-label="Close annotation"
+          onClick=${onClose}
+          style=${{
+            background: 'none',
+            border: 'none',
+            color: 'var(--color-fg-muted)',
+            cursor: 'pointer',
+            fontSize: '14px',
+            lineHeight: 1,
+            padding: '2px 4px',
+          }}
+        >&times;</button>
+      </div>
+      <div style=${{ color: 'var(--color-fg-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        ${annotation.content}
+      </div>
+      <div style=${{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)', flexWrap: 'wrap' }}>
+        ${annotation.keeper_id ? html`
+          <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
+            keeper: <strong>${annotation.keeper_id}</strong>
+          </span>
+        ` : null}
+        ${annotation.goal_id ? html`
+          <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
+            goal: ${annotation.goal_id}
+          </span>
+        ` : null}
+        ${annotation.task_id ? html`
+          <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
+            task: ${annotation.task_id}
+          </span>
+        ` : null}
+      </div>
+    </div>
+  `
 }

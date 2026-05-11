@@ -1,7 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
-import type { ComponentChildren } from 'preact'
 import { lastEvent } from '../sse'
 import type { SSEEvent } from '../types'
 import { FetchScheduler } from '../lib/fetch-scheduler'
@@ -17,6 +16,7 @@ import { StatusDot } from './common/status-dot'
 import { CopyIdButton } from './common/copy-id-button'
 import { ActionButton } from './common/button'
 import { StatTile } from './common/stat-tile'
+import { SectionCard } from './common/card'
 
 export type StatusTone = 'ok' | 'warn' | 'bad'
 
@@ -321,33 +321,6 @@ export function webrtcEyebrow(data: TransportHealthData): string {
     : '시그널링 중단'
 }
 
-function SectionCard({
-  title,
-  status,
-  eyebrow,
-  children,
-}: {
-  title: string
-  status: StatusTone
-  eyebrow?: string
-  children: ComponentChildren
-}) {
-  return html`
-    <div class="rounded-[var(--r-1)] border border-card-border bg-bg-1/60 p-4">
-      <div class="flex items-center justify-between gap-3 mb-3">
-        <div class="flex items-center gap-2 min-w-0">
-          <${StatusDot} size="sm" class=${statusDot(status)} />
-          <span class="text-xs font-semibold text-text-strong uppercase tracking-wider truncate">${title}</span>
-        </div>
-        ${eyebrow ? html`<span class=${`text-3xs uppercase tracking-wider ${toneClass(status)}`}>${eyebrow}</span>` : null}
-      </div>
-      <div class="divide-y divide-card-border/50">
-        ${children}
-      </div>
-    </div>
-  `
-}
-
 function TransportStatusBadge({ status, label }: { status: StatusTone; label: string }) {
   return html`<span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(status)} />${label}</span>`
 }
@@ -487,80 +460,92 @@ export function TransportHealthPanel() {
         <div class="p-4">
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
             <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 활성`}>
-              <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
-              <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
-              <${MetricRow} label="프레즌스" value=${data.sse.sessions_presence} />
-              <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />
-              <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />
-              <${MetricRow} label="릴레이 큐" value=${data.sse.relay_queue_depth} />
-              <${MetricRow} label="릴레이 재시도" value=${data.sse.relay_retry_total} sub=${`append ${data.sse.relay_retry_append} · broadcast ${data.sse.relay_retry_broadcast}`} />
-              <${MetricRow} label="릴레이 드롭" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
-              <${MetricRow} label="브로드캐스트 평균" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count}개 이벤트`} />
+              <div class="divide-y divide-card-border/50">
+                <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
+                <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
+                <${MetricRow} label="프레즌스" value=${data.sse.sessions_presence} />
+                <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />
+                <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />
+                <${MetricRow} label="릴레이 큐" value=${data.sse.relay_queue_depth} />
+                <${MetricRow} label="릴레이 재시도" value=${data.sse.relay_retry_total} sub=${`append ${data.sse.relay_retry_append} · broadcast ${data.sse.relay_retry_broadcast}`} />
+                <${MetricRow} label="릴레이 드롭" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
+                <${MetricRow} label="브로드캐스트 평균" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count}개 이벤트`} />
+              </div>
             <//>
 
             <${SectionCard} title="gRPC" status=${grpcStatus} eyebrow=${transportEyebrow(data.grpc.configured, data.grpc.listening, data.grpc.port)}>
-              <${MetricRow} label="리스너" value=${data.grpc.listening ? '활성' : '중단'} />
-              <${MetricRow} label="구독자" value=${data.grpc.subscribers} />
-              <${MetricRow} label="활성 스트림" value=${data.grpc.active_streams} />
-              <${MetricRow} label="하트비트 평균" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
-              <${MetricRow} label="전달된 이벤트" value=${data.grpc.events_delivered} />
-              <${MetricRow}
-                label="드롭된 이벤트"
-                value=${data.grpc.events_dropped}
-                sub=${data.grpc.events_dropped > 0 ? '버퍼 포화' : '정상'}
-              />
+              <div class="divide-y divide-card-border/50">
+                <${MetricRow} label="리스너" value=${data.grpc.listening ? '활성' : '중단'} />
+                <${MetricRow} label="구독자" value=${data.grpc.subscribers} />
+                <${MetricRow} label="활성 스트림" value=${data.grpc.active_streams} />
+                <${MetricRow} label="하트비트 평균" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
+                <${MetricRow} label="전달된 이벤트" value=${data.grpc.events_delivered} />
+                <${MetricRow}
+                  label="드롭된 이벤트"
+                  value=${data.grpc.events_dropped}
+                  sub=${data.grpc.events_dropped > 0 ? '버퍼 포화' : '정상'}
+                />
+              </div>
             <//>
 
             <${SectionCard} title="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
-              <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
-              <${MetricRow} label="세션" value=${data.websocket.sessions} />
-              <${MetricRow} label="모드" value=${data.websocket.mode} />
-              <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
-              <${MetricRow}
-                label="파싱 캐시"
-                value=${formatHitRate(data.websocket.delivery.parse_cache_hits, data.websocket.delivery.parse_cache_misses)}
-                sub=${`${data.websocket.delivery.parse_cache_hits} 히트 / ${data.websocket.delivery.parse_cache_misses} 미스`}
-              />
-              <${MetricRow}
-                label="바이트 캐시"
-                value=${formatHitRate(data.websocket.delivery.bytes_cache_hits, data.websocket.delivery.bytes_cache_misses)}
-                sub=${`${data.websocket.delivery.bytes_cache_hits} 히트 / ${data.websocket.delivery.bytes_cache_misses} 미스`}
-              />
-              <${MetricRow}
-                label="클라이언트 드레인"
-                value=${formatAvgBufferedBytes(data.websocket.delivery.client_buffered_bytes_sum, data.websocket.delivery.client_buffered_bytes_count)}
-                sub=${`${data.websocket.delivery.client_acks} ack`}
-              />
-              <${MetricRow}
-                label="억제된 전달"
-                value=${data.websocket.delivery.throttled_deliveries}
-                sub=${data.websocket.delivery.throttled_deliveries > 0 ? '서킷 오픈' : '정상'}
-              />
+              <div class="divide-y divide-card-border/50">
+                <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
+                <${MetricRow} label="세션" value=${data.websocket.sessions} />
+                <${MetricRow} label="모드" value=${data.websocket.mode} />
+                <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
+                <${MetricRow}
+                  label="파싱 캐시"
+                  value=${formatHitRate(data.websocket.delivery.parse_cache_hits, data.websocket.delivery.parse_cache_misses)}
+                  sub=${`${data.websocket.delivery.parse_cache_hits} 히트 / ${data.websocket.delivery.parse_cache_misses} 미스`}
+                />
+                <${MetricRow}
+                  label="바이트 캐시"
+                  value=${formatHitRate(data.websocket.delivery.bytes_cache_hits, data.websocket.delivery.bytes_cache_misses)}
+                  sub=${`${data.websocket.delivery.bytes_cache_hits} 히트 / ${data.websocket.delivery.bytes_cache_misses} 미스`}
+                />
+                <${MetricRow}
+                  label="클라이언트 드레인"
+                  value=${formatAvgBufferedBytes(data.websocket.delivery.client_buffered_bytes_sum, data.websocket.delivery.client_buffered_bytes_count)}
+                  sub=${`${data.websocket.delivery.client_acks} ack`}
+                />
+                <${MetricRow}
+                  label="억제된 전달"
+                  value=${data.websocket.delivery.throttled_deliveries}
+                  sub=${data.websocket.delivery.throttled_deliveries > 0 ? '서킷 오픈' : '정상'}
+                />
+              </div>
             <//>
 
             <${SectionCard} title="WebRTC" status=${webrtcStatus} eyebrow=${webrtcEyebrow(data)}>
-              <${MetricRow} label="시그널링" value=${data.webrtc.signaling_available ? 'ready' : 'down'} sub=${data.webrtc.signaling_mode} />
-              <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
-              <${MetricRow} label="활성 피어" value=${data.webrtc.active_peers} />
-              <${MetricRow} label="대기 오퍼" value=${data.webrtc.pending_offers} />
-              <${MetricRow} label="라이브 연결" value=${data.webrtc.live_connections} />
+              <div class="divide-y divide-card-border/50">
+                <${MetricRow} label="시그널링" value=${data.webrtc.signaling_available ? 'ready' : 'down'} sub=${data.webrtc.signaling_mode} />
+                <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
+                <${MetricRow} label="활성 피어" value=${data.webrtc.active_peers} />
+                <${MetricRow} label="대기 오퍼" value=${data.webrtc.pending_offers} />
+                <${MetricRow} label="라이브 연결" value=${data.webrtc.live_connections} />
+              </div>
             <//>
 
             <${SectionCard} title="HTTP" status=${h2Status} eyebrow=${data.http2.listener_mode}>
-              <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
-              <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
-              <${MetricRow} label="프레즌스 스트림" value=${data.streamable_http.presence_stream} />
-              <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
-              <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
+              <div class="divide-y divide-card-border/50">
+                <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
+                <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
+                <${MetricRow} label="프레즌스 스트림" value=${data.streamable_http.presence_stream} />
+                <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
+                <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
+              </div>
             <//>
 
             <${SectionCard} title="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
-              <div class="text-3xs text-text-muted mb-2">클러스터 내 관리 유닛 풀. 부실(stale) = 하트비트가 끊긴 에이전트.</div>
-              <${MetricRow} label="관리 유닛" value=${formatMetricValue(data.cluster.managed_units)} sub=${managedUnitsSub} />
-              <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
-              <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
-              <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
-              <${MetricRow} label="라이프사이클 거부" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
+              <div class="divide-y divide-card-border/50">
+                <div class="text-3xs text-text-muted mb-2">클러스터 내 관리 유닛 풀. 부실(stale) = 하트비트가 끊긴 에이전트.</div>
+                <${MetricRow} label="관리 유닛" value=${formatMetricValue(data.cluster.managed_units)} sub=${managedUnitsSub} />
+                <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
+                <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
+                <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
+                <${MetricRow} label="라이프사이클 거부" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
+              </div>
             <//>
           </div>
         </div>

@@ -127,11 +127,121 @@ let save_file_unix (path : string) (content : string) : unit =
     Stdlib.output_string oc content
   )
 
+(** LRU fd cache for [append_file_unix].
+
+    Tier-A perf change: previously every [append_file] call did
+    [open_out_gen] + [output_string] + [close_out] — three syscalls
+    per JSONL line.  Under 64+ keepers each emitting telemetry every
+    turn, that fd churn dominated kernel time and gated keeper
+    progress on file I/O.
+
+    Cache up to [fd_cache_max_size] open append channels keyed by
+    absolute path.  On hit, re-use the cached channel and [flush] so
+    bytes reach the kernel buffer before the call returns (preserves
+    durability semantics for crash-after-append scenarios — without
+    the flush, OCaml's per-channel buffer would coalesce writes and
+    a SIGKILL between [output_string] and the next [flush] could lose
+    data).  On miss, open the file and insert; if the cache is full,
+    evict the least-recently-used entry first (closing its channel).
+
+    Uses [Stdlib.Mutex] (not [Eio.Mutex]) because [append_file] is
+    callable from non-Eio contexts (init, [at_exit], pure-Unix
+    fallback paths).  Single-domain assumption holds — multi-domain
+    rollout is gated on RFC-Domain-Split (out-of-scope here); when
+    that lands, the cache should become domain-local.
+
+    The [at_exit] handler closes every cached channel so normal
+    shutdown flushes all pending bytes; abnormal termination
+    (SIGKILL) still loses any kernel-buffered writes that haven't
+    been [fsync]'d, but that was already true before this change. *)
+let fd_cache_max_size = 16
+
+module Append_fd_cache = struct
+  type entry = {
+    mutable channel : Stdlib.out_channel;
+    mutable last_used : int;
+  }
+
+  let cache : (string, entry) Hashtbl.t = Hashtbl.create 17
+  let counter = ref 0
+  let mutex = Mutex.create ()
+
+  let with_lock f =
+    Mutex.lock mutex;
+    Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+
+  let evict_lru_if_needed_locked () =
+    if Hashtbl.length cache >= fd_cache_max_size then begin
+      let victim_path = ref None in
+      let victim_use = ref max_int in
+      Hashtbl.iter
+        (fun path entry ->
+           if entry.last_used < !victim_use
+           then begin
+             victim_path := Some path;
+             victim_use := entry.last_used
+           end)
+        cache;
+      match !victim_path with
+      | None -> ()
+      | Some path ->
+          (match Hashtbl.find_opt cache path with
+           | Some entry ->
+               Stdlib.close_out_noerr entry.channel;
+               Hashtbl.remove cache path
+           | None -> ())
+    end
+
+  let get_or_open_locked path =
+    match Hashtbl.find_opt cache path with
+    | Some entry ->
+        incr counter;
+        entry.last_used <- !counter;
+        entry.channel
+    | None ->
+        evict_lru_if_needed_locked ();
+        let oc =
+          Stdlib.open_out_gen
+            [ Stdlib.Open_append; Stdlib.Open_creat ]
+            0o644 path
+        in
+        incr counter;
+        let entry = { channel = oc; last_used = !counter } in
+        Hashtbl.add cache path entry;
+        oc
+
+  let invalidate path =
+    with_lock (fun () ->
+      match Hashtbl.find_opt cache path with
+      | None -> ()
+      | Some entry ->
+          Stdlib.close_out_noerr entry.channel;
+          Hashtbl.remove cache path)
+
+  let close_all () =
+    with_lock (fun () ->
+      Hashtbl.iter
+        (fun _ entry -> Stdlib.close_out_noerr entry.channel)
+        cache;
+      Hashtbl.clear cache)
+end
+
+let () = Stdlib.at_exit Append_fd_cache.close_all
+
 let append_file_unix (path : string) (content : string) : unit =
-  let oc = Stdlib.open_out_gen [Stdlib.Open_append; Stdlib.Open_creat] 0o644 path in
-  Stdlib.Fun.protect ~finally:(fun () -> Stdlib.close_out_noerr oc) (fun () ->
-    Stdlib.output_string oc content
-  )
+  let write_with_cached () =
+    Append_fd_cache.with_lock (fun () ->
+      let oc = Append_fd_cache.get_or_open_locked path in
+      Stdlib.output_string oc content;
+      Stdlib.flush oc)
+  in
+  try write_with_cached ()
+  with exn ->
+    (* On I/O error invalidate the cached fd so the next call re-opens
+       fresh.  Re-raise so callers see the same error class as before
+       (Sys_error wrapping Unix_error). *)
+    Append_fd_cache.invalidate path;
+    raise exn
 
 let mkdir_p_unix (path : string) : unit =
   let rec ensure_dir (p : string) : unit =

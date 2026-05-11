@@ -52,10 +52,35 @@ val buffer_ttl_seconds : float
 (** {1 Session Management} *)
 
 val register :
-  ?kind:session_kind -> string -> last_event_id:int ->
+  ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
+  string -> last_event_id:int ->
   int * string Eio.Stream.t * string option
+(** [?on_disconnect] is installed atomically with registration via
+    {!set_disconnect_hook} before the client becomes broadcast-visible,
+    so a concurrent queue-overflow [unregister] always finds the hook. *)
+
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit
+
+(** [set_disconnect_hook session_id hook] arranges for [hook ()] to fire
+    exactly once when the session is removed from the broadcast registry
+    (via [unregister] or [unregister_if_current]).  The hook is the
+    transport layer's wakeup signal for its drain fiber; without it, a
+    queue-overflow [unregister] from [broadcast_impl] leaves the drain
+    fiber blocked on [Eio.Stream.take] and the HTTP body writer open
+    until socket keep-alive timeout reaps it.
+
+    Callers MUST invoke this immediately after a successful [register]
+    and SHOULD invoke [clear_disconnect_hook] before re-registering the
+    same session_id so a stale hook from a prior connection does not
+    fire against the new one. *)
+val set_disconnect_hook : string -> (unit -> unit) -> unit
+
+(** [clear_disconnect_hook session_id] removes any hook previously
+    installed for [session_id].  Idempotent — safe to call when no hook
+    exists. *)
+val clear_disconnect_hook : string -> unit
+
 val exists : string -> bool
 val touch : string -> unit
 val update_last_event_id : string -> int -> unit

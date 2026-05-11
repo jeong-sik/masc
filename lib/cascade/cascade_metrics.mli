@@ -306,6 +306,14 @@ val on_cascade_audit_failure : stage:string -> unit
     don't break keeper turns but compromise post-incident
     analysis. *)
 
+val on_local_context_clamped : unit -> unit
+(** Tick the local-context-clamped counter at
+    [Cascade_runtime.clamp_context_for_pure_local_labels] when a
+    cascade with only local-provider labels has its
+    [max_context] silently reduced to [small_local_floor].
+    Symmetric to iter 46 [max_tokens_clamped] (response-budget
+    side). *)
+
 val register_all : unit -> unit
 (** Pre-register every counter defined in this module with
     [Prometheus.register_counter] so process startup exposes them

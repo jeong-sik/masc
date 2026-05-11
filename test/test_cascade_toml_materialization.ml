@@ -854,6 +854,15 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    stage labels match the two exception arms in
    [Cascade_legacy_runner].  Pinning both keeps the canonical set
    in lockstep with the call sites. *)
+(* Smoke for [Cascade_metrics.on_local_context_clamped].  Natural
+   code path requires a cascade with pure-local labels and
+   max_context > small_local_floor — best exercised end-to-end in
+   the cascade_runtime regression harness.  Smoke pins the no-arg
+   helper signature. *)
+let test_local_context_clamped_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_local_context_clamped ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_cascade_audit_failure_documented_stages_are_callable () =
   Masc_mcp.Cascade_metrics.on_cascade_audit_failure
     ~stage:"store_creation";
@@ -1373,6 +1382,9 @@ let () =
             "cascade_audit_failure: both documented stages callable"
             `Quick
             test_cascade_audit_failure_documented_stages_are_callable;
+          test_case
+            "local_context_clamped: helper callable" `Quick
+            test_local_context_clamped_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

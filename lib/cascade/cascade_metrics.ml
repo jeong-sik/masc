@@ -970,6 +970,31 @@ let on_cascade_audit_failure ~stage =
     ~labels:[ ("stage", stage) ]
     ()
 
+(* [Cascade_runtime.clamp_context_for_pure_local_labels] silently
+   reduces an operator-supplied [max_context] to
+   [Env_config.ContextCompact.small_local_floor] when every label
+   in the cascade points at a local provider.  The clamp is
+   intentional (local providers typically have tiny context
+   windows) but the silent reduction means an operator who set
+   [max_context=128_000] for a cascade that happens to be
+   local-only got an unexpectedly small window with no signal.
+
+   Companion to iter 46 [max_tokens_clamped] (response-budget
+   side) and iter 26 [max_context_fallback] (no-resolved-value
+   side); together they form the complete inference-budget
+   coverage:
+
+     no resolved value         iter 26 max_context_fallback
+     resolved but suspicious   iter 27 discovered_context_below_floor
+     resolved but disagreement iter 28 context_capability_drift
+     local-only clamp          iter 49 local_context_clamped  (this)
+     response budget clip      iter 46 max_tokens_clamped *)
+let metric_local_context_clamped =
+  "masc_cascade_local_context_clamped_total"
+
+let on_local_context_clamped () =
+  Prometheus.inc_counter metric_local_context_clamped ()
+
 (* Iter 43 infrastructure: pre-register every counter introduced in
    iter 2-42 with [Prometheus.register_counter] so the
    process startup state exposes all metric names at /metrics with
@@ -1121,7 +1146,8 @@ let register_all () =
      Accept_rejected branch.";
   c metric_cascade_metrics_eviction;
   c metric_max_tokens_clamped;
-  c metric_cascade_audit_failure
+  c metric_cascade_audit_failure;
+  c metric_local_context_clamped
 ;;
 
 (* Module-load side effect: register every cascade counter as soon

@@ -922,6 +922,13 @@ type outcome_kind =
   | Outcome_soft_rate_limited
 
 let outcome_matches kind ev =
+  (* Enumerate every [outcome_kind] x [outcome] pair so the compiler
+     flags any new variant added to either type. Adding e.g. an
+     [Outcome_circuit_break] kind without a matching [Circuit_break]
+     outcome (or vice versa) would silently inherit [false] under the
+     previous [_, _ -> false] catch-all, masking a probable mismatch.
+     Same FSM Sparse Match anti-pattern as PRs #14716, #14762, #14790,
+     #14806. *)
   match kind, ev.outcome with
   | Outcome_success, Success
   | Outcome_failure, Failure
@@ -929,7 +936,18 @@ let outcome_matches kind ev =
   | Outcome_hard_quota, Hard_quota
   | Outcome_terminal_failure, Terminal_failure
   | Outcome_soft_rate_limited, Soft_rate_limited -> true
-  | _, _ -> false
+  | Outcome_success,
+      (Failure | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited)
+  | Outcome_failure,
+      (Success | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited)
+  | Outcome_rejected,
+      (Success | Failure | Hard_quota | Terminal_failure | Soft_rate_limited)
+  | Outcome_hard_quota,
+      (Success | Failure | Rejected | Terminal_failure | Soft_rate_limited)
+  | Outcome_terminal_failure,
+      (Success | Failure | Rejected | Hard_quota | Soft_rate_limited)
+  | Outcome_soft_rate_limited,
+      (Success | Failure | Rejected | Hard_quota | Terminal_failure) -> false
 
 (* Count [outcome] events recorded for [provider_key] within the last
    [window_s] seconds.  We piggyback on the same event ring used by

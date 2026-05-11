@@ -1438,7 +1438,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but retry setup failed: %s"
                             meta.name execution_cascade_name
                             degraded_retry.next_cascade
-                            degraded_retry.fallback_reason
+                            (EC.degraded_retry_reason_to_string
+                               degraded_retry.fallback_reason)
                             (short_preview (Agent_sdk.Error.to_string fail_open_err));
                           mark_terminal_error fail_open_err;
                           Error fail_open_err
@@ -1473,7 +1474,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             "%s: recoverable cascade failure in %s; rotation retry on cascade=%s reason=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s: %s"
                             meta.name execution_cascade_name
                             next_execution_cascade_name
-                            degraded_retry.fallback_reason
+                            (EC.degraded_retry_reason_to_string
+                               degraded_retry.fallback_reason)
                             next_execution.max_context
                             next_execution.max_context_resolution.effective_budget
                             next_execution.max_context_resolution.primary_budget
@@ -1553,7 +1555,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but remaining turn budget %.1fs is below the OAS retry guard/minimum; ending this cycle: %s"
                         meta.name execution_cascade_name
                         degraded_retry.next_cascade
-                        degraded_retry.fallback_reason
+                        (EC.degraded_retry_reason_to_string
+                           degraded_retry.fallback_reason)
                         (remaining_turn_budget_s ())
                         (short_preview (Agent_sdk.Error.to_string err));
                       mark_terminal_error err;
@@ -1583,7 +1586,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but productive slot phase budget %.1fs is exhausted after %.1fs; ending this cycle to release the outer turn slot: %s"
                         meta.name execution_cascade_name
                         degraded_retry.next_cascade
-                        degraded_retry.fallback_reason
+                        (EC.degraded_retry_reason_to_string
+                           degraded_retry.fallback_reason)
                         degraded_retry_slot_phase_budget_sec
                         (timeout_sec -. remaining_turn_budget_s ())
                         (short_preview (Agent_sdk.Error.to_string err));
@@ -2044,7 +2048,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~outcome:(if is_ambiguous_partial then "partial" else "error")
             ~degraded_retry_applied
             ?degraded_retry_cascade
-            ?fallback_reason
+            ?fallback_reason:
+              (Option.map EC.degraded_retry_reason_to_string fallback_reason)
             ~social_state
             ~error:e_str
             ~terminal_reason
@@ -2527,7 +2532,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~latency_ms ~semaphore_wait_ms ~outcome:"success"
             ~degraded_retry_applied
             ?degraded_retry_cascade
-            ?fallback_reason
+            ?fallback_reason:
+              (Option.map EC.degraded_retry_reason_to_string fallback_reason)
             ~turn_mode
             ~social_state
             ~result:(Some result) ();

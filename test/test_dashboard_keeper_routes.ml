@@ -592,7 +592,8 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
     ?(degraded_retry_applied = true)
     ?(degraded_retry_cascade =
       Some Masc_mcp.Keeper_config.local_recovery_cascade_name)
-    ?(fallback_reason = Some "turn_timeout") config ~keeper_name =
+    ?(fallback_reason = Some Masc_mcp.Keeper_error_classify.Turn_timeout)
+    config ~keeper_name =
   let meta =
     match Masc_mcp.Keeper_types.read_meta config keeper_name with
     | Ok (Some meta) -> meta

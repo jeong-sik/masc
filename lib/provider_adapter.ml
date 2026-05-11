@@ -1505,9 +1505,12 @@ let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
   (* RFC-0058 §2.4: dispatch flows through the kind→canonical_name table
      ([adapter_canonical_name_of_provider_kind]) rather than enumerating
      every provider variant inline. [Glm] and [OpenAI_compat] still need
-     the endpoint-derived [cascade_prefix] because multiple endpoints
-     share the same kind, so the canonical name is not knowable from
-     the kind alone. *)
+     a registry lookup because multiple distinct providers share the
+     same [kind]: [OpenAI_compat] is disambiguated by [base_url] via
+     [openai_compat_adapter_by_endpoint], while [Glm] is disambiguated
+     by registry label ([glm] vs [glm-coding]) via
+     [provider_name_of_config]. [provider_label_from_registry] folds
+     both into the same [cascade_prefix] key. *)
   match cfg.kind with
   | Llm_provider.Provider_config.Glm
   | Llm_provider.Provider_config.OpenAI_compat ->

@@ -5,7 +5,14 @@ import { activeKeeperName } from '../../keeper-state'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
+import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
+
+const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
+  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
+}
 // Imported from `./ide-state` rather than `./ide-shell` to avoid the
 // circular dependency `ide-shell -> inspector-keeper-bdi -> ide-shell`
 // (which also drags `router` and other window-touching side effects
@@ -192,6 +199,9 @@ export function InspectorKeeperBDI({
   const keeperName = (pin?.keeperName ?? activeKeeper).trim()
   const [snapshot, setSnapshot] = useState<KeeperBdiSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [, forceRender] = useState(0)
+
+  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
 
   useEffect(() => {
     if (!keeperName) {
@@ -244,6 +254,10 @@ export function InspectorKeeperBDI({
     : null
   const tokenRows = snapshot?.recent_token_spend ?? []
   const lastTool = snapshot?.last_tool_call ?? null
+  const presence = globalPresenceSnapshot.value
+  const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
+  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
 
   const navigateToFocus = (): void => {
     if (hasValidFocus && cursor) activeIdeFile.value = cursor.file_path
@@ -269,6 +283,30 @@ export function InspectorKeeperBDI({
         <span style=${{ color: 'var(--color-accent-fg)', fontSize: 'var(--fs-12)' }}>
           ${keeperName || '—'}
         </span>
+        ${statusDot ? html`
+          <span
+            role="status"
+            aria-label=${`Keeper status: ${statusDot.label}`}
+            style=${{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px',
+              fontSize: 'var(--fs-10)',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              color: statusDot.color,
+            }}
+          >
+            <span style=${{
+              width: '4px',
+              height: '4px',
+              borderRadius: '50%',
+              background: statusDot.color,
+              display: 'inline-block',
+            }} />
+            ${statusDot.label}
+          </span>
+        ` : null}
         ${focusLabel ? html`
           <button
             type="button"

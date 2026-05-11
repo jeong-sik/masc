@@ -5,6 +5,7 @@ import {
   KeeperBdiSnapshot,
   normalizeKeeperBdiSnapshot,
 } from './inspector-keeper-bdi'
+import { globalPresenceSnapshot, type KeeperPresenceEntry, type KeeperPresenceStatus } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { activeIdeFile } from './ide-shell'
 import {
@@ -15,6 +16,12 @@ import {
   reorderPins,
   unpinKeeper,
 } from './multi-keeper-pin-store'
+
+const PRESENCE_DOT: Record<KeeperPresenceStatus, { color: string; label: string }> = {
+  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
+}
 
 /**
  * RFC-0027 PR-γ drag reorder MIME. Custom token (not text/plain) so
@@ -246,6 +253,12 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: Keeper
   const lastTool = snapshot?.last_tool_call ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
   const cursor = cursorOverlaySignal.value.cursors.get(entry.keeperName)
+  const [, forceRender] = useState(0)
+  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
+  const presence = globalPresenceSnapshot.value
+  const pEntries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
+  const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
   const focusLabel = cursor?.file_path
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
@@ -270,6 +283,30 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: Keeper
         <span style=${{ color: 'var(--color-accent-fg)', fontSize: 'var(--fs-12)' }}>
           ${entry.keeperName}
         </span>
+        ${statusDot ? html`
+          <span
+            role="status"
+            aria-label=${`Keeper status: ${statusDot.label}`}
+            style=${{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px',
+              fontSize: 'var(--fs-10)',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              color: statusDot.color,
+            }}
+          >
+            <span style=${{
+              width: '4px',
+              height: '4px',
+              borderRadius: '50%',
+              background: statusDot.color,
+              display: 'inline-block',
+            }} />
+            ${statusDot.label}
+          </span>
+        ` : null}
         ${entry.line !== null
           ? html`<span style=${{ color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${entry.line}</span>`
           : null}
@@ -345,6 +382,12 @@ function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps)
   const tokens = slot.snapshot?.recent_token_spend?.[0]?.total_tokens ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
   const cursor = cursorOverlaySignal.value.cursors.get(entry.keeperName)
+  const [, forceRender] = useState(0)
+  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1)), [])
+  const presence = globalPresenceSnapshot.value
+  const pEntries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
+  const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
   const focusLabel = cursor?.file_path
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
@@ -369,6 +412,20 @@ function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps)
         style=${CHIP_BUTTON_STYLE}
       >
         <span>${entry.keeperName}</span>
+        ${statusDot ? html`
+          <span
+            role="status"
+            aria-label=${statusDot.label}
+            style=${{
+              width: '4px',
+              height: '4px',
+              borderRadius: '50%',
+              background: statusDot.color,
+              display: 'inline-block',
+              flexShrink: '0',
+            }}
+          />
+        ` : null}
         ${entry.line !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>L${entry.line}</span>` : null}
         ${tokens !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>${tokens.toLocaleString()}</span>` : null}
       </button>

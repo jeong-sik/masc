@@ -511,13 +511,15 @@ let test_valid_catalog_records_probe_error_without_eio_caps () =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ())
   in
-  (* [(Keeper_config.default_cascade_name ())] is evaluated at module init
-     when no catalog is loaded, so it freezes to the
-     [first_alias_or_key] fallback ("default").  After the fixture
-     installs a catalog whose first profile is "big_three",
-     [resolve_declared_name ""] returns "big_three" — the live answer.
-     Pin against the fixture's first profile, not the init-time cache. *)
-  check string "blank name defaults to first catalog profile"
+  (* [(Keeper_config.default_cascade_name ())] is now a thunk that
+     consults the live [Cascade_catalog_runtime] snapshot (RFC-0066
+     Phase 1; previously a module-init-cached string that froze to the
+     [first_alias_or_key] fallback "default" when the catalog was
+     empty at init time).  This test pins against the fixture's
+     resolved default profile name — which, in this fixture's
+     [routes.keeper_turn] configuration, is "big_three" — rather than
+     anything about init-time state. *)
+  check string "blank name defaults to fixture's default profile"
     "big_three" blank_name;
   let custom_exec_name =
     require_ok
@@ -815,8 +817,11 @@ let test_partial_catalog_keeps_validated_subset_available () =
     (contains_substring rejection_json
        "__nonexistent_provider_sentinel__:fake");
   (* Same caveat as test_valid_catalog_records_probe_error_without_eio_caps:
-     [(Keeper_config.default_cascade_name ())] is module-init-cached; assert
-     against the fixture's first profile name directly. *)
+     [(Keeper_config.default_cascade_name ())] is now a thunk
+     (previously module-init-cached) and its return depends on the
+     active cascade snapshot, which this fixture does not install on
+     the global runtime; assert against the fixture's first profile
+     name directly. *)
   check (list string) "dashboard only advertises validated profiles"
     [ "big_three"; "tool_rerank" ]
     (Masc_mcp.Server_routes_http_routes_dashboard.available_cascade_profiles ());

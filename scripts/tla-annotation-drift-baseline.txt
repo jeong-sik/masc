@@ -12,15 +12,28 @@
 #
 # References:
 #   - docs/tla-audit/ktc-b1-turn-phase-spec-gap-2026-05-12.md (iter 19)
+#   - docs/tla-audit/kcaf-d1-attempt-fsm-coverage-2026-05-12.md (iter 30)
 #   - PR #14770 (validator script, iter 20)
 #   - PR #14767 (KTC B-1 audit memo)
+#   - PR #14803 (R-D-1.b cfg CONSTANT-style support, iter 32)
+#   - PR #14798 (KCAF D-1 audit, iter 30)
 
-# (Baseline currently empty.)
+# R-D-1.a pending: KCAF spec §ProviderOutcomes has a 3-way call_err
+# alphabet (call_err_cascadeable / _terminal / _hard_quota) while OCaml
+# `Cascade_fsm.provider_outcome` carries a single `Call_err`
+# constructor with runtime classification via
+# `Cascade_health_filter.should_cascade_to_next` plus
+# `sdk_error_is_hard_quota` (keeper_turn_driver.ml:657-669).
 #
-# R-B-1.a landed in iter 28 (this PR): KTC TurnPhaseSet extended to
-# include `routing` and `exhausted`.  Both prior baseline entries
-# removed.  CI now enforces zero turn_phase drift going forward.
+# Production correctness preserved through:
+#   - Cascade_health_filter corpus tests
+#   - 3-BugAction model in KeeperCascadeAttemptFSM-buggy.cfg
+#   - Fun.protect finalizer in with_keeper_turn_slot
 #
-# Per-action transition modeling for routing/exhausted is intentionally
-# deferred — see B-2 follow-up audit
+# Removal trigger: R-D-1.a (Call_err 3-way split) lands.  See iter 30
+# audit memo §"Three RFC candidates".
+provider_outcome:call_err
+
+# Per-action transition modeling for KTC routing/exhausted is
+# intentionally deferred — see B-2 follow-up audit
 # (`docs/tla-audit/ktc-b1-turn-phase-spec-gap-2026-05-12.md`).

@@ -95,10 +95,11 @@ declare -a TYPE_SET_PAIRS=(
   # extend to KSM in a follow-up by adding spec-side `PhaseSet` first
   # and matching here.
   #
-  # KCAF pair (activation deferred — surfaces the known 3-way Call_err
-  # vs 1-way OCaml drift documented in iter 30 audit Gap 1.  Enable in
-  # a follow-up that lands paired baseline entries.):
-  #   "provider_outcome:cfg:ProviderOutcomes"
+  # KCAF pair — activated iter 33 (R-D-1.b activation, this PR).  The
+  # known `call_err` drift (iter 30 audit Gap 1) is recorded in the
+  # paired baseline file with R-D-1.a as the removal trigger.  CI now
+  # enforces zero NEW drift on provider_outcome going forward.
+  "provider_outcome:cfg:ProviderOutcomes"
 )
 
 # Aux: extract spec set members.  Greps the `XxxSet == { ... }` block,

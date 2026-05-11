@@ -812,13 +812,24 @@ let run_named
       | None -> ""
   in
   let candidate_capacity_keys = List.map capacity_key_of candidate_cfgs in
-  (match ollama_max with
-   | None ->
-     Cascade_client_capacity.auto_register_for_candidates
-       ~base_urls:candidate_base_urls
-   | Some n ->
-     Cascade_client_capacity.auto_register_ollama_with_override
-       ~base_urls:candidate_base_urls ~max_concurrent:n);
+  (* Register HTTP-probe-capable provider URLs explicitly.  Capability
+     check goes through [Provider_adapter.is_http_probe_capable_kind] —
+     keeper code does not name a provider variant.  Both registries
+     receive the same URL: [Cascade_client_capacity] for the per-process
+     semaphore, [Cascade_http_probe] for the [/api/ps] probe adapter. *)
+  let http_probe_max_concurrent = Option.value ollama_max ~default:1 in
+  List.iter
+    (fun (cfg : Llm_provider.Provider_config.t) ->
+       if Provider_adapter.is_http_probe_capable_kind cfg.kind
+          && cfg.base_url <> ""
+       then begin
+         if not (Cascade_client_capacity.is_registered cfg.base_url) then
+           Cascade_client_capacity.register
+             ~url:cfg.base_url
+             ~max_concurrent:http_probe_max_concurrent;
+         Cascade_http_probe.register_url ~url:cfg.base_url
+       end)
+    candidate_cfgs;
   (* Refresh provider [/api/ps] cache for any candidate whose cache
      entry has expired.  Failures are swallowed inside the probe so
      a flaky probe never breaks the cascade — it just denies the

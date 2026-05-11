@@ -187,8 +187,25 @@ let permissions_for_role = function
       CanVote; CanAdmin;
     ]
 
+(* Direct (role, permission) variant match — O(1), no per-call list
+   allocation.  Hot path: [Auth.check_permission] runs this on every
+   protected operation; [Auth_doctor] runs it 10+ times per snapshot.
+   The previous [List.mem permission (permissions_for_role role)] form
+   built a fresh 12-element (Worker) / 15-element (Admin) list each
+   call.
+
+   Parallel to [permissions_for_role]: both forms are compiler-checked
+   exhaustive against the [permission] variant, so adding a new
+   constructor breaks both at compile time rather than letting one
+   silently fall through to a default. *)
 let has_permission role permission =
-  List.mem permission (permissions_for_role role)
+  match role, permission with
+  | Admin, _ -> true
+  | Worker, (CanInit | CanReset | CanAdmin) -> false
+  | Worker, ( CanJoin | CanLeave | CanReadState | CanAddTask
+            | CanClaimTask | CanCompleteTask | CanBroadcast
+            | CanOpenPortal | CanSendPortal | CanCreateWorktree
+            | CanRemoveWorktree | CanVote ) -> true
 
 (* ============================================ *)
 (* Rate limit role integration                  *)

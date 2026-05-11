@@ -1388,7 +1388,10 @@ let init () =
     "Whether an allowed keeper tool is unused or below the diversity threshold (1=yes, \
      0=no; labels: keeper, tool)"
     Gauge;
-  (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
+  (* Operator-initiated overflow recovery — emitted by tool_keeper.ml.
+     [result] label is bound by [Operator_compact_result.t]; adding a
+     new value requires extending the closed sum and re-running every
+     emit site through the compiler. *)
   add
     Keeper_metrics.metric_keeper_operator_compact
     "Total operator-invoked masc_keeper_compact calls (labels: \

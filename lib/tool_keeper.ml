@@ -1357,7 +1357,7 @@ let handle_keeper_compact ctx args : tool_result =
     match Keeper_registry.get ~base_path:ctx.config.base_path name with
     | None ->
       Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-        ~labels:[("keeper", name); ("result", "not_found")] ();
+        ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Not_found))] ();
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
@@ -1373,7 +1373,7 @@ let handle_keeper_compact ctx args : tool_result =
     in
     if not allowed then begin
       Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-        ~labels:[("keeper", name); ("result", "precondition")] ();
+        ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Precondition))] ();
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf
            "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
@@ -1406,7 +1406,7 @@ let handle_keeper_compact ctx args : tool_result =
             ~after_tokens:recovery.compaction.after_tokens;
           invalidate_status_cache name;
           Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-            ~labels:[("keeper", name); ("result", "ok")] ();
+            ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Ok))] ();
           (true,
            Yojson.Safe.to_string
              (`Assoc [
@@ -1432,7 +1432,7 @@ let handle_keeper_compact ctx args : tool_result =
                reason = "no_valid_checkpoint";
             });
           Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-            ~labels:[("keeper", name); ("result", "no_checkpoint")] ();
+            ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label No_checkpoint))] ();
           (false,
            Printf.sprintf
              "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"

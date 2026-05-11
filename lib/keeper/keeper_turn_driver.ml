@@ -819,12 +819,11 @@ let run_named
    | Some n ->
      Cascade_client_capacity.auto_register_ollama_with_override
        ~base_urls:candidate_base_urls ~max_concurrent:n);
-  (* Refresh ollama [/api/ps] cache for any candidate that looks
-     like ollama and whose cache entry has expired.  Failures are
-     swallowed inside [Cascade_ollama_probe.try_probe] so a flaky
-     probe never breaks the cascade — it just denies the cache
-     optimisation for this attempt. *)
-  Cascade_ollama_probe.refresh_many ~sw ~net candidate_base_urls;
+  (* Refresh provider [/api/ps] cache for any candidate whose cache
+     entry has expired.  Failures are swallowed inside the probe so
+     a flaky probe never breaks the cascade — it just denies the
+     cache optimisation for this attempt. *)
+  Cascade_capacity_probe.refresh_many ~sw ~net ~urls:candidate_base_urls ();
   (match cli_max with
    | None ->
      Cascade_client_capacity.auto_register_cli_for_candidates
@@ -839,13 +838,7 @@ let run_named
   } in
   let signal_ctx : Cascade_strategy.signal_ctx = {
     health = Cascade_health_tracker.global;
-    capacity = (fun url ->
-      match Cascade_throttle.capacity url with
-      | Some _ as v -> v
-      | None ->
-        match Cascade_ollama_probe.cached_capacity url with
-        | Some _ as v -> v
-        | None -> Cascade_client_capacity.capacity url);
+    capacity = Cascade_capacity_probe.capacity;
     now = Unix.gettimeofday ();
     rand_int = Random.int;
     keeper_name;

@@ -34,10 +34,15 @@ val on_serving_last_known_good : reason:string -> unit
     be one of [path_unresolved], [validation_failed],
     [stale_rejection_cached]. *)
 
-val on_lkg_recovery : unit -> unit
-(** Tick once per [inspect_active] call that transitions out of
-    [Serving_last_known_good] back to [Validated] (operator fixed the
-    cascade.toml fault). *)
+val on_degraded_recovery : unit -> unit
+(** Tick once per [inspect_active] call that transitions FROM a
+    degraded state (either [Serving_last_known_good] from iter 5 or
+    [Validated_with_rejections] from iter 11) back to [Validated]
+    (operator fixed the cascade.toml fault).  Originally named
+    [on_lkg_recovery] in iter 5 when only the LKG case existed;
+    renamed in iter 16 after iter 11 broadened the
+    [prev_was_failing] detection to include partial-rejection
+    recovery. *)
 
 val on_profile_candidate_drop : cascade:string -> reason:string -> unit
 (** Tick the per-cascade candidate drop counter at [validate_profile_static]

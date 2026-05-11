@@ -130,11 +130,18 @@ let on_serving_last_known_good ~reason =
 (* Ticks once per [inspect_active] call that transitions FROM a
    non-empty [rejected_update] back TO [None] (i.e. operator fixed
    the fault and the next validation passed clean).  Distinguishes
-   a real recovery from steady-state validated calls. *)
-let metric_lkg_recovery = "masc_cascade_lkg_recovery_total"
+   a real recovery from steady-state validated calls.
 
-let on_lkg_recovery () =
-  Prometheus.inc_counter metric_lkg_recovery ()
+   The detection condition ([prev_was_failing] boolean over
+   [rejected_update]) catches BOTH the LKG -> Validated transition
+   (iter 5) and the Validated_with_rejections -> Validated
+   transition (iter 11); the metric name and helper were originally
+   "lkg_recovery" but their actual semantics are "degraded -> clean
+   recovery".  Renamed to [degraded_recovery] for honesty (iter 16). *)
+let metric_degraded_recovery = "masc_cascade_degraded_recovery_total"
+
+let on_degraded_recovery () =
+  Prometheus.inc_counter metric_degraded_recovery ()
 
 (* Profile-validation step rejects individual candidates with one of
    three typed reasons from [Cascade_config.parse_weighted_entry_diag].

@@ -789,7 +789,9 @@ let test_provider_health_probe_error_metric_name_is_exported () =
 
    The catalog runtime now ticks
    [masc_cascade_serving_last_known_good_total{reason}] on every LKG
-   entry and [masc_cascade_lkg_recovery_total] on every recovery —
+   entry and [masc_cascade_degraded_recovery_total] on every
+   recovery (the latter renamed from [lkg_recovery] in iter 16 after
+   iter 11 broadened the detection to include partial recovery) —
    plus a single WARN at entry transition and INFO at recovery
    transition (not on steady-state replays).
 

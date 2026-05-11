@@ -1045,8 +1045,12 @@ let inspect_active ?sw ?net ?clock () =
           match validate_path_result ?sw ?net ~config_path () with
           | Ok { snapshot; rejected_update = None } ->
               (* Recovery detection: capture prev rejected_update
-                 inside the same lock as the write so an LKG -> OK
-                 transition is detected atomically. *)
+                 inside the same lock as the write so a degraded ->
+                 Validated transition is detected atomically.  The
+                 condition catches BOTH the LKG -> Validated case
+                 (iter 5) and the Validated_with_rejections ->
+                 Validated case (iter 11) since both store the
+                 prev state as [rejected_update = Some _]. *)
               let recovered =
                 with_cache_lock (fun () ->
                   let prev_was_failing =
@@ -1060,11 +1064,10 @@ let inspect_active ?sw ?net ?clock () =
                   prev_was_failing)
               in
               if recovered then (
-                Cascade_metrics.on_lkg_recovery ();
+                Cascade_metrics.on_degraded_recovery ();
                 Log.Misc.info
-                  "[CascadeCatalog] cascade.toml fault recovered; \
-                   transitioning from Serving_last_known_good back to \
-                   Validated");
+                  "[CascadeCatalog] cascade.toml degraded state cleared; \
+                   transitioning back to Validated");
               Ok (Validated snapshot)
           | Ok { snapshot; rejected_update = Some rejection } ->
               (* Capture prev cache state inside the same lock as

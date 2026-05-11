@@ -88,18 +88,37 @@ let task_required_tools (task : Masc_domain.task) =
 let string_list_contains all value =
   List.exists (String.equal value) all
 
+(* Build [allowed] as a [(name, unit) Hashtbl.t] once.  Constant
+   initial bucket size avoids the [List.length allowed] pre-traversal
+   (Hashtbl grows automatically); [allowed] is typically the agent's
+   tool surface, ~30-50 names. *)
+let build_allowed_set allowed =
+  let set = Hashtbl.create 32 in
+  List.iter (fun name -> Hashtbl.replace set name ()) allowed;
+  set
+
+let make_required_tools_predicate ?agent_tool_names () =
+  match agent_tool_names with
+  | None ->
+      (* Without an explicit surface, the surface is open: all required
+         tools are considered allowed.  Empty [required] also short-
+         circuits to [true] below. *)
+      fun _required_tools -> true
+  | Some allowed ->
+      let allowed_set = build_allowed_set allowed in
+      fun required_tools ->
+        match required_tools with
+        | [] -> true
+        | _ ->
+            List.for_all (fun name -> Hashtbl.mem allowed_set name)
+              required_tools
+
 let required_tools_allowed ?agent_tool_names required_tools =
-  match required_tools, agent_tool_names with
-  | [], _ -> true
-  | _ :: _, None -> true
-  | required, Some allowed ->
-      (* Materialise [allowed] as a Hashtbl once so [List.for_all] does
-         O(1) lookups instead of [List.exists String.equal] per
-         required tool.  Called per task-schedule eligibility check
-         with ~30-50 allowed names and 1-5 required names. *)
-      let allowed_set = Hashtbl.create (List.length allowed) in
-      List.iter (fun name -> Hashtbl.replace allowed_set name ()) allowed;
-      List.for_all (fun name -> Hashtbl.mem allowed_set name) required
+  (* Single-shot caller convenience.  Per-candidate loops should hoist
+     [make_required_tools_predicate] above the loop so the allowed-set
+     is built once per claim cycle instead of once per candidate. *)
+  let pred = make_required_tools_predicate ?agent_tool_names () in
+  pred required_tools
 
 let underscore_name name =
   String.map (function '-' -> '_' | c -> c) name
@@ -562,9 +581,15 @@ let claim_next_r
                 (List.filter (fun task -> task_required_tools task <> []) unclaimed)));
              ("ts", `String (now_iso ()));
            ]);
+      (* Hoist allowed-set materialisation above the per-candidate
+         filter so we pay O(A) once instead of O(R*A).  Restores the
+         O(R+A) win that this PR's title advertises. *)
+      let required_tools_allowed_for_agent =
+        make_required_tools_predicate ?agent_tool_names ()
+      in
       let required_tool_claim_allowed (task : task) =
         let required_tools = task_required_tools task in
-        required_tools_allowed ?agent_tool_names required_tools
+        required_tools_allowed_for_agent required_tools
         && not (receipt_blocks_task task)
       in
       let required_tool_excluded =

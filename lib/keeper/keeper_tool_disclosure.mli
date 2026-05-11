@@ -116,8 +116,21 @@ type tool_progress_class =
 
 val tool_progress_class_to_string : tool_progress_class -> string
 
-(** Canonicalize a tool name via [Keeper_tool_alias]. *)
+(** Pure canonicalisation — no telemetry side-effect.
+
+    Used by set-logic call sites (required-tool canonicalisation, surface
+    composition, satisfaction checks) where every invocation should NOT
+    count as an observation event. *)
 val canonical_tool_name : string -> string
+
+(** Observation-emitting canonicalisation.
+
+    Emits exactly one [masc_keeper_tool_call_total] sample with bounded
+    [tool] / [routed_to] / [result] labels. Use only at the keeper turn
+    observation boundary (e.g. canonicalising LLM-reported tool calls in
+    [Keeper_agent_run]). Non-observation call sites should use
+    [canonical_tool_name] to avoid double-counting. *)
+val canonical_tool_name_observed : string -> string
 
 (** Canonical names of claim-context tools (Task_claim, Claim_next,
     Claim_task). *)

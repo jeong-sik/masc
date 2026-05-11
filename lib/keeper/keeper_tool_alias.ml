@@ -65,10 +65,6 @@ let known_internal_names_tbl : (string, unit) Hashtbl.t =
   t
 ;;
 
-let register_known_internal name =
-  if name <> "" then Hashtbl.replace known_internal_names_tbl name ()
-;;
-
 let is_known_internal name = Hashtbl.mem known_internal_names_tbl name
 
 (** Bound a label value to a closed set so hallucinated / unbounded

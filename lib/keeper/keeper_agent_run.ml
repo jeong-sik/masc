@@ -720,15 +720,16 @@ let run_turn
                     "unexpected" and nukes turns where the LLM only used the
                     alias names (≈18% of turns per #8778).
 
-                    [Keeper_tool_disclosure.canonical_tool_name] emits the
-                    per-branch result-based telemetry
-                    ([masc_keeper_tool_call_total] with bounded labels) — see
-                    that module for the full path. Using the lower-level
-                    [Keeper_tool_alias.route_or_miss] here would mis-attribute
-                    every internal "keeper_*"/"masc_*" pass-through as a
-                    routing miss. *)
+                    [canonical_tool_name_observed] is the observation
+                    boundary — it emits exactly one
+                    [masc_keeper_tool_call_total] sample per observed
+                    name with bounded labels. Set-logic call sites
+                    (required-tool canonicalisation, surface composition)
+                    use the pure [canonical_tool_name] variant so a
+                    single observed call does not produce multiple
+                    counter samples (PR #14585 review #3). *)
                  let canonical_tool_names =
-                   List.map Keeper_tool_disclosure.canonical_tool_name tool_names
+                   List.map Keeper_tool_disclosure.canonical_tool_name_observed tool_names
                  in
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =

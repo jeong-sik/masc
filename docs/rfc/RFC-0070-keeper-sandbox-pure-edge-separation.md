@@ -80,7 +80,7 @@ val of_request
 (* Same input ⇒ identical plan. No Random, no Unix.time. *)
 ```
 
-`Container_name.t` is a private string derived as `"masc-keeper-" ^ hex(Hash_algo.digest_bytes hash_algo (turn_id ‖ attempt ‖ suffix))[0..31]`, where `Hash_algo.t = SHA_256 | SHA_512` (closed variant, default `SHA_256` per §8 Q1). The hex slice takes the first **32 hex chars = 16 bytes (128 bits)** of the digest. Direct collision probability is 1/2^128; birthday-bound collision threshold (concurrent keepers in the same fleet) is ~2^64 ≈ 1.8×10^19 — effectively zero under any realistic load. Test backdoor `Container_name.of_string_for_test` is exposed only under `let%test_module` and not in the public `.mli`. **The algorithm choice is parametric** — wall-clock is the only construction-time dependency that must remain absent.
+`Container_name.t` is a private string derived as `"masc-keeper-" ^ hex(Keeper_hash_algo.digest_bytes hash_algo (turn_id ‖ attempt ‖ suffix))[0..31]`, where `Keeper_hash_algo.t = SHA_256 | SHA_512` (closed variant, default `SHA_256` per §8 Q1). The hex slice takes the first **32 hex chars = 16 bytes (128 bits)** of the digest. Direct collision probability is 1/2^128; birthday-bound collision threshold (concurrent keepers in the same fleet) is ~2^64 ≈ 1.8×10^19 — effectively zero under any realistic load. Test backdoor `Container_name.of_string_for_test` is exposed only under `let%test_module` and not in the public `.mli`. **The algorithm choice is parametric** — wall-clock is the only construction-time dependency that must remain absent.
 
 (BLAKE3 was originally in the variant; deferred to a follow-up — opam `digestif` 1.3.0 ships BLAKE2B/2S but not BLAKE3, and adding a separate `blake3` opam dependency is out of Phase 3b-i scope. RFC §8 Q1 updated. Hex encoding chosen over base36 to match the existing `Digestif.to_hex` convention used 8+ times elsewhere in `lib/` — see `lib/cache_eio.ml:58`, `lib/rate_limit.ml:230`, `lib/eval_calibration.ml:126`.)
 
@@ -195,7 +195,7 @@ Phases 1-5 are independently mergeable and revertible. Phase 5 closes the loop b
 | Alert flood from quarantine path | Alert dedup TTL: same `Container_name.t` quarantine event suppresses re-alert within 1h. Recorded in `Quarantine.t` state. |
 | Mock vs real daemon divergence | Phase 4 integration test runs both paths; mock impl reviewed against `docker --version` output diff suite. |
 | RFC-0036 cleanup hook *non-throwing* contract vs this RFC's Result.t *escalating* contract | `Sandbox_cleanup.adapter` wraps internal Result.t into the public hook (`log + swallow`). Public hook contract preserved. Internal logic retains typed errors. |
-| BLAKE3 dependency in OCaml — current opam constraints | RESOLVED Phase 3b-i (#14741 follow-up): `digestif` 1.3.0 (already present, used 8+ times in `lib/`) ships BLAKE2B/2S/SHA-256/SHA-512 but **not BLAKE3**. Adopted `Hash_algo.t = SHA_256 \| SHA_512` for Phase 3b. Future BLAKE3 = separate PR adding `blake3` opam dep + variant arm. |
+| BLAKE3 dependency in OCaml — current opam constraints | RESOLVED Phase 3b-i (#14741 follow-up): `digestif` 1.3.0 (already present, used 8+ times in `lib/`) ships BLAKE2B/2S/SHA-256/SHA-512 but **not BLAKE3**. Adopted `Keeper_hash_algo.t = SHA_256 \| SHA_512` for Phase 3b. Future BLAKE3 = separate PR adding `blake3` opam dep + variant arm. |
 
 ## 7. Out of Scope (v2 candidates)
 
@@ -206,7 +206,7 @@ Phases 1-5 are independently mergeable and revertible. Phase 5 closes the loop b
 
 ## 8. Open Questions
 
-1. **Default Hash_algo.t** — RESOLVED Phase 3b-i: variant is `SHA_256 | SHA_512`, default `SHA_256`. BLAKE3 deferred (digestif 1.3.0 lacks it). Future expansion = variant arm + opam dep in a separate PR.
+1. **Default Keeper_hash_algo.t** — RESOLVED Phase 3b-i: variant is `SHA_256 | SHA_512`, default `SHA_256`. BLAKE3 deferred (digestif 1.3.0 lacks it). Future expansion = variant arm + opam dep in a separate PR.
 2. **`Container_name.t` representation** — `private string` vs phantom-typed wrapper? Default: `private string` for opam-friendly cross-compilation.
 3. **Mock client thread safety** — single-fiber injection vs concurrent? Default: single-fiber; concurrent injection adds complexity not yet justified by test patterns.
 4. **Quarantine persistence across server restart** — in-memory only, or JSONL trail? Default: in-memory; restart loses state, restart-cleanup catches it via labels.

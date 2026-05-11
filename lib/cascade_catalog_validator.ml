@@ -228,23 +228,57 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
           };
         ]
 
+(* RFC-0066 Phase 4: prefer the validated runtime snapshot for
+   [required_capability_profile] and [weighted_entries] when the active
+   snapshot's [source_path] matches the caller-provided [config_path].
+   Falls through to the legacy reader when the snapshot is unrelated
+   (fixture tests with explicit path) or unavailable (early boot). *)
+let snapshot_profile_for ~config_path ~profile =
+  match Cascade_catalog_runtime.inspect_active () with
+  | Error _ -> None
+  | Ok state ->
+    let snap_opt =
+      match state with
+      | Cascade_catalog_runtime.Validated snapshot -> Some snapshot
+      | Validated_with_rejections { snapshot; _ } -> Some snapshot
+      | Serving_last_known_good { snapshot; _ } -> Some snapshot
+    in
+    (match snap_opt with
+     | Some snapshot when String.equal snapshot.source_path config_path ->
+       List.find_opt
+         (fun (p : Cascade_catalog_runtime.profile_build) ->
+           String.equal p.name profile)
+         snapshot.profiles
+     | _ -> None)
+
 let diagnose_profile ~config_path ~profile =
+  let snapshot_profile = snapshot_profile_for ~config_path ~profile in
   let model_specs =
-    Cascade_config_loader.load_profile_weighted ~config_path ~name:profile
-    |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
-           entry.model)
+    match snapshot_profile with
+    | Some (p : Cascade_catalog_runtime.profile_build) ->
+      List.map
+        (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
+        p.weighted_entries
+    | None ->
+      Cascade_config_loader.load_profile_weighted ~config_path ~name:profile
+      |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
+             entry.model)
   in
   let required_profile_opt =
-    match Cascade_config_loader.load_catalog ~config_path with
-    | Error _ -> None
-    | Ok entries ->
-        List.find_map
-          (fun (e : Cascade_config_loader.catalog_entry) ->
-            if String.equal e.name profile then
-              Some e.required_capability_profile
-            else None)
-          entries
-        |> Option.value ~default:None
+    match snapshot_profile with
+    | Some (p : Cascade_catalog_runtime.profile_build) ->
+      p.required_capability_profile
+    | None ->
+      (match Cascade_config_loader.load_catalog ~config_path with
+       | Error _ -> None
+       | Ok entries ->
+           List.find_map
+             (fun (e : Cascade_config_loader.catalog_entry) ->
+               if String.equal e.name profile then
+                 Some e.required_capability_profile
+               else None)
+             entries
+           |> Option.value ~default:None)
   in
   let capability_issues =
     match required_profile_opt with

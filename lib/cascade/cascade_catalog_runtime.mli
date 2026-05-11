@@ -38,6 +38,13 @@ type profile_build = {
   cli_max_concurrent : int option;
   candidates : candidate_runtime list;
   probes : candidate_probe list;
+  required_capability_profile : string option;
+      (** RFC-0066 Phase 3 — profile-scoped capability lint hint, copied
+          from the legacy [catalog_entry] at validation time. Legacy
+          schema only: the declarative [provider]/[model]/[profile]
+          format does not expose this field, so callers see [None] under
+          fully-declarative configs. [Cascade_catalog_validator] will
+          read this in Phase 4 instead of re-invoking [load_catalog]. *)
 }
 
 type snapshot = {

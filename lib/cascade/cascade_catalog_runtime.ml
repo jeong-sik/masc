@@ -32,6 +32,7 @@ type profile_build = {
   cli_max_concurrent : int option;
   candidates : candidate_runtime list;
   probes : candidate_probe list;
+  required_capability_profile : string option;
 }
 
 type profile_snapshot = profile_build
@@ -127,6 +128,7 @@ let install_snapshot_for_tests ~source_path ~profile_names =
              cli_max_concurrent = None;
              candidates = [];
              probes = [];
+             required_capability_profile = None;
            })
   in
   let snapshot =
@@ -616,6 +618,18 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
               probes = [];
             }
         else
+          let required_capability_profile =
+            match Cascade_config_loader.load_catalog ~config_path with
+            | Ok entries ->
+                List.find_map
+                  (fun (entry : Cascade_config_loader.catalog_entry) ->
+                    if String.equal entry.name name then
+                      Some entry.required_capability_profile
+                    else None)
+                  entries
+                |> Option.value ~default:None
+            | Error _ -> None
+          in
           Ok
             {
               name;
@@ -627,6 +641,7 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
               cli_max_concurrent;
               candidates;
               probes = profile_probes candidates;
+              required_capability_profile;
             }
 
 let runtime_required_profiles ~config_path =

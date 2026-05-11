@@ -596,6 +596,7 @@
         test_docker_response
         test_docker_client_mock
         test_sandbox_executor
+        test_keeper_backoff_policy
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -811,6 +812,7 @@
         test_docker_response
         test_docker_client_mock
         test_sandbox_executor
+        test_keeper_backoff_policy
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify

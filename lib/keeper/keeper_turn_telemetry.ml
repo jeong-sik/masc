@@ -60,13 +60,14 @@ let friction_activity_payload
 ;;
 
 let log_keeper_proof ~(keeper_name : string) (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) =
+  (* Closed-set wire label.  Previously this called [show_result_status]
+     (a [@@deriving show] artifact that returns ["Cdal_proof.Completed"])
+     and stripped the module prefix by [String.rindex_opt raw '.']
+     substring split — a fragile pattern that breaks silently when the
+     type is moved or the module renamed.  [result_status_to_string] is
+     now exposed in the [.mli] for callers that need the wire label. *)
   let status_string =
-    Masc_mcp_cdal_runtime.Cdal_proof.show_result_status proof.result_status
-    |> fun raw ->
-    match String.rindex_opt raw '.' with
-    | Some idx when idx + 1 < String.length raw ->
-      String.sub raw (idx + 1) (String.length raw - idx - 1)
-    | _ -> raw |> String.lowercase_ascii
+    Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_string proof.result_status
   in
   match proof.result_status with
   | Masc_mcp_cdal_runtime.Cdal_proof.Completed ->

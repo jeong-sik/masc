@@ -76,11 +76,16 @@ vars ==
     << turn_live, ksm_phase, turn_phase, decision_stage, cascade_state,
        compaction_stage, overflow_latched, retry_exhausted >>
 
-PhaseSet      == {"Running", "Overflowed", "Compacting", "Paused"}
-TurnPhaseSet  == {"idle", "prompting", "executing", "compacting"}
-DecisionSet   == {"undecided", "guard_ok", "tool_policy_selected"}
-CascadeSet    == {"idle", "trying"}
-CompactionSet == {"accumulating", "compacting", "done"}
+PhaseSet         == {"Running", "Overflowed", "Compacting", "Paused"}
+\* Class B (DELIBERATE projection) — KMC_ prefix isolates these from the
+\* canonical cross-spec sets (KTC/KCascadeLifecycle/KDP/KCompositeLifecycle
+\* carry full 7-/4-/5-member vocabularies). The KMC projection scope is
+\* documented at file header §"Out-of-scope subsidiary variants (#8957)".
+\* See iter 41 audit docs/tla-audit/cross-spec-3-divergences-classify-2026-05-12.md.
+KMC_TurnPhaseSet == {"idle", "prompting", "executing", "compacting"}
+KMC_DecisionSet  == {"undecided", "guard_ok", "tool_policy_selected"}
+KMC_CascadeSet   == {"idle", "trying"}
+CompactionSet    == {"accumulating", "compacting", "done"}
 ActionSet     == {
     "StartTurn",
     "BeginCascadeAttempt",
@@ -104,9 +109,9 @@ InvariantSet == {
 TypeOK ==
     /\ turn_live \in BOOLEAN
     /\ ksm_phase \in PhaseSet
-    /\ turn_phase \in TurnPhaseSet
-    /\ decision_stage \in DecisionSet
-    /\ cascade_state \in CascadeSet
+    /\ turn_phase \in KMC_TurnPhaseSet
+    /\ decision_stage \in KMC_DecisionSet
+    /\ cascade_state \in KMC_CascadeSet
     /\ compaction_stage \in CompactionSet
     /\ overflow_latched \in BOOLEAN
     /\ retry_exhausted \in BOOLEAN

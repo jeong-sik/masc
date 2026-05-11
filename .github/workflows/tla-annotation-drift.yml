@@ -62,4 +62,5 @@ jobs:
       - name: Run drift validator
         run: |
           bash scripts/audit-tla-annotation-drift.sh \
-            --baseline scripts/tla-annotation-drift-baseline.txt
+            --baseline scripts/tla-annotation-drift-baseline.txt \
+            --check-cross-spec

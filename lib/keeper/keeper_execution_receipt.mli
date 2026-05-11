@@ -139,7 +139,7 @@ type t =
   ; turn_count : int option
   ; current_task_id : string option
   ; goal_ids : string list
-  ; outcome : string
+  ; outcome : outcome_kind
   ; terminal_reason_code : string
   ; response_text_present : bool
   ; model_used : string option

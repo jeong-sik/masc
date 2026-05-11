@@ -98,7 +98,8 @@ let make_keeper_meta ~name ~goal_id =
   | Ok meta -> { meta with active_goal_ids = [ goal_id ] }
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
-let append_keeper_receipt ?(outcome = "ok")
+let append_keeper_receipt
+    ?(outcome : Keeper_execution_receipt.outcome_kind = `Ok)
     ?(terminal_reason_code = "completed")
     ?(requested_tools = [ "keeper_fs_read" ])
     ?(reported_tools = [ "Read" ])

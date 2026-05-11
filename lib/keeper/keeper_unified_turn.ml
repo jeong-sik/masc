@@ -84,7 +84,7 @@ let record_streaming_cancelled_observation
     ~meta:run_meta
     ~generation:run_generation
     ~cascade_name
-    ~outcome:"cancelled"
+    ~outcome:`Cancelled
     ~terminal_reason_code
     ~activity_kind:"keeper.turn_cancelled"
     ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
@@ -310,7 +310,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       ~generation
       ~cascade_name:
         (Keeper_execution_receipt.cascade_name_of_string (cascade_name_of_meta meta))
-      ~outcome:"cancelled"
+      ~outcome:`Cancelled
       ~terminal_reason_code:"supervisor_stop"
       ~activity_kind:"keeper.turn_cancelled"
       ~trajectory_outcome:(Trajectory.Gated "supervisor_stop")
@@ -339,7 +339,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~generation
         ~cascade_name:
           (Keeper_execution_receipt.cascade_name_of_string (cascade_name_of_meta meta))
-        ~outcome:"skipped"
+        ~outcome:`Skipped
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_skipped"
         ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
@@ -506,7 +506,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~cascade_name:
                   (Keeper_execution_receipt.cascade_name_of_string
                      effective_cascade_name)
-                ~outcome:"skipped"
+                ~outcome:`Skipped
                 ~terminal_reason_code:"ollama_saturated"
                 ~activity_kind:"keeper.turn_skipped"
                 ~trajectory_outcome:(Trajectory.Gated "ollama_saturated")
@@ -600,7 +600,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~meta
             ~generation
             ~cascade_name:effective_cascade_runtime_name
-            ~outcome:"error"
+            ~outcome:`Error
             ~terminal_reason_code
             ~activity_kind:"keeper.turn_blocked"
             ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
@@ -660,7 +660,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 to classify livelock-blocked turns as "unknown".  Map to
                 "error" — livelock IS a turn failure; the specific reason
                 is captured in terminal_reason_code. *)
-             ~outcome:"error"
+             ~outcome:`Error
              ~terminal_reason_code
              ~activity_kind:"keeper.turn_blocked"
              ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)

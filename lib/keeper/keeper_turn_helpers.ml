@@ -228,7 +228,7 @@ let record_pre_dispatch_terminal_observation
       ~(meta : keeper_meta)
       ~(generation : int)
       ~(cascade_name : Keeper_execution_receipt.cascade_name)
-      ~(outcome : string)
+      ~(outcome : Keeper_execution_receipt.outcome_kind)
       ~(terminal_reason_code : string)
       ~(activity_kind : string)
       ~(trajectory_outcome : Trajectory.trajectory_outcome)
@@ -281,7 +281,7 @@ let record_pre_dispatch_terminal_observation
     ; cascade_selected_model = None
     ; cascade_attempt_count = 0
     ; cascade_fallback_applied = false
-    ; cascade_outcome = "not_dispatched"
+    ; cascade_outcome = Keeper_execution_receipt.Cascade_not_dispatched
     ; degraded_retry_applied = false
     ; degraded_retry_cascade = None
     ; fallback_reason = None
@@ -321,7 +321,9 @@ let record_pre_dispatch_terminal_observation
           (`Assoc
               [ "keeper_name", `String meta.name
               ; "trace_id", `String trace_id
-              ; "outcome", `String outcome
+              ; ( "outcome"
+                , `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
+                )
               ; "terminal_reason_code", `String terminal_reason_code
               ; "cascade_name", `String cascade_name_string
               ])

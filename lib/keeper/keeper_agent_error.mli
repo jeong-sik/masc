@@ -69,8 +69,9 @@ val checkpoint_persistence_error
   -> detail:string
   -> Agent_sdk.Error.sdk_error
 
-(** Map an optional cascade observation to a textual outcome label
-    ("passed_to_next_model" / "completed" / "not_observed"). *)
+(** Map an optional cascade observation to a typed cascade outcome
+    ([Cascade_passed_to_next_model] / [Cascade_completed] /
+    [Cascade_not_observed]). *)
 val cascade_outcome_of_observation
   :  Cascade_legacy_runner.cascade_observation option
-  -> string
+  -> Keeper_execution_receipt.cascade_outcome

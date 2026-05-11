@@ -1494,10 +1494,8 @@ let run_turn
          ; goal_ids = meta.active_goal_ids
          ; outcome =
              (match turn_result with
-              | Ok _ -> Keeper_execution_receipt.outcome_kind_to_string `Ok
-              | Error err ->
-                Keeper_execution_receipt.outcome_kind_to_string
-                  (receipt_outcome_kind_of_sdk_error err))
+              | Ok _ -> `Ok
+              | Error err -> receipt_outcome_kind_of_sdk_error err)
          ; terminal_reason_code
          ; response_text_present = !receipt_response_text_present_ref
          ; model_used = !receipt_model_used_ref

@@ -34,7 +34,7 @@ let mk_tool_surface ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Requ
   }
 
 let mk_receipt
-    ?(outcome = "error")
+    ?(outcome : R.outcome_kind = `Error)
     ?(terminal_reason_code = "")
     ?(tool_contract_result = "satisfied")
     ?(tools_used = [ "Read" ])
@@ -45,7 +45,7 @@ let mk_receipt
     ?(required_tools = [])
     ?(missing_required_tools = [])
     ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required)
-    ?(cascade_outcome = "completed")
+    ?(cascade_outcome : R.cascade_outcome = Cascade_completed)
     ?current_task_id
     ?stop_reason
     ?(goal_ids = [])
@@ -181,9 +181,16 @@ let test_preflight_config_failure_not_reported_as_tool_unsatisfied () =
 (* === Cascade exhausted always alerts ================================ *)
 
 let test_alert_for_cascade_exhausted () =
+  (* Pre-typing: ~cascade_outcome:"exhausted" was paired with
+     terminal_reason_code="cascade_exhausted" to drive operator_disposition's
+     dead "exhausted"/"cascade_exhausted" string-matching branches.  Those
+     branches were unreachable workarounds (producer never emits
+     "exhausted"/"cascade_exhausted" in cascade_outcome); the typed
+     [cascade_outcome] migration drops them.  The remaining live path is
+     terminal_reason_code="cascade_exhausted", which still triggers
+     alert_exhausted regardless of cascade_outcome. *)
   let r =
-    mk_receipt ~terminal_reason_code:"cascade_exhausted"
-      ~cascade_outcome:"exhausted" ()
+    mk_receipt ~terminal_reason_code:"cascade_exhausted" ()
   in
   check_disp "cascade_exhausted" r "alert_exhausted" "cascade_exhausted"
 
@@ -191,7 +198,12 @@ let test_alert_for_cascade_exhausted () =
 
 let test_unknown_when_unmapped () =
   let r =
-    mk_receipt ~outcome:"weird" ~cascade_outcome:"weird"
+    (* outcome=`Ok with cascade_outcome ≠ Completed hits operator_disposition's
+       fall-through arm (the previous fixture used ~cascade_outcome:"weird"
+       drift; typed enum makes that unrepresentable, so use a valid non-Completed
+       variant to reach the same path). *)
+    mk_receipt ~outcome:`Ok
+      ~cascade_outcome:R.Cascade_not_observed
       ~tool_contract_result:"satisfied" ()
   in
   check_disp "unmapped" r "unknown" "unmapped_cascade_state"
@@ -200,7 +212,7 @@ let test_unknown_when_unmapped () =
 
 let test_pass_for_healthy () =
   let r =
-    mk_receipt ~outcome:"ok" ~cascade_outcome:"completed"
+    mk_receipt ~outcome:`Ok ~cascade_outcome:R.Cascade_completed
       ~tool_contract_result:"satisfied" ~terminal_reason_code:"completed"
       ()
   in
@@ -209,7 +221,7 @@ let test_pass_for_healthy () =
 let test_pass_next_for_cascade_fallback () =
   let r =
     mk_receipt ~cascade_fallback_applied:true
-      ~cascade_outcome:"passed_to_next_model"
+      ~cascade_outcome:R.Cascade_passed_to_next_model
       ~tool_contract_result:"satisfied" ()
   in
   check_disp "cascade_fallback" r "pass_next_model" "cascade_fallback"
@@ -241,13 +253,22 @@ let test_each_broadcast_disp_is_reachable () =
   let r1 = mk_receipt ~tool_contract_result:"violated" () in
   let d1, _ = R.operator_disposition r1 in
   check bool "pause_human reachable" true (R.needs_operator_broadcast d1);
-  (* alert_exhausted via cascade_outcome *)
-  let r2 = mk_receipt ~cascade_outcome:"cascade_exhausted" () in
+  (* alert_exhausted via terminal_reason_code.  Pre-typing this was driven
+     by cascade_outcome="cascade_exhausted", but that string is not in the
+     producer's closed [cascade_outcome] set; the dead path was dropped
+     with the typed migration.  terminal_reason_code remains the live
+     trigger. *)
+  let r2 = mk_receipt ~terminal_reason_code:"cascade_exhausted" () in
   let d2, _ = R.operator_disposition r2 in
   check bool "alert_exhausted reachable" true (R.needs_operator_broadcast d2);
   (* unknown via unmapped *)
   let r3 =
-    mk_receipt ~outcome:"weird" ~cascade_outcome:"weird"
+    (* outcome=`Ok with cascade_outcome ≠ Completed hits operator_disposition's
+       fall-through arm (the previous fixture used ~cascade_outcome:"weird"
+       drift; typed enum makes that unrepresentable, so use a valid non-Completed
+       variant to reach the same path). *)
+    mk_receipt ~outcome:`Ok
+      ~cascade_outcome:R.Cascade_not_observed
       ~tool_contract_result:"satisfied" ()
   in
   let d3, _ = R.operator_disposition r3 in

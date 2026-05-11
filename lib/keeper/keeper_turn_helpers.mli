@@ -70,7 +70,7 @@ val record_pre_dispatch_terminal_observation :
   meta:keeper_meta ->
   generation:int ->
   cascade_name:Keeper_execution_receipt.cascade_name ->
-  outcome:string ->
+  outcome:Keeper_execution_receipt.outcome_kind ->
   terminal_reason_code:string ->
   activity_kind:string ->
   trajectory_outcome:Trajectory.trajectory_outcome ->

@@ -107,7 +107,7 @@ let make_keeper_meta ~name ~goal_id =
 ;;
 
 let append_keeper_receipt
-      ?(outcome = "ok")
+      ?(outcome : Keeper_execution_receipt.outcome_kind = `Ok)
       ?(terminal_reason_code = "completed")
       ?(requested_tools = [ "keeper_fs_read" ])
       ?(reported_tools = [ "Read" ])
@@ -116,7 +116,7 @@ let append_keeper_receipt
       ?(tools_used = [ "keeper_fs_read" ])
       ?(tool_contract_result = "satisfied")
       ?(tool_requirement = Keeper_agent_tool_surface.Required)
-      ?(cascade_outcome = "completed")
+      ?(cascade_outcome : Keeper_execution_receipt.cascade_outcome = Cascade_completed)
       (config : Coord.config)
       (meta : Keeper_types.keeper_meta)
   =

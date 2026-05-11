@@ -1579,15 +1579,20 @@ let requires_per_keeper_bridging_for_bound_actor_tools_for_config
     cascade-decl [cascade_capabilities] (the TOML-parsed shape).
 
     [None] (no [[providers.<id>.capabilities]] sub-table declared in
-    cascade.toml) maps to [no_tool_http_headers] — the conservative
-    defaults that match the historical hardcoded baseline.
+    cascade.toml) returns [no_tool_http_headers] — the conservative
+    baseline that matches the historical hardcoded defaults.
 
-    [Some c] maps each capability field 1-to-1 except for
-    [tolerates_bound_actor_fallback], which the cascade-decl schema does
-    not yet carry; that field is hard-pinned to [false] here pending
-    the schema-side mirror PR (#14651) — callers that need it must keep
-    using the OCaml-side [tool_policy.tolerates_bound_actor_fallback]
-    from the hardcoded adapter records.
+    [Some c] maps the [tool_policy]-relevant subset of
+    [cascade_capabilities] (seven fields:
+    [supports_runtime_mcp_http_headers],
+    [requires_per_keeper_bridging_for_bound_actor_tools],
+    [identity_runtime_mcp_header_keys], [argv_prompt_preflight],
+    [uses_anthropic_caching], [max_turns_per_attempt],
+    [tolerates_bound_actor_fallback]).  The remaining capability
+    fields ([supports_inline_tools], [supports_runtime_mcp_tools],
+    [supports_runtime_tool_events]) describe runtime tool / event
+    surfaces and are intentionally outside the [tool_policy] shape;
+    they are consumed elsewhere (e.g. [Provider_tool_support]).
 
     Caller cutover plan: a future PR will route
     [adapter_of_provider_config] through this bridge so that
@@ -1608,10 +1613,7 @@ let tool_policy_of_cascade_capabilities
         argv_prompt_preflight = c.argv_prompt_preflight;
         uses_anthropic_caching = c.uses_anthropic_caching;
         max_turns_per_attempt = c.max_turns_per_attempt;
-        tolerates_bound_actor_fallback = false;
-        (* Pending #14651 — cascade_decl schema does not yet carry this
-           field; the hardcoded adapter records remain the SSOT until
-           the schema-side mirror lands and the parser populates it. *)
+        tolerates_bound_actor_fallback = c.tolerates_bound_actor_fallback;
       }
 
 let requires_per_keeper_bridging_for_bound_actor_tools_for_kind

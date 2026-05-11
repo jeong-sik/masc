@@ -450,6 +450,74 @@ let test_openai_compat_provider_identity_uses_endpoint_metadata () =
   check string "model id alone does not imply kimi" "openai"
     (Adapter.provider_label_of_config openai_endpoint_cfg)
 
+(* RFC-0058 §2.4 SSOT bridge — cascade-decl capabilities → tool_policy. *)
+
+let test_tool_policy_of_cascade_capabilities_none_is_conservative () =
+  let policy = Adapter.tool_policy_of_cascade_capabilities None in
+  check bool "None: supports_runtime_mcp_http_headers = false" false
+    policy.supports_runtime_mcp_http_headers;
+  check bool "None: requires_per_keeper_bridging = false" false
+    policy.requires_per_keeper_bridging_for_bound_actor_tools;
+  check (list string) "None: identity_runtime_mcp_header_keys = []" []
+    policy.identity_runtime_mcp_header_keys;
+  check bool "None: argv_prompt_preflight = false" false
+    policy.argv_prompt_preflight;
+  check bool "None: uses_anthropic_caching = false" false
+    policy.uses_anthropic_caching;
+  check (option int) "None: max_turns_per_attempt = None" None
+    policy.max_turns_per_attempt;
+  check bool "None: tolerates_bound_actor_fallback = false" false
+    policy.tolerates_bound_actor_fallback
+
+let test_tool_policy_of_cascade_capabilities_some_maps_subset () =
+  let caps : Cascade_declarative_types.cascade_capabilities =
+    {
+      Cascade_declarative_types.cascade_capabilities_default with
+      supports_runtime_mcp_http_headers = true;
+      requires_per_keeper_bridging_for_bound_actor_tools = true;
+      identity_runtime_mcp_header_keys = [ "authorization"; "x-openai-beta" ];
+      argv_prompt_preflight = true;
+      uses_anthropic_caching = true;
+      max_turns_per_attempt = Some 8;
+      tolerates_bound_actor_fallback = true;
+    }
+  in
+  let policy = Adapter.tool_policy_of_cascade_capabilities (Some caps) in
+  check bool "Some: supports_runtime_mcp_http_headers" true
+    policy.supports_runtime_mcp_http_headers;
+  check bool "Some: requires_per_keeper_bridging" true
+    policy.requires_per_keeper_bridging_for_bound_actor_tools;
+  check (list string) "Some: identity_runtime_mcp_header_keys"
+    [ "authorization"; "x-openai-beta" ]
+    policy.identity_runtime_mcp_header_keys;
+  check bool "Some: argv_prompt_preflight" true
+    policy.argv_prompt_preflight;
+  check bool "Some: uses_anthropic_caching" true
+    policy.uses_anthropic_caching;
+  check (option int) "Some: max_turns_per_attempt" (Some 8)
+    policy.max_turns_per_attempt;
+  check bool "Some: tolerates_bound_actor_fallback" true
+    policy.tolerates_bound_actor_fallback
+
+let test_tool_policy_of_cascade_capabilities_default_matches_none () =
+  let from_default =
+    Adapter.tool_policy_of_cascade_capabilities
+      (Some Cascade_declarative_types.cascade_capabilities_default)
+  in
+  let from_none = Adapter.tool_policy_of_cascade_capabilities None in
+  check bool "default Some matches None: supports_runtime_mcp_http_headers"
+    from_none.supports_runtime_mcp_http_headers
+    from_default.supports_runtime_mcp_http_headers;
+  check bool "default Some matches None: requires_per_keeper_bridging"
+    from_none.requires_per_keeper_bridging_for_bound_actor_tools
+    from_default.requires_per_keeper_bridging_for_bound_actor_tools;
+  check (list string) "default Some matches None: identity headers"
+    from_none.identity_runtime_mcp_header_keys
+    from_default.identity_runtime_mcp_header_keys;
+  check bool "default Some matches None: tolerates_bound_actor_fallback"
+    from_none.tolerates_bound_actor_fallback
+    from_default.tolerates_bound_actor_fallback
+
 let () =
   run "Provider Adapter"
     [
@@ -499,6 +567,14 @@ let () =
           test_case "resolve voice aliases" `Quick test_resolve_voice_aliases;
           test_case "voice auth env resolution" `Quick
             test_voice_auth_env_resolution;
+          test_case "tool_policy_of_cascade_capabilities None is conservative"
+            `Quick
+            test_tool_policy_of_cascade_capabilities_none_is_conservative;
+          test_case "tool_policy_of_cascade_capabilities Some maps subset"
+            `Quick test_tool_policy_of_cascade_capabilities_some_maps_subset;
+          test_case "tool_policy_of_cascade_capabilities default matches None"
+            `Quick
+            test_tool_policy_of_cascade_capabilities_default_matches_none;
         ] );
       ( "local_provider",
         [

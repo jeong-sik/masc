@@ -465,14 +465,26 @@ val requires_per_keeper_bridging_for_bound_actor_tools_for_config :
 (** RFC-0058 §2.4 SSOT bridge: build a [tool_policy] from a cascade-decl
     [cascade_capabilities] (the TOML-parsed shape).
 
-    [None] (no [[providers.<id>.capabilities]] sub-table) maps to
-    {!no_tool_http_headers} — the conservative defaults matching the
-    historical hardcoded baseline.
+    [None] (no [[providers.<id>.capabilities]] sub-table) returns the
+    conservative [no_tool_http_headers] baseline (a private [tool_policy]
+    record inside [provider_adapter.ml]; not exported by this signature).
 
-    [Some c] maps each capability field 1-to-1 except for
-    [tolerates_bound_actor_fallback], which is hard-pinned to [false]
-    pending the schema-side mirror PR (#14651) so caller behavior does
-    not regress before the cascade-decl field exists.
+    [Some c] maps the [tool_policy]-relevant subset of
+    [cascade_capabilities]:
+
+    - [supports_runtime_mcp_http_headers]
+    - [requires_per_keeper_bridging_for_bound_actor_tools]
+    - [identity_runtime_mcp_header_keys]
+    - [argv_prompt_preflight]
+    - [uses_anthropic_caching]
+    - [max_turns_per_attempt]
+    - [tolerates_bound_actor_fallback]
+
+    The remaining [cascade_capabilities] fields
+    ([supports_inline_tools], [supports_runtime_mcp_tools],
+    [supports_runtime_tool_events]) describe runtime tool / event
+    surfaces and are intentionally not represented in [tool_policy];
+    they are consumed elsewhere (e.g. [Provider_tool_support]).
 
     Schema-additive primitive; no callers yet. Future caller cutover
     will route [adapter_of_provider_config] through this bridge so

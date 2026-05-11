@@ -1,33 +1,35 @@
 (* OCaml ↔ TLA+ correspondence harness — RFC-0065 §3.6 scaffold.
  *
- * Phase 5.1 (this commit): scaffold + B1 (KeeperCascadeAttemptFSM) coverage.
+ * Phase 5.1: scaffold + B1 (KeeperCascadeAttemptFSM) coverage.
+ * Phase 5.2 (this commit): adds B2 (KeeperToolSurface) observable
+ *   label parity — SurfaceClassSet, RequirementSet.
  *
- * Phase 5.2 will plug in B2 (KeeperToolSurface).
  * Phase 5.3 will plug in B3 (KeeperPostTurnOrchestration) and close
  * memory P5 OPEN item.
  *
- * Approach (Phase 5.1):
+ * Approach:
  *
- *   - Read PhaseSet / TerminalSet / ProviderOutcomes from the .tla
+ *   - Read enumerated sets (PhaseSet / TerminalSet / ProviderOutcomes
+ *     for B1; SurfaceClassSet / RequirementSet for B2) from the .tla
  *     source via [Masc_test_deps.tla_quoted_set_from_repo_file_exn]
  *     (same primitive used by test_keeper_receipt_outcome_tla_parity).
  *   - Cross-reference with the OCaml side: variant labels emitted via
- *     [@@deriving tla] (Cascade_fsm.provider_outcome / decision) and
- *     a hand-maintained TLA name list for the higher-level attempt
- *     phase (which does not have a single OCaml type — it is a
- *     recursion shape inside try_cascade).
+ *     [@@deriving tla] when available, hand-pinned label lists when
+ *     the OCaml side carries the values as plain strings (current
+ *     state for tool_surface_class / tool_requirement).
  *   - Run a small number of representative transition checks: invoke
  *     [Cascade_fsm.decide] on inputs that map onto B1 actions and
  *     verify the OCaml decision matches the spec's expected next
  *     phase.
  *
- * What this scaffold does NOT do yet (deferred to Phase 5.2/5.3):
+ * What this harness does NOT do yet (deferred to Phase 5.3+):
  *
  *   - Full TLC trace export + replay.  The aspirational version reads
  *     a TLC trace and replays each (state, action, state') tuple
- *     through OCaml.  Phase 5.1 ships parity + spot transitions.
+ *     through OCaml.  Current phases ship parity + spot transitions.
  *   - B2 surface pipeline replay.  The 11-step compute_tool_surface
- *     transformation requires its own harness — Phase 5.2.
+ *     transformation requires a keeper-runtime fixture; the spec
+ *     covers the structural invariants at the TLC layer.
  *   - B3 post-turn ordering replay.  Wirein pinned order check —
  *     Phase 5.3.
  *)
@@ -35,6 +37,7 @@
 open Alcotest
 
 let spec_relpath_b1 = "specs/keeper-state-machine/KeeperCascadeAttemptFSM.tla"
+let spec_relpath_b2 = "specs/keeper-state-machine/KeeperToolSurface.tla"
 
 (* ── Set parity (B1) ─────────────────────────────────────── *)
 
@@ -210,12 +213,67 @@ let test_accept_on_exhaustion_terminal () =
       Alcotest.fail
         "Accept_on_exhaustion path must yield terminal success"
 
-(* ── Scaffold: future spec hooks (Phase 5.2 / 5.3) ──────── *)
+(* ── Set parity (B2) ─────────────────────────────────────── *)
 
-let test_b2_tool_surface_scaffold_pending () =
-  (* Placeholder — Phase 5.2 will add KeeperToolSurface.tla and
-     populate this with the 11-step pipeline parity. *)
-  skip ()
+let test_surface_class_set_parity () =
+  (* B2 spec catalog: SurfaceClassSet = {"none", "public_only", "mixed"}.
+     OCaml: keeper_run_tools.ml:949-955 emits exactly these strings.
+     There is no closed sum type on the OCaml side yet — the value
+     is a [string] field on [computed_tool_surface].  Hand-pin and
+     compare against the spec's enumerated catalog. *)
+  let spec_classes =
+    Masc_test_deps.tla_quoted_set_from_repo_file_exn
+      ~relpath:spec_relpath_b2
+      ~symbol:"SurfaceClassSet"
+    |> Masc_test_deps.sorted_strings
+  in
+  let ocaml_classes =
+    Masc_test_deps.sorted_strings
+      [ "none"; "public_only"; "mixed" ]
+  in
+  if ocaml_classes <> spec_classes then begin
+    Printf.printf "OCaml surface classes : [%s]\n"
+      (String.concat "; " ocaml_classes);
+    Printf.printf "Spec  surface classes : [%s]\n"
+      (String.concat "; " spec_classes);
+    failwith
+      "KeeperToolSurface SurfaceClassSet differs from OCaml \
+       tool_surface_class catalog — sync the spec or the OCaml-side \
+       contract list."
+  end
+
+let test_requirement_set_parity () =
+  (* B2 spec catalog: RequirementSet = {"no_tools", "required", "optional"}.
+     OCaml: tool_requirement = No_tools | Required | Optional (variant
+     at keeper_run_tools.ml:956-962).  Lower-cased, snake-cased to
+     match the spec convention. *)
+  let spec_reqs =
+    Masc_test_deps.tla_quoted_set_from_repo_file_exn
+      ~relpath:spec_relpath_b2
+      ~symbol:"RequirementSet"
+    |> Masc_test_deps.sorted_strings
+  in
+  let ocaml_reqs =
+    Masc_test_deps.sorted_strings
+      [ "no_tools"; "required"; "optional" ]
+  in
+  if ocaml_reqs <> spec_reqs then
+    failwith
+      "KeeperToolSurface RequirementSet differs from OCaml \
+       tool_requirement variant set"
+
+(* ── B2 pipeline contract spot checks ──────────────────── *)
+
+(* Pipeline contracts (FallbackFloorOnlyWhenEmpty, LastTurnSafeMonotone,
+   MaxToolsCap, RequiredSubsetEmitted) operate over a fully assembled
+   [computed_tool_surface], which in turn requires a live keeper
+   runtime (acc, meta, switch, …) to construct.  A faithful spot
+   check would replicate that runtime — out of scope for this
+   scaffold.  The TLC layer is the load-bearing check for these
+   invariants.  Hint left for Phase 5.3+ trace-replay work. *)
+let test_b2_pipeline_replay_pending () = skip ()
+
+(* ── Scaffold: future spec hooks (Phase 5.3) ────────────── *)
 
 let test_b3_post_turn_scaffold_pending () =
   (* Placeholder — Phase 5.3 will add KeeperPostTurnOrchestration.tla,
@@ -246,9 +304,17 @@ let () =
       test_case "Accept_on_exhaustion → terminal success" `Quick
         test_accept_on_exhaustion_terminal;
     ];
+    "B2 set parity", [
+      test_case "SurfaceClassSet matches OCaml tool_surface_class catalog" `Quick
+        test_surface_class_set_parity;
+      test_case "RequirementSet matches OCaml tool_requirement variant" `Quick
+        test_requirement_set_parity;
+    ];
+    "B2 pipeline contract (deferred to trace-replay)", [
+      test_case "B2 pipeline replay (Phase 5.3+, pending)" `Quick
+        test_b2_pipeline_replay_pending;
+    ];
     "Future specs (scaffold)", [
-      test_case "B2 KeeperToolSurface (Phase 5.2, pending)" `Quick
-        test_b2_tool_surface_scaffold_pending;
       test_case "B3 KeeperPostTurnOrchestration (Phase 5.3, pending)" `Quick
         test_b3_post_turn_scaffold_pending;
     ];

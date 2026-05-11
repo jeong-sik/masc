@@ -11,16 +11,16 @@ let string_list_json (items : string list) : Yojson.Safe.t =
 let blocking_gap_artifacts (verdict : Cdal_types.contract_verdict) : string list =
   verdict.completeness_gaps
   |> List.filter_map (fun (gap : Cdal_types.completeness_gap) ->
-       if gap.impact = Cdal_types.Blocks_verdict then Some gap.artifact else None)
+    if gap.impact = Cdal_types.Blocks_verdict then Some gap.artifact else None)
   |> List.sort_uniq String.compare
 ;;
 
-let friction_gap_artifacts
-      (fp : Cdal_friction_projection.friction_projection) : string list
+let friction_gap_artifacts (fp : Cdal_friction_projection.friction_projection)
+  : string list
   =
   fp.evidence_gap_groups
   |> List.map (fun (group : Cdal_friction_projection.evidence_gap_group) ->
-       group.artifact)
+    group.artifact)
   |> List.sort_uniq String.compare
 ;;
 
@@ -30,15 +30,14 @@ let contract_verdict_activity_payload
   : Yojson.Safe.t
   =
   `Assoc
-    [
-      ("keeper_name", `String keeper_name);
-      ("run_id", `String verdict.run_id);
-      ("contract_id", `String verdict.contract_id);
-      ("status", `String (Cdal_types.contract_status_to_string verdict.status));
-      ("claim_scope", `String verdict.claim_scope);
-      ("judgment_hash", `String verdict.judgment_hash);
-      ("finding_count", `Int (List.length verdict.findings));
-      ("blocking_gap_artifacts", string_list_json (blocking_gap_artifacts verdict));
+    [ "keeper_name", `String keeper_name
+    ; "run_id", `String verdict.run_id
+    ; "contract_id", `String verdict.contract_id
+    ; "status", `String (Cdal_types.contract_status_to_string verdict.status)
+    ; "claim_scope", `String verdict.claim_scope
+    ; "judgment_hash", `String verdict.judgment_hash
+    ; "finding_count", `Int (List.length verdict.findings)
+    ; "blocking_gap_artifacts", string_list_json (blocking_gap_artifacts verdict)
     ]
 ;;
 
@@ -48,14 +47,13 @@ let friction_activity_payload
   : Yojson.Safe.t
   =
   `Assoc
-    [
-      ("keeper_name", `String keeper_name);
-      ("window", `String fp.window);
-      ("based_on_run_ids", string_list_json fp.based_on_run_ids);
-      ("blocked_attempt_count", `Int fp.blocked_attempt_count);
-      ("blocked_group_count", `Int (List.length fp.blocked_attempt_groups));
-      ("review_tripwires", string_list_json fp.review_tripwires);
-      ("evidence_gap_artifacts", string_list_json (friction_gap_artifacts fp));
+    [ "keeper_name", `String keeper_name
+    ; "window", `String fp.window
+    ; "based_on_run_ids", string_list_json fp.based_on_run_ids
+    ; "blocked_attempt_count", `Int fp.blocked_attempt_count
+    ; "blocked_group_count", `Int (List.length fp.blocked_attempt_groups)
+    ; "review_tripwires", string_list_json fp.review_tripwires
+    ; "evidence_gap_artifacts", string_list_json (friction_gap_artifacts fp)
     ]
 ;;
 
@@ -100,7 +98,8 @@ let log_keeper_contract_verdict
     if Keeper_types_profile.keeper_debug
     then
       Log.Keeper.debug
-        "keeper:%s contract_verdict: status=%s scope=%s hash=%s findings=%d blocking_gaps=[%s]"
+        "keeper:%s contract_verdict: status=%s scope=%s hash=%s findings=%d \
+         blocking_gaps=[%s]"
         keeper_name
         (Cdal_types.contract_status_to_string verdict.status)
         verdict.claim_scope
@@ -109,7 +108,8 @@ let log_keeper_contract_verdict
         (String.concat "," blocking_gaps)
   | Cdal_types.Violated | Cdal_types.Inconclusive ->
     Log.Keeper.warn
-      "keeper:%s contract_verdict: status=%s scope=%s hash=%s findings=%d blocking_gaps=[%s]"
+      "keeper:%s contract_verdict: status=%s scope=%s hash=%s findings=%d \
+       blocking_gaps=[%s]"
       keeper_name
       (Cdal_types.contract_status_to_string verdict.status)
       verdict.claim_scope

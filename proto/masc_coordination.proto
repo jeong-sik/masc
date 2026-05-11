@@ -35,6 +35,12 @@ service MascCoordination {
 
   // Get current room status.
   rpc GetStatus(StatusRequest) returns (StatusResponse);
+
+  // LSP proxy call: forwards a JSON-RPC LSP request to the language server
+  // and returns the JSON-RPC response.  Used by the IDE dashboard to
+  // obtain hover, codeLens, inlayHint, and diagnostic results over the
+  // gRPC-web transport instead of a separate WebSocket.
+  rpc LspCall(LspRequest) returns (LspResponse);
 }
 
 // ===== Agent Lifecycle =====
@@ -164,4 +170,27 @@ message TaskInfo {
   string status = 3;
   string assigned_to = 4;
   int32 priority = 5;
+}
+
+// ===== LSP Proxy =====
+
+message LspRequest {
+  // Language ID, e.g. "ocaml", "typescript", "go".
+  string language_id = 1;
+  // JSON-RPC 2.0 request object serialized as a string.
+  string jsonrpc_request_json = 2;
+  // Optional: workspace root URI for the LSP server.
+  string workspace_root = 3;
+}
+
+message LspResponse {
+  // JSON-RPC 2.0 response object serialized as a string. Only valid when
+  // error_message is empty.
+  string jsonrpc_response_json = 1;
+  // Empty string means the request reached the LSP server and the JSON-RPC
+  // response is in jsonrpc_response_json (which may itself carry a JSON-RPC
+  // level error per the JSON-RPC spec). Non-empty means the gRPC service
+  // rejected the request before it reached the LSP process (transport-level
+  // failure, no language server, dispatcher not wired, etc.).
+  string error_message = 2;
 }

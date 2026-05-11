@@ -4,85 +4,9 @@ module Tool_result = Masc_mcp.Tool_result
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Time_compat = Time_compat
 
-let to_legacy_compat_for_test =
-  (Tool_result.to_legacy_compat [@alert "-legacy_tuple"])
-
-let test_wrap_json_response () =
-  let start = 1000.0 in
-  let raw = (true, {|{"status":"ok","count":42}|}) in
-  let r = Tool_result.wrap ~tool_name:"masc_status" ~start_time:start raw in
-  Alcotest.(check bool) "success" true r.success;
-  Alcotest.(check string) "tool_name" "masc_status" r.tool_name;
-  (* data should be parsed JSON, not a string *)
-  (match r.data with
-   | `Assoc fields ->
-     Alcotest.(check bool) "has status field"
-       true
-       (List.exists (fun (k, _) -> k = "status") fields)
-   | _ -> Alcotest.fail "expected Assoc");
-  Alcotest.(check bool) "duration >= 0" true (r.duration_ms >= 0.0)
-
-let test_wrap_plain_string () =
-  let start = Time_compat.now () in
-  let raw = (false, "Something went wrong") in
-  let r = Tool_result.wrap ~tool_name:"masc_transition" ~start_time:start raw in
-  Alcotest.(check bool) "failure" false r.success;
-  Alcotest.(check string) "tool_name" "masc_transition" r.tool_name;
-  (* Non-JSON string should be wrapped as `String *)
-  (match r.data with
-   | `String s ->
-     Alcotest.(check string) "plain string preserved" "Something went wrong" s
-   | _ -> Alcotest.fail "expected String for non-JSON input")
-
-let test_wrap_prefixed_json_response () =
-  let start = 1000.0 in
-  let raw =
-    ( true,
-      "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}" )
-  in
-  let r = Tool_result.wrap ~tool_name:"masc_board_post" ~start_time:start raw in
-  match r.data with
-  | `Assoc fields ->
-      Alcotest.(check string) "id parsed" "post-1"
-        Yojson.Safe.Util.(List.assoc "id" fields |> to_string);
-      Alcotest.(check string) "content parsed" "hello"
-        Yojson.Safe.Util.(List.assoc "content" fields |> to_string)
-  | _ -> Alcotest.fail "expected parsed JSON from prefixed payload"
-
-let test_prefixed_json_legacy_message_roundtrip () =
-  let start = 1000.0 in
-  let message =
-    "Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
-  in
-  let r =
-    Tool_result.wrap ~tool_name:"masc_board_post" ~start_time:start
-      (true, message)
-  in
-  Alcotest.(check bool) "success preserved" true r.success;
-  let legacy_success, legacy = to_legacy_compat_for_test r in
-  Alcotest.(check bool) "legacy success preserved" true legacy_success;
-  Alcotest.(check string) "legacy prefix preserved" message legacy
-
-let test_empty_legacy_message_is_preserved () =
-  let r =
-    {
-      Tool_result.success = true;
-      data = `Assoc [ ("status", `String "ok") ];
-      legacy_message = "";
-      tool_name = "direct";
-      duration_ms = 0.0;
-      failure_class = None;
-    }
-  in
-  Alcotest.(check string) "message remains empty" "" (Tool_result.message r);
-  let legacy_success, legacy = to_legacy_compat_for_test r in
-  Alcotest.(check bool) "legacy success preserved" true legacy_success;
-  Alcotest.(check string) "legacy message remains empty" "" legacy
-
 let test_to_json () =
   let start = Time_compat.now () in
-  let raw = (true, "done") in
-  let r = Tool_result.wrap ~tool_name:"masc_transition" ~start_time:start raw in
+  let r = Tool_result.ok ~tool_name:"masc_transition" ~start_time:start "done" in
   let json = Tool_result.to_json r in
   match json with
   | `Assoc fields ->
@@ -95,8 +19,7 @@ let test_to_json () =
 
 let test_message_roundtrip () =
   let start = Time_compat.now () in
-  let original = (true, "hello world") in
-  let r = Tool_result.wrap ~tool_name:"test" ~start_time:start original in
+  let r = Tool_result.ok ~tool_name:"test" ~start_time:start "hello world" in
   let success = r.success in
   let message = Tool_result.message r in
   Alcotest.(check bool) "success preserved" true success;
@@ -105,8 +28,7 @@ let test_message_roundtrip () =
 let test_message_json_roundtrip () =
   let start = Time_compat.now () in
   let json_str = {|{"key":"value"}|} in
-  let original = (true, json_str) in
-  let r = Tool_result.wrap ~tool_name:"test" ~start_time:start original in
+  let r = Tool_result.ok ~tool_name:"test" ~start_time:start json_str in
   let message = Tool_result.message r in
   (* JSON roundtrip may normalize formatting *)
   let reparsed = Yojson.Safe.from_string message in
@@ -135,16 +57,6 @@ let test_dispatch_structured_unknown () =
 
 let () =
   Alcotest.run "Tool_result" [
-    "wrap", [
-      Alcotest.test_case "json response" `Quick test_wrap_json_response;
-      Alcotest.test_case "plain string" `Quick test_wrap_plain_string;
-      Alcotest.test_case "prefixed json response" `Quick
-        test_wrap_prefixed_json_response;
-      Alcotest.test_case "prefixed json legacy message roundtrip" `Quick
-        test_prefixed_json_legacy_message_roundtrip;
-      Alcotest.test_case "empty legacy message preserved" `Quick
-        test_empty_legacy_message_is_preserved;
-    ];
     "to_json", [
       Alcotest.test_case "fields present" `Quick test_to_json;
     ];

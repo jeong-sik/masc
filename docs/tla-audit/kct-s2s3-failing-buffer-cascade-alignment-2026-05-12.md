@@ -3,7 +3,7 @@
 **Iteration**: 26 (/loop FSM/TLA+/OCaml drift hunt)
 **Date**: 2026-05-12
 **Spec**: `specs/keeper-state-machine/KeeperCoreTriad.tla` §S2 FailingUsesRecovery, §S3 BufferOpsUseLocalOnly
-**OCaml**: `lib/keeper/keeper_cascade_routing.ml:20-25`, `lib/keeper/keeper_config.ml:26-33`, `lib/cascade/cascade_routes.ml:64-65, 251-271`
+**OCaml**: `lib/keeper/keeper_cascade_routing.ml:20-25`, `lib/keeper/keeper_config.ml:26-33`, `lib/cascade/cascade_routes.ml:64-65, 209-271`
 **Risk**: LOW — alignment is correct in the *default* deployment.  Configuration-dependent gap: operator-supplied catalogs/routes may resolve to non-spec names, in which case spec-literal match no longer holds verbatim — though the *intent* (use recovery / buffer profile, not main keeper cascade) is preserved.
 **Type**: Audit-only (no code change in this PR).  Companion to C-3 (terminal cascade) audit.
 

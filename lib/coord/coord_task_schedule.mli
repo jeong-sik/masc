@@ -31,6 +31,15 @@ val string_list_contains : string list -> string -> bool
 val required_tools_allowed :
   ?agent_tool_names:string list -> string list -> bool
 
+(** [make_required_tools_predicate ?agent_tool_names ()] returns a
+    closure that checks whether a given [required_tools] list is
+    satisfied by [agent_tool_names].  The allowed-set is materialised
+    once at call time and reused across every invocation of the
+    returned closure — call this {b outside} per-candidate loops to
+    avoid rebuilding the set per task. *)
+val make_required_tools_predicate :
+  ?agent_tool_names:string list -> unit -> (string list -> bool)
+
 val underscore_name : string -> string
 val hyphen_name : string -> string
 val keeper_name_from_agent_name : string -> string option

@@ -285,13 +285,13 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
         ~meta
         ()
     in
-    let required_tools_allowed required_tools =
-      match allowed_tool_names with
-      | Some names ->
-          Coord_task_schedule.required_tools_allowed ~agent_tool_names:names
-            required_tools
-      | None ->
-          Coord_task_schedule.required_tools_allowed required_tools
+    (* Build the allowed-set once and reuse across all candidates in
+       the [unclaimed_tasks] filter below — see PR #14826 for the
+       O(R+A) rationale. *)
+    let required_tools_allowed =
+      Coord_task_schedule.make_required_tools_predicate
+        ?agent_tool_names:allowed_tool_names
+        ()
     in
     let claimable =
       List.length

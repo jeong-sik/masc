@@ -201,8 +201,16 @@ let task_required_tools (task : Masc_domain.task) =
 ;;
 
 let missing_required_tools ~allowed required =
+  (* Build a name-keyed Hashtbl over [allowed] once; per-required-name
+     check drops from O(|allowed|) to O(1).  Called on the task-claim
+     guard path where [allowed] is typically the agent's tool surface
+     (~30-50 names) and [required] is 1-5 contract tools.
+     Constant initial bucket size avoids the [List.length allowed]
+     pre-traversal (Hashtbl grows automatically). *)
+  let allowed_set = Hashtbl.create 32 in
+  List.iter (fun name -> Hashtbl.replace allowed_set name ()) allowed;
   List.filter
-    (fun required_name -> not (List.exists (String.equal required_name) allowed))
+    (fun required_name -> not (Hashtbl.mem allowed_set required_name))
     required
 ;;
 

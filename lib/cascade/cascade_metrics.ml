@@ -1013,8 +1013,19 @@ let register_all () =
     "Total inspect_active calls that transitioned from a degraded \
      state (LKG or Validated_with_rejections) back to Validated. \
      Non-zero rate confirms operator fixes are taking effect.";
-  c metric_profile_candidate_drop;
-  c metric_resolve_provider_leak;
+  h metric_profile_candidate_drop
+    "Total weighted entries dropped at [validate_profile_static] \
+     because [parse_weighted_entry_diag] rejected them. Labels: \
+     cascade, reason (unregistered_scheme | unavailable_scheme | \
+     invalid_syntax). [unavailable_scheme] is the most common \
+     operator-actionable cause (missing API credential / disabled \
+     runtime lane).";
+  h metric_resolve_provider_leak
+    "Total provider entries returned by [resolve_named_providers] \
+     that are NOT in the parsed declared profile (alias expansion, \
+     provider_filter fallback widening, or genuine configuration \
+     drift). Bumped by leak_count per resolve call (delta \
+     semantics). Labels: cascade.";
   c metric_route_config_error;
   h metric_resolve_failure
     "Total resolve_named_providers[_strict[_with_secondary_resolver]] \
@@ -1031,12 +1042,24 @@ let register_all () =
      cascade.toml provider list.";
   c metric_auto_expansion_fanout;
   c metric_ordering_health_widening;
-  c metric_provider_cooldown;
+  h metric_provider_cooldown
+    "Total fresh cooldown entries set at [Cascade_health_tracker]. \
+     Labels: provider, reason (failure_threshold | soft_rate_limit \
+     | hard_quota | terminal_failure). Counter complement to the \
+     existing [keeper_provider_block_duration_sec] histogram \
+     (duration distribution, this is entry rate by cause).";
   c metric_strategy_starvation_guard;
   c metric_sticky_drift;
   c metric_sticky_expiry;
   c metric_default_label_fallback;
-  c metric_max_context_fallback;
+  h metric_max_context_fallback
+    "Total context-window resolutions falling back to \
+     [fallback_context_window] (128_000). Labels: site \
+     (label_no_provider_name | label_unregistered_scheme | \
+     primary_no_available | cascade_max_no_available). Keeper \
+     turn runs at the fallback window instead of any configured \
+     value — operators querying for long-context capability \
+     should check non-zero rates per site.";
   c metric_discovered_context_below_floor;
   c metric_context_capability_drift;
   c metric_llama_model_not_discovered;
@@ -1045,7 +1068,13 @@ let register_all () =
      target could not be honored at runtime. Labels: reason \
      (catalog_unvalidated | target_not_in_catalog). Operator action: \
      fix the [routes] table in cascade.toml.";
-  c metric_deprecated_profile_name_filter;
+  h metric_deprecated_profile_name_filter
+    "Total profile names filtered by \
+     [is_deprecated_logical_profile_name] across 3 catalog-build \
+     call sites. Label: name (one of ~28 closed deprecated names). \
+     Doubles as RFC-0066 Phase 4 migration tracker: per-name rate \
+     stays at zero across deploys -> safe to drop from \
+     [deprecated_logical_profile_names].";
   h metric_capability_mismatch
     "Total load_catalog invocations that detected at least one \
      RFC-0055 capability subset violation on a fallback_cascade edge. \
@@ -1063,13 +1092,27 @@ let register_all () =
      and runtime MCP tools run unauthenticated. Caller-contract \
      fault, not config — fix the calling code path to thread \
      agent_name through.";
-  c metric_partial_eio_context;
+  h metric_partial_eio_context
+    "Total [refresh_local_discovery_if_possible] calls where only \
+     one of [Eio.Switch.t] / [Eio.Net.t] was available (caller \
+     forgot [Eio_context.set_switch] / [set_net]). The existing \
+     WARN-once dedups log noise; this counter ticks every hit so \
+     a chronic caller-side regression stays observable after the \
+     WARN is suppressed. Operator action: thread Eio context to \
+     the failing call site (RFC-0037 §4.3).";
   h metric_discovery_refresh_exception
     "Total refresh_local_discovery_if_possible calls that caught a \
      non-cancellation exception from refresh_llama_endpoints. The \
      exception is swallowed and the function returns false; this \
      counter makes the swallow rate alertable.";
-  c metric_profile_registration_failure;
+  h metric_profile_registration_failure
+    "Total [load_catalog] calls where \
+     [register_declared_profiles_from_json] returned Error. \
+     Catalog continues loading without the declared profiles, so \
+     downstream [resolve_required_capabilities] returns None for \
+     these names and capability filtering falls back to defaults. \
+     Pair with iter 6 / iter 14 [profile_candidate_drop] which \
+     surfaces the downstream effect of these registration gaps.";
   h metric_cascade_invariant_violation
     "Total Cascade_fsm contract violations (should-be-unreachable \
      defensive arms). MUST be zero in steady state. Any non-zero \

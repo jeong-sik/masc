@@ -473,8 +473,15 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   let selected = ref [] in
   (* Side-channel set for O(1) "already selected?" checks across the
      multi-phase selection loop.  [selected] (list) is still used for
-     ordering and length checks; the Hashtbl mirrors only the names. *)
-  let selected_names : (string, unit) Hashtbl.t = Hashtbl.create max_n in
+     ordering and length checks; the Hashtbl mirrors only the names.
+
+     Clamp the initial size: a negative [max_n] would raise
+     [Invalid_argument] from [Hashtbl.create], and a pathologically
+     large value would preallocate proportional buckets up-front.
+     Bound by [List.length agents] since the loop cannot select more
+     than that many names regardless of [max_n]. *)
+  let initial_size = max 0 (min max_n (List.length agents)) in
+  let selected_names : (string, unit) Hashtbl.t = Hashtbl.create initial_size in
   let is_selected name = Hashtbl.mem selected_names name in
   let mark_selected name = Hashtbl.replace selected_names name () in
   let add_selected result =

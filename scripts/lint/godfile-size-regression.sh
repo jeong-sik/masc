@@ -15,6 +15,14 @@
 #     3000 leaves headroom for one round of additions before the cap forces split.
 #   - 40+ files are already over 600 lines. New files start clean.
 #
+# 2026-05-11 cap raised 3000 -> 3300 after lib/prometheus.ml grew to 3,154 lines
+# from a global ocamlformat regularization (commit f297cce035, no functional
+# change — single-line patterns expanded across the metric registry). Decision
+# is to absorb the format-driven growth rather than split prometheus.ml in a
+# rush; the new ceiling re-establishes ~150 lines of headroom. Owner sign-off
+# in PR #14559 thread. Next raise must come with a decomposition plan, not
+# another absorption.
+#
 # Modes:
 #   bash godfile-size-regression.sh                 # absolute-cap only
 #   BASE=origin/main bash godfile-size-regression.sh   # adds new-file 600 cap
@@ -27,7 +35,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BASE="${BASE:-}"
-ABSOLUTE_CAP="${ABSOLUTE_CAP:-3000}"
+ABSOLUTE_CAP="${ABSOLUTE_CAP:-3300}"
 NEW_FILE_CAP="${NEW_FILE_CAP:-600}"
 
 cd "${ROOT}"

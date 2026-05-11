@@ -90,61 +90,17 @@ let load_toml_in_memory config_path =
        Ok json)
 ;;
 
+(* RFC-0058 §9 Phase 9.3: TOML is the only cascade source. The previous
+   JSON-only branch (mtime-cached disk read of cascade.json) has been
+   removed along with [source_kind = Json]. All paths flow through
+   [load_toml_in_memory], which renders TOML to JSON in memory and
+   caches by source-path mtime. *)
 let load_json path =
-  let source = Cascade_toml_materializer.source_info ~config_path:path in
-  match source.kind with
-  | Cascade_toml_materializer.Toml ->
-    (try load_toml_in_memory path with
-     | Sys_error msg -> Error msg
-     | Unix.Unix_error (err, fn, arg) ->
-       Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
-     | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg))
-  | Cascade_toml_materializer.Json ->
-    let rec load_current () =
-      let mtime = (Unix.stat path).Unix.st_mtime in
-      match
-        with_cache_lock (fun () ->
-          match Hashtbl.find_opt config_cache path with
-          | Some (cached_mtime, json) when Float.equal cached_mtime mtime -> Some json
-          | _ -> None)
-      with
-      | Some json -> Ok json
-      | None ->
-        let json = read_json_file path in
-        let refreshed_mtime = (Unix.stat path).Unix.st_mtime in
-        if not (Float.equal refreshed_mtime mtime)
-        then load_current ()
-        else (
-          let outcome =
-            with_cache_lock (fun () ->
-              match Hashtbl.find_opt config_cache path with
-              | Some (cached_mtime, cached_json)
-                when Float.equal cached_mtime refreshed_mtime ->
-                `Returning_cached cached_json
-              | prior ->
-                Hashtbl.replace config_cache path (refreshed_mtime, json);
-                `Installed_new (Option.map fst prior))
-          in
-          match outcome with
-          | `Returning_cached cached_json -> Ok cached_json
-          | `Installed_new prior_mtime ->
-            (match prior_mtime with
-             | None ->
-               Eio.traceln "[CascadeConfig] loaded %s mtime=%.0f" path refreshed_mtime
-             | Some old_mtime ->
-               Eio.traceln
-                 "[CascadeConfig] reloaded %s old_mtime=%.0f new_mtime=%.0f"
-                 path
-                 old_mtime
-                 refreshed_mtime);
-            Ok json)
-    in
-    (try load_current () with
-     | Sys_error msg -> Error msg
-     | Unix.Unix_error (err, fn, arg) ->
-       Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
-     | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
-     | End_of_file -> Error "unexpected end of file")
+  try load_toml_in_memory path with
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
 ;;
 
 (** A model entry with an optional weight for weighted cascade selection.

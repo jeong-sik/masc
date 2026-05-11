@@ -272,8 +272,12 @@ let test_cascade_json_is_not_committed () =
          repo_root)
 ;;
 
-let with_temp_cascade_json body =
-  let tmp = Filename.temp_file "cascade-strategy-" ".json" in
+(* RFC-0058 §9 Phase 9.3: cascade.toml is the only authoring surface.
+   Helper renamed from [with_temp_cascade_json] to [with_temp_cascade_toml]
+   so the file extension matches the only source kind the materializer
+   accepts. *)
+let with_temp_cascade_toml body =
+  let tmp = Filename.temp_file "cascade-strategy-" ".toml" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove tmp with
@@ -282,7 +286,7 @@ let with_temp_cascade_json body =
 ;;
 
 let test_priority_tier_label_tiers_normalize_to_model_ids () =
-  with_temp_cascade_json
+  with_temp_cascade_toml
   @@ fun tmp ->
   let oc = open_out tmp in
   Fun.protect
@@ -290,17 +294,18 @@ let test_priority_tier_label_tiers_normalize_to_model_ids () =
     (fun () ->
        output_string
          oc
-         {|{
-  "regression_models": [
-    "claude_code:claude-haiku-4-5-20251001",
-    "gemini_cli:gemini-3-flash-preview"
-  ],
-  "regression_strategy": "priority_tier",
-  "regression_tiers": [
-    ["claude_code:claude-haiku-4-5-20251001"],
-    ["gemini_cli:gemini-3-flash-preview"]
-  ]
-}|});
+         {|
+[regression]
+models = [
+  "claude_code:claude-haiku-4-5-20251001",
+  "gemini_cli:gemini-3-flash-preview",
+]
+strategy = "priority_tier"
+tiers = [
+  ["claude_code:claude-haiku-4-5-20251001"],
+  ["gemini_cli:gemini-3-flash-preview"],
+]
+|});
   let strategy =
     Masc_mcp.Cascade_config.resolve_strategy ~config_path:tmp ~name:"regression" ()
   in
@@ -317,7 +322,7 @@ let test_priority_tier_label_tiers_normalize_to_model_ids () =
 ;;
 
 let test_priority_tier_invalid_tiers_fall_back_to_default_strategy () =
-  with_temp_cascade_json
+  with_temp_cascade_toml
   @@ fun tmp ->
   let oc = open_out tmp in
   Fun.protect
@@ -325,15 +330,12 @@ let test_priority_tier_invalid_tiers_fall_back_to_default_strategy () =
     (fun () ->
        output_string
          oc
-         {|{
-  "regression_models": [
-    "claude_code:claude-haiku-4-5-20251001"
-  ],
-  "regression_strategy": "priority_tier",
-  "regression_tiers": [
-    ["codex_cli:auto"]
-  ]
-}|});
+         {|
+[regression]
+models = ["claude_code:claude-haiku-4-5-20251001"]
+strategy = "priority_tier"
+tiers = [["codex_cli:auto"]]
+|});
   let strategy =
     Masc_mcp.Cascade_config.resolve_strategy ~config_path:tmp ~name:"regression" ()
   in
@@ -346,7 +348,7 @@ let test_priority_tier_invalid_tiers_fall_back_to_default_strategy () =
 ;;
 
 let test_keeper_assignable_profile_defaults_to_round_robin () =
-  with_temp_cascade_json
+  with_temp_cascade_toml
   @@ fun tmp ->
   let oc = open_out tmp in
   Fun.protect
@@ -354,13 +356,14 @@ let test_keeper_assignable_profile_defaults_to_round_robin () =
     (fun () ->
        output_string
          oc
-         {|{
-  "regression_models": [
-    "claude_code:claude-haiku-4-5-20251001",
-    "gemini_cli:gemini-3-flash-preview"
-  ],
-  "regression_keeper_assignable": true
-}|});
+         {|
+[regression]
+models = [
+  "claude_code:claude-haiku-4-5-20251001",
+  "gemini_cli:gemini-3-flash-preview",
+]
+keeper_assignable = true
+|});
   let strategy =
     Masc_mcp.Cascade_config.resolve_strategy ~config_path:tmp ~name:"regression" ()
   in
@@ -372,7 +375,7 @@ let test_keeper_assignable_profile_defaults_to_round_robin () =
 ;;
 
 let test_non_keeper_assignable_profile_defaults_to_failover () =
-  with_temp_cascade_json
+  with_temp_cascade_toml
   @@ fun tmp ->
   let oc = open_out tmp in
   Fun.protect
@@ -380,13 +383,14 @@ let test_non_keeper_assignable_profile_defaults_to_failover () =
     (fun () ->
        output_string
          oc
-         {|{
-  "regression_models": [
-    "claude_code:claude-haiku-4-5-20251001",
-    "gemini_cli:gemini-3-flash-preview"
-  ],
-  "regression_keeper_assignable": false
-}|});
+         {|
+[regression]
+models = [
+  "claude_code:claude-haiku-4-5-20251001",
+  "gemini_cli:gemini-3-flash-preview",
+]
+keeper_assignable = false
+|});
   let strategy =
     Masc_mcp.Cascade_config.resolve_strategy ~config_path:tmp ~name:"regression" ()
   in

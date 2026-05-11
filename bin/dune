@@ -26,10 +26,9 @@
  (modules public_tool_manifest)
  (libraries masc_mcp yojson))
 
-(executable
- (name cascade_materialize)
- (modules cascade_materialize)
- (libraries masc_mcp))
+;; cascade_materialize (RFC-0058 §9 Phase 9.3): retired. cascade.json
+;; is no longer generated or consumed; the CLI's only purpose was to
+;; pre-write that derived artifact.
 
 ;; Env knob catalog generator (#10733):
 ;;   regenerates docs/runtime-tunables.md from lib/config/env_config_*.ml.

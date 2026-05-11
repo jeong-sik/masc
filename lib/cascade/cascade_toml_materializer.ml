@@ -1,18 +1,14 @@
-type source_kind =
-  | Json [@tla.symbol "json"]
-  | Toml [@tla.symbol "toml"]
-[@@deriving tla]
+(* RFC-0058 §9 Phase 9.3: cascade.json is no longer generated or
+   consumed. The previous [Json] variant of [source_kind] modelled the
+   "operator committed cascade.json without a TOML sibling" mode, which
+   is now disallowed — TOML is the sole SSOT. The variant is kept as a
+   single-arm union so external [source_kind_to_string] callers keep
+   working; future cleanup may drop the type entirely. *)
+type source_kind = Toml [@tla.symbol "toml"] [@@deriving tla]
 
 type source_info =
   { kind : source_kind
   ; source_path : string
-  ; json_path : string
-  ; raw_json_editable : bool
-  }
-
-type materialize_result =
-  { source : source_info
-  ; wrote_json : bool
   }
 
 type source_state =
@@ -21,30 +17,26 @@ type source_state =
   ; source_mtime : float option
   }
 
-let source_kind_to_string = function
-  | Json -> "json"
-  | Toml -> "toml"
-;;
+let source_kind_to_string Toml = "toml"
 
 let toml_path_of_json_path config_path =
   Filename.concat (Filename.dirname config_path) Config_dir_resolver.cascade_toml_filename
 ;;
 
+(* Accept either a TOML path or a path that points to where a JSON file
+   used to live — we always resolve to the TOML sibling. If neither
+   exists we still return a path so callers can probe via
+   [source_state.source_exists]; an actual read will fail loudly. *)
 let source_info ~config_path =
   let toml_path = toml_path_of_json_path config_path in
-  if Fs_compat.file_exists toml_path
-  then
-    { kind = Toml
-    ; source_path = toml_path
-    ; json_path = config_path
-    ; raw_json_editable = false
-    }
-  else
-    { kind = Json
-    ; source_path = config_path
-    ; json_path = config_path
-    ; raw_json_editable = true
-    }
+  let source_path =
+    if Fs_compat.file_exists toml_path
+    then toml_path
+    else if Filename.check_suffix config_path ".toml"
+    then config_path
+    else toml_path
+  in
+  { kind = Toml; source_path }
 ;;
 
 let source_state ~config_path =
@@ -638,14 +630,11 @@ let render_toml_file_to_json_string toml_path =
    [_schema], [_revision]) are filtered so that documentation
    /housekeeping fields don't leak into the accept list.
 
-   On JSON-only sources, returns [Ok []] — JSON's catalog goes through
-   [Cascade_config_loader] directly; a JSON load that fails is a
-   different class of bug than the strict-field regression this guard
-   is for. *)
+   RFC-0058 §9 Phase 9.3: source_kind = Json is gone; TOML is the only
+   cascade source. *)
 let toml_section_names_result ~config_path =
   let info = source_info ~config_path in
   match info.kind with
-  | Json -> Ok []
   | Toml ->
     (try
        let content = Fs_compat.load_file info.source_path in
@@ -704,39 +693,13 @@ let toml_section_names_result ~config_path =
 
 let render_toml_to_json_string ~config_path =
   let source = source_info ~config_path in
-  match source.kind with
-  | Json -> Error "render_toml_to_json_string: source is JSON, not TOML"
-  | Toml ->
-    (match render_toml_file_to_json_string source.source_path with
-     | Ok json -> Ok (source, json)
-     | Error msg ->
-       Error (Printf.sprintf "failed to materialize from %s: %s" source.source_path msg))
+  match render_toml_file_to_json_string source.source_path with
+  | Ok json -> Ok (source, json)
+  | Error msg ->
+    Error (Printf.sprintf "failed to materialize from %s: %s" source.source_path msg)
 ;;
 
-let ensure_materialized_json ~config_path =
-  let source = source_info ~config_path in
-  match source.kind with
-  | Json -> Ok { source; wrote_json = false }
-  | Toml ->
-    (match render_toml_file_to_json_string source.source_path with
-     | Error msg ->
-       Error
-         (Printf.sprintf
-            "failed to materialize %s from %s: %s"
-            source.json_path
-            source.source_path
-            msg)
-     | Ok rendered_json ->
-       let current_json =
-         if Fs_compat.file_exists source.json_path
-         then Some (Fs_compat.load_file source.json_path)
-         else None
-       in
-       if current_json = Some rendered_json
-       then Ok { source; wrote_json = false }
-       else (
-         Fs_compat.mkdir_p (Filename.dirname source.json_path);
-         match Fs_compat.save_file_atomic source.json_path rendered_json with
-         | Ok () -> Ok { source; wrote_json = true }
-         | Error msg -> Error msg))
-;;
+(* RFC-0058 §9 Phase 9.3: [ensure_materialized_json] retired. cascade.json
+   is no longer generated or consumed; rendering happens in-memory via
+   [render_toml_to_json_string]. The disk-write path and
+   [materialize_result] type are gone. *)

@@ -36,8 +36,11 @@ type cascade_credential =
 (** {1 Layer 1: Providers} *)
 
 (** Per-provider liveness class — RFC-0058 §3.2.1 (Phase 5.2).
-    Replaces the hardcoded cascade-prefix → budget match table in
-    [Cascade_attempt_liveness_config.budget_for_label]. *)
+    Schema only at this phase; the field is parsed and validated but
+    not yet consumed. Intended to replace the hardcoded cascade-prefix
+    → budget match table in
+    [Cascade_attempt_liveness_config.budget_for_label] in a follow-up
+    phase. *)
 type cascade_liveness_class =
   | Cloud_fast
   | Cloud_thinking

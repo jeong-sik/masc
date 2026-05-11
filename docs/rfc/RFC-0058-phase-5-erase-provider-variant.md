@@ -72,7 +72,7 @@ Phased to keep `main` green at every step. Each step is one PR.
 
 Split into two PRs to keep the schema migration reversible.
 
-**Phase 5.2a (schema only) — landed**
+**Phase 5.2a (schema only) — this PR**
 - Add `cascade_liveness_class` type + `liveness_class` field on
   `cascade_provider`.
 - Parser reads `[providers.<p>.liveness] class = "cloud_fast" | …` into
@@ -110,9 +110,10 @@ Split into two PRs to keep the schema migration reversible.
 
 ### Phase 5.5 — Validator hardens R11 globally
 
-- Promote `validate_strict` (Phase 4) to be the default validator used
-  by every cascade.toml load site. Legacy `validate` removed once test
-  fixtures all carry `max-concurrent`.
+- Promote `validate_strict` (introduced in Phase 5.2a alongside R11)
+  to be the default validator used by every cascade.toml load site.
+  Legacy `validate` removed once test fixtures all carry
+  `max-concurrent`.
 
 ## 5. Acceptance Gates
 

@@ -1,4 +1,9 @@
-# RFC-0047 — Typed `Keeper_turn_disposition` (operator-facing closed sum)
+# RFC-0068 — Typed `Keeper_turn_disposition` (operator-facing closed sum)
+
+> **Renumber note (2026-05-12)**: Originally filed as RFC-0047 on 2026-05-08,
+> conflicting with `RFC-0047-oas-adapter-decomposition.md` (Implemented
+> #14314). Renumbered to RFC-0068 to resolve the collision, mirroring the
+> RFC-0057 → RFC-0067 renumber pattern (#14672).
 
 - **Status**: Draft
 - **Author**: vincent (with Claude)
@@ -84,7 +89,7 @@ layer-1 (runtime) wire strings. RFC-0042 PR-3 alone cannot remove them.
 | G2 | Adding a new operator disposition is a compile error in every consumer. |
 | G3 | Layer separation: runtime termination (`Keeper_turn_terminal_code.t`) and operator disposition (`Keeper_turn_disposition.t`) are two distinct types. Promotion is explicit (`Provider_error of Keeper_turn_terminal_code.t`). |
 | G4 | Wire format on the receipt JSON `code` field is byte-for-byte preserved during PR-1 and PR-2; PR-3 is the only step that can change it (and only by *adding* fields, not removing). |
-| G5 | RFC-0042 PR-3 (the field-swap step) is replaced by RFC-0047 PR-2/PR-3 (the disposition migration). The runtime type stays narrow. |
+| G5 | RFC-0042 PR-3 (the field-swap step) is replaced by RFC-0068 PR-2/PR-3 (the disposition migration). The runtime type stays narrow. |
 
 ### Non-goals
 
@@ -282,13 +287,13 @@ typed.
 ### 5.3 Interaction with RFC-0042 PR-3 (deferred)
 
 RFC-0042 PR-3 ("`Keeper_turn_terminal.t.code: string → t`") is **not
-landing as written**. RFC-0047 supersedes that step. RFC-0042 stays
+landing as written**. RFC-0068 supersedes that step. RFC-0042 stays
 correct for the runtime layer (PR-1 + PR-2 + PR-2.5 already merged);
 PR-3 / PR-4 of RFC-0042 are repurposed:
 
-- RFC-0042 PR-3 → RFC-0047 PR-2 (add disposition field to
+- RFC-0042 PR-3 → RFC-0068 PR-2 (add disposition field to
   `Keeper_turn_terminal.t`)
-- RFC-0042 PR-4 (reader migration) → RFC-0047 PR-3
+- RFC-0042 PR-4 (reader migration) → RFC-0068 PR-3
 
 Both RFC-0042 docs (#14181 still open) and this RFC need the same
 maintainer review for that handoff to be authoritative.
@@ -310,7 +315,7 @@ require:
 
 1. Confirmation that the layer separation in §3 is the canonical
    shape (vs. a single-type expansion of `Keeper_turn_terminal_code.t`).
-2. Confirmation that RFC-0042 PR-3/PR-4 are superseded by RFC-0047
+2. Confirmation that RFC-0042 PR-3/PR-4 are superseded by RFC-0068
    PR-2/PR-3 (so RFC-0042 closes after PR-2.5 + RFC-0042 docs merge).
 3. Maintainer approval of the disposition variant set in §3.1
    (the inventory was lifted from current

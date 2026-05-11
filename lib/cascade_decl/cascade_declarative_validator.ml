@@ -265,6 +265,31 @@ let validate_strategy_fields (cfg : cascade_config) :
     cycle_errs @ sticky_errs @ scoring_errs)
     cfg.tiers
 
+(* --- R11: Binding max-concurrent is required and positive ---
+
+   RFC-0058 §3.4 declares `max-concurrent` mandatory. The parser keeps
+   a sentinel value (0) when the field is missing so that this rule can
+   flag the omission instead of silently throttling the binding to 1.
+
+   R11 is intentionally excluded from {!validate} (the default validator
+   used by the rest of the codebase, including legacy test fixtures that
+   predate the capacity requirement). It is invoked through {!validate_strict}
+   which is the contract for production cascade.toml loaders. *)
+
+let validate_binding_capacity (cfg : cascade_config) :
+    validation_error list =
+  List.filter_map (fun (b : cascade_binding) ->
+    if b.max_concurrent > 0 then None
+    else Some {
+       rule = "R11";
+       path = Printf.sprintf "%s.%s.max-concurrent"
+                b.provider_id b.model_id;
+       message =
+         "binding max-concurrent is required and must be > 0 \
+          (RFC-0058 §3.4); add `max-concurrent = N` to this binding"
+    })
+    cfg.bindings
+
 (* --- Top-level validation --- *)
 
 let validate (cfg : cascade_config) : validation_error list =
@@ -278,3 +303,6 @@ let validate (cfg : cascade_config) : validation_error list =
   @ validate_system_targets cfg
   @ validate_single_default cfg
   @ validate_strategy_fields cfg
+
+let validate_strict (cfg : cascade_config) : validation_error list =
+  validate cfg @ validate_binding_capacity cfg

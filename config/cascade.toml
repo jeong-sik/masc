@@ -1,39 +1,66 @@
 # Declarative cascade configuration (RFC-0058 v2 5-layer schema).
 # Checked-in seed. Logical usage names are configured under [routes].
+#
+# This file is the SSOT for: provider credentials, model capabilities,
+# per-binding capacity (max-concurrent) and pricing, per-use aliases,
+# tier composition, tier-group fallback chains, and route assignments.
+# Code MUST NOT hard-code provider or model names; it dispatches by
+# api_format (Messages_api / Chat_completions_api / Ollama_api) and
+# reads everything else from this file. See RFC-0058 §2.4.
 
 # ── Layer 1: Providers ──────────────────────────────────────────
 
 [providers.claude_code]
-provider-name = "Anthropic Claude Code CLI"
+display-name = "Anthropic Claude Code CLI"
 protocol = "anthropic-cli"
 command = "claude"
 is-non-interactive = true
 
+[providers.claude_code.credentials]
+type = "env"
+key = "ANTHROPIC_API_KEY"
+
 [providers.codex_cli]
-provider-name = "OpenAI Codex CLI"
+display-name = "OpenAI Codex CLI"
 protocol = "openai-http"
 command = "codex"
 is-non-interactive = true
 
+[providers.codex_cli.credentials]
+type = "env"
+key = "OPENAI_API_KEY"
+
 [providers.gemini_cli]
-provider-name = "Google Gemini CLI"
+display-name = "Google Gemini CLI"
 protocol = "google-cli"
 command = "gemini"
 is-non-interactive = true
 
+[providers.gemini_cli.credentials]
+type = "env"
+key = "GEMINI_API_KEY"
+
 [providers.kimi_cli]
-provider-name = "Moonshot Kimi CLI"
+display-name = "Moonshot Kimi CLI"
 protocol = "kimi-cli"
 command = "kimi"
 is-non-interactive = true
 
+[providers.kimi_cli.credentials]
+type = "env"
+key = "MOONSHOT_API_KEY"
+
 [providers.glm-coding]
-provider-name = "Zhipu GLM Coding"
+display-name = "Zhipu GLM Coding"
 protocol = "openai-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
 [providers.ollama]
-provider-name = "Ollama Local"
+display-name = "Ollama Local"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
 
@@ -43,116 +70,167 @@ endpoint = "http://localhost:11434"
 api-name = "gpt-5.3-codex-spark"
 max-context = 128000
 tools-support = true
+streaming = true
 
 [models.kimi-coding]
 api-name = "kimi-for-coding"
 max-context = 128000
 tools-support = true
+streaming = true
 
 [models.sonnet]
 api-name = "claude-sonnet-4-6"
 max-context = 200000
 tools-support = true
+thinking-support = true
+max-thinking-budget = 16000
+streaming = true
 
 [models.haiku]
 api-name = "claude-haiku-4-5-20251001"
 max-context = 200000
 tools-support = true
+streaming = true
 
 [models.gemini-flash]
 api-name = "gemini-3-flash-preview"
 max-context = 128000
 tools-support = true
+streaming = true
 
 [models.gemini-flash-lite]
 api-name = "gemini-3.1-flash-lite-preview"
 max-context = 128000
 tools-support = true
+streaming = true
 
 [models.glm-5-turbo]
 api-name = "glm-5-turbo"
 max-context = 128000
 tools-support = true
+streaming = true
 
 [models.glm-flashx]
 api-name = "glm-4.7-flashx"
 max-context = 128000
 tools-support = true
+streaming = true
 
 # ── Layer 3: Provider×Model Bindings ───────────────────────────
+#
+# `max-concurrent` is REQUIRED (RFC-0058 §3.4). Defaults reflect
+# observed CLI/HTTP capacity ceilings — CLI providers serialize at
+# the binary level (1 concurrent invocation per credential), HTTP
+# providers tolerate small fan-out before upstream throttling.
+# `price-input` / `price-output` are USD per 1M tokens.
 
 [codex_cli.codex-spark]
 is-default = true
+max-concurrent = 1
 
 [kimi_cli.kimi-coding]
 is-default = true
+max-concurrent = 1
 
 [claude_code.sonnet]
 is-default = true
+max-concurrent = 1
+price-input = 3.00
+price-output = 15.00
 
 [claude_code.haiku]
 is-default = false
+max-concurrent = 2
+price-input = 0.80
+price-output = 4.00
 
 [gemini_cli.gemini-flash]
 is-default = true
+max-concurrent = 1
 
 [gemini_cli.gemini-flash-lite]
 is-default = false
+max-concurrent = 1
 
 [glm-coding.glm-5-turbo]
 is-default = true
+max-concurrent = 2
 
 [glm-coding.glm-flashx]
 is-default = false
+max-concurrent = 2
 
-# ── Layer 4: Aliases ───────────────────────────────────────────
-# (none yet)
+# ── Layer 4: Aliases (per-use overrides) ───────────────────────
+#
+# Aliases give logical names to (provider, model) pairs with
+# call-site specific overrides. Code MUST reference aliases here
+# rather than raw `<provider>.<model>` pairs — that is how RFC-0058
+# §2.4 keeps vendor/model identifiers out of OCaml source.
+
+[claude_code.haiku.for-tool-rerank]
+max-output = 1024
+temperature = 0.1
+
+[codex_cli.codex-spark.for-tool-rerank]
+max-output = 1024
+temperature = 0.1
+
+[claude_code.haiku.for-governance]
+max-input = 8192
+max-output = 2048
+temperature = 0.1
 
 # ── Layer 5: Tiers ─────────────────────────────────────────────
 
 [tier.big_three]
-# Canonical keeper/workflow tier. Keep operator-chosen providers here;
-# code must route logical usages through [routes] instead of hardcoding.
+# Canonical keeper/workflow tier.
 members = ["codex_cli.codex-spark", "kimi_cli.kimi-coding"]
 strategy = "failover"
 
 [tier.keeper_diverse]
-# Fallback tier for contract violation retry. Different model composition
-# from big_three to break correlated failure.
+# Fallback tier for contract violation retry. Different model
+# composition from big_three to break correlated failure.
 members = ["claude_code.sonnet", "gemini_cli.gemini-flash", "codex_cli.codex-spark"]
 strategy = "failover"
 
 [tier.tool_rerank]
 # System-only short-output tier for rerank/scoring calls.
-members = ["codex_cli.codex-spark", "kimi_cli.kimi-coding"]
+# Members are aliases (Layer 4) with reduced max-output.
+members = [
+  "codex_cli.codex-spark.for-tool-rerank",
+  "claude_code.haiku.for-tool-rerank",
+]
+strategy = "failover"
+
+[tier.governance]
+# System-only baseline for governance / judge calls.
+members = ["claude_code.haiku.for-governance"]
 strategy = "failover"
 
 [tier.tier_small]
-# Operator opt-in slot for 4B-class local models. Empty by default.
-# Routes fall through to tier_medium via tier-group fallback.
+# Operator opt-in slot for 4B-class local models. Empty by default;
+# routes fall through to tier_medium via tier-group fallback.
 members = []
 strategy = "failover"
 
 [tier.tier_medium]
-# 9B-class models for moderate tasks. Falls back to big_three on exhaustion.
+# 9B-class cloud-coding models for moderate tasks.
 members = ["glm-coding.glm-flashx"]
 strategy = "failover"
 
 [tier.__safe_lane]
-# System-only baseline tier. Satisfies every capability profile.
-# Used as last-resort fallback target. Not keeper-assignable.
+# System-only baseline tier (RFC-0027 PR-4). Last-resort fallback
+# target that satisfies every capability profile. Not keeper-assignable.
 members = ["kimi_cli.kimi-coding"]
 strategy = "failover"
 
 [tier.local_recovery]
 # Recovery tier for fallback_cascade = "local_recovery".
-# Falls back to big_three on exhaustion.
 members = ["codex_cli.codex-spark"]
 strategy = "failover"
 
 [tier.tier_fast]
 # Cheap+fast tool-capable cloud models for keeper turns.
-# Falls back to big_three on exhaustion.
 members = [
   "claude_code.haiku",
   "codex_cli.codex-spark",
@@ -163,93 +241,107 @@ members = [
 ]
 strategy = "failover"
 
-# ── Tier-Groups ─────────────────────────────────────────────────
+# ── Tier-Groups (fallback chains) ──────────────────────────────
 
-[tier-group.big_three-with-keeper_diverse]
-tiers = ["big_three", "keeper_diverse"]
+[tier-group.big_three]
+tiers = ["big_three", "keeper_diverse", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
 
-[tier-group.tier_small-with-tier_medium]
-tiers = ["tier_small", "tier_medium"]
+[tier-group.tier_small]
+tiers = ["tier_small", "tier_medium", "big_three"]
 strategy = "priority_tier"
 fallback = true
 
-[tier-group.tier_medium-with-big_three]
+[tier-group.tier_medium]
 tiers = ["tier_medium", "big_three"]
 strategy = "priority_tier"
 fallback = true
 
-[tier-group.local_recovery-with-big_three]
+[tier-group.local_recovery]
 tiers = ["local_recovery", "big_three"]
 strategy = "priority_tier"
 fallback = true
 
-[tier-group.tier_fast-with-big_three]
+[tier-group.tier_fast]
 tiers = ["tier_fast", "big_three"]
 strategy = "priority_tier"
 fallback = true
 
-# ── Routes ──────────────────────────────────────────────────────
+[tier-group.tool_rerank]
+tiers = ["tool_rerank", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.governance]
+tiers = ["governance", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+
+# ── Routes (logical usage → tier-group) ────────────────────────
+#
+# RFC-0058 §4 R6: route targets must resolve to tier-groups. This
+# keeps fallback chains explicit and prevents callers from depending
+# on a single tier without a documented degradation path.
 
 [routes.keeper_turn]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.phase_recovery]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.phase_buffer]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.tool_required]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.governance_judge]
-target = "tier.big_three"
+target = "tier-group.governance"
 
 [routes.operator_judge]
-target = "tier.big_three"
+target = "tier-group.governance"
 
 [routes.cross_verifier]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.verifier]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.autoresearch]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.adversarial_reviewer]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.auto_responder]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.routing]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.openai_compat]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.persona_generation]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.provider_benchmark]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
 [routes.llm_rerank]
-target = "tier.tool_rerank"
+target = "tier-group.tool_rerank"
 
 [routes.simple_task]
-target = "tier.tier_small"
+target = "tier-group.tier_small"
 
 [routes.moderate_task]
-target = "tier.tier_medium"
+target = "tier-group.tier_medium"
 
 [routes.complex_task]
-target = "tier.big_three"
+target = "tier-group.big_three"
 
-# ── Profiles ────────────────────────────────────────────────────
+# ── Profiles (capability requirements per route class) ─────────
 
 [profiles.tool_strict]
 required_capabilities = [

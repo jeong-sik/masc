@@ -11,3 +11,10 @@ type validation_error = {
 [@@deriving show]
 
 val validate : Cascade_declarative_types.cascade_config -> validation_error list
+
+val validate_strict :
+  Cascade_declarative_types.cascade_config -> validation_error list
+(** Like {!validate}, plus R11 (binding max-concurrent required & positive,
+    RFC-0058 §3.4). Use for production cascade.toml loading where missing
+    capacity must fail-fast. Legacy fixtures that predate the capacity
+    requirement continue to use {!validate}. *)

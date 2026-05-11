@@ -874,11 +874,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${SectionHeader} size="xs" class="mt-2 mb-0.5">캐스케이드 카탈로그 출처</${SectionHeader}>
         <${LongText} text=${c.sources.cascade_catalog_source_path} />
       ` : null}
-      ${c.sources.cascade_runtime_json_path ? html`
-        <${SectionHeader} size="xs" class="mt-2 mb-0.5">생성된 런타임 JSON</${SectionHeader}>
-        <${LongText} text=${c.sources.cascade_runtime_json_path} />
-      ` : null}
-      <${BoolRow} label="cascade.json 직접 수정 가능" value=${c.sources.cascade_runtime_json_editable} />
       <div class="mt-1.5">
         <${SectionHeader} size="xs" class="mb-1">우선순위</${SectionHeader}>
         <${ModelList} models=${c.sources.precedence} />

@@ -26,10 +26,15 @@ module Make : functor (D : Docker_client.S) -> sig
     :  Keeper_sandbox_plan.t
     -> (Docker_response.exec_result, Docker_client.sandbox_error) result
 
-  (** [execute_plan_with_retry ~retry plan] retries [D.run plan] up to
-      [Keeper_backoff_policy.max_attempts retry] times when the error
-      is in the policy's retryable set. Returns the first [Ok], or
-      the last [Error] after exhausting the budget.
+  (** [execute_plan_with_retry ~retry plan] calls [D.run plan] up to
+      [Keeper_backoff_policy.max_attempts retry] times *in total*
+      (one initial call plus up to [max_attempts - 1] retries on
+      retryable errors). Concretely: with [max_attempts = 3] the
+      callee may run at most three times — initial + 2 retries.
+
+      Returns the first [Ok], or the last [Error] after exhausting
+      the call budget. Non-retryable errors return immediately
+      regardless of remaining budget.
 
       Phase 3c.1 has *no sleep* between attempts — the budget is
       strictly call-count based. Phase 3c.2 introduces an

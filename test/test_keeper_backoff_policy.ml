@@ -67,6 +67,32 @@ let test_disable_retry () =
   check bool "empty retryable list rejects every variant" false
     (Keeper_backoff_policy.should_retry p Docker_client.Daemon_unreachable)
 
+(* ── Precondition enforcement (Copilot review T20/T21) ──────── *)
+
+let test_make_rejects_zero_attempts () =
+  check_raises "max_attempts=0 raises Invalid_argument"
+    (Invalid_argument
+       "Keeper_backoff_policy.make: max_attempts must be >= 1 (got 0)")
+    (fun () ->
+      let _ : Keeper_backoff_policy.t =
+        Keeper_backoff_policy.make ~max_attempts:0 ~retryable_errors:[]
+      in
+      ())
+
+let test_make_rejects_negative_attempts () =
+  check_raises "max_attempts=-3 raises Invalid_argument"
+    (Invalid_argument
+       "Keeper_backoff_policy.make: max_attempts must be >= 1 (got -3)")
+    (fun () ->
+      let _ : Keeper_backoff_policy.t =
+        Keeper_backoff_policy.make ~max_attempts:(-3) ~retryable_errors:[]
+      in
+      ())
+
+let test_make_accepts_minimum_one () =
+  let p = Keeper_backoff_policy.make ~max_attempts:1 ~retryable_errors:[] in
+  check int "min boundary 1 accepted" 1 (Keeper_backoff_policy.max_attempts p)
+
 let () =
   run "Keeper_backoff_policy"
     [
@@ -84,5 +110,11 @@ let () =
         [
           test_case "custom max_attempts + retryable list" `Quick test_custom_policy;
           test_case "max_attempts=1 + empty list disables retry" `Quick test_disable_retry;
+        ] );
+      ( "precondition enforcement",
+        [
+          test_case "make rejects max_attempts=0" `Quick test_make_rejects_zero_attempts;
+          test_case "make rejects negative max_attempts" `Quick test_make_rejects_negative_attempts;
+          test_case "make accepts minimum 1" `Quick test_make_accepts_minimum_one;
         ] );
     ]

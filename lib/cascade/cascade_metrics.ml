@@ -930,10 +930,18 @@ let on_cascade_invariant_violation () =
    compilations can validate the names without waiting for first
    production hit.
 
-   Help text defaults to the metric name itself; richer help can
-   be backfilled in follow-up commits if dashboards need it. *)
+   Iter 44 follow-up: backfill operator-actionable help text for
+   the 10 most critical counters (security / SLA / cost
+   implications).  The remaining iter-43 [c] entries keep
+   [help = name] until their dashboards need richer text.
+
+   Help-text policy mirrors [Prometheus.init] in [lib/prometheus.ml]
+   for the legacy cascade counters: state when the counter ticks
+   ("when ...") + immediate operator action ("operator: ...") or
+   contract ("must be zero in steady state"). *)
 let register_all () =
   let c name = Prometheus.register_counter ~name ~help:name () in
+  let h name help = Prometheus.register_counter ~name ~help () in
   c metric_decisions;
   c metric_fallbacks;
   c metric_providers_exhausted;
@@ -942,14 +950,31 @@ let register_all () =
   c metric_declarative_parse_errors;
   c metric_parallel_validation;
   c metric_toml_read_race;
-  c metric_serving_last_known_good;
-  c metric_degraded_recovery;
+  h metric_serving_last_known_good
+    "Total inspect_active calls that returned Serving_last_known_good. \
+     Labels: reason (path_unresolved | validation_failed | \
+     stale_rejection_cached). Operator action: investigate cascade.toml \
+     load fault; the keeper is serving a stale cached snapshot.";
+  h metric_degraded_recovery
+    "Total inspect_active calls that transitioned from a degraded \
+     state (LKG or Validated_with_rejections) back to Validated. \
+     Non-zero rate confirms operator fixes are taking effect.";
   c metric_profile_candidate_drop;
   c metric_resolve_provider_leak;
   c metric_route_config_error;
-  c metric_resolve_failure;
+  h metric_resolve_failure
+    "Total resolve_named_providers[_strict[_with_secondary_resolver]] \
+     invocations that returned Error. Labels: cascade, reason \
+     (lookup_failed | provider_filter_rejected | no_callable_providers). \
+     Operator action: cascade.toml typo or provider unavailable.";
   c metric_validated_with_rejections;
-  c metric_provider_filter_widening;
+  h metric_provider_filter_widening
+    "Total apply_provider_filter (non-strict) invocations where the \
+     operator-supplied filter matched no provider and the function \
+     silently fell back to the unfiltered list. Security / budget / \
+     SLA implication: the filter intent is being ignored. Operator \
+     action: switch to apply_provider_filter_strict or fix the \
+     cascade.toml provider list.";
   c metric_auto_expansion_fanout;
   c metric_ordering_health_widening;
   c metric_provider_cooldown;
@@ -961,18 +986,42 @@ let register_all () =
   c metric_discovered_context_below_floor;
   c metric_context_capability_drift;
   c metric_llama_model_not_discovered;
-  c metric_route_resolve_fallback;
+  h metric_route_resolve_fallback
+    "Total cascade_name_for_use invocations where the declared route \
+     target could not be honored at runtime. Labels: reason \
+     (catalog_unvalidated | target_not_in_catalog). Operator action: \
+     fix the [routes] table in cascade.toml.";
   c metric_deprecated_profile_name_filter;
-  c metric_capability_mismatch;
+  h metric_capability_mismatch
+    "Total load_catalog invocations that detected at least one \
+     RFC-0055 capability subset violation on a fallback_cascade edge. \
+     Bumped by the number of mismatches per call (delta semantics). \
+     Operator action: align source profile capability requirements \
+     with the fallback target.";
   c metric_route_binding_dropped;
   c metric_weighted_item_dropped;
   c metric_resolve_live_fallback;
   c metric_fallback_hint_invalid;
-  c metric_runtime_mcp_legacy_strip;
+  h metric_runtime_mcp_legacy_strip
+    "Total runtime_mcp_policy_for_provider invocations where a \
+     provider requires per-keeper bridging but the caller did not \
+     supply agent_name; auth-bearing headers are silently stripped \
+     and runtime MCP tools run unauthenticated. Caller-contract \
+     fault, not config — fix the calling code path to thread \
+     agent_name through.";
   c metric_partial_eio_context;
-  c metric_discovery_refresh_exception;
+  h metric_discovery_refresh_exception
+    "Total refresh_local_discovery_if_possible calls that caught a \
+     non-cancellation exception from refresh_llama_endpoints. The \
+     exception is swallowed and the function returns false; this \
+     counter makes the swallow rate alertable.";
   c metric_profile_registration_failure;
-  c metric_cascade_invariant_violation
+  h metric_cascade_invariant_violation
+    "Total Cascade_fsm contract violations (should-be-unreachable \
+     defensive arms). MUST be zero in steady state. Any non-zero \
+     rate is a guaranteed FSM bug — not a tunable; alert immediately \
+     and investigate the FSM transition that exposed an Accept in \
+     Accept_rejected branch."
 ;;
 
 (* Module-load side effect: register every cascade counter as soon

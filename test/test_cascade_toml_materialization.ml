@@ -76,15 +76,17 @@ let init_config_root config_dir =
   mkdir_p (Filename.concat config_dir "personas")
 
 (* Removed alongside the JSON-match invariant tests (RFC-0058 §9):
-   - [repo_toml_path] / [repo_json_path] helpers
+   - [repo_toml_path] / [repo_json_path] env-var helpers
    - [render_or_fail], [model_names_for_profile],
      [model_entry_for_profile], [supports_tool_choice_for_profile]
-   These keyed off the pre-RFC-0058 cascade.json shape
-   ([<name>_models] arrays) and the [MASC_CASCADE_JSON_PATH] env var
-   that the now-deleted byte-equality stanza injected. Note that
-   [MASC_CASCADE_TOML_PATH] still exists project-wide (e.g.
-   [test_cascade_config_validity.inc] uses it) — only the JSON-keyed
-   helpers and the JSON env var are gone from this suite. *)
+   These keyed off the pre-RFC-0058 flat cascade.json shape
+   ([<name>_models] arrays at the top level), which PR #14550 retired
+   when cascade.toml moved to the 5-layer declarative schema. This
+   suite no longer touches either cascade env var; for context,
+   [MASC_CASCADE_TOML_PATH] is still in use elsewhere
+   ([test_cascade_config_validity.inc] injects it as of #14578) and
+   [MASC_CASCADE_JSON_PATH] is no longer injected by any dune stanza
+   in the repo. *)
 
 let minimal_toml =
   {|

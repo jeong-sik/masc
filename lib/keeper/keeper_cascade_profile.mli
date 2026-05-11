@@ -57,8 +57,10 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
 val configured_route_targets : ?config_path:string -> unit -> string list
 (** Unique non-empty profile names referenced from [routes]. *)
 
-type runtime_name = Runtime_name of string
-(** Catalog-aware cascade name after point-of-use runtime normalization. *)
+type runtime_name = Cascade_ref.runtime_name = Runtime_name of string
+(** Catalog-aware cascade name after point-of-use runtime normalization.
+    Manifest alias of {!Cascade_ref.runtime_name} (leaf module) so
+    [Cascade_strategy] can carry the type without inducing a cycle. *)
 
 val runtime_name_to_string : runtime_name -> string
 val runtime_name_of_string : string -> runtime_name

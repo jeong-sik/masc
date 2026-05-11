@@ -100,13 +100,16 @@ module For_testing = struct
   ;;
 
   let with_registry probes f =
-    Stdlib.Mutex.protect registry_mutex (fun () ->
-      let saved = !registered_probes_rev in
-      registered_probes_rev := List.rev probes;
-      let restore () =
-        Stdlib.Mutex.protect registry_mutex (fun () -> registered_probes_rev := saved)
-      in
-      Fun.protect ~finally:restore f)
+    let saved =
+      Stdlib.Mutex.protect registry_mutex (fun () ->
+        let s = !registered_probes_rev in
+        registered_probes_rev := List.rev probes;
+        s)
+    in
+    let restore () =
+      Stdlib.Mutex.protect registry_mutex (fun () -> registered_probes_rev := saved)
+    in
+    Fun.protect ~finally:restore f
   ;;
 end
 

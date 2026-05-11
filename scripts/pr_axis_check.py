@@ -85,6 +85,32 @@ def get_repo_slug() -> Tuple[str, str]:
     return data["owner"]["login"], data["name"]
 
 
+def get_pr_base_sha(pr_number: int, owner: str, repo: str) -> Optional[str]:
+    """Get the base SHA of an open PR."""
+    resp = _run_gh([f"/repos/{owner}/{repo}/pulls/{pr_number}"])
+    return resp.get("base", {}).get("sha")
+
+
+def get_merged_pr_merge_commit(merged_pr_number: int, owner: str, repo: str) -> Optional[str]:
+    """Get the merge commit SHA of a merged PR."""
+    resp = _run_gh([f"/repos/{owner}/{repo}/pulls/{merged_pr_number}"])
+    return resp.get("merge_commit_sha")
+
+
+def merge_commit_already_in_base(
+    merge_commit_sha: str, pr_base_sha: str, owner: str, repo: str
+) -> bool:
+    """Check if a merged PR's merge commit is already an ancestor of (or equal to) the PR base."""
+    if merge_commit_sha == pr_base_sha:
+        return True
+    # GitHub compare API: compare/{base}...{head}
+    # status == "ahead"   -> head is ahead of base (base is ancestor of head)
+    # status == "identical" -> same
+    resp = _run_gh([f"/repos/{owner}/{repo}/compare/{merge_commit_sha}...{pr_base_sha}"])
+    status = resp.get("status", "")
+    return status in ("ahead", "identical")
+
+
 def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
     """Get set of file paths changed in a PR."""
     files: List[dict] = []
@@ -171,6 +197,10 @@ def check_pr_axis_stale(
         print(f"Warning: no files found for PR #{pr_number}", file=sys.stderr)
         return []
 
+    pr_base_sha = get_pr_base_sha(pr_number, owner, repo)
+    if not pr_base_sha:
+        print(f"Warning: could not determine base SHA for PR #{pr_number}", file=sys.stderr)
+
     recently_merged = get_recently_merged_prs(owner, repo, hours, limit)
     risks: List[AxisRisk] = []
 
@@ -182,6 +212,12 @@ def check_pr_axis_stale(
         overlap = open_files & merged_files
         if not overlap:
             continue
+
+        # Skip if the merged PR is already included in the current PR's base
+        if pr_base_sha:
+            merge_commit = get_merged_pr_merge_commit(merged_num, owner, repo)
+            if merge_commit and merge_commit_already_in_base(merge_commit, pr_base_sha, owner, repo):
+                continue
 
         # Determine risk type and confidence
         confidence = "LOW"

@@ -86,6 +86,11 @@ let labels_require_local_discovery (labels : string list) : bool =
 let local_discovery_warned = Atomic.make false
 
 let warn_partial_eio_context_once ~sw_some ~net_some =
+  (* Iter 39: counter ticks on EVERY hit (independent of the
+     WARN-once dedup), so a caller-side regression that keeps
+     hitting this path after the first log line stays observable
+     via the metric. *)
+  Cascade_metrics.on_partial_eio_context ();
   if not (Atomic.exchange local_discovery_warned true) then
     Log.warn ~ctx:"CascadeRuntime"
       "Local discovery skipped: Eio_context partial (sw=%b net=%b). \

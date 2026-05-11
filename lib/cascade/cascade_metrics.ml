@@ -827,3 +827,28 @@ let metric_runtime_mcp_legacy_strip =
 
 let on_runtime_mcp_legacy_strip () =
   Prometheus.inc_counter metric_runtime_mcp_legacy_strip ()
+
+(* [Cascade_runtime.refresh_local_discovery_if_possible] requires
+   both [Eio.Switch.t] and [Eio.Net.t] to probe local providers.
+   When only one of the two is available (partial Eio context —
+   typically a caller that forgot [Eio_context.set_switch] or
+   [set_net]), the function skips local discovery and emits a
+   WARN-once via [warn_partial_eio_context_once].
+
+   "WARN-once" means the *first* partial-context hit logs and every
+   subsequent hit stays completely silent for the process lifetime.
+   The pattern is operator-friendly (no log spam) but loses
+   frequency information — operators can't tell whether the bug is
+   a single startup race or a chronic caller-side regression.
+
+   Counter ticks on every hit (no dedup), pairing with iter 37
+   [fallback_hint_invalid] and iter 38 [runtime_mcp_legacy_strip]
+   as the third "WARN-once + per-hit counter" pattern this PR
+   adds to caller-contract observability.
+
+   Cardinality: 1 series. *)
+let metric_partial_eio_context =
+  "masc_cascade_partial_eio_context_total"
+
+let on_partial_eio_context () =
+  Prometheus.inc_counter metric_partial_eio_context ()

@@ -252,3 +252,11 @@ val on_runtime_mcp_legacy_strip : unit -> unit
     supply [agent_name] and the function silently degrades to
     strip-all-headers legacy behavior.  Non-zero rate signals a
     caller path that should thread keeper [agent_name] but isn't. *)
+
+val on_partial_eio_context : unit -> unit
+(** Tick the partial-Eio-context counter at
+    [Cascade_runtime.refresh_local_discovery_if_possible] when
+    only one of [Eio.Switch.t] / [Eio.Net.t] is available.  The
+    existing WARN-once dedups to one log line per process; this
+    counter ticks every hit so the rate is alertable even after
+    the WARN was suppressed. *)

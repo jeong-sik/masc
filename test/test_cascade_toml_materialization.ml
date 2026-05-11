@@ -817,6 +817,16 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    exercised end-to-end via the cascade-transport regression
    harness rather than from this suite.  Smoke pins the no-arg
    helper signature. *)
+(* Smoke for [Cascade_metrics.on_partial_eio_context].  The
+   natural code path requires a caller that supplies only one of
+   [Eio.Switch.t] / [Eio.Net.t] — easier to set up in the
+   cascade-runtime regression suite than from this materialization
+   suite.  Smoke pins the no-arg helper signature so a future
+   refactor that changes the call shape trips here. *)
+let test_partial_eio_context_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_partial_eio_context ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_runtime_mcp_legacy_strip_helper_callable () =
   Masc_mcp.Cascade_metrics.on_runtime_mcp_legacy_strip ();
   check bool "no-arg helper callable without raising" true true
@@ -1282,6 +1292,9 @@ let () =
           test_case
             "runtime_mcp_legacy_strip: helper callable" `Quick
             test_runtime_mcp_legacy_strip_helper_callable;
+          test_case
+            "partial_eio_context: helper callable" `Quick
+            test_partial_eio_context_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

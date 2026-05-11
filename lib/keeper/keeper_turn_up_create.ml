@@ -600,7 +600,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       | Error e ->
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_checkpoint_failures
-          ~labels:[("keeper", p.name); ("site", "create_initial_save")]
+          ~labels:[("keeper", p.name); ("site", Checkpoint_failure_operation.(to_label Create_initial_save))]
           ();
         Log.Keeper.error
           "create_keeper failed: initial checkpoint save error for name=%s: %s"

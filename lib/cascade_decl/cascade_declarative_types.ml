@@ -39,14 +39,50 @@ type cascade_liveness_class =
   | Local_70b_plus
 [@@deriving show, eq]
 
+(** Per-provider runtime + behavioral capabilities — RFC-0058 §2.4 +
+    Phase 5.1 (capability fields) + §3.2 Phase 5.6 (tool/event support).
+
+    Declarative SSOT for cascade-dispatch quirks that historically lived
+    as closed-variant matches in OCaml code. Schema-additive: A.1 ships
+    the type + parser; A.3 migrates cascade_transport, Provider_tool_support,
+    Cascade_error_classify, and Keeper_usage_trust to read these fields
+    instead of matching on provider name. *)
 type cascade_capabilities = {
+  (* Tool/event support — #14608 Phase 5.6 prep *)
   supports_inline_tools : bool;
   supports_runtime_mcp_tools : bool;
   supports_runtime_tool_events : bool;
   supports_runtime_mcp_http_headers : bool;
+  (* Dispatch axes — A.1 Phase 5.1 caller cutover prep *)
+  requires_per_keeper_bridging_for_bound_actor_tools : bool;
+      (** A.3 will route [Cascade_transport.resolve_tool_lane_for_oas_tools]
+          through this flag instead of matching on [Codex_cli]. *)
+  identity_runtime_mcp_header_keys : string list;
+      (** Header keys honored by the runtime's auth surface even when
+          [supports_runtime_mcp_http_headers] is false. A.3 will have
+          [Provider_tool_support] read this list for Codex CLI. *)
+  argv_prompt_preflight : bool;
+      (** Runtime needs prompt length / argv-byte preflight before
+          invocation to avoid silent OS-level argv overflow. *)
+  uses_anthropic_caching : bool;
+      (** Runtime sends Anthropic-style prompt caching usage fields. *)
+  max_turns_per_attempt : int option;
+      (** Optional per-attempt cap on [max_turns]. Parser rejects
+          non-positive values (warn + None). *)
 }
 [@@deriving show, eq]
 
+let cascade_capabilities_default = {
+  supports_inline_tools = false;
+  supports_runtime_mcp_tools = false;
+  supports_runtime_tool_events = false;
+  supports_runtime_mcp_http_headers = false;
+  requires_per_keeper_bridging_for_bound_actor_tools = false;
+  identity_runtime_mcp_header_keys = [];
+  argv_prompt_preflight = false;
+  uses_anthropic_caching = false;
+  max_turns_per_attempt = None;
+}
 type cascade_provider = {
   id : string;
   display_name : string;

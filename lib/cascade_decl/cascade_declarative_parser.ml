@@ -71,13 +71,50 @@ let parse_credential (tbl : Otoml.t) (path : string)
   | t -> Error (error (path ^ ".type") (Printf.sprintf "unknown credential type %S" t))
 ;;
 
-let parse_capabilities (tbl : Otoml.t) : cascade_capabilities =
+let parse_capabilities ~(path : string) (tbl : Otoml.t) : cascade_capabilities =
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+  let string_list_field key =
+    match Otoml.find_opt tbl Fun.id [ key ] with
+    | None -> []
+    | Some v ->
+      (try Otoml.get_array Otoml.get_string v
+       with _ ->
+         Logs.warn (fun m ->
+           m
+             "cascade_declarative_parser: %s.capabilities.%s — \
+              expected string array, ignoring"
+             path
+             key);
+         [])
+  in
+  let positive_int_opt_field key =
+    (* Reject non-positive values at parse time: a cap of 0 or -N would
+       clamp every cascade attempt to a meaningless budget downstream. *)
+    match Otoml.find_opt tbl Otoml.get_integer [ key ] with
+    | None -> None
+    | Some n when n > 0 -> Some n
+    | Some n ->
+      Logs.warn (fun m ->
+        m
+          "cascade_declarative_parser: %s.capabilities.%s = %d — \
+           expected positive integer, ignoring"
+          path
+          key
+          n);
+      None
+  in
   {
     supports_inline_tools = b "supports-inline-tools";
     supports_runtime_mcp_tools = b "supports-runtime-mcp-tools";
     supports_runtime_tool_events = b "supports-runtime-tool-events";
     supports_runtime_mcp_http_headers = b "supports-runtime-mcp-http-headers";
+    requires_per_keeper_bridging_for_bound_actor_tools =
+      b "requires-per-keeper-bridging-for-bound-actor-tools";
+    identity_runtime_mcp_header_keys =
+      string_list_field "identity-runtime-mcp-header-keys";
+    argv_prompt_preflight = b "argv-prompt-preflight";
+    uses_anthropic_caching = b "uses-anthropic-caching";
+    max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt";
   }
 ;;
 
@@ -181,7 +218,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
     in
     let capabilities =
       Otoml.find_opt tbl Fun.id [ "capabilities" ]
-      |> Option.map parse_capabilities
+      |> Option.map (parse_capabilities ~path)
     in
     let headers =
       match Otoml.find_opt tbl Fun.id [ "headers" ] with

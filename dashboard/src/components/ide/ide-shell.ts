@@ -14,8 +14,8 @@ import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
 import { InspectorKeeperBDI, pinInspectorKeeper } from './inspector-keeper-bdi'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
-import { KeeperMemoryTierPanel } from '../keeper-memory-tier-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
+import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -241,7 +241,7 @@ export function IdeShell() {
               class="ide-plane-conversation"
               style=${{
                 display: 'grid',
-                gridTemplateRows: 'auto auto auto auto auto 1fr',
+                gridTemplateRows: 'auto auto auto auto 1fr',
                 minHeight: 0,
                 overflow: 'auto',
               }}
@@ -254,7 +254,6 @@ export function IdeShell() {
               <${IdePersistencePanel} keeperName=${terminalKeeper} />
               <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
               <${IdeConversationRailMock} />
-              ${terminalKeeper.trim() ? html`<${KeeperMemoryTierPanel} keeperName=${terminalKeeper} />` : null}
             </div>
           `}
         ${railsCollapsed
@@ -306,17 +305,35 @@ const FILE_ICONS: Readonly<Record<string, string>> = {
 
 function IdeBreadcrumb() {
   const [filePath, setFilePath] = useState(activeIdeFile.value)
-  useEffect(() => {
-    const unsub = activeIdeFile.subscribe(f => setFilePath(f))
-    return () => unsub()
-  }, [])
+  useEffect(() => activeIdeFile.subscribe(f => setFilePath(f)), [])
+
+  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
+  useEffect(() => cursorOverlaySignal.subscribe(v => setOverlay(v)), [])
 
   const segments = filePath.split('/')
-  // segments is non-empty because String.prototype.split('/') always returns ≥1 element
-  // (even '' → ['']), but TS noUncheckedIndexedAccess requires a fallback.
-  const fileName = segments[segments.length - 1] ?? ''
+  const fileName = segments[segments.length - 1]
   const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : ''
   const icon = FILE_ICONS[ext] ?? '📄'
+
+  // Keepers currently on this file with activity detail
+  const activeOnFile: Array<{
+    readonly keeperId: string
+    readonly color: string
+    readonly focusMode: KeeperCursor['focus_mode']
+    readonly toolName: string | undefined
+    readonly turn: number | undefined
+  }> = []
+  for (const [keeperId, cursor] of overlay.cursors) {
+    if (cursor.file_path === filePath) {
+      activeOnFile.push({
+        keeperId,
+        color: getKeeperColor(keeperId).cursor,
+        focusMode: cursor.focus_mode,
+        toolName: cursor.tool_name,
+        turn: cursor.turn,
+      })
+    }
+  }
 
   return html`
     <div
@@ -331,15 +348,42 @@ function IdeBreadcrumb() {
         style=${{ overflow: 'hidden' }}
       >
         ${segments.map((seg, i) => html`
-          <span key=${`breadcrumb-seg-${i}`}>
-            ${i > 0 ? html`<span class="text-[var(--color-fg-disabled)]">/</span>` : null}
-            <span
-              class=${i === segments.length - 1 ? 'text-[var(--color-fg-primary)]' : ''}
-              style=${{ whiteSpace: 'nowrap' }}
-            >${seg}</span>
-          </span>
+          ${i > 0 ? html`<span class="text-[var(--color-fg-disabled)]">/</span>` : null}
+          <span
+            class=${i === segments.length - 1 ? 'text-[var(--color-fg-primary)]' : ''}
+            style=${{ whiteSpace: 'nowrap' }}
+          >${seg}</span>
         `)}
       </span>
+      ${activeOnFile.length > 0
+        ? html`
+          <span class="flex items-center gap-1 ml-auto shrink-0">
+            ${activeOnFile.map(k => html`
+              <span
+                key=${k.keeperId}
+                class="flex items-center gap-1"
+                title=${`${k.keeperId} · ${k.focusMode}${k.toolName ? ` · ${k.toolName}` : ''}${k.turn != null ? ` · turn ${k.turn}` : ''}`}
+                style=${{ color: 'var(--color-fg-muted)' }}
+              >
+                <span
+                  aria-hidden="true"
+                  style=${{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    background: k.color,
+                    display: 'inline-block',
+                    boxShadow: k.focusMode === 'editing' ? `0 0 4px ${k.color}` : 'none',
+                  }}
+                />
+                <span>${k.keeperId}</span>
+                ${k.toolName ? html`<span class="text-[var(--color-fg-disabled)]" style=${{ fontSize: '10px' }}>${k.toolName}</span>` : null}
+                ${k.turn != null ? html`<span style=${{ fontSize: '10px', color: 'var(--color-accent-fg)' }}>T${k.turn}</span>` : null}
+              </span>
+            `)}
+          </span>
+        `
+        : null}
     </div>
   `
 }

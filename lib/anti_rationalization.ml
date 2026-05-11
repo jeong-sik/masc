@@ -554,16 +554,15 @@ let review
     let verdict_ref = ref None in
     let dispatch ~name ~args =
       let start_time = Time_compat.now () in
-      let result : bool * string =
-        match parse_review_verdict_from_json args with
-        | Ok v ->
-          verdict_ref := Some v;
-          (false, match v with Approve -> "Approved" | Reject r -> "Rejected: " ^ r)
-        | Error msg ->
-          Log.Task.warn "[anti-rationalization] structured verdict parse failed: %s" msg;
-          (false, sprintf "Invalid verdict format: %s" msg)
-      in
-      Tool_result.wrap ~tool_name:name ~start_time result
+      match parse_review_verdict_from_json args with
+      | Ok v ->
+        verdict_ref := Some v;
+        let msg = match v with Approve -> "Approved" | Reject r -> "Rejected: " ^ r in
+        Tool_result.error ~tool_name:name ~start_time msg
+      | Error msg ->
+        Log.Task.warn "[anti-rationalization] structured verdict parse failed: %s" msg;
+        Tool_result.error ~tool_name:name ~start_time
+          (sprintf "Invalid verdict format: %s" msg)
     in
     (match
        Masc_oas_bridge.run_with_caller

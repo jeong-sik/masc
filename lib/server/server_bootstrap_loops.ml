@@ -533,27 +533,28 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     | "masc_status" -> (
         match Tool_coord.dispatch ctx_room ~name ~args with
         | Some { Coord_types.success; message } ->
-            Tool_result.wrap ~tool_name:name ~start_time (success, message)
+            if success then Tool_result.ok ~tool_name:name ~start_time message
+            else Tool_result.error ~tool_name:name ~start_time message
         | None ->
-            Tool_result.wrap ~tool_name:name ~start_time
-              (false, "masc_status: dispatch failed"))
+            Tool_result.error ~tool_name:name ~start_time
+              "masc_status: dispatch failed")
     | "masc_tasks" -> (
         match Tool_task.dispatch ctx_task ~name ~args with
         | Some result -> result
         | None ->
-            Tool_result.wrap ~tool_name:name ~start_time
-              (false, "masc_tasks: dispatch failed"))
+            Tool_result.error ~tool_name:name ~start_time
+              "masc_tasks: dispatch failed")
     | "masc_agents" -> (
         match Tool_agent.dispatch ctx_agent ~name ~args with
         | Some result -> result
         | None ->
-            Tool_result.wrap ~tool_name:name ~start_time
-              (false, "masc_agents: dispatch failed"))
+            Tool_result.error ~tool_name:name ~start_time
+              "masc_agents: dispatch failed")
     | "masc_board_list" ->
         Tool_board.handle_tool name args
     | _ ->
-        Tool_result.wrap ~tool_name:name ~start_time
-          (false, Printf.sprintf "judge: tool '%s' not allowed" name)
+        Tool_result.error ~tool_name:name ~start_time
+          (Printf.sprintf "judge: tool '%s' not allowed" name)
   in
   let governance_judge_dispatch = make_judge_dispatch ~actor:"governance-judge" in
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in

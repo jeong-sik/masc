@@ -1414,7 +1414,9 @@ let handle_tool name args =
       result
     | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
   in
-  Tool_result.wrap ~tool_name:name ~start_time result
+  let (success, message) = result in
+  if success then Tool_result.ok ~tool_name:name ~start_time message
+  else Tool_result.error ~tool_name:name ~start_time message
 
 let tool_spec_read_only =
   [

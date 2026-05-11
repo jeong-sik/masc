@@ -293,8 +293,13 @@ val resolve_strategy_config :
 
 (** {1 RFC-0041 cascade_profile bridge} *)
 
-(** Load a [Cascade_ref.cascade_profile] from the legacy cascade.json
-    format.  Each profile section becomes a single-group profile;
+(** Load a [Cascade_ref.cascade_profile] from the in-memory JSON view
+    produced by the TOML materializer.
+
+    Tries the hierarchical [<name>_groups] layout first (RFC-0041, opt-in
+    via [groups]). Falls back to the flat [<name>_models] layout, which
+    is the default wire format for profiles that declare [models]. Each
+    profile section becomes a single-group profile in the flat case;
     [models] become [cascade_item]s and [fallback_cascade] becomes
     [fallback_group].
 

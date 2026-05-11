@@ -52,37 +52,28 @@ let with_config_dir config_dir f =
   Fun.protect ~finally:reset f
 
 (* -------------------------------------------------------------------------- *)
-(* Hierarchical JSON format: {name}_groups                                  *)
+(* Hierarchical layout: <profile>.groups TOML field (RFC-0041)              *)
 (* -------------------------------------------------------------------------- *)
 
 let test_load_cascade_profile_hierarchical () =
   with_temp_dir "cascade_hier" @@ fun config_dir ->
   with_config_dir config_dir @@ fun () ->
-  let json_path = Filename.concat config_dir "cascade.json" in
-  let json_content =
-    {|{
-      "test_profile_groups": [
-        {
-          "name": "primary",
-          "items": [
-            {"id": "ollama-qwen", "provider": "ollama", "model": "qwen3:14b", "timeout_ms": 30000, "priority": 1},
-            {"id": "ollama-llama", "provider": "ollama", "model": "llama3:8b", "timeout_ms": 30000, "priority": 2}
-          ],
-          "strategy": "priority",
-          "fallback_group": "fallback"
-        },
-        {
-          "name": "fallback",
-          "items": [
-            {"id": "gemini-flash", "provider": "gemini_cli", "model": "gemini-3-flash-preview", "timeout_ms": 60000, "priority": 1}
-          ],
-          "strategy": "priority",
-          "fallback_group": null
-        }
-      ]
-    }|}
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  let toml_content =
+    {|[test_profile]
+groups = [
+  { name = "primary", items = [
+      { id = "ollama-qwen", provider = "ollama", model = "qwen3:14b", timeout_ms = 30000, priority = 1 },
+      { id = "ollama-llama", provider = "ollama", model = "llama3:8b", timeout_ms = 30000, priority = 2 }
+    ], strategy = "priority", fallback_group = "fallback" },
+  { name = "fallback", items = [
+      { id = "gemini-flash", provider = "gemini_cli", model = "gemini-3-flash-preview", timeout_ms = 60000, priority = 1 }
+    ], strategy = "priority" }
+]
+|}
   in
-  write_file json_path json_content;
+  write_file toml_path toml_content;
+  let json_path = Filename.concat config_dir "cascade.json" in
   let profile_opt =
     Masc_mcp.Cascade_config_loader.load_cascade_profile
       ~config_path:json_path ~name:"test_profile"
@@ -106,77 +97,62 @@ let test_load_cascade_profile_hierarchical () =
       check (option string) "fallback fallback_group" None fallback.fallback_group
 
 (* -------------------------------------------------------------------------- *)
-(* Legacy JSON format: {name}_models (backward compatibility)                *)
+(* Flat layout: <profile>.models TOML field (default wire format)           *)
 (* -------------------------------------------------------------------------- *)
 
-let test_load_cascade_profile_legacy_fallback () =
-  with_temp_dir "cascade_legacy" @@ fun config_dir ->
+let test_load_cascade_profile_flat_models_fallback () =
+  with_temp_dir "cascade_flat" @@ fun config_dir ->
   with_config_dir config_dir @@ fun () ->
-  let json_path = Filename.concat config_dir "cascade.json" in
-  let json_content =
-    {|{
-      "legacy_profile_models": [
-        {"model": "ollama:qwen3:14b", "weight": 1},
-        {"model": "gemini_cli:gemini-3-flash-preview", "weight": 2}
-      ],
-      "legacy_profile_temperature": 0.7
-    }|}
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  (* [provider_model_of_string] requires a single ':' separator, so model
+     names with embedded colons (e.g. "qwen3:14b") are not representable
+     as cascade_items via this fallback path. *)
+  let toml_content =
+    {|[flat_profile]
+models = [
+  { model = "ollama:qwen3-14b", weight = 1 },
+  { model = "gemini_cli:gemini-3-flash-preview", weight = 2 }
+]
+temperature = 0.7
+|}
   in
-  write_file json_path json_content;
+  write_file toml_path toml_content;
+  let json_path = Filename.concat config_dir "cascade.json" in
   let profile_opt =
     Masc_mcp.Cascade_config_loader.load_cascade_profile
-      ~config_path:json_path ~name:"legacy_profile"
+      ~config_path:json_path ~name:"flat_profile"
   in
   match profile_opt with
-  | None -> fail "expected legacy profile to parse"
+  | None -> fail "expected flat profile to parse"
   | Some profile ->
-      check string "profile name" "legacy_profile" profile.name;
+      check string "profile name" "flat_profile" profile.name;
       check int "group count" 1 (List.length profile.groups);
       let group = List.nth profile.groups 0 in
-      check string "group name" "legacy_profile" group.name;
+      check string "group name" "flat_profile" group.name;
       check int "item count" 2 (List.length group.items);
       let first_item = List.nth group.items 0 in
-      check string "first item id" "ollama:qwen3:14b" first_item.id;
+      check string "first item id" "ollama:qwen3-14b" first_item.id;
       check string "first item provider" "ollama" first_item.provider;
-      check string "first item model" "qwen3:14b" first_item.model;
+      check string "first item model" "qwen3-14b" first_item.model;
       let second_item = List.nth group.items 1 in
       check string "second item id" "gemini_cli:gemini-3-flash-preview" second_item.id
 
 (* -------------------------------------------------------------------------- *)
-(* TOML materializer: groups array -> JSON                                  *)
+(* TOML materializer: <profile>.groups -> <profile>_groups JSON key         *)
 (* -------------------------------------------------------------------------- *)
 
 let test_toml_materializer_groups () =
   let toml_content =
-    {|[[groups]]
-name = "primary"
-strategy = "priority"
-fallback_group = "fallback"
-
-[[groups.items]]
-id = "ollama-qwen"
-provider = "ollama"
-model = "qwen3:14b"
-timeout_ms = 30000
-priority = 1
-
-[[groups.items]]
-id = "ollama-llama"
-provider = "ollama"
-model = "llama3:8b"
-timeout_ms = 30000
-priority = 2
-
-[[groups]]
-name = "fallback"
-strategy = "priority"
-
-[[groups.items]]
-id = "gemini-flash"
-provider = "gemini_cli"
-model = "gemini-3-flash-preview"
-timeout_ms = 60000
-priority = 1
+    {|[demo]
+groups = [
+  { name = "primary", items = [
+      { id = "ollama-qwen", provider = "ollama", model = "qwen3:14b", timeout_ms = 30000, priority = 1 },
+      { id = "ollama-llama", provider = "ollama", model = "llama3:8b", timeout_ms = 30000, priority = 2 }
+    ], strategy = "priority", fallback_group = "fallback" },
+  { name = "fallback", items = [
+      { id = "gemini-flash", provider = "gemini_cli", model = "gemini-3-flash-preview", timeout_ms = 60000, priority = 1 }
+    ], strategy = "priority" }
+]
 |}
   in
   match Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
@@ -185,7 +161,7 @@ priority = 1
   | Ok json_str ->
       let json = Yojson.Safe.from_string json_str in
       let groups = Yojson.Safe.Util.to_list
-        (Yojson.Safe.Util.member "groups" json)
+        (Yojson.Safe.Util.member "demo_groups" json)
       in
       check int "group count" 2 (List.length groups);
       let primary_json = List.nth groups 0 in
@@ -212,13 +188,14 @@ let () =
     [
       ( "loader",
         [
-          test_case "hierarchical JSON profile" `Quick
+          test_case "hierarchical groups profile" `Quick
             test_load_cascade_profile_hierarchical;
-          test_case "legacy JSON fallback" `Quick
-            test_load_cascade_profile_legacy_fallback;
+          test_case "flat models fallback" `Quick
+            test_load_cascade_profile_flat_models_fallback;
         ] );
       ( "materializer",
         [
-          test_case "TOML groups to JSON" `Quick test_toml_materializer_groups;
+          test_case "TOML groups to <profile>_groups JSON" `Quick
+            test_toml_materializer_groups;
         ] );
     ]

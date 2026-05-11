@@ -75,7 +75,15 @@ val reset : unit -> unit
 
     Convenience functions that call [resolve ()] internally. *)
 
+(** Path to the on-disk cascade source ([cascade.toml]) when the config
+    root resolves to a usable directory and the file exists. Returns
+    [None] when the resolver state is [Invalid_env]/[Missing] or the
+    file is absent. *)
 val cascade_path_opt : unit -> string option
+
+(** Candidate path to the on-disk cascade source ([cascade.toml]),
+    independent of whether the file exists. Useful for diagnostics that
+    want to surface the expected path. *)
 val cascade_path_candidate : unit -> string
 val prompts_dir : unit -> string
 val keepers_dir : unit -> string

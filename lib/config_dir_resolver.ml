@@ -419,23 +419,13 @@ let resolve () =
 let reset () =
   _cached_resolution := None
 
+(* RFC-0058 §9: the on-disk cascade source is [cascade.toml]; the legacy
+   [cascade.json] sibling is materialized in memory by
+   [Cascade_toml_materializer] and never read from disk. Callers feed the
+   returned path through that materializer, which accepts either suffix,
+   so returning the [.toml] path is consistent with the actual source of
+   truth. *)
 let cascade_path_opt () =
-  let resolution = resolve () in
-  match resolution.config_root.source with
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
-    when resolution.cascade.exists ->
-      Some resolution.cascade.path
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
-  | Invalid_env | Missing ->
-      None
-
-let cascade_path_candidate () =
-  (resolve ()).cascade.path
-
-let cascade_toml_path_candidate () =
-  Filename.concat (resolve ()).config_root.path cascade_toml_filename
-
-let cascade_toml_path_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with
   | Env | Local_masc | Home_masc | Exe_relative | Cwd
@@ -444,6 +434,12 @@ let cascade_toml_path_opt () =
   | Env | Local_masc | Home_masc | Exe_relative | Cwd
   | Invalid_env | Missing ->
       None
+
+let cascade_path_candidate () =
+  (resolve ()).cascade_authoring.path
+
+let cascade_toml_path_candidate () =
+  Filename.concat (resolve ()).config_root.path cascade_toml_filename
 
 let prompts_dir () =
   (resolve ()).prompts.path

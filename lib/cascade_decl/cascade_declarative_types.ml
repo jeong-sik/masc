@@ -202,6 +202,12 @@ let provider_of_id (cfg : cascade_config) (id : string) :
     cascade_provider option =
   List.find_opt (fun (p : cascade_provider) -> p.id = id) cfg.providers
 
+let capabilities_for_provider_id (cfg : cascade_config) (id : string) :
+    cascade_capabilities option =
+  match provider_of_id cfg id with
+  | Some p -> p.capabilities
+  | None -> None
+
 let model_of_id (cfg : cascade_config) (id : string) :
     cascade_model_spec option =
   List.find_opt (fun (m : cascade_model_spec) -> m.id = id) cfg.models

@@ -13,7 +13,6 @@ let default_config_path = Cascade_runtime.cascade_config_path
 let default_model_strings ~cascade_name =
   Cascade_runtime.default_model_strings
     ~cascade_name:(Keeper_cascade_profile.Runtime_name cascade_name)
-;;
 
 (* Named model execution *)
 
@@ -32,16 +31,13 @@ let require_eio ?sw ?net () =
   | Some sw, Some net -> Ok (sw, net)
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
-;;
 
 let eio_context_error_to_sdk_error detail =
   Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field = "eio_context"; detail })
-;;
 
 let cascade_catalog_error_to_sdk_error detail =
   Agent_sdk.Error.Config
     (Agent_sdk.Error.InvalidConfig { field = "cascade_name"; detail })
-;;
 
 (** Resolve cascade provider configs via MASC Cascade_config.
     Returns Provider_config.t list for the downstream OAS runtime,
@@ -61,7 +57,6 @@ let resolve_cascade_providers
     ~require_tool_support
     ~cascade_name
     ()
-;;
 
 (** Resolve from an explicit model string list (user-declared in keeper TOML).
     MASC parses the strings via its local [Cascade_config] and passes the
@@ -79,12 +74,10 @@ let resolve_providers_from_model_strings
     ~require_tool_choice_support
     ~require_tool_support
     model_strings
-;;
 
 let keeper_agent_name_opt (keeper_name : string) =
   let keeper_name = String.trim keeper_name in
   if keeper_name = "" then None else Some (Keeper_types.keeper_agent_name keeper_name)
-;;
 
 let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool.t list) =
   let agent_name = keeper_agent_name_opt keeper_name in
@@ -112,7 +105,6 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool
     Some (Cascade_runner.runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
   | Some policy, None -> Some policy
   | None, _ -> None
-;;
 
 let keeper_internal_tool_names_for_runtime_surface
       ~(keeper_name : string)
@@ -126,14 +118,12 @@ let keeper_internal_tool_names_for_runtime_surface
       Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool.schema.name)
     |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
     |> List.sort_uniq String.compare
-;;
 
 let keeper_internal_tools_require_materialized_runtime_surface
       ~(keeper_name : string)
       (tools : Agent_sdk.Tool.t list)
   =
   keeper_internal_tool_names_for_runtime_surface ~keeper_name tools <> []
-;;
 
 let runtime_mcp_policy_for_provider
       ~(keeper_name : string)
@@ -142,7 +132,6 @@ let runtime_mcp_policy_for_provider
   =
   let agent_name = keeper_agent_name_opt keeper_name |> Option.value ~default:"" in
   Cascade_runner.runtime_mcp_policy_for_provider ~provider_cfg ~agent_name policy_opt
-;;
 
 let codex_cli_cannot_carry_keeper_bound_runtime_mcp
       ~(keeper_name : string)
@@ -165,7 +154,6 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
            Cascade_runner.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names
     | _ -> false)
-;;
 
 (* #10681: per-provider rejection reason produced by the cascade filter.
    When the filter empties the cascade, operators previously saw only a
@@ -193,7 +181,6 @@ let filter_rejection_reason_label = function
   | Codex_keeper_bound_actor_required -> "codex_keeper_bound_actor_required"
   | Tool_lane_unsupported -> "tool_lane_unsupported"
   | Required_tool_use r -> Provider_tool_support.rejection_reason_label r
-;;
 
 let codex_keeper_bound_skip_seen : (string, float) Hashtbl.t = Hashtbl.create 16
 let codex_keeper_bound_skip_seen_mutex = Mutex.create ()
@@ -211,7 +198,6 @@ let codex_keeper_bound_skip_should_emit ~label ~provider_label ~keeper_name ~rea
   if first then Hashtbl.replace codex_keeper_bound_skip_seen key now;
   Mutex.unlock codex_keeper_bound_skip_seen_mutex;
   first
-;;
 
 let codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason =
   match reason with
@@ -224,7 +210,6 @@ let codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason 
          keeper_name
          (filter_rejection_reason_label reason))
   | Tool_lane_unsupported | Required_tool_use _ -> None
-;;
 
 let log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason =
   match codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason with
@@ -244,7 +229,6 @@ let log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason =
         message
         codex_keeper_bound_skip_restate_sec
     else Log.Misc.debug "%s" message
-;;
 
 let classify_filter_rejection
       ~(keeper_name : string)
@@ -295,7 +279,6 @@ let classify_filter_rejection
       with
       | Some reason -> Some (Required_tool_use reason)
       | None -> None))
-;;
 
 (* #11060: cascade-empty WARN dedupe.
 
@@ -329,7 +312,6 @@ let signature_of_rejected_providers rejected =
       (filter_rejection_reason_label reason))
   |> List.sort String.compare
   |> String.concat ","
-;;
 
 let cascade_empty_should_emit_first ~label ~signature =
   let key = label ^ "|" ^ signature in
@@ -343,7 +325,6 @@ let cascade_empty_should_emit_first ~label ~signature =
   if first then Hashtbl.replace cascade_empty_warn_seen key now;
   Mutex.unlock cascade_empty_warn_seen_mutex;
   first
-;;
 
 (** RFC-0027 PR-9b dual-track swap. When the tool-use gate rejects a
     primary provider and the caller supplied a [secondary_resolver],
@@ -423,7 +404,6 @@ let attempt_secondary_swap
               secondary_kind_label
               (filter_rejection_reason_label secondary_reason));
        Either.Right (primary, primary_reason))
-;;
 
 let filter_candidate_providers_for_tool_support
       ~(keeper_name : string)
@@ -518,7 +498,6 @@ let filter_candidate_providers_for_tool_support
           label
           signature);
     kept)
-;;
 
 (* Cross-cascade health-aware fallback.
    When the current cascade has no tool-capable providers after filtering,
@@ -611,4 +590,3 @@ let resolve_tool_capable_provider_across_cascades
       scored_candidates
     |> Option.map (fun (sp : Cascade_inventory.scored_provider) ->
       Keeper_cascade_profile.runtime_name_to_string sp.cascade_name, sp.provider)
-;;

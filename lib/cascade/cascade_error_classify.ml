@@ -673,8 +673,19 @@ let codex_cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
 
 let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
     : codex_cli_prompt_preflight option =
-  match config.provider_cfg.kind with
-  | Llm_provider.Provider_config.Codex_cli ->
+  (* RFC-0058 §2.4 — dispatch by adapter capability flag
+     ([tool_policy.argv_prompt_preflight]), never by provider variant.
+     argv/context-window preflight currently applies only to the
+     [codex exec] subprocess transport (single-argv-vector prompt).
+     Adding a new vendor that needs the same preflight is now a TOML/
+     adapter registry change, not a code change here. *)
+  let requires_preflight =
+    match Provider_adapter.adapter_of_provider_config config.provider_cfg with
+    | Some adapter -> adapter.tool_policy.argv_prompt_preflight
+    | None -> false
+  in
+  if not requires_preflight then None
+  else
     let messages =
       Agent_sdk.Agent_turn.prepare_messages
         ~messages:(config.initial_messages @ [ Agent_sdk.Types.user_msg goal ])
@@ -736,16 +747,6 @@ let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string
           hits_argv_limit;
           hits_context_window;
         }
-  (* Other provider kinds: argv-limit + context-window preflight only
-     applies to the [codex exec] subprocess transport (it serialises the
-     full prompt onto a single argv vector).  Other transports either
-     stream over HTTP (no argv limit) or have their own preflight in
-     their adapter — return [None] here so the caller skips preflight
-     wrapping.  Enumerated explicitly so adding a new
-     [Llm_provider.Provider_config.provider_kind] forces a decision on
-     whether it needs codex-style prompt preflight. *)
-  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm
-  | DashScope | Claude_code | Gemini_cli | Kimi_cli -> None
 
 let codex_cli_preflight_error ~(scope : string)
     ~(provider_cfg : Llm_provider.Provider_config.t)

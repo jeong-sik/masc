@@ -26,13 +26,15 @@ let absurd_token_threshold = 1_000_000
    prompts running 5K-30K tokens. *)
 let anthropic_cache_min_input_tokens = 1024
 
+(* RFC-0058 §2.4 — dispatch by adapter capability flag
+   ([tool_policy.uses_anthropic_caching]), never by provider variant.
+   Adding a new vendor whose wire format supports Anthropic-style
+   prompt caching is now a registry/TOML change, not a code change here. *)
 let provider_kind_uses_anthropic_caching
     (kind : Llm_provider.Provider_config.provider_kind) : bool =
-  match kind with
-  | Anthropic | Claude_code -> true
-  | OpenAI_compat | Ollama | Gemini | Gemini_cli | Kimi | Kimi_cli | Glm
-  | Codex_cli | DashScope ->
-      false
+  match Provider_adapter.adapter_of_provider_kind kind with
+  | Some adapter -> adapter.tool_policy.uses_anthropic_caching
+  | None -> false
 
 let model_label_provider_kind label =
   Provider_kind_resolver.kind_of_spec label

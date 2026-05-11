@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { useEffect, useState } from 'preact/hooks'
 import type { Keeper, Task } from '../../types'
 import { keepers, tasks } from '../../store'
 import { KeeperBadge } from '../keeper-badge'
@@ -6,6 +7,7 @@ import {
   canonicalKeeperName,
   keeperIdentityKeys,
 } from '../common/keeper-identity'
+import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 
 interface IdeKeeperWorkPanelProps {
   readonly keeperName: string
@@ -38,6 +40,11 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
     || summary.terminalCode
     || summary.runtimeBlocker,
   )
+
+  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
+  useEffect(() => cursorOverlaySignal.subscribe(v => setOverlay(v)), [])
+
+  const cursor = resolveKeeperCursor(keeperName, overlay.cursors)
 
   return html`
     <section
@@ -86,6 +93,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
             `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
         ${RuntimeBlock(summary)}
+        ${PresenceIndicator(cursor)}
         ${summary.recentOutput
           ? html`<p class="ide-keeper-work-output">${summary.recentOutput}</p>`
           : null}
@@ -225,4 +233,83 @@ function firstNonEmpty(...values: ReadonlyArray<string | null | undefined>): str
     if (trimmed) return trimmed
   }
   return null
+}
+
+function resolveKeeperCursor(
+  keeperName: string,
+  cursors: Map<string, KeeperCursor>,
+): KeeperCursor | null {
+  if (!keeperName) return null
+  const target = keeperName.toLowerCase().trim()
+  for (const [id, cursor] of cursors) {
+    if (id.toLowerCase() === target) return cursor
+  }
+  for (const [id, cursor] of cursors) {
+    if (id.toLowerCase().includes(target) || target.includes(id.toLowerCase())) return cursor
+  }
+  return null
+}
+
+function PresenceIndicator(cursor: KeeperCursor | null) {
+  if (!cursor) return null
+  const color = getKeeperColor(cursor.keeper_id)
+  const fileName = cursor.file_path.split('/').pop() ?? cursor.file_path
+  const ageSec = Math.round((Date.now() - cursor.last_update) / 1000)
+  const isEditing = cursor.focus_mode === 'editing'
+  return html`
+    <div
+      class="ide-keeper-presence"
+      role="status"
+      aria-label="Keeper presence"
+      style=${{
+        display: 'grid',
+        gap: 'var(--sp-1)',
+        padding: 'var(--sp-2)',
+        background: 'var(--color-bg-surface)',
+        border: '1px solid var(--color-border-default)',
+        borderRadius: 'var(--r-2)',
+      }}
+    >
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+        <span
+          aria-hidden="true"
+          style=${{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            background: color.cursor,
+            display: 'inline-block',
+            boxShadow: isEditing ? `0 0 4px ${color.cursor}` : 'none',
+          }}
+        />
+        <span style=${{
+          fontSize: 'var(--fs-11)',
+          letterSpacing: '0.05em',
+          color: isEditing ? 'var(--color-status-err)' : 'var(--color-fg-muted)',
+          fontWeight: 600,
+        }}>${cursor.focus_mode.toUpperCase()}</span>
+        ${cursor.tool_name
+          ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)', marginLeft: 'auto' }}>${cursor.tool_name}</span>`
+          : null}
+      </div>
+      <div style=${{
+        fontSize: 'var(--fs-11)',
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--color-fg-secondary)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }} title=${cursor.file_path}>
+        ${fileName}:${cursor.line}${cursor.selection_end ? `-${cursor.selection_end.line}` : ''}
+      </div>
+      ${cursor.turn != null
+        ? html`
+          <div style=${{ display: 'flex', gap: 'var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
+            <span>turn ${cursor.turn}</span>
+            <span style=${{ marginLeft: 'auto' }}>${ageSec < 60 ? `${ageSec}s ago` : `${Math.round(ageSec / 60)}m ago`}</span>
+          </div>
+        `
+        : null}
+    </div>
+  `
 }

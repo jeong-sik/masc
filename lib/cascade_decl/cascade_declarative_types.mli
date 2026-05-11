@@ -103,9 +103,13 @@ type cascade_provider =
     fields below.
 
     M1 (this PR): schema-only addition; no callers consume.
-    M2 (follow-up): OAS [for_model_id_static] substring-on-model-id
-    derivation replaced by cascade.toml lookup via
-    {!model_capabilities_for_id}.
+    M2 (follow-up): OAS [for_model_id_static], which currently
+    substring-matches on the upstream API model identifier (e.g.
+    [\"claude-sonnet-4-6\"] — Llm_provider.Capabilities.for_model_id
+    receives the api-name, not the cascade [\[models.<id>\]] key
+    [\"sonnet\"]), is replaced by cascade.toml lookup via
+    {!model_capabilities_for_id} — keyed on the cascade [<id>] (the
+    cascade key, not the api-name).
 
     Field selection excludes fields already present on
     {!cascade_model_spec} ([tools_support], [thinking_support],

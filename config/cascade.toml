@@ -159,11 +159,13 @@ max-context = 128000
 tools-support = true
 streaming = true
 
-# Capabilities mirror OAS kimi_capabilities (only tool/reasoning flags
-# overridden from default_capabilities; multimodal/streaming/caching
-# left at default-false). M2 cutover preserves this asymmetry — if
-# kimi production actually streams natively this is an OAS bug to
-# rectify upstream, not here.
+# Capabilities mirror OAS kimi_capabilities. Only max-output-tokens
+# is overridden from defaults here; other capability fields
+# (supports_parallel_tool_calls, supports_multimodal_input,
+# supports_streaming, supports_prompt_caching) inherit default
+# values from cascade_model_capabilities. M2 cutover preserves this
+# asymmetry — if kimi production actually streams natively this is
+# an OAS bug to rectify upstream, not here.
 [models.kimi-coding.capabilities]
 max-output-tokens = 32768
 

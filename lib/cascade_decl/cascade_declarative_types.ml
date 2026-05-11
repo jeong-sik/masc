@@ -125,10 +125,13 @@ type cascade_provider =
     Mirrors the dispatch-critical subset of OAS [Llm_provider.Capabilities.capabilities]
     so the cascade.toml [\[models.<id>.capabilities\]] sub-table becomes
     the SSOT for per-model feature flags. Currently OAS derives these
-    via [for_model_id_static] substring match on model_id strings
-    ([starts_with "claude-opus-4"], [starts_with "gpt-5"], etc.). M2
-    replaces that derivation with a cascade.toml lookup so OAS no longer
-    needs to "know model names".
+    via [for_model_id_static] substring match on the upstream *API model
+    identifier* — e.g. [starts_with "claude-opus-4"], [starts_with
+    "gpt-5"]. That input is the api-name (cascade_model_spec.api_name /
+    Provider_config.model_id), not the cascade [\[models.<id>\]] key.
+    M2 replaces that derivation with a cascade.toml lookup keyed on the
+    cascade [<id>] (the cascade key) so OAS no longer needs to "know
+    model names".
 
     Schema-additive in M1 (this PR): no callers consume the fields yet.
     M2 caller cutover wires OAS [for_model_id] to read these fields.

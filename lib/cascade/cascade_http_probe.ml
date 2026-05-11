@@ -1,4 +1,4 @@
-(** See cascade_ollama_probe.mli for documentation. *)
+(** See cascade_http_probe.mli for documentation. *)
 
 (* ── URL classification ─────────────────────────────────────── *)
 

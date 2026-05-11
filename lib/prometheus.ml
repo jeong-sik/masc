@@ -2347,7 +2347,8 @@ let init () =
   add
     metric_process_timeout
     "Total subprocess executions that exceeded their configured timeout. Labeled by \
-     program and timeout_sec."
+     program and timeout_bucket (Timeout_bucket.to_label: lt_1s | ge_1s_lt_15s | \
+     ge_15s_lt_60s | ge_60s_lt_300s | ge_300s)."
     Counter;
   add
     metric_bg_task_sidecar_failures

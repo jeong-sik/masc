@@ -523,9 +523,18 @@ let () = Atomic.set Coord_hooks.cache_desync_cleared_fn record_cache_desync_clea
 let process_timeout_metric = Prometheus.metric_process_timeout
 
 let record_process_timeout ~program ~timeout_sec =
+  (* Bucket the raw float to keep Prometheus cardinality bounded — a
+     [Printf.sprintf "%.0f"] of caller-supplied seconds would mint a
+     new series per distinct value.  Five closed buckets preserve the
+     operator question "is 15s/60s the right budget?" while
+     guaranteeing the label set never grows beyond
+     [Timeout_bucket]'s variant arity. *)
   Prometheus.inc_counter
     process_timeout_metric
-    ~labels:[ "program", program; "timeout_sec", Printf.sprintf "%.0f" timeout_sec ]
+    ~labels:
+      [ "program", program
+      ; ("timeout_bucket", Timeout_bucket.(to_label (of_seconds timeout_sec)))
+      ]
     ()
 ;;
 

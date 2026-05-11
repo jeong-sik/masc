@@ -20,7 +20,6 @@
 - #14557 - fix(keeper,dashboard,server): stop swallowing warnings/errors (Phase 6)
 - #14564 - feat(keeper): wire goal/task/board with keeper tool results (Phase 5)
 - #14565 - feat(ide): add memory tier panel to IDE right-side (Phase 5)
-- #14567 - docs(plan): update PLAN.md with current status
 - #14573 - feat(grpc,lsp): add LspCall RPC to gRPC service (Phase 1)
 
 ## Remaining Work
@@ -28,7 +27,7 @@
 ### Phase 1: Dashboard/Transports
 - [x] Implement multi-transport abstraction (SSE, HTTP streamable, WebSocket, gRPC)
 - [x] Remove hardcoded EventSource from dashboard/src/sse.ts
-- [x] Wire gRPC consumer for LSP results (PR #14573)
+- [ ] Wire gRPC consumer for LSP results (in-flight: PR #14573)
 - [ ] Add Go WebSocket server support (no Go code in repo; deferred)
 
 ### Phase 2: Keeper Invariants
@@ -43,17 +42,17 @@
 
 ### Phase 4: Tool Selection
 - [x] Move hardcoded alias table from keeper_tool_alias.ml to config
-- [x] Add passive-streak metric for tool selection validation (PR #14555)
+- [ ] Add passive-streak metric for tool selection validation (in-flight: PR #14555)
 
 ### Phase 5: IDE/Dashboard Integration
 - [x] Integrate .masc-ide persistence (ide_meta_sync.ml) - wired in keeper_exec_fs.ml (PR #14552)
-- [x] Wire goal/task/board with keeper tool results (PR #14564)
-- [x] IDE right-side memory component (PR #14565)
+- [ ] Wire goal/task/board with keeper tool results (in-flight: PR #14564)
+- [ ] IDE right-side memory component (in-flight: PR #14565)
 
 ### Phase 6: Logging/Observability
 - [x] Add turn_id label to Docker containers
 - [x] Per-keeper log sampling
-- [x] Ensure warnings/errors are not swallowed (PR #14557)
+- [ ] Ensure warnings/errors are not swallowed (in-flight: PR #14557)
 
 ### Phase 7: Math Verification
 - [x] Formalize keeper_invariant.ml tests (14 tests)

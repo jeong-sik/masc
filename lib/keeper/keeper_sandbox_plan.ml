@@ -18,8 +18,10 @@ type t =
   }
 
 let of_request ~turn_id ~attempt ~meta_name ~cmd =
-  if String.equal meta_name "" then Error (Invalid_meta "meta_name must not be empty")
-  else if String.equal cmd "" then Error (Invalid_command "cmd must not be empty")
+  (* Error payload = offending value (per .mli contract). Empty-string
+     callers see [Invalid_meta ""] / [Invalid_command ""]. *)
+  if String.equal meta_name "" then Error (Invalid_meta meta_name)
+  else if String.equal cmd "" then Error (Invalid_command cmd)
   else
     let container_name =
       Keeper_container_name.derive

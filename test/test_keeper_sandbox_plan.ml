@@ -13,8 +13,10 @@ let plan_error_pp ppf = function
 
 let plan_error_eq a b =
   match a, b with
-  | Keeper_sandbox_plan.Invalid_meta _, Keeper_sandbox_plan.Invalid_meta _ -> true
-  | Keeper_sandbox_plan.Invalid_command _, Keeper_sandbox_plan.Invalid_command _ -> true
+  | Keeper_sandbox_plan.Invalid_meta x, Keeper_sandbox_plan.Invalid_meta y ->
+      String.equal x y
+  | Keeper_sandbox_plan.Invalid_command x, Keeper_sandbox_plan.Invalid_command y ->
+      String.equal x y
   | _ -> false
 
 let plan_t = testable Keeper_sandbox_plan.pp Keeper_sandbox_plan.equal
@@ -41,6 +43,26 @@ let test_empty_cmd_rejected () =
     "empty cmd → Invalid_command"
     (Error (Keeper_sandbox_plan.Invalid_command ""))
     result
+
+(* ── Payload semantics: error carries offending value (Phase 3b-iii contract) ── *)
+
+let test_invalid_meta_payload_is_offending () =
+  let result =
+    Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"" ~cmd:"x"
+  in
+  match result with
+  | Error (Keeper_sandbox_plan.Invalid_meta payload) ->
+      check string "Invalid_meta payload = offending meta_name (\"\")" "" payload
+  | _ -> fail "expected Invalid_meta"
+
+let test_invalid_command_payload_is_offending () =
+  let result =
+    Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"k" ~cmd:""
+  in
+  match result with
+  | Error (Keeper_sandbox_plan.Invalid_command payload) ->
+      check string "Invalid_command payload = offending cmd (\"\")" "" payload
+  | _ -> fail "expected Invalid_command"
 
 (* ── Happy path: returns Ok with populated fields ─────────────── *)
 
@@ -127,6 +149,12 @@ let () =
         [
           test_case "empty meta rejected" `Quick test_empty_meta_rejected;
           test_case "empty cmd rejected" `Quick test_empty_cmd_rejected;
+          test_case "Invalid_meta payload = offending meta_name"
+            `Quick
+            test_invalid_meta_payload_is_offending;
+          test_case "Invalid_command payload = offending cmd"
+            `Quick
+            test_invalid_command_payload_is_offending;
         ] );
       ( "happy path",
         [

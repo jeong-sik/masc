@@ -652,19 +652,29 @@ let of_string s =
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 
+(* Enumerate every [t] constructor in each sibling predicate so the
+   compiler flags any new variant added to [t]. If a future variant
+   (say [External of ...]) joins the sum, the previous [_ -> false]
+   catch-alls would silently classify it as not-keeper / not-masc /
+   not-masc_keeper without any review point; with explicit
+   enumeration the new variant must be deliberately mapped on each
+   predicate. Mirrors the [is_board] convention below and the fix
+   shape in PR #14842 (Resilience_outcome predicates). Same FSM
+   Sparse Match anti-pattern as PRs #14716, #14790, #14806, #14810,
+   #14816, #14823, #14829. *)
 let is_keeper = function
   | Keeper _ -> true
-  | _ -> false
+  | Masc _ | Masc_keeper _ -> false
 ;;
 
 let is_masc = function
   | Masc _ -> true
-  | _ -> false
+  | Keeper _ | Masc_keeper _ -> false
 ;;
 
 let is_masc_keeper = function
   | Masc_keeper _ -> true
-  | _ -> false
+  | Keeper _ | Masc _ -> false
 ;;
 
 let is_board = function

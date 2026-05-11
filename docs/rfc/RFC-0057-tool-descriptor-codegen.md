@@ -272,13 +272,24 @@ python3 -c "import json; tools=json.load(open('tool_descriptors_golden.json')); 
 
 ## §9 Rollout & Migration
 
-| Phase | 범위 | 기간 추정 | 의존성 |
-|-------|------|----------|--------|
-| **0** | POC: Shell IR 9개 도구 descriptor 생성 | 1일 | gen_shell_ir_walkers.ml 재사용 |
-| **1** | File System 카테고리 (10개 도구) | 2일 | Phase 0 완료 |
-| **2** | 나머지 52개 도구 + 중복 통합 | 1주 | Phase 1 완료, 중복 분석 |
-| **3** | `agent_tools` O(n) 검색 → GADT dispatch | 3일 | Phase 2 완료 |
-| **4** | Telemetry/ Dashboard 도구 전환 | 별도 RFC | RFC-0049 (telemetry foundation) |
+| Phase | 범위 | 기간 추정 | 의존성 | 상태 |
+|-------|------|----------|--------|------|
+| **0** | POC: Shell IR 9개 도구 descriptor 생성 | 1일 | gen_shell_ir_walkers.ml 재사용 | merged (PR #14396) |
+| **1** | File System 카테고리 (10개 도구) | 2일 | Phase 0 완료 | merged (PR #14405) |
+| **2** | 나머지 52개 도구 + 중복 통합 | 1주 | Phase 1 완료, 중복 분석 | merged (PR #14412 + #14658 PR-2a..2d split) |
+| **3** | `agent_tools` O(n) 검색 → GADT dispatch | 3일 | Phase 2 완료 | merged (PR #14416) |
+| **4** | Telemetry/ Dashboard 도구 전환 | 별도 RFC | RFC-0049 (telemetry foundation) | merged (PR #14417) |
+| ~~5~~ | (number skipped — see footnote) | — | — | — |
+| **6** | Tool selection mode codegen + GADT activation | — | Phase 4 완료 | merged (PR #14421) |
+
+> **Phase numbering footnote**: Phase 5 was reserved during planning but not
+> ultimately scoped into a PR — the work originally intended for Phase 5
+> (codegen-swap inline_coord group) was bundled into Phase 6's scope when
+> the cross-cutting nature became clear during Phase 4 review. The number
+> is preserved as a gap rather than renumbered to avoid invalidating PR
+> titles already merged with "Phase 6" / "Phase 7" labels. Future RFCs
+> should renumber phases when a number is dropped, or add a footnote like
+> this one. See issue #14561 for the process-gap discussion.
 
 ---
 

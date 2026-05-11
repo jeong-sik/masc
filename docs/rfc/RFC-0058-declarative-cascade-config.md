@@ -236,10 +236,11 @@ key = "OPENAI_API_KEY"
 
 #### 3.2.1 Liveness sub-table `[providers.<p>.liveness]`
 
-Replaces the cascade-prefix → budget match table that previously lived
-in `cascade_attempt_liveness_config.budget_for_label`. The class
-selects which `Cascade_attempt_liveness` budget the attempt-wall
-observer applies when no streaming observer is attached.
+Schema-only at Phase 5.2a: parsed and validated but not yet consumed by
+callers. Intended to replace the cascade-prefix → budget match table in
+`cascade_attempt_liveness_config.budget_for_label` in a follow-up phase.
+When wired, the class will select which `Cascade_attempt_liveness` budget
+the attempt-wall observer applies when no streaming observer is attached.
 
 ```toml
 [providers.claude_code.liveness]

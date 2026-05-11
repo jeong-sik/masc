@@ -91,12 +91,6 @@ def get_pr_base_sha(pr_number: int, owner: str, repo: str) -> Optional[str]:
     return resp.get("base", {}).get("sha")
 
 
-def get_merged_pr_merge_commit(merged_pr_number: int, owner: str, repo: str) -> Optional[str]:
-    """Get the merge commit SHA of a merged PR."""
-    resp = _run_gh([f"/repos/{owner}/{repo}/pulls/{merged_pr_number}"])
-    return resp.get("merge_commit_sha")
-
-
 def merge_commit_already_in_base(
     merge_commit_sha: str, pr_base_sha: str, owner: str, repo: str
 ) -> bool:
@@ -151,6 +145,7 @@ query {{
         number
         title
         mergedAt
+        mergeCommit {{ oid }}
         files(first: 100) {{
           nodes {{ path }}
         }}
@@ -213,9 +208,11 @@ def check_pr_axis_stale(
         if not overlap:
             continue
 
-        # Skip if the merged PR is already included in the current PR's base
+        # Skip if the merged PR is already included in the current PR's base.
+        # mergeCommit.oid is fetched up-front in get_recently_merged_prs so we
+        # don't pay a per-PR REST round-trip here when scanning many PRs.
         if pr_base_sha:
-            merge_commit = get_merged_pr_merge_commit(merged_num, owner, repo)
+            merge_commit = (merged.get("mergeCommit") or {}).get("oid")
             if merge_commit and merge_commit_already_in_base(merge_commit, pr_base_sha, owner, repo):
                 continue
 

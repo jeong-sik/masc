@@ -109,8 +109,10 @@ let flush_regions (config : config) (state : sync_state) : sync_state =
                   ; "timestamp_ms", `Intlit (Int64.to_string region.timestamp_ms)
                   ]
               in
-              output_string oc (Yojson.Safe.to_string json);
-              output_char oc '\n')
+              (* Single write per JSONL record so concurrent appenders
+                 cannot interleave a record body with another record's
+                 trailing newline. *)
+              output_string oc (Yojson.Safe.to_string json ^ "\n"))
            pending);
     { state with
       pending_regions = []

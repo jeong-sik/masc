@@ -62,3 +62,11 @@ type t =
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val schema_version_current : int
+
+(** Closed-set wire label for {!result_status}.  Prefer this over
+    {!show_result_status} (the [@@deriving show] artifact prefixes
+    each constructor with the module path, e.g.
+    ["Cdal_proof.Completed"], which downstream callers then strip by
+    substring split — a fragile pattern that breaks silently when the
+    type is moved or the module renamed). *)
+val result_status_to_string : result_status -> string

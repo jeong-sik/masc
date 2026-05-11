@@ -96,7 +96,7 @@ let classify_rollover_gate = Keeper_rollover.classify_rollover_gate
 let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_keeper
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
-  | Applied of string
+  | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
   | Skipped_continuity_reflection of {
@@ -119,7 +119,7 @@ type compaction_event = Keeper_post_turn.compaction_event = {
   attempted : bool;
   applied : bool;
   failure_reason : string option;
-  trigger : string option;
+  trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
   before_tokens : int;
   after_tokens : int;

@@ -145,7 +145,10 @@ let test_runtime_signals_are_persisted () =
     (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
        ~message_count:88 ~token_count:32000
        ~strategies:[ "PruneToolOutputs"; "SummarizeOld" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next"
@@ -174,7 +177,10 @@ let test_runtime_window_empty_reason () =
   ignore
     (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next";
@@ -196,7 +202,10 @@ let test_runtime_since_only_window_empty_reason () =
   ignore
     (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next";
@@ -218,7 +227,10 @@ let test_runtime_until_only_window_empty_reason () =
   ignore
     (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next";
@@ -242,7 +254,10 @@ let test_runtime_stale_status () =
     (Harness.record_pre_compact_at ~timestamp:stale_timestamp
        ~keeper_name:"keeper-a" ~context_ratio:0.91 ~message_count:88
        ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric ~timestamp:stale_timestamp config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next";

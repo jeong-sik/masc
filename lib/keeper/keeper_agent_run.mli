@@ -48,7 +48,6 @@ type ctx_composition_metrics =
 
 type tool_requirement = Keeper_agent_tool_surface.tool_requirement
 type tool_surface_class = Keeper_agent_tool_surface.tool_surface_class
-
 type turn_lane = Keeper_agent_tool_surface.turn_lane
 
 type tool_surface_metrics =
@@ -113,13 +112,13 @@ type pre_dispatch_checkpoint_hygiene_result =
   ; meaningful_reduction : bool
   ; before_tokens : int
   ; after_tokens : int
-  ; trigger : string option
+  ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
   ; save_error : string option
   }
 
-val prepare_resume_checkpoint_for_dispatch :
-     meta:Keeper_types.keeper_meta
+val prepare_resume_checkpoint_for_dispatch
+  :  meta:Keeper_types.keeper_meta
   -> now_ts:float
   -> loaded_checkpoint_present:bool
   -> save_checkpoint:
@@ -127,11 +126,13 @@ val prepare_resume_checkpoint_for_dispatch :
   -> Keeper_types.working_context
   -> pre_dispatch_checkpoint_hygiene_result
 
-val should_require_tools_for_initial_turn :
-  max_turns:int -> turn_affordances:string list -> bool
+val should_require_tools_for_initial_turn
+  :  max_turns:int
+  -> turn_affordances:string list
+  -> bool
 
-val preferred_tool_choice_for_required_turn :
-     has_current_task:bool
+val preferred_tool_choice_for_required_turn
+  :  has_current_task:bool
   -> turn_affordances:string list
   -> allowed_tool_names:string list
   -> Agent_sdk.Types.tool_choice
@@ -143,8 +144,8 @@ val preferred_tool_choice_for_required_turn :
     so keepers without the relevant action tools (e.g. a [social]
     preset facing unclaimed tasks) aren't forced into unwinnable
     contract violations. *)
-val turn_affordances_require_tool_gate_with_allowed :
-     ?record_suppression_metric:bool
+val turn_affordances_require_tool_gate_with_allowed
+  :  ?record_suppression_metric:bool
   -> allowed_tool_names:string list
   -> string list
   -> bool
@@ -174,8 +175,8 @@ val surface_resolved_model_id : run_result -> string
 
 (** {1 Telemetry serialisation} *)
 
-val build_prompt_metrics :
-     system_prompt:string
+val build_prompt_metrics
+  :  system_prompt:string
   -> dynamic_context:string
   -> user_message:string
   -> prompt_metrics
@@ -183,8 +184,8 @@ val build_prompt_metrics :
 (** [actual_input_tokens] is the LLM-reported input token count and is
     only known after a provider response. Pre-call sites (prompt build)
     must pass [None]; post-response sites pass [Some n]. *)
-val build_ctx_composition_metrics :
-     system_prompt:string
+val build_ctx_composition_metrics
+  :  system_prompt:string
   -> dynamic_context:string
   -> memory_context:string
   -> temporal_context:string
@@ -201,8 +202,8 @@ val ctx_composition_to_json : ctx_composition_metrics -> Yojson.Safe.t
 (** Adaptive thinking budget: raises budget when tool errors, long context,
     or retry conditions are detected. Pure function — safe to call from
     tests without Eio context. *)
-val adaptive_thinking_budget :
-     enabled:bool
+val adaptive_thinking_budget
+  :  enabled:bool
   -> is_retry:bool
   -> last_tool_results:Agent_sdk.Types.tool_result list
   -> user_message:string
@@ -217,8 +218,8 @@ val adaptive_thinking_budget :
     persisted keeper [per_provider_timeout_s] because the direct caller is
     intentionally setting the budget for this run. Without that precedence,
     a stale 300s keeper profile can silently defeat a one-off 900s reprobe. *)
-val per_provider_timeout_for_turn :
-     meta:Keeper_types.keeper_meta
+val per_provider_timeout_for_turn
+  :  meta:Keeper_types.keeper_meta
   -> ?oas_timeout_s:float
   -> timeout_s:float
   -> unit
@@ -256,15 +257,13 @@ val per_provider_timeout_for_turn :
     @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared OAS context for cross-turn state
     @param event_bus Optional MASC event bus *)
-val run_turn :
-     config:Coord.config
+val run_turn
+  :  config:Coord.config
   -> meta:Keeper_types.keeper_meta
   -> base_dir:string
   -> max_context:int
   -> build_turn_prompt:
-       (   base_system_prompt:string
-        -> messages:Agent_sdk.Types.message list
-        -> turn_prompt)
+       (base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
   -> user_message:string
   -> cascade_name:Keeper_cascade_profile.runtime_name
   -> ?world_observation:Keeper_world_observation.world_observation
@@ -288,8 +287,7 @@ val run_turn :
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_cascade:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
-  -> ?cascade_rotation_attempts:
-       Keeper_execution_receipt.cascade_rotation_attempt list
+  -> ?cascade_rotation_attempts:Keeper_execution_receipt.cascade_rotation_attempt list
   -> ?is_retry:bool
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t

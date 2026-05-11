@@ -56,7 +56,7 @@ type compaction_event = {
   attempted : bool;
   applied : bool;
   failure_reason : string option;
-  trigger : string option;
+  trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
   before_tokens : int;
   after_tokens : int;

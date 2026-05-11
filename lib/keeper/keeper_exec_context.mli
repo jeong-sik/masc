@@ -105,7 +105,7 @@ type compaction_event = {
   attempted : bool;
   applied : bool;
   failure_reason : string option;
-  trigger : string option;
+  trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
   before_tokens : int;
   after_tokens : int;
@@ -195,7 +195,7 @@ val save_checkpoint :
 val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
-  | Applied of string
+  | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
   | Skipped_continuity_reflection of {

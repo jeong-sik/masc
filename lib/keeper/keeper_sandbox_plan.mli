@@ -1,44 +1,87 @@
-(** RFC-0070 Phase 3a — Pure construction of a docker run plan.
+(** RFC-0070 Phase 3b-iii — Pure construction of a docker run plan.
 
-    Stub signatures only. Implementation arrives in Phase 3b. Phase 3a
-    establishes the *type contract* so callers cannot drift before the
-    plan/executor split lands; no caller is wired yet.
+    Real (no longer stub) implementation of {!of_request}. Phase 3a
+    established the type contract with [Error Unsupported_profile] for
+    every call; Phase 3b-iii returns a populated {!t}.
 
     Reference: docs/rfc/RFC-0070-keeper-sandbox-pure-edge-separation.md §3.1
 
-    Determinism contract: every constructor in this module is a pure
-    function of its declared inputs. No wall-clock, no Random, no global
-    state. Same inputs ⇒ identical {!t}. *)
+    Determinism contract: same [(turn_id, attempt, meta_name, cmd)] ⇒
+    identical {!t}. No wall-clock, no Random, no global state.
+
+    Scope of Phase 3b-iii: the record exposes the four most-needed
+    fields (container_name, image, command, timeout_budget). Mount,
+    ulimit, and network_mode are deferred to Phase 3b-iv where they
+    arrive as typed records together with the {!Real} {!Docker_client}
+    implementation. *)
 
 (** {1 Errors} *)
 
-(** Closed sum — no catch-all. Phase 3b will extend with concrete arms
-    as the constructor logic surfaces edge cases. *)
+(** Closed sum — no catch-all. Phase 3b-iii narrows from Phase 3a's
+    {!Unsupported_profile} catch-all to two concrete validation arms.
+    Phase 3b-iv may add more as Mount / Network validation lands. *)
 type plan_error =
   | Invalid_meta of string
   | Invalid_command of string
-  | Unsupported_profile of string
 
 (** {1 Plan} *)
 
 (** Abstract sandbox-execution plan. Treat the type as opaque outside
-    {!Sandbox_executor} (Phase 3c). *)
+    {!Sandbox_executor} (Phase 3c) — accessor functions below expose
+    only what callers need. *)
 type t
+
+(** {1 Constructor} *)
 
 (** [of_request ~turn_id ~attempt ~meta_name ~cmd] derives a plan from
     its declared inputs alone. Pure: no I/O, no clock, no random.
 
-    Phase 3a stub: returns {!Error} {!Unsupported_profile} for every
-    call. Phase 3b replaces with the real derivation against
-    {!Keeper_sandbox.t} (and the wired
-    {!Keeper_types.keeper_meta}-derived inputs).
+    Validation:
+    - [meta_name] must be non-empty (returns [Invalid_meta] otherwise).
+    - [cmd] must be non-empty (returns [Invalid_command] otherwise).
 
-    The signature accepts [meta_name] as a [string] in Phase 3a to keep
-    this module's interface free of cross-module dependencies. Phase 3b
-    swaps to a typed meta input. *)
+    Fields populated:
+    - [container_name = Keeper_container_name.derive ~algo:SHA_256
+      ~turn_id ~attempt ~suffix:meta_name]
+    - [image = default_image] (Phase 3b-iv: caller-provided)
+    - [command = cmd]
+    - [timeout_budget = default_timeout_budget_sec] (Phase 3b-iv:
+      caller-provided)
+
+    The signature accepts [meta_name] as a [string] in Phase 3a/3b-iii
+    to keep this module's interface free of cross-module dependencies.
+    Phase 3b-iv swaps to a typed meta input. *)
 val of_request
   :  turn_id:int
   -> attempt:int
   -> meta_name:string
   -> cmd:string
   -> (t, plan_error) result
+
+(** {1 Accessors} *)
+
+val container_name : t -> Keeper_container_name.t
+
+val image : t -> string
+
+val command : t -> string
+
+(** Timeout budget in seconds. Phase 3b-iv replaces with [Eio.Time.span]
+    once Eio is wired into the plan layer. *)
+val timeout_budget_sec : t -> float
+
+(** {1 Equality / pretty-print for tests} *)
+
+val equal : t -> t -> bool
+
+val pp : Format.formatter -> t -> unit
+
+(** {1 Phase 3b-iii defaults} *)
+
+(** Default container image — RFC-0070 Phase 3b-iv will replace with
+    a typed {!Image.digest} resolved from keeper config. Public for
+    test visibility only. *)
+val default_image : string
+
+(** Default per-turn timeout — Phase 3b-iv parameterises. *)
+val default_timeout_budget_sec : float

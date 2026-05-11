@@ -72,8 +72,8 @@ Then R-D-1.c becomes:
 
 `dune build @check` surfaced two unrelated pre-existing errors that should *not* be attributed to this iteration's change:
 
-1. `test/test_keeper_sandbox_plan.ml:32` — `result` applied as a function but actually a constructor; orthogonal to KCAF.
-2. `Keeper_registry.registry_entry` vs tuple mismatch in some unrelated caller; orthogonal.
+1. `test/test_keeper_sandbox_plan.ml:32` — identifier shadowing: the local `let result = Keeper_sandbox_plan.of_request ...` at line 28 shadows `Alcotest.result`, so the subsequent `check (result plan_t plan_error_t) ...` tries to apply the shadowed value (a record) as a 2-arg function.  Orthogonal to KCAF; rename the local to e.g. `outcome` to lift the shadow.
+2. `Keeper_registry.registry_entry` vs tuple mismatch in an unrelated caller — exact file:line not captured in this memo's working tree at iter 31 rollback time; run `dune build --root . @check` on a clean main checkout to recover the trace, or check open PRs touching `Keeper_registry.registry_entry` shape.
 
 These appear to be live failures on main that other PRs may already be addressing.  Reported here only so future readers know the iter 31 attempt was rolled back **cleanly** and these errors persist independently of this PR.
 
@@ -97,7 +97,7 @@ The cheapest *implementable* KCAF fix is now R-D-1.b (validator-side, doesn't de
 - Identifies a previously-invisible prerequisite (R-D-1.d).
 - Establishes the *Loop Discipline*: when an audit claims LOW risk, an attempted fix is the cheapest way to confirm.  When the fix surfaces a hidden constraint, the audit memo is *more valuable than the fix would have been* — it prevents the same misclassification in adjacent slices.
 
-This is the audit-correction shape that the workaround anti-pattern §CLAUDE.md flags as healthy: **prefer surfacing constraints over silencing them with workarounds**.  A naïve approach to this constraint (renaming all test references, or putting `decision` in a sub-module to break shadowing) would be a string-classifier-style workaround.  The structural fix is ppx_tla extension.
+This is the audit-correction shape that the operator's local "Workaround Rejection Bar" guidance flags as healthy: **prefer surfacing constraints over silencing them with workarounds**.  (The guidance lives in the operator-local `~/me/CLAUDE.md` / `~/me/instructions/software-development.md` and is not tracked in this repo — see also RFC-0064 §Workaround Anti-pattern and RFC-0068 for in-repo applications of the same rule.)  A naïve approach to this constraint (renaming all test references, or putting `decision` in a sub-module to break shadowing) would be a string-classifier-style workaround.  The structural fix is ppx_tla extension.
 
 ## References
 

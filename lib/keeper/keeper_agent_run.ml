@@ -607,9 +607,7 @@ let run_turn
                  let model = result.response.model in
                  receipt_turn_count_ref := Some result.turns;
                  receipt_model_used_ref := Some model;
-                 receipt_stop_reason_ref
-                 := Some
-                      (Keeper_execution_receipt.stop_reason_to_string result.stop_reason);
+                 receipt_stop_reason_ref := Some result.stop_reason;
                  receipt_cascade_observation_ref := result.cascade_observation;
                  (* Extract and persist thinking blocks to trajectory JSONL.
            NOTE: turn = acc.turn stays at 0 in the keeper path because
@@ -1477,7 +1475,9 @@ let run_turn
            this defaulted to "completed", which [Keeper_turn_terminal.normalize_code]
            remapped to "success" before disposition lookup. The producer-side
            default is now the canonical wire; the normalize step is gone. *)
-           Option.value ~default:"success" !receipt_stop_reason_ref
+           (match !receipt_stop_reason_ref with
+            | Some sr -> Keeper_execution_receipt.stop_reason_to_string sr
+            | None -> "success")
          | Error err ->
            terminal_reason_code_of_sdk_error_typed err
            |> Keeper_turn_terminal_code.to_wire

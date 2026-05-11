@@ -156,7 +156,7 @@ let append_keeper_receipt ?(outcome = "ok")
       degraded_retry_cascade = None;
       fallback_reason = None;
       cascade_rotation_attempts = [];
-      stop_reason = Some terminal_reason_code;
+      stop_reason = Some Cascade_runner.Completed;
       error_kind = None;
       error_message = None;
       started_at;

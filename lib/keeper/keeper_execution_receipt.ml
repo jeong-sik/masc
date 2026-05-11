@@ -125,7 +125,7 @@ type t =
   ; degraded_retry_cascade : cascade_name option
   ; fallback_reason : string option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
-  ; stop_reason : string option
+  ; stop_reason : Cascade_runner.stop_reason option
   ; error_kind : error_kind option
   ; error_message : string option
   ; started_at : string
@@ -554,7 +554,7 @@ let to_json (receipt : t) =
           ] );
       ( "stop_reason",
         match receipt.stop_reason with
-        | Some value -> `String value
+        | Some value -> `String (stop_reason_to_string value)
         | None -> `Null );
       ("error", error_json);
       ("started_at", `String receipt.started_at);
@@ -669,7 +669,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
         | None -> `Null )
     ; ( "stop_reason",
         match receipt.stop_reason with
-        | Some value -> `String value
+        | Some value -> `String (stop_reason_to_string value)
         | None -> `Null )
     ; ( "error_kind",
         match receipt.error_kind with

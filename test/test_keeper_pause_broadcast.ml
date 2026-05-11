@@ -266,7 +266,7 @@ let test_broadcast_payload_carries_turn_diagnostics () =
       ~required_tools:[ "keeper_shell"; "masc_worktree_create" ]
       ~missing_required_tools:[ "keeper_shell" ]
       ~current_task_id:"task-102"
-      ~stop_reason:"completed"
+      ~stop_reason:Masc_mcp.Cascade_runner.Completed
       ~goal_ids:[ "goal-main" ]
       ()
   in

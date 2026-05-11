@@ -141,7 +141,7 @@ type t =
   ; degraded_retry_cascade : cascade_name option
   ; fallback_reason : string option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
-  ; stop_reason : string option
+  ; stop_reason : Cascade_runner.stop_reason option
   ; error_kind : error_kind option
   ; error_message : string option
   ; started_at : string

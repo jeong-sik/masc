@@ -95,17 +95,15 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
-let lowercase_enum_case_name raw =
-  let raw =
-    match String.rindex_opt raw '.' with
-    | Some idx when idx + 1 < String.length raw ->
-        String.sub raw (idx + 1) (String.length raw - idx - 1)
-    | _ -> raw
-  in
-  String.lowercase_ascii raw
-
-let proof_result_status_to_string status =
-  Masc_mcp_cdal_runtime.Cdal_proof.show_result_status status |> lowercase_enum_case_name
+(* Delegate to the canonical [Cdal_proof.result_status_to_string]
+   (exposed in #14712 / T5).  Previously this re-implemented the same
+   wire conversion via [show_result_status] + [String.rindex '.']
+   substring split — a fragile [@@deriving show] strip that breaks
+   silently when the type is moved or the module renamed.  Both this
+   call site and [keeper_turn_telemetry.log_keeper_proof] had grown
+   independent copies of the same workaround. *)
+let proof_result_status_to_string =
+  Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_string
 
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)

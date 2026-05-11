@@ -65,7 +65,9 @@ let read_provider_rate_config ~provider json =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
-      "keeper_admission_runtime: admission config parse failed: %s"
+      "keeper_admission_runtime: admission.provider_rates parse failed for \
+       provider=%s: %s"
+      provider
       (Printexc.to_string exn);
     None
 ;;

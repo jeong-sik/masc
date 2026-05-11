@@ -227,7 +227,7 @@ let list_entries ~base_path =
          try Some (build_entry path branch) with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Log.Core.warn
+           Log.Dashboard.warn
              "dashboard_worktree_status: build_entry failed for %s/%s: %s"
              path
              branch

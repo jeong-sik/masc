@@ -46,7 +46,7 @@ let executable_path () =
   in
   try Unix.realpath path with
   | exn ->
-    Log.Core.warn
+    Log.Identity.warn
       "build_identity: Unix.realpath failed for %s: %s"
       path
       (Printexc.to_string exn);

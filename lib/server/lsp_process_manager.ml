@@ -42,7 +42,7 @@ let lang_of_path file_path =
   let ext =
     try Filename.extension file_path |> String.lowercase_ascii with
     | exn ->
-      Log.Core.warn
+      Log.Server.warn
         "lsp_process_manager: Filename.extension failed for %s: %s"
         file_path
         (Printexc.to_string exn);

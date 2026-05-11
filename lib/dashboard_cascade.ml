@@ -253,7 +253,7 @@ let config_json () =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Log.Core.warn
+      Log.Keeper.warn
         "dashboard_cascade: offline_keepers_json failed: %s"
         (Printexc.to_string exn);
       []

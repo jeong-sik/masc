@@ -2783,6 +2783,187 @@ let test_attribution_gate_and_origin_invariant () =
     cases
 ;;
 
+(* ── Precondition layer negative tests (R-A-9 wrap-up) ──
+
+   Each event covered by [check_event_precondition] gets one test per
+   spec-declared misuse vector.  The arms encode TLA+ §CompactRetryExhausted,
+   §ContextOverflowDetected, §AutoCompactTriggered, §OperatorCompactRequested.
+   Operator_clear_requested has no extra precondition (escape-hatch) — we
+   verify it accepts even an unusual condition state. *)
+
+let overflowed_conditions : SM.conditions =
+  { running_conditions with context_overflow = true }
+;;
+
+(* [event_to_string] for payload-carrying events appends the payload
+   (e.g. "context_overflow_detected(prompt_rejected,...)"), so we use
+   prefix match rather than equality. *)
+let assert_precondition_violation ~event_name err =
+  match err with
+  | SM.Precondition_violation { event; reason = _ } ->
+    check
+      bool
+      ("event name prefix " ^ event_name ^ " in " ^ event)
+      true
+      (Astring.String.is_prefix ~affix:event_name event)
+  | other ->
+    Alcotest.fail
+      ("expected Precondition_violation, got " ^ SM.transition_error_to_string other)
+;;
+
+(* — Compact_retry_exhausted (PR-1) ─────────────────────── *)
+
+let test_pre_compact_retry_no_overflow () =
+  let err =
+    apply_err
+      ~current_phase:SM.Running
+      ~conditions:running_conditions
+      ~event:SM.Compact_retry_exhausted
+  in
+  assert_precondition_violation ~event_name:"compact_retry_exhausted" err
+;;
+
+let test_pre_compact_retry_compaction_active () =
+  let c = { overflowed_conditions with compaction_active = true } in
+  let err =
+    apply_err ~current_phase:SM.Compacting ~conditions:c ~event:SM.Compact_retry_exhausted
+  in
+  assert_precondition_violation ~event_name:"compact_retry_exhausted" err
+;;
+
+let test_pre_compact_retry_already_exhausted () =
+  let c = { overflowed_conditions with compact_retry_exhausted = true } in
+  let err =
+    apply_err ~current_phase:SM.Paused ~conditions:c ~event:SM.Compact_retry_exhausted
+  in
+  assert_precondition_violation ~event_name:"compact_retry_exhausted" err
+;;
+
+(* — Context_overflow_detected (PR-2) ─────────────────────── *)
+
+let overflow_event =
+  SM.Context_overflow_detected
+    { source = `Prompt_rejected; token_count = 100_000; limit_tokens = Some 200_000 }
+;;
+
+let test_pre_overflow_during_compaction () =
+  let c = { running_conditions with compaction_active = true } in
+  let err = apply_err ~current_phase:SM.Compacting ~conditions:c ~event:overflow_event in
+  assert_precondition_violation ~event_name:"context_overflow_detected" err
+;;
+
+(* — Auto_compact_triggered (PR-2) ─────────────────────── *)
+
+let test_pre_auto_compact_no_overflow () =
+  let err =
+    apply_err
+      ~current_phase:SM.Running
+      ~conditions:running_conditions
+      ~event:SM.Auto_compact_triggered
+  in
+  assert_precondition_violation ~event_name:"auto_compact_triggered" err
+;;
+
+let test_pre_auto_compact_active () =
+  let c = { overflowed_conditions with compaction_active = true } in
+  let err =
+    apply_err ~current_phase:SM.Compacting ~conditions:c ~event:SM.Auto_compact_triggered
+  in
+  assert_precondition_violation ~event_name:"auto_compact_triggered" err
+;;
+
+let test_pre_auto_compact_handoff_active () =
+  let c = { overflowed_conditions with handoff_active = true } in
+  let err =
+    apply_err ~current_phase:SM.HandingOff ~conditions:c ~event:SM.Auto_compact_triggered
+  in
+  assert_precondition_violation ~event_name:"auto_compact_triggered" err
+;;
+
+let test_pre_auto_compact_retry_exhausted () =
+  let c = { overflowed_conditions with compact_retry_exhausted = true } in
+  let err =
+    apply_err ~current_phase:SM.Paused ~conditions:c ~event:SM.Auto_compact_triggered
+  in
+  assert_precondition_violation ~event_name:"auto_compact_triggered" err
+;;
+
+(* — Operator_compact_requested (PR-3) ─────────────────────── *)
+
+let test_pre_operator_compact_during_compaction () =
+  let c = { running_conditions with compaction_active = true } in
+  let err =
+    apply_err
+      ~current_phase:SM.Compacting
+      ~conditions:c
+      ~event:SM.Operator_compact_requested
+  in
+  assert_precondition_violation ~event_name:"operator_compact_requested" err
+;;
+
+let test_pre_operator_compact_during_handoff () =
+  let c = { running_conditions with handoff_active = true } in
+  let err =
+    apply_err
+      ~current_phase:SM.HandingOff
+      ~conditions:c
+      ~event:SM.Operator_compact_requested
+  in
+  assert_precondition_violation ~event_name:"operator_compact_requested" err
+;;
+
+(* — Operator_clear_requested (PR-3 escape-hatch) ────────────
+
+   Deliberate no-arm: the precondition layer never rejects this event.
+   Whether the resulting state transition is matrix-valid is a separate
+   FSM concern; the contract under test here is *only* that the
+   precondition arm doesn't surface Precondition_violation.
+
+   We exercise a misuse-shaped condition state (overflow + retry-latched)
+   that would block Compact_retry_exhausted or Auto_compact_triggered,
+   and check that Operator_clear_requested still slips through the
+   precondition layer. *)
+let test_pre_operator_clear_no_extra_precondition () =
+  let c =
+    { running_conditions with
+      context_overflow = true
+    ; compact_retry_exhausted = true
+    }
+  in
+  let clear_event =
+    SM.Operator_clear_requested
+      { preserve_system = false; reason = "operator escape-hatch" }
+  in
+  match
+    SM.apply_event ~current_phase:SM.Running ~conditions:c ~event:clear_event ~now:0.0
+  with
+  | Ok _ -> ()
+  | Error (SM.Precondition_violation { event; _ }) ->
+    Alcotest.fail
+      ("Operator_clear_requested escape-hatch contract violated — \
+        precondition layer rejected with event=" ^ event)
+  | Error _ ->
+    (* Matrix or terminal errors are out of scope for this test. *)
+    ()
+;;
+
+(* — Restart_budget_exhausted (R-A-6.b — adjacent arm, not R-A-9) ─── *)
+
+let test_pre_restart_budget_already_exhausted () =
+  (* Pairs with §S3 BudgetNeverRevives: re-exhausting an already-cleared
+     budget is masked as a no-op by [update_conditions] (the unconditional
+     [false] write), but signals a duplicate dispatch from the supervisor
+     or operator path. *)
+  let c = { running_conditions with restart_budget_remaining = false } in
+  let err =
+    apply_err
+      ~current_phase:SM.Crashed
+      ~conditions:c
+      ~event:SM.Restart_budget_exhausted
+  in
+  assert_precondition_violation ~event_name:"restart_budget_exhausted" err
+;;
+
 (* ── Test suite ────────────────────────────────────────── *)
 
 let () =
@@ -3108,6 +3289,56 @@ let () =
             "gate=keeper_fsm origin=Det invariant"
             `Quick
             test_attribution_gate_and_origin_invariant
+        ] )
+    ; ( "precondition_layer"
+      , [ test_case
+            "Compact_retry_exhausted requires context_overflow"
+            `Quick
+            test_pre_compact_retry_no_overflow
+        ; test_case
+            "Compact_retry_exhausted requires ~compaction_active"
+            `Quick
+            test_pre_compact_retry_compaction_active
+        ; test_case
+            "Compact_retry_exhausted is non-idempotent (~already_exhausted)"
+            `Quick
+            test_pre_compact_retry_already_exhausted
+        ; test_case
+            "Context_overflow_detected requires ~compaction_active"
+            `Quick
+            test_pre_overflow_during_compaction
+        ; test_case
+            "Auto_compact_triggered requires context_overflow"
+            `Quick
+            test_pre_auto_compact_no_overflow
+        ; test_case
+            "Auto_compact_triggered requires ~compaction_active"
+            `Quick
+            test_pre_auto_compact_active
+        ; test_case
+            "Auto_compact_triggered requires ~handoff_active"
+            `Quick
+            test_pre_auto_compact_handoff_active
+        ; test_case
+            "Auto_compact_triggered requires ~compact_retry_exhausted (#8581)"
+            `Quick
+            test_pre_auto_compact_retry_exhausted
+        ; test_case
+            "Operator_compact_requested requires ~compaction_active"
+            `Quick
+            test_pre_operator_compact_during_compaction
+        ; test_case
+            "Operator_compact_requested requires ~handoff_active"
+            `Quick
+            test_pre_operator_compact_during_handoff
+        ; test_case
+            "Operator_clear_requested is escape-hatch (no extra precondition)"
+            `Quick
+            test_pre_operator_clear_no_extra_precondition
+        ; test_case
+            "Restart_budget_exhausted is non-idempotent (R-A-6.b)"
+            `Quick
+            test_pre_restart_budget_already_exhausted
         ] )
     ]
 ;;

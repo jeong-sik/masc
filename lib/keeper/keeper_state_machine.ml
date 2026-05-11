@@ -955,17 +955,30 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
 
    This helper enforces a subset of those preconditions at the
    [apply_event] boundary so silent corruption becomes a typed
-   [Precondition_violation] result.  Only the most operationally
-   dangerous event is covered in this first PR; the remaining four
-   (Auto_compact_triggered, Operator_compact_requested,
-   Context_overflow_detected, Operator_clear_requested) follow in
-   subsequent PRs as the spec/code refinement chain (R-A-9 PR-2/PR-3)
-   matures.
+   [Precondition_violation] result.  Coverage extended incrementally
+   across the spec/code refinement chain (R-A-9, then R-A-6.b):
+     - PR-1: Compact_retry_exhausted (latch correctness)
+     - PR-2: Context_overflow_detected, Auto_compact_triggered (overflow
+       lifecycle — the two events that drive Overflowed↔Compacting)
+     - PR-3: Operator_compact_requested (operator-driven buffer op
+       exclusivity).  Operator_clear_requested is deliberately *not*
+       arm-enforced beyond the terminal guard — see its arm below for
+       the operator escape-hatch rationale.
+     - R-A-6.b: Restart_budget_exhausted (non-idempotency — pairs with
+       §S3 BudgetNeverRevives liveness invariant; iter 14 audit).
+
+   Coverage: 5/5 R-A-9 events (Compact_retry_exhausted,
+   Context_overflow_detected, Auto_compact_triggered,
+   Operator_compact_requested, Operator_clear_requested) plus the
+   adjacent R-A-6.b Restart_budget_exhausted arm (iter 14 follow-up).
+   Other events have no spec preconditions beyond NotTerminal and
+   fall through the catch-all.
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
      - iter 9 PR #14730 (systematic gap class)
-     - TLA+ §CompactRetryExhausted in KeeperStateMachine.tla *)
+     - TLA+ §ContextOverflowDetected, §AutoCompactTriggered,
+       §CompactRetryExhausted in KeeperStateMachine.tla *)
 let check_event_precondition (c : conditions) (ev : event)
   : (unit, transition_error) result
   =
@@ -1002,7 +1015,130 @@ let check_event_precondition (c : conditions) (ev : event)
         (Precondition_violation
            { event = event_to_string ev; reason = "already_latched" })
     else Ok ()
-  (* Remaining 4 events covered in follow-up PRs (R-A-9 PR-2/PR-3). *)
+  | Context_overflow_detected _ ->
+    if c.compaction_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §ContextOverflowDetected requires ~compaction_active; \
+                an overflow signal while compaction is already running means \
+                the in-flight compaction is the runaway — the retry latch \
+                must catch it, not a fresh overflow event that conflates the \
+                two attempts"
+           })
+    else Ok ()
+  | Auto_compact_triggered ->
+    if not c.context_overflow
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §AutoCompactTriggered requires context_overflow=true; \
+                triggering auto-compaction on a non-overflowed keeper flips \
+                compaction_active outside the Overflowed→Compacting transition \
+                and corrupts the overflow lifecycle invariant"
+           })
+    else if c.compaction_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §AutoCompactTriggered requires ~compaction_active; \
+                re-triggering while a compaction is already in flight \
+                duplicates the buffer op and tangles the ordering"
+           })
+    else if c.handoff_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §AutoCompactTriggered requires ~handoff_active; \
+                starting a compaction during handoff entangles two buffer \
+                ops on the same keeper"
+           })
+    else if c.compact_retry_exhausted
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §AutoCompactTriggered requires ~compact_retry_exhausted; \
+                the retry budget is spent — DerivePhase routes the next \
+                overflow to Paused, and a fresh auto-compact would defeat \
+                that latch (Issue #8581 root cause)"
+           })
+    else Ok ()
+  | Operator_compact_requested ->
+    (* TLA+ §OperatorCompactRequested.  Operator path differs from
+       AutoCompactTriggered: it does NOT require [context_overflow], so
+       an operator can pre-emptively compact a not-yet-overflowed
+       keeper.  But the two buffer-op exclusivity preconditions are
+       identical — concurrent compaction or handoff entangles ops. *)
+    if c.compaction_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §OperatorCompactRequested requires ~compaction_active; \
+                stacking operator-driven compaction on top of an in-flight \
+                buffer op duplicates the work and confuses the retry latch \
+                that OperatorCompactRequested clears as a side-effect"
+           })
+    else if c.handoff_active
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §OperatorCompactRequested requires ~handoff_active; \
+                handoff already owns the buffer, so a concurrent operator \
+                compaction would race on the same keeper context"
+           })
+    else Ok ()
+  | Operator_clear_requested _ ->
+    (* TLA+ §OperatorClearRequested deliberately requires only NotTerminal
+       (lib §masc_keeper_clear: "Last-resort: operator drops the keeper's
+       context entirely").  The terminal guard at the top of [apply_event]
+       already enforces this, so no extra arm is needed here.  Documented
+       to make the deliberate minimal precondition explicit — adding any
+       check beyond NotTerminal would weaken the operator escape-hatch. *)
+    Ok ()
+  | Restart_budget_exhausted ->
+    (* TLA+ §RestartBudgetExhausted requires [restart_budget_remaining];
+       re-exhausting an already-exhausted budget is a logical no-op in
+       isolation, but masks a duplicate dispatch in the caller and —
+       paired with the §S3 [BudgetNeverRevives] invariant — indicates
+       the supervisor's restart-vs-mark-dead gate was bypassed.
+
+       This is the 6th R-A-9 candidate, identified in iter 14 audit
+       memo `docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md`
+       — same systematic gap class as the 5 events in iter 9's
+       original enumeration. *)
+    if not c.restart_budget_remaining
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §RestartBudgetExhausted requires \
+                restart_budget_remaining=true; re-exhausting an already-\
+                exhausted budget masks a duplicate dispatch and \
+                signals the supervisor's restart-vs-mark-dead gate \
+                may have been bypassed (see §S3 BudgetNeverRevives)"
+           })
+    else Ok ()
+  (* Other events have no TLA+ state preconditions beyond what
+     [apply_event]'s terminal guard already enforces; their semantics
+     are encoded in [update_conditions] + [derive_phase] (e.g.
+     [Heartbeat_failed] always flips [heartbeat_healthy] to false
+     regardless of prior state).  Adding speculative arms here would
+     drift from the spec. *)
   | _ -> Ok ()
 ;;
 

@@ -625,6 +625,62 @@ let test_unmetered_provider_uses_declared_telemetry_policy () =
     (Adapter.is_structurally_unmetered_provider "unknown")
 ;;
 
+(* RFC-0058 Phase 5.6 boundary helper: timeout_bounds_of_kind.
+
+   These tests seal the per-provider attempt timeout policy inside
+   the adapter boundary. The previous [match provider_cfg.kind] site
+   lived in [Keeper_turn_driver_helpers]; the helper now lives here
+   so adding vLLM/lmstudio means editing this site, not the keeper
+   layer. *)
+
+let test_timeout_bounds_ollama_has_300s_floor () =
+  let b = Adapter.timeout_bounds_of_kind Llm_provider.Provider_config.Ollama in
+  check (option (float 0.001)) "ollama min 300s" (Some 300.0) b.min_timeout_s;
+  check (option (float 0.001)) "ollama no max"    None         b.max_timeout_s
+
+let test_timeout_bounds_claude_code_has_120s_ceiling () =
+  let b =
+    Adapter.timeout_bounds_of_kind Llm_provider.Provider_config.Claude_code
+  in
+  check (option (float 0.001)) "claude_code no min" None         b.min_timeout_s;
+  check (option (float 0.001)) "claude_code max 120s" (Some 120.0) b.max_timeout_s
+
+let test_timeout_bounds_gemini_variants_share_ceiling () =
+  let b_api =
+    Adapter.timeout_bounds_of_kind Llm_provider.Provider_config.Gemini
+  in
+  let b_cli =
+    Adapter.timeout_bounds_of_kind Llm_provider.Provider_config.Gemini_cli
+  in
+  check (option (float 0.001)) "Gemini max 180s" (Some 180.0) b_api.max_timeout_s;
+  check (option (float 0.001)) "Gemini_cli max 180s" (Some 180.0)
+    b_cli.max_timeout_s
+
+let test_timeout_bounds_kimi_cli_has_60s_ceiling () =
+  let b =
+    Adapter.timeout_bounds_of_kind Llm_provider.Provider_config.Kimi_cli
+  in
+  check (option (float 0.001)) "kimi_cli max 60s" (Some 60.0) b.max_timeout_s
+
+let test_timeout_bounds_unconstrained_kinds_have_no_bounds () =
+  let unconstrained =
+    [ Llm_provider.Provider_config.Anthropic
+    ; Llm_provider.Provider_config.Kimi
+    ; Llm_provider.Provider_config.OpenAI_compat
+    ; Llm_provider.Provider_config.Glm
+    ; Llm_provider.Provider_config.DashScope
+    ; Llm_provider.Provider_config.Codex_cli
+    ]
+  in
+  List.iter
+    (fun kind ->
+       let b = Adapter.timeout_bounds_of_kind kind in
+       check (option (float 0.001))
+         "unconstrained min = None" None b.min_timeout_s;
+       check (option (float 0.001))
+         "unconstrained max = None" None b.max_timeout_s)
+    unconstrained
+
 (* RFC-0058 Phase 5.6 boundary helper: apply_wire_overlay.
 
    These tests seal the invariant that the keeper layer no longer
@@ -974,6 +1030,28 @@ let () =
             test_stt_request_elevenlabs_direct
         ; test_case "stt request openai compat" `Quick test_stt_request_openai_compat
         ; test_case "stt request mcp rejected" `Quick test_stt_request_mcp_rejected
+        ] )
+    ; ( "timeout_bounds_of_kind"
+      , [ test_case
+            "ollama floors at 300s"
+            `Quick
+            test_timeout_bounds_ollama_has_300s_floor
+        ; test_case
+            "claude_code ceiling 120s"
+            `Quick
+            test_timeout_bounds_claude_code_has_120s_ceiling
+        ; test_case
+            "gemini variants share 180s ceiling"
+            `Quick
+            test_timeout_bounds_gemini_variants_share_ceiling
+        ; test_case
+            "kimi_cli ceiling 60s"
+            `Quick
+            test_timeout_bounds_kimi_cli_has_60s_ceiling
+        ; test_case
+            "unconstrained kinds report no bounds"
+            `Quick
+            test_timeout_bounds_unconstrained_kinds_have_no_bounds
         ] )
     ; ( "apply_wire_overlay"
       , [ test_case

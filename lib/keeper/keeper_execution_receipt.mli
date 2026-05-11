@@ -127,7 +127,7 @@ type t =
   ; tools_used : string list
   ; tool_contract_result : string
   ; tool_surface : tool_surface
-  ; sandbox_kind : string
+  ; sandbox_kind : Keeper_types.sandbox_profile
   ; sandbox_root : string option
   ; network_mode : string
   ; approval_profile : string option
@@ -149,7 +149,8 @@ type t =
   }
 
 val stop_reason_to_string : Cascade_runner.stop_reason -> string
-val sandbox_kind_of_meta : Keeper_types.keeper_meta -> string
+val sandbox_kind_of_meta :
+  Keeper_types.keeper_meta -> Keeper_types.sandbox_profile
 val to_json : t -> Yojson.Safe.t
 
 (** Derived display pair (disposition, reason) computed from receipt fields.

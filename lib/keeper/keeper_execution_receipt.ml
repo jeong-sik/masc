@@ -111,7 +111,7 @@ type t =
   ; tools_used : string list
   ; tool_contract_result : string
   ; tool_surface : tool_surface
-  ; sandbox_kind : string
+  ; sandbox_kind : Keeper_types.sandbox_profile
   ; sandbox_root : string option
   ; network_mode : string
   ; approval_profile : string option
@@ -143,10 +143,9 @@ let stop_reason_to_string = function
      | None ->
        Printf.sprintf "mutation_boundary:%d" turns_used)
 
-let sandbox_kind_of_meta (meta : Keeper_types.keeper_meta) =
-  match meta.sandbox_profile with
-  | Keeper_types.Docker -> "docker"
-  | Keeper_types.Local -> "local"
+let sandbox_kind_of_meta (meta : Keeper_types.keeper_meta)
+    : Keeper_types.sandbox_profile =
+  meta.sandbox_profile
 
 let list_json values =
   `List (List.map (fun value -> `String value) values)
@@ -415,7 +414,8 @@ let to_json (receipt : t) =
       ?keeper_turn_id:receipt.turn_count
       ?task_id:receipt.current_task_id
       ~goal_ids:receipt.goal_ids
-      ~sandbox_profile:receipt.sandbox_kind
+      ~sandbox_profile:
+        (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
       ?sandbox_root:receipt.sandbox_root
       ~network_mode:receipt.network_mode
       ?approval_mode:receipt.approval_profile
@@ -445,7 +445,8 @@ let to_json (receipt : t) =
          | None -> false (* unknown outcome: fail-closed *))
       ~duration_ms:(receipt_duration_ms receipt)
       ?error:receipt.error_message
-      ~sandbox_target:receipt.sandbox_kind
+      ~sandbox_target:
+        (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
       ()
   in
   `Assoc
@@ -508,7 +509,7 @@ let to_json (receipt : t) =
       ( "sandbox",
         `Assoc
           [
-            ("kind", `String receipt.sandbox_kind);
+            ("kind", `String (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind));
             ( "sandbox_root",
               match receipt.sandbox_root with
               | Some value -> `String value
@@ -654,7 +655,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           ] )
     ; ( "sandbox",
         `Assoc
-          [ "kind", `String receipt.sandbox_kind
+          [ "kind", `String (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
           ; "sandbox_root", string_opt_json receipt.sandbox_root
           ; "network_mode", `String receipt.network_mode
           ] )

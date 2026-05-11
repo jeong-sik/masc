@@ -11,6 +11,9 @@ import { keepers } from '../../store'
 import type { Keeper } from '../../types'
 import { MemoryGraph } from '../common/memory-graph'
 import { PersistenceStatus, type PersistenceState } from '../common/persistence-status'
+import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { useSignalValue } from './use-signal-value'
 
 const REFRESH_MS = 30_000
 
@@ -153,12 +156,6 @@ export function buildMemoryGraphModel(
   return { nodes, edges, visibleUsage, totalUsed, totalCap, saturatedCount }
 }
 
-function useSignalValue<T>(signal: { value: T; subscribe: (fn: (value: T) => void) => () => void }): T {
-  const [value, setValue] = useState(signal.value)
-  useEffect(() => signal.subscribe(next => setValue(next)), [signal])
-  return value
-}
-
 function resolveKeeperName(explicit: string | undefined, active: string, rows: readonly Keeper[]): string {
   const fromProp = explicit?.trim()
   if (fromProp) return fromProp
@@ -242,6 +239,15 @@ export function IdePersistencePanel({
   const keeperRows = useSignalValue(keepers)
   const keeperName = resolveKeeperName(explicitKeeperName, activeName, keeperRows)
   const keeper = findKeeper(keeperRows, keeperName)
+  const presence = useSignalValue(globalPresenceSnapshot)
+  const overlay = useSignalValue(cursorOverlaySignal)
+  const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
+  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
+  const cursor = keeperName ? overlay.cursors.get(keeperName) : undefined
+  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
   const [diagram, setDiagram] = useState<KeeperStateDiagramResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -309,6 +315,43 @@ export function IdePersistencePanel({
         <span style=${{ color: 'var(--color-accent-fg)', fontSize: 'var(--fs-12)' }}>
           ${keeperName || '—'}
         </span>
+        ${statusDot ? html`
+          <span
+            role="status"
+            aria-label=${`Keeper status: ${statusDot.label}`}
+            style=${{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px',
+              fontSize: 'var(--fs-10)',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              color: statusDot.color,
+            }}
+          >
+            <span style=${{
+              width: '4px',
+              height: '4px',
+              borderRadius: '50%',
+              background: statusDot.color,
+              display: 'inline-block',
+            }} />
+            ${statusDot.label}
+          </span>
+        ` : null}
+        ${focusLabel ? html`
+          <span style=${{
+            fontSize: 'var(--fs-10)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-accent-fg)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: '120px',
+          }}
+          title=${cursor?.file_path}
+          >↗ ${focusLabel}</span>
+        ` : null}
         <span style=${{ marginLeft: 'auto' }}>
           <${PersistenceStatus} status=${persistenceState} lastSaved=${lastSaved} />
         </span>

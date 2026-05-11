@@ -52,6 +52,12 @@ const STATUS_ORDER: Record<KeeperPresenceStatus, number> = {
   idle: 2,
 }
 
+export const PRESENCE_DOT: Record<KeeperPresenceStatus, { readonly color: string; readonly label: string }> = {
+  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
+}
+
 const VALID_STATUS = new Set<string>(['active', 'idle', 'blocked'])
 
 export function createKeeperPresenceStore(

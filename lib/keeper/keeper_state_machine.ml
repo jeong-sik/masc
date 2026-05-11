@@ -956,7 +956,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
    This helper enforces a subset of those preconditions at the
    [apply_event] boundary so silent corruption becomes a typed
    [Precondition_violation] result.  Coverage extended incrementally
-   across the spec/code refinement chain (R-A-9):
+   across the spec/code refinement chain (R-A-9, then R-A-6.b):
      - PR-1: Compact_retry_exhausted (latch correctness)
      - PR-2: Context_overflow_detected, Auto_compact_triggered (overflow
        lifecycle — the two events that drive Overflowed↔Compacting)
@@ -964,10 +964,11 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        exclusivity).  Operator_clear_requested is deliberately *not*
        arm-enforced beyond the terminal guard — see its arm below for
        the operator escape-hatch rationale.
+     - R-A-6.b: Restart_budget_exhausted (non-idempotency — pairs with
+       §S3 BudgetNeverRevives liveness invariant; iter 14 audit).
 
-   Coverage closed at 5/5 R-A-9 events as of PR-3.  Other events have
-   no spec preconditions beyond NotTerminal and fall through the
-   catch-all.
+   Coverage at 6/6 enumerated R-A-9 events.  Other events have no spec
+   preconditions beyond NotTerminal and fall through the catch-all.
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
@@ -1104,6 +1105,30 @@ let check_event_precondition (c : conditions) (ev : event)
        to make the deliberate minimal precondition explicit — adding any
        check beyond NotTerminal would weaken the operator escape-hatch. *)
     Ok ()
+  | Restart_budget_exhausted ->
+    (* TLA+ §RestartBudgetExhausted requires [restart_budget_remaining];
+       re-exhausting an already-exhausted budget is a logical no-op in
+       isolation, but masks a duplicate dispatch in the caller and —
+       paired with the §S3 [BudgetNeverRevives] invariant — indicates
+       the supervisor's restart-vs-mark-dead gate was bypassed.
+
+       This is the 6th R-A-9 candidate, identified in iter 14 audit
+       memo `docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md`
+       — same systematic gap class as the 5 events in iter 9's
+       original enumeration. *)
+    if not c.restart_budget_remaining
+    then
+      Error
+        (Precondition_violation
+           { event = event_to_string ev
+           ; reason =
+               "TLA+ §RestartBudgetExhausted requires \
+                restart_budget_remaining=true; re-exhausting an already-\
+                exhausted budget masks a duplicate dispatch and \
+                signals the supervisor's restart-vs-mark-dead gate \
+                may have been bypassed (see §S3 BudgetNeverRevives)"
+           })
+    else Ok ()
   (* Other events have no TLA+ state preconditions beyond what
      [apply_event]'s terminal guard already enforces; their semantics
      are encoded in [update_conditions] + [derive_phase] (e.g.

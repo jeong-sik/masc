@@ -1022,9 +1022,7 @@ let make_tool_bundle
            else None)
       (Keeper_tool_alias.public_names ())
   in
-  let assembled_tool_surface =
-    universe_names_for_pass_a @ pass_b_public_alias_names
-  in
+  let assembled_tool_surface = universe_names_for_pass_a @ pass_b_public_alias_names in
   (* Record tool assignment telemetry for causal tracing.
      assignment_id links Assigned → Called → Completed events.
      [tool_list] reflects the final agent-visible surface so assignment

@@ -90,6 +90,24 @@ type tool_policy = {
           [max_turns] to [n] before handing it to the underlying CLI.
           Only Claude Code currently sets this (loop hard cap = 30).
           RFC-0058 §2.4: capability flag, not a vendor match. *)
+  tolerates_bound_actor_fallback : bool;
+      (** When true, this adapter is considered a viable fallback target
+          when the operator's catalog also contains an adapter that
+          [requires_per_keeper_bridging_for_bound_actor_tools = true]
+          (e.g. Codex CLI). Catalog static validation
+          ({!Cascade_catalog_validator.codex_with_bound_actor_only_issue})
+          uses this flag to decide whether a "Codex CLI present without a
+          bound-actor-tolerant fallback" warning should fire.
+
+          Currently set to [true] for CLI agents with native per-keeper
+          MCP support: Claude Code, Gemini CLI, Kimi CLI, and the local
+          Ollama runtime. HTTP-only adapters (glm-api, glm-coding-plan,
+          openrouter, *-api variants) currently default to [false]; the
+          legacy whitelist treated PK.Glm as tolerant but that mapping
+          is unreachable via [adapter_of_provider_kind] (PK.Glm has no
+          single canonical adapter), so the swap drops it pending an
+          explicit reinstatement when GLM gains a per-keeper auth path.
+          RFC-0058 §2.4: capability flag, not a vendor match. *)
 }
 
 type telemetry_policy = {
@@ -451,6 +469,15 @@ val requires_per_keeper_bridging_for_bound_actor_tools_for_config :
     Returns [false] when no adapter resolves for [kind].
     RFC-0058 §2.4: capability flag, not a vendor match. *)
 val requires_per_keeper_bridging_for_bound_actor_tools_for_kind :
+  Llm_provider.Provider_config.provider_kind -> bool
+
+(** Whether the resolved adapter for [kind] is a viable fallback when
+    the catalog also contains a bridging-required adapter (Codex CLI).
+    Returns [false] when no adapter resolves for [kind] (including
+    PK.Glm and PK.OpenAI_compat, which have no single canonical adapter).
+    Used by {!Cascade_catalog_validator.codex_with_bound_actor_only_issue}.
+    RFC-0058 §2.4: capability flag, not a vendor match. *)
+val tolerates_bound_actor_fallback_for_kind :
   Llm_provider.Provider_config.provider_kind -> bool
 
 (** OAS-level capabilities for a provider config.  SSOT for the kind →

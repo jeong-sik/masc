@@ -49,6 +49,7 @@ type tool_policy = {
   argv_prompt_preflight : bool;
   uses_anthropic_caching : bool;
   max_turns_per_attempt : int option;
+  tolerates_bound_actor_fallback : bool;
 }
 
 type telemetry_policy = {
@@ -152,6 +153,7 @@ let no_tool_http_headers =
     argv_prompt_preflight = false;
     uses_anthropic_caching = false;
     max_turns_per_attempt = None;
+    tolerates_bound_actor_fallback = false;
   }
 
 let runtime_mcp_http_headers =
@@ -162,6 +164,7 @@ let runtime_mcp_http_headers =
     argv_prompt_preflight = false;
     uses_anthropic_caching = false;
     max_turns_per_attempt = None;
+    tolerates_bound_actor_fallback = false;
   }
 
 (* Codex CLI quirk: its cached login cannot natively inject per-keeper auth
@@ -185,6 +188,7 @@ let codex_cli_tool_policy =
     argv_prompt_preflight = true;
     uses_anthropic_caching = false;
     max_turns_per_attempt = None;
+    tolerates_bound_actor_fallback = false;
   }
 let telemetry_reported = { usage_reporting = Reported; runtime_reporting = Reported }
 let telemetry_unknown = { usage_reporting = Unknown; runtime_reporting = Unknown }
@@ -358,7 +362,8 @@ let direct_adapters =
           expand_auto = false;
           family = Generic;
         };
-      tool_policy = no_tool_http_headers;
+      tool_policy =
+        { no_tool_http_headers with tolerates_bound_actor_fallback = true };
       telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
@@ -390,6 +395,7 @@ let direct_adapters =
           runtime_mcp_http_headers with
           uses_anthropic_caching = true;
           max_turns_per_attempt = Some 30;
+          tolerates_bound_actor_fallback = true;
         };
       telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
@@ -469,7 +475,8 @@ let direct_adapters =
          lib/llm_provider/transport_gemini_cli.ml (runtime_mcp_policy = Some
          _ branch). Keep this false until upstream adds per-invocation
          MCP config injection. See masc-mcp#11356 for full analysis. *)
-      tool_policy = no_tool_http_headers;
+      tool_policy =
+        { no_tool_http_headers with tolerates_bound_actor_fallback = true };
       telemetry_policy = telemetry_usage_missing_runtime_reported;
     };
     {
@@ -496,7 +503,8 @@ let direct_adapters =
           expand_auto = true;
           family = Generic;
         };
-      tool_policy = runtime_mcp_http_headers;
+      tool_policy =
+        { runtime_mcp_http_headers with tolerates_bound_actor_fallback = true };
       telemetry_policy = telemetry_usage_missing;
     };
     {
@@ -1572,6 +1580,12 @@ let requires_per_keeper_bridging_for_bound_actor_tools_for_kind
   match adapter_of_provider_kind kind with
   | Some adapter ->
       adapter.tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
+  | None -> false
+
+let tolerates_bound_actor_fallback_for_kind
+    (kind : Llm_provider.Provider_config.provider_kind) =
+  match adapter_of_provider_kind kind with
+  | Some adapter -> adapter.tool_policy.tolerates_bound_actor_fallback
   | None -> false
 
 (** Normalize a header key for case-insensitive comparison against

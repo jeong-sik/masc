@@ -151,14 +151,17 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
       .requires_per_keeper_bridging_for_bound_actor_tools_for_kind
       kinds
   in
+  (* The legacy whitelist hard-coded PK.Glm as tolerant, but
+     [adapter_of_provider_kind PK.Glm = None] (Glm/OpenAI_compat have no
+     single canonical adapter), so the capability-driven helper returns
+     [false] for it.  This is intentional: GLM has no CLI surface today and
+     therefore no per-keeper bound-actor auth path. If and when one lands,
+     the corresponding adapter's [tolerates_bound_actor_fallback] capability
+     becomes the SSOT — no validator edit required.
+     RFC-0058 §2.4: capability flag, not a vendor match. *)
   let has_bound_actor_tolerant_fallback =
     List.exists
-      (fun k ->
-        match k with
-        | PK.Claude_code | PK.Gemini_cli | PK.Kimi_cli
-        | PK.Ollama | PK.Glm ->
-            true
-        | _ -> false)
+      Provider_adapter.tolerates_bound_actor_fallback_for_kind
       kinds
   in
   if has_bridging_required_kind && not has_bound_actor_tolerant_fallback then

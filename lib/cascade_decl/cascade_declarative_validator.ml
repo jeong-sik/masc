@@ -59,7 +59,16 @@ let tier_group_names (cfg : cascade_config) : string list =
     cfg.tier_groups
 ;;
 
-let is_member (lst : string list) (key : string) : bool = List.mem key lst
+(* Build a name-keyed Hashtbl once for O(1) membership.  Eight
+   validator rules below (R1-R8) used to do [List.mem key list]
+   per filtered item, paying O(items × |list|).  Several rules also
+   concatenate sub-lists ([bkeys @ akeys], etc.) producing 50-100
+   element lists that compound the cost.  Each validator now builds
+   the set once and uses [Hashtbl.mem] per check. *)
+let name_set (names : string list) : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create (List.length names) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
+  tbl
 
 let err (rule : string) (path : string) (message : string) : validation_error list =
   [ { rule; path; message } ]
@@ -68,10 +77,10 @@ let err (rule : string) (path : string) (message : string) : validation_error li
 (* --- R1: Binding → provider exists --- *)
 
 let validate_binding_providers (cfg : cascade_config) : validation_error list =
-  let pids = provider_ids cfg in
+  let pids_set = name_set (provider_ids cfg) in
   List.filter_map
     (fun (b : cascade_binding) ->
-       if is_member pids b.provider_id
+       if Hashtbl.mem pids_set b.provider_id
        then None
        else
          Some
@@ -86,10 +95,10 @@ let validate_binding_providers (cfg : cascade_config) : validation_error list =
 (* --- R2: Binding → model exists --- *)
 
 let validate_binding_models (cfg : cascade_config) : validation_error list =
-  let mids = model_ids cfg in
+  let mids_set = name_set (model_ids cfg) in
   List.filter_map
     (fun (b : cascade_binding) ->
-       if is_member mids b.model_id
+       if Hashtbl.mem mids_set b.model_id
        then None
        else
          Some
@@ -103,11 +112,11 @@ let validate_binding_models (cfg : cascade_config) : validation_error list =
 (* --- R3: Alias → binding exists --- *)
 
 let validate_alias_bindings (cfg : cascade_config) : validation_error list =
-  let bkeys = binding_keys cfg in
+  let bkeys_set = name_set (binding_keys cfg) in
   List.filter_map
     (fun (a : cascade_alias) ->
        let parent_key = Printf.sprintf "%s.%s" a.provider_id a.model_id in
-       if is_member bkeys parent_key
+       if Hashtbl.mem bkeys_set parent_key
        then None
        else
          Some
@@ -149,14 +158,12 @@ let validate_alias_max_input (cfg : cascade_config) : validation_error list =
 (* --- R5: Tier members resolve to binding or alias --- *)
 
 let validate_tier_members (cfg : cascade_config) : validation_error list =
-  let bkeys = binding_keys cfg in
-  let akeys = alias_keys cfg in
-  let all_valid = bkeys @ akeys in
+  let all_valid_set = name_set (binding_keys cfg @ alias_keys cfg) in
   List.concat_map
     (fun (t : cascade_tier) ->
        List.filter_map
          (fun member ->
-            if is_member all_valid member
+            if Hashtbl.mem all_valid_set member
             then None
             else
               Some
@@ -174,12 +181,12 @@ let validate_tier_members (cfg : cascade_config) : validation_error list =
 (* --- R6: Tier-group tiers reference existing tiers --- *)
 
 let validate_tier_group_refs (cfg : cascade_config) : validation_error list =
-  let tnames = tier_names_bare cfg in
+  let tnames_set = name_set (tier_names_bare cfg) in
   List.concat_map
     (fun (g : cascade_tier_group) ->
        List.filter_map
          (fun tier_name ->
-            if is_member tnames tier_name
+            if Hashtbl.mem tnames_set tier_name
             then None
             else
               Some
@@ -195,14 +202,14 @@ let validate_tier_group_refs (cfg : cascade_config) : validation_error list =
 (* --- R7: Route targets exist --- *)
 
 let validate_route_targets (cfg : cascade_config) : validation_error list =
-  let tg_names = tier_group_names cfg in
-  let t_names = tier_names cfg in
-  let bkeys = binding_keys cfg in
-  let akeys = alias_keys cfg in
-  let all_targets = tg_names @ t_names @ bkeys @ akeys in
+  let all_targets_set =
+    name_set
+      (tier_group_names cfg @ tier_names cfg
+      @ binding_keys cfg @ alias_keys cfg)
+  in
   List.filter_map
     (fun (r : cascade_route) ->
-       if is_member all_targets r.target
+       if Hashtbl.mem all_targets_set r.target
        then None
        else
          Some
@@ -220,12 +227,10 @@ let validate_route_targets (cfg : cascade_config) : validation_error list =
 (* --- R8: System targets exist --- *)
 
 let validate_system_targets (cfg : cascade_config) : validation_error list =
-  let bkeys = binding_keys cfg in
-  let akeys = alias_keys cfg in
-  let all_valid = bkeys @ akeys in
+  let all_valid_set = name_set (binding_keys cfg @ alias_keys cfg) in
   List.filter_map
     (fun (r : cascade_route) ->
-       if is_member all_valid r.target
+       if Hashtbl.mem all_valid_set r.target
        then None
        else
          Some

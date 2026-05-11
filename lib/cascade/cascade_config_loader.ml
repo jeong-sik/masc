@@ -101,6 +101,13 @@ let load_json path =
   | Unix.Unix_error (err, fn, arg) ->
     Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
   | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
+  | End_of_file ->
+    (* [Fs_compat.load_file_unix] reads [in_channel_length] first, then
+       [really_input_string len]. If the file is truncated between the
+       two calls (concurrent writer, atomic-rename mid-flight), the
+       second call raises [End_of_file]. Surface as an [Error] instead
+       of crashing the loader. *)
+    Error (Printf.sprintf "cascade source truncated mid-read: %s" path)
 ;;
 
 (** A model entry with an optional weight for weighted cascade selection.

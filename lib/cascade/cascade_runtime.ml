@@ -138,7 +138,14 @@ let context_floor = 4_096
 let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
   match discovered with
   | Some ctx when ctx >= context_floor -> ctx
-  | _ -> static_ctx
+  | Some _below_floor ->
+    (* Discovered value present but below the safety floor — likely
+       discovery-API misbehavior or corrupted response.  Fall back to
+       the static registry value and tick the counter so operators
+       can alert on suspicious discovery readings (iter 27). *)
+    Cascade_metrics.on_discovered_context_below_floor ();
+    static_ctx
+  | None -> static_ctx
 
 let static_context_of_entry
     (entry : Llm_provider.Provider_registry.entry) : int =

@@ -518,3 +518,30 @@ let on_max_context_fallback ~site =
   Prometheus.inc_counter metric_max_context_fallback
     ~labels:[ ("site", site) ]
     ()
+
+(* [Cascade_runtime.effective_discovered_ctx] applies a
+   [context_floor] safety net: when the per-label dynamic-discovery
+   API reports a context_window below the floor (4_096 tokens), the
+   function silently falls back to [static_ctx] from the registry,
+   on the theory that an absurdly small "discovered" value is more
+   likely a discovery-API bug or response corruption than a real
+   small-context model.
+
+   The fallback is intentional, but its rate had no visibility
+   until iter 27.  A non-zero rate signals the discovery API for
+   SOME provider is returning suspicious values; pair with iter-8
+   probe metrics to attribute the misbehaving provider.
+
+   No label dimensions: the helper takes raw integers, the caller
+   carries the label string.  Adding a label here would require
+   threading label context through 2+ caller sites and
+   [effective_discovered_ctx] is a generic numeric helper that
+   shouldn't know about cascade structure.  Aggregate rate is
+   sufficient for the alert; operators drill down via logs.
+
+   Cardinality: 1 series. *)
+let metric_discovered_context_below_floor =
+  "masc_cascade_discovered_context_below_floor_total"
+
+let on_discovered_context_below_floor () =
+  Prometheus.inc_counter metric_discovered_context_below_floor ()

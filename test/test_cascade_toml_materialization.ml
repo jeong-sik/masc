@@ -751,6 +751,16 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    undocumented label and pollute Prometheus cardinality.  Pinning
    all four strings here keeps the canonical set in lockstep with
    the implementation. *)
+(* Smoke for [Cascade_metrics.on_discovered_context_below_floor].
+   No-arg helper — pin the call shape so a future refactor that
+   adds a parameter trips here.  The natural code path requires a
+   discovery API that returns a value below 4_096, which is awkward
+   to provoke from a unit test without mocking
+   [Cascade_config.resolve_label_context]. *)
+let test_discovered_context_below_floor_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_discovered_context_below_floor ();
+  check bool "no-arg helper callable without raising" true true
+
 let test_max_context_fallback_documented_sites_are_callable () =
   Masc_mcp.Cascade_metrics.on_max_context_fallback
     ~site:"label_no_provider_name";
@@ -1118,6 +1128,9 @@ let () =
             "max_context_fallback: all four documented sites callable"
             `Quick
             test_max_context_fallback_documented_sites_are_callable;
+          test_case
+            "discovered_context_below_floor: helper callable" `Quick
+            test_discovered_context_below_floor_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

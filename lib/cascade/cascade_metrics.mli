@@ -155,3 +155,11 @@ val on_max_context_fallback : site:string -> unit
     value.  [site] must be one of [label_no_provider_name],
     [label_unregistered_scheme], [primary_no_available],
     [cascade_max_no_available]. *)
+
+val on_discovered_context_below_floor : unit -> unit
+(** Tick the discovered-context floor-violation counter at
+    [Cascade_runtime.effective_discovered_ctx] when a per-label
+    discovered context_window is below [context_floor] (4_096) and
+    the function falls back to the static registry value.  A
+    non-zero rate signals a discovery-API misbehavior for at least
+    one provider. *)

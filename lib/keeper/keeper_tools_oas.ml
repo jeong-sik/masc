@@ -1074,7 +1074,11 @@ let make_tool_bundle
                 ~input_schema:td.input_schema
                 (fun input ->
                    let start_time = Time_compat.now () in
-                   Tool_result.wrap ~tool_name:td.name ~start_time (h input))))
+                   let (success, message) = h input in
+                   if success then
+                     Tool_result.ok ~tool_name:td.name ~start_time message
+                   else
+                     Tool_result.error ~tool_name:td.name ~start_time message)))
          else None)
       tool_defs_for_pass_a
   in
@@ -1140,7 +1144,11 @@ let make_tool_bundle
                     ~input_schema
                     (fun input ->
                        let start_time = Time_compat.now () in
-                       Tool_result.wrap ~tool_name:public ~start_time (h input)))))
+                       let (success, message) = h input in
+                       if success then
+                         Tool_result.ok ~tool_name:public ~start_time message
+                       else
+                         Tool_result.error ~tool_name:public ~start_time message))))
       (Keeper_tool_alias.public_names ())
   in
   { tools = internal_tools @ alias_tools

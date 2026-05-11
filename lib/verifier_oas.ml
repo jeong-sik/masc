@@ -98,16 +98,15 @@ let verify (req : verification_request) : (verdict, string) result =
     let verdict_ref = ref None in
     let dispatch ~name ~args =
       let start_time = Time_compat.now () in
-      let result : bool * string =
-        match parse_verdict_from_json args with
-        | Ok v ->
-          verdict_ref := Some v;
-          (false, sprintf "Verdict recorded: %s" (verdict_to_string v))
-        | Error msg ->
-          Log.Verifier.warn "Structured verdict parse failed: %s" msg;
-          (false, sprintf "Invalid verdict format: %s" msg)
-      in
-      Tool_result.wrap ~tool_name:name ~start_time result
+      match parse_verdict_from_json args with
+      | Ok v ->
+        verdict_ref := Some v;
+        Tool_result.error ~tool_name:name ~start_time
+          (sprintf "Verdict recorded: %s" (verdict_to_string v))
+      | Error msg ->
+        Log.Verifier.warn "Structured verdict parse failed: %s" msg;
+        Tool_result.error ~tool_name:name ~start_time
+          (sprintf "Invalid verdict format: %s" msg)
     in
     let cascade_name =
       Keeper_cascade_profile.cascade_name_for_use

@@ -459,12 +459,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         let labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_check
         in
-        match resolve_ollama_only_base_url labels with
+        match resolve_shared_probeable_base_url labels with
         | None ->
             saturation_skip_count_reset ~keeper_name:meta.name;
             None
         | Some base_url ->
-            if not (is_ollama_saturated base_url) then begin
+            if not (is_base_url_saturated base_url) then begin
               saturation_skip_count_reset ~keeper_name:meta.name;
               None
             end

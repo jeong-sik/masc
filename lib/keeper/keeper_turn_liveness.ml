@@ -1,5 +1,9 @@
-(* Keeper_turn_liveness — phase-buffer cascade liveness decisions, ollama
-   saturation pre-skip, and turn liveload configuration.
+(* Keeper_turn_liveness — phase-buffer cascade liveness decisions,
+   capacity-probe saturation pre-skip, and turn liveload configuration.
+
+   Provider-specific knowledge lives in [Cascade_capacity_probe]; this
+   module routes probeable URLs through that registry without naming
+   any single provider.
 
    Extracted from keeper_unified_turn.ml (L328-499) during the god-file split. *)
 
@@ -81,61 +85,69 @@ let fail_open_local_only_when_unavailable
          if List.exists probe probeable_base_urls then effective_cascade
          else fallback_cascade)
 
-(** PR-B: ollama saturation pre-skip support.
+(** PR-B: saturation pre-skip support (provider-agnostic).
 
     When every label in the resolved cascade points at the same
-    ollama [base_url] (single-provider profile), we can pre-check the
-    [Cascade_capacity_probe] cache before paying an [Agent.run] dispatch.
-    If the probe reports [process_available <= 0] the request would
-    queue on a busy slot and very likely blow the keeper turn budget,
-    causing a cascading FAILED cycle.  Skipping the turn here keeps
-    the keeper alive without burning the budget. *)
+    [base_url] AND a registered [Cascade_capacity_probe] recognises
+    that URL, we can pre-check the probe cache before paying an
+    [Agent.run] dispatch.  If the probe reports
+    [process_available <= 0] the request would queue on a busy slot
+    and very likely blow the keeper turn budget, causing a cascading
+    FAILED cycle.  Skipping the turn here keeps the keeper alive
+    without burning the budget.
 
-(** [resolve_ollama_only_base_url ?resolve_label labels] returns
-    [Some url] when [labels] is non-empty AND every label parses to
-    an ollama provider config sharing the same [base_url].  Returns
-    [None] when the cascade has zero candidates, when any candidate
-    is non-ollama, when ollama candidates point at different hosts,
-    or when any label fails to parse.
+    No provider variant is named — the probe registry is the
+    boundary that decides which URLs are probeable.  Adding a new
+    local backend (vllm, lmstudio, …) only needs a new probe
+    registration. *)
 
-    Pure: [resolve_label] is the only injected dependency for tests. *)
-let resolve_ollama_only_base_url
+(** [resolve_shared_probeable_base_url ?resolve_label ?can_probe labels]
+    returns [Some url] when [labels] is non-empty AND every label
+    parses to a provider config sharing the same [base_url] AND that
+    URL is recognised by the capacity-probe registry.  Returns
+    [None] otherwise (empty cascade, any unresolved label, mixed
+    hosts, or no registered probe for the URL).
+
+    Pure: [resolve_label] resolves labels and [can_probe] queries the
+    probe registry — both are injected dependencies for tests. *)
+let resolve_shared_probeable_base_url
     ?resolve_label
+    ?can_probe
     (labels : string list) : string option =
   let resolve_label =
     match resolve_label with
     | Some f -> f
     | None -> fun label -> Cascade_config.parse_model_string label
   in
+  let can_probe =
+    match can_probe with
+    | Some f -> f
+    | None -> fun url -> Cascade_capacity_probe.can_probe ~url
+  in
   match labels with
   | [] -> None
-  | first :: rest ->
-      let is_ollama_cfg (cfg : Llm_provider.Provider_config.t) =
-        match cfg.kind with
-        | Llm_provider.Provider_config.Ollama -> true
-        | _ -> false
-      in
-      (match resolve_label first with
-       | Some cfg when is_ollama_cfg cfg ->
-           let base_url = cfg.base_url in
-           let same_ollama_host label =
-             match resolve_label label with
-             | Some other when is_ollama_cfg other ->
-                 String.equal other.base_url base_url
-             | _ -> false
-           in
-           if List.for_all same_ollama_host rest then Some base_url
-           else None
-       | _ -> None)
+  | first :: rest -> (
+      match resolve_label first with
+      | None -> None
+      | Some cfg ->
+          let base_url = cfg.base_url in
+          let same_host label =
+            match resolve_label label with
+            | Some other -> String.equal other.base_url base_url
+            | None -> false
+          in
+          if List.for_all same_host rest && can_probe base_url then
+            Some base_url
+          else None)
 
-(** [is_ollama_saturated ?capacity_lookup base_url] returns [true]
+(** [is_base_url_saturated ?capacity_lookup base_url] returns [true]
     only when the cache has a fresh entry whose
     [process_available <= 0] AND there is at least one queued or
     active request.  [None] (no cache entry / probe never ran) and
     failed probes are deliberately treated as "not saturated" so a
     flaky probe never starves the keeper.  Mirrors the conservative
     fail-open policy in [Cascade_http_probe.try_probe]. *)
-let is_ollama_saturated
+let is_base_url_saturated
     ?capacity_lookup
     (base_url : string) : bool =
   let capacity_lookup =
@@ -150,7 +162,7 @@ let is_ollama_saturated
       && (info.process_active > 0 || info.process_queue_length > 0)
 
 (** Backoff sleep applied after a saturation skip so the keeper does
-    not hot-spin against a busy ollama instance. Short by design:
+    not hot-spin against a busy local backend. Short by design:
     the heartbeat loop already has its own pacing (see
     [keeper_keepalive.ml]); this only covers the case where multiple
     keepers race the probe cache. *)

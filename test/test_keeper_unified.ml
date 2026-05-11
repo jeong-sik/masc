@@ -4553,27 +4553,44 @@ let make_capacity_info ?(total = 1) ?(active = 0) ?(available = 1)
     source = Llm_provider.Provider_throttle.Discovered;
   }
 
-let test_resolve_ollama_only_base_url_empty_returns_none () =
-  match UT.resolve_ollama_only_base_url [] with
+let test_resolve_shared_probeable_base_url_empty_returns_none () =
+  match UT.resolve_shared_probeable_base_url [] with
   | None -> ()
-  | Some _ -> fail "empty labels should not resolve to ollama-only"
+  | Some _ -> fail "empty labels should not resolve to a shared host"
 
-let test_resolve_ollama_only_base_url_single_ollama () =
+let test_resolve_shared_probeable_base_url_single_label () =
   let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
   let cfg = provider_config_of_label label in
-  match UT.resolve_ollama_only_base_url [ label ] with
-  | Some url -> check string "single ollama base url" cfg.base_url url
-  | None -> fail "single ollama label should resolve"
-
-let test_resolve_ollama_only_base_url_mixed_provider () =
   match
-    UT.resolve_ollama_only_base_url
+    UT.resolve_shared_probeable_base_url
+      ~can_probe:(fun _ -> true)
+      [ label ]
+  with
+  | Some url -> check string "single label base url" cfg.base_url url
+  | None -> fail "single probeable label should resolve"
+
+let test_resolve_shared_probeable_base_url_requires_probe_registration () =
+  (* Provider variant is irrelevant; what matters is whether the URL
+     is recognised by the probe registry. *)
+  let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
+  match
+    UT.resolve_shared_probeable_base_url
+      ~can_probe:(fun _ -> false)
+      [ label ]
+  with
+  | None -> ()
+  | Some _ -> fail "no probe registration must yield None"
+
+let test_resolve_shared_probeable_base_url_mixed_host () =
+  match
+    UT.resolve_shared_probeable_base_url
+      ~can_probe:(fun _ -> true)
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16"; "claude:sonnet-4-5" ]
   with
   | None -> ()
-  | Some _ -> fail "mixed provider must not be classified as ollama-only"
+  | Some _ -> fail "mixed hosts must not collapse to a single base url"
 
-let test_resolve_ollama_only_base_url_different_hosts () =
+let test_resolve_shared_probeable_base_url_different_hosts () =
   let resolve_label = function
     | "ollama:a" ->
         Some
@@ -4592,38 +4609,40 @@ let test_resolve_ollama_only_base_url_different_hosts () =
     | _ -> None
   in
   match
-    UT.resolve_ollama_only_base_url ~resolve_label
+    UT.resolve_shared_probeable_base_url
+      ~resolve_label
+      ~can_probe:(fun _ -> true)
       [ "ollama:a"; "ollama:b" ]
   with
   | None -> ()
-  | Some _ -> fail "different ollama hosts must not collapse"
+  | Some _ -> fail "different hosts must not collapse"
 
-let test_is_ollama_saturated_returns_false_when_cache_missing () =
+let test_is_base_url_saturated_returns_false_when_cache_missing () =
   let url = "http://127.0.0.1:11434" in
   check bool "missing cache treated as healthy" false
-    (UT.is_ollama_saturated ~capacity_lookup:(fun _ -> None) url)
+    (UT.is_base_url_saturated ~capacity_lookup:(fun _ -> None) url)
 
-let test_is_ollama_saturated_returns_false_when_idle () =
+let test_is_base_url_saturated_returns_false_when_idle () =
   let url = "http://127.0.0.1:11434" in
   let info = make_capacity_info ~active:0 ~available:1 ~queue:0 () in
   check bool "idle endpoint not saturated" false
-    (UT.is_ollama_saturated
+    (UT.is_base_url_saturated
        ~capacity_lookup:(fun _ -> Some info) url)
 
-let test_is_ollama_saturated_returns_true_when_full_with_queue () =
+let test_is_base_url_saturated_returns_true_when_full_with_queue () =
   let url = "http://127.0.0.1:11434" in
   let info = make_capacity_info ~active:1 ~available:0 ~queue:3 () in
   check bool "full endpoint with queue is saturated" true
-    (UT.is_ollama_saturated
+    (UT.is_base_url_saturated
        ~capacity_lookup:(fun _ -> Some info) url)
 
-let test_is_ollama_saturated_ignores_zero_available_when_idle () =
+let test_is_base_url_saturated_ignores_zero_available_when_idle () =
   (* Defensive: discovery may report 0 available before any traffic.
      Without active or queued requests the keeper should still dispatch. *)
   let url = "http://127.0.0.1:11434" in
   let info = make_capacity_info ~active:0 ~available:0 ~queue:0 () in
   check bool "idle endpoint with no slots is fail-open" false
-    (UT.is_ollama_saturated
+    (UT.is_base_url_saturated
        ~capacity_lookup:(fun _ -> Some info) url)
 
 let test_saturation_skip_count_starts_at_zero () =
@@ -8975,22 +8994,24 @@ let () =
             test_fail_open_local_only_preserves_explicit_local_only_base;
           test_case "healthy local_only stays selected" `Quick
             test_fail_open_local_only_preserves_healthy_local_only;
-          test_case "PR-B: empty labels are not ollama-only" `Quick
-            test_resolve_ollama_only_base_url_empty_returns_none;
-          test_case "PR-B: single ollama label is ollama-only" `Quick
-            test_resolve_ollama_only_base_url_single_ollama;
-          test_case "PR-B: mixed providers are not ollama-only" `Quick
-            test_resolve_ollama_only_base_url_mixed_provider;
-          test_case "PR-B: different ollama hosts are not ollama-only" `Quick
-            test_resolve_ollama_only_base_url_different_hosts;
+          test_case "PR-B: empty labels yield no shared host" `Quick
+            test_resolve_shared_probeable_base_url_empty_returns_none;
+          test_case "PR-B: single probeable label resolves" `Quick
+            test_resolve_shared_probeable_base_url_single_label;
+          test_case "PR-B: probe registry gates resolution" `Quick
+            test_resolve_shared_probeable_base_url_requires_probe_registration;
+          test_case "PR-B: mixed hosts collapse to None" `Quick
+            test_resolve_shared_probeable_base_url_mixed_host;
+          test_case "PR-B: different hosts collapse to None" `Quick
+            test_resolve_shared_probeable_base_url_different_hosts;
           test_case "PR-B: missing cache is fail-open" `Quick
-            test_is_ollama_saturated_returns_false_when_cache_missing;
+            test_is_base_url_saturated_returns_false_when_cache_missing;
           test_case "PR-B: idle endpoint not saturated" `Quick
-            test_is_ollama_saturated_returns_false_when_idle;
+            test_is_base_url_saturated_returns_false_when_idle;
           test_case "PR-B: full endpoint with queue is saturated" `Quick
-            test_is_ollama_saturated_returns_true_when_full_with_queue;
+            test_is_base_url_saturated_returns_true_when_full_with_queue;
           test_case "PR-B: zero available without traffic is fail-open" `Quick
-            test_is_ollama_saturated_ignores_zero_available_when_idle;
+            test_is_base_url_saturated_ignores_zero_available_when_idle;
           test_case "PR-B follow-up: fresh keeper has zero skip count" `Quick
             test_saturation_skip_count_starts_at_zero;
           test_case "PR-B follow-up: inc returns monotonic counts" `Quick

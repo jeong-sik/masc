@@ -40,15 +40,19 @@ val fail_open_local_only_when_unavailable :
     reports the endpoint as serving. Legacy [local_only] aliases
     normalize through [routes.phase_buffer]. *)
 
-val resolve_ollama_only_base_url :
+val resolve_shared_probeable_base_url :
   ?resolve_label:(string -> Llm_provider.Provider_config.t option) ->
+  ?can_probe:(string -> bool) ->
   string list ->
   string option
-(** PR-B: when every label in the resolved cascade points at the
-    same ollama [base_url] return [Some url], else [None]. Purely
-    structural: does not probe the network. *)
+(** PR-B: when every label in the resolved cascade points at the same
+    [base_url] AND a registered [Cascade_capacity_probe] recognises
+    that URL, return [Some url]; otherwise [None]. Purely structural:
+    does not probe the network. Provider variant is never inspected —
+    the probe registry is the boundary that decides which URLs are
+    probeable. *)
 
-val is_ollama_saturated :
+val is_base_url_saturated :
   ?capacity_lookup:(string -> Cascade_throttle.capacity_info option) ->
   string ->
   bool
@@ -90,7 +94,7 @@ val saturation_skip_count_inc : keeper_name:string -> int
 
 val saturation_skip_count_reset : keeper_name:string -> unit
 (** Reset [keeper_name]'s consecutive-skip count to zero.  Called on
-    every non-skip path (probe reports unsaturated, non-ollama
+    every non-skip path (probe reports unsaturated, non-probeable
     cascade, force-dispatch escape). *)
 
 val saturation_skip_count_clear_all : unit -> unit

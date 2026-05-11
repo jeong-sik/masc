@@ -4,7 +4,6 @@
  (name masc_tool_schemas)
  (public_name masc_mcp.tool_schemas)
  (modules
-   tool_schemas_plan
    tool_schemas_worktree
 
    tool_schemas_agent

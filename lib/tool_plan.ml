@@ -164,7 +164,8 @@ let dispatch ctx ~name ~args : Tool_result.t option =
   | "masc_plan_clear_task" -> Some (handle_plan_clear_task ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
-let schemas = Tool_schemas_plan.schemas
+(* RFC-0057 PR-2: schemas binding removed; plan tools now emitted via
+   Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -179,18 +180,30 @@ let tool_required_permission = function
   | _ -> None
 
 let () =
+  let is_plan = function
+    | "masc_plan_init"
+    | "masc_plan_update"
+    | "masc_plan_get"
+    | "masc_plan_set_task"
+    | "masc_plan_get_task"
+    | "masc_plan_clear_task"
+    | "masc_note_add"
+    | "masc_deliver" -> true
+    | _ -> false
+  in
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_plan
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name _tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
-           ~requires_join:(List.mem s.name _tool_spec_requires_join)
-           ?required_permission:(tool_required_permission s.name)
-           ()))
-    schemas
+      if is_plan s.name then
+        Tool_spec.register
+          (Tool_spec.create
+             ~name:s.name
+             ~description:s.description
+             ~module_tag:Tool_dispatch.Mod_plan
+             ~input_schema:s.input_schema
+             ~handler_binding:Tag_dispatch
+             ~is_read_only:(List.mem s.name _tool_spec_read_only)
+             ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+             ~requires_join:(List.mem s.name _tool_spec_requires_join)
+             ?required_permission:(tool_required_permission s.name)
+             ()))
+    Tool_schemas_misc.schemas

@@ -757,6 +757,17 @@ let test_secondary_resolver_empty_cascade_returns_error () =
    discovery API that returns a value below 4_096, which is awkward
    to provoke from a unit test without mocking
    [Cascade_config.resolve_label_context]. *)
+(* Smoke for [Cascade_metrics.on_context_capability_drift].  The
+   natural code path requires a registered provider whose
+   [Capabilities.max_context_tokens] exceeds [entry.max_context],
+   which is brittle to provoke from a unit test (registration
+   shape changes with each adapter).  Smoke pins the provider
+   label name + helper signature. *)
+let test_context_capability_drift_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_context_capability_drift
+    ~provider:"smoke_test_provider_iter28";
+  check bool "single-label provider helper callable" true true
+
 let test_discovered_context_below_floor_helper_callable () =
   Masc_mcp.Cascade_metrics.on_discovered_context_below_floor ();
   check bool "no-arg helper callable without raising" true true
@@ -1131,6 +1142,9 @@ let () =
           test_case
             "discovered_context_below_floor: helper callable" `Quick
             test_discovered_context_below_floor_helper_callable;
+          test_case
+            "context_capability_drift: provider label helper callable" `Quick
+            test_context_capability_drift_helper_callable;
         ] );
       ( "secondary_resolver_error_paths",
         [

@@ -150,7 +150,14 @@ let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
 let static_context_of_entry
     (entry : Llm_provider.Provider_registry.entry) : int =
   match entry.capabilities.Llm_provider.Capabilities.max_context_tokens with
-  | Some caps_ctx when caps_ctx > entry.max_context -> caps_ctx
+  | Some caps_ctx when caps_ctx > entry.max_context ->
+    (* Capability table reports a larger context than the legacy
+       [max_context] field.  Pick [caps_ctx] (newer, more accurate)
+       but tick the drift counter — the disagreement means operator
+       updated one of two ground truths and forgot the other.
+       Iter 28 telemetry. *)
+    Cascade_metrics.on_context_capability_drift ~provider:entry.name;
+    caps_ctx
   | _ -> entry.max_context
 
 let max_context_of_label (label : string) : int =

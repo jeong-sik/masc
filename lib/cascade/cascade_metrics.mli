@@ -163,3 +163,11 @@ val on_discovered_context_below_floor : unit -> unit
     the function falls back to the static registry value.  A
     non-zero rate signals a discovery-API misbehavior for at least
     one provider. *)
+
+val on_context_capability_drift : provider:string -> unit
+(** Tick the context-capability-drift counter at
+    [Cascade_runtime.static_context_of_entry] when the provider
+    registry [max_context] disagrees with the capability table's
+    [max_context_tokens] (caps_ctx > entry.max_context).  Signals
+    operator updated one of two ground truths and forgot the
+    other. *)

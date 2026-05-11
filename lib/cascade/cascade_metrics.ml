@@ -545,3 +545,24 @@ let metric_discovered_context_below_floor =
 
 let on_discovered_context_below_floor () =
   Prometheus.inc_counter metric_discovered_context_below_floor ()
+
+(* [Cascade_runtime.static_context_of_entry] has two ground truths
+   for a provider context window:
+     - [entry.max_context]                       (legacy registry default)
+     - [entry.capabilities.max_context_tokens]   (newer capability table)
+
+   When [caps_ctx > entry.max_context] the function silently picks
+   [caps_ctx], on the theory that the capability table is newer and
+   more accurate.  In practice the inequality means the operator
+   updated ONE of the two sources and forgot the other — a drift
+   signal that operators should know about so the stale value can
+   be brought in sync.
+
+   Cardinality: provider names (~10) = ~10 series. *)
+let metric_context_capability_drift =
+  "masc_cascade_context_capability_drift_total"
+
+let on_context_capability_drift ~provider =
+  Prometheus.inc_counter metric_context_capability_drift
+    ~labels:[ ("provider", provider) ]
+    ()

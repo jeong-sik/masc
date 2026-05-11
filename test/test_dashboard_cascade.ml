@@ -392,14 +392,28 @@ let test_raw_config_defaults_when_file_missing () =
       cascade_path
       Yojson.Safe.Util.(j |> member "source_path" |> to_string);
     (* RFC-0058 §9.3: an absent cascade.toml falls back to the default
-         empty seed.  The renderer returns the empty TOML root as the
-         empty JSON object so the dashboard still has a valid response
-         body to render. *)
+       empty TOML seed ("" — the smallest valid TOML document).  The
+       renderer turns that into the empty JSON object, so the
+       dashboard still has a valid response body to render and the
+       FE never sees a JSON-shaped seed in a TOML-only world. *)
     check
       string
-      "missing source file seeds default object"
+      "missing source file seeds empty toml"
+      ""
+      Yojson.Safe.Util.(j |> member "source_text" |> to_string);
+    check
+      string
+      "missing source file renders empty json object"
       "{}\n"
-      Yojson.Safe.Util.(j |> member "source_text" |> to_string))
+      Yojson.Safe.Util.(j |> member "raw_json" |> to_string);
+    (* RFC-0058 §9.3 review thread: the missing-file path must NOT be
+       treated as an authoring error — the dashboard explicitly seeds
+       an empty TOML so first-boot operators get a valid response. *)
+    check
+      bool
+      "missing source file does not surface materialization_error"
+      true
+      Yojson.Safe.Util.(j |> member "materialization_error" = `Null))
 ;;
 
 (* Regression test for the silent-stale-fallback hole this PR closes:
@@ -782,22 +796,32 @@ let test_declared_provider_schemes_reads_all_profiles () =
      skipped. Assert that every declared scheme — across both primary
      and secondary profiles — ends up in the returned list, and that
      non-profile keys do not leak in. *)
+  (* RFC-0058 §9.3 review thread: the declarative form is the
+     `[<profile>]` block with a `models = ...` field; flat
+     `<profile>_models = ...` keys are not parsed by the materializer
+     anymore.  Each block here is a real profile whose models list
+     contributes to the declared provider scheme set. *)
   let cascade_contents =
     {|
 _comment = "Fixture for declared_provider_schemes_of_config"
 
-primary_route_models = [
+[primary_route]
+models = [
   { model = "codex_cli:auto", weight = 1 },
   { model = "kimi_cli:kimi-for-coding", weight = 1 },
 ]
-primary_route_temperature = 0.2
-primary_route_max_tokens = 16384
-secondary_route_models = [
+temperature = 0.2
+max_tokens = 16384
+
+[secondary_route]
+models = [
   { model = "codex_cli:auto", weight = 1 },
   { model = "glm-coding:auto", weight = 1 },
 ]
-secondary_route_temperature = 0.2
-local_route_models = ["ollama:auto"]
+temperature = 0.2
+
+[local_route]
+models = ["ollama:auto"]
 |}
   in
   with_temp_config_root cascade_contents (fun config_path ->
@@ -828,7 +852,7 @@ let test_declared_provider_schemes_handles_malformed_config () =
     let schemes =
       Masc_mcp.Dashboard_cascade.declared_provider_schemes_of_config ~config_path ()
     in
-    check (list string) "malformed json gives empty list" [] schemes)
+    check (list string) "malformed toml gives empty list" [] schemes)
 ;;
 
 (* ── SLO (LT-11) ─────────────────────────────────────── *)
@@ -1445,7 +1469,7 @@ let () =
             `Quick
             test_declared_provider_schemes_handles_missing_path
         ; test_case
-            "declared_provider_schemes tolerates malformed json"
+            "declared_provider_schemes tolerates malformed toml"
             `Quick
             test_declared_provider_schemes_handles_malformed_config
         ] )

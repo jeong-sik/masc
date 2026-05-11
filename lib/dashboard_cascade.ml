@@ -308,10 +308,13 @@ let config_json () =
   `Assoc fields
 ;;
 
-let default_raw_config_json = "{}\n"
+(* RFC-0058 §9.3: empty cascade.toml seed.  "" is the smallest valid
+   TOML document (an empty table); previously this was "{}\n" which is
+   JSON-shaped and not parseable by the TOML reader. *)
+let default_raw_source_text = ""
 
 let load_raw_config_string path =
-  if Fs_compat.file_exists path then Fs_compat.load_file path else default_raw_config_json
+  if Fs_compat.file_exists path then Fs_compat.load_file path else default_raw_source_text
 ;;
 
 let invalidate_cascade_config config_path =

@@ -167,18 +167,6 @@ strategy = "first_success"
       sorted
 ;;
 
-(* --- json-only source: empty result, no error --------------------- *)
-
-let test_json_only_source_returns_empty () =
-  with_temp_dir
-  @@ fun dir ->
-  let json_path = Filename.concat dir "cascade.json" in
-  write_file json_path {|{ "_schema": "1", "ollama_only_models": [] }|};
-  match M.toml_section_names_result ~config_path:json_path with
-  | Error e -> fail ("expected Ok [], got Error: " ^ e)
-  | Ok names -> check (list string) "json-only source yields empty list" [] names
-;;
-
 (* --- malformed TOML -> Error ------------------------------------- *)
 
 let test_malformed_toml_yields_error () =
@@ -276,11 +264,18 @@ let test_with_toml_fallback_empty_degraded_path_errors () =
   (* Strict failure plus an empty fallback name list is not a degraded
      success.  Without this guard the keeper-name validator can receive
      [Ok []] and collapse the real catalog failure into a silent
-     accept-list bug. *)
+     accept-list bug.
+
+     RFC-0058 §9.3: source_kind = Json is gone, so we seed a TOML that
+     (a) breaks the strict catalog loader (unknown top-level key) and
+     (b) has no [section] headers, so the lenient fallback returns
+     [Ok []].  That hits the
+     [Ok [] → "returned no cascade profile names"] branch under test. *)
   with_temp_dir
   @@ fun dir ->
-  let json_path = Filename.concat dir "cascade.json" in
-  match K.catalog_names_with_toml_fallback ~config_path:json_path () with
+  let toml_path = Filename.concat dir "cascade.toml" in
+  write_file toml_path "_unknown_top_level_field = \"trips strict loader\"\n";
+  match K.catalog_names_with_toml_fallback ~config_path:toml_path () with
   | Ok (names, _) ->
     fail
       (Printf.sprintf
@@ -307,10 +302,6 @@ let () =
             "survives strict-unknown inner field"
             `Quick
             test_section_names_survives_unknown_field
-        ; test_case
-            "json-only source yields empty list"
-            `Quick
-            test_json_only_source_returns_empty
         ; test_case "malformed toml yields error" `Quick test_malformed_toml_yields_error
         ] )
     ; ( "validator-fallback"

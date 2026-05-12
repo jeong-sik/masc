@@ -16,7 +16,7 @@
 # (audit → fix → guard), mirroring iter 52 #14874 (R-H-1.c TLA+
 # phase-count) and iter 55 #14891 (R-H-1.f OCaml docstring phase-count).
 #
-# Rule:
+# Rule 1 (drift check — prose `[func] ... line N` form):
 #   - In each `specs/keeper-state-machine/*.tla` preamble (first 60
 #     comment lines starting with `\*`), find every match of
 #     `\[([a-z_]+)\][^,]*line[s ]+(\d+)` — i.e. a bracketed function
@@ -35,10 +35,32 @@
 # fall outside.  Default 5 is empirical — KAQ's +245 drift would have
 # tripped this at any tolerance under 200.
 #
+# Rule 2 (strict check — compact `file.ml:NNN` colon form):
+#   - In each `specs/keeper-state-machine/*.tla` (whole file, not just
+#     the preamble), reject any `<ident>.ml:<digit>` — the compact
+#     `lib/keeper/keeper_foo.ml:648-656` form.  The iter-64 N-2.a
+#     convention for this subdir is "no line numbers — cite OCaml by
+#     symbol" (`keeper_foo.ml:my_function` or `keeper_foo.ml — my_function`);
+#     line numbers drift on every edit to the OCaml file, symbols do not.
+#   - Rule 1's prose-form regex (`[func] ... line N`) misses this compact
+#     form entirely, so iter 84 #14971's mapping-table sweep + the
+#     follow-up symbol-anchor commit left no automated guard against the
+#     next preamble re-introducing it.  This rule closes that gap.
+#   - `.ml` only — `.mli` interface files are small and don't grow, so
+#     they're not subject to the growth-driven drift this guard targets,
+#     and Rule 1 already de-prioritises `.mli` (it's only a fallback
+#     there).  Two `.mli:NNN` refs remain (KeeperCompositeLifecycle's
+#     `Keeper_state_machine.mli:139-144`, KeeperDecisionPipeline's
+#     `keeper_registry.mli:49-53`); left for a separate cleanup if wanted.
+#   - Scoped to keeper-state-machine because the other spec trees
+#     (boundary/, bug-models/, auth/, ...) never adopted N-2.a and still
+#     use the colon form freely; widening would need a baseline file.
+#
 # Usage: bash scripts/audit-tla-ml-line-refs.sh [--verbose] [--tolerance N]
 #
 # RFC chain: R-B-1.c → R-H-1.c (#14874) → R-H-1.f (#14891) → N-2.c
-# (this script), 8th drift class structural closure.
+# (this script — Rule 1; iter 92 adds Rule 2), 8th drift class
+# structural closure.
 set -euo pipefail
 
 for tool in awk grep sed; do
@@ -155,11 +177,34 @@ for spec in "${SPEC_DIR}"/*.tla; do
   done < <(printf '%s\n' "${preamble}" | grep -oE '\[[a-z_]+\][^,]*line[s ]+[0-9]+')
 done
 
-if [[ "${drift_count}" -gt 0 ]]; then
+# ── Rule 2: strict colon-form `file.ml:NNN` check ──────────────────
+# Whole-file scan (the colon form shows up in mapping tables and
+# inline `\*` comments, not just the preamble).  Any hit is an N-2.a
+# violation — line numbers must be symbols in this subdir.
+colon_ref_count=0
+for spec in "${SPEC_DIR}"/*.tla; do
+  spec_name="$(basename "${spec}")"
+  while IFS= read -r hit; do
+    [[ -z "${hit}" ]] && continue
+    colon_ref_count=$((colon_ref_count + 1))
+    line_no="${hit%%:*}"
+    line_txt="$(printf '%s' "${hit#*:}" | sed -E 's/^[[:space:]]+//' | cut -c1-100)"
+    printf 'colon-ref: %s:%s — N-2.a: cite by symbol, not line — %s\n' \
+      "${spec_name}" "${line_no}" "${line_txt}"
+  done < <(grep -nE '[A-Za-z0-9_]+\.ml:[0-9]' "${spec}" || true)
+done
+
+if [[ "${drift_count}" -gt 0 || "${colon_ref_count}" -gt 0 ]]; then
   echo "" >&2
-  echo "${drift_count} line-reference drift(s) detected across ${spec_count} spec(s) (${cite_count} citation(s) checked)." >&2
-  echo "Fix: update the cited line numbers, OR replace the line-number cite with a function-name-only reference (N-2.a shape, iter 59 L-2.b precedent)." >&2
+  if [[ "${drift_count}" -gt 0 ]]; then
+    echo "${drift_count} line-reference drift(s) detected across ${spec_count} spec(s) (${cite_count} citation(s) checked)." >&2
+    echo "Fix (Rule 1, drift): update the cited line numbers, OR replace the line-number cite with a symbol reference (N-2.a shape — e.g. \`keeper_foo.ml:my_function\` or \`keeper_foo.ml — my_function\`; iter 59 L-2.b precedent)." >&2
+  fi
+  if [[ "${colon_ref_count}" -gt 0 ]]; then
+    echo "${colon_ref_count} colon-form line-ref(s) (\`file.ml:NNN\`) detected in specs/keeper-state-machine/*.tla — N-2.a requires symbol anchors." >&2
+    echo "Fix (Rule 2, colon-form forbidden): replace each \`file.ml:NNN\` with a symbol anchor (\`file.ml:symbol\`) or a prose mention; line-number cites are not allowed under N-2.a." >&2
+  fi
   exit 1
 fi
 
-echo "line-ref audit clean: ${cite_count} citation(s) verified across ${spec_count} spec(s)." >&2
+echo "line-ref audit clean: ${cite_count} prose-form citation(s) verified + ${colon_ref_count} colon-form line-ref(s) across ${spec_count} spec(s)." >&2

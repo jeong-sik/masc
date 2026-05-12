@@ -31,7 +31,7 @@ Same procedure: extract `NextBuggy` shape, cross-check `CHECK_DEADLOCK` directiv
 
 | File | `NextBuggy` shape | Class | TLC buggy exit | Outcome |
 |---|---|---|---:|---|
-| `specs/bug-models/AmbiguousPartialCommitBug-buggy.cfg` | `StartTurn ∨ ReadOnlyToolCall ∨ MutatingToolCall ∨ TurnSuccess ∨ BugProviderError ∨ Done` (no `Next`) | **E candidate** (literal replace-bug) | **12** | `Invariant Safety is violated` — 87 distinct states, 27 left on queue. NOT deadlock. |
+| `specs/bug-models/AmbiguousPartialCommitBug-buggy.cfg` | `StartTurn ∨ ReadOnlyToolCall ∨ MutatingToolCall ∨ TurnSuccess ∨ BugProviderError ∨ Done` (no `Next`) | **D′ (enumerated-replace)** | **12** | `Invariant Safety is violated` — 87 distinct states, 27 left on queue. NOT deadlock. |
 | `specs/bug-models/AuthIdentityFSM-buggy.cfg` | `Next ∨ SilentRewrite` | D (add-bug) | **12** | `Invariant SafetyInvariant is violated`. |
 | `specs/server-state/ServerState-buggy.cfg` | `Next ∨ BugAction` | D | **12** | `Invariant InvariantViolated is violated`. |
 | `specs/admission-queue/AdmissionQueue-buggy.cfg` | `Next ∨ FdGuardSkip ∨ ReleaseSkipped` | D | **12** | `Invariant CascadeNameCanonical is violated`. |
@@ -53,7 +53,7 @@ All 7 exit with **TLC exit code 12** = invariant violation. **No deadlock**.
 | Class | Setting | Shape | KSM (iter 98) | Non-KSM (this PR) | Total |
 |---|---|---|---:|---:|---:|
 | A | `FALSE` | add-bug | 8 | TBD | TBD |
-| B | `FALSE` | replace-bug | 9 | TBD | TBD |
+| B | `FALSE` | replace-bug | 10 | TBD | TBD |
 | C | `FALSE` | no separate `NextBuggy` | 8 | TBD | TBD |
 | D | missing | add-bug | 6 | 6 (verified ✅) | 12 |
 | D′ | missing | enumerated-replace (effective add-bug) | 0 | 1 (verified ✅) | 1 |
@@ -68,7 +68,7 @@ Same reasoning as iter 98: pre-emptive `CHECK_DEADLOCK FALSE` widening to the 13
 
 ## What this PR does
 
-- Adds `docs/tla-audit/buggy-cfg-check-deadlock-pattern-catalog-non-ksm-2026-05-12.md` (this memo, ~130 LOC).
+- Adds `docs/tla-audit/buggy-cfg-check-deadlock-pattern-catalog-non-ksm-2026-05-12.md` (this memo, ~90 LOC).
 - **No spec, cfg, or `INDEX.md` edits.** All 7 missing-CD cfgs continue to be `CHECK_DEADLOCK`-absent and each buggy run correctly surfaces its intended invariant violation (as verified above). The corpus is unchanged.
 
 ## Trade-offs
@@ -86,6 +86,6 @@ Same reasoning as iter 98: pre-emptive `CHECK_DEADLOCK FALSE` widening to the 13
 ## Verification
 
 - Corpus enumeration: `for d in specs/cascade specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do ls $d/*-buggy.cfg; done | wc -l` → 35.
-- Missing-CD detection: `for f in $d/*-buggy.cfg; do grep -q CHECK_DEADLOCK $f || echo $f; done` → 7 paths.
+- Missing-CD detection: `for d in specs/cascade specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do for f in "$d"/*-buggy.cfg; do grep -q CHECK_DEADLOCK "$f" || echo "$f"; done; done` → 7 paths.
 - TLC runs: 7 invocations of `tlc -config <spec>-buggy.cfg <spec>.tla`, each `exit 12` with invariant-violation diagnostic. Total wall time ~30s.
 - Base: `162f89631` (iter 97 #15008 in base; iter 98 #15011 — this memo extends #15011's argument).

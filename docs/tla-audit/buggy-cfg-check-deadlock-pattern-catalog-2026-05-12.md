@@ -4,20 +4,20 @@
 
 ## What this is
 
-iter 97 #15008 fixed `OperatorPauseBroadcast-buggy.cfg`'s deadlock-masking-property quirk by adding `CHECK_DEADLOCK FALSE`. The iter 87 OPB R-12 audit (#14977) had described this as one instance of a family ("KMC-buggy `TypeOK`-first 같은 family"). Question: how many *other* instances are there in `specs/keeper-state-machine/`, and are any silently failing to surface their intended property violation?
+iter 97 #15008 fixed `OperatorPauseBroadcast-buggy.cfg`'s deadlock-masking-property quirk by adding `CHECK_DEADLOCK FALSE`. The iter 87 OPB R-12 audit (#14977) had described this as one instance of a family ("KMC-buggy `TypeOK`-first 같은 family"). Question: how many active canonical instances are there in `specs/keeper-state-machine/`, and are any silently failing to surface their intended property violation?
 
-This memo enumerates all 31 `*-buggy.cfg` files in the keeper-state-machine spec directory, classifies each one's `NextBuggy` *shape*, cross-checks the `CHECK_DEADLOCK` setting in its cfg, and identifies the residual risk surface. It is comments-only / docs-only — no spec or cfg edits.
+This memo enumerates 32 active canonical `*-buggy.cfg` files in the keeper-state-machine spec directory, classifies each one's `NextBuggy` *shape*, cross-checks the `CHECK_DEADLOCK` setting in its cfg, and identifies the residual risk surface. It is comments-only / docs-only — no spec or cfg edits. The raw directory contains 35 `*-buggy.cfg` files; this active inventory excludes three non-canonical entries: `KeeperCampaignLifecycle-buggy.cfg` (orphan cfg without a matching `.tla`), `KeeperContextLifecycle-ci-buggy.cfg` (CI variant), and `KeeperStateMachine-overflow-buggy.cfg` (overflow variant).
 
 ## Method
 
-For each `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
+For each active canonical `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
 1. Read the cfg, look for a `CHECK_DEADLOCK` directive (any value, any line shape).
 2. Read the matching `<Spec>.tla`, find the `NextBuggy` definition.
 3. Classify `NextBuggy` shape:
-   - **add-bug** — `NextBuggy == Next \/ BugAction` (or `\/ Next \/ BugAction(...)`). Adds a bug-only transition on top of the clean transition set. *Cannot* deadlock if `Next` itself is deadlock-free (the bug transition only *adds* enabled actions).
+   - **add-bug** — `NextBuggy == Next \/ BugAction` (or `\/ Next \/ BugAction(...)`). Adds a bug-only transition on top of the clean transition set. This preserves clean transitions on clean-reachable states, but it is not a proof of deadlock-freedom: a bug action can still reach bug-only states where neither `Next` nor the bug action remains enabled.
    - **replace-bug** — `NextBuggy` is a *redefinition* (its disjuncts do not include `Next`). May drop or substitute clean actions. *Can* deadlock if a clean action that prevented stuck states is dropped.
 
-## Inventory (31 cfgs)
+## Inventory (32 cfgs)
 
 ### Class A — `CHECK_DEADLOCK FALSE` + add-bug (safe; explicit option present but not strictly required)
 
@@ -47,8 +47,9 @@ Eight specs. The `CHECK_DEADLOCK FALSE` is *defensive belt-and-braces* here — 
 | `KeeperRolloverDecision` | `step < MaxSteps /\ \E ah ...` (subset of clean) |
 | `KeeperStateMachine` | `HeartbeatOk \/ HeartbeatFailed \/ TurnSucceeded \/ TurnFailed` (4 of 18 actions) |
 | `KeeperTurnSlot` | `AcquireProductive \/ ProductiveTick` (drops Yield, Idle) |
+| `OperatorPauseBroadcast` | `StartTurn \/ EnterPauseHumanBuggy \/ EnterStaleRunning \/ Resolve` (drops `WatchdogEmit`, `Recycle`, clean `EnterPauseHuman`) |
 
-Nine specs. Here `CHECK_DEADLOCK FALSE` is *load-bearing*: if the redefined `NextBuggy` ever leaves the system in a state with no enabled action (and that state is *not* the intended end of the trace), TLC would otherwise report "Deadlock reached" before evaluating temporal properties — masking the intended `<liveness/safety>` violation. The OPB R-12.a fix (iter 97) was a member of this class promoted from Class D below.
+Ten specs. Here `CHECK_DEADLOCK FALSE` is *load-bearing*: if the redefined `NextBuggy` ever leaves the system in a state with no enabled action (and that state is *not* the intended end of the trace), TLC would otherwise report "Deadlock reached" before evaluating temporal properties — masking the intended `<liveness/safety>` violation. The OPB R-12.a fix (iter 97) is included here now that its cfg carries `CHECK_DEADLOCK FALSE`.
 
 ### Class C — `CHECK_DEADLOCK FALSE` + (no `NextBuggy` in `.tla`)
 
@@ -65,7 +66,7 @@ Nine specs. Here `CHECK_DEADLOCK FALSE` is *load-bearing*: if the redefined `Nex
 
 Eight specs. These were not analyzed for shape because the bug action's structural position differs; the `CHECK_DEADLOCK FALSE` setting is honored regardless.
 
-### Class D — *NO* `CHECK_DEADLOCK` + add-bug (likely-safe, but unverified)
+### Class D — *NO* `CHECK_DEADLOCK` + add-bug (likely low-risk, but unverified)
 
 | Spec | `NextBuggy` shape | Risk |
 |---|---|---|
@@ -76,31 +77,31 @@ Eight specs. These were not analyzed for shape because the bug action's structur
 | `KeeperOASAdvanced` | `Next \/ CancelledAbsorbed` | LOW |
 | `KeeperTaskAcquisition` | `Next \/ TaskRejected` | LOW |
 
-Six specs. Each adds a single bug action to the clean `Next`. *Provided* the clean spec is deadlock-free (which `<Spec>.cfg` verifies via TLC default `CHECK_DEADLOCK`), the buggy spec is too — bug action only adds enabled transitions. Empirical TLC verification of buggy run + counterexample shape is **deferred** (Class D entries have not been observed to mask their intended violation, but no proof).
+Six specs. Each adds a single bug action to the clean `Next`. This preserves all clean transitions, so the shape is lower risk than replace-bug, but it does not by itself prove deadlock-freedom on bug-reachable states. Empirical TLC verification of buggy run + counterexample shape is **deferred** (Class D entries have not been observed to mask their intended violation, but no proof).
 
 ### Class E — *NO* `CHECK_DEADLOCK` + replace-bug (the iter 97 closure target)
 
 | Spec | Status |
 |---|---|
-| `OperatorPauseBroadcast` | **CLOSED** by iter 97 #15008 (promoted to Class B) |
+| _(none)_ | OPB moved to Class B after iter 97 #15008 added `CHECK_DEADLOCK FALSE` |
 
-One spec. The R-12.a fix moved this entry into Class B. **At the time this memo is written, Class E is empty.**
+Zero active specs. The R-12.a fix added `CHECK_DEADLOCK FALSE` to OPB, so the active Class E count is now zero.
 
 ## Summary table
 
 | Class | Setting | Shape | Count | Status |
 |---|---|---|---|---|
 | A | `CHECK_DEADLOCK FALSE` | add-bug | 8 | safe (defensive option) |
-| B | `CHECK_DEADLOCK FALSE` | replace-bug | 9 | safe (option load-bearing) |
+| B | `CHECK_DEADLOCK FALSE` | replace-bug | 10 | safe (option load-bearing) |
 | C | `CHECK_DEADLOCK FALSE` | no `NextBuggy` | 8 | safe (different shape) |
 | D | *(missing)* | add-bug | 6 | likely-safe, unverified |
 | E | *(missing)* | replace-bug | 0 | empty after iter 97 |
-| **Total** | | | **31** | |
+| **Total** | | | **32** | |
 
 ## Findings
 
-1. **OPB was unique in Class E** — the only `-buggy.cfg` in `specs/keeper-state-machine/` where the combination of a missing `CHECK_DEADLOCK FALSE` *and* a redefined `NextBuggy` could (and did) mask the intended property violation. iter 97 closed it.
-2. **Class D (6 specs) is the only remaining ambiguity** — `add-bug` shape *should* be deadlock-free if the clean spec is, but this is not empirically confirmed per-spec. None has been reported to mask its violation.
+1. **OPB was unique in Class E before iter 97** — the only `-buggy.cfg` in `specs/keeper-state-machine/` where the combination of a missing `CHECK_DEADLOCK FALSE` *and* a redefined `NextBuggy` could (and did) mask the intended property violation. iter 97 closed it and moved OPB into active Class B.
+2. **Class D (6 specs) is the only remaining ambiguity** — `add-bug` shape preserves clean transitions but can expand reachability; this is not empirically confirmed per-spec. None has been reported to mask its violation.
 3. **No structural fix is needed in this PR** — adding `CHECK_DEADLOCK FALSE` to Class D specs would be a defensive change without an observed failure mode. CLAUDE.md §Workaround Rejection Bar's *inverse anti-pattern* (single-instance infrastructure) applies in *miniature* here: 6 unconfirmed-deadlock specs do not motivate pre-emptive cfg widening. Re-evaluate only if a Class D spec is observed to mask a violation (then fix at that time).
 4. **Cross-dir parallel** — `specs/cascade/CascadeAttemptLiveness-buggy.cfg` and `specs/multimodal/MultimodalArtifact-buggy.cfg` both already carry `CHECK_DEADLOCK FALSE`. The same Class-by-shape sweep across non-keeper spec dirs is a follow-up (see below).
 

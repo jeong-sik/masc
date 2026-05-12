@@ -229,9 +229,9 @@ For repo seed changes:
 2. Run focused checks:
 
 ```bash
-scripts/dune-local.sh build test/test_cascade_toml_materialization.exe
-scripts/dune-local.sh build test/test_cascade_phase1_smoke.exe
-scripts/dune-local.sh build test/test_keeper_cascade_profile.exe
+scripts/dune-local.sh runtest test/test_cascade_toml_materialization.exe
+scripts/dune-local.sh runtest test/test_cascade_phase1_smoke.exe
+scripts/dune-local.sh runtest test/test_keeper_cascade_profile.exe
 ```
 
 `cascade_materialize` is retired. Runtime TOML loading is in-memory, and no
@@ -294,9 +294,7 @@ moderate_task = "coding_plan"
 complex_task = "coding_plan"
 
 [coding_plan]
-models = [
-  { model = "glm-coding:auto", weight = 1 },
-]
+models = ["glm-coding:auto"]
 temperature = 0.2
 max_tokens = 16384
 strategy = "failover"

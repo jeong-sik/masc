@@ -69,9 +69,7 @@ complex_task = "coding_plan"
 
 [coding_plan]
 comment = "Only active live profile. glm-coding resolves to the Z.AI Coding endpoint."
-models = [
-  { model = "glm-coding:auto", weight = 1 },
-]
+models = ["glm-coding:auto"]
 temperature = 0.2
 max_tokens = 16384
 strategy = "failover"
@@ -85,7 +83,7 @@ Expected diagnostic shape:
 
 ```bash
 ./_build/default/bin/main_eio.exe doctor config \
-  --base-path "$HOME/me" \
+  --base-path "$MASC_BASE_PATH" \
   --json
 ```
 
@@ -136,8 +134,8 @@ temperature = 0.2
 max_tokens = 16384
 strategy = "failover"
 models = [
-  { model = "glm-coding:auto", weight = 2 },
-  { model = "kimi_cli:auto", weight = 1 },
+  "glm-coding:auto",
+  "kimi_cli:auto",
 ]
 keeper_assignable = true
 
@@ -145,13 +143,13 @@ keeper_assignable = true
 "glm-coding" = "ZAI_API_KEY"
 kimi_cli = "MOONSHOT_API_KEY"
 
-[local_recovery]
+[phase_buffer]
 temperature = 0.1
 max_tokens = 8192
 models = ["glm-coding:auto"]
 keeper_assignable = false
 
-[local_recovery.api_key_env]
+[phase_buffer.api_key_env]
 "glm-coding" = "ZAI_API_KEY"
 
 [tool_rerank]
@@ -199,10 +197,10 @@ Verification:
 
 ```bash
 rg -l '^autoboot_enabled\s*=\s*true$' \
-  "$HOME/me/.masc/config/keepers"/*.toml
+  "$MASC_BASE_PATH/.masc/config/keepers"/*.toml
 
 rg -n 'cascade_name\s*=\s*"(?!coding_plan")' -P \
-  "$HOME/me/.masc/config/keepers"/*.toml
+  "$MASC_BASE_PATH/.masc/config/keepers"/*.toml
 ```
 
 The first command should list only the intended keepers. The second command

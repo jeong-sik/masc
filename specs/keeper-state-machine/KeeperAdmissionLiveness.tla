@@ -4,6 +4,22 @@
 \* to dispatch on a provider, enqueue on the WFQ overflow queue, or
 \* surface a capacity-exhausted event.
 \*
+\* Runtime status (2026-05-12, iter 57 K-2.d):
+\*   The OCaml implementation (lib/keeper/keeper_admission_*.ml +
+\*   keeper_provider_token_bucket.ml + keeper_wfq_overflow.ml, ~845 LOC
+\*   across 7 modules) lives in main but is DORMANT.  keeper_heartbeat_loop
+\*   only exercises the active path when the process environment sets
+\*   MASC_ADMISSION_USE_NEW=1; with the flag unset (the default), the
+\*   shadow path computes admission outcomes but does NOT consume bucket
+\*   tokens or enqueue the WFQ.  RFC-0026 PR-E-1.6 is the activation
+\*   wiring step (memory:reference_masc_mcp_integrated_improvement_design_audit
+\*   2026-05-05).  Until PR-E-1.6 lands, the invariants below describe
+\*   the intended behaviour, not the running behaviour.
+\*
+\*   The spec/OCaml mapping table and four open drift risks (K-2.a..d)
+\*   are catalogued in docs/tla-audit/kal-k1-admission-spec-ocaml-mapping-
+\*   2026-05-12.md (iter 56 #14895).
+\*
 \* This spec is the design ground for PR-A (#12904 keeper_provider_token_bucket)
 \* and the planned PR-B/PR-C/PR-E series. It does NOT model:
 \*   - in-attempt streaming liveness (RFC-0022)

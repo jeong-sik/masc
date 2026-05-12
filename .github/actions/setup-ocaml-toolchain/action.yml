@@ -104,8 +104,12 @@ runs:
         export PATH="${opam_dir}:${PATH}"
         echo "${opam_dir}" >> "${GITHUB_PATH}"
 
-        # Cache hit: reuse existing switch, skip init + switch create
-        if [ -d "${HOME}/.opam" ] && opam switch list --short 2>/dev/null | grep -q "^${switch_name}$"; then
+        # Cache hit: reuse existing switch, skip init + switch create.
+        # `opam switch list` is the authoritative check — it covers both the
+        # default `~/.opam` root and an XDG root under `~/.local/share/opam`,
+        # so don't pre-gate on a single directory path (that produced a false
+        # cache miss when opam used the XDG layout).
+        if opam switch list --short 2>/dev/null | grep -q "^${switch_name}$"; then
           echo "::notice::Cache hit — reusing opam switch ${switch_name}"
           switch_prefix="$(opam var prefix --switch="${switch_name}")"
           echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"

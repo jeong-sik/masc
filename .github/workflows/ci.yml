@@ -88,16 +88,20 @@ jobs:
           # Retry-based PR state resolution: instead of a fixed sleep, poll
           # gh pr view with short intervals. This catches draft restoration
           # within ~3s on fast APIs while avoiding unnecessary delay on
-          # non-PR events or already-settled states.
+          # non-PR events or already-settled states. Capture stderr from each
+          # attempt so a persistent failure reports the underlying gh error
+          # (a silent "after 3 attempts" is undebuggable).
+          err_log="${RUNNER_TEMP:-/tmp}/live-pr-gate.err"
+          : > "$err_log"
           for _attempt in 1 2 3; do
-            if live_fields="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,isDraft --jq '.state + " " + (.isDraft | tostring)' 2>/dev/null)"; then
+            if live_fields="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,isDraft --jq '.state + " " + (.isDraft | tostring)' 2>"$err_log")"; then
               break
             fi
             sleep 1
           done
 
           if [ -z "${live_fields:-}" ]; then
-            echo "::error::Could not resolve live PR state for #${PR_NUMBER} after 3 attempts"
+            echo "::error::Could not resolve live PR state for #${PR_NUMBER} after 3 attempts: $(cat "$err_log")"
             exit 1
           fi
           live_state="${live_fields%% *}"

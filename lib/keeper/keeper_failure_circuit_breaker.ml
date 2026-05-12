@@ -22,7 +22,8 @@
       count         -> [mutable consecutive_count : int]
       currentClass  -> [mutable consecutive_class : error_class]
       tripped       -> [record_failure] return value
-      ErrorClasses  -> [type error_class] (this file, ~line 17)
+      ErrorClasses  -> [type error_class] (this file; the name is the
+                       stable anchor — see iter 64 N-2.a, line numbers drift)
 
     This block is the reverse-direction citation so code search for
     "KeeperCircuitBreaker" lands in this module.

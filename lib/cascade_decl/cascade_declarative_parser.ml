@@ -195,28 +195,6 @@ let parse_provider (id : string) (tbl : Otoml.t)
            None)
       | None -> None
     in
-    let liveness_class =
-      match Otoml.find_opt tbl Fun.id [ "liveness" ] with
-      | None -> None
-      | Some live_tbl ->
-        (match Otoml.find_opt live_tbl Otoml.get_string [ "class" ] with
-         | None -> None
-         | Some raw ->
-           (match String.lowercase_ascii (String.trim raw) with
-            | "cloud_fast" -> Some Cloud_fast
-            | "cloud_thinking" -> Some Cloud_thinking
-            | "local_27b" -> Some Local_27b
-            | "local_70b_plus" -> Some Local_70b_plus
-            | other ->
-              Logs.warn (fun m ->
-                m
-                  "cascade_declarative_parser: %s.liveness.class unknown value %S — \
-                   ignoring (expected one of cloud_fast, cloud_thinking, local_27b, \
-                   local_70b_plus)"
-                  path
-                  other);
-              None))
-    in
     let capabilities =
       Otoml.find_opt tbl Fun.id [ "capabilities" ]
       |> Option.map (parse_capabilities ~path)
@@ -234,7 +212,6 @@ let parse_provider (id : string) (tbl : Otoml.t)
       ; transport
       ; is_non_interactive
       ; credentials
-      ; liveness_class
       ; capabilities
       ; headers
       }

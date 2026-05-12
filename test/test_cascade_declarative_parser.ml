@@ -62,16 +62,10 @@ is-non-interactive = true
 type = "env"
 key = "ANTHROPIC_API_KEY"
 
-[providers.claude-code.liveness]
-class = "cloud_fast"
-
 [providers.ollama]
 provider-name = "Ollama Local"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
-
-[providers.ollama.liveness]
-class = "local_27b"
 
 [models.haiku]
 api-name = "claude-haiku-4-5-20251001"
@@ -165,11 +159,6 @@ let test_layer1_providers () =
    | Some p ->
      check string "display_name" "Anthropic Claude Code CLI" p.display_name;
      check bool "non-interactive" true p.is_non_interactive;
-     check
-       (option string)
-       "claude liveness"
-       (Some "Cascade_declarative_types.Cloud_fast")
-       (Option.map show_cascade_liveness_class p.liveness_class);
      (match p.transport with
       | Cli cmd -> check string "cli cmd" "claude" cmd
       | Http _ -> failwith "expected Cli transport")
@@ -179,11 +168,6 @@ let test_layer1_providers () =
   match ollama with
   | Some p ->
     check string "display_name" "Ollama Local" p.display_name;
-    check
-      (option string)
-      "ollama liveness"
-      (Some "Cascade_declarative_types.Local_27b")
-      (Option.map show_cascade_liveness_class p.liveness_class);
     (match p.transport with
      | Http url -> check string "http url" "http://localhost:11434" url
      | Cli _ -> failwith "expected Http transport")
@@ -734,49 +718,6 @@ rate-limit-recency-window-s = 60.0
   match cfg.tiers with
   | [ t ] -> check bool "partial scoring yields None" true (t.scoring_params = None)
   | _ -> failwith "expected exactly one tier"
-;;
-
-(* --- Liveness class tests --- *)
-
-let test_liveness_class_unknown () =
-  let toml =
-    {|
-[providers.p]
-protocol = "anthropic-cli"
-command = "c"
-
-[providers.p.liveness]
-class = "nonexistent_class"
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.providers with
-  | [ p ] ->
-    check
-      (option string)
-      "unknown liveness yields None"
-      None
-      (Option.map show_cascade_liveness_class p.liveness_class)
-  | _ -> failwith "expected exactly one provider"
-;;
-
-let test_liveness_class_absent () =
-  let toml =
-    {|
-[providers.p]
-protocol = "anthropic-cli"
-command = "c"
-|}
-  in
-  let cfg = ok_config (parse_string toml) in
-  match cfg.providers with
-  | [ p ] ->
-    check
-      (option string)
-      "no liveness sub-table → None"
-      None
-      (Option.map show_cascade_liveness_class p.liveness_class)
-  | _ -> failwith "expected exactly one provider"
 ;;
 
 (* --- Capabilities tests (#14608 tool/event fields + RFC-0058 §2.4 Phase 5.1 dispatch fields) --- *)
@@ -1534,10 +1475,6 @@ let () =
     ; ( "scoring_params"
       , [ test_case "parses all 7 fields" `Quick test_scoring_params
         ; test_case "partial yields None" `Quick test_scoring_params_partial_ignored
-        ] )
-    ; ( "liveness_class"
-      , [ test_case "unknown value yields None" `Quick test_liveness_class_unknown
-        ; test_case "absent yields None" `Quick test_liveness_class_absent
         ] )
     ; ( "capabilities"
       , [ test_case "present parses with defaults" `Quick test_capabilities_present

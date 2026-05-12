@@ -30,7 +30,8 @@ let check_output =
       | L.Completed -> Format.fprintf fmt "Completed")
     ( = )
 
-let budget = L.cloud_fast (* 30/20/180 *)
+let budget : L.budget =
+  { ttft_max = 30.0; inter_chunk_max = 20.0; attempt_wall_max = 180.0 }
 
 (* ──────────────────────── §4.5 decision table ──────────────────────── *)
 
@@ -135,11 +136,12 @@ let test_success_state_is_absorbing () =
 
 (* ──────────────────────── §8 property tests ──────────────────────── *)
 
-(* §8.4 Thinking protection — adaptive-reasoning model emits thinking
-   tokens every 5s for 600s under cloud_thinking profile (60/30/300).
-   Hits wall at 300s but never inter-chunk. *)
+(* §8.4 Thinking protection — a model emits thinking tokens every 5s
+   under a 60/30/300 budget. Hits wall at 300s but never inter-chunk. *)
 let test_thinking_protection_hits_wall_only () =
-  let b = L.cloud_thinking in
+  let b : L.budget =
+    { ttft_max = 60.0; inter_chunk_max = 30.0; attempt_wall_max = 300.0 }
+  in
   let s = ref (L.initial ~started_at:0.0) in
   let killed_by = ref None in
   let t = ref 0.0 in
@@ -171,7 +173,7 @@ let test_thinking_protection_hits_wall_only () =
 (* §8.5 Hung-first-byte — provider holds connection without any
    chunks. Killed at TTFT_MAX exactly. *)
 let test_hung_first_byte_kills_at_ttft () =
-  let b = L.cloud_fast in (* ttft_max = 30 *)
+  let b = budget in (* ttft_max = 30 *)
   let s = ref (L.initial ~started_at:0.0) in
   let kill_t = ref None in
   let t = ref 0.0 in
@@ -192,7 +194,7 @@ let test_hung_first_byte_kills_at_ttft () =
 (* §8.6 Mid-stream stall — 3 chunks then silence. Killed at
    last_chunk_at + IDLE_MAX. *)
 let test_mid_stream_stall_kills_at_idle () =
-  let b = L.cloud_fast in (* inter_chunk_max = 20 *)
+  let b = budget in (* inter_chunk_max = 20 *)
   let s = ref (L.initial ~started_at:0.0) in
   (* Three chunks at t=1, 2, 3 *)
   List.iter (fun t ->
@@ -220,7 +222,7 @@ let test_mid_stream_stall_kills_at_idle () =
 (* §8.7 Wall backstop — provider streams a token every (idle_max - 1)s
    indefinitely. Killed at WALL_MAX exactly. *)
 let test_wall_backstop_kills_at_wall_max () =
-  let b = L.cloud_fast in (* idle = 20, wall = 180 *)
+  let b = budget in (* idle = 20, wall = 180 *)
   let s = ref (L.initial ~started_at:0.0) in
   let kill_class = ref None in
   let t = ref 0.0 in

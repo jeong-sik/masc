@@ -15,11 +15,11 @@ module Obs = Cascade_attempt_liveness_observer
 
 (* -- helpers ------------------------------------------------------- *)
 
-let mk_observer ?(mode = Cfg.Observe) ?(budget = L.cloud_fast)
+let mk_observer ?(mode = Cfg.Observe) ?(budget = L.bootstrap)
     ?(cascade = "test_cascade") ?(provider = "test_provider")
-    ?(started_at = 0.0) () =
+    ?candidate_key ?(started_at = 0.0) () =
   Obs.create ~mode ~budget ~cascade_label:cascade ~provider_label:provider
-    ~started_at
+    ?candidate_key ~started_at ()
 
 let counter_value name labels =
   Prometheus.metric_value_or_zero name ~labels ()
@@ -157,6 +157,32 @@ let test_observe_finalize_emits_outcome () =
   Alcotest.(check (float 1e-6))
     "finalize is idempotent" after after2
 
+let test_success_sample_waits_for_accept_gate () =
+  let candidate_key = "provider:model-a" in
+  Cfg.reset_success_history_for_test ();
+  let obs =
+    mk_observer
+      ~mode:Cfg.Observe
+      ~candidate_key
+      ~started_at:(Time_compat.now ())
+      ()
+  in
+  let wrapped = Obs.wrap_on_event obs None in
+  (match wrapped with
+   | Some f -> f stop
+   | None -> Alcotest.fail "wrapper missing");
+  Obs.finalize obs;
+  Alcotest.(check bool)
+    "finalize exposes a success sample"
+    true
+    (match Obs.success_sample_for_candidate obs with
+     | Some (key, _) -> String.equal key candidate_key
+     | None -> false);
+  Alcotest.(check int)
+    "observer does not train budget before accept"
+    0
+    (Cfg.success_sample_count_for_test ~candidate_key)
+
 let test_observe_finalize_pending_is_wire_error () =
   let cascade = "observe_pending_cascade" in
   let provider = "observe_pending_provider" in
@@ -239,6 +265,8 @@ let () =
             test_observe_done_completes;
           Alcotest.test_case "finalize emits outcome and is idempotent"
             `Quick test_observe_finalize_emits_outcome;
+          Alcotest.test_case "success sample waits for accept gate" `Quick
+            test_success_sample_waits_for_accept_gate;
           Alcotest.test_case "pending finalize -> wire_error" `Quick
             test_observe_finalize_pending_is_wire_error;
         ] );

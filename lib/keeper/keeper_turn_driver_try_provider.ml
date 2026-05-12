@@ -88,7 +88,9 @@ type try_provider_ctx =
     @param resume_checkpoint Checkpoint from a previous failed provider.
     @param per_provider_timeout_s Per-provider wall-clock timeout.
     @param provider_cfg The provider configuration to attempt.
-    @return [(result, checkpoint_after)] tuple. *)
+    @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
+    sample is not recorded here; the caller records it only after the cascade
+    accept predicate accepts the response. *)
 let run_try_provider
       (ctx : try_provider_ctx)
       ?resume_checkpoint
@@ -174,28 +176,41 @@ let run_try_provider
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
   match config_result with
-  | Error err -> Error err, None
+  | Error err -> Error err, None, None
   | Ok config ->
     let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
-    (* Compute provider_id once so the liveness budget lookup and the
-       [outer_wall_for_attempt] dispatch key cannot diverge if
-       [provider_label_of_config] ever changes behavior. *)
-    let provider_id = Provider_adapter.provider_label_of_config provider_cfg in
+    (* Compute the concrete provider/model key once so liveness budget lookup,
+       success-history training, and the [outer_wall_for_attempt] dispatch key
+       cannot diverge. *)
+    let candidate_key =
+      Provider_adapter.provider_model_health_key_of_config provider_cfg
+    in
     let liveness_observer_opt =
       match liveness_mode with
       | Cascade_attempt_liveness_config.Off -> None
       | Cascade_attempt_liveness_config.Observe | Cascade_attempt_liveness_config.Enforce
         ->
-        let budget =
-          Cascade_attempt_liveness_config.budget_for_provider_id ~provider_id
+        let resolved_budget =
+          Cascade_attempt_liveness_config.budget_for_candidate ~candidate_key
         in
+        Log.Misc.debug
+          "cascade_attempt_liveness: candidate=%s budget_source=%s ttft=%.1fs \
+           inter_chunk=%.1fs wall=%.1fs"
+          candidate_key
+          (Cascade_attempt_liveness_config.budget_source_label
+             resolved_budget.source)
+          resolved_budget.budget.Cascade_attempt_liveness.ttft_max
+          resolved_budget.budget.Cascade_attempt_liveness.inter_chunk_max
+          resolved_budget.budget.Cascade_attempt_liveness.attempt_wall_max;
         let obs =
           Cascade_attempt_liveness_observer.create
             ~mode:liveness_mode
-            ~budget
+            ~budget:resolved_budget.budget
             ~cascade_label:ctx.cascade_name
             ~provider_label:provider_cfg.model_id
+            ~candidate_key
             ~started_at:(Time_compat.now ())
+            ()
         in
         Some obs
     in
@@ -203,6 +218,12 @@ let run_try_provider
       match liveness_observer_opt with
       | None -> ()
       | Some obs -> Cascade_attempt_liveness_observer.finalize obs
+    in
+    let liveness_success_sample () =
+      match liveness_observer_opt with
+      | None -> None
+      | Some obs ->
+        Cascade_attempt_liveness_observer.success_sample_for_candidate obs
     in
     let liveness_timeout_error failure =
       let kind = Cascade_attempt_liveness.failure_kind_label failure in
@@ -287,7 +308,7 @@ let run_try_provider
                     ~mode:liveness_mode
                     ~observer_attached:(Option.is_some liveness_observer_opt)
                     ~per_provider_timeout_s
-                    ~provider_id
+                    ~candidate_key
                 in
                 match outer_wall_for_provider with
                 | None -> run_fn ()
@@ -322,9 +343,10 @@ let run_try_provider
      with
      | Error err ->
        finalize_liveness ();
-       Error err, None
+       Error err, None, None
      | Ok result ->
        finalize_liveness ();
+       let liveness_success_sample = liveness_success_sample () in
        let result =
          Result.map_error
            (Cascade_attempt_fsm.enrich_sdk_error
@@ -337,5 +359,5 @@ let run_try_provider
            ?agent_ref:ctx.agent_ref
            !local_agent_ref
        in
-       result, checkpoint_after)
+       result, checkpoint_after, liveness_success_sample)
 ;;

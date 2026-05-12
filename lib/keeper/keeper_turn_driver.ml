@@ -425,7 +425,17 @@ let run_named
           provider_cfg
       in
       let attempt_started_at = Unix.gettimeofday () in
-      let (result, checkpoint_after) = try_provider ?resume_checkpoint ?per_provider_timeout_s:pp_timeout provider_cfg in
+      let (result, checkpoint_after, liveness_success_sample) =
+        try_provider ?resume_checkpoint ?per_provider_timeout_s:pp_timeout provider_cfg
+      in
+      let record_accepted_liveness_sample () =
+        match liveness_success_sample with
+        | None -> ()
+        | Some (candidate_key, sample) ->
+          Cascade_attempt_liveness_config.record_success_sample
+            ~candidate_key
+            sample
+      in
       let attempt_latency_ms =
         (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
       in
@@ -451,6 +461,7 @@ let run_named
          a single number, which would mislead strategy ranking. *)
       (match result with
       | Ok result when accept result.response ->
+        record_accepted_liveness_sample ();
         Cascade_health_tracker.(record_success global ~provider_key:provider_health_key
           ~latency_ms:attempt_latency_ms ());
         (* FSM: Call_ok → Accept *)
@@ -485,6 +496,7 @@ let run_named
           { response = result.response; reason } in
         (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
          | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
+           record_accepted_liveness_sample ();
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
@@ -538,6 +550,7 @@ let run_named
               real FSM contract violation, not a tunable. *)
            Cascade_metrics.on_cascade_invariant_violation ();
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name resp.model;
+           record_accepted_liveness_sample ();
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name

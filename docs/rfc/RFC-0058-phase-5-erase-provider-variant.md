@@ -68,32 +68,31 @@ Phased to keep `main` green at every step. Each step is one PR.
 - Caller-site grep: `provider_tool_support`, `runtime_mcp_policy_requires_http_headers`,
   `codex_cli_identity_runtime_mcp_header`. Each becomes a TOML lookup.
 
-### Phase 5.2 — Move liveness tunables to TOML
+### Phase 5.2 — Remove static liveness classes
 
-Split into two PRs to keep the schema migration reversible.
+The provider-level liveness schema was superseded before productization.
+Do not add a provider liveness sub-table or provider liveness class field
+back to declarative cascade config.
 
-**Phase 5.2a (schema only) — this PR**
-- Add `cascade_liveness_class` type + `liveness_class` field on
-  `cascade_provider`.
-- Parser reads `[providers.<p>.liveness] class = "cloud_fast" | …` into
-  the new field. Unknown / missing values are tolerated (parser warns;
-  validator does not flag).
-- `config/cascade.toml` declares a `liveness` sub-table on every shipped
-  provider.
-- Caller (`Cascade_attempt_liveness_config.budget_for_label`) is
-  **unchanged** — keeps its hardcoded match. The TOML data is parsed but
-  not yet consumed. This keeps the schema additive: rolling back means
-  ignoring the new field, no behaviour change.
+Runtime liveness now uses:
 
-**Phase 5.2b (caller migration) — follow-up PR**
-- `budget_for_label` is replaced by `budget_for_provider_id ~cfg`.
-  `keeper_turn_driver_try_provider.ml` passes the provider id (not the
-  cascade label string) and reads the cascade config.
+- an explicit bootstrap budget for candidates with no successful history,
+- recent successful attempt samples keyed by concrete provider/model candidate,
+- no training from failed, killed, rejected, or cancelled attempts.
+
+This keeps provider ids and model-size labels out of liveness policy.
+Follow-up hardening should focus on receipts/debug surfaces that expose
+the candidate key, budget source (`bootstrap` or `observed_success`), and
+resolved budget used for the attempt.
+
+**Former Phase 5.2b caller migration — obsolete**
+- Do not replace the old match with a provider-id keyed budget lookup;
+  that still makes provider identity the budget taxonomy. Keeper dispatch
+  should use a concrete provider/model candidate key.
 - The hardcoded `match cascade_prefix with "codex_cli" | "claude_code" |
-  …` block is deleted.
-- Promote the parser's missing-class tolerance to a validator R-rule
-  (every shipped provider must declare `liveness.class`) so future
-  provider entries cannot regress to the silent fallback.
+  …` block is deleted without replacing it with static provider classes.
+- If validator rules are added, they should ensure no shipped provider
+  declares a liveness class so future entries cannot silently regress.
 
 ### Phase 5.3 — Erase `cascade_prefix` literals from `provider_adapter`
 
@@ -164,8 +163,9 @@ For each Phase 5.N PR:
   fixtures and migration tools excluded).
 - G3: `dune build --root .` and `dune test` pass. Test fixtures may be
   amended in the same PR but production cascade.toml schema does not change.
-- G4: New TOML fields (`[providers.<p>.capabilities]`, `[providers.<p>.liveness]`,
-  provider `aliases`) ship with parser + R-rule validator coverage.
+- G4: New TOML fields (`[providers.<p>.capabilities]`, provider `aliases`)
+  ship with parser + R-rule validator coverage. Provider liveness classes
+  remain absent.
 
 ## 6. Risks
 

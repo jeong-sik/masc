@@ -47,12 +47,18 @@ val create :
   budget:Cascade_attempt_liveness.budget ->
   cascade_label:string ->
   provider_label:string ->
+  ?candidate_key:string ->
   started_at:float ->
+  unit ->
   t
 (** Build an observer for one cascade attempt.
 
-    [started_at] is the monotonic wall-clock the caller already
-    captured for [attempt_started_at] (oas_worker_named.ml:508).
+    [candidate_key], when supplied, is the concrete provider/model key that
+    identifies any successful timing sample exposed by
+    {!success_sample_for_candidate}.
+
+    [started_at] is the monotonic wall-clock the caller already captured for
+    the attempt start.
 
     The observer does not own the switch — see [start_tick_fiber]. *)
 
@@ -108,6 +114,13 @@ val finalize : t -> unit
       cancellation or upstream exception).
 
     Idempotent: calling twice emits the counter once. *)
+
+val success_sample_for_candidate :
+  t -> (string * Cascade_attempt_liveness_config.success_sample) option
+(** Return the successful timing sample captured by {!finalize}, paired
+    with the concrete provider/model candidate key. This function does not
+    mutate the living budget store; callers must record the sample only after
+    their own acceptance gate has accepted the response. *)
 
 val current_state_for_test : t -> Cascade_attempt_liveness.state
 (** Test-only accessor. Production callers must not depend on this. *)

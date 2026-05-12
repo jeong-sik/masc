@@ -531,10 +531,9 @@ val metric_cascade_capacity_events : string
     - [mode] ∈ [observe | enforce]
     - [provider] is the cascade label that produced the attempt
 
-    Use the {b observe}-mode counter to calibrate the per-profile
-    budgets (cloud_fast / cloud_thinking / local_27b / local_70b_plus)
-    against [scripts/diag-keeper-cycle.sh] before flipping any profile
-    to {b enforce}. *)
+    Use the {b observe}-mode counter to calibrate bootstrap and
+    observed-success budgets against [scripts/diag-keeper-cycle.sh]
+    before flipping attempt liveness to {b enforce}. *)
 val metric_cascade_attempt_liveness_kill : string
 
 (** RFC-0022 PR-2 §3 — per-attempt finalizer counter regardless of

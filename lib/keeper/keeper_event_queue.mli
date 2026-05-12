@@ -6,10 +6,15 @@
     Policy Layer turn, and dedup/urgency are bookkeeping concerns
     that never delay an [enqueue].
 
-    This module is data only. Wiring into
-    [keeper_keepalive_signal.wakeup_keeper] and
-    [Heartbeat_smart.should_emit] lives in a follow-up patch so
-    the queue can be exercised in isolation by tests first. *)
+    This module is data only. The enqueue side is wired:
+    [keeper_keepalive_signal.ml] calls [Keeper_registry.enqueue_event]
+    before the wakeup flag flips (RFC-0020 Rule 1), and
+    [keeper_heartbeat_loop.ml] dequeues once per turn (pinning the
+    [Conservation] invariant) and forces [Emit] when the queue is
+    non-empty (pinning [QueueNeverStarvedBySkip]). The remaining
+    follow-up is the consumer-side wiring of
+    [Heartbeat_smart.should_emit] so the Policy Layer reads the queue
+    before answering [Skip]. *)
 
 type urgency =
   | Immediate  (** operator commands and other latency-critical signals *)

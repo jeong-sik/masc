@@ -1,17 +1,40 @@
 ---- MODULE KeeperEventQueue ----
 \* Event Layer / Policy Layer separation contract for the keeper
-\* heartbeat loop. Models the design described in
-\* docs/design/keeper-event-queue-layer-separation.md (forthcoming
-\* RFC), itself derived from RUTHLESS_JUDGMENT §3-4.
+\* heartbeat loop. Models the design in
+\* docs/rfc/RFC-0020-keeper-event-queue-layer-separation.md (Draft,
+\* 2026-04-30; RFC-0020 cites this spec as #12386), itself derived
+\* from RUTHLESS_JUDGMENT.md §1 A5 (the starvation-race walkthrough).
 \*
-\* Runtime entities modelled (see [keeper_keepalive_signal.ml] and
-\* [keeper_keepalive.ml]):
+\* Runtime status (2026-05-12, iter 69 Q-2.a):
+\*   The Event Layer this spec models is IMPLEMENTED in main, not
+\*   aspirational:
+\*     - data module: lib/keeper/keeper_event_queue.{ml,mli} — a
+\*       persistent FIFO of stimuli (enqueue / dequeue / dedup_by_post_id
+\*       / sort_by_urgency / classify / drain_board_window). Its .mli
+\*       opens "Models the contract verified in [KeeperEventQueue.tla]".
+\*     - enqueue wiring: keeper_keepalive_signal.ml calls
+\*       Keeper_registry.enqueue_event before the wakeup flag flips and
+\*       comments "RFC-0020 Rule 1 (enqueue is independent of policy)".
+\*     - dequeue + override: keeper_heartbeat_loop.ml dequeues once per
+\*       turn ("pins the [Conservation] invariant ... in production",
+\*       dequeued_total <= enqueued_total) and forces Emit when the
+\*       queue is non-empty ("Pinned by KeeperEventQueue.tla
+\*       QueueNeverStarvedBySkip invariant").
+\*   Remaining honest gap: the consumer-side wiring of
+\*   Heartbeat_smart.should_emit (so the Policy Layer reads the queue
+\*   before answering Skip) is flagged "follow-up" in keeper_event_queue.mli
+\*   and at keeper_heartbeat_loop.ml. The drift this note closes was
+\*   audited in iter 68 #14933 (docs/tla-audit/keq-q1-event-queue-spec-
+\*   banner-vs-runtime-2026-05-12.md) — the inverse of KOAS M-2.a, where
+\*   the runtime owes the spec; here the spec banner had simply not
+\*   caught up to the runtime.
 \*
-\*   event_queue          : the new Event Layer FIFO holding pending
+\* Runtime entities modelled (see [keeper_event_queue.ml],
+\* [keeper_keepalive_signal.ml], [keeper_heartbeat_loop.ml]):
+\*
+\*   event_queue          : the Event Layer FIFO holding pending
 \*                          stimuli (board posts, mentions, operator
-\*                          directives). Today this state lives only
-\*                          implicitly via fiber_wakeup and the
-\*                          interruptible_sleep race window.
+\*                          directives) — Keeper_event_queue.t.
 \*   smart_decision       : the Policy Layer output of
 \*                          Heartbeat_smart.should_emit (Emit/Skip).
 \*

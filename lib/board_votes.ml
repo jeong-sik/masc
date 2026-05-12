@@ -1029,30 +1029,42 @@ let karma_event_to_yojson (e : karma_event) : Yojson.Safe.t =
     ("ts_iso",      `String ts_iso);
   ]
 
-(** Get karma for all agents (cached) *)
+(** Get karma for all agents (cached).
+
+    Cache check / rebuild / write are all performed inside one
+    [with_lock] block — same pattern as [Board_core.list_posts] for
+    [sorted_posts_cache].  Previously the read at [store.karma_cache]
+    and the write to it lived outside [with_lock] while
+    [Board_core.invalidate_*_caches] (callers always hold the lock)
+    cleared the field under lock — so two fibers could both observe
+    [None] and both rebuild, and an invalidation occurring between an
+    unlocked read of a stale [Some _] and a downstream consumer was
+    silently lost.  Hashtbl iteration / fold / List.sort are pure CPU
+    with no fiber yields, so holding the Eio mutex during the rebuild
+    is safe. *)
 let get_all_karma store =
-  match store.karma_cache with
-  | Some cached -> cached
-  | None ->
-      let result =
-        with_lock store (fun () ->
-          let tbl = Hashtbl.create 64 in
-          Hashtbl.iter
-            (fun key vote ->
-               match karma_event_of_vote store key vote with
-               | None -> ()
-               | Some (e : karma_event) ->
-                   let prev =
-                     Hashtbl.find_opt tbl e.recipient
-                     |> Option.value ~default:0
-                   in
-                   Hashtbl.replace tbl e.recipient (prev + e.delta))
-            store.vote_log;
-          Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl [])
-        |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
-      in
-      store.karma_cache <- Some result;
-      result
+  with_lock store (fun () ->
+    match store.karma_cache with
+    | Some cached -> cached
+    | None ->
+        let tbl = Hashtbl.create 64 in
+        Hashtbl.iter
+          (fun key vote ->
+             match karma_event_of_vote store key vote with
+             | None -> ()
+             | Some (e : karma_event) ->
+                 let prev =
+                   Hashtbl.find_opt tbl e.recipient
+                   |> Option.value ~default:0
+                 in
+                 Hashtbl.replace tbl e.recipient (prev + e.delta))
+          store.vote_log;
+        let result =
+          Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
+          |> List.sort (fun (_, a) (_, b) -> Int.compare b a)
+        in
+        store.karma_cache <- Some result;
+        result)
 
 (** Calculate karma (total peer upvotes) for an agent *)
 let get_agent_karma store ~agent_name =

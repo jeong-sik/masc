@@ -171,6 +171,72 @@ let test_exec_argv_user_and_workdir () =
        ())
 ;;
 
+(* Phase 4.1-h — [?stdin] is the third optional. When true, the argv
+   gains [-i] after [-w] (and after [--user]); the content itself is
+   never in the argv. Default is [false] (no [-i]). *)
+let test_exec_argv_stdin_only_emits_dash_i () =
+  let c = sample_container () in
+  check
+    (list string)
+    "stdin=true → -i after the keyless slot"
+    [ "docker"
+    ; "exec"
+    ; "-i"
+    ; Keeper_container_name.to_string c
+    ; "sh"
+    ; "-lc"
+    ; "cat > /tmp/x"
+    ]
+    (Docker_client_real.exec_argv ~stdin:true ~container:c ~cmd:"cat > /tmp/x" ())
+;;
+
+let test_exec_argv_stdin_false_omits_dash_i () =
+  let c = sample_container () in
+  let argv =
+    Docker_client_real.exec_argv ~stdin:false ~container:c ~cmd:"echo hi" ()
+  in
+  check bool "stdin=false ⇒ no -i" false (List.mem "-i" argv);
+  check
+    (list string)
+    "stdin=false matches the plain shape"
+    [ "docker"; "exec"; Keeper_container_name.to_string c; "sh"; "-lc"; "echo hi" ]
+    argv
+;;
+
+let test_exec_argv_user_workdir_stdin_full_order () =
+  let c = sample_container () in
+  check
+    (list string)
+    "user + workdir + stdin → --user before -w before -i"
+    [ "docker"
+    ; "exec"
+    ; "--user"
+    ; "1000:1000"
+    ; "-w"
+    ; "/work"
+    ; "-i"
+    ; Keeper_container_name.to_string c
+    ; "sh"
+    ; "-lc"
+    ; "tee /tmp/x"
+    ]
+    (Docker_client_real.exec_argv
+       ~user:(1000, 1000)
+       ~workdir:"/work"
+       ~stdin:true
+       ~container:c
+       ~cmd:"tee /tmp/x"
+       ())
+;;
+
+let test_exec_argv_stdin_default_is_false () =
+  (* Omitting [?stdin] altogether is the same as [~stdin:false]: the
+     default is "no -i", because most exec calls don't pipe stdin. *)
+  let c = sample_container () in
+  let argv = Docker_client_real.exec_argv ~container:c ~cmd:"echo hi" () in
+  check bool "no ?stdin ⇒ no -i" false (List.mem "-i" argv)
+;;
+
 let test_ps_query_placeholder () =
   match Docker_client_real.ps_query ~labels:[] with
   | Error Docker_client.Cleanup_failed -> ()
@@ -469,6 +535,18 @@ let () =
             "user + workdir (--user before -w)"
             `Quick
             test_exec_argv_user_and_workdir
+        ] )
+    ; ( "exec_argv ?stdin (pure, Phase 4.1-h)"
+      , [ test_case "stdin=true ⇒ -i present" `Quick test_exec_argv_stdin_only_emits_dash_i
+        ; test_case
+            "stdin=false ⇒ no -i + plain shape"
+            `Quick
+            test_exec_argv_stdin_false_omits_dash_i
+        ; test_case
+            "user + workdir + stdin: --user before -w before -i"
+            `Quick
+            test_exec_argv_user_workdir_stdin_full_order
+        ; test_case "?stdin default is false" `Quick test_exec_argv_stdin_default_is_false
         ] )
     ; ( "parse_security_options (pure, Phase 3e c)"
       , [ test_case "array of strings" `Quick test_parse_security_options_array

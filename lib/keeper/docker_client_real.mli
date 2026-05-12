@@ -59,14 +59,20 @@
 
 include Docker_client.S
 
-(** [exec_argv ?user ?workdir ~container ~cmd ()] is the pure [docker
-    exec] argv builder used by {!exec}. Exposed for unit-testing the
-    argv shape (option presence, [--user] before [-w] ordering)
-    without spawning a daemon. Trailing [unit] for the same
-    optional-erasure reason as {!exec}. *)
+(** [exec_argv ?user ?workdir ?stdin ~container ~cmd ()] is the pure
+    [docker exec] argv builder used by {!exec}. Exposed for unit-testing
+    the argv shape (option presence, [--user] before [-w] before [-i]
+    ordering) without spawning a daemon.
+
+    [?stdin] is a [bool], not the content — the *content* is never part
+    of the argv (it is piped on stdin at spawn time by {!exec}); the
+    pure builder only needs to know whether to emit [-i]. Defaults to
+    [false]. Trailing [unit] for the same optional-erasure reason as
+    {!exec}. *)
 val exec_argv
   :  ?user:int * int
   -> ?workdir:string
+  -> ?stdin:bool
   -> container:Keeper_container_name.t
   -> cmd:string
   -> unit

@@ -134,6 +134,41 @@ let gated_argv_with_status_split ?timeout_sec ~(summary : string) argv =
   loop max_eintr_retries
 ;;
 
+(* Mirror of {!gated_argv_with_status_split} for the stdin-piped case
+   (RFC-0070 Phase 4.1-h). Wraps
+   [Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split] and reuses
+   the same EINTR-retry contract — a [WEXITED 127] whose combined
+   stdout/stderr mentions the EINTR marker is retried up to
+   [max_eintr_retries] times. Used by {!exec} when [?stdin] is
+   [Some _]. *)
+let gated_argv_with_stdin_and_status_split
+      ?timeout_sec
+      ~(summary : string)
+      ~(stdin_content : string)
+      argv
+  =
+  let timeout_sec =
+    match timeout_sec with
+    | Some t -> t
+    | None -> default_timeout_sec ()
+  in
+  let rec loop attempts_left =
+    let status, stdout, stderr =
+      Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+        ~actor:`System_task_sandbox
+        ~raw_source:(String.concat " " argv)
+        ~summary
+        ~timeout_sec
+        ~stdin_content
+        argv
+    in
+    if attempts_left > 0 && is_eintr_127 status (stdout ^ "\n" ^ stderr)
+    then loop (attempts_left - 1)
+    else status, stdout, stderr
+  in
+  loop max_eintr_retries
+;;
+
 (* ── Functions ───────────────────────────────────────────────── *)
 
 let ps_query ~labels:_ = placeholder
@@ -142,8 +177,12 @@ let ps_query ~labels:_ = placeholder
    argv shape is unit-testable without a daemon (RFC-0070's pure/edge
    split — deterministic argv construction here, daemon spawn in
    {!exec}). [--user] precedes [-w] to match the order
-   [keeper_turn_sandbox_runtime] currently emits. *)
-let exec_argv ?user ?workdir ~container ~cmd () =
+   [keeper_turn_sandbox_runtime] currently emits.
+
+   [?stdin] is a [bool], not the content itself — the *content* is
+   never part of the argv (it is piped on stdin by {!exec}), so the
+   pure builder only needs to know whether to emit the [-i] flag. *)
+let exec_argv ?user ?workdir ?(stdin = false) ~container ~cmd () =
   let user_args =
     match user with
     | None -> []
@@ -154,18 +193,34 @@ let exec_argv ?user ?workdir ~container ~cmd () =
     | None -> []
     | Some w -> [ "-w"; w ]
   in
+  let stdin_args = if stdin then [ "-i" ] else [] in
   [ "docker"; "exec" ]
   @ user_args
   @ workdir_args
+  @ stdin_args
   @ [ Keeper_container_name.to_string container; "sh"; "-lc"; cmd ]
 ;;
 
-let exec ?user ?workdir ~container ~cmd () =
-  let argv = exec_argv ?user ?workdir ~container ~cmd () in
+let exec ?user ?workdir ?stdin ~container ~cmd () =
+  let argv =
+    exec_argv ?user ?workdir ~stdin:(Option.is_some stdin) ~container ~cmd ()
+  in
   (* Gated spawn returns [(status, stdout, stderr)]; on spawn failure
      the status is synthesized as [WEXITED 127] (see 3b-iv.2.1 commit
-     on rm). *)
-  map_status_to_exec_result (gated_argv_with_status_split ~summary:"keeper docker exec" argv)
+     on rm). [?stdin] toggles between the no-stdin gate
+     ({!gated_argv_with_status_split}) and the stdin-piped gate
+     ({!gated_argv_with_stdin_and_status_split}) — both share the same
+     EINTR-retry contract. *)
+  match stdin with
+  | None ->
+    map_status_to_exec_result
+      (gated_argv_with_status_split ~summary:"keeper docker exec" argv)
+  | Some stdin_content ->
+    map_status_to_exec_result
+      (gated_argv_with_stdin_and_status_split
+         ~summary:"keeper docker exec (stdin-piped)"
+         ~stdin_content
+         argv)
 ;;
 
 let run plan =

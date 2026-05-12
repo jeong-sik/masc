@@ -16,6 +16,7 @@ module type S = sig
   val exec
     :  ?user:int * int
     -> ?workdir:string
+    -> ?stdin:string
     -> container:Keeper_container_name.t
     -> cmd:string
     -> unit

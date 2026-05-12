@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-04-20
+last_verified: 2026-05-12
 code_refs:
   - lib/exec/exec_semantic.ml
   - lib/exec/exec_buffer.ml

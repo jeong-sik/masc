@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-04-17
+last_verified: 2026-05-12
 code_refs:
   - lib/cascade/cascade_events.ml
   - lib/cascade/cascade_event_bridge.ml

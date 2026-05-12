@@ -37,7 +37,10 @@ let current_mode () =
   | None ->
     let m =
       match Sys.getenv_opt env_var_name with
-      | None -> Enforce
+      (* Truly-unset env var → [Observe], matching the .mli contract and
+         [parse_mode ""]. The module's stance is "default to Observe,
+         never silently Off, only Enforce when explicitly requested". *)
+      | None -> Observe
       | Some raw -> parse_mode raw
     in
     mode_cache := Some m;
@@ -46,34 +49,34 @@ let current_mode () =
 
 (* RFC-0058 Phase 5.2b — lazy declarative-config cache.
 
-   The active cascade_config is read once from
-   [Config_dir_resolver.cascade_path_candidate], cached, and reused for
-   every subsequent provider→budget lookup. A failed parse (missing
-   file, pre-5-layer schema, invalid TOML) caches as [None] — callers
-   fall back to [cloud_fast], the same conservative default the
-   deleted hardcoded match used for unknown ids. *)
+   A *successful* parse of [Config_dir_resolver.cascade_path_candidate]
+   is cached and reused for every subsequent provider→budget lookup. A
+   *failed* parse (missing file during a boot race, transient permission
+   error, half-written TOML mid-deploy, pre-5-layer schema) is NOT
+   cached — the next call re-attempts so a recovered config takes effect
+   without a restart. Until a parse succeeds, [budget_for_provider_id]
+   falls back to [cloud_fast] (the conservative default the deleted
+   hardcoded match used for unknown ids). Cost of the no-cache-on-error
+   policy: one TOML parse per [budget_for_provider_id] call during an
+   outage window — acceptable, as these calls are per-attempt (not
+   per-token) and most callers thread an explicit [?cfg] anyway. *)
 let cfg_cache : Cascade_declarative_types.cascade_config option ref = ref None
-let cfg_loaded : bool ref = ref false
 
 let load_active_cfg () : Cascade_declarative_types.cascade_config option =
-  if !cfg_loaded
-  then !cfg_cache
-  else (
+  match !cfg_cache with
+  | Some _ as cached -> cached
+  | None ->
     let path = Config_dir_resolver.cascade_path_candidate () in
-    let parsed =
-      match Cascade_declarative_parser.parse_file path with
-      | Error _ -> None
-      | Ok cfg -> Some cfg
-    in
-    cfg_cache := parsed;
-    cfg_loaded := true;
-    parsed)
+    (match Cascade_declarative_parser.parse_file path with
+     | Ok cfg ->
+       cfg_cache := Some cfg;
+       Some cfg
+     | Error _ -> None)
 ;;
 
 let reset_cache_for_test () =
   mode_cache := None;
-  cfg_cache := None;
-  cfg_loaded := false
+  cfg_cache := None
 ;;
 
 let budget_of_class

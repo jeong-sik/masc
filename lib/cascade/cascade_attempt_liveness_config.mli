@@ -18,7 +18,11 @@
 
     [budget_for_provider_id] resolves the per-provider liveness budget
     by reading [\[providers.<id>.liveness\] class] from
-    [config/cascade.toml]. The cascade config is parsed once and cached.
+    [config/cascade.toml]. A *successful* parse is cached; a *failed*
+    parse is not cached and is re-attempted on the next call, so a
+    config that becomes available (or is repaired) after boot takes
+    effect without a restart. Until a parse succeeds the fallback is
+    [cloud_fast].
 
     Phase 5.2b deleted the hardcoded
     [match provider_id with "codex_cli" | "claude_code" | …] block that

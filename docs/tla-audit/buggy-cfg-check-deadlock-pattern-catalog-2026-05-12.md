@@ -6,7 +6,7 @@
 
 iter 97 #15008 fixed `OperatorPauseBroadcast-buggy.cfg`'s deadlock-masking-property quirk by adding `CHECK_DEADLOCK FALSE`. The iter 87 OPB R-12 audit (#14977) had described this as one instance of a family ("KMC-buggy `TypeOK`-first 같은 family"). Question: how many *other* instances are there in `specs/keeper-state-machine/`, and are any silently failing to surface their intended property violation?
 
-This memo enumerates all 32 `*-buggy.cfg` files in the keeper-state-machine spec directory, classifies each one's `NextBuggy` *shape*, cross-checks the `CHECK_DEADLOCK` setting in its cfg, and identifies the residual risk surface. It is comments-only / docs-only — no spec or cfg edits.
+This memo enumerates all 31 `*-buggy.cfg` files in the keeper-state-machine spec directory, classifies each one's `NextBuggy` *shape*, cross-checks the `CHECK_DEADLOCK` setting in its cfg, and identifies the residual risk surface. It is comments-only / docs-only — no spec or cfg edits.
 
 ## Method
 
@@ -17,7 +17,7 @@ For each `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
    - **add-bug** — `NextBuggy == Next \/ BugAction` (or `\/ Next \/ BugAction(...)`). Adds a bug-only transition on top of the clean transition set. *Cannot* deadlock if `Next` itself is deadlock-free (the bug transition only *adds* enabled actions).
    - **replace-bug** — `NextBuggy` is a *redefinition* (its disjuncts do not include `Next`). May drop or substitute clean actions. *Can* deadlock if a clean action that prevented stuck states is dropped.
 
-## Inventory (32 cfgs)
+## Inventory (31 cfgs)
 
 ### Class A — `CHECK_DEADLOCK FALSE` + add-bug (safe; explicit option present but not strictly required)
 
@@ -32,7 +32,7 @@ For each `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
 | `KeeperToolSurface` | `Next \/ BugRequiredEscapesValidate` |
 | `KeeperTurnCycle` | `Next \/ BugSelectingWithoutToolPolicy` |
 
-Eight specs. The `CHECK_DEADLOCK FALSE` is *defensive belt-and-braces* here — the option matters only if `Next` itself can stutter, which would already be a bug in the clean spec.
+Eight specs. The `CHECK_DEADLOCK FALSE` is *defensive belt-and-braces* here — the option matters only if `Next` itself can reach a deadlock (no enabled actions), which would already be a bug in the clean spec.
 
 ### Class B — `CHECK_DEADLOCK FALSE` + replace-bug (safe; option load-bearing)
 
@@ -95,7 +95,7 @@ One spec. The R-12.a fix moved this entry into Class B. **At the time this memo 
 | C | `CHECK_DEADLOCK FALSE` | no `NextBuggy` | 8 | safe (different shape) |
 | D | *(missing)* | add-bug | 6 | likely-safe, unverified |
 | E | *(missing)* | replace-bug | 0 | empty after iter 97 |
-| **Total** | | | **32** | |
+| **Total** | | | **31** | |
 
 ## Findings
 

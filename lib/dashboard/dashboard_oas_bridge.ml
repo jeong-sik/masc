@@ -416,7 +416,9 @@ let summary ?provider ?limit () =
       let cancels =
         List.fold_left
           (fun acc (s, _) ->
-            match s.status with Cancelled _ -> acc + 1 | _ -> acc)
+            match s.status with
+            | Cancelled _ -> acc + 1
+            | Success | Error _ | Timeout -> acc)
           0 xs
       in
       {

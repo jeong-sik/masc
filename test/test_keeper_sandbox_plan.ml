@@ -25,24 +25,24 @@ let plan_error_t = testable plan_error_pp plan_error_eq
 (* ── Validation: empty inputs rejected ────────────────────────── *)
 
 let test_empty_meta_rejected () =
-  let result =
+  let actual =
     Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"" ~cmd:"ls"
   in
   check
     (result plan_t plan_error_t)
     "empty meta → Invalid_meta"
     (Error (Keeper_sandbox_plan.Invalid_meta ""))
-    result
+    actual
 
 let test_empty_cmd_rejected () =
-  let result =
+  let actual =
     Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"k" ~cmd:""
   in
   check
     (result plan_t plan_error_t)
     "empty cmd → Invalid_command"
     (Error (Keeper_sandbox_plan.Invalid_command ""))
-    result
+    actual
 
 (* ── Payload semantics: error carries offending value (Phase 3b-iii contract) ── *)
 

@@ -111,7 +111,7 @@ let failure_rate_of_batch entries =
         (fun e ->
           match e.Audit_log.outcome with
           | Audit_log.Failure _ -> true
-          | _ -> false)
+          | Audit_log.Success -> false)
         entries
     in
     float_of_int (List.length failures) /. float_of_int n

@@ -10,10 +10,13 @@
 \* at scripts/audit-tla-ml-line-refs.sh):
 \*
 \*   pending  : SMap from id to entry, holding submitted-but-unresolved
-\*              approval requests. Each entry carries either a resolver
-\*              (the [submit_and_await] case — see scope note below) or
-\*              an [on_resolution] callback (the [submit_pending] case),
-\*              recorded as [entry.resolver : ... Eio.Promise.u option].
+\*              approval requests. The two submit paths are represented
+\*              by two separate optional fields on the entry, exactly one
+\*              of which is populated:
+\*                - [entry.resolver : ... Eio.Promise.u option]
+\*                  — the [submit_and_await] case (Some r, on_resolution = None)
+\*                - [entry.on_resolution : (approval_decision -> unit) option]
+\*                  — the [submit_pending] case (resolver = None, on_resolution = Some f)
 \*   resolver : Eio.Promise resolver tied to a fiber blocked on
 \*              [Eio.Promise.await]. Resolving wakes the fiber.
 \*
@@ -27,10 +30,14 @@
 \* [submit_and_await] variant — `suspended_fibers` counts those fibers.
 \* The [submit_pending] variant has a different, weaker failure mode (a
 \* dropped [on_resolution] callback, not a permanently blocked fiber);
-\* it is out of scope here.  [expire_stale] handles BOTH (`match
-\* entry.resolver with Some r -> Eio.Promise.resolve r (Reject ...) |
-\* None -> f (Reject ...)`); the model abstracts only its effect on the
-\* suspended-fiber population.
+\* it is out of scope here.  [expire_stale] handles BOTH via two
+\* independent matches — `match entry.resolver with Some r ->
+\* Eio.Promise.resolve r (Reject ...) | None -> ()` and, separately,
+\* `match entry.on_resolution with Some f -> f (Reject ...) | None ->
+\* ()` (the two fields are never both populated: a [submit_pending]
+\* entry has resolver = None and on_resolution = Some f, so `resolver =
+\* None` does not imply a callback exists); the model abstracts only its
+\* effect on the suspended-fiber population.
 \*
 \* The boundary critique flagged this as a black-box area: a tool call
 \* submits an approval request and gets suspended on
@@ -120,16 +127,22 @@ Done ==
 \* ── Bug action (only in SpecBuggy) ─────────────────────────────
 
 \* Models the regression where [expire_stale] removes the pending
-\* entry of a [submit_and_await] request but forgets to call
-\* [Eio.Promise.resolve resolver] — the suspended fiber stays blocked
-\* forever. In the OCaml runtime this is the path where a future
-\* refactor moves the [pending] cleanup before the
-\* [Eio.Promise.resolve resolver (Reject ...)] in [expire_stale]'s
-\* [Some resolver] branch, or otherwise drops the resolve.  (NB: an
-\* [entry.resolver = None] entry is a [submit_pending] request — it has
-\* NO suspended fiber, so dropping it does not produce the modelled
-\* harm; its weaker failure mode — a dropped [on_resolution] callback —
-\* is out of scope, see the header.)
+\* entry of a [submit_and_await] request but never resolves its
+\* promise — the suspended fiber stays blocked forever.  In the OCaml
+\* runtime, [expire_stale] *already* removes stale entries from
+\* [pending] (via [atomic_update]) before it resolves/invokes anything,
+\* capturing each removed [(id, entry)] in [stale_ref] precisely so it
+\* can still call [Eio.Promise.resolve resolver (Reject ...)] (and
+\* [entry.on_resolution]) afterwards.  The modelled hazard is therefore
+\* NOT a reordering of removal vs resolve (removal is already first by
+\* design) — it is a future refactor that loses or skips the captured
+\* entry/resolver in that post-removal step (the [Some resolver] branch
+\* dropped, [stale_ref] mis-built), leaving the entry gone from
+\* [pending] with the resolve never run.  (NB: an [entry.resolver =
+\* None] entry is a [submit_pending] request — it has NO suspended
+\* fiber, so dropping it does not produce the modelled harm; its weaker
+\* failure mode — a dropped [on_resolution] callback — is out of scope,
+\* see the header.)
 ExpireStaleNoResolve ==
     /\ pending_count > 0
     /\ pending_count' = pending_count - 1

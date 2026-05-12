@@ -41,11 +41,6 @@ ALLOWLIST=(
   # pretty form or normalize.
   "lib/tool_keeper.ml"
 
-  # Tier C: local `json_ok` helper, same sibling-include pattern as
-  # tool_local_runtime_core. Operator subsystem will be migrated in
-  # an independent PR scoped to lib/operator/.
-  "lib/operator/operator_control_snapshot.ml"
-
   # Single-shot health endpoint, no caller chain. De-prioritized — safe
   # to migrate but no test/wire impact.
   "lib/http_server_eio.ml"

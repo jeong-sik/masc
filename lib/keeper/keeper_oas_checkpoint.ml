@@ -35,6 +35,12 @@ let persist_checkpoint ~dir ~session_id (ckpt : Agent_sdk.Checkpoint.t)
          Printf.sprintf "checkpoint persist failed for %s: %s" session_id err)
       (Fs_compat.save_file_atomic path (Agent_sdk.Checkpoint.to_string ckpt))
   with
+  (* CancelledNeverAbsorbed (KeeperOASAdvanced.tla): re-raise [Cancelled]
+     before the catch-all so a cancelled checkpoint fiber propagates the
+     cancel to its parent switch instead of returning a normal [Error]
+     result.  Absorbing it would create the spec's "zombie" — the parent
+     believes the child completed cleanly while the cancel signal is lost.
+     Regression guard: test/test_oas_checkpoint_cancelled_never_absorbed.ml *)
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Error (Printf.sprintf "checkpoint persist failed for %s: %s"

@@ -182,12 +182,10 @@
   meta_cognition_interpret
   meta_cognition_digest
   tool_task_schemas
+  tool_board_schemas
+  tool_shard_schemas
   board_core_classify
   board_core_payload
-  ide_annotation_types
-  ide_annotations
-  ide_region_tracker
-  ide_meta_sync
   server_ide_http
   lsp_process_manager
   lsp_message_router
@@ -318,6 +316,7 @@
    masc_coord
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
+   masc_mcp.ide
    ;; Dashboard utilities (extracted sub-library)
    masc_mcp.dashboard_utils
    ;; Dashboard API wire contracts (extracted sub-library)

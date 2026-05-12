@@ -447,9 +447,8 @@ let agent_voices_json config =
        config.tts.agent_voices)
 
 let public_json config =
-  `Assoc
+  Tool_args.ok_assoc
     [
-      ("status", `String "ok");
       ( "tts",
         `Assoc
           [

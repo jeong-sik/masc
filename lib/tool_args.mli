@@ -68,8 +68,15 @@ val error_response : string -> string
 (** [{"status":"error","error_code":"…","message":"…"}] *)
 val error_response_typed : code:error_code -> string -> string
 
-(** [{"status":"ok", <fields>}] *)
+(** [{"status":"ok", <fields>}] as a serialized JSON string. *)
 val ok_response : (string * Yojson.Safe.t) list -> string
+
+(** [{"status":"ok", <fields>}] as a [`Assoc] node (no serialization).
+    Use when embedding the envelope in a larger composed response — HTTP
+    body builders, [(Yojson.Safe.t, string) result] pipelines, etc.
+    Identical field-order semantics to {!ok_response}: [status] is
+    prepended to the [`Assoc] head. *)
+val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 
 (** {1 Tool_result.t Helpers}
 

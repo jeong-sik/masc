@@ -130,9 +130,8 @@ let mint ~base_path ~host ~port ~agent_name ~role () =
             })
 
 let to_yojson report =
-  `Assoc
+  Tool_args.ok_assoc
     [
-      ("status", `String "ok");
       ("base_path", `String report.base_path);
       ("auth_config_path", `String report.auth_config_path);
       ("auth_change", `String (auth_change_to_string report.auth_change));

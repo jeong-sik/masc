@@ -109,6 +109,15 @@ let error_response_typed ~code message =
 let ok_response fields =
   Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
+(** Build a JSON OK envelope as a [Yojson.Safe.t] (unserialized).  Use
+    when the caller needs the envelope as part of a larger composed
+    response — for example HTTP body builders that wrap multiple
+    sub-payloads, or [(Yojson.Safe.t, string) result] pipelines that
+    serialize at a later stage.  Same field-order guarantee as
+    [ok_response]: status is prepended to the head of the [`Assoc]. *)
+let ok_assoc fields : Yojson.Safe.t =
+  `Assoc (("status", `String "ok") :: fields)
+
 (** {1 Tool_result.t Helpers}
 
     These return structured [Tool_result.t] instead of [(bool * string)].

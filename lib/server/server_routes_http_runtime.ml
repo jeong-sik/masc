@@ -186,8 +186,7 @@ let make_health_json ?(listener = "http/1.1") request =
     else if keeper_config_unknown_key_count > 0 then "config_unknown_keys"
     else "none"
   in
-  `Assoc [
-    ("status", `String "ok");
+  Tool_args.ok_assoc [
     ("server", `String "masc-mcp");
     ("version", `String build.release_version);
     ("release_version", `String build.release_version);

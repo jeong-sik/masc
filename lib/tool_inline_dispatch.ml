@@ -183,8 +183,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
                  let updated = { s with last_seen = now } in
                  let others = List.filter (fun (x : Mcp_server_eio_governance.mcp_session_record) -> not (String.equal x.id session_id)) sessions in
                  save (updated :: others);
-                 Ok (`Assoc [
-                   ("status", `String "ok");
+                 Ok (Tool_args.ok_assoc [
                    ("session", Mcp_server_eio_governance.mcp_session_to_json updated);
                  ]))
         | Mcp_session.List ->

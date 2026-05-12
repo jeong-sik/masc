@@ -337,6 +337,25 @@ let stage_to_witness : decision_stage -> packed_decision_stage = function
   | Decision_tool_policy_selected -> Packed Decision_tool_policy_selected
 ;;
 
+(* Decision stages valid as ADVANCE targets within a turn.
+   Excludes [Decision_undecided] (the initial state, set only by
+   [mark_turn_started] / [mark_sdk_turn_started]).  The 3 spec-forbidden
+   [<active>_to_undecided] transitions are unrepresentable through this
+   type, replacing the prior runtime [invalid_arg] inside
+   [set_turn_decision_stage]. *)
+type decision_stage_active =
+  | Decision_active_guard_ok
+  | Decision_active_gate_rejected
+  | Decision_active_tool_policy_selected
+
+let decision_stage_active_to_packed
+    : decision_stage_active -> packed_decision_stage
+  = function
+  | Decision_active_guard_ok -> Packed Decision_guard_ok
+  | Decision_active_gate_rejected -> Packed Decision_gate_rejected
+  | Decision_active_tool_policy_selected -> Packed Decision_tool_policy_selected
+;;
+
 (* Diagnostic label for invalid-transition error messages.  Mirrors
    [decision_stage]; constructor changes will fail compilation here. *)
 let packed_decision_stage_label : packed_decision_stage -> string = function
@@ -1320,48 +1339,27 @@ let validate_turn_phase_transition ~from ~to_ =
               (packed_turn_phase_label to_)))
 ;;
 
-let set_turn_decision_stage ~base_path name decision_stage =
-  let target_packed = stage_to_witness decision_stage in
+let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_active) =
+  (* Spec invariant: the 3 [<active>_to_undecided] transitions are forbidden
+     within a turn.  Previously enforced at runtime via [invalid_arg] inside
+     a 16-pair match; now unrepresentable through the [decision_stage_active]
+     input type, so the matrix collapses to a simple equality check.  All
+     12 remaining (from, to) pairs (4 from-states × 3 non-Undecided targets)
+     share identical action: idempotent on equality, otherwise replace.
+     [Decision_transition] (module above) enumerates the 9 valid cross-state
+     transitions; the GADT remains available for future per-transition
+     dispatch but is not needed here since this setter has no per-pair
+     side effects. *)
+  let target_packed = decision_stage_active_to_packed decision_stage in
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
-      match obs.decision_stage, target_packed with
-      | Packed Decision_undecided, Packed Decision_undecided -> obs
-      | Packed Decision_undecided, Packed Decision_guard_ok ->
+      if obs.decision_stage = target_packed
+      then obs
+      else (
         changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_undecided, Packed Decision_gate_rejected ->
-        changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_undecided, Packed Decision_tool_policy_selected ->
-        changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_guard_ok, Packed Decision_guard_ok -> obs
-      | Packed Decision_guard_ok, Packed Decision_gate_rejected ->
-        changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_guard_ok, Packed Decision_tool_policy_selected ->
-        changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_gate_rejected, Packed Decision_gate_rejected -> obs
-      | Packed Decision_gate_rejected, Packed Decision_guard_ok ->
-        changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_gate_rejected, Packed Decision_tool_policy_selected ->
-        changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_tool_policy_selected, Packed Decision_tool_policy_selected -> obs
-      | Packed Decision_tool_policy_selected, Packed Decision_guard_ok ->
-        changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_tool_policy_selected, Packed Decision_gate_rejected ->
-        changed := true;
-        { obs with decision_stage = target_packed }
-      | Packed Decision_guard_ok, Packed Decision_undecided
-      | Packed Decision_gate_rejected, Packed Decision_undecided
-      | Packed Decision_tool_policy_selected, Packed Decision_undecided ->
-        invalid_arg "decision_stage transition to undecided is not valid within a turn"));
+        { obs with decision_stage = target_packed })));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 

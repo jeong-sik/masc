@@ -942,7 +942,7 @@ let run_keeper_cycle
                   Keeper_registry.set_turn_decision_stage
                     ~base_path:config.base_path
                     meta.name
-                    Keeper_registry.Decision_guard_ok
+                    Keeper_registry.Decision_active_guard_ok
                 | _ -> ());
                let last_execution = ref initial_execution in
                let last_timeout_budget : oas_timeout_budget_resolution option ref =

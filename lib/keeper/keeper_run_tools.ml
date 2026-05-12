@@ -1559,7 +1559,7 @@ let prepare_agent_setup
                  Keeper_registry.set_turn_decision_stage
                    ~base_path:config.base_path
                    meta.name
-                   Keeper_registry.Decision_tool_policy_selected;
+                   Keeper_registry.Decision_active_tool_policy_selected;
                  Keeper_registry.set_turn_cascade_state
                    ~base_path:config.base_path
                    meta.name

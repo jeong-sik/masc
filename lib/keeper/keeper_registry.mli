@@ -213,6 +213,20 @@ type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decisi
 val witness_to_stage : 'a decision_stage_witness -> decision_stage
 val stage_to_witness : decision_stage -> packed_decision_stage
 
+(** Decision stages valid as ADVANCE targets within a turn.  Excludes
+    [Decision_undecided] (the initial state set only by [mark_turn_started]
+    / [mark_sdk_turn_started]).  The 3 spec-forbidden [<active>_to_undecided]
+    transitions are unrepresentable through this type, replacing the prior
+    runtime [invalid_arg] inside [set_turn_decision_stage]. *)
+type decision_stage_active =
+  | Decision_active_guard_ok
+  | Decision_active_gate_rejected
+  | Decision_active_tool_policy_selected
+
+val decision_stage_active_to_packed
+  :  decision_stage_active
+  -> packed_decision_stage
+
 (** Diagnostic label using the constructor name (e.g.
     ["Decision_guard_ok"]).  Used by [validate_decision_transition] for
     [Invalid_argument] messages. *)
@@ -516,9 +530,12 @@ val mark_sdk_turn_started : base_path:string -> string -> unit
     No-op if no turn is active or no pending measurement exists. *)
 val mark_turn_measurement : base_path:string -> string -> unit
 
-(** Advance the live turn's projected decision stage. No-op if idle. *)
+(** Advance the live turn's projected decision stage. No-op if idle.
+    Input type [decision_stage_active] excludes [Decision_undecided];
+    the 3 spec-forbidden [<active>_to_undecided] transitions are therefore
+    unrepresentable at the call site (replaces prior runtime [invalid_arg]). *)
 val set_turn_decision_stage :
-  base_path:string -> string -> decision_stage -> unit
+  base_path:string -> string -> decision_stage_active -> unit
 
 (** Advance the live turn's projected cascade state. No-op if idle.
     Sets [turn_phase] to [Turn_executing] for [Cascade_trying] and to

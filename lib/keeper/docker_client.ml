@@ -30,4 +30,8 @@ module type S = sig
   val info_security_options : unit -> (string list, sandbox_error) result
 
   val image_present : image:string -> (unit, sandbox_error) result
+
+  val run_detached
+    :  Keeper_sandbox_session_plan.t
+    -> (Keeper_container_name.t, sandbox_error) result
 end

@@ -38,6 +38,16 @@ let image_present_queue
   : (string * (unit, Docker_client.sandbox_error) result) Queue.t
   = Queue.create ()
 
+(* [run_detached]'s success value is mechanical ([plan.container_name]),
+   so this queue is for *overriding* — inject an [Error] (or a
+   different [Ok name]) when a test needs the spawn to fail. An empty
+   queue ⇒ the deterministic [Ok plan.container_name], NOT a fail-closed
+   error (deliberate deviation from the other queues: there is nothing
+   to "expect" on the happy path). *)
+let run_detached_queue
+  : (Keeper_container_name.t, Docker_client.sandbox_error) result Queue.t
+  = Queue.create ()
+
 (* ── Injection API ──────────────────────────────────────────── *)
 
 let inject_run plan response = Queue.add (plan, response) run_queue
@@ -59,6 +69,8 @@ let inject_info_security_options response =
 let inject_image_present ~image response =
   Queue.add (image, response) image_present_queue
 ;;
+
+let inject_run_detached response = Queue.add response run_detached_queue
 
 (* ── Docker_client.S implementation ─────────────────────────── *)
 
@@ -127,6 +139,16 @@ let image_present ~image =
     response
   | _ -> Error Docker_client.Daemon_unreachable
 
+let run_detached plan =
+  (* Override-or-default: a queued response (typically an [Error] for a
+     failure test) wins; otherwise the deterministic [Ok
+     plan.container_name] — the mock "spawns" by handing back the name
+     the plan already determines, no daemon involved. *)
+  match Queue.take_opt run_detached_queue with
+  | Some response -> response
+  | None -> Ok (Keeper_sandbox_session_plan.container_name plan)
+;;
+
 (* ── Fixture lifecycle ──────────────────────────────────────── *)
 
 let reset () =
@@ -135,7 +157,8 @@ let reset () =
   Queue.clear ps_query_queue;
   Queue.clear rm_queue;
   Queue.clear info_security_options_queue;
-  Queue.clear image_present_queue
+  Queue.clear image_present_queue;
+  Queue.clear run_detached_queue
 
 let pending_calls () =
   Queue.length run_queue
@@ -144,3 +167,4 @@ let pending_calls () =
   + Queue.length rm_queue
   + Queue.length info_security_options_queue
   + Queue.length image_present_queue
+  + Queue.length run_detached_queue

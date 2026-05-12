@@ -81,3 +81,16 @@ val exec_argv
 val parse_security_options
   :  string
   -> (string list, Docker_client.sandbox_error) result
+
+(** [run_detached_argv plan ~seccomp_args ~owner_pid ~started_at] is
+    the pure [docker run -d ...] argv builder behind {!run_detached}:
+    it assembles the argv from [plan] plus the spawn-time bits the plan
+    omits (resolved seccomp args, owner PID, started-at clock). Exposed
+    so the argv shape is unit-testable without writing files / probing
+    a daemon / reading the clock. *)
+val run_detached_argv
+  :  Keeper_sandbox_session_plan.t
+  -> seccomp_args:string list
+  -> owner_pid:int
+  -> started_at:float
+  -> string list

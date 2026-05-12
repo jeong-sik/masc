@@ -46,6 +46,29 @@ let sample_container () =
     ~suffix:(Printf.sprintf "test-pid%d-%d" pid nonce)
 ;;
 
+(* A session plan with a per-invocation-unique meta_name so the derived
+   container name cannot collide with a real keeper's. *)
+let sample_session_plan () =
+  let suffix = Printf.sprintf "test-pid%d-%d" (Unix.getpid ()) (Random.bits ()) in
+  match
+    Keeper_sandbox_session_plan.of_request
+      ~turn_id:3
+      ~attempt:0
+      ~meta_name:suffix
+      ~image:"ubuntu:22.04"
+      ~container_root:"/keeper/sess"
+      ~base_path:"/srv/masc"
+      ~container_kind:"turn"
+      ~network_mode:Keeper_types.Network_none
+      ~host_root:"/var/masc/sess"
+      ~uid:4321
+      ~gid:8765
+      ()
+  with
+  | Ok p -> p
+  | Error _ -> failwith "test fixture: session of_request failed"
+;;
+
 (* ── Each S function returns the typed placeholder ──────────── *)
 
 (* Phase 3b-iv.2.3 — run is no longer a placeholder. It spawns
@@ -280,6 +303,78 @@ let test_image_present_returns_typed () =
     fail "image_present should only surface Ok | Image_pull_failed | Daemon_unreachable"
 ;;
 
+(* Phase 3e-a — [run_detached_argv] is the pure argv builder behind
+   [run_detached]. Deterministic given (plan, seccomp_args, owner_pid,
+   started_at): assert the structural shape — the [run -d --rm --name]
+   prefix, the two spawn-time labels carrying the passed pid/clock, the
+   passed seccomp args, the plan's mounts as [-v], the hardening flags,
+   and the trailing [image; sh; -lc; startup]. Config-driven values
+   (ulimits/pids/memory/tmpfs) are not asserted byte-for-byte — that
+   would just re-read the config the impl reads. *)
+let rec ends_with suffix lst =
+  let ln = List.length lst and sn = List.length suffix in
+  if sn > ln then false
+  else if sn = ln then List.equal String.equal suffix lst
+  else (match lst with _ :: tl -> ends_with suffix tl | [] -> false)
+;;
+
+let test_run_detached_argv_shape () =
+  let plan = sample_session_plan () in
+  let argv =
+    Docker_client_real.run_detached_argv
+      plan
+      ~seccomp_args:[ "--security-opt"; "seccomp=/tmp/test-profile.json" ]
+      ~owner_pid:424242
+      ~started_at:1234.5
+  in
+  let name = Keeper_container_name.to_string (Keeper_sandbox_session_plan.container_name plan) in
+  (* prefix: ...; "run"; "-d"; "--rm"; "--name"; <name>; ... *)
+  let rec has_run_prefix = function
+    | "run" :: "-d" :: "--rm" :: "--name" :: n :: _ -> String.equal n name
+    | _ :: tl -> has_run_prefix tl
+    | [] -> false
+  in
+  check bool "argv has `run -d --rm --name <derived>`" true (has_run_prefix argv);
+  check bool "owner_pid label = passed pid" true
+    (List.mem "masc.mcp.owner_pid=424242" argv);
+  check bool "started_at label = %.3f of passed clock" true
+    (List.mem "masc.mcp.started_at=1234.500" argv);
+  check bool "the 7 deterministic labels are present (component)" true
+    (List.mem "masc.mcp.component=keeper-sandbox" argv);
+  check bool "passed seccomp args spliced in" true
+    (List.mem "seccomp=/tmp/test-profile.json" argv);
+  check bool "hardening: --cap-drop=ALL" true (List.mem "--cap-drop=ALL" argv);
+  check bool "hardening: no-new-privileges" true (List.mem "no-new-privileges" argv);
+  List.iter
+    (fun m -> check bool (Printf.sprintf "mount %S present as -v arg" m) true (List.mem m argv))
+    (Keeper_sandbox_session_plan.mounts plan);
+  check bool "ends with [image; sh; -lc; startup_command]" true
+    (ends_with
+       [ Keeper_sandbox_session_plan.image plan
+       ; "sh"
+       ; "-lc"
+       ; Keeper_sandbox_session_plan.startup_command plan
+       ]
+       argv)
+;;
+
+let test_run_detached_returns_typed () =
+  (* Env may or may not have a docker daemon; the identity-file write
+     targets a real path under /var/masc/sess which likely does not
+     exist or is not writable on a CI box → Daemon_unreachable. With a
+     daemon + writable host_root the spawn could succeed → Ok name. Only
+     the typed contract is asserted. *)
+  match Docker_client_real.run_detached (sample_session_plan ()) with
+  | Ok _ -> () (* daemon present + identity files written + spawn ok *)
+  | Error Docker_client.Daemon_unreachable -> () (* identity-write failure / no daemon / spawn failure *)
+  | Error Docker_client.Image_pull_failed
+  | Error Docker_client.Container_oom
+  | Error Docker_client.Exec_timeout
+  | Error Docker_client.Probe_format_drift
+  | Error Docker_client.Cleanup_failed ->
+    fail "run_detached should only surface Ok <name> | Daemon_unreachable"
+;;
+
 (* ── Functor instantiation works with Real ───────────────────── *)
 
 (* Phase 3b-iv.2.3 — executor.execute_plan calls Real.run, which is
@@ -350,6 +445,13 @@ let () =
             "image_present → Ok | Image_pull_failed | Daemon_unreachable"
             `Quick
             test_image_present_returns_typed
+        ] )
+    ; ( "run_detached (Phase 3e a)"
+      , [ test_case "run_detached_argv: structural shape" `Quick test_run_detached_argv_shape
+        ; test_case
+            "run_detached → Ok <name> | Daemon_unreachable"
+            `Quick
+            test_run_detached_returns_typed
         ] )
     ; ( "Functor composition"
       , [ test_case

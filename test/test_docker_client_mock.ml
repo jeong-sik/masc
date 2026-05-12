@@ -30,6 +30,25 @@ let sample_container () =
     ~attempt:0
     ~suffix:"alice"
 
+let sample_session_plan () =
+  match
+    Keeper_sandbox_session_plan.of_request
+      ~turn_id:9
+      ~attempt:0
+      ~meta_name:"sess"
+      ~image:"ubuntu:22.04"
+      ~container_root:"/keeper/sess"
+      ~base_path:"/srv/masc"
+      ~container_kind:"turn"
+      ~network_mode:Keeper_types.Network_none
+      ~host_root:"/var/masc/sess"
+      ~uid:1
+      ~gid:1
+      ()
+  with
+  | Ok p -> p
+  | Error _ -> failwith "test fixture: session of_request"
+
 let sample_exec_result =
   Docker_response.
     { exit_code = 0; stdout = "ok"; stderr = "" }
@@ -225,6 +244,26 @@ let test_image_present_error_injection () =
   | Error Docker_client.Image_pull_failed -> ()
   | _ -> fail "expected Image_pull_failed"
 
+(* ── run_detached (Phase 3e a) ────────────────────────────────── *)
+
+let test_run_detached_default_returns_plan_name () =
+  setup ();
+  let plan = sample_session_plan () in
+  match Docker_client_mock.run_detached plan with
+  | Ok name ->
+    check bool "default = plan.container_name (no injection needed)" true
+      (Keeper_container_name.equal name (Keeper_sandbox_session_plan.container_name plan));
+    check int "no queue consumed" 0 (Docker_client_mock.pending_calls ())
+  | Error _ -> fail "expected Ok plan.container_name"
+
+let test_run_detached_error_injection () =
+  setup ();
+  Docker_client_mock.inject_run_detached (Error Docker_client.Daemon_unreachable);
+  match Docker_client_mock.run_detached (sample_session_plan ()) with
+  | Error Docker_client.Daemon_unreachable ->
+    check int "injection consumed" 0 (Docker_client_mock.pending_calls ())
+  | _ -> fail "expected the injected Daemon_unreachable"
+
 (* ── reset / pending_calls ────────────────────────────────────── *)
 
 let test_reset_clears_all_queues () =
@@ -236,7 +275,8 @@ let test_reset_clears_all_queues () =
   Docker_client_mock.inject_rm c (Ok ());
   Docker_client_mock.inject_info_security_options (Ok []);
   Docker_client_mock.inject_image_present ~image:"a:b" (Ok ());
-  check int "6 queued" 6 (Docker_client_mock.pending_calls ());
+  Docker_client_mock.inject_run_detached (Ok c);
+  check int "7 queued" 7 (Docker_client_mock.pending_calls ());
   Docker_client_mock.reset ();
   check int "reset clears everything" 0 (Docker_client_mock.pending_calls ())
 
@@ -285,6 +325,13 @@ let () =
             test_image_present_wrong_image_miss;
           test_case "Error injection round-trip" `Quick
             test_image_present_error_injection;
+        ] );
+      ( "run_detached",
+        [
+          test_case "default → plan.container_name (no injection)" `Quick
+            test_run_detached_default_returns_plan_name;
+          test_case "Error injection overrides default" `Quick
+            test_run_detached_error_injection;
         ] );
       ( "lifecycle",
         [ test_case "reset clears all queues" `Quick test_reset_clears_all_queues ] );

@@ -162,3 +162,124 @@ let image_present ~image =
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
     Error Docker_client.Image_pull_failed
 ;;
+
+(* ── run_detached (Phase 3e-a) ──────────────────────────────────
+   The session-spawn edge: writes the plan's identity_files, resolves
+   the seccomp choice (a daemon probe), appends the spawn-time
+   owner_pid / started_at labels, prepends docker_command_argv (), and
+   spawns [docker run -d --rm --name <derived> ...]. Returns the
+   plan's Container_name.t (deterministic — we already know the name;
+   no [docker inspect] round-trip needed for the name). *)
+
+let label_arg (k, v) = [ "--label"; k ^ "=" ^ v ]
+let env_arg (k, v) = [ "--env"; k ^ "=" ^ v ]
+
+let ulimit_arg (u : Keeper_sandbox_session_plan.ulimit) =
+  [ "--ulimit"; Printf.sprintf "%s=%d:%d" u.name u.soft u.hard ]
+;;
+
+let user_args = function
+  | None -> []
+  | Some (uid, gid) -> [ "--user"; Printf.sprintf "%d:%d" uid gid ]
+;;
+
+let workdir_args = function
+  | None -> []
+  | Some w -> [ "--workdir"; w ]
+;;
+
+(* Pure: assembles the [docker run -d] argv from the plan plus the
+   spawn-time bits the plan deliberately omits (resolved [seccomp_args],
+   [owner_pid], [started_at]). Separated from {!run_detached} so the argv
+   shape is unit-testable without writing files / probing a daemon /
+   reading the clock. Flag ordering follows
+   [keeper_turn_sandbox_runtime.start_container] closely; where it
+   differs it is only [-v]/[--workdir] interleaving, which docker treats
+   order-independently. *)
+let run_detached_argv
+      (plan : Keeper_sandbox_session_plan.t)
+      ~(seccomp_args : string list)
+      ~(owner_pid : int)
+      ~(started_at : float)
+  =
+  let module P = Keeper_sandbox_session_plan in
+  let edge_labels =
+    [ Keeper_sandbox_runtime.sandbox_owner_pid_label_key, string_of_int owner_pid
+    ; ( Keeper_sandbox_runtime.sandbox_started_at_label_key
+      , Printf.sprintf "%.3f" started_at )
+    ]
+  in
+  let read_only = if P.read_only_rootfs plan then [ "--read-only" ] else [] in
+  let network_args, _network_label =
+    Keeper_sandbox_runtime.docker_network_args (P.network_mode plan)
+  in
+  Keeper_sandbox_runtime.docker_command_argv ()
+  @ [ "run"; "-d"; "--rm"; "--name"; Keeper_container_name.to_string (P.container_name plan) ]
+  @ List.concat_map label_arg (P.labels plan @ edge_labels)
+  @ user_args (P.user plan)
+  @ List.concat_map env_arg (P.env_overrides plan)
+  @ List.concat_map ulimit_arg (P.ulimits plan)
+  @ read_only
+  @ [ "--tmpfs"; P.tmpfs_mount plan; "--cap-drop=ALL"; "--security-opt"; "no-new-privileges" ]
+  @ seccomp_args
+  @ [ "--pids-limit"; string_of_int (P.pids_limit plan); "--memory"; P.memory_limit plan ]
+  @ List.concat_map (fun v -> [ "-v"; v ]) (P.mounts plan)
+  @ workdir_args (P.workdir plan)
+  @ network_args
+  @ [ P.image plan; "sh"; "-lc"; P.startup_command plan ]
+;;
+
+let write_identity_files (plan : Keeper_sandbox_session_plan.t) =
+  (* Each (path, content): mkdir_p the parent then atomic-write. Any
+     failure means the identity mounts won't be valid, so the spawn
+     would produce a broken container — surface it as a typed error
+     rather than spawning anyway. [Daemon_unreachable] is the closest
+     existing variant ("cannot stand up a container"); a future RFC
+     could add a dedicated [Identity_setup_failed]. *)
+  let rec go = function
+    | [] -> Ok ()
+    | (path, content) :: rest ->
+      (match
+         (try
+            Fs_compat.mkdir_p (Filename.dirname path);
+            Fs_compat.save_file_atomic path content
+          with
+          | Sys_error msg | Unix.Unix_error (_, _, msg) -> Error msg)
+       with
+       | Ok () -> go rest
+       | Error _ -> Error Docker_client.Daemon_unreachable)
+  in
+  go (Keeper_sandbox_session_plan.identity_files plan)
+;;
+
+let run_detached (plan : Keeper_sandbox_session_plan.t) =
+  match write_identity_files plan with
+  | Error _ as err -> err
+  | Ok () ->
+    let ensure_timeout =
+      Env_config_exec_timeout.timeout_sec ~caller:Env_config_exec_timeout.Turn_sandbox ()
+    in
+    (match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec:ensure_timeout with
+     | Error _ ->
+       (* docker runtime could not be ensured — daemon-level. *)
+       Error Docker_client.Daemon_unreachable
+     | Ok seccomp_args ->
+       let argv =
+         run_detached_argv
+           plan
+           ~seccomp_args
+           ~owner_pid:(Unix.getpid ())
+           ~started_at:(Unix.gettimeofday ())
+       in
+       (match Process_eio.run_argv_with_status_split argv with
+        | Unix.WEXITED 0, _, _ -> Ok (Keeper_sandbox_session_plan.container_name plan)
+        | Unix.WEXITED 125, _, _ ->
+          (* [docker run] itself failed — bad flag, image not pullable,
+             daemon error. The keeper preflight ([image_present]) runs
+             before this, so a missing image is unlikely here. Surface
+             as [Daemon_unreachable] (the "cannot run a container"
+             class); a future RFC could distinguish. *)
+          Error Docker_client.Daemon_unreachable
+        | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ ->
+          Error Docker_client.Daemon_unreachable))
+;;

@@ -65,6 +65,15 @@ val inject_image_present
   -> (unit, Docker_client.sandbox_error) result
   -> unit
 
+(** [inject_run_detached response] enqueues [response] to override the
+    next {!run_detached} call. Unlike the other queues, an *empty*
+    [run_detached] queue is not a fail-closed error — it yields the
+    deterministic [Ok plan.container_name]. Use this only to inject an
+    [Error] (or a non-default [Ok]) for a failure / variation test. *)
+val inject_run_detached
+  :  (Keeper_container_name.t, Docker_client.sandbox_error) result
+  -> unit
+
 (** {1 Fixture lifecycle} *)
 
 (** [reset ()] empties every injection queue. Call between tests so

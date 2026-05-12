@@ -193,12 +193,7 @@ let restart_launch_noop_for_test =
 ;;
 
 let update_restart_launch_noop_state f =
-  let rec loop () =
-    let current = Atomic.get restart_launch_noop_for_test in
-    let next = f current in
-    if not (Atomic.compare_and_set restart_launch_noop_for_test current next) then loop ()
-  in
-  loop ()
+  Lockfree_atomic.update restart_launch_noop_for_test f
 ;;
 
 let set_restart_launch_noop_for_test enabled =

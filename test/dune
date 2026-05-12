@@ -600,6 +600,7 @@
         test_docker_client_mock
         test_docker_client_real
         test_sandbox_executor
+        test_sandbox_session_executor
         test_keeper_backoff_policy
         test_worker_runtime
         test_capability_registry
@@ -819,6 +820,7 @@
         test_docker_client_mock
         test_docker_client_real
         test_sandbox_executor
+        test_sandbox_session_executor
         test_keeper_backoff_policy
         test_worker_runtime
         test_capability_registry

@@ -53,6 +53,15 @@ let run_capture_lines ~workdir ?(timeout_sec = git_mutation_timeout_sec ()) argv
   in
   (status, lines)
 
+(* [Unix.process_status] is a closed stdlib variant; matching it as
+   [WEXITED 0 | _] trips warning 4 (fragile-match) because the wildcard
+   would silently absorb any future constructor.  Every git-status check
+   in this module routes the success test through [exited_zero] so the
+   constructor enumeration lives in exactly one place. *)
+let exited_zero = function
+  | Unix.WEXITED 0 -> true
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
+
 (** Get current HEAD commit hash (short). *)
 let git_head_short ~workdir =
   if not (is_in_git_repo workdir) then None
@@ -63,11 +72,10 @@ let git_head_short ~workdir =
       ~workdir
       [ "rev-parse"; "--short"; "HEAD" ]
   in
-  match status with
-  | Unix.WEXITED 0 ->
+  if exited_zero status then
     let trimmed = String.trim raw_output in
     if trimmed = "" then None else Some trimmed
-  | _ -> None
+  else None
 
 (** Git commit result: Ok (Some hash) on success, Ok None when no diff,
     Error msg when git commit itself fails (e.g. missing identity, hooks). *)
@@ -82,47 +90,45 @@ let git_commit ~workdir ~message
       ~workdir
       [ "add"; "--update" ]
   in
-  match add_status with
-  | Unix.WEXITED 0 -> (
-    let check_status, _check_output =
-      run_git_with_status ~timeout_sec:(git_mutation_timeout_sec ()) ~workdir
-        [ "diff"; "--cached"; "--quiet" ]
-    in
-    match check_status with
-    | Unix.WEXITED 0 ->
+  if not (exited_zero add_status) then
+    Result.error (Printf.sprintf "git add failed: %s" add_output)
+  else
+  let check_status, _check_output =
+    run_git_with_status ~timeout_sec:(git_mutation_timeout_sec ()) ~workdir
+      [ "diff"; "--cached"; "--quiet" ]
+  in
+  match check_status with
+  | Unix.WEXITED 0 ->
     (* No staged changes -- nothing to commit *)
     Result.ok None
-    | Unix.WEXITED 1 ->
+  | Unix.WEXITED 1 ->
     let status, raw_output =
       run_git_with_status
         ~timeout_sec:(git_mutation_timeout_sec ())
         ~workdir
         [ "commit"; "-m"; message ]
     in
-    (match status with
-     | Unix.WEXITED 0 ->
-       let hash_status, hash_output =
-         run_git_with_status
-           ~timeout_sec:(git_meta_timeout_sec ())
-           ~workdir
-           [ "rev-parse"; "--short"; "HEAD" ]
-       in
-       (match hash_status with
-        | Unix.WEXITED 0 ->
-          let trimmed = String.trim hash_output in
-          if trimmed = "" then
-            Result.error "git commit succeeded but no hash returned"
-          else Result.ok (Some trimmed)
-        | _ ->
-          Result.error "git commit succeeded but rev-parse failed")
-     | _ ->
-       Result.error (Printf.sprintf "git commit failed: %s" raw_output))
-    | Unix.WEXITED code ->
-      Result.error (Printf.sprintf "git diff --cached --quiet exited %d" code)
-    | _ ->
-      Result.error "git diff --cached --quiet terminated abnormally")
-  | _ ->
-    Result.error (Printf.sprintf "git add failed: %s" add_output)
+    if not (exited_zero status) then
+      Result.error (Printf.sprintf "git commit failed: %s" raw_output)
+    else begin
+      let hash_status, hash_output =
+        run_git_with_status
+          ~timeout_sec:(git_meta_timeout_sec ())
+          ~workdir
+          [ "rev-parse"; "--short"; "HEAD" ]
+      in
+      if not (exited_zero hash_status) then
+        Result.error "git commit succeeded but rev-parse failed"
+      else
+        let trimmed = String.trim hash_output in
+        if trimmed = "" then
+          Result.error "git commit succeeded but no hash returned"
+        else Result.ok (Some trimmed)
+    end
+  | Unix.WEXITED code ->
+    Result.error (Printf.sprintf "git diff --cached --quiet exited %d" code)
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    Result.error "git diff --cached --quiet terminated abnormally"
 
 (** Restore worktree files to current HEAD without moving the branch. *)
 let git_restore_head ~workdir =
@@ -133,9 +139,8 @@ let git_restore_head ~workdir =
       run_git_with_status ~timeout_sec:(git_mutation_timeout_sec ()) ~workdir
         [ "restore"; "--source=HEAD"; "--worktree"; "--"; "." ]
     in
-    match status with
-    | Unix.WEXITED 0 -> ()
-    | _ -> Log.Autoresearch.warn "git restore HEAD non-zero exit in %s" workdir
+    if not (exited_zero status) then
+      Log.Autoresearch.warn "git restore HEAD non-zero exit in %s" workdir
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Autoresearch.warn "git restore HEAD failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Reset to HEAD~1, discarding the last commit. *)
@@ -147,9 +152,8 @@ let git_reset_last ~workdir =
       run_git_with_status ~timeout_sec:(git_mutation_timeout_sec ()) ~workdir
         [ "reset"; "--soft"; "HEAD~1" ]
     in
-    match status with
-    | Unix.WEXITED 0 -> ()
-    | _ -> Log.Autoresearch.warn "git reset HEAD~1 non-zero exit in %s" workdir
+    if not (exited_zero status) then
+      Log.Autoresearch.warn "git reset HEAD~1 non-zero exit in %s" workdir
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Autoresearch.warn "git reset HEAD~1 failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Commit with autoresearch-formatted message. *)
@@ -183,7 +187,7 @@ let git_top_level ~workdir =
     Result.error "workdir is not inside a git repository"
   else
   match run_capture_lines ~workdir [ "rev-parse"; "--show-toplevel" ] with
-  | Unix.WEXITED 0, top :: _ ->
+  | status, top :: _ when exited_zero status ->
       let trimmed = String.trim top in
       if trimmed = "" then Result.error "git top-level was empty"
       else Result.ok trimmed
@@ -194,7 +198,7 @@ let git_current_branch ~workdir =
   if not (is_in_git_repo workdir) then None
   else
   match run_capture_lines ~workdir [ "rev-parse"; "--abbrev-ref"; "HEAD" ] with
-  | Unix.WEXITED 0, branch :: _ ->
+  | status, branch :: _ when exited_zero status ->
       let trimmed = String.trim branch in
       if trimmed = "" then None else Some trimmed
   | _ -> None
@@ -204,7 +208,8 @@ let git_is_dirty ~workdir =
   if not (is_in_git_repo workdir) then false
   else
   match run_capture_lines ~workdir [ "status"; "--porcelain" ] with
-  | Unix.WEXITED 0, lines -> List.exists (fun line -> String.trim line <> "") lines
+  | status, lines when exited_zero status ->
+      List.exists (fun line -> String.trim line <> "") lines
   | _ -> false
 
 let managed_branch_name loop_id =
@@ -235,7 +240,7 @@ let prepare_managed_worktree ~base_path ~source_workdir ~loop_id =
           run_capture_lines ~workdir:repo_root
             [ "worktree"; "add"; "-b"; branch; workdir; "HEAD" ]
         with
-        | Unix.WEXITED 0, _ ->
+        | status, _ when exited_zero status ->
             Result.ok (workdir, repo_root, List.rev warnings)
         | _, lines ->
             Result.error
@@ -251,7 +256,7 @@ let local_branch_exists ~repo_root branch =
     run_capture_lines ~workdir:repo_root
       [ "show-ref"; "--verify"; "--quiet"; "refs/heads/" ^ branch ]
   with
-  | Unix.WEXITED 0, _ -> true
+  | status, _ when exited_zero status -> true
   | _ -> false
 
 (** Remove the managed worktree directory and its branch.

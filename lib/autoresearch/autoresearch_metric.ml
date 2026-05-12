@@ -143,7 +143,9 @@ let run_metric_argv ~workdir ~timeout_s argv =
       (match output.status with
        | Masc_mcp_cdal_runtime.Autonomy_exec.Exit_code 0 ->
          Result.ok (output.stdout, elapsed_ms)
-       | status ->
+       | (Masc_mcp_cdal_runtime.Autonomy_exec.Exit_code _
+         | Masc_mcp_cdal_runtime.Autonomy_exec.Exit_signal _
+         | Masc_mcp_cdal_runtime.Autonomy_exec.Timed_out _) as status ->
          let detail =
            let stderr = String.trim output.stderr in
            let stdout = String.trim output.stdout in

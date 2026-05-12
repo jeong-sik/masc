@@ -16,7 +16,12 @@ implementation_prs: []
 ## Changelog
 
 - **v1 (2026-05-12, initial Draft, PR #14714)**: single `Sandbox_plan.t` covering one-shot semantics. Sandbox_executor + Docker_client.S + Mock + parser shipped through Phase 3b-iv.2.5 (#14741 / #14752 / #14764 / #14781 / #14786 / #14792 / #14797 / #14802 / #14808 / #14814 / #14821 / #14827 / #14832 / #14838 / #14844 / #14854 / #14862 / #14889).
-- **v2 (2026-05-12, this amendment)**: Phase 4.1 prep audit (caller survey at line 184/820/838) found the v1 Plan models the *anonymous one-shot* pattern only — 1 of 3 caller patterns. `keeper_turn_sandbox_runtime` uses a *persistent session* (`run -d` + `exec` × N + `rm`) that the v1 Plan cannot represent. v2 splits §3.1 into `Oneshot_plan` (renamed from v1's `Sandbox_plan`) + `Session_plan`; adds `Sandbox_session_executor` (§3.2.3) + `Docker_client.S.run_detached` (§3.2.3); re-orders §4 Migration table to gate Phase 4 cutover on the new Session API (Phase 3e). No v1 code is invalidated — all merged work remains, only the `keeper_sandbox_plan` filename is renamed in Phase 3d.
+- **v2 (2026-05-12, this amendment)**: Phase 4.1 prep audit found scope gaps in v1's §3.1 single Plan model. Audit happened in two passes:
+  - First pass (iter 33) — caller survey at line 184/820/838 found 3 distinct *lifetime* patterns (session / named one-shot / anonymous one-shot). v1 Plan models only the third. v2 splits §3.1 into `Oneshot_plan` + `Session_plan`; adds `Sandbox_session_executor` (§3.2.3) + `Docker_client.S.run_detached` (§3.2.3); re-orders §4 to gate Phase 4 on Phase 3e.
+  - Second pass (iter 34) — exhaustive enumeration of *all 16 docker call sites* (not just the representative line per caller) surfaced 2 additional v2 gaps:
+    - `Docker_client.S.exec` v1 signature is missing `?user` and `?workdir` (proven by `keeper_turn_sandbox_runtime:278`).
+    - **4th orthogonal capability**: preflight queries (`docker info --format`, `docker image inspect`) — not container lifecycle but docker-state queries. Phase 3e absorbs these as `info_security_options` + `image_inspect` on `Docker_client.S`.
+  - No v1 code is invalidated — all merged work remains, only the `keeper_sandbox_plan` filename is renamed in Phase 3d. Phase 3e absorbs *all four* v2-discovered gaps in a single batch so Phase 4 cutover (4.1/4.2/4.3) can land without further `Docker_client.S` extension PRs.
 
 - **Depends on**: RFC-0036 Phase A (cleanup hook plumbing — foundation)
 - **Extends**: RFC-0006 Phase B-2 (Read/Edit/Grep docker exec routing)
@@ -63,15 +68,83 @@ F1, F3, F6 are direct instances of CLAUDE.md §AI 코드 생성 안티패턴: ha
 
 ### 3.0 v2 caller survey (amendment driver)
 
-Phase 4.1 prep audit (2026-05-12) catalogued the 3 caller sites and discovered they use **3 distinct docker invocation patterns**, not one. v1 §3.1 modelled only the third:
+Phase 4.1 prep audit (2026-05-12, iter 34 of cron `7493fe21`) enumerated **all 16 docker call sites across 3 callers** and discovered:
+- **4 distinct invocation patterns** (3 run variants + 1 preflight family), not the 3 named in earlier v2 draft.
+- **`Docker_client.S.exec` v1 signature is incomplete** — `keeper_turn_sandbox_runtime:278` passes `--user uid:gid` and `-w cwd` flags that v1's `~container ~cmd` cannot express.
 
-| Caller | Site | Pattern | Lifetime | Existing v1 Plan fit |
-|--------|------|---------|----------|----------------------|
+#### 3.0.1 Run variants (3 patterns)
+
+| Caller | Site | Pattern | Lifetime | v1 Plan fit |
+|--------|------|---------|----------|-------------|
 | `keeper_turn_sandbox_runtime` | line 184 | `docker run -d --rm --name <n> ... sh -lc "trap : TERM INT; while :; do sleep 3600; done"` + `docker exec <n> <cmd>` × N + `docker rm -f <n>` | **session** (turn-scoped) | ❌ not representable |
-| `keeper_shell_docker` | line 820 | `docker run --rm --name <n> <image> sh -lc <cmd>` | **named one-shot** | ⚠ partial (Plan has `container_name`, but caller treats name as observable identity, not derivation byproduct) |
+| `keeper_shell_docker` | line 820 | `docker run --rm --name <n> <image> sh -lc <cmd>` | **named one-shot** | ⚠ partial (Plan has `container_name`, but caller treats name as observable identity) |
 | `keeper_sandbox_runtime` | line 838 | `docker run --rm --network none --entrypoint sh <image> -lc <script>` | **anonymous one-shot** | ✅ closest to v1 Plan |
 
-The cleanup/probe path (`docker ps -a`, `docker inspect`, `docker rm -f`) is shared across all three callers and is fully covered by v1 `Docker_client.S.ps_query` + `rm` — no amend needed.
+#### 3.0.2 Cleanup/probe (shared, v1 covered)
+
+`docker ps -a`, `docker inspect --format`, `docker rm -f` — all 9 cleanup sites across the 3 callers map cleanly onto v1's `Docker_client.S.ps_query` + `rm`. The `keeper_sandbox_runtime:699` *variadic* `inspect --format ... id1 id2 ...` (bulk inspect for performance) is a quality-of-life optimisation, not a new capability — v1 `ps_query` + per-record fetch is functionally equivalent at higher syscall cost. Deferred to Phase 4.3 follow-up if measured cost matters.
+
+#### 3.0.3 Preflight (NEW 4th pattern — not in earlier v2 draft)
+
+| Caller | Site | Pattern | Purpose |
+|--------|------|---------|---------|
+| `keeper_sandbox_runtime` | line 39 | `docker info --format '{{json .SecurityOptions}}'` | Detect seccomp/AppArmor availability at server boot |
+| `keeper_sandbox_runtime` | line 807 | `docker image inspect <image>` | Verify image is locally cached before `run --rm` |
+
+These are **read-only queries against docker state, not container lifecycle**. v1 `Docker_client.S` has no surface for them. Phase 3e introduces:
+
+```ocaml
+(* lib/keeper/docker_client.mli — added in Phase 3e *)
+module type S = sig
+  (* ...existing v1 surface... *)
+
+  val info_security_options : unit -> (string list, sandbox_error) result
+  (** [docker info --format '{{json .SecurityOptions}}'] parsed into the
+      enabled security profiles ("name=seccomp", "name=no-new-privileges",
+      etc.). Empty list when docker daemon reports no profiles. Used at
+      server boot to gate [run]'s [--security-opt] choices. *)
+
+  val image_inspect : image:string -> (image_info, sandbox_error) result
+  (** [docker image inspect <image>]. Returns minimal typed info
+      (digest, created_at, size_bytes); full inspect output is
+      out of scope. Error variant [Image_pull_failed] (already in
+      [sandbox_error]) covers "image not locally cached". *)
+end
+```
+
+This is the 4th orthogonal capability, not a new lifetime model. `keeper_sandbox_runtime` calls these *before* construction of any Plan; they live in `Docker_client.S` rather than in `Sandbox_executor`/`Sandbox_session_executor`.
+
+#### 3.0.4 `exec` flag completeness (v1 signature bug — fixed in Phase 3e)
+
+v1 `Docker_client.S.exec : container:Container_name.t -> cmd:string -> ...`. The signature implicitly assumes the docker container's `--user` and `--workdir` defaults are correct. **`keeper_turn_sandbox_runtime:278` proves otherwise**:
+
+```
+docker exec --user <uid>:<gid> -w <container_cwd> <name> sh -lc <cmd>
+```
+
+Phase 3e extends `exec` to carry the optional `?user` and `?workdir` flags:
+
+```ocaml
+val exec
+  :  ?user:int * int        (* uid, gid; defaults to image USER *)
+  -> ?workdir:string        (* defaults to image WORKDIR *)
+  -> container:Container_name.t
+  -> cmd:string
+  -> (Docker_response.exec_result, sandbox_error) result
+```
+
+Backwards-compatible: existing test callers (Phase 3b-iv.2.2 `test_docker_client_real.exec` etc.) work unchanged.
+
+#### 3.0.5 Site count summary
+
+| Caller | Sites | Categories |
+|--------|-------|------------|
+| `keeper_turn_sandbox_runtime` | 6 | run -d, inspect, rm × 2, exec, ps |
+| `keeper_shell_docker` | 1 | run named |
+| `keeper_sandbox_runtime` | 9 | info, inspect × 2, rm, ps × 2, image inspect, run anonymous, variadic inspect |
+| **Total** | **16** | **7 distinct operations**: run (3 variants), exec, rm, inspect (container + image), ps, info |
+
+The 7 operations are fully covered by the v2 RFC after the additions in §3.0.3 + §3.0.4. No 8th operation surfaced in this audit. `logs`, `kill`, `stop`, `wait`, `start` are not used by any of the 3 callers.
 
 ### 3.1 Pure core (Plan family)
 
@@ -300,7 +373,7 @@ v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0
 | **2** | Plan + Real Docker_client implementations, existing callers unchanged | Phase 1 | LOW | ✅ Phase 3b-iv.2.0–2.4 #14838/14844/14854/14862/14871 |
 | **3** | `Sandbox_executor` (oneshot) + `Docker_client.Mock` + parser unit tests | Phase 2 | MEDIUM | ✅ Phase 3c.0/3c.1 #14821/14827, Phase 3b-iv.2.5 #14889 |
 | **3d** *(v2)* | Rename `keeper_sandbox_plan` → `keeper_sandbox_oneshot_plan` (file + caller renames; no behavior change). Necessary to free the unqualified name for the Session/Oneshot split. | Phase 3 | LOW — pure rename refactor | ⏳ pending |
-| **3e** *(v2)* | `Docker_client.S.run_detached` (Mock + Real) + `Keeper_sandbox_session_plan` + `Sandbox_session_executor.Make` + unit tests | Phase 3d | MEDIUM — new edge primitive | ⏳ pending |
+| **3e** *(v2)* | `Docker_client.S` extensions: (a) `run_detached`, (b) `exec` adds `?user` + `?workdir`, (c) `info_security_options`, (d) `image_inspect`. Plus `Keeper_sandbox_session_plan` + `Sandbox_session_executor.Make` + unit tests. Mock + Real both updated. | Phase 3d | MEDIUM — new edge primitives + signature extension | ⏳ pending |
 | **3c.2** | Cleanup quarantine state machine (`Quarantine.t` + alert path) | Phase 3, **RFC-0036 §3.1 cleanup_hook on main** | MEDIUM | ⏸ blocked — RFC-0036 cleanup_hook still missing on origin/main |
 | **4.1** *(v2)* | Caller cutover `keeper_turn_sandbox_runtime` → `Sandbox_session_executor` (one PR) | Phase 3e | MEDIUM | ⏳ pending |
 | **4.2** *(v2)* | Caller cutover `keeper_shell_docker:820` → `Sandbox_executor` w/ named one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |

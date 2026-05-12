@@ -6,16 +6,38 @@
 \* released. A retry may later reacquire a fresh productive slot, but it must
 \* not keep the same acquisition across the retry phase.
 \*
-\* OCaml <-> TLA+ mapping:
+\* OCaml <-> TLA+ mapping (cited by symbol name, not line number -- iter 64
+\* N-2.a convention):
 \*
 \*   spec variable / action     | OCaml surface
 \*   ---------------------------+----------------------------------------------
 \*   ProductivePhaseBudget      | Env_config_keeper.KeeperRetryBackoff.
 \*                              | degraded_retry_slot_phase_budget_sec
-\*   productive_elapsed         | keeper_unified_turn.current_turn_phase_elapsed_ms
-\*   RetryScheduled             | Degraded_retry_allowed branch
-\*   ProductivePhaseExhausted   | Degraded_retry_slot_phase_exhausted branch
+\*   productive_elapsed         | the [current_turn_phase_elapsed_ms ()] closure
+\*                              | inside keeper_unified_turn.ml's turn loop
+\*   RetryScheduled             | the [Degraded_retry_allowed _] branch of
+\*                              | keeper_turn_cascade_budget.ml's classifier
+\*   ProductivePhaseExhausted   | the [Degraded_retry_slot_phase_exhausted _]
+\*                              | branch of the same classifier
 \*   release_at_phase           | cascade_rotation_attempt.slot_release_at_phase
+\*                              | (keeper_execution_receipt.ml)
+\*
+\* Alphabet projection (spec scope).  The runtime's slot-release alphabet is
+\* [type slot_release_phase] in keeper_execution_receipt.ml -- four non-None
+\* constructors: Retry_setup_failed, Retry_scheduled, Retry_budget_exhausted,
+\* Productive_phase_exhausted (plus the [option] None when no rotation
+\* occurred).  ReleasePhaseSet below models a PROJECTION sufficient for the
+\* #12888 leak class: it keeps "retry_scheduled" and "productive_phase_exhausted"
+\* (the two slot-release outcomes the leak invariant cares about), drops
+\* "retry_setup_failed" / "retry_budget_exhausted" (other terminal rotation
+\* outcomes -- they also release the slot, but are not on the leak path this
+\* spec pins), and adds two spec-internal markers: "none" (<-> the [option]
+\* None / no rotation) and "finish" (a clean productive-phase finish releases
+\* the slot; the runtime records no [slot_release_phase] for that case, since
+\* [slot_release_at_phase] lives on [cascade_rotation_attempt], which only
+\* exists for degraded retries).  So ReleasePhaseSet is not a 1:1 image of
+\* [slot_release_phase]; it is the leak-relevant projection plus the
+\* no-rotation / clean-finish endpoints the model needs to be closed.
 \*
 \* The current runtime mitigation (#13120) rejects late rotation once the
 \* productive phase is exhausted; #13272 exposes the release/phase telemetry.

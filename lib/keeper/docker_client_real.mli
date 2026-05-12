@@ -94,3 +94,15 @@ val run_detached_argv
   -> owner_pid:int
   -> started_at:float
   -> string list
+
+(** [is_eintr_127 status out] is the EINTR-retry predicate behind the
+    gated-spawn helpers (RFC-0070 Phase 4.1-g): a spawn that exited
+    [WEXITED 127] *and* whose combined stdout/stderr mentions
+    "interrupted system call" (case-insensitive) is a transient EINTR
+    on [fork]/[exec], not a missing docker CLI — so it is retried (up
+    to 8×) instead of being mapped straight to [Daemon_unreachable].
+    Any other status, or [WEXITED 127] without that marker, is [false].
+    Pure; exposed for unit-testing the predicate without a daemon.
+    Mirrors [keeper_turn_sandbox_runtime]'s long-standing EINTR loop
+    (the Phase 4.1 cutover deletes that copy in favour of this one). *)
+val is_eintr_127 : Unix.process_status -> string -> bool

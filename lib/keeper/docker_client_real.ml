@@ -48,6 +48,92 @@ let map_status_to_exec_result
   | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error Docker_client.Daemon_unreachable
 ;;
 
+(* ── Gated spawn (RFC-0070 Phase 4.1-g) ──────────────────────────
+   All docker spawns go through {!Masc_exec.Exec_gate} with
+   [~actor:`System_task_sandbox], the same actor the keeper sandbox
+   subsystem already uses ([keeper_sandbox_runtime], [keeper_docker_read],
+   [keeper_turn_sandbox_runtime]). Before this phase the [Real] client
+   called [Process_eio.run_argv_with_status*] directly, bypassing the
+   gate's actor accounting / approval-policy hook — a regression once a
+   caller like [keeper_turn_sandbox_runtime] (which today gates its own
+   spawns) is cut over to this client. Routing through [Exec_gate] keeps
+   that behaviour; the gate itself delegates to [Process_eio], so the
+   spawn semantics (synthesized [WEXITED 127] on exec failure, etc.) are
+   unchanged.
+
+   EINTR-retry: a [WEXITED 127] whose output mentions "interrupted
+   system call" is a transient EINTR on spawn, not a missing CLI —
+   retry up to [max_eintr_retries] times before letting it fall through
+   to the [WEXITED 127] → [Daemon_unreachable] mapping. Mirrors
+   [keeper_turn_sandbox_runtime.run_argv_with_status_retry_eintr]; the
+   Phase 4.1 cutover deletes that copy in favour of this one. *)
+
+let max_eintr_retries = 8
+
+let is_eintr_127 (status : Unix.process_status) (out : string) =
+  match status with
+  | Unix.WEXITED 127 -> String_util.contains_substring_ci out "interrupted system call"
+  | _ -> false
+;;
+
+(* Sandbox subprocess timeout default.  [Exec_gate.run_argv_with_status*]
+   all carry a hard-coded [?(timeout_sec = 60.0)] default that bypasses
+   the per-caller env override ([MASC_EXEC_TIMEOUT_TURN_SANDBOX_SEC]);
+   routing through [Env_config_exec_timeout] keeps the SSOT live for
+   sites that omit a caller-specific timeout. *)
+let default_timeout_sec () =
+  Env_config_exec_timeout.timeout_sec
+    ~caller:Env_config_exec_timeout.Turn_sandbox
+    ()
+;;
+
+let gated_argv_with_status ?timeout_sec ~(summary : string) argv =
+  let timeout_sec =
+    match timeout_sec with
+    | Some t -> t
+    | None -> default_timeout_sec ()
+  in
+  let rec loop attempts_left =
+    let status, out =
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:`System_task_sandbox
+        ~raw_source:(String.concat " " argv)
+        ~summary
+        ~timeout_sec
+        argv
+    in
+    if attempts_left > 0 && is_eintr_127 status out
+    then loop (attempts_left - 1)
+    else status, out
+  in
+  loop max_eintr_retries
+;;
+
+let gated_argv_with_status_split ?timeout_sec ~(summary : string) argv =
+  let timeout_sec =
+    match timeout_sec with
+    | Some t -> t
+    | None -> default_timeout_sec ()
+  in
+  let rec loop attempts_left =
+    let status, stdout, stderr =
+      Masc_exec.Exec_gate.run_argv_with_status_split
+        ~actor:`System_task_sandbox
+        ~raw_source:(String.concat " " argv)
+        ~summary
+        ~timeout_sec
+        argv
+    in
+    (* Join with a newline so a marker spanning the stream boundary
+       (stdout ends with "interrupted", stderr begins with "system
+       call") still matches [is_eintr_127]. *)
+    if attempts_left > 0 && is_eintr_127 status (stdout ^ "\n" ^ stderr)
+    then loop (attempts_left - 1)
+    else status, stdout, stderr
+  in
+  loop max_eintr_retries
+;;
+
 (* ── Functions ───────────────────────────────────────────────── *)
 
 let ps_query ~labels:_ = placeholder
@@ -76,10 +162,10 @@ let exec_argv ?user ?workdir ~container ~cmd () =
 
 let exec ?user ?workdir ~container ~cmd () =
   let argv = exec_argv ?user ?workdir ~container ~cmd () in
-  (* [Process_eio.run_argv_with_status_split] returns
-     [(status, stdout, stderr)]; on spawn failure the status is
-     synthesized as [WEXITED 127] (see 3b-iv.2.1 commit on rm). *)
-  map_status_to_exec_result (Process_eio.run_argv_with_status_split argv)
+  (* Gated spawn returns [(status, stdout, stderr)]; on spawn failure
+     the status is synthesized as [WEXITED 127] (see 3b-iv.2.1 commit
+     on rm). *)
+  map_status_to_exec_result (gated_argv_with_status_split ~summary:"keeper docker exec" argv)
 ;;
 
 let run plan =
@@ -98,12 +184,13 @@ let run plan =
   let argv =
     [ "docker"; "run"; "--rm"; "--name"; container_name; image; "sh"; "-lc"; command ]
   in
-  map_status_to_exec_result (Process_eio.run_argv_with_status_split ~timeout_sec argv)
+  map_status_to_exec_result
+    (gated_argv_with_status_split ~timeout_sec ~summary:"keeper docker run (oneshot)" argv)
 ;;
 
 let rm container =
   let argv = [ "docker"; "rm"; "-f"; Keeper_container_name.to_string container ] in
-  let status, _stdout = Process_eio.run_argv_with_status argv in
+  let status, _stdout = gated_argv_with_status ~summary:"keeper docker rm" argv in
   map_exit_status_for_rm status
 ;;
 
@@ -131,7 +218,9 @@ let parse_security_options (raw : string)
 
 let info_security_options () =
   let argv = [ "docker"; "info"; "--format"; "{{json .SecurityOptions}}" ] in
-  match Process_eio.run_argv_with_status_split argv with
+  match
+    gated_argv_with_status_split ~summary:"keeper docker info security-options" argv
+  with
   | Unix.WEXITED 0, out, _ -> parse_security_options out
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ ->
     (* Any non-zero exit means the daemon could not answer (not
@@ -156,7 +245,7 @@ let image_present ~image =
      distinguish. [image] is assumed non-empty — the plan layer
      validates that, not this daemon-level call. *)
   let argv = [ "docker"; "image"; "inspect"; image ] in
-  match Process_eio.run_argv_with_status argv with
+  match gated_argv_with_status ~summary:"keeper docker image inspect" argv with
   | Unix.WEXITED 0, _ -> Ok ()
   | Unix.WEXITED 127, _ -> Error Docker_client.Daemon_unreachable
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
@@ -271,7 +360,12 @@ let run_detached (plan : Keeper_sandbox_session_plan.t) =
            ~owner_pid:(Unix.getpid ())
            ~started_at:(Unix.gettimeofday ())
        in
-       (match Process_eio.run_argv_with_status_split argv with
+       (match
+          gated_argv_with_status_split
+            ~timeout_sec:ensure_timeout
+            ~summary:"keeper docker run -d (session)"
+            argv
+        with
         | Unix.WEXITED 0, _, _ -> Ok (Keeper_sandbox_session_plan.container_name plan)
         | Unix.WEXITED 125, _, _ ->
           (* [docker run] itself failed — bad flag, image not pullable,

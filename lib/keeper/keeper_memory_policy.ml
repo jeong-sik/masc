@@ -5,31 +5,28 @@
     Authoritative spec mirror is
     [specs/keeper-state-machine/KeeperMemoryLifecycle.tla] (#8642 family).
 
-    Spec lines 17-35 already cite this module field-by-field:
+    The spec preamble cites this module field-by-field:
       short_mem / mid_mem / long_mem  -> rows with [horizon] in
                                          {"short_term", "mid_term",
                                           "long_term"}, see the
-                                         constants
-                                           [short_term_horizon] (~line 165)
-                                           [mid_term_horizon]   (next)
-                                           [long_term_horizon]  (next)
+                                         constants [short_term_horizon],
+                                         [mid_term_horizon],
+                                         [long_term_horizon].
       provenanced  -> rows with non-empty trace_id / source
                       (lives in keeper_memory_bank, not this file).
-      producer     -> [memory_horizon_of_kind_opt] (~line 171, strict)
-                      and [memory_horizon_of_kind] (~line 182,
-                      back-compat wrapper that defaults unknown kinds
-                      to mid_term with a warn — see #8826 drift note).
+      producer     -> [memory_horizon_of_kind_opt] (strict) and
+                      [memory_horizon_of_kind] (back-compat wrapper that
+                      defaults unknown kinds to mid_term with a warn —
+                      see #8826 drift note).
 
     This block is the reverse-direction citation so code search for
-    "KeeperMemoryLifecycle" lands here.
-
-    Spec line drift correction:
-      Spec line 19-21 cites "ml:155 / ml:156 / ml:157" for the three
-      horizon constants; current actual line is 165 (+10 drift).  The
-      shift is because new `compaction_outcome` record fields were
-      inserted between the spec citation and the constants.  The
-      function-name citations ([memory_horizon_of_kind_opt],
-      [memory_horizon_of_kind]) remain stable.
+    "KeeperMemoryLifecycle" lands here.  Citations are by symbol name,
+    not line number: the spec preamble used to carry "ml:155 / ml:156 /
+    ml:157" for the horizon constants but those drifted (>+30 once
+    `compaction_outcome` fields were inserted between the citation and
+    the constants) and were removed — symbol names are the stable anchor
+    (iter 64 N-2.a; guarded by scripts/audit-ocaml-spec-nav-line-refs.sh,
+    iter 72 R-1.a).
 
     Spec safety goals (line 9-13):
       - every persisted note has provenance

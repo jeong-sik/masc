@@ -761,8 +761,8 @@ let to_json (receipt : t) =
      OperatorBroadcast event    -> [emit_operator_broadcast]
                                   emits "keeper.operator_broadcast_required.v1"
                                   with structured payload.
-     Eventually-emit liveness   -> [append] (~line 455) calls the
-                                  emit unconditionally when
+     Eventually-emit liveness   -> [append] calls the emit
+                                  unconditionally when
                                   [needs_operator_broadcast] is true,
                                   inside a [try] so a single failure
                                   does not cascade — the spec's clean

@@ -19,4 +19,10 @@
    masc_time_constants
    playground_paths)
  (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ ; The one closed-variant fragile site (env_config_oas_bridge.ml's
+ ; legacy_per_caller_env_var) is closed in this PR; the remaining
+ ; catch-all (env_config_runtime.ml string scrutinee) is open-type and
+ ; warning 4 ignores it.
+ (flags (:standard -w +4))
  (libraries masc_core masc_log yojson uri ipaddr unix))

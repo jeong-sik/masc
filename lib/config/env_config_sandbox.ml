@@ -188,7 +188,7 @@ module Shell_timeout = struct
       (* Read-only floor — see .mli.  Operators MUST NOT lower this
          via env; doing so cascades 401 retries (#8688). *)
       15.0
-    | _ ->
+    | Io | Read | Git_meta | User_max | Cleanup_rm | Unknown _ ->
       let per_bucket_env = per_bucket_env_var ~bucket in
       match trimmed_value_opt per_bucket_env with
       | Some v ->
@@ -327,7 +327,7 @@ let raw_shell_timeout () : Yojson.Safe.t =
     let entry =
       match b with
       | Gh_min -> entry_floor value
-      | _ ->
+      | Io | Read | Git_meta | User_max | Cleanup_rm | Unknown _ ->
         entry_env_overridable
           ~env_var:(Shell_timeout.per_bucket_env_var ~bucket:b)
           value

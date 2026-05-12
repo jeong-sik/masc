@@ -108,7 +108,8 @@ rg -n --type ocaml 'type\s+[a-z_]+_(state|phase|disposition|class)\s*=' lib/ \
 
 본 RFC 와 함께 lands 되는 inventory 산출물 (§4 Phase 0):
 
-- `docs/rfc/RFC-0071-inventory.csv` — `(file, line, ctor_type_guess, rhs, triage_class)` 5-열. 1044 행. CSV 가 *RFC main spec 의 부속 자료* (RFC-0047 의 `RFC-0047-caller-inventory.txt` 선례).
+- `docs/rfc/RFC-0071-inventory.csv` — `(file, line, rhs, triage_class_guess)` 4-열. 1044 행. CSV 가 *RFC main spec 의 부속 자료* (RFC-0047 의 `RFC-0047-caller-inventory.txt` 선례).
+  - `triage_class_guess` 는 Phase 0 의 *추정* 라벨 (전 행 `unclassified` 로 seed). Phase 2 codemod 가 `.cmt` 타입 AST 기반으로 `ctor_type` 과 최종 `triage_class` 를 *산출* 한다 — 즉 `ctor_type_guess` 는 별도 CSV 컬럼이 아니라 codemod 출력물의 필드. Phase 0 CSV 는 행 enumerate 만 책임진다.
 
 ### 2.2 Triage classification (RFC §3.1 가 규칙 정의)
 
@@ -228,7 +229,12 @@ CI 가 net-new catch-all 을 차단하기 위한 가드. 기존 `scripts/lint/no
 #   2 — stale allowlist entry
 ```
 
-allowlist (`scripts/lint/exhaustive-guard.allowlist`) 는 RFC-0071 inventory 의 (a) Intentional 사이트로 seed. (b)/(c) 사이트가 codemod 로 해소되면 allowlist 에 *들어가지 않는다* — lint 가 직접 차단.
+allowlist (`scripts/lint/exhaustive-guard.allowlist`) 의 seed 는 phase 에 따라 다르다 (§4 Migration 참조):
+
+- **Phase 1 (advisory)**: lint 가 PR 머지를 차단하지 않는 *측정 단계*. allowlist 는 inventory 의 (a)/(b)/(c) 전체 1044 사이트로 seed — 즉 *기존 사이트는 전부 grandfathered*, net-new 변경만 감지·보고한다.
+- **Phase 5 (blocking)**: codemod 가 (b)/(c) 를 모두 해소한 *최종 상태*. allowlist 는 (a) Intentional 사이트만 유지 — (b)/(c) 항목은 제거되어 lint 가 net-new 재발을 *차단* 한다.
+
+따라서 정상 상태(Phase 5 이후) 의 allowlist 는 (a) Intentional 한정이며, (b)/(c) 신규 사이트는 lint 가 직접 reject.
 
 #### 3.3.1 SSOT 한 곳에서 FSM-shaped 타입 enumerate
 
@@ -295,7 +301,7 @@ match cap with
 | Phase | Deliverable | RFC dependency | Risk |
 |-------|-------------|----------------|------|
 | **0** | 본 RFC + `docs/rfc/RFC-0071-inventory.csv` 부속 자료 | none | LOW — docs only |
-| **1** | `scripts/lint/exhaustive-guard.sh` + allowlist seed (inventory 의 (a)/(b)/(c) 분류 결과 전부 allowlist 에) — *advisory* (PR 머지 차단 안 함) | Phase 0 | LOW — 측정만 |
+| **1** | `scripts/lint/exhaustive-guard.sh` + allowlist seed (inventory 1044 사이트 전부 grandfathered: (a)/(b)/(c) 모두 포함) — *advisory* (PR 머지 차단 안 함). §3.3 참조: Phase 5 에서 (b)/(c) 제거하여 (a)-only 로 수렴. | Phase 0 | LOW — 측정만 |
 | **2** | `tools/codemod/exhaustive_match_sweep` 구현 (§3.2 sketch 의 실체) | Phase 0 | MEDIUM — ppxlib + .cmt 의존 |
 | **3** | codemod 1차 적용: 단일 PR per `scrutinee_type`. *큰 도메인부터*: `Goal_phase`, `keeper_phase`, `epoch_status`, `Resilience_outcome`. 한 PR 안에 같은 타입의 sibling site 전부. | Phase 2 | MEDIUM — large diff, but compiler-verified |
 | **4** | codemod 2차: 나머지 closed-variant 사이트 일괄 | Phase 3 | MEDIUM — 동일 패턴 |

@@ -33,7 +33,7 @@
 \* near the turn-loop head).  See
 \* docs/tla-audit/kpto-r10-post-turn-lineref-symbol-anchor-2026-05-12.md
 \*
-\*   spec variable / action          | OCaml location (path.ml:symbol; or a control-flow position when there's no single symbol) | semantic
+\*   spec variable / action          | semantic (how the spec field maps to the post_turn_lifecycle record / control flow) | OCaml location (path.ml:symbol; or a control-flow position when there's no single symbol)
 \*   --------------------------------+-------------------------------------------------------------------------+---------
 \*   phase                           | implicit (control-flow position inside apply_post_turn_lifecycle_with_resilience_handles)        | lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — (post-compaction → rollover → wirein-chain tail)
 \*   compaction_decision             | post_turn_lifecycle.compaction.applied/failure_reason/trigger           | lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the post_turn_lifecycle record's `compaction = { attempted; applied; failure_reason; trigger; ... }` construction

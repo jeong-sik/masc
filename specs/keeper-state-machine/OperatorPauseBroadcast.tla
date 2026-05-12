@@ -14,11 +14,23 @@
 \*   model satisfies this; the bug model (where emit is silently dropped)
 \*   must violate it.
 \*
-\* Anchors (OCaml runtime)
-\*   - lib/keeper/keeper_execution_receipt.ml: needs_operator_broadcast +
-\*     emit_operator_broadcast called from append (this PR's Step 2).
-\*   - lib/keeper/keeper_supervisor.ml: stale watchdog fiber forks under
-\*     ctx.sw and calls emit_stale_keeper_broadcast (this PR's Step 3).
+\* Anchors (OCaml runtime — cited by symbol/function name, not line
+\* number; iter 64 N-2.a convention)
+\*   - keeper_execution_receipt.ml: [needs_operator_broadcast] +
+\*     [emit_operator_broadcast], called from [append]
+\*     (`if needs_operator_broadcast disposition then ... emit_operator_broadcast`).
+\*     This is the EnterPauseHuman emit path.
+\*   - keeper_stale_watchdog.ml: [fork_stale_watchdog] forks the
+\*     stale-turn watchdog fiber under [ctx.sw] and (via its inner
+\*     [emit_watchdog_broadcast]) calls
+\*     [Keeper_execution_receipt.emit_stale_keeper_broadcast].  This is
+\*     the WatchdogEmit path.  keeper_supervisor.ml only *forwards*:
+\*     `let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog`,
+\*     invoked once per keeper at supervisor boot.  (The watchdog logic
+\*     was extracted out of keeper_supervisor.ml into keeper_stale_watchdog.ml
+\*     in PR #10670; the OCaml module's own header comment already flags
+\*     that the old "keeper_supervisor.ml ... emit_stale_keeper_broadcast"
+\*     citation here was stale — this updates the spec side to match.)
 
 EXTENDS Naturals, FiniteSets, TLC
 

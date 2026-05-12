@@ -49,6 +49,14 @@ val inject_rm
   -> (unit, Docker_client.sandbox_error) result
   -> unit
 
+(** [inject_info_security_options response] enqueues [response] to be
+    returned by the next {!info_security_options} call (no input key —
+    it takes [unit]). Strict FIFO, fail-closed: an empty queue returns
+    [Error Daemon_unreachable]. *)
+val inject_info_security_options
+  :  (string list, Docker_client.sandbox_error) result
+  -> unit
+
 (** {1 Fixture lifecycle} *)
 
 (** [reset ()] empties every injection queue. Call between tests so

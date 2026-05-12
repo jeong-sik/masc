@@ -170,6 +170,98 @@ let test_rm_returns_typed_error () =
     fail "rm should only surface Daemon_unreachable or Cleanup_failed"
 ;;
 
+(* Phase 3e (c) — [parse_security_options] is the pure parser behind
+   [info_security_options]. Deterministic (no daemon): assert array
+   handling, lowercasing, non-string drop, and that a format drift
+   surfaces as [Probe_format_drift] rather than [Ok []]. *)
+let security_options_result : (string list, Docker_client.sandbox_error) result testable =
+  let pp ppf = function
+    | Ok xs -> Format.fprintf ppf "Ok [%s]" (String.concat "; " xs)
+    | Error e -> Format.fprintf ppf "Error %s" (match e with
+        | Docker_client.Daemon_unreachable -> "Daemon_unreachable"
+        | Docker_client.Image_pull_failed -> "Image_pull_failed"
+        | Docker_client.Container_oom -> "Container_oom"
+        | Docker_client.Exec_timeout -> "Exec_timeout"
+        | Docker_client.Probe_format_drift -> "Probe_format_drift"
+        | Docker_client.Cleanup_failed -> "Cleanup_failed")
+  in
+  testable pp ( = )
+;;
+
+let test_parse_security_options_array () =
+  check
+    security_options_result
+    "array of strings, preserved order"
+    (Ok [ "name=seccomp,profile=builtin"; "name=cgroupns" ])
+    (Docker_client_real.parse_security_options
+       {|["name=seccomp,profile=builtin","name=cgroupns"]|})
+;;
+
+let test_parse_security_options_lowercases () =
+  check
+    security_options_result
+    "items lowercased"
+    (Ok [ "name=apparmor" ])
+    (Docker_client_real.parse_security_options {|["name=AppArmor"]|})
+;;
+
+let test_parse_security_options_null () =
+  check
+    security_options_result
+    "null → Ok []"
+    (Ok [])
+    (Docker_client_real.parse_security_options "null")
+;;
+
+let test_parse_security_options_empty_array () =
+  check
+    security_options_result
+    "[] → Ok []"
+    (Ok [])
+    (Docker_client_real.parse_security_options "[]")
+;;
+
+let test_parse_security_options_drops_non_strings () =
+  check
+    security_options_result
+    "non-string elements dropped"
+    (Ok [ "name=seccomp" ])
+    (Docker_client_real.parse_security_options {|["name=seccomp", 1, true, null]|})
+;;
+
+let test_parse_security_options_bad_json () =
+  check
+    security_options_result
+    "malformed JSON → Probe_format_drift (not silent Ok [])"
+    (Error Docker_client.Probe_format_drift)
+    (Docker_client_real.parse_security_options "not valid json {")
+;;
+
+let test_parse_security_options_object () =
+  check
+    security_options_result
+    "JSON object (not array/null) → Probe_format_drift"
+    (Error Docker_client.Probe_format_drift)
+    (Docker_client_real.parse_security_options {|{"x":1}|})
+;;
+
+(* The edge call: env may or may not have a docker daemon, so only
+   the typed contract is asserted. *)
+let test_info_security_options_returns_typed () =
+  match Docker_client_real.info_security_options () with
+  | Ok _ -> () (* daemon present *)
+  | Error Docker_client.Daemon_unreachable -> () (* no daemon / CLI missing *)
+  | Error Docker_client.Probe_format_drift ->
+    () (* daemon present but unexpected SecurityOptions payload *)
+  | Error Docker_client.Cleanup_failed
+  | Error Docker_client.Image_pull_failed
+  | Error Docker_client.Container_oom
+  | Error Docker_client.Exec_timeout ->
+    fail
+      "info_security_options should only surface Ok | Daemon_unreachable | \
+       Probe_format_drift"
+;;
+
 (* ── Functor instantiation works with Real ───────────────────── *)
 
 (* Phase 3b-iv.2.3 — executor.execute_plan calls Real.run, which is
@@ -212,6 +304,28 @@ let () =
             "user + workdir (--user before -w)"
             `Quick
             test_exec_argv_user_and_workdir
+        ] )
+    ; ( "parse_security_options (pure, Phase 3e c)"
+      , [ test_case "array of strings" `Quick test_parse_security_options_array
+        ; test_case "lowercases items" `Quick test_parse_security_options_lowercases
+        ; test_case "null → Ok []" `Quick test_parse_security_options_null
+        ; test_case "[] → Ok []" `Quick test_parse_security_options_empty_array
+        ; test_case
+            "drops non-string elements"
+            `Quick
+            test_parse_security_options_drops_non_strings
+        ; test_case
+            "malformed JSON → Probe_format_drift"
+            `Quick
+            test_parse_security_options_bad_json
+        ; test_case
+            "object (not array/null) → Probe_format_drift"
+            `Quick
+            test_parse_security_options_object
+        ; test_case
+            "info_security_options → Ok | Daemon_unreachable | Probe_format_drift"
+            `Quick
+            test_info_security_options_returns_typed
         ] )
     ; ( "Functor composition"
       , [ test_case

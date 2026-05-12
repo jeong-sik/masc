@@ -70,4 +70,17 @@ module type S = sig
     -> (Docker_response.ps_record list, sandbox_error) result
 
   val rm : Keeper_container_name.t -> (unit, sandbox_error) result
+
+  val info_security_options : unit -> (string list, sandbox_error) result
+  (** [info_security_options ()] = the docker daemon's [SecurityOptions]
+      list (from [docker info --format '\{\{json .SecurityOptions\}\}']),
+      lowercased so callers can match tokens like ["seccomp"] /
+      ["apparmor"] / ["no-new-privileges"] case-insensitively.
+
+      [Ok []] when the daemon reports none ([null] / empty array).
+      A daemon-level failure (not running, permission denied, CLI
+      missing) ⇒ [Error Daemon_unreachable]. A payload that is neither
+      a JSON array nor [null], or that fails to parse — i.e. a docker
+      output-format change — ⇒ [Error Probe_format_drift] rather than
+      a silent [Ok []]. *)
 end

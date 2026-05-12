@@ -178,6 +178,29 @@ let test_rm_error_injection () =
   | Error Docker_client.Cleanup_failed -> ()
   | _ -> fail "expected Cleanup_failed"
 
+(* ── info_security_options (Phase 3e c) ───────────────────────── *)
+
+let test_info_security_options_matches () =
+  setup ();
+  Docker_client_mock.inject_info_security_options (Ok [ "name=seccomp"; "name=apparmor" ]);
+  match Docker_client_mock.info_security_options () with
+  | Ok opts -> check int "2 options + queue drained" 2 (List.length opts);
+    check int "queue drained" 0 (Docker_client_mock.pending_calls ())
+  | Error _ -> fail "expected Ok"
+
+let test_info_security_options_empty_queue () =
+  setup ();
+  match Docker_client_mock.info_security_options () with
+  | Error Docker_client.Daemon_unreachable -> ()
+  | _ -> fail "empty queue must fail closed with Daemon_unreachable"
+
+let test_info_security_options_error_injection () =
+  setup ();
+  Docker_client_mock.inject_info_security_options (Error Docker_client.Probe_format_drift);
+  match Docker_client_mock.info_security_options () with
+  | Error Docker_client.Probe_format_drift -> ()
+  | _ -> fail "expected Probe_format_drift"
+
 (* ── reset / pending_calls ────────────────────────────────────── *)
 
 let test_reset_clears_all_queues () =
@@ -187,7 +210,8 @@ let test_reset_clears_all_queues () =
   Docker_client_mock.inject_exec ~container:c ~cmd:"x" (Ok sample_exec_result);
   Docker_client_mock.inject_ps_query ~labels:[] (Ok []);
   Docker_client_mock.inject_rm c (Ok ());
-  check int "4 queued" 4 (Docker_client_mock.pending_calls ());
+  Docker_client_mock.inject_info_security_options (Ok []);
+  check int "5 queued" 5 (Docker_client_mock.pending_calls ());
   Docker_client_mock.reset ();
   check int "reset clears everything" 0 (Docker_client_mock.pending_calls ())
 
@@ -220,6 +244,14 @@ let () =
         [
           test_case "matches Ok" `Quick test_rm_matches;
           test_case "Error injection round-trip" `Quick test_rm_error_injection;
+        ] );
+      ( "info_security_options",
+        [
+          test_case "matches injection" `Quick test_info_security_options_matches;
+          test_case "empty queue → Daemon_unreachable" `Quick
+            test_info_security_options_empty_queue;
+          test_case "Error injection round-trip" `Quick
+            test_info_security_options_error_injection;
         ] );
       ( "lifecycle",
         [ test_case "reset clears all queues" `Quick test_reset_clears_all_queues ] );

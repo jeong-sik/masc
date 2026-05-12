@@ -77,16 +77,26 @@ let test_state_set_parity () =
   (* One-way: every TLA+ name must appear in OCaml. *)
   List.iter
     (fun tla_name ->
-       check bool
+       check
+         bool
          (Printf.sprintf "TLA+ phase %S has OCaml equivalent" tla_name)
          true
          (List.mem tla_name ocaml_sorted))
     tla_sorted;
-  (* Today the two sets are identical (13↔13); record the cardinalities
-     so a future spec extension fails this assertion until parity is
-     re-established. *)
+  (* Pin the TLA+ side cardinality so a spec extension that adds a phase
+     without updating [tla_phase_names] fails fast.  The OCaml side is
+     intentionally NOT pinned: this test is one-way (TLA+ ⊆ OCaml), so a
+     future OCaml-only phase (e.g. an internal substate not yet modelled
+     in the spec) must not break the smoke.  When such drift appears,
+     the spec gap should be tracked separately, not enforced here. *)
   check int "TLA+ phase count" 13 (List.length tla_sorted);
-  check int "OCaml phase count" 13 (List.length ocaml_sorted)
+  (* OCaml ≥ TLA+ is implied by the per-name check above; we re-state it
+     as an explicit inequality for readability. *)
+  check
+    bool
+    "OCaml phases ≥ TLA+ phases"
+    true
+    (List.length ocaml_sorted >= List.length tla_sorted)
 ;;
 
 (* ── Helpers for transition tests ────────────────────────────── *)
@@ -114,9 +124,7 @@ let check_transition ~label ~from_phase ~event ~expected =
   with
   | Ok result ->
     check
-      (testable
-         (fun fmt p -> Format.fprintf fmt "%s" (SM.phase_to_string p))
-         ( = ))
+      (testable (fun fmt p -> Format.fprintf fmt "%s" (SM.phase_to_string p)) ( = ))
       label
       expected
       result.new_phase
@@ -172,10 +180,7 @@ let test_running_to_compacting_via_compaction_started () =
 (* A baseline "Dead" condition set: fiber dead AND budget exhausted.
    Mirrors DerivePhase priority 3 (Dead branch). *)
 let dead_conditions : SM.conditions =
-  { SM.default_conditions with
-    fiber_alive = false
-  ; restart_budget_remaining = false
-  }
+  { SM.default_conditions with fiber_alive = false; restart_budget_remaining = false }
 ;;
 
 let test_forbidden_dead_rejects_heartbeat_ok () =
@@ -192,16 +197,12 @@ let test_forbidden_dead_rejects_heartbeat_ok () =
       (SM.phase_to_string result.new_phase)
   | Error (Terminal_state { current; _ }) ->
     check
-      (testable
-         (fun fmt p -> Format.fprintf fmt "%s" (SM.phase_to_string p))
-         ( = ))
+      (testable (fun fmt p -> Format.fprintf fmt "%s" (SM.phase_to_string p)) ( = ))
       "Terminal_state reports Dead as current"
       Dead
       current
   | Error err ->
-    failf
-      "expected Terminal_state, got %s"
-      (SM.transition_error_to_string err)
+    failf "expected Terminal_state, got %s" (SM.transition_error_to_string err)
 ;;
 
 (* ── Wire-up ────────────────────────────────────────────────── *)

@@ -3,4 +3,6 @@
  (name fs_compat)
  (public_name masc_mcp.fs_compat)
  (modules fs_compat)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ (flags (:standard -w +4))
  (libraries eio eio.unix unix yojson optint))

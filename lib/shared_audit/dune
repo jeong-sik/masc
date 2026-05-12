@@ -3,4 +3,6 @@
 (library
  (name shared_audit)
  (public_name masc_mcp.shared_audit)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ (flags (:standard -w +4))
  (libraries unix yojson digestif digestif.c))

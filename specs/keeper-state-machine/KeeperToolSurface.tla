@@ -16,17 +16,21 @@
 \* invariants (validate gate, last-turn safety monotonicity, fallback
 \* floor conditioning, max-tools cap with required preservation).
 \*
-\* OCaml ↔ TLA+ mapping:
+\* OCaml ↔ TLA+ mapping.  All keeper_run_tools.ml refs are cited by
+\* function/stage name (the surface pipeline lives inside [compute_tool_surface]),
+\* not line number — iter 64 N-2.a convention; the previous "keeper_run_tools.ml:NNN"
+\* anchors (≈16 of them, lines 794-1011) had drifted as the file grew to ~1.7k LOC.
+\* See docs/tla-audit/kts-r9-tool-surface-lineref-symbol-anchor-2026-05-12.md
 \*
 \*   spec variable           | OCaml location                                            | semantic
 \*   ------------------------+-----------------------------------------------------------+---------
-\*   pre_floor               | merged after overlay compose+validate                     | lib/keeper/keeper_run_tools.ml:830-836
-\*   floor_fired             | tool_surface_fallback_used = true                         | lib/keeper/keeper_run_tools.ml:844-850
-\*   after_floor             | all_allowed post fallback floor                           | lib/keeper/keeper_run_tools.ml:850
-\*   after_last_turn_safe    | Intersect_with safe_last_turn_tools (when is_last_turn)   | lib/keeper/keeper_run_tools.ml:866-873
-\*   after_passive           | contract_enforcement_filter output                        | lib/keeper/keeper_run_tools.ml:882-888
-\*   emitted                 | all_allowed (final return)                                | lib/keeper/keeper_run_tools.ml:909-944
-\*   required                | required_tool_names (post satisfaction)                   | lib/keeper/keeper_run_tools.ml:794-797
+\*   pre_floor               | merged after overlay compose+validate                     | lib/keeper/keeper_run_tools.ml's compute_tool_surface merged-tools step (after overlay compose + validate)
+\*   floor_fired             | tool_surface_fallback_used = true                         | lib/keeper/keeper_run_tools.ml's compute_tool_surface fallback-floor conditional (sets tool_surface_fallback_used)
+\*   after_floor             | all_allowed post fallback floor                           | lib/keeper/keeper_run_tools.ml's compute_tool_surface all_allowed after the fallback floor
+\*   after_last_turn_safe    | Intersect_with safe_last_turn_tools (when is_last_turn)   | lib/keeper/keeper_run_tools.ml's compute_tool_surface Intersect_with safe_last_turn_tools step (when is_last_turn)
+\*   after_passive           | contract_enforcement_filter output                        | lib/keeper/keeper_tool_disclosure.ml — contract_enforcement_filter (called from keeper_run_tools.ml's compute_tool_surface)
+\*   emitted                 | all_allowed (final return)                                | lib/keeper/keeper_run_tools.ml's compute_tool_surface max_tools-truncation step (essential / non_essential split)
+\*   required                | required_tool_names (post satisfaction)                   | lib/keeper/keeper_run_tools.ml's compute_tool_surface outstanding_required_tool_names (post-satisfaction required set)
 \*
 \* Provider opacity (G3 acceptance gate):
 \*   The Tools universe is an abstract set of atoms ("t1", "t2", …) only.
@@ -83,7 +87,7 @@ PhaseSet == {"idle", "computed"}
 \* Observable label catalogs (cross-referenced by the OCaml ↔ TLA+
 \* correspondence harness).  These do not participate in Actions or
 \* SafetyInvariant — they pin the downstream-visible classification
-\* strings emitted at keeper_run_tools.ml:949-973.
+\* strings emitted at keeper_run_tools.ml's compute_tool_surface classification block near the return (tool_surface_class / lane / tool_requirement).
 SurfaceClassSet == {"none", "public_only", "mixed"}
 RequirementSet == {"no_tools", "required", "optional"}
 
@@ -115,7 +119,7 @@ Init ==
 
 \* ── Helper: truncation preserving required tools ────────
 
-\* The OCaml truncation (keeper_run_tools.ml:909-944) splits all_allowed
+\* The OCaml truncation (keeper_run_tools.ml's compute_tool_surface max_tools-truncation step (essential / non_essential split)) splits all_allowed
 \* into "essential" (required + always-include) and "non-essential",
 \* keeps essentials, then takes the first (cap - |essential|) of the
 \* non-essentials.  Abstracted here as: any subset T of S with size
@@ -163,12 +167,13 @@ ComputePipeline ==
        IN
        \* Pipeline contract — clean stages must preserve required-affordanced
        \* tools end-to-end.  Each constraint mirrors an OCaml guarantee:
-       \*   - validate gate at keeper_run_tools.ml:805-806/830-836 ensures
-       \*     required (post validate_allow_list) is in pre_floor.
-       \*   - contract_enforcement_filter at keeper_run_tools.ml:882-888
-       \*     does not drop required-affordanced tools.
-       \*   - safe_last_turn_tools at keeper_run_tools.ml:856-865 includes
-       \*     required-affordanced tools when is_last_turn fires.
+       \*   - the validate_allow_list gate + merged-tools step in
+       \*     keeper_run_tools.ml's compute_tool_surface ensures required
+       \*     (post validate_allow_list) is in pre_floor.
+       \*   - the Keeper_tool_disclosure.contract_enforcement_filter call
+       \*     (from compute_tool_surface) does not drop required-affordanced tools.
+       \*   - the safe_last_turn_tools construction in compute_tool_surface
+       \*     includes required-affordanced tools when is_last_turn fires.
        /\ r_aff \subseteq p
        /\ passive_drop \cap r_aff = {}
        /\ (~ilt) \/ (r_aff \subseteq lts_safe)
@@ -336,7 +341,7 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 
 \* I1: required tools must be preserved through to emitted, unless the
 \* affordance-less carve-out applies.  Mirrors the surface-mismatch
-\* guard at keeper_run_tools.ml:998-1011 at the model-checking layer.
+\* guard at keeper_run_tools.ml's compute_tool_surface returned tool_surface record at the model-checking layer.
 RequiredSubsetEmitted ==
     phase = "computed" =>
         \/ required \subseteq emitted
@@ -344,18 +349,18 @@ RequiredSubsetEmitted ==
 
 \* I2: last-turn-safe stage only *removes* tools — it is an intersect,
 \* never a union.  Pinned by the implementation at
-\* keeper_run_tools.ml:866-873 (Intersect_with).
+\* keeper_run_tools.ml's compute_tool_surface Intersect_with safe_last_turn_tools step (when is_last_turn) (Intersect_with).
 LastTurnSafeMonotone ==
     phase = "computed" => after_last_turn_safe \subseteq after_floor
 
 \* I3: fallback floor fires only when the upstream surface is empty.
-\* Models the explicit conditional at keeper_run_tools.ml:844-850.
+\* Models the explicit conditional at keeper_run_tools.ml's compute_tool_surface fallback-floor conditional (sets tool_surface_fallback_used).
 FallbackFloorOnlyWhenEmpty ==
     (phase = "computed" /\ floor_fired) => (pre_floor = {})
 
 \* I4: truncation cap is honored AND required tools that survived
 \* upstream are preserved.  Mirrors the essential/non-essential split
-\* at keeper_run_tools.ml:909-944.
+\* at keeper_run_tools.ml's compute_tool_surface max_tools-truncation step (essential / non_essential split).
 MaxToolsCap ==
     phase = "computed" =>
         /\ Cardinality(emitted) <= MaxToolsPerTurn

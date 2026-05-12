@@ -209,9 +209,7 @@ let missing_required_tools ~allowed required =
      pre-traversal (Hashtbl grows automatically). *)
   let allowed_set = Hashtbl.create 32 in
   List.iter (fun name -> Hashtbl.replace allowed_set name ()) allowed;
-  List.filter
-    (fun required_name -> not (Hashtbl.mem allowed_set required_name))
-    required
+  List.filter (fun required_name -> not (Hashtbl.mem allowed_set required_name)) required
 ;;
 
 let required_tool_claim_guard config ~agent_name ?agent_tool_names task =

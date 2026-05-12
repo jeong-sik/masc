@@ -27,6 +27,7 @@ let map_exit_status_for_rm (status : Unix.process_status) =
   | Unix.WEXITED 127 -> Error Docker_client.Daemon_unreachable
   | Unix.WEXITED _ -> Error Docker_client.Cleanup_failed
   | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error Docker_client.Daemon_unreachable
+;;
 
 (* Docker CLI exit code semantics for [docker exec] AND [docker run]:
    both return the executed *command's* exit code on success; only
@@ -39,16 +40,13 @@ let map_exit_status_for_rm (status : Unix.process_status) =
    docker CLI, and its [WEXITED n] reflects what docker reported about
    the containerized command. *)
 let map_status_to_exec_result
-    ((status, stdout, stderr) :
-      Unix.process_status * string * string)
+      ((status, stdout, stderr) : Unix.process_status * string * string)
   =
   match status with
-  | Unix.WEXITED 125 | Unix.WEXITED 127 ->
-    Error Docker_client.Daemon_unreachable
-  | Unix.WEXITED code ->
-    Ok Docker_response.{ exit_code = code; stdout; stderr }
-  | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-    Error Docker_client.Daemon_unreachable
+  | Unix.WEXITED 125 | Unix.WEXITED 127 -> Error Docker_client.Daemon_unreachable
+  | Unix.WEXITED code -> Ok Docker_response.{ exit_code = code; stdout; stderr }
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error Docker_client.Daemon_unreachable
+;;
 
 (* ── Functions ───────────────────────────────────────────────── *)
 
@@ -56,18 +54,13 @@ let ps_query ~labels:_ = placeholder
 
 let exec ~container ~cmd =
   let argv =
-    [ "docker"
-    ; "exec"
-    ; Keeper_container_name.to_string container
-    ; "sh"
-    ; "-lc"
-    ; cmd
-    ]
+    [ "docker"; "exec"; Keeper_container_name.to_string container; "sh"; "-lc"; cmd ]
   in
   (* [Process_eio.run_argv_with_status_split] returns
      [(status, stdout, stderr)]; on spawn failure the status is
      synthesized as [WEXITED 127] (see 3b-iv.2.1 commit on rm). *)
   map_status_to_exec_result (Process_eio.run_argv_with_status_split argv)
+;;
 
 let run plan =
   let container_name =
@@ -83,23 +76,13 @@ let run plan =
      so caller-passed [cmd] strings work identically across both
      functions. *)
   let argv =
-    [ "docker"
-    ; "run"
-    ; "--rm"
-    ; "--name"
-    ; container_name
-    ; image
-    ; "sh"
-    ; "-lc"
-    ; command
-    ]
+    [ "docker"; "run"; "--rm"; "--name"; container_name; image; "sh"; "-lc"; command ]
   in
-  map_status_to_exec_result
-    (Process_eio.run_argv_with_status_split ~timeout_sec argv)
+  map_status_to_exec_result (Process_eio.run_argv_with_status_split ~timeout_sec argv)
+;;
 
 let rm container =
-  let argv =
-    [ "docker"; "rm"; "-f"; Keeper_container_name.to_string container ]
-  in
+  let argv = [ "docker"; "rm"; "-f"; Keeper_container_name.to_string container ] in
   let status, _stdout = Process_eio.run_argv_with_status argv in
   map_exit_status_for_rm status
+;;

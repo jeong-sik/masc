@@ -23,10 +23,7 @@ type t
     [retryable_errors] enumerates exactly the {!Docker_client.sandbox_error}
     arms that warrant a retry — *no catch-all*, the caller must
     enumerate every retryable variant. *)
-val make
-  :  max_attempts:int
-  -> retryable_errors:Docker_client.sandbox_error list
-  -> t
+val make : max_attempts:int -> retryable_errors:Docker_client.sandbox_error list -> t
 
 (** [default_for_sandbox] is the canonical policy for Sandbox_executor:
     - [max_attempts = 3]

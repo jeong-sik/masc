@@ -355,9 +355,11 @@ module Ring = struct
        boot even when [capacity] was much smaller.
 
        [Fs_compat.fold_jsonl_lines] also gives us non-blocking IO
-       under Eio, max-line-size enforcement from [Eio.Buf_read.lines],
-       and consistent malformed-line handling (stderr warning + skip)
-       in place of the prior silent drop on [Yojson.Json_error]. *)
+       under Eio, max-line-size enforcement via the [~max_size:16 MiB]
+       cap on [Eio.Buf_read.of_flow] (which [Buf_read.lines] then
+       streams under), and consistent malformed-line handling (stderr
+       warning + skip) in place of the prior silent drop on
+       [Yojson.Json_error]. *)
     let buf_ring : entry Queue.t = Queue.create () in
     let push_file path =
       Fs_compat.fold_jsonl_lines

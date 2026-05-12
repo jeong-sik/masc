@@ -80,12 +80,18 @@ let trust (out : unverified output) ~reason =
 
 let content (out : verified output) = out.response
 
+(* Single exhaustive enumeration of Types content-block constructors,
+   shared by [text] and [raw_json] so they cannot drift when the
+   constructor set changes. *)
+let text_of_content_block = function
+  | Types.Text s -> Some s
+  | Types.Thinking _ | Types.RedactedThinking _ | Types.ToolUse _ | Types.ToolResult _
+  | Types.Image _ | Types.Document _ | Types.Audio _ -> None
+;;
+
 let text (out : verified output) =
   out.response.content
-  |> List.filter_map (function
-    | Types.Text s -> Some s
-    | Types.Thinking _ | Types.RedactedThinking _ | Types.ToolUse _ | Types.ToolResult _
-    | Types.Image _ | Types.Document _ | Types.Audio _ -> None)
+  |> List.filter_map text_of_content_block
   |> String.concat "\n"
 ;;
 
@@ -96,10 +102,7 @@ let is_verified (type s) (out : s output) = out.verified_flag
 let raw_json (type s) (out : s output) =
   let text_content =
     out.response.content
-    |> List.filter_map (function
-      | Types.Text s -> Some s
-      | Types.Thinking _ | Types.RedactedThinking _ | Types.ToolUse _ | Types.ToolResult _
-    | Types.Image _ | Types.Document _ | Types.Audio _ -> None)
+    |> List.filter_map text_of_content_block
     |> String.concat "\n"
   in
   `Assoc

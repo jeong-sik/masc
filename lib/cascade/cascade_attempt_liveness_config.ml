@@ -58,6 +58,7 @@ let budget_source_label = function
   | Observed_success _ -> "observed_success"
 
 let success_history : (string, success_sample list) Hashtbl.t = Hashtbl.create 64
+let success_history_order : string list ref = ref []
 let success_history_mu = Stdlib.Mutex.create ()
 
 let with_success_history_lock f =
@@ -71,6 +72,14 @@ let success_history_limit =
     (match int_of_string_opt (String.trim raw) with
      | Some n -> max 1 (min 256 n)
      | None -> 32)
+
+let success_history_candidate_limit =
+  match Sys.getenv_opt "MASC_CASCADE_LIVENESS_SUCCESS_CANDIDATES" with
+  | None | Some "" -> 128
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some n -> max 1 (min 2048 n)
+     | None -> 128)
 
 let finite_non_negative v = Float.is_finite v && Float.compare v 0.0 >= 0
 
@@ -87,11 +96,32 @@ let take limit values =
   in
   loop limit [] values
 
+let take_drop limit values =
+  let rec loop n kept = function
+    | [] -> List.rev kept, []
+    | rest when n <= 0 -> List.rev kept, rest
+    | x :: rest -> loop (n - 1) (x :: kept) rest
+  in
+  loop limit [] values
+
+let remember_candidate_key key =
+  success_history_order
+  := key
+     :: List.filter
+          (fun existing -> not (String.equal existing key))
+          !success_history_order;
+  let kept, evicted =
+    take_drop success_history_candidate_limit !success_history_order
+  in
+  success_history_order := kept;
+  List.iter (Hashtbl.remove success_history) evicted
+
 let record_success_sample ~candidate_key (sample : success_sample) =
   let key = String.trim candidate_key in
   if key = "" || not (valid_sample sample) then ()
   else
     with_success_history_lock (fun () ->
+        remember_candidate_key key;
         let current =
           match Hashtbl.find_opt success_history key with
           | Some samples -> samples
@@ -100,7 +130,9 @@ let record_success_sample ~candidate_key (sample : success_sample) =
         Hashtbl.replace success_history key (take success_history_limit (sample :: current)))
 
 let reset_success_history_for_test () =
-  with_success_history_lock (fun () -> Hashtbl.clear success_history)
+  with_success_history_lock (fun () ->
+      Hashtbl.clear success_history;
+      success_history_order := [])
 
 let success_sample_count_for_test ~candidate_key =
   let key = String.trim candidate_key in

@@ -1,8 +1,8 @@
 (** Tests for [Cascade_attempt_liveness_config] (RFC-0022 PR-2/4 §2).
 
-    Covers: env-flag parsing (default Observe, all aliases),
-    cache invalidation via reset_cache_for_test, and living success-history
-    budget selection. *)
+    Covers: env-flag parsing (unset defaults to Enforce; empty/unknown parse
+    as Observe), cache invalidation via reset_cache_for_test, and living
+    success-history budget selection. *)
 
 open Masc_mcp
 module Cfg = Cascade_attempt_liveness_config
@@ -10,15 +10,17 @@ module L = Cascade_attempt_liveness
 
 let env_var = "MASC_CASCADE_ATTEMPT_LIVENESS"
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let with_env value f =
   let prior = Sys.getenv_opt env_var in
   (match value with
-   | None -> Unix.putenv env_var ""
+   | None -> unsetenv env_var
    | Some v -> Unix.putenv env_var v);
   Cfg.reset_cache_for_test ();
   let restore () =
     (match prior with
-     | None -> Unix.putenv env_var ""
+     | None -> unsetenv env_var
      | Some v -> Unix.putenv env_var v);
     Cfg.reset_cache_for_test ()
   in
@@ -33,17 +35,13 @@ let check_mode label expected actual =
 
 (* -- mode parsing --------------------------------------------------- *)
 
+let test_unset_defaults_enforce () =
+  with_env None (fun () ->
+      check_mode "unset -> Enforce" Enforce (Cfg.current_mode ()))
+
 let test_empty_string_alias () =
-  let prior = Sys.getenv_opt env_var in
-  Unix.putenv env_var "";
-  Cfg.reset_cache_for_test ();
-  (* Empty string parses as Observe by parse_mode contract. *)
-  let m = Cfg.current_mode () in
-  (match prior with
-   | None -> Unix.putenv env_var ""
-   | Some v -> Unix.putenv env_var v);
-  Cfg.reset_cache_for_test ();
-  check_mode "empty string -> Observe" Observe m
+  with_env (Some "") (fun () ->
+      check_mode "empty string -> Observe" Observe (Cfg.current_mode ()))
 
 let test_observe_alias () =
   with_env (Some "observe") (fun () ->
@@ -159,11 +157,29 @@ let test_invalid_success_sample_ignored () =
     0
     (Cfg.success_sample_count_for_test ~candidate_key:"provider:model-a")
 
+let test_success_history_candidate_count_is_bounded () =
+  Cfg.reset_success_history_for_test ();
+  for i = 0 to 2049 do
+    Cfg.record_success_sample
+      ~candidate_key:(Printf.sprintf "provider:model-%03d" i)
+      { Cfg.ttft_ms = 1_000.0; max_inter_chunk_ms = 1_000.0; wall_ms = 2_000.0 }
+  done;
+  Alcotest.(check int)
+    "oldest candidate evicted"
+    0
+    (Cfg.success_sample_count_for_test ~candidate_key:"provider:model-000");
+  Alcotest.(check int)
+    "newest candidate retained"
+    1
+    (Cfg.success_sample_count_for_test ~candidate_key:"provider:model-2049")
+
 let () =
   Alcotest.run "cascade_attempt_liveness_config"
     [
       ( "mode parsing",
         [
+          Alcotest.test_case "unset -> enforce" `Quick
+            test_unset_defaults_enforce;
           Alcotest.test_case "empty string -> observe" `Quick
             test_empty_string_alias;
           Alcotest.test_case "observe" `Quick test_observe_alias;
@@ -193,5 +209,7 @@ let () =
             test_candidate_keys_are_model_scoped;
           Alcotest.test_case "invalid sample ignored" `Quick
             test_invalid_success_sample_ignored;
+          Alcotest.test_case "candidate count bounded" `Quick
+            test_success_history_candidate_count_is_bounded;
         ] );
     ]

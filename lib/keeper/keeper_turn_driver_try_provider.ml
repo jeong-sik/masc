@@ -185,6 +185,9 @@ let run_try_provider
     let candidate_key =
       Provider_adapter.provider_model_health_key_of_config provider_cfg
     in
+    let provider_label =
+      Provider_adapter.provider_label_of_config provider_cfg
+    in
     let liveness_observer_opt =
       match liveness_mode with
       | Cascade_attempt_liveness_config.Off -> None
@@ -207,7 +210,7 @@ let run_try_provider
             ~mode:liveness_mode
             ~budget:resolved_budget.budget
             ~cascade_label:ctx.cascade_name
-            ~provider_label:provider_cfg.model_id
+            ~provider_label
             ~candidate_key
             ~started_at:(Time_compat.now ())
             ()

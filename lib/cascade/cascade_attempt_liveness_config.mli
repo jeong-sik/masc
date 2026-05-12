@@ -63,7 +63,9 @@ val budget_for_candidate : candidate_key:string -> resolved_budget
 val record_success_sample :
   candidate_key:string -> success_sample -> unit
 (** Append a successful attempt timing sample for [candidate_key]. Invalid
-    negative/non-finite values are ignored. *)
+    negative/non-finite values are ignored. Each candidate keeps at most
+    [MASC_CASCADE_LIVENESS_SUCCESS_HISTORY_SIZE] samples, and the process keeps
+    at most [MASC_CASCADE_LIVENESS_SUCCESS_CANDIDATES] candidate keys. *)
 
 val reset_cache_for_test : unit -> unit
 (** Test-only: reset the cached flag read so a new value of

@@ -90,20 +90,32 @@ let error_code_to_string = function
     These produce plain JSON strings without [Tool_result.t] wrapping.
     Used by [get_string_required] error paths and legacy callers. *)
 
+(** Build a JSON error envelope as a [Yojson.Safe.t] node (unserialized).
+    Mirrors [ok_assoc] for the error variant.  Use when the envelope is
+    composed into a larger structure or returned as
+    [(Yojson.Safe.t, _) result]. *)
+let error_assoc fields : Yojson.Safe.t =
+  `Assoc (("status", `String "error") :: fields)
+
 (** Build a JSON error response string: [\{"status":"error","message":"..."\}] *)
 let error_response message =
-  Yojson.Safe.to_string
-    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
+  Yojson.Safe.to_string (error_assoc [ ("message", `String message) ])
+
+(** Build a JSON error response string with caller-supplied fields.
+    Use when the error payload needs more than just [message] (e.g.
+    [error]/[agent_id]/[config_path] context).  Field-order semantics:
+    [status] is prepended to the head of the [`Assoc]. *)
+let error_response_with fields =
+  Yojson.Safe.to_string (error_assoc fields)
 
 (** Build a JSON error response string with machine-readable error code:
     [\{"status":"error","error_code":"validation_error","message":"..."\}] *)
 let error_response_typed ~code message =
-  Yojson.Safe.to_string
-    (`Assoc [
-      ("status", `String "error");
+  error_response_with
+    [
       ("error_code", `String (error_code_to_string code));
       ("message", `String message);
-    ])
+    ]
 
 (** Build a JSON OK response string with additional fields. *)
 let ok_response fields =
@@ -236,13 +248,12 @@ let field_error_to_yojson (e : field_error) : Yojson.Safe.t =
     "field_errors":[...],"message":"N field error(s)"\}] *)
 let validation_error_response (errors : field_error list) : string =
   let field_errors = List.map field_error_to_yojson errors in
-  Yojson.Safe.to_string
-    (`Assoc [
-      ("status", `String "error");
+  error_response_with
+    [
       ("error_code", `String "validation_error");
       ("field_errors", `List field_errors);
       ("message", `String (Printf.sprintf "%d field error(s)" (List.length errors)));
-    ])
+    ]
 
 (** Convenience: [Tool_result.t] validation error. *)
 let validation_error_result ?tool_name ?start_time errors =

@@ -246,11 +246,10 @@ let public_config_json () =
   | Ok config -> Ok (Voice_config.public_json config)
   | Error message ->
     Error
-      (`Assoc
-          [ "status", `String "error"
-          ; "message", `String message
-          ; "config_path", `String (Voice_config.config_path ())
-          ])
+      (Tool_args.error_assoc
+         [ "message", `String message
+         ; "config_path", `String (Voice_config.config_path ())
+         ])
 ;;
 
 let tts_preview_bytes_from_request_json json =

@@ -62,8 +62,19 @@ val error_code_to_string : error_code -> string
     These produce plain JSON strings without [Tool_result.t] wrapping.
     Used by [get_string_required] error paths and other low-level callers. *)
 
-(** [{"status":"error","message":"…"}] *)
+(** [{"status":"error", <fields>}] as a [`Assoc] node.  Mirrors
+    {!ok_assoc} for the error variant — use when the envelope must be
+    embedded in a larger response or returned via
+    [(Yojson.Safe.t, _) result]. *)
+val error_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
+
+(** [{"status":"error","message":"…"}] as a serialized JSON string. *)
 val error_response : string -> string
+
+(** [{"status":"error", <fields>}] as a serialized JSON string with
+    caller-supplied fields.  Use when the payload needs more than just
+    [message] (e.g. [error]/[agent_id]/[config_path] context). *)
+val error_response_with : (string * Yojson.Safe.t) list -> string
 
 (** [{"status":"error","error_code":"…","message":"…"}] *)
 val error_response_typed : code:error_code -> string -> string

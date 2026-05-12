@@ -1140,7 +1140,7 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
 ;;
 
 let operator_error_json message =
-  `Assoc [ "status", `String "error"; "message", `String message ]
+  Tool_args.error_assoc [ "message", `String message ]
 ;;
 
 (* Cold-start bootstrap aggregator.

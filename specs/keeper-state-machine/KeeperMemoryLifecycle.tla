@@ -12,20 +12,23 @@
 \*   - handoff clears stale short-term notes,
 \*   - each tier stays within its configured bound.
 \*
-\* OCaml <-> TLA+ mapping (see #8642 family):
+\* OCaml <-> TLA+ mapping (see #8642 family).  Cited by symbol name, not
+\* line number — iter 64 N-2.a convention; the "lib/keeper/keeper_memory_policy.ml:155-157"
+\* anchors had drifted +46 (the horizon constants are now ~line 201-203).
+\* See docs/tla-audit/kml-r8-memory-lifecycle-lineref-drift-2026-05-12.md
 \*
 \*   spec variable    | OCaml field / source                              | location
 \*   -----------------+--------------------------------------------------+--------
-\*   short_mem        | rows with horizon = "short_term"                 | lib/keeper/keeper_memory_policy.ml:155
-\*   mid_mem          | rows with horizon = "mid_term"                   | lib/keeper/keeper_memory_policy.ml:156
-\*   long_mem         | rows with horizon = "long_term"                  | lib/keeper/keeper_memory_policy.ml:157
+\*   short_mem        | rows with horizon = "short_term"                 | lib/keeper/keeper_memory_policy.ml — `short_term_horizon`
+\*   mid_mem          | rows with horizon = "mid_term"                   | lib/keeper/keeper_memory_policy.ml — `mid_term_horizon`
+\*   long_mem         | rows with horizon = "long_term"                  | lib/keeper/keeper_memory_policy.ml — `long_term_horizon`
 \*   open_short       | unresolved short-term notes (open_question kind) | lib/keeper/keeper_memory_bank.ml
 \*   provenanced      | rows with non-empty trace_id / source            | lib/keeper/keeper_memory_bank.ml
 \*   generation       | snapshot.generation field                        | snapshot record
 \*   overflowed       | derived: short_mem cardinality > MaxShort        | runtime check
 \*
-\* Tier vocabulary (string-typed, intentionally not a variant today):
-\*   lib/keeper/keeper_memory_policy.ml:155-157
+\* Tier vocabulary (string-typed, intentionally not a variant today) —
+\* the horizon string constants in lib/keeper/keeper_memory_policy.ml:
 \*     `let short_term_horizon = "short_term"`
 \*     `let mid_term_horizon   = "mid_term"`
 \*     `let long_term_horizon  = "long_term"`

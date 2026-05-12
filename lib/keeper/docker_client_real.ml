@@ -272,8 +272,8 @@ let run plan =
 
 let rm container =
   let argv = [ "docker"; "rm"; "-f"; Keeper_container_name.to_string container ] in
-  let status, stdout = gated_argv_with_status ~summary:"keeper docker rm" argv in
-  if is_exec_gate_blocked status stdout
+  let status, combined_out = gated_argv_with_status ~summary:"keeper docker rm" argv in
+  if is_exec_gate_blocked status combined_out
   then Error Docker_client.Daemon_unreachable
   else map_exit_status_for_rm status
 ;;

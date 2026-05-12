@@ -528,25 +528,46 @@ let test_exec_gate_blocked_rejects_plain_126 () =
 ;;
 
 let test_docker_real_timeout_budgets_are_separated () =
-  check
-    (float 0.001)
-    "exec keeps shell budget"
-    60.0
-    (Docker_client_real.session_exec_timeout_sec ());
-  check
-    (float 0.001)
-    "probe keeps sandbox budget"
-    10.0
-    (Docker_client_real.docker_probe_timeout_sec ());
-  check
-    (float 0.001)
-    "start keeps turn-up budget"
-    15.0
-    (Docker_client_real.session_start_timeout_sec ());
-  check
-    (float 0.001)
-    "preflight keeps short turn-sandbox budget"
-    2.0
+  (* Pin env vars to sentinels so assertions are deterministic regardless
+     of the host environment. Restore originals on exit. *)
+  let pin key value = Unix.putenv key (string_of_float value) in
+  let snap key = try Some (key, Unix.getenv key) with Not_found -> None in
+  let saved =
+    List.filter_map snap
+      [ "MASC_EXEC_TIMEOUT_SHELL_SEC"
+      ; "MASC_EXEC_TIMEOUT_SANDBOX_SEC"
+      ; "MASC_EXEC_TIMEOUT_TURN_UP_SEC"
+      ; "MASC_EXEC_TIMEOUT_TURN_SANDBOX_SEC"
+      ]
+  in
+  pin "MASC_EXEC_TIMEOUT_SHELL_SEC" 60.0;
+  pin "MASC_EXEC_TIMEOUT_SANDBOX_SEC" 10.0;
+  pin "MASC_EXEC_TIMEOUT_TURN_UP_SEC" 15.0;
+  pin "MASC_EXEC_TIMEOUT_TURN_SANDBOX_SEC" 2.0;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (function k, v -> Unix.putenv k v) saved)
+    (fun () ->
+      check
+        (float 0.001)
+        "exec keeps shell budget"
+        60.0
+        (Docker_client_real.session_exec_timeout_sec ());
+      check
+        (float 0.001)
+        "probe keeps sandbox budget"
+        10.0
+        (Docker_client_real.docker_probe_timeout_sec ());
+      check
+        (float 0.001)
+        "start keeps turn-up budget"
+        15.0
+        (Docker_client_real.session_start_timeout_sec ());
+      check
+        (float 0.001)
+        "preflight keeps short turn-sandbox budget"
+        2.0
+        (Docker_client_real.session_preflight_timeout_sec ()))
     (Docker_client_real.session_preflight_timeout_sec ())
 ;;
 

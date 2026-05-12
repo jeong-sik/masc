@@ -149,9 +149,15 @@ val resolve_cascade_transition :
 
 Where `cascade_transition_spec_violation` is a typed sum capturing each forbidden pair as a named constructor, eliminating string-based diagnostic messages.
 
-### 4.3 Validator becomes documentation fixture
+### 4.3 Validator becomes a resolver shim raising a typed exception
 
-`validate_cascade_transition` becomes a compile-time fixture (same role as PR #14893 made `validate_decision_transition`): an explicit 18-pair match returning `()`, with no `invalid_arg`. Forbidden pairs are unrepresentable in the GADT.
+The original plan (mirroring PR #14893's `validate_decision_transition`) was to make `validate_cascade_transition` a compile-time fixture: an explicit `()`-returning match where forbidden pairs are unrepresentable. That works for the decision axis because the `to_` argument can be refined to `decision_stage_active` (a non-GADT enum that *excludes* the forbidden targets). It does **not** generalise to the cascade/turn_phase axes: the inputs are `packed_*` existentials (`Packed : 'a witness -> packed_*`), so a match over `(packed, packed)` pairs cannot have its forbidden arms removed without making the function partial — and the GADT-through-`Packed` exhaustivity check produces a Warning-8 false positive (the #14893 → #14909 regression).
+
+So the realised design (Phase 2-4b) is: `validate_*` and `set_turn_*` dispatch on `resolve_*_transition`'s typed `*_resolve_outcome` sum (3 constructors: transition / idempotent / violation), and on the violation arm they `raise` a **typed exception** carrying the `*_transition_spec_violation` payload — not `invalid_arg`-with-a-formatted-string (Phase 5). A `Printexc.register_printer` reproduces the prior message text for log output. This keeps the transition matrix a single source of truth in the resolver while making the violation channel typed and catchable.
+
+### 4.3b Why a typed exception, not `Result.t`
+
+`set_turn_*` and `validate_*` are fail-closed: a forbidden transition is a programmer error / spec violation, not a recoverable condition. Threading `Result.t` through their ~13 call sites would add no behaviour (every caller would `Result.get_ok` or re-raise) — the cost without the benefit. A typed exception keeps the call-site ergonomics of the prior `invalid_arg` while replacing the stringly-typed payload with the `*_transition_spec_violation` variant, so a caller that *does* want to discriminate can pattern-match it (today none does).
 
 ### 4.4 Compaction axis (out of scope)
 
@@ -187,9 +193,37 @@ Compaction has a separate transition matrix (`compaction_accumulating`, `compact
 
 Same 3-phase structure applied to `turn_phase`. Separate sub-PRs because the variant count is larger and the matrix shape differs.
 
-### Phase 5 — Compaction axis audit (separate amendment)
+- Phase 4a (PR #14912): realign the dead-code `Turn_phase_transition` GADT to the cascade shape (drop idempotent self-loops, 30→23 cross-state constructors), add `turn_phase_transition_spec_violation` (19 forbidden), add `resolve_turn_phase_transition`. Additive.
+- Phase 4b (PR #14918): route `validate_turn_phase_transition` + `set_turn_phase` through the resolver; collapse the 49-arm matrix to a 3-arm `turn_phase_resolve_outcome` match; fix the idempotent-self-loop spurious-broadcast bug (mirrors cascade Phase 2).
 
-Inventory `compaction_stage` variants + transition matrix. Decide whether the same pattern applies.
+### Phase 5 — Typed transition exceptions (closeout of R-1, R-2)
+
+The 4 `invalid_arg` sites left by Phases 1-4b (`validate_cascade_transition`, `set_turn_cascade_state`, `validate_turn_phase_transition`, `set_turn_phase`) raise `Invalid_argument` with the `*_transition_spec_violation` tag projected into a string. Phase 5 replaces them with two typed exceptions:
+
+```ocaml
+exception Cascade_transition_violation of
+  { where : string
+  ; from : packed_cascade_state
+  ; to_ : packed_cascade_state
+  ; violation : cascade_transition_spec_violation
+  }
+
+exception Turn_phase_transition_violation of
+  { where : string
+  ; from : packed_turn_phase
+  ; to_ : packed_turn_phase
+  ; violation : turn_phase_transition_spec_violation
+  }
+```
+
+- `Printexc.register_printer` for both, reproducing the prior `<where>: invalid <axis> transition <from> -> <to> (spec_violation=<tag>)` message — log output and generic `exn`-catchers see no change.
+- `Keeper_fsm_guard_runtime.wrap_unit`'s catch is widened from `(Assert_failure _ | Invalid_argument _)` to all exceptions, so the `metric_fsm_guard_violation` counter still fires on the new typed exceptions (it cannot *name* them — `Keeper_registry` already depends on that module, so a back-reference would form a cycle).
+- Tests (`test_keeper_sub_fsm_guards.ml`): `capture_invalid_arg` + substring-needle assertions replaced by pattern-matching the typed `violation` payload + a single `Printexc.to_string` render check per axis. (Bonus: this rewrite also fixes a latent broken test — `test_turn_phase_message_includes_labels` asserted `Turn_routing -> Turn_exhausted` is rejected, but PR #14395 made that pair *valid*; the heavy `dune test` CI step skips on most PRs so it went unnoticed.)
+- LOC: ~+130 / -55. Risk: low (typed payload + printer; no behaviour change on the success path; failure path message text preserved).
+
+### Phase 6 — Compaction axis audit (separate amendment)
+
+Inventory `compaction_stage` variants + transition matrix (currently an `assert`-based `@@fsm_guard` shim raising `Assert_failure`). Decide whether the resolver + typed-exception pattern applies.
 
 ## 6. Risks
 
@@ -211,17 +245,17 @@ The audit in §2.4 counted explicit `set_turn_cascade_state` calls. There may be
 
 ## 7. Acceptance criteria
 
-- **R-1**: `cascade_state` axis has 0 `invalid_arg` sites in `lib/`
-- **R-2**: `turn_phase` axis has 0 `invalid_arg` sites in `lib/`
-- **R-3**: All `cascade_state` valid transitions are first-class GADT constructors
-- **R-4**: Adding a new `cascade_state` variant requires editing `Cascade_transition.t` and triggers Warning 8 at all match sites
-- **R-5**: Existing test coverage is preserved or replaced by compile-time enforcement (no behavior regression)
-- **R-6**: Phase 1 + Phase 2 + Phase 3 + Phase 4 each ship in independent PRs, each <150 LOC impl
+- **R-1**: `cascade_state` axis has 0 `invalid_arg` sites in `lib/` — **met by Phase 5** (the 2 cascade sites raise `Cascade_transition_violation` instead).
+- **R-2**: `turn_phase` axis has 0 `invalid_arg` sites in `lib/` — **met by Phase 5** (the 2 turn_phase sites raise `Turn_phase_transition_violation` instead).
+- **R-3**: All `cascade_state` valid transitions are first-class GADT constructors — met by Phase 1.
+- **R-4**: Adding a new `cascade_state` (or `turn_phase`) variant requires editing the resolver and triggers Warning 8 at all match sites — met by Phase 1 / Phase 4a.
+- **R-5**: Existing test coverage is preserved or replaced by compile-time / typed-payload enforcement (no behavior regression) — met by Phase 3 / 4b / 5.
+- **R-6**: Phase 1, 2, 3, 4 (a/b), and 5 each ship in independent PRs, each <150 LOC impl.
 
 ## 8. Open questions
 
 1. **OQ-1**: Should `Compaction_transition` GADT be added in this RFC or deferred? — Recommendation: defer to amendment after Phase 1-4 lands.
-2. **OQ-2**: `resolve_*_transition` returns `Result.t` — does the typed error variant suffice, or should it carry the violated *invariant identifier* (e.g., TLA+ action name)? — Recommendation: start with simple typed variant, escalate if TLA+ trace integration becomes useful.
+2. **OQ-2** (resolved by Phase 5): `resolve_*_transition` returns the `*_resolve_outcome` sum; the violation arm carries the `*_transition_spec_violation` variant, and that variant is re-raised on the typed `*_transition_violation` exception. Carrying the TLA+ action name was not needed — the `*_transition_spec_violation` constructor name *is* a stable identifier for the violated pair, and the `Printexc` printer renders it. Escalate only if TLA+ trace integration later wants the action name verbatim.
 3. **OQ-3**: Should the existing `Decision_transition` GADT also be activated (PR-7 of this RFC) for symmetry, or left as standalone documentation? — Recommendation: defer; #14887 already closed the decision axis via input refinement, and GADT activation would force from-state threading without semantic gain.
 
 ## 9. Precedent + references

@@ -5,26 +5,24 @@
     [@@fsm_guard "<bool-expr>"] injects [assert (<bool-expr>);] into
     the function body.
 
-    [wrap_unit] runs a [unit -> unit] thunk under that contract:
-    catches [Assert_failure] (legacy [@@fsm_guard]-injected asserts)
-    and [Invalid_argument] (explicit [invalid_arg] from validators that
-    embed the rejected ([from], [to]) pair in the message), bumps the
+    [wrap_unit] runs a [unit -> unit] thunk under that contract: any
+    exception escaping the thunk (legacy [Assert_failure] from PPX-injected
+    asserts, legacy [Invalid_argument] from string-message validators, or
+    the typed [Keeper_registry.Cascade_transition_violation] /
+    [Turn_phase_transition_violation] as of RFC-0072 Phase 5) bumps the
     [Prometheus.metric_fsm_guard_violation] counter labelled with
-    [action] / [stage], and re-raises.  FSM contract violations are
-    fail-closed in production and tests; [MASC_FSM_GUARD_ASSERT] is no
-    longer a runtime soft-mode escape hatch.
+    [action] / [stage], and is re-raised unchanged.  FSM contract
+    violations are fail-closed in production and tests;
+    [MASC_FSM_GUARD_ASSERT] is no longer a runtime soft-mode escape hatch.
+    The catch is widened to all exceptions (rather than naming the typed
+    ones) because [Keeper_registry] already depends on this module, so a
+    back-reference would form a dependency cycle.
 
     The thunk is expected to call an identity helper of return type
     [unit] (a function whose only purpose is to carry the
-    [@@fsm_guard] attribute). Exceptions other than [Assert_failure] and
-    [Invalid_argument] propagate unchanged — only the spec-violation
-    channel is intercepted. *)
+    [@@fsm_guard] attribute). *)
 
-val wrap_unit :
-  action:string ->
-  stage:string ->
-  (unit -> unit) ->
-  unit
+val wrap_unit : action:string -> stage:string -> (unit -> unit) -> unit
 
 (** Compatibility no-op retained for older tests.  The guard policy no
     longer reads [MASC_FSM_GUARD_ASSERT]. *)

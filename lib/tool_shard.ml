@@ -1837,8 +1837,8 @@ let agent_shards : string list StringMap.t ref = ref StringMap.empty
 let agent_shards_mutex = Stdlib.Mutex.create ()
 
 (** Default shards for a new keeper.
-    All keepers get all shards unconditionally. Safety is handled by
-    eval_gate deny lists, not by shard membership. *)
+    Autoresearch is intentionally opt-in through the explicit shard or
+    a preset/tool policy group. *)
 let default_shard_names : string list =
   [ "base"
   ; "board"
@@ -1847,7 +1847,6 @@ let default_shard_names : string list =
   ; "library"
   ; "taskboard"
   ; "coding"
-  ; "autoresearch"
   ]
 ;;
 

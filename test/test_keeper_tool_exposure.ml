@@ -124,10 +124,10 @@ let test_default_has_no_legacy_governance_tools () =
   check bool "case brief submit removed" false (has_tool "masc_case_brief_submit" tools)
 ;;
 
-let test_default_has_research_tools () =
-  let meta = make_meta () in
+let test_coding_preset_hides_autoresearch_tools () =
+  let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
+  check bool "hides autoresearch" false (has_any_prefix "masc_autoresearch_" tools)
 ;;
 
 let test_custom_empty_blocks_all_tools () =
@@ -293,10 +293,10 @@ let test_legacy_pr_schemas_removed () =
 ;;
 
 (* ============================================================
-   6. All keepers get autoresearch tools (mode removed)
+   6. Autoresearch tools are opt-in through research-capable presets
    ============================================================ *)
 
-let test_all_keepers_have_autoresearch () =
+let test_research_preset_has_autoresearch () =
   let meta = make_meta ~preset:Keeper_types.Research () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
@@ -1196,7 +1196,10 @@ let () =
             "legacy governance tools removed"
             `Quick
             test_default_has_no_legacy_governance_tools
-        ; test_case "has research tools" `Quick test_default_has_research_tools
+        ; test_case
+            "coding preset hides autoresearch tools"
+            `Quick
+            test_coding_preset_hides_autoresearch_tools
         ; test_case
             "custom empty blocks all tools"
             `Quick
@@ -1256,9 +1259,9 @@ let () =
         ] )
     ; ( "autoresearch_tools"
       , [ test_case
-            "all keepers have autoresearch"
+            "research preset has autoresearch"
             `Quick
-            test_all_keepers_have_autoresearch
+            test_research_preset_has_autoresearch
         ] )
     ; ( "mode_free_access"
       , [ test_case

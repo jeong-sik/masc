@@ -14,8 +14,7 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   List.rev unique
 
 let retired_front_door_schema_names =
-  [
-  ]
+  Tool_autoresearch.schemas |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
 let filter_retired_front_door_schemas (schemas : Masc_domain.tool_schema list) =
   List.filter
@@ -24,30 +23,32 @@ let filter_retired_front_door_schemas (schemas : Masc_domain.tool_schema list) =
     schemas
 
 let raw_all_tool_schemas : Masc_domain.tool_schema list =
-  filter_retired_front_door_schemas
-    (dedupe_schemas
-       (Tools.raw_schemas
-       @ Tool_schemas_misc.schemas
-       @ Tool_board.tools
-       @ Keeper_types.schemas
-       @ Tool_local_runtime.schemas
-       @ Tool_autoresearch.schemas
-       @ Tool_agent_timeline.schemas
-       @ Tool_shard.schemas
-       (* #9912 / #10101: every keeper-facing shard tool must reach the
-          authoritative registry consumed by
-          [Tool_help_registry.find_entry], or keepers that request
-          help on the tool receive "unknown tool" despite the
-          dispatcher handling it correctly.  #9912 plugged only
-          [Tool_shard.base_tools] (5 always-present tools); #10101
-          observed 11 other shard categories still missing
-          (keeper_task_claim, keeper_fs_edit, keeper_board_*, ...).
-          [Tool_shard.all_keeper_tool_schemas] is the SSOT that
-          pulls from [all_shards] plus the non-shard
-          [keeper_preflight_tools] / [keeper_pr_review_tools]
-          lists, so future shard categories flow through without
-          another patch-local fix. *)
-       @ Tool_shard.all_keeper_tool_schemas))
+  dedupe_schemas
+    (Tools.raw_schemas
+     @ Tool_schemas_misc.schemas
+     @ Tool_board.tools
+     @ Keeper_types.schemas
+     @ Tool_local_runtime.schemas
+     @ Tool_autoresearch.schemas
+     @ Tool_agent_timeline.schemas
+     @ Tool_shard.schemas
+     (* #9912 / #10101: every keeper-facing shard tool must reach the
+        authoritative registry consumed by
+        [Tool_help_registry.find_entry], or keepers that request
+        help on the tool receive "unknown tool" despite the
+        dispatcher handling it correctly.  #9912 plugged only
+        [Tool_shard.base_tools] (5 always-present tools); #10101
+        observed 11 other shard categories still missing
+        (keeper_task_claim, keeper_fs_edit, keeper_board_*, ...).
+        [Tool_shard.all_keeper_tool_schemas] is the SSOT that
+        pulls from [all_shards] plus the non-shard
+        [keeper_preflight_tools] / [keeper_pr_review_tools]
+        lists, so future shard categories flow through without
+        another patch-local fix. *)
+     @ Tool_shard.all_keeper_tool_schemas)
+
+let front_door_tool_schemas : Masc_domain.tool_schema list =
+  filter_retired_front_door_schemas raw_all_tool_schemas
 
 (** Validate tool schemas at module initialization time.
     Logs warnings for: duplicate names, empty names/descriptions,
@@ -90,7 +91,7 @@ let validate_schemas (schemas : Masc_domain.tool_schema list) =
 
 let all_tool_schemas : Masc_domain.tool_schema list =
   let schemas =
-    Capability_registry.public_tool_schemas_from raw_all_tool_schemas
+    Capability_registry.public_tool_schemas_from front_door_tool_schemas
   in
   validate_schemas schemas;
   schemas
@@ -119,7 +120,7 @@ let is_raw_tool_name name = Hashtbl.mem raw_tool_name_set name
 let visible_tool_schemas ?(include_hidden = false) ?(include_deprecated = false) () :
     Masc_domain.tool_schema list =
   Capability_registry.visible_public_tool_schemas_from ~include_hidden
-    ~include_deprecated raw_all_tool_schemas
+    ~include_deprecated front_door_tool_schemas
 
 let surface_tool_schemas ?(include_hidden = false) ?(include_deprecated = false) () :
     Masc_domain.tool_schema list =

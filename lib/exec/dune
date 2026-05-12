@@ -5,6 +5,8 @@
  (name masc_exec)
  (public_name masc_mcp.masc_exec)
  (wrapped true)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ (flags (:standard -w +4))
  (libraries masc_process masc_core masc_config eio unix yojson re))
 
 ; RFC-0054 PR-3 — auto-generate parallel-verification walkers for

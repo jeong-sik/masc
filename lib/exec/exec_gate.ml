@@ -153,12 +153,16 @@ let verdict_for_argv ~actor ~raw_source ~summary ~argv ?env ?cwd () =
     let overlay = Approval_config.lookup rollout_config ~actor in
     let policy : Approval_policy.t = { raw_source; summary } in
     let typed = Shell_ir_typed.of_simple simple in
+    (* [@warning "-4"]: [typed] is a GADT existential (Shell_ir_typed.W).
+       Enumerating every wrapped node type is impractical; the intent is
+       "Generic gets the legacy capability check, everything else gets the
+       typed path". RFC-0071 §3.4.1 GADT-existential exemption. *)
     let caps =
-      match typed with
-      | Shell_ir_typed.W (Shell_ir_typed.Generic _) ->
-        Capability_check.of_simple simple
-      | _ ->
-        Capability_check_typed.of_command typed
+      (match typed with
+       | Shell_ir_typed.W (Shell_ir_typed.Generic _) ->
+         Capability_check.of_simple simple
+       | _ ->
+         Capability_check_typed.of_command typed) [@warning "-4"]
     in
     let verdict = Approval_policy.decide policy ~overlay ~caps ~simple in
     Ok verdict

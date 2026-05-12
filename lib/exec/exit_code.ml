@@ -79,11 +79,15 @@ let of_process_status = function
       | 11 -> Segfault
       | _ -> Signal signum
     in
+    (* cat is provably one of {Oom_killed, Segfault, Signal _} from the
+       [match signum] above; the remaining category ctors are listed
+       explicitly so a new ctor forces a compile error here (warning 4). *)
     let lab = match cat with
       | Oom_killed -> "oom_killed"
       | Segfault -> "segfault"
       | Signal s -> Printf.sprintf "killed_by_%s" (signal_name s)
-      | _ -> "signal" (* unreachable for this branch *)
+      | Success | General_error | Usage_error | Data_error
+      | Permission_error | Not_found | Timeout | Unknown _ -> "signal"
     in
     let hnt = match cat with
       | Oom_killed ->
@@ -93,7 +97,8 @@ let of_process_status = function
       | Signal s ->
         Printf.sprintf "Process received %s. May have been killed externally."
           (signal_name s)
-      | _ -> ""
+      | Success | General_error | Usage_error | Data_error
+      | Permission_error | Not_found | Timeout | Unknown _ -> ""
     in
     { raw = Unix.WEXITED n; code = n;
       category = cat; label = lab; hint = hnt }
@@ -108,11 +113,13 @@ let of_process_status = function
       | 11 -> Segfault
       | _ -> Signal signum
     in
+    (* Same provable invariant as the WEXITED>=128 branch above. *)
     let lab = match cat with
       | Oom_killed -> "oom_killed"
       | Segfault -> "segfault"
       | Signal s -> Printf.sprintf "killed_by_%s" (signal_name s)
-      | _ -> "signal"
+      | Success | General_error | Usage_error | Data_error
+      | Permission_error | Not_found | Timeout | Unknown _ -> "signal"
     in
     let hnt = match cat with
       | Oom_killed ->
@@ -122,7 +129,8 @@ let of_process_status = function
       | Signal s ->
         Printf.sprintf "Process received %s. May have been killed externally."
           (signal_name s)
-      | _ -> ""
+      | Success | General_error | Usage_error | Data_error
+      | Permission_error | Not_found | Timeout | Unknown _ -> ""
     in
     { raw = Unix.WSIGNALED signum;
       code = 128 + signum;

@@ -132,7 +132,8 @@ let rec dispatch_pipeline stages =
                 let final_status =
                   match last_status with
                   | Unix.WEXITED 0 -> result.status
-                  | _ -> last_status
+                  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+                      last_status
                 in
                 { result with status = final_status })
         | Pipeline _ :: _ ->

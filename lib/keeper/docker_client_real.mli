@@ -58,3 +58,16 @@
     leak" contract is preserved. *)
 
 include Docker_client.S
+
+(** [exec_argv ?user ?workdir ~container ~cmd ()] is the pure [docker
+    exec] argv builder used by {!exec}. Exposed for unit-testing the
+    argv shape (option presence, [--user] before [-w] ordering)
+    without spawning a daemon. Trailing [unit] for the same
+    optional-erasure reason as {!exec}. *)
+val exec_argv
+  :  ?user:int * int
+  -> ?workdir:string
+  -> container:Keeper_container_name.t
+  -> cmd:string
+  -> unit
+  -> string list

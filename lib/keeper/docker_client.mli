@@ -44,9 +44,26 @@ module type S = sig
     -> (Docker_response.exec_result, sandbox_error) result
 
   val exec
-    :  container:Keeper_container_name.t
+    :  ?user:int * int
+    -> ?workdir:string
+    -> container:Keeper_container_name.t
     -> cmd:string
+    -> unit
     -> (Docker_response.exec_result, sandbox_error) result
+  (** [exec ?user ?workdir ~container ~cmd ()] runs [cmd] inside an
+      already-running [container] via [docker exec].
+
+      - [?user] — [(uid, gid)], emitted as [--user uid:gid]. Omitted
+        ⇒ docker uses the container image's [USER].
+      - [?workdir] — emitted as [-w workdir]. Omitted ⇒ docker uses
+        the container's [WORKDIR].
+
+      The trailing [unit] is required so OCaml can erase the leading
+      optionals (warning 16) — all parameters are otherwise labeled.
+
+      A non-zero exit *inside the container* is the command's result
+      ([Ok { exit_code = n; ... }]), not a daemon error; only
+      daemon-level statuses become [Error Daemon_unreachable]. *)
 
   val ps_query
     :  labels:(string * string) list

@@ -27,6 +27,39 @@ When `cascade.toml` is present alongside `cascade.json`:
 
 Legacy `cascade.json`-only mode remains supported for backward compatibility.
 
+## Provider/Model-Free Contract
+
+`models = ["provider:model"]` entries are **configuration data**, not permission
+for MASC code to branch on provider or model literals.
+
+The runtime contract is:
+
+- MASC owns routes, profile selection, fallback, admission, health cooldown,
+  receipt, dashboard, and keeper-facing assignment policy.
+- OAS owns the generic single-provider runtime contract: provider catalog,
+  model/capability/pricing manifests, request/response adapters, and
+  non-interactive transport metadata.
+- MASC bridge/adapter code may parse provider/model labels and project
+  `cascade.toml` facts into OAS generic provider/capability contracts.
+- MASC core code must not hardcode vendor/model names for routing decisions.
+  It should route by logical use, declared capability, profile order, health,
+  and capacity.
+
+In practical terms, adding a cloud API provider that already follows an
+existing OAS wire protocol should be:
+
+1. Add or override an OAS provider catalog entry (`OAS_PROVIDER_CATALOG` or
+   embedding-time catalog install).
+2. Add the provider id/model label to `cascade.toml`.
+3. Add capability/pricing facts through OAS manifests when the defaults are not
+   enough.
+4. Run the cascade materialization and OAS boundary checks.
+
+Adding a subscription-backed CLI runtime is the same shape: the provider
+catalog declares `transport = "cli"`, cached-login auth, non-interactive
+readiness, and daemon safety; `cascade.toml` only references the opaque
+provider id selected by the operator.
+
 ## TOML Schema Reference
 
 ### Top-Level Comment
@@ -164,6 +197,11 @@ models = [
   { model = "glm-coding:auto", supports_tool_choice = true, weight = 2 },
 ]
 ```
+
+Provider ids in the examples above are repo seed examples only. Operators may
+use catalog-defined ids such as `"acme-cloud:acme-large"` or
+`"subscriber-codex:auto"` without requiring MASC code changes, provided the
+corresponding OAS provider/catalog capability contract exists.
 
 ## Checked-In Seed Policy
 

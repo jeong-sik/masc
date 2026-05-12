@@ -31,12 +31,17 @@
 \* The [submit_pending] variant has a different, weaker failure mode (a
 \* dropped [on_resolution] callback, not a permanently blocked fiber);
 \* it is out of scope here.  [expire_stale] handles BOTH via two
-\* independent matches — `match entry.resolver with Some r ->
-\* Eio.Promise.resolve r (Reject ...) | None -> ()` and, separately,
-\* `match entry.on_resolution with Some f -> f (Reject ...) | None ->
-\* ()` (the two fields are never both populated: a [submit_pending]
-\* entry has resolver = None and on_resolution = Some f, so `resolver =
-\* None` does not imply a callback exists); the model abstracts only its
+\* *syntactically* independent matches — `match entry.resolver with
+\* Some r -> Eio.Promise.resolve r (Reject ...) | None -> ()` and,
+\* separately, `match entry.on_resolution with Some f -> f (Reject ...)
+\* | None -> ()`.  The two arms don't reference each other, so
+\* [expire_stale] would still terminate cleanly for any combination of
+\* the four (Some/None × Some/None) cases.  Under the *current* runtime
+\* invariant exactly one field is populated (submit_and_await sets
+\* resolver=Some, on_resolution=None; submit_pending sets the reverse),
+\* so [resolver = None] does imply [on_resolution = Some]; the
+\* independent-match shape is defensive against a future refactor that
+\* might relax the producer invariant.  The model abstracts only the
 \* effect on the suspended-fiber population.
 \*
 \* The boundary critique flagged this as a black-box area: a tool call

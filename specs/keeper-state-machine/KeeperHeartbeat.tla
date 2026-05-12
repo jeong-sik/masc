@@ -5,8 +5,10 @@
 \* Verified against main as of 2026-04-28 (sibling refresh to #11641,
 \* #11645; see Cycle 27 PR #11596 for the OCaml-side anchor).
 \*
-\* Runtime entities modelled (see [run_heartbeat_loop] at line 1828,
-\* and [Atomic.set entry.fiber_wakeup true] at lines 2143 and 2644):
+\* Runtime entities modelled (see functions [run_heartbeat_loop] and
+\* [Atomic.set entry.fiber_wakeup true]; iter 64 N-2.a removed line
+\* numbers — function names are stable, line numbers drift; N-2.c adds a
+\* structural guard at scripts/audit-tla-ml-line-refs.sh):
 \*
 \*   wakeup_signaled  : bool Atomic.t — set by external supervisor /
 \*                      operator code when a keeper should service a

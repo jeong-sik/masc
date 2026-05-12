@@ -26,6 +26,7 @@ on:
       - 'scripts/audit-tla-phase-count.sh'
       - 'scripts/audit-ocaml-phase-count.sh'
       - 'scripts/ocaml-phase-count-baseline.txt'
+      - 'scripts/audit-tla-ml-line-refs.sh'
       - 'lib/keeper/**/*.ml'
       - 'lib/keeper/**/*.mli'
       - 'scripts/tla-annotation-drift-baseline.txt'
@@ -43,6 +44,7 @@ on:
       - 'scripts/audit-tla-phase-count.sh'
       - 'scripts/audit-ocaml-phase-count.sh'
       - 'scripts/ocaml-phase-count-baseline.txt'
+      - 'scripts/audit-tla-ml-line-refs.sh'
       - 'lib/keeper/**/*.ml'
       - 'lib/keeper/**/*.mli'
       - 'scripts/tla-annotation-drift-baseline.txt'
@@ -99,3 +101,16 @@ jobs:
         run: |
           bash scripts/audit-ocaml-phase-count.sh \
             --baseline scripts/ocaml-phase-count-baseline.txt
+
+      - name: Run TLA->OCaml line-ref validator (N-2.c)
+        # Catches stale `[func] at line N` citations in spec preambles
+        # where the OCaml `let func` declaration has drifted out of an
+        # N-line window.  iter 63 #14919 audit found KeeperApprovalQueue
+        # citing lines 751/772/941 for functions now at +245..+413; two
+        # more specs (KeeperHeartbeat, KeeperTaskAcquisition) had the
+        # same drift.  iter 64 N-2.a converted those to function-name-
+        # only references; this guard prevents the next preamble that
+        # adds a line number from regressing the same way.
+        # See scripts/audit-tla-ml-line-refs.sh and docs/tla-audit/
+        # kaq-n1-approval-queue-line-ref-drift-2026-05-12.md.
+        run: bash scripts/audit-tla-ml-line-refs.sh

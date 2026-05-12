@@ -103,7 +103,7 @@ type conditions = {
       [Fiber_started]; a noop compaction does not reset this latch. *)
   terminal_failure_latched : bool;
   (** Set when the keeper encounters a permanent structural error
-      (provider adapter failure, unresumable session conflict, etc).
+      (runtime bridge failure, unresumable session conflict, etc).
       Once latched, [derive_phase] returns [Zombie] regardless of
       fiber or budget state. Reset only by [Fiber_started] so a
       full restart can attempt recovery with a fresh trace. *)
@@ -198,7 +198,7 @@ type event =
   | Zombie_timeout
   | Guardrail_stop of { reason : string }
   | Terminal_failure_detected of { reason : string }
-    (** Permanent structural error (provider adapter failure, unresumable
+    (** Permanent structural error (runtime bridge failure, unresumable
         session conflict, etc). Latches [terminal_failure_latched] and
         drives the keeper to [Zombie] on the next [derive_phase]. *)
   | Context_overflow_detected of {

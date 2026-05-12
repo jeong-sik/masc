@@ -260,7 +260,7 @@ let test_get_config_unknown () =
   | Some _ -> fail "expected None"
 
 let test_spawn_bare_ollama_rejected () =
-  if Masc_mcp.Provider_adapter.is_bare_ollama_label "ollama" then (
+  if Masc_mcp.Runtime_catalog.is_bare_ollama_label "ollama" then (
     let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
     check bool "spawn rejected" false result.Spawn.success;
     check int "exit code" 2 result.Spawn.exit_code;

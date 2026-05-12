@@ -7,9 +7,9 @@
 
 open Alcotest
 
-(* ── Section 1: Provider_adapter contracts ── *)
+(* ── Section 1: Runtime_catalog contracts ── *)
 
-module Adapter = Masc_mcp.Provider_adapter
+module Adapter = Masc_mcp.Runtime_catalog
 module Model_resolve = Masc_mcp.Cascade_model_resolve
 
 let string_of_resolution_provenance = function
@@ -327,7 +327,7 @@ let test_redaction_idempotent () =
 let () =
   run "Observability Provider Contracts"
     [
-      ( "provider_adapter",
+      ( "runtime_catalog",
         [
           test_case "alias roundtrip" `Quick test_alias_roundtrip;
           test_case "case insensitive" `Quick test_case_insensitive;

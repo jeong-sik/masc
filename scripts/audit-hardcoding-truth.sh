@@ -91,8 +91,8 @@ print_matches \
   'tool_required_affordances|String\.starts_with|String\.equal[[:space:]]+[a-zA-Z_]+[[:space:]]+"(keeper|masc)_[^"]+"|List\.mem[[:space:]]+[a-zA-Z_]+[[:space:]]+turn_affordances'
 
 print_matches \
-  "provider adapter still has model-label/provider heuristics" \
-  lib/provider_adapter.ml \
+  "runtime catalog still has model-label/provider heuristics" \
+  lib/runtime_catalog.ml \
   'prefix_classification_vocabulary|bare_heuristic|is_kimi_model_id|is_moonshot_base_url|String\.starts_with|List\.mem[[:space:]]+provider[[:space:]]+\['
 
 section "Anti-Fake Detector"

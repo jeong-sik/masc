@@ -118,7 +118,7 @@ let load_snapshots_from_jsonl path =
 
 let response_format_of_provider provider =
   let canonical =
-    match Provider_adapter.resolve_direct_canonical_name provider with
+    match Runtime_catalog.resolve_direct_canonical_name provider with
     | Some name -> name
     | None -> String.lowercase_ascii (String.trim provider)
   in

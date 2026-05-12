@@ -30,7 +30,7 @@ let is_local_only_cascade name =
 
 let is_local_label label =
   match provider_name_of_label label with
-  | Some pname -> Provider_adapter.is_local_provider pname
+  | Some pname -> Runtime_catalog.is_local_provider pname
   | None -> false
 
 let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
@@ -40,17 +40,17 @@ let default_model_strings ~cascade_name =
     cascade_name |> cascade_name_to_string |> Keeper_cascade_profile.canonicalize
   in
   let all_labels =
-    match Provider_adapter.explicit_llama_model_label_result () with
+    match Runtime_catalog.explicit_llama_model_label_result () with
     | Ok label -> [ label ]
     | Error _ -> (
-        match Provider_adapter.preferred_execution_model_labels () with
+        match Runtime_catalog.preferred_execution_model_labels () with
         | [] ->
           (* Neither explicit llama label nor any preferred execution
              label is configured.  Iter 25: surface so dashboards can
              alert on missing execution-lane config. *)
           Cascade_metrics.on_default_label_fallback
             ~cascade:cascade_name ~reason:"no_execution_labels";
-          [ Provider_adapter.default_local_fallback_label () ]
+          [ Runtime_catalog.default_local_fallback_label () ]
         | labels -> labels)
   in
   if is_local_only_cascade cascade_name then
@@ -61,7 +61,7 @@ let default_model_strings ~cascade_name =
          only remote providers.  Iter 25 counter. *)
       Cascade_metrics.on_default_label_fallback
         ~cascade:cascade_name ~reason:"local_cascade_no_local";
-      [ Provider_adapter.default_local_fallback_label () ]
+      [ Runtime_catalog.default_local_fallback_label () ]
     | local -> local
   else
     all_labels
@@ -70,7 +70,7 @@ let labels_require_local_discovery (labels : string list) : bool =
   List.exists
     (fun label ->
       match provider_name_of_label label with
-      | Some pname -> Provider_adapter.requires_discovery pname
+      | Some pname -> Runtime_catalog.requires_discovery pname
       | None -> false)
     labels
 
@@ -227,7 +227,7 @@ let labels_are_pure_local (labels : string list) : bool =
   List.for_all
     (fun label ->
       match provider_name_of_label label with
-      | Some pname -> Provider_adapter.is_local_provider pname
+      | Some pname -> Runtime_catalog.is_local_provider pname
       | None -> false)
     labels
 
@@ -281,16 +281,16 @@ let default_local_model_label_and_id () : string * string =
             if entry.is_available () then Some (label, model_id_of_label label)
             else None)
   in
-  match Provider_adapter.configured_default_model_label_result () with
+  match Runtime_catalog.configured_default_model_label_result () with
   | Ok label -> (
       match try_label label with
       | Some pair -> pair
       | None -> (
-          match List.find_map try_label (Provider_adapter.preferred_execution_model_labels ()) with
+          match List.find_map try_label (Runtime_catalog.preferred_execution_model_labels ()) with
           | Some pair -> pair
           | None -> fallback))
   | Error _ -> (
-      match List.find_map try_label (Provider_adapter.preferred_execution_model_labels ()) with
+      match List.find_map try_label (Runtime_catalog.preferred_execution_model_labels ()) with
       | Some pair -> pair
       | None -> fallback)
 
@@ -303,7 +303,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
           match provider_name_of_label label with
           | None -> true
           | Some pname ->
-              if Provider_adapter.is_local_provider pname then true
+              if Runtime_catalog.is_local_provider pname then true
               else
                 match Llm_provider.Provider_registry.find default_registry pname with
                 | None -> false
@@ -318,7 +318,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
             match provider_name_of_label label with
             | None -> None
             | Some pname ->
-                if Provider_adapter.is_local_provider pname then None
+                if Runtime_catalog.is_local_provider pname then None
                 else
                   match Llm_provider.Provider_registry.find default_registry pname with
                   | None -> Some (Printf.sprintf "%s (unknown provider)" pname)

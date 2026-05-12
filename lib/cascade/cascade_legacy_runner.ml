@@ -151,13 +151,13 @@ let find_cascade_eviction_candidate counters =
     providers such as [glm], [glm-coding], and [openrouter] track the
     pinned agent_sdk behavior exactly. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.provider_label_of_config cfg
+  Runtime_catalog.provider_label_of_config cfg
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.display_provider_name_of_config cfg
+  Runtime_catalog.display_provider_name_of_config cfg
 
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.model_label_of_config cfg
+  Runtime_catalog.model_label_of_config cfg
 
 let model_label_option_of_model_id
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)

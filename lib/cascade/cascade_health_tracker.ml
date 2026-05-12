@@ -112,7 +112,7 @@ let cooldown_sec =
     respectively to prevent zero-value misconfiguration from disabling
     cooldown entirely.
 
-    Provider classification uses {!Provider_adapter.is_local_provider},
+    Provider classification uses {!Runtime_catalog.is_local_provider},
     the same primitive cascade_runtime already consumes — no new
     classifier introduced. *)
 let local_cooldown_threshold =
@@ -130,7 +130,7 @@ let local_cooldown_sec =
        ())
 
 let cooldown_config_for ~provider_key =
-  if Provider_adapter.is_local_provider provider_key then
+  if Runtime_catalog.is_local_provider provider_key then
     (local_cooldown_threshold, local_cooldown_sec)
   else
     (cooldown_threshold, cooldown_sec)

@@ -6,26 +6,26 @@ type capabilities =
   ; supports_runtime_mcp_http_headers : bool
   }
 
-(** Whether the resolved provider adapter is a CLI runtime (Claude Code,
+(** Whether the resolved runtime catalog entry is a CLI runtime (Claude Code,
     Codex CLI, Gemini CLI, Kimi CLI).  Capability normalisation and the
     [for_model_id] bypass both key off this predicate rather than matching
     on [Provider_config.provider_kind] (RFC-0058 §2.4). *)
 let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
-  match Provider_adapter.adapter_of_provider_config provider_cfg with
-  | Some adapter -> adapter.runtime_kind = Provider_adapter.Cli_agent
+  match Runtime_catalog.adapter_of_provider_config provider_cfg with
+  | Some adapter -> adapter.runtime_kind = Runtime_catalog.Cli_agent
   | None -> false
 ;;
 
 (** [normalize_cli_caps_when ~is_cli caps] overrides CLI runtime caps when
     [is_cli] is [true]. Decoupled from [is_cli_agent_provider] so callers
-    that have already resolved the adapter (e.g. [oas_capabilities_of_config]
+    that have already resolved the runtime entry (e.g. [oas_capabilities_of_config]
     below) can avoid re-resolving for the same provider.
 
     Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
     Kimi CLI) use runtime MCP for tool invocation, not inline
     function-calling. The OAS base capabilities for CLI kinds may disagree
     on [supports_runtime_mcp_tools] (e.g. Gemini CLI defaults to [false]
-    in OAS — see [Provider_adapter] gemini-cli row: MCP servers are read
+    in OAS — see [Runtime_catalog] gemini-cli row: MCP servers are read
     only from [~/.gemini/settings.json] / project [.gemini/settings.json]
     with no [--mcp-config] flag, so masc-mcp's per-keeper request-scoped
     policies cannot be injected per invocation). This override forces all
@@ -43,6 +43,30 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
   else caps
 ;;
 
+let normalize_registry_url value =
+  let trimmed = String.trim value in
+  let rec strip_trailing_slash value =
+    let len = String.length value in
+    if len > 1 && value.[len - 1] = '/'
+    then strip_trailing_slash (String.sub value 0 (len - 1))
+    else value
+  in
+  strip_trailing_slash trimmed
+;;
+
+let registry_entry_matches_config
+      (provider_cfg : Llm_provider.Provider_config.t)
+      (entry : Llm_provider.Provider_registry.entry)
+  =
+  entry.defaults.kind = provider_cfg.kind
+  && String.equal
+       (normalize_registry_url entry.defaults.base_url)
+       (normalize_registry_url provider_cfg.base_url)
+  && String.equal
+       (String.trim entry.defaults.request_path)
+       (String.trim provider_cfg.request_path)
+;;
+
 (** Resolve OAS-level capabilities for a provider config.
 
     CLI runtimes (Claude_code, Gemini_cli, Kimi_cli, Codex_cli) bypass
@@ -50,13 +74,31 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
     internally — the model_id in the config is a routing hint, not an
     API model identifier that OAS can look up.  All other adapters consult
     [for_model_id] first, falling back to the kind-level base. *)
+let registry_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
+  let registry = Llm_provider.Provider_registry.default () in
+  match
+    Llm_provider.Provider_registry.all registry
+    |> List.find_opt (registry_entry_matches_config provider_cfg)
+  with
+  | Some entry -> entry.capabilities
+  | None ->
+    let provider_label =
+      Llm_provider.Provider_registry.provider_name_of_config provider_cfg
+    in
+    (match Llm_provider.Provider_registry.find registry provider_label with
+     | Some entry -> entry.capabilities
+     | None ->
+       (match Llm_provider.Capabilities.capabilities_for_provider_label provider_label with
+        | Some caps -> caps
+        | None -> Llm_provider.Capabilities.default_capabilities))
+;;
+
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
-  (* Resolve the adapter once via [is_cli_agent_provider]; reuse the
-     boolean for both the [for_model_id] bypass and the CLI cap override
-     so we do not call [Provider_adapter.adapter_of_provider_config]
-     twice for the same config. *)
+  (* OAS owns generic provider capabilities through Provider_registry and
+     Provider_catalog overlays. MASC keeps only local policy overlays such
+     as runtime MCP header handling in Runtime_catalog. *)
   let is_cli = is_cli_agent_provider provider_cfg in
-  let caps = Provider_adapter.oas_capabilities_of_config provider_cfg in
+  let caps = registry_capabilities_of_config provider_cfg in
   let caps =
     if is_cli
     then caps
@@ -72,7 +114,7 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
 ;;
 
 let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
+  Runtime_catalog.supports_runtime_mcp_http_headers_for_config provider_cfg
 ;;
 
 let capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
@@ -112,7 +154,7 @@ let provider_supports_runtime_mcp_http_header
      carve-out (e.g. Codex CLI carries [Authorization]/[x-masc-*] via
      [bearer_token_env_var] + non-secret routing labels).  The carve-out
      set lives on the adapter row, not in this consumer module. *)
-  Provider_adapter.accepts_runtime_mcp_http_header_for_config provider_cfg key
+  Runtime_catalog.accepts_runtime_mcp_http_header_for_config provider_cfg key
 ;;
 
 let runtime_mcp_policy_requires_unsupported_http_headers

@@ -152,7 +152,7 @@ let test_masc_mcp_tools () =
   ()
 
 let test_spawn_bare_ollama_rejected () =
-  if Provider_adapter.is_bare_ollama_label "ollama" then (
+  if Runtime_catalog.is_bare_ollama_label "ollama" then (
     let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
     Alcotest.(check bool) "spawn rejected" false result.Spawn.success;
     Alcotest.(check int) "exit code" 2 result.Spawn.exit_code;

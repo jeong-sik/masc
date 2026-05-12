@@ -44,6 +44,18 @@ let make_telemetry ?canonical_model_id () : Agent_sdk.Types.inference_telemetry 
   }
 ;;
 
+let with_known_non_catalog_pricing_models models f =
+  let env = "MASC_KNOWN_NON_CATALOG_PRICING_MODELS" in
+  let previous = Sys.getenv_opt env in
+  Unix.putenv env (String.concat "," models);
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some prior -> Unix.putenv env prior
+      | None -> Unix.putenv env "")
+    f
+;;
+
 (* ------------------------------------------------------------------ *)
 (* pricing_model_for_ledger                                            *)
 (* ------------------------------------------------------------------ *)
@@ -185,9 +197,15 @@ let test_catalog_status_unresolved_for_auto_alias () =
   check string "auto alias → alias_unresolved" "alias_unresolved" status
 ;;
 
-let test_catalog_status_known_unpriced_codex_spark () =
-  let status = H.pricing_catalog_status ~pricing_model:"gpt-5.3-codex-spark" in
-  check string "codex spark preview → known_unpriced" "known_unpriced" status
+let test_catalog_status_known_unpriced_from_config () =
+  with_known_non_catalog_pricing_models
+    [ "fixture-known-unpriced-model-10318" ]
+    (fun () ->
+      let status =
+        H.pricing_catalog_status
+          ~pricing_model:"fixture-known-unpriced-model-10318"
+      in
+      check string "configured non-catalog model -> known_unpriced" "known_unpriced" status)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -219,7 +237,7 @@ let check_status
 ;;
 
 (* usage_missing gates everything else — the most actionable upstream
-   failure (provider adapter didn't surface usage at all). *)
+   failure (runtime bridge didn't surface usage at all). *)
 let test_status_usage_missing_wins () =
   check_status
     ~msg:"usage_missing: dominant"
@@ -333,17 +351,20 @@ let test_status_auto_alias_unresolved_model () =
     "unresolved_model_alias"
 ;;
 
-let test_status_known_unpriced_codex_spark () =
-  check_status
-    ~msg:"known provider + codex spark preview → known_unpriced_model"
-    ~provider:"openai"
-    ~pricing_model:"gpt-5.3-codex-spark"
-    ~usage_missing:false
-    ~usage_trusted:true
-    ~input_tokens:500
-    ~output_tokens:200
-    ~cost_usd:0.0
-    "known_unpriced_model"
+let test_status_known_unpriced_from_config () =
+  with_known_non_catalog_pricing_models
+    [ "fixture-known-unpriced-model-10318" ]
+    (fun () ->
+      check_status
+        ~msg:"known provider + configured non-catalog model -> known_unpriced_model"
+        ~provider:"openai"
+        ~pricing_model:"fixture-known-unpriced-model-10318"
+        ~usage_missing:false
+        ~usage_trusted:true
+        ~input_tokens:500
+        ~output_tokens:200
+        ~cost_usd:0.0
+        "known_unpriced_model")
 ;;
 
 (* Trusted + known-paid provider + model in catalog + zero cost (despite
@@ -467,9 +488,9 @@ let () =
             `Quick
             test_catalog_status_unresolved_for_auto_alias
         ; test_case
-            "codex spark preview → known_unpriced"
+            "configured non-catalog model -> known_unpriced"
             `Quick
-            test_catalog_status_known_unpriced_codex_spark
+            test_catalog_status_known_unpriced_from_config
         ] )
     ; ( "cost_status_for_event"
       , [ test_case "usage_missing wins" `Quick test_status_usage_missing_wins
@@ -484,9 +505,9 @@ let () =
         ; test_case "unpriced_model" `Quick test_status_unpriced_model
         ; test_case "auto alias unresolved" `Quick test_status_auto_alias_unresolved_model
         ; test_case
-            "codex spark known unpriced"
+            "configured non-catalog known unpriced"
             `Quick
-            test_status_known_unpriced_codex_spark
+            test_status_known_unpriced_from_config
         ; test_case "priced real model" `Quick test_status_priced_path_with_real_model
         ; test_case "known_free via catalog" `Quick test_status_known_free_via_catalog
         ] )

@@ -4,7 +4,7 @@ let score_provider health ~exclude ~keeper_assignable
     (provider : Llm_provider.Provider_config.t) =
   if not keeper_assignable then 0.0
   else
-    let provider_key = Provider_adapter.provider_health_key_of_config provider in
+    let provider_key = Runtime_catalog.provider_health_key_of_config provider in
     if List.mem provider_key exclude then 0.0
     else if Cascade_health_tracker.is_in_cooldown health ~provider_key then 0.0
     else
@@ -35,7 +35,7 @@ let best_runner_among ~health ~exclude candidates =
     List.filter
       (fun (sp : scored_provider) ->
          let provider_key =
-           Provider_adapter.provider_health_key_of_config sp.provider
+           Runtime_catalog.provider_health_key_of_config sp.provider
          in
          sp.score > 0.0
          && not (List.mem provider_key exclude))

@@ -5,7 +5,7 @@
 - **Created**: 2026-05-07
 - **Related**: RFC-0024 (ollama cascade integration), RFC-0027 (capability-typed cascade), RFC-0032 (env knob unification), RFC-0037 (local-first enablement boundary)
 - **Files referenced**:
-  `lib/provider_adapter.ml:152-167` (cn_* SSOT constants),
+  `lib/runtime_catalog.ml:152-167` (cn_* SSOT constants),
   `lib/cascade/cascade_config.ml:277` (provider name match),
   `lib/keeper/keeper_status_detail.ml:199` (provider name match),
   `lib/keeper/keeper_cascade_profile.ml:14-22` (cascade variant SSOT),
@@ -18,7 +18,7 @@ code as **bare string literals** scattered across modules:
 
 | Identifier kind | SSOT location | Example drift sites | Drift count (`rg "<name>"` lib) |
 |-----------------|---------------|---------------------|---------------------------------|
-| Provider name (e.g. "ollama") | `Provider_adapter.cn_ollama` | `keeper_status_detail.ml:199`, `cascade_config.ml:277`, `keeper_mcp_provider_audit.ml:85`, `server_routes_http_routes_cascade.ml:16` | 20+ across 14 files |
+| Provider name (e.g. "ollama") | `Runtime_catalog.cn_ollama` | `keeper_status_detail.ml:199`, `cascade_config.ml:277`, `keeper_mcp_provider_audit.ml:85`, `server_routes_http_routes_cascade.ml:16` | 20+ across 14 files |
 | Cascade name (e.g. "big_three") | `Keeper_cascade_profile.t` variant | `cascade_routes.ml:65-94`, `cascade_config_loader.ml`, `cascade_routes.mli` | 5 files |
 | Model id (e.g. "qwen3-coder:30b") | `cascade.toml` (data) | scattered string equality checks across cascade resolvers, telemetry tags |  highly variable |
 
@@ -74,7 +74,7 @@ Three new modules, each defining a `private` string alias:
 type t = private string
 val of_canonical_name : string -> t option
   (** Returns [Some] only if the string matches a registered
-      [Provider_adapter.adapter.canonical_name]. *)
+      [Runtime_catalog.adapter.canonical_name]. *)
 val of_canonical_name_exn : string -> t
 val to_string : t -> string
 val equal : t -> t -> bool
@@ -89,7 +89,7 @@ val gemini : t
 val kimi : t
 val glm : t
 val custom : t
-(* ... one per Provider_adapter.cn_* constant *)
+(* ... one per Runtime_catalog.cn_* constant *)
 ```
 
 Identical pattern for `Cascade_id` (canonical names from
@@ -102,12 +102,12 @@ The repository has many places that compare strings. We migrate **call
 sites only**, not data structures, in three phases:
 
 **Phase A — Provider_id (this RFC, surgical PR)**:
-- Replace `String.equal x "ollama"` with `String.equal x Provider_adapter.cn_ollama` (or eventually `Provider_id.equal x Provider_id.ollama`).
+- Replace `String.equal x "ollama"` with `String.equal x Runtime_catalog.cn_ollama` (or eventually `Provider_id.equal x Provider_id.ollama`).
 - This is the minimum drift fix — even without the full opaque type, just routing through SSOT eliminates the literal duplication. **Companion PR #14111 ships exactly this.**
 
 **Phase B — Phantom-typed wrappers**:
 - Introduce `Provider_id.t = private string`.
-- `Provider_adapter.cn_ollama : string` becomes `Provider_id.ollama : Provider_id.t`.
+- `Runtime_catalog.cn_ollama : string` becomes `Provider_id.ollama : Provider_id.t`.
 - All call sites that imported `cn_ollama` get an automatic compile error and must update — desirable, this is how we find the migration surface.
 - Estimate: ~80-150 LOC of mechanical updates spread across ~15 files.
 
@@ -159,7 +159,7 @@ type-safety without forcing exhaustiveness.
 
 | Phase | Scope | LOC | Status |
 |-------|-------|-----|--------|
-| A | route through `Provider_adapter.cn_*` SSOT (no new module) | ~30 | DONE — companion PR #14111 |
+| A | route through `Runtime_catalog.cn_*` SSOT (no new module) | ~30 | DONE — companion PR #14111 |
 | B | introduce `Provider_id.t = private string`, migrate call sites | ~150 | OPEN — needs separate sign-off |
 | C | `Cascade_id.t`, `Model_id.t` + migration | ~300 | DEFERRED — needs review of Phase B outcome |
 

@@ -674,7 +674,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                             let has_recovery_evidence
                                 (p : Llm_provider.Provider_config.t) =
                               let provider_key =
-                                Provider_adapter.provider_health_key_of_config p
+                                Runtime_catalog.provider_health_key_of_config p
                               in
                               match
                                 Cascade_health_tracker.provider_info

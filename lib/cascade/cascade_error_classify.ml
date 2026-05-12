@@ -680,7 +680,7 @@ let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string
      Adding a new vendor that needs the same preflight is now a TOML/
      adapter registry change, not a code change here. *)
   let requires_preflight =
-    match Provider_adapter.adapter_of_provider_config config.provider_cfg with
+    match Runtime_catalog.adapter_of_provider_config config.provider_cfg with
     | Some adapter -> adapter.tool_policy.argv_prompt_preflight
     | None -> false
   in

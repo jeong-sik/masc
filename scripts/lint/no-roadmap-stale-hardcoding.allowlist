@@ -7,7 +7,7 @@
 # Baseline (2026-05-05, HEAD 5806519c0b): the audit at
 # docs/audit/2026-05-05-fundamental-roadmap-reality-check.md found that
 # `lib/cascade/capabilities.ml` was deleted but its model lists migrated
-# into lib/provider_adapter.ml (1,623 lines). The model-name literals
+# into lib/runtime_catalog.ml (1,623 lines). The model-name literals
 # below are grandfathered as existing tech debt, NOT endorsed. The
 # cleanup is queued for Sprint 2 (oas backend dispatch separation) /
 # Sprint 3 follow-up of joyful-tumbling-dragon.md and tracked as gap #6.
@@ -15,13 +15,13 @@
 # Documentation example in interface comment (legitimate)
 lib/keeper/keeper_hooks_oas.mli:22
 
-# lib/provider_adapter.ml model list — gap #6, queued for Sprint 2/3
-lib/provider_adapter.ml:365
-lib/provider_adapter.ml:366
-lib/provider_adapter.ml:367
-lib/provider_adapter.ml:368
-lib/provider_adapter.ml:369
-lib/provider_adapter.ml:370
-lib/provider_adapter.ml:402
-lib/provider_adapter.ml:403
-lib/provider_adapter.ml:405
+# lib/runtime_catalog.ml model list — gap #6, queued for Sprint 2/3
+lib/runtime_catalog.ml:365
+lib/runtime_catalog.ml:366
+lib/runtime_catalog.ml:367
+lib/runtime_catalog.ml:368
+lib/runtime_catalog.ml:369
+lib/runtime_catalog.ml:370
+lib/runtime_catalog.ml:402
+lib/runtime_catalog.ml:403
+lib/runtime_catalog.ml:405

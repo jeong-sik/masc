@@ -29,8 +29,8 @@ let write_text path content = Fs_compat.save_file path content
 let read_file path = Fs_compat.load_file path
 
 let resolve_api_key endpoint =
-  let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
-  match Provider_adapter.voice_endpoint_auth_env_name endpoint with
+  let adapter = Runtime_catalog.voice_adapter_for_endpoint endpoint in
+  match Runtime_catalog.voice_endpoint_auth_env_name endpoint with
   | Some env_name ->
     (match Sys.getenv_opt env_name with
      | Some value ->
@@ -128,7 +128,7 @@ let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output
   let* api_key = resolve_api_key endpoint in
   let tuning = tuning_for_agent agent_id in
   let* request =
-    Provider_adapter.voice_http_request_for_tts
+    Runtime_catalog.voice_http_request_for_tts
       endpoint
       ~api_key
       ~message
@@ -143,7 +143,7 @@ let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output
     ~output_file
 ;;
 
-let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
+let run_stt_multipart_request (req : Runtime_catalog.voice_stt_request) =
   let header_args =
     List.concat_map
       (fun (key, value) -> [ "-H"; Printf.sprintf "%s: %s" key value ])
@@ -184,7 +184,7 @@ let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
 let transcribe_via_http_stt endpoint ~audio_file ~model =
   let* api_key = resolve_api_key endpoint in
   let* request =
-    Provider_adapter.voice_stt_request_for_endpoint endpoint ~api_key ~audio_file ~model
+    Runtime_catalog.voice_stt_request_for_endpoint endpoint ~api_key ~audio_file ~model
   in
   run_stt_multipart_request request
 ;;
@@ -238,7 +238,7 @@ let transcribe_audio ~audio_file ?language_code () =
 let available_tts_endpoints ?provider () =
   match load_voice_config () with
   | Error _ -> []
-  | Ok config -> Provider_adapter.select_voice_endpoints ?provider config.tts.endpoints
+  | Ok config -> Runtime_catalog.select_voice_endpoints ?provider config.tts.endpoints
 ;;
 
 let public_config_json () =
@@ -303,8 +303,8 @@ let tts_preview_bytes_from_request_json json =
       in
       Error detail
     | endpoint :: rest ->
-      let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
-      if not (Provider_adapter.voice_transport_supports_http_tts adapter)
+      let adapter = Runtime_catalog.voice_adapter_for_endpoint endpoint in
+      if not (Runtime_catalog.voice_transport_supports_http_tts adapter)
       then (
         let note = Printf.sprintf "%s: preview unsupported for voice_mcp" endpoint.id in
         try_endpoints (note :: attempted) rest)
@@ -498,7 +498,7 @@ let extract_mcp_result json =
 
 let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
   let uri =
-    match Provider_adapter.voice_session_mcp_url_of_endpoint endpoint with
+    match Runtime_catalog.voice_session_mcp_url_of_endpoint endpoint with
     | Ok url -> Uri.of_string url
     | Error _ -> voice_mcp_uri ()
   in
@@ -544,9 +544,9 @@ let attempt_tts_endpoint
       ~priority
       endpoint
   =
-  let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
+  let adapter = Runtime_catalog.voice_adapter_for_endpoint endpoint in
   match adapter.transport with
-  | Provider_adapter.Voice_openai_compat | Provider_adapter.Voice_elevenlabs_direct ->
+  | Runtime_catalog.Voice_openai_compat | Runtime_catalog.Voice_elevenlabs_direct ->
     let audio_file = make_audio_file ~agent_id in
     (match
        speak_via_http_tts_to_file
@@ -594,7 +594,7 @@ let attempt_tts_endpoint
        (try Sys.remove audio_file with
         | Sys_error _ -> ());
        Error error)
-  | Provider_adapter.Voice_mcp ->
+  | Runtime_catalog.Voice_mcp ->
     let args =
       `Assoc
         [ "agent_id", `String agent_id
@@ -641,7 +641,7 @@ let cache_duration () =
 let session_endpoint_result () =
   match load_voice_config () with
   | Error message -> Error message
-  | Ok config -> Provider_adapter.voice_session_endpoint_result config
+  | Ok config -> Runtime_catalog.voice_session_endpoint_result config
 ;;
 
 let is_voice_server_available ~sw:_ ~clock ~net =
@@ -651,7 +651,7 @@ let is_voice_server_available ~sw:_ ~clock ~net =
     false
   | Ok endpoint ->
     let health_target =
-      match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+      match Runtime_catalog.voice_session_health_url_of_endpoint endpoint with
       | Ok url -> url
       | Error _ -> Uri.to_string (voice_health_uri ())
     in
@@ -670,7 +670,7 @@ let is_voice_server_available ~sw:_ ~clock ~net =
           Eio.Switch.run
           @@ fun inner_sw ->
           let uri =
-            match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+            match Runtime_catalog.voice_session_health_url_of_endpoint endpoint with
             | Ok url -> Uri.of_string url
             | Error _ -> voice_health_uri ()
           in
@@ -956,7 +956,7 @@ let health_check ~sw:_ ~clock:_ ~net () =
   | Error error -> Error error
   | Ok endpoint ->
     let uri =
-      match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+      match Runtime_catalog.voice_session_health_url_of_endpoint endpoint with
       | Ok url -> Uri.of_string url
       | Error _ -> voice_health_uri ()
     in

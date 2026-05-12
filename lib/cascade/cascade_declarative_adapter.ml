@@ -4,7 +4,7 @@
     an {!adapted_catalog} that mirrors the runtime's expected shape.
 
     Resolution chain:
-    - TOML provider.id → normalize → Provider_adapter.resolve_adapter_by_cascade_prefix
+    - TOML provider.id → normalize → Runtime_catalog.resolve_adapter_by_cascade_prefix
     - adapter.cascade_prefix + model_spec.api_name → "prefix:api_name" string
     - Cascade_config.parse_model_string → Provider_config.t
 
@@ -50,12 +50,12 @@ let err (e : adapter_error) : adapter_error list = [ e ]
 (* --- Provider resolution --- *)
 
 let resolve_provider_prefix (provider_id : string) : string option =
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-  | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
+  match Runtime_catalog.resolve_adapter_by_cascade_prefix provider_id with
+  | Some adapter -> Some adapter.Runtime_catalog.cascade_prefix
   | None ->
     let normalized = normalize_id provider_id in
-    match Provider_adapter.resolve_adapter_by_cascade_prefix normalized with
-    | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
+    match Runtime_catalog.resolve_adapter_by_cascade_prefix normalized with
+    | Some adapter -> Some adapter.Runtime_catalog.cascade_prefix
     | None -> None
 
 (* --- Model lookup --- *)

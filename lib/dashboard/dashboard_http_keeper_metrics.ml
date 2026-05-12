@@ -23,7 +23,7 @@ let normalize_model_name s =
     | None -> s
     | Some i ->
         let prefix = String.sub s 0 i |> String.lowercase_ascii in
-        if Provider_adapter.resolve_direct_canonical_name prefix <> None then
+        if Runtime_catalog.resolve_direct_canonical_name prefix <> None then
           String.sub s (i + 1) (String.length s - i - 1)
         else
           s

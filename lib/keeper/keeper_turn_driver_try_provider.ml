@@ -288,10 +288,10 @@ let run_try_provider
        success-history training, and the [outer_wall_for_attempt] dispatch key
        cannot diverge. *)
     let candidate_key =
-      Provider_adapter.provider_model_health_key_of_config provider_cfg
+      Runtime_catalog.provider_model_health_key_of_config provider_cfg
     in
     let provider_label =
-      Provider_adapter.provider_label_of_config provider_cfg
+      Runtime_catalog.provider_label_of_config provider_cfg
     in
     let liveness_observer_opt =
       match liveness_mode with

@@ -32,6 +32,17 @@ open Alcotest
 
 module H = Masc_mcp.Keeper_hooks_oas
 
+let with_known_non_catalog_pricing_models models f =
+  let env = "MASC_KNOWN_NON_CATALOG_PRICING_MODELS" in
+  let previous = Sys.getenv_opt env in
+  Unix.putenv env (String.concat "," models);
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some prior -> Unix.putenv env prior
+      | None -> Unix.putenv env "")
+    f
+
 let check_source ~msg ~usage_missing ~usage_trusted ~provider ~model
     ~cost_usd expected =
   let actual =
@@ -45,7 +56,7 @@ let check_source ~msg ~usage_missing ~usage_trusted ~provider ~model
 let test_missing_usage_wins_over_everything () =
   (* Even with a known-priced model and a positive cost number, an
      upstream missing-usage signal must dominate — that's the
-     more-actionable failure mode (provider adapter didn't surface
+     more-actionable failure mode (runtime bridge didn't surface
      usage at all). *)
   check_source
     ~msg:"missing_usage even with priced model + positive cost"
@@ -106,14 +117,17 @@ let test_unresolved_model_alias_for_auto_alias () =
     ~cost_usd:0.0
     "unresolved_model_alias"
 
-let test_known_unpriced_model_for_codex_spark () =
-  check_source
-    ~msg:"codex spark preview => known_unpriced_model"
-    ~usage_missing:false ~usage_trusted:true
-    ~provider:"openai"
-    ~model:"gpt-5.3-codex-spark"
-    ~cost_usd:0.0
-    "known_unpriced_model"
+let test_known_unpriced_model_from_config () =
+  with_known_non_catalog_pricing_models
+    [ "fixture-known-unpriced-model-10318" ]
+    (fun () ->
+      check_source
+        ~msg:"configured non-catalog model => known_unpriced_model"
+        ~usage_missing:false ~usage_trusted:true
+        ~provider:"openai"
+        ~model:"fixture-known-unpriced-model-10318"
+        ~cost_usd:0.0
+        "known_unpriced_model")
 
 (* --- counter wiring (only non-computed sources tick) ------------- *)
 
@@ -170,8 +184,8 @@ let () =
             test_pricing_catalog_miss_for_unknown_model;
           test_case "unresolved_model_alias for auto alias" `Quick
             test_unresolved_model_alias_for_auto_alias;
-          test_case "known_unpriced_model for codex spark" `Quick
-            test_known_unpriced_model_for_codex_spark;
+          test_case "known_unpriced_model from config" `Quick
+            test_known_unpriced_model_from_config;
         ] );
       ( "counter",
         [

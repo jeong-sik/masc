@@ -178,7 +178,7 @@ let escape_applescript s =
   Buffer.contents buf
 
 (** Agent emoji mapping for visual distinction.
-    Agent names come from spawn_key in Provider_adapter.direct_adapters.
+    Agent names come from spawn_key in Runtime_catalog.direct_adapters.
     Use {!register_agent_emoji} at startup to add provider-specific entries
     without modifying this file. *)
 let agent_emoji_table : (string, string) Hashtbl.t =
@@ -192,7 +192,7 @@ let agent_emoji_table : (string, string) Hashtbl.t =
   t
 
 (** Register an agent-name → emoji mapping at startup.
-    Call this from your provider adapter's init hook to extend the table
+    Call this from your runtime/catalog init hook to extend the table
     without touching notify.ml. *)
 let register_agent_emoji name emoji =
   Hashtbl.replace agent_emoji_table name emoji

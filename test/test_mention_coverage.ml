@@ -228,7 +228,7 @@ let test_is_spawnable_llama () =
   check bool "llama is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "llama")
 
 let test_is_spawnable_glm () =
-  (* glm has spawn_key=None in Provider_adapter — not CLI-spawnable *)
+  (* glm has spawn_key=None in Runtime_catalog — not CLI-spawnable *)
   check bool "glm not spawnable" false (Masc_mcp.Auto_responder.is_spawnable "glm")
 
 let test_is_spawnable_unknown () =
@@ -246,7 +246,7 @@ let test_is_spawnable_empty () =
    ============================================================ *)
 
 let test_spawnable_agents_list () =
-  let names = Masc_mcp.Provider_adapter.spawnable_canonical_names () in
+  let names = Masc_mcp.Runtime_catalog.spawnable_canonical_names () in
   check bool "list not empty" true (List.length names > 0);
   check bool "contains claude" true (List.mem "claude" names);
   check bool "contains gemini" true (List.mem "gemini" names);

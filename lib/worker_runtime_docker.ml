@@ -108,7 +108,7 @@ let rewrite_spec_for_container (spec : Worker_execution_spec.t) =
 
 let allowlisted_env_pairs () =
   let keys =
-    Provider_adapter.all_auth_env_keys ()
+    Runtime_catalog.all_auth_env_keys ()
     @ [ "GOOGLE_CLOUD_PROJECT"
       ; "GOOGLE_CLOUD_LOCATION"
       ; Env_config_core.storage_type_env_key
@@ -221,7 +221,7 @@ let auth_requirements_of_model_label model_label =
   match Cascade_config.parse_model_string model_label with
   | None -> Ok []
   | Some cfg ->
-    let keys = Provider_adapter.docker_auth_env_keys_of_provider_config cfg in
+    let keys = Runtime_catalog.docker_auth_env_keys_of_provider_config cfg in
     let missing =
       List.filter
         (fun key ->
@@ -234,7 +234,7 @@ let auth_requirements_of_model_label model_label =
     then Ok keys
     else (
       let kind_name =
-        Provider_adapter.cascade_prefix_of_provider_kind
+        Runtime_catalog.cascade_prefix_of_provider_kind
           cfg.Llm_provider.Provider_config.kind
       in
       Error

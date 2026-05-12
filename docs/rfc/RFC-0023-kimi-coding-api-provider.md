@@ -3,7 +3,7 @@
 - **Status**: Draft
 - **Author**: vincent (with Claude)
 - **Created**: 2026-05-03
-- **Related**: provider_adapter.ml, transport_kimi_cli.ml, config/cascade.toml
+- **Related**: runtime_catalog.ml, transport_kimi_cli.ml, config/cascade.toml
 
 ## 1. Problem
 
@@ -29,7 +29,7 @@ The `kimi-coding` endpoint is a coding-optimized API with different rate limits,
 
 ### 3.1 Provider Registry Entry
 
-In `lib/provider_adapter.ml`, add:
+In `lib/runtime_catalog.ml`, add:
 
 ```ocaml
 { canonical_name = "kimi-coding";
@@ -54,8 +54,8 @@ Reuse existing OpenAI-compatible `Direct_api` transport. Only differences are ba
 
 | File | Change |
 |------|--------|
-| `lib/provider_adapter.ml` | Add `kimi-coding` provider entry |
-| `lib/provider_adapter.mli` | Expose if needed |
+| `lib/runtime_catalog.ml` | Add `kimi-coding` provider entry |
+| `lib/runtime_catalog.mli` | Expose if needed |
 | `config/cascade.toml` | Optional: add to cascade profile after validation |
 
 ## 5. Validation

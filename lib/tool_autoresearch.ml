@@ -107,7 +107,7 @@ let prepare_start_params (ctx : context) args =
   let model_model_result =
     match get_string_opt args "model_model" with
     | Some m -> Ok m
-    | None -> Provider_adapter.default_model_label_result ()
+    | None -> Runtime_catalog.default_model_label_result ()
   in
   match model_model_result with
   | Error e -> Error (Printf.sprintf "no default model configured: %s" e)

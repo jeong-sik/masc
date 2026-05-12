@@ -236,16 +236,16 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
       in
       let runtime_model_valid =
         match (spawn_agent_name, model_name) with
-        (* Stable provider name — see Provider_adapter.cn_llama *)
+        (* Stable provider name — see Runtime_catalog.cn_llama *)
         | "llama", None -> Error "model is required when agent_name=llama"
         | "llama", Some raw ->
             let spec_name =
-              if String.contains raw ':' then raw else Provider_adapter.make_local_label raw
+              if String.contains raw ':' then raw else Runtime_catalog.make_local_label raw
             in
             (* Validate the label parses without retaining model_spec *)
             (match Cascade_config.parse_model_string spec_name with Some _ -> Ok () | None -> Error "invalid model spec")
         | _ ->
-            (match Provider_adapter.preferred_execution_model_labels () with _ :: _ -> Ok () | [] -> Error "no execution model")
+            (match Runtime_catalog.preferred_execution_model_labels () with _ :: _ -> Ok () | [] -> Error "no execution model")
       in
       let module U = Yojson.Safe.Util in
       let working_dir = match arguments |> U.member "working_dir" with

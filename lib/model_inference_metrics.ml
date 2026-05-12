@@ -559,7 +559,7 @@ let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
 let canonical_cost_model_id ~(provider : string option) model =
   let module PK = Llm_provider.Provider_kind in
   let provider_kind = Option.bind provider PK.of_string in
-  let ollama_prefix = Provider_adapter.cn_ollama ^ ":" in
+  let ollama_prefix = Runtime_catalog.cn_ollama ^ ":" in
   match provider_kind with
   | Some PK.Ollama when not (String.starts_with ~prefix:ollama_prefix model) ->
     ollama_prefix ^ model

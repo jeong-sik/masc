@@ -66,7 +66,7 @@ let unresolved_auto requested_model_id =
 
 let default_resolution_from_policy
       ?getenv
-      (policy : Provider_adapter.model_policy)
+      (policy : Runtime_catalog.model_policy)
       ~requested_model_id
   =
   match policy.default_model_env with
@@ -87,7 +87,7 @@ let default_resolution_from_policy
 ;;
 
 let default_resolution ?getenv provider_name ~requested_model_id =
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
+  match Runtime_catalog.resolve_adapter_by_cascade_prefix provider_name with
   | Some adapter ->
     default_resolution_from_policy ?getenv adapter.model_policy ~requested_model_id
   | None -> unresolved_auto requested_model_id
@@ -188,8 +188,8 @@ let resolve_auto_model
     | Concrete s -> s
     | Auto -> "auto"
   in
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
-  | Some { runtime_kind = Provider_adapter.Local; _ } ->
+  match Runtime_catalog.resolve_adapter_by_cascade_prefix provider_name with
+  | Some { runtime_kind = Runtime_catalog.Local; _ } ->
     (match selector with
      | Auto ->
        (match discover () with
@@ -197,11 +197,11 @@ let resolve_auto_model
           { requested_model_id = model_id; resolved_model_id; provenance = Discovery }
         | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id)
      | Concrete _ -> explicit_resolution model_id model_id)
-  | Some { model_policy = { family = Provider_adapter.Glm_general; _ }; _ } ->
+  | Some { model_policy = { family = Runtime_catalog.Glm_general; _ }; _ } ->
     resolve_glm_model ?getenv selector
-  | Some { model_policy = { family = Provider_adapter.Glm_coding; _ }; _ } ->
+  | Some { model_policy = { family = Runtime_catalog.Glm_coding; _ }; _ } ->
     resolve_glm_coding_model ?getenv selector
-  | Some { model_policy = { family = Provider_adapter.Kimi_api_family; _ }; _ } ->
+  | Some { model_policy = { family = Runtime_catalog.Kimi_api_family; _ }; _ } ->
     resolve_kimi_model ?getenv selector
   | Some _ ->
     (match selector with

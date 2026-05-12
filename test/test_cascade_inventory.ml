@@ -21,7 +21,7 @@ let provider_of_label label =
   | None -> fail ("expected model label to parse: " ^ label)
 
 let provider_health_key provider =
-  Masc_mcp.Provider_adapter.provider_health_key_of_config provider
+  Masc_mcp.Runtime_catalog.provider_health_key_of_config provider
 
 let mk_scored ?(cascade_name = "test") ?(score = 0.0) label =
   Inv.

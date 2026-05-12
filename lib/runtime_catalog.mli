@@ -1,8 +1,11 @@
-(** Provider_adapter — provider registry, auth resolution, voice bridge,
-    and cascade label construction.
+(** Runtime_catalog — MASC provider compatibility overlay, auth resolution,
+    voice bridge, and cascade label construction.
 
-    Single source of truth for all LLM and voice provider adapters.
-    Adding a new provider = adding one entry to [direct_adapters].
+    Generic provider connection metadata and capability facts belong to
+    OAS Provider_registry/Provider_catalog. This module retains MASC-local
+    overlays that OAS deliberately does not own: cascade labels, spawn keys,
+    runtime-MCP policy quirks, telemetry policy, auth display, and voice
+    defaults.
 
     @since v2.100.0 *)
 
@@ -29,16 +32,6 @@ type model_family =
   | Glm_coding
   | Kimi_api_family
 
-type auto_models_source =
-  | No_auto_models
-  | Env_csv_or_default of
-      { env_var : string
-      ; defaults : string list
-      ; prefer_default_model_env : bool
-      }
-  | Zai_general_auto_models
-  | Zai_coding_auto_models
-
 type reporting_policy =
   | Reported
   | Missing_by_design
@@ -47,8 +40,6 @@ type reporting_policy =
 type model_policy =
   { default_model_env : string option
   ; default_model_fallback : string option
-  ; auto_models : auto_models_source
-  ; expand_auto : bool
   ; family : model_family
   }
 
@@ -201,7 +192,7 @@ val string_of_voice_transport : voice_transport -> string
 (** All registered LLM provider/runtime adapters. *)
 val direct_adapters : adapter list
 
-(** All registered voice provider adapters. *)
+(** All registered voice runtime entries. *)
 val voice_adapters : voice_adapter list
 
 (** {1 Label and Provider Resolution} *)
@@ -264,13 +255,18 @@ val default_model_id_for_cascade_prefix
   -> string
   -> string option
 
-(** Resolve declared auto-model expansion for a provider canonical name/alias. *)
+(** Resolve auto-model expansion for a provider canonical name/alias.
+    Expansion comes from an explicit [MASC_<CASCADE_PREFIX>_AUTO_MODELS]
+    environment override, or from an OAS catalog-backed provider family
+    such as ZAI/GLM. CLI providers do not carry built-in model lists here;
+    absent an explicit override, their ["auto"] selector is passed through
+    to the runtime. *)
 val auto_models_for_provider
   :  ?getenv:(string -> string option)
   -> string
   -> string list option
 
-(** Resolve declared auto-model expansion for a cascade prefix. *)
+(** Resolve auto-model expansion for a cascade prefix. *)
 val auto_models_for_cascade_prefix
   :  ?getenv:(string -> string option)
   -> string
@@ -467,12 +463,12 @@ val resolve_gemini_direct_auth : unit -> gemini_direct_auth
 (** Compute the Vertex AI OpenAI-compatible endpoint URL. *)
 val gemini_vertex_openai_base_url : project:string -> location:string -> string
 
-(** Resolve the concrete provider adapter for a provider config. *)
+(** Resolve the concrete runtime catalog entry for a provider config. *)
 val adapter_of_provider_config : Llm_provider.Provider_config.t -> adapter option
 
-(** Resolve the concrete provider adapter for an OAS [provider_kind].
+(** Resolve the concrete runtime catalog entry for an OAS [provider_kind].
     Used by call sites that only have the typed kind (no full config)
-    and need adapter-level capability flags. RFC-0058 §2.4 boundary. *)
+    and need runtime-level capability flags. RFC-0058 §2.4 boundary. *)
 val adapter_of_provider_kind
   :  Llm_provider.Provider_config.provider_kind
   -> adapter option
@@ -532,7 +528,7 @@ val requires_per_keeper_bridging_for_bound_actor_tools_for_config
 
     [None] (no [[providers.<id>.capabilities]] sub-table) returns the
     conservative [no_tool_http_headers] baseline (a private [tool_policy]
-    record inside [provider_adapter.ml]; not exported by this signature).
+    record inside [runtime_catalog.ml]; not exported by this signature).
 
     [Some c] maps the [tool_policy]-relevant subset of
     [cascade_capabilities]:
@@ -579,14 +575,6 @@ val requires_per_keeper_bridging_for_bound_actor_tools_for_kind
 val tolerates_bound_actor_fallback_for_kind
   :  Llm_provider.Provider_config.provider_kind
   -> bool
-
-(** OAS-level capabilities for a provider config.  SSOT for the kind →
-    capability mapping; centralises what was previously a closed-variant
-    [match Llm_provider.Provider_config.provider_kind] in
-    [Provider_tool_support]. *)
-val oas_capabilities_of_config
-  :  Llm_provider.Provider_config.t
-  -> Llm_provider.Capabilities.capabilities
 
 (** Whether a runtime-MCP HTTP header key is acceptable for the resolved
     adapter, even when general HTTP-header support is off.  Covers the

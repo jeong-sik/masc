@@ -154,10 +154,10 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `ZAI_DEFAULT_MODEL` | string | `"glm-5.1"` | `glm` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:38) |
 | `ZAI_CODING_DEFAULT_MODEL` | string | `"glm-4.7"` | `glm-coding` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:43) |
 | `GEMINI_DEFAULT_MODEL` | string | `"gemini-3-flash-preview"` | `gemini` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:67) |
-| `MASC_GEMINI_CLI_AUTO_MODELS` | csv string | `"gemini-3-flash-preview,gemini-3.1-flash-lite-preview,gemini-3.1-pro-preview"` | `gemini_cli:auto`를 여러 concrete model 후보로 확장하는 순서. 설정 시 `GEMINI_DEFAULT_MODEL`보다 우선 |
-| `MASC_CODEX_CLI_AUTO_MODELS` | csv string | `"gpt-5.2,gpt-5.3-codex-spark,gpt-5.3-codex,gpt-5.4-mini,gpt-5.4"` | `codex_cli:auto` 확장 순서. 기본은 ChatGPT-backed Codex에서 실제 호출 성공이 확인된 후보만 포함하며, 필요하면 env override로 후보를 직접 재지정 |
+| `MASC_GEMINI_CLI_AUTO_MODELS` | csv string | `"auto"` | `gemini_cli:auto` 확장 순서. 기본은 Gemini CLI의 사용자/CLI 기본 모델에 위임하며, 필요하면 env override로 후보를 직접 재지정 |
+| `MASC_CODEX_CLI_AUTO_MODELS` | csv string | `"auto"` | `codex_cli:auto` 확장 순서. 기본은 Codex CLI의 사용자/CLI 기본 모델에 위임하며, 필요하면 env override로 후보를 직접 재지정 |
 | `MASC_CLAUDE_CODE_AUTO_MODELS` | csv string | `"auto"` | `claude_code:auto` 확장 순서. 기본은 Claude Code의 사용자 기본 모델에 위임 |
-| `KIMI_DEFAULT_MODEL` | string | `"kimi-k2.5"` | `kimi` provider `auto` 기본 모델 (lib/provider_adapter.ml:505) |
+| `KIMI_DEFAULT_MODEL` | string | `"kimi-k2.5"` | `kimi` provider `auto` 기본 모델 (lib/runtime_catalog.ml:505) |
 | `ANTHROPIC_DEFAULT_MODEL` | string | `"claude-sonnet-4-6-20250514"` | `claude` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:70) |
 | `OPENAI_DEFAULT_MODEL` | string | `"gpt-4.1"` | `openai` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:73) |
 | `OLLAMA_DEFAULT_MODEL` | string | `""` | `ollama` provider `auto` 기본 모델 (lib/config/env_config_runtime.ml:181) |
@@ -414,9 +414,9 @@ ollama HTTP 및 CLI provider(Claude_code / Gemini_cli / Codex_cli)는 endpoint s
 
 CLI sentinel key는 내부적으로 `cli:claude_code` / `cli:gemini_cli` / `cli:codex_cli` 형태로 registry에 등록된다. 대시보드 `/api/v1/cascade/client_capacity`에서 현재 이용률 확인 가능.
 
-`gemini_cli:auto`, `codex_cli:auto`, `claude_code:auto`는 cascade 파싱 시 concrete 후보 목록으로 확장된다. Gemini CLI는 기본적으로 Flash/Lite 우선, Pro 후순위의 quota-aware 순서를 사용한다. Codex CLI는 기본적으로 `gpt-5.2`에서 시작해 `gpt-5.4`로 올라가는 지원 후보만 사용하며, `gpt-5.3-codex-spark`와 `gpt-5.4-mini` 같은 fast 후보도 로테이션에 포함한다. 2026-04-21 기준 ChatGPT-backed Codex CLI 실호출에서는 `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2-codex`가 모두 400 unsupported를 반환해 기본 목록에서 제외한다. Claude Code는 비용과 조직별 model policy 차이가 커서 기본값을 `auto` 1개로 유지하며, 운영자가 `MASC_CLAUDE_CODE_AUTO_MODELS`를 설정할 때만 여러 후보로 로테이션한다.
+`gemini_cli:auto`, `codex_cli:auto`, `claude_code:auto`, `kimi_cli:auto`는 기본적으로 해당 CLI의 native default selector에 위임한다. MASC는 provider/model 목록을 코드에 고정하지 않으며, 운영자가 명시적으로 후보 로테이션을 원할 때만 `MASC_GEMINI_CLI_AUTO_MODELS`, `MASC_CODEX_CLI_AUTO_MODELS`, `MASC_CLAUDE_CODE_AUTO_MODELS`, `MASC_KIMI_CLI_AUTO_MODELS`로 comma-separated 후보를 제공한다.
 
-Codex 후보 목록은 2026-04-20 로컬 Codex CLI model picker 기준이고, 기본 순서는 5.1→5.4로 재정렬되어 있다. hosted model menu가 바뀌면 `MASC_CODEX_CLI_AUTO_MODELS`로 즉시 override하고, 코드 기본값은 별도 PR로 갱신한다.
+hosted model menu가 바뀌어도 MASC 코드는 변경하지 않는다. 지원/미지원 판단은 CLI/OAS/catalog/runtime telemetry가 맡고, MASC 쪽 기본값은 `auto` 위임 상태를 유지한다.
 
 ### 7.6 Ollama HTTP Probe (Phase C2, #7619)
 

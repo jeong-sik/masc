@@ -141,7 +141,7 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
   (* RFC-0058 §2.4: dispatch by adapter capability, not provider name. *)
   if
     not
-      (Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
+      (Runtime_catalog.requires_per_keeper_bridging_for_bound_actor_tools_for_config
          provider_cfg)
   then false
   else (

@@ -142,7 +142,7 @@ let model_label_for_pool ~model_id runtime_pool =
   | Some pool ->
       let trimmed = String.trim pool in
       if is_oas_managed_runtime_pool (Some trimmed) then
-        Provider_adapter.make_local_label model_id
+        Runtime_catalog.make_local_label model_id
       else
         let base_url =
           if
@@ -154,7 +154,7 @@ let model_label_for_pool ~model_id runtime_pool =
             runtime_base_url_for_pool runtime_pool
         in
         Printf.sprintf "custom:%s@%s" model_id base_url
-  | None -> Provider_adapter.make_local_label model_id
+  | None -> Runtime_catalog.make_local_label model_id
 
 let ensure_runtime_reachable ?runtime_pool ~timeout_sec () =
   let base_url = runtime_base_url_for_pool runtime_pool |> String.trim in

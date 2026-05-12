@@ -46,9 +46,9 @@ let record_playback ~agent_id ~message =
   Atomic.set last_playback_ref
     (Some { agent_id; message_hash = Hashtbl.hash message; finished_at = Unix.gettimeofday () })
 
-(** Default agent voices from Provider_adapter registry (SSOT).
-    Hardcoded list removed — voices defined in Provider_adapter.direct_adapters. *)
-let default_agent_voices () = Provider_adapter.all_agent_voices ()
+(** Default agent voices from Runtime_catalog registry (SSOT).
+    Hardcoded list removed — voices defined in Runtime_catalog.direct_adapters. *)
+let default_agent_voices () = Runtime_catalog.all_agent_voices ()
 
 let load_voice_config () = Voice_config.load ()
 
@@ -74,14 +74,14 @@ let local_playback_enabled_for_agent agent_id =
   | Error _ -> false
 
 let default_voice_uri path =
-  Uri.of_string (Provider_adapter.default_voice_session_url ~path)
+  Uri.of_string (Runtime_catalog.default_voice_session_url ~path)
 
 let voice_mcp_uri () =
   match load_voice_config () with
   | Ok config -> (
-      match Provider_adapter.voice_session_endpoint_result config with
+      match Runtime_catalog.voice_session_endpoint_result config with
       | Ok endpoint -> (
-          match Provider_adapter.voice_session_mcp_url_of_endpoint endpoint with
+          match Runtime_catalog.voice_session_mcp_url_of_endpoint endpoint with
           | Ok url -> Uri.of_string url
           | Error _ -> default_voice_uri "/mcp" )
       | Error _ -> default_voice_uri "/mcp")
@@ -90,9 +90,9 @@ let voice_mcp_uri () =
 let voice_health_uri () =
   match load_voice_config () with
   | Ok config -> (
-      match Provider_adapter.voice_session_endpoint_result config with
+      match Runtime_catalog.voice_session_endpoint_result config with
       | Ok endpoint -> (
-          match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+          match Runtime_catalog.voice_session_health_url_of_endpoint endpoint with
           | Ok url -> Uri.of_string url
           | Error _ -> default_voice_uri "/health" )
       | Error _ -> default_voice_uri "/health")

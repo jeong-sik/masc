@@ -647,7 +647,7 @@ let test_default_model_strings_local_only () =
   let models = Keeper_turn_driver.default_model_strings ~cascade_name:"local_only" in
   let is_local label =
     match Cascade_runtime.provider_name_of_label label with
-    | Some pname -> Provider_adapter.is_local_provider pname
+    | Some pname -> Runtime_catalog.is_local_provider pname
     | None -> false
   in
   Alcotest.(check bool) "local_only has models" true (models <> []);
@@ -1640,17 +1640,17 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
         Alcotest.(check string) "primary base url" primary_url primary.base_url;
         Alcotest.(check string) "fallback base url" fallback_url fallback.base_url;
         let primary_model_health_key =
-          Masc_mcp.Provider_adapter.provider_model_health_key_of_config primary
+          Masc_mcp.Runtime_catalog.provider_model_health_key_of_config primary
         in
         let fallback_model_health_key =
-          Masc_mcp.Provider_adapter.provider_model_health_key_of_config fallback
+          Masc_mcp.Runtime_catalog.provider_model_health_key_of_config fallback
         in
         Alcotest.(check bool)
           "model health keys are isolated"
           true
           (primary_model_health_key <> fallback_model_health_key);
         ( primary_model_health_key
-        , Masc_mcp.Provider_adapter.provider_health_key_of_config fallback )
+        , Masc_mcp.Runtime_catalog.provider_health_key_of_config fallback )
       | providers ->
         Alcotest.failf "expected 2 resolved providers, got %d" (List.length providers)
     in

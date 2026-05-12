@@ -192,7 +192,7 @@ let label_or_unknown raw =
 
 let provider_kind_of_model_used raw =
   let model_used = label_or_unknown raw in
-  Provider_adapter.provider_of_model_label model_used
+  Runtime_catalog.provider_of_model_label model_used
 
 let record_turn_latency_by_model_bucket
     ~(keeper : string)
@@ -340,7 +340,7 @@ let telemetry_reported_of_result
   Option.is_some result.inference_telemetry
 
 let structurally_unmetered_provider (provider : string) : bool =
-  Provider_adapter.is_structurally_unmetered_provider provider
+  Runtime_catalog.is_structurally_unmetered_provider provider
 
 let coverage_reason_of_result
     (result : Keeper_agent_run.run_result) : string option =

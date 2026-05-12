@@ -32,7 +32,7 @@ let anthropic_cache_min_input_tokens = 1024
    prompt caching is now a registry/TOML change, not a code change here. *)
 let provider_kind_uses_anthropic_caching
     (kind : Llm_provider.Provider_config.provider_kind) : bool =
-  match Provider_adapter.adapter_of_provider_kind kind with
+  match Runtime_catalog.adapter_of_provider_kind kind with
   | Some adapter -> adapter.tool_policy.uses_anthropic_caching
   | None -> false
 

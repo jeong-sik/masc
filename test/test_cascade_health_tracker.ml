@@ -68,7 +68,7 @@ let test_remote_provider_threshold_unchanged () =
     true (H.is_in_cooldown t ~provider_key:"claude")
 
 let test_unknown_provider_uses_remote_threshold () =
-  (* Defensive: a provider name not registered in Provider_adapter
+  (* Defensive: a provider name not registered in Runtime_catalog
      defaults to the conservative (remote) threshold. *)
   let t = H.create () in
   H.record_failure t ~provider_key:"unknown_xyz" ();

@@ -134,6 +134,6 @@ block them on this RFC.
 
 - `.ocamlformat` gains `disable = true`.
 - `ocamlformat-check` CI passes on a PR that edits an arbitrary
-  pre-existing file (e.g. add a no-op comment to `lib/provider_adapter.ml`
+  pre-existing file (e.g. add a no-op comment to `lib/runtime_catalog.ml`
   and confirm the check is green).
 - No `.ml` / `.mli` file content changes in the implementing PR.

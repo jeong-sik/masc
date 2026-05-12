@@ -148,7 +148,7 @@ frontmatter.
 | PERFORMANCE-SLO.md | B | SLO targets, no code enforcement | delete | low |
 | PRODUCT-OPERATING-PLAN.md | A | live product promise / execution plan | keep+frontmatter | low |
 | PRODUCT-REVIEW.md | A | product review / release posture | keep+frontmatter | low |
-| PROVIDER-ADAPTER-RUNBOOK.md | A | runtime/auth canonical matrix | keep+frontmatter | low |
+| RUNTIME-CATALOG-RUNBOOK.md | A | runtime/auth canonical matrix | keep+frontmatter | low |
 | qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md | A | live boundary health snapshot | keep+frontmatter | low |
 | qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md | A | producer→consumer chain audit | keep+frontmatter | low |
 | qa/REQUIREMENTS-REVERSE-ENGINEERED.md | B | reverse-engineered feature matrix | delete | low |

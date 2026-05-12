@@ -7,7 +7,7 @@
 - **Related**:
   - `docs/rfc/RFC-0008-credential-provider.md` — credential surface that any external API integration (Anthropic / OpenAI) must respect.
   - `lib/board_types/board_types.mli` — current post type SSOT (line 76 onward).
-  - `lib/provider_adapter.ml` — existing AI provider abstraction (1626 LOC + 397 mli) that this RFC builds on rather than replacing.
+  - `lib/runtime_catalog.ml` — existing AI provider abstraction (1626 LOC + 397 mli) that this RFC builds on rather than replacing.
   - `~/me/common/evidence-record.md` — currency policy that any model-id / pricing claim must satisfy at PR time.
 
 ## 1. Problem
@@ -17,7 +17,7 @@ An external 2025-05 plan document (~2040 lines) proposes adding image / video / 
 | Plan section | Verifiable claims sampled | Stale or unverified |
 |---|---|---|
 | §1 codebase analysis | 7 | 6 (paths wrong, nonexistent frontend files) |
-| §3 architecture stack | 5 | 4 (Dream/Opium → actual httpun, Lwt → actual Eio, Redis/RabbitMQ → unused, PostgreSQL → unused) + 1 ignored existing abstraction (`provider_adapter.ml`) |
+| §3 architecture stack | 5 | 4 (Dream/Opium → actual httpun, Lwt → actual Eio, Redis/RabbitMQ → unused, PostgreSQL → unused) + 1 ignored existing abstraction (`runtime_catalog.ml`) |
 | §5 cost / model selection | 7 | 5/5 pricing claims with no Evidence Record + 2/2 model IDs (`claude-3-5-sonnet`, `gpt-4o`) predate Claude 4.X family |
 | §6 phase tables | repeats §3 stack | propagates |
 | §7.1 frontend file targets | 7 | 3 inexistent (`post-editor.ts`, `comment-form.ts`, `comment-tree.ts`) |
@@ -33,7 +33,7 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 
 - G1. Establish a minimal `Board_attachment_meta` carrier that lets a post reference attachments without changing `Board_types.post`, by reusing the existing `meta_json : Yojson.Safe.t option` field (`board_types.mli:83`).
 - G2. Build the upload / storage path on the same file-based primitives that already protect post bodies (atomic writes, `expires_at` TTL, sharded paths). No PostgreSQL, no MinIO, no S3 in the initial scope.
-- G3. Reach AI vision through `provider_adapter.ml` extension, not a parallel `VisionProvider` hierarchy. Reuse `auth_mode` / `model_family` / `model_policy` SSOTs.
+- G3. Reach AI vision through `runtime_catalog.ml` extension, not a parallel `VisionProvider` hierarchy. Reuse `auth_mode` / `model_family` / `model_policy` SSOTs.
 - G4. Treat model IDs and pricing as **fetched at PR time** with Evidence Record entries, not committed in this RFC.
 
 **Non-Goals**
@@ -43,7 +43,7 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 - N3. Redis, RabbitMQ, SQS, or any external message broker. masc-mcp's coord broadcast is the existing primitive.
 - N4. Python sidecar workers (Sharp, libvips, image-optimization daemon). The OCaml monorepo serves the surface; image variant generation is deferred to a later phase if measured load justifies it.
 - N5. Frontend implementation files that the external plan named but that don't exist (`post-editor.ts`, `comment-form.ts`, `comment-tree.ts`). Frontend work goes through actual files (`board-surface.ts`, `post-detail.ts`).
-- N6. A `Vision Worker (Python)` cross-language process. provider_adapter is in OCaml.
+- N6. A `Vision Worker (Python)` cross-language process. runtime_catalog is in OCaml.
 
 ## 3. Verified state of board surface as of 2026-05-07
 
@@ -55,7 +55,7 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 | Post type | `board_types.mli:76-93` — 16 fields including `meta_json : Yojson.Safe.t option` (line 83) |
 | Comment type | `board_types.mli:95-105` — analogous structure, no `meta_json` field today |
 | API dispatch | `lib/board_dispatch.ml`, `lib/board.ml`, `lib/board_core.ml` |
-| AI provider abstraction | `lib/provider_adapter.ml` (1626 LOC + 397 mli) — `runtime_kind` (Local / Cli_agent / Direct_api), `auth_mode`, `model_family`, `model_policy` |
+| AI provider abstraction | `lib/runtime_catalog.ml` (1626 LOC + 397 mli) — `runtime_kind` (Local / Cli_agent / Direct_api), `auth_mode`, `model_family`, `model_policy` |
 | OpenAI compat surface | `lib/server/server_openai_compat.ml` — receives OpenAI-style requests but is not vision-aware today |
 | Frontend board components | 12 files in `dashboard/src/components/board/` — board-state, board-surface (863 LOC), post-detail (538 LOC), mention-inbox, message-room-timeline, board-curation-panel, board-karma-panel, reaction-bar, state-block-messages, sub-board-surface, index, plus tests |
 
@@ -137,9 +137,9 @@ val attachments_of_post_meta :
 - Size cap: 20 MB initial, configurable via env (NOT a hardcoded literal — follows the SSOT pattern memorialized in past audits: `feedback_pr_13221_cache_poisoning_misanalysis`).
 - TTL: same `expires_at` semantics as posts.
 
-### 4.3 Phase B — vision via `provider_adapter` extension
+### 4.3 Phase B — vision via `runtime_catalog` extension
 
-The plan proposes a separate `VisionProvider` module hierarchy (with its own `name`, `analyze`, `cost_estimate`). This RFC instead extends `provider_adapter.ml`:
+The plan proposes a separate `VisionProvider` module hierarchy (with its own `name`, `analyze`, `cost_estimate`). This RFC instead extends `runtime_catalog.ml`:
 
 - Add a `vision_capability` flag onto the existing adapter records.
 - Add a typed dispatch:
@@ -180,7 +180,7 @@ The `meta_json`-as-carrier choice is what makes Phase A0 zero-migration. Phase A
 
 1. **Phase A0 module placement**: `lib/board_attachment_meta.ml` (top-level masc_mcp) versus `lib/board_types/board_attachment_meta.ml` (sub-module of board_types). Sub-module is cleaner if attachments are conceptually part of the board type SSOT; top-level is cleaner if attachments may be reused by non-board surfaces (e.g. keeper artefact attachments) in future.
 2. **Attachment_id prefix**: `a-` (consistent with `p-` for posts, `c-` for comments) or `att-` (more descriptive but breaks the one-letter convention).
-3. **Phase B model commitment**: do we decide on a Claude-family default upfront (with provider_adapter routing as the override), or stay provider-agnostic and let the adapter pick at call-time? Latter has lower lock-in but harder to reason about cost.
+3. **Phase B model commitment**: do we decide on a Claude-family default upfront (with runtime_catalog routing as the override), or stay provider-agnostic and let the adapter pick at call-time? Latter has lower lock-in but harder to reason about cost.
 4. **Frontend scope**: extend `post-detail.ts` (538 LOC, already complex) versus add a new sibling component for media-aware rendering. The plan named `post-editor.ts` — that file does not exist, so this is a real decision.
 
 ## 7. Out of scope for this RFC

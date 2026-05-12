@@ -279,7 +279,7 @@ let dashboard_status_of_stop_reason = function
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =
   try
-    let provider_id = Provider_adapter.provider_label_of_config config.provider_cfg in
+    let provider_id = Runtime_catalog.provider_label_of_config config.provider_cfg in
     let model_id =
       let response_model = String.trim response.model in
       if response_model = "" then config.model_id else response_model

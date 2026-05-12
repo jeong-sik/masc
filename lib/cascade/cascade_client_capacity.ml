@@ -208,7 +208,7 @@ let () =
    misclassified non-ollama services on the same port and missed
    ollama on non-default ports. The keeper-side caller
    ([Keeper_turn_driver]) now consults
-   [Provider_adapter.is_http_probe_capable_kind] and calls
+   [Runtime_catalog.is_http_probe_capable_kind] and calls
    {!register} directly, so the heuristic is gone. *)
 
 let looks_like_cli_sentinel = Masc_network_defaults.is_cli_sentinel_url

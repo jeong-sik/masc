@@ -729,7 +729,7 @@ lib/process/exec_tap.ml,171,false,unclassified
 lib/process/process_eio.ml,113,false,unclassified
 lib/process/process_eio.ml,809,false,unclassified
 lib/prompt_registry/prompt_registry.ml,276,None,unclassified
-lib/provider_adapter.ml,1251,None,unclassified
+lib/runtime_catalog.ml,1251,None,unclassified
 lib/provider_kind_resolver.ml,40,None,unclassified
 lib/repo_manager/credential_materializer.ml,52,false,unclassified
 lib/repo_manager/keeper_repo_mapping.ml,428,None,unclassified

@@ -201,8 +201,8 @@ let provider_scope_of_model_label model_label =
   match prefix with
   | None -> Unknown
   | Some name
-    when String.equal name Provider_adapter.cn_llama
-      || String.equal name Provider_adapter.cn_ollama ->
+    when String.equal name Runtime_catalog.cn_llama
+      || String.equal name Runtime_catalog.cn_ollama ->
       Local
   | Some _ -> Non_local
 

@@ -47,7 +47,7 @@ code_refs:
 | `docs/VERSIONED-ROADMAP.md` | Maintained Reference | release train and intake policy |
 | `docs/CAPABILITY-REGISTRY-SSOT.md` | Maintained Reference | MCP vs internal capability mapping |
 | `docs/OAS-MASC-BOUNDARY.md` | Maintained Reference | OAS/MASC role split |
-| `docs/PROVIDER-ADAPTER-RUNBOOK.md` | Maintained Reference | provider/runtime/auth guidance |
+| `docs/RUNTIME-CATALOG-RUNBOOK.md` | Maintained Reference | provider/runtime/auth guidance |
 | `docs/TRPG-KEEPER-SPECTATOR-QUICKSTART.md` | Maintained Reference | TRPG spectator entry |
 | `docs/TRPG-OPS-MANUAL.md` | Maintained Reference | follow-up ops guide for spectator flow |
 

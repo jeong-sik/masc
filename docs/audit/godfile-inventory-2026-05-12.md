@@ -26,7 +26,7 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 | 8 | lib/tool_shard.ml | 2,152 | Split into lib/tool_shard/ sub-lib |
 | 9 | lib/dashboard/dashboard_goals.ml | 1,998 | Extract into lib/dashboard/ sub-lib |
 | 10 | lib/server/server_runtime_bootstrap.ml | 1,996 | Extract into lib/server/ sub-lib |
-| 11 | lib/provider_adapter.ml | 1,982 | Follow RFC-0072; extract sub-lib |
+| 11 | lib/runtime_catalog.ml | 1,982 | Follow RFC-0072; extract sub-lib |
 | 12 | lib/keeper/keeper_types_profile.ml | 1,937 | Move into keeper sub-lib |
 | 13 | lib/keeper/keeper_heartbeat_loop.ml | 1,851 | Move into keeper sub-lib |
 | 14 | lib/keeper/keeper_unified_metrics.ml | 1,781 | Move into keeper sub-lib |
@@ -53,7 +53,7 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 - [ ] lib/prometheus.ml → lib/prometheus/ sub-lib
 - [ ] lib/tool_board.ml → lib/tool_board/ sub-lib
 - [ ] lib/tool_shard.ml → lib/tool_shard/ sub-lib
-- [ ] lib/provider_adapter.ml → follow RFC-0072
+- [ ] lib/runtime_catalog.ml → follow RFC-0072
 
 ### Phase 2: Directory extraction (directories without dune files)
 - [x] lib/ide/ (7 files) → masc_mcp.ide sub-lib (zero flat-namespace deps)

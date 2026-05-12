@@ -65,14 +65,14 @@ type cascade_capabilities =
           parser path so cascade.toml can declare the value, but
           [Cascade_catalog_validator.codex_with_bound_actor_only_issue]
           still reads
-          [Provider_adapter.tolerates_bound_actor_fallback_for_kind],
+          [Runtime_catalog.tolerates_bound_actor_fallback_for_kind],
           which is hard-coded to per-adapter literals in
-          [Provider_adapter] (introduced in #14642). Editing this value
+          [Runtime_catalog] (introduced in #14642). Editing this value
           in cascade.toml has no runtime effect on the catalog warning
           until the caller cutover lands.
 
           The cutover is a follow-up that routes
-          [Provider_adapter.adapter_of_provider_config] through
+          [Runtime_catalog.adapter_of_provider_config] through
           [tool_policy_of_cascade_capabilities] (see #14659) so the
           cascade-decl value becomes the SSOT. This field is shipped now
           so the schema is stable before that cutover. *)
@@ -126,9 +126,9 @@ type cascade_thinking_control_format =
     so the cascade.toml [\[models.<id>.capabilities\]] sub-table becomes
     the SSOT for per-model feature flags. Currently OAS derives these
     via [for_model_id_static] substring match on the upstream *API model
-    identifier* — e.g. [starts_with "claude-opus-4"], [starts_with
-    "gpt-5"]. That input is the api-name (cascade_model_spec.api_name /
-    Provider_config.model_id), not the cascade [\[models.<id>\]] key.
+    identifier* (family/prefix checks embedded in code). That input is the
+    api-name (cascade_model_spec.api_name / Provider_config.model_id), not
+    the cascade [\[models.<id>\]] key.
     M2 replaces that derivation with a cascade.toml lookup keyed on the
     cascade [<id>] (the cascade key) so OAS no longer needs to "know
     model names". *)

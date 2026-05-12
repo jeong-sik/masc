@@ -93,7 +93,7 @@ let resolve ~base_path ~keeper_id ~provider_kind
            a per-keeper raw bearer. Codex CLI is the current canonical case
            (cached login → no per-request headers), and the capability flag
            on its adapter is the SSOT. RFC-0058 §2.4: capability, not match. *)
-        if Provider_adapter
+        if Runtime_catalog
            .requires_per_keeper_bridging_for_bound_actor_tools_for_kind
              provider_kind
         then Error (Bound_actor_provider_mismatch { provider_kind })

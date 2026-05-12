@@ -56,7 +56,7 @@ val budget_source_label : budget_source -> string
 
 val budget_for_candidate : candidate_key:string -> resolved_budget
 (** Resolve the budget for a concrete provider/model candidate. The key should
-    be derived from [Provider_adapter.provider_model_health_key_of_config] or
+    be derived from [Runtime_catalog.provider_model_health_key_of_config] or
     an equivalent model-scoped runtime key. When no successful samples exist,
     returns {!Cascade_attempt_liveness.bootstrap} with [source = Bootstrap]. *)
 

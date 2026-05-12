@@ -20,7 +20,7 @@ val glm_coding_auto_models : unit -> string list
     The per-provider [gemini_cli_auto_models], [codex_cli_auto_models],
     [claude_code_auto_models], and [kimi_cli_auto_models] thin wrappers
     have been deleted. They were unused in production — every routing
-    call went through {!Provider_adapter.auto_models_for_cascade_prefix}
+    call went through {!Runtime_catalog.auto_models_for_cascade_prefix}
     directly. Hardcoded provider names were a §2.4 "code knows provider
     names" violation. Callers that need a specific provider's auto list
     use the generic API; per-provider env-override behaviour

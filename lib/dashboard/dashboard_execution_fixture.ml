@@ -158,7 +158,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("korean_name", `String "local-alpha");
-                ("model", `String (Provider_adapter.make_local_label Env_config.Llama.default_model));
+                ("model", `String (Runtime_catalog.make_local_label Env_config.Llama.default_model));
                 ("recent_output_preview", `String "manager synthesized runtime visibility and handed next checks to beta");
                 ("recent_event", `String "manager handoff");
               ];
@@ -180,7 +180,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("korean_name", `String "local-beta");
-                ("model", `String (Provider_adapter.make_local_label "fixture-model-a"));
+                ("model", `String (Runtime_catalog.make_local_label "fixture-model-a"));
                 ("recent_output_preview", `String "secondary runtime is quiet; watching queue depth before escalation");
                 ("recent_event", `String "secondary runtime probe");
               ];
@@ -202,7 +202,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-003");
                 ("emoji", `String "🤖");
                 ("korean_name", `String "local-gamma");
-                ("model", `String (Provider_adapter.make_local_label "fixture-model-b"));
+                ("model", `String (Runtime_catalog.make_local_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "idle");
               ];
@@ -261,7 +261,7 @@ let execution_smoke_fixture_json () =
                 ("continuity", `String "Gen 2 · Turns 84 · Goals 2");
                 ("lifecycle", `String "handoff-imminent");
                 ("related_session_id", `Null);
-                ("model", `String (Provider_adapter.make_local_label "fixture-model-a"));
+                ("model", `String (Runtime_catalog.make_local_label "fixture-model-a"));
                 ("emoji", `String "🤖");
                 ("korean_name", `String "dm-keeper");
                 ("recent_input_preview", `String "Player asked to continue the next scene without breaking continuity");
@@ -299,7 +299,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("korean_name", `String "local-delta");
-                ("model", `String (Provider_adapter.make_local_label "fixture-model-b"));
+                ("model", `String (Runtime_catalog.make_local_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "missing heartbeat");
               ];
@@ -423,8 +423,8 @@ let execution_smoke_fixture_json () =
                 ("last_autonomous_action_at", `String generated_at);
                 ("autonomous_action_count", `Int 11);
                 ("active_goal_ids", `List [ `String "goal-runtime"; `String "goal-story" ]);
-                ("model", `String (Provider_adapter.make_local_label "fixture-model-a"));
-                ("active_model", `String (Provider_adapter.make_local_label "fixture-model-a"));
+                ("model", `String (Runtime_catalog.make_local_label "fixture-model-a"));
+                ("active_model", `String (Runtime_catalog.make_local_label "fixture-model-a"));
                 ("goal", `String "masc-keeper-autonomy");
                 ("short_goal", `String "masc-keeper-autonomy");
                 ("updated_at", `String generated_at);

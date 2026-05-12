@@ -2588,7 +2588,7 @@ had the full Phase 2 release to migrate.
 ## [0.5.2] - 2026-04-11
 
 ### Changed
-- Eliminate vendor hardcoding outside provider_adapter boundary (#6495)
+- Eliminate vendor hardcoding outside runtime_catalog boundary (#6495)
 - Root cause fixes for JSONL parsing, keeper_github repo, preset validation (#6457)
 
 ### Fixed

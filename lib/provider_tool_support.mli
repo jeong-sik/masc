@@ -18,7 +18,7 @@
     Distinct from {!Llm_provider.Capabilities.capabilities}: this
     record collapses [supports_tools && supports_tool_choice] into a
     single [supports_inline_tool_choice] and adds runtime-MCP HTTP
-    headers as a first-class field (queried via Provider_adapter). *)
+    headers as a first-class field (queried via Runtime_catalog). *)
 type capabilities =
   { supports_inline_tools : bool
   ; supports_inline_tool_choice : bool
@@ -32,9 +32,9 @@ type capabilities =
 (** [oas_capabilities_of_config cfg] returns the OAS-side
     {!Llm_provider.Capabilities.capabilities}.  Resolution order:
 
-    + Per-kind base via
-      {!Provider_adapter.oas_capabilities_of_config} (SSOT for the
-      [provider_kind → capabilities] mapping).
+    + Provider-level base via
+      {!Llm_provider.Provider_registry.default}, including
+      {!Llm_provider.Provider_catalog} overlays.
     + For non-CLI-agent adapters, override with
       {!Llm_provider.Capabilities.for_model_id} when present.
     + CLI-agent normalisation: adapters with
@@ -57,7 +57,7 @@ val oas_capabilities_of_config
     - [supports_runtime_mcp_tools] / [supports_runtime_tool_events]:
       passthrough.
     - [supports_runtime_mcp_http_headers]: queried via
-      [Provider_adapter.supports_runtime_mcp_http_headers_for_config]. *)
+      [Runtime_catalog.supports_runtime_mcp_http_headers_for_config]. *)
 val capabilities_of_config : Llm_provider.Provider_config.t -> capabilities
 
 (** [provider_supports_inline_tools cfg] is shorthand for
@@ -84,7 +84,7 @@ val runtime_mcp_policy_requires_http_headers
     carry.  This is stricter than
     {!runtime_mcp_policy_requires_http_headers}: it consults the
     adapter's identity-header carve-out via
-    {!Provider_adapter.accepts_runtime_mcp_http_header_for_config}.
+    {!Runtime_catalog.accepts_runtime_mcp_http_header_for_config}.
 
     Example: [codex_cli] declares
     [supports_runtime_mcp_http_headers = false] (no general header

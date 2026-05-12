@@ -30,11 +30,11 @@ let keeper_denied_tools =
 
 (** Derive a provider label from a model id.
 
-    Delegates to {!Provider_adapter.provider_of_model_label}. Explicit
+    Delegates to {!Runtime_catalog.provider_of_model_label}. Explicit
     ["provider:model"] labels are trusted; bare model ids require typed OAS
     [provider_kind] telemetry and otherwise stay ["unknown"]. *)
 let provider_of_model ?provider_kind (model : string) : string =
-  Provider_adapter.provider_of_model_label ?provider_kind model
+  Runtime_catalog.provider_of_model_label ?provider_kind model
 
 let provider_kind_of_telemetry
     (telemetry : Agent_sdk.Types.inference_telemetry option) =
@@ -47,7 +47,7 @@ let provider_of_model_with_telemetry ~model ~telemetry =
   provider_of_model ?provider_kind model
 
 let structurally_unmetered_provider provider =
-  Provider_adapter.is_structurally_unmetered_provider provider
+  Runtime_catalog.is_structurally_unmetered_provider provider
 
 let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
   usage.input_tokens > 0
@@ -257,7 +257,7 @@ let empty_response_model_metric =
 let alias_response_model_metric =
   Prometheus.metric_after_turn_response_model_alias
 
-let unknown_model_sentinel = Provider_adapter.cn_unknown_provider
+let unknown_model_sentinel = Runtime_catalog.cn_unknown_provider
 
 let zero_usage : Agent_sdk.Types.api_usage =
   {
@@ -494,10 +494,23 @@ let pricing_model_leaf model =
   | Some idx ->
       String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
 
+let known_non_catalog_pricing_models_env =
+  "MASC_KNOWN_NON_CATALOG_PRICING_MODELS"
+
+let split_csv_trim raw =
+  raw
+  |> String.split_on_char ','
+  |> List.filter_map (fun item ->
+         let item = String.trim item in
+         if String.equal item "" then None else Some item)
+
 let is_known_non_catalog_pricing_model model =
-  match pricing_model_leaf model with
-  | "gpt-5.3-codex-spark" -> true
-  | _ -> false
+  let leaf = pricing_model_leaf model in
+  match Sys.getenv_opt known_non_catalog_pricing_models_env with
+  | None -> false
+  | Some raw ->
+      split_csv_trim raw
+      |> List.exists (fun known -> String.equal (pricing_model_leaf known) leaf)
 
 let pricing_model_for_ledger ~model ~telemetry =
   match canonical_model_id_opt telemetry with
@@ -725,7 +738,7 @@ let () =
        zero_token_call}.  A high [pricing_catalog_miss] rate is the hint \
        to add upstream OAS pricing entries; a high [untrusted_usage] rate \
        points at the trust classifier; a high [missing_usage] rate points \
-       at the provider adapter not surfacing usage.  See #10318 and #13698."
+       at the runtime bridge not surfacing usage.  See #10318 and #13698."
     ()
 
 let classify_cost_usd_source ~usage_missing ~usage_trusted ~provider

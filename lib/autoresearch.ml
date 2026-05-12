@@ -142,7 +142,7 @@ let create_state ~goal ~metric_fn ?model_model ?author ~target_file ?target_scor
     ?(lower_is_better = false) ~workdir () =
   let model_model = match model_model with
     | Some m -> m
-    | None -> Provider_adapter.default_model_provider_prefix_result () |> Result.value ~default:"auto"
+    | None -> Runtime_catalog.default_model_provider_prefix_result () |> Result.value ~default:"auto"
   in
   let now = Time_compat.now () in
   let patience = match patience with

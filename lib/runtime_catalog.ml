@@ -19,16 +19,6 @@ type model_family =
   | Glm_coding
   | Kimi_api_family
 
-type auto_models_source =
-  | No_auto_models
-  | Env_csv_or_default of
-      { env_var : string
-      ; defaults : string list
-      ; prefer_default_model_env : bool
-      }
-  | Zai_general_auto_models
-  | Zai_coding_auto_models
-
 type reporting_policy =
   | Reported
   | Missing_by_design
@@ -37,8 +27,6 @@ type reporting_policy =
 type model_policy =
   { default_model_env : string option
   ; default_model_fallback : string option
-  ; auto_models : auto_models_source
-  ; expand_auto : bool
   ; family : model_family
   }
 
@@ -328,9 +316,11 @@ let adapter_canonical_name_of_provider_kind
   | Codex_cli -> cn_codex
 ;;
 
-(** Single source of truth for all provider/runtime adapters.
+(** MASC compatibility overlay for provider/runtime adapters.
     Simple names ([claude], [codex], [gemini]) are CLI runtimes.
-    Direct API adapters use explicit [*-api] canonical names. *)
+    Direct API adapters use explicit [*-api] canonical names. Generic
+    provider capability and endpoint facts should come from OAS
+    Provider_registry/Provider_catalog, not from new rows here. *)
 let direct_adapters =
   [ { canonical_name = cn_llama
     ; runtime_kind = Local
@@ -346,8 +336,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "LLAMA_DEFAULT_MODEL"
         ; default_model_fallback = None
-        ; auto_models = No_auto_models
-        ; expand_auto = false
         ; family = Generic
         }
     ; tool_policy = no_tool_http_headers
@@ -367,8 +355,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "OLLAMA_DEFAULT_MODEL"
         ; default_model_fallback = None
-        ; auto_models = No_auto_models
-        ; expand_auto = false
         ; family = Generic
         }
     ; tool_policy = { no_tool_http_headers with tolerates_bound_actor_fallback = true }
@@ -385,14 +371,7 @@ let direct_adapters =
     ; default_model_id = Some "auto"
     ; model_policy =
         { default_model_env = None
-        ; default_model_fallback = Some "auto"
-        ; auto_models =
-            Env_csv_or_default
-              { env_var = "MASC_CLAUDE_CODE_AUTO_MODELS"
-              ; defaults = [ "auto" ]
-              ; prefer_default_model_env = false
-              }
-        ; expand_auto = true
+        ; default_model_fallback = None
         ; family = Generic
         }
     ; tool_policy =
@@ -414,21 +393,7 @@ let direct_adapters =
     ; default_model_id = Some "auto"
     ; model_policy =
         { default_model_env = None
-        ; default_model_fallback = Some "auto"
-        ; auto_models =
-            Env_csv_or_default
-              { env_var = "MASC_CODEX_CLI_AUTO_MODELS"
-              ; defaults =
-                  [ "gpt-5.2"
-                  ; "gpt-5.3-codex-spark"
-                  ; "gpt-5.3-codex"
-                  ; "gpt-5.4-mini"
-                  ; "gpt-5.4"
-                  ; "gpt-5.5"
-                  ]
-              ; prefer_default_model_env = false
-              }
-        ; expand_auto = true
+        ; default_model_fallback = None
         ; family = Generic
         }
     ; tool_policy = codex_cli_tool_policy
@@ -444,19 +409,8 @@ let direct_adapters =
     ; endpoint_url = None
     ; default_model_id = Some "auto"
     ; model_policy =
-        { default_model_env = Some "GEMINI_DEFAULT_MODEL"
-        ; default_model_fallback = Some "gemini-3-flash-preview"
-        ; auto_models =
-            Env_csv_or_default
-              { env_var = "MASC_GEMINI_CLI_AUTO_MODELS"
-              ; defaults =
-                  [ "gemini-3-flash-preview"
-                  ; "gemini-3.1-flash-lite-preview"
-                  ; "gemini-3.1-pro-preview"
-                  ]
-              ; prefer_default_model_env = true
-              }
-        ; expand_auto = true
+        { default_model_env = None
+        ; default_model_fallback = None
         ; family = Generic
         }
     ; (* gemini-cli reads MCP servers only from ~/.gemini/settings.json or
@@ -485,14 +439,7 @@ let direct_adapters =
     ; default_model_id = Some "auto"
     ; model_policy =
         { default_model_env = None
-        ; default_model_fallback = Some "kimi-for-coding"
-        ; auto_models =
-            Env_csv_or_default
-              { env_var = "MASC_KIMI_CLI_AUTO_MODELS"
-              ; defaults = [ "kimi-for-coding" ]
-              ; prefer_default_model_env = false
-              }
-        ; expand_auto = true
+        ; default_model_fallback = None
         ; family = Generic
         }
     ; tool_policy =
@@ -511,8 +458,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "ANTHROPIC_DEFAULT_MODEL"
         ; default_model_fallback = Some "claude-sonnet-4-6-20250514"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
         ; family = Generic
         }
     ; tool_policy = { no_tool_http_headers with uses_anthropic_caching = true }
@@ -530,8 +475,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "OPENAI_DEFAULT_MODEL"
         ; default_model_fallback = Some "gpt-4.1"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
         ; family = Generic
         }
     ; tool_policy = no_tool_http_headers
@@ -554,8 +497,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "GEMINI_DEFAULT_MODEL"
         ; default_model_fallback = Some "gemini-3-flash-preview"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
         ; family = Generic
         }
     ; tool_policy = no_tool_http_headers
@@ -573,8 +514,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "KIMI_DEFAULT_MODEL"
         ; default_model_fallback = Some "kimi-k2.5"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
         ; family = Kimi_api_family
         }
     ; tool_policy = no_tool_http_headers
@@ -592,8 +531,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "KIMI_CODING_DEFAULT_MODEL"
         ; default_model_fallback = Some "kimi-coding-auto"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
         ; family = Kimi_api_family
         }
     ; tool_policy = no_tool_http_headers
@@ -611,8 +548,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "ZAI_DEFAULT_MODEL"
         ; default_model_fallback = Some "glm-5.1"
-        ; auto_models = Zai_general_auto_models
-        ; expand_auto = true
         ; family = Glm_general
         }
     ; tool_policy = no_tool_http_headers
@@ -630,8 +565,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "ZAI_CODING_DEFAULT_MODEL"
         ; default_model_fallback = Some "glm-5.1"
-        ; auto_models = Zai_coding_auto_models
-        ; expand_auto = true
         ; family = Glm_coding
         }
     ; tool_policy = no_tool_http_headers
@@ -649,8 +582,6 @@ let direct_adapters =
     ; model_policy =
         { default_model_env = Some "OPENROUTER_DEFAULT_MODEL"
         ; default_model_fallback = None
-        ; auto_models = No_auto_models
-        ; expand_auto = false
         ; family = Generic
         }
     ; tool_policy = no_tool_http_headers
@@ -683,25 +614,38 @@ let resolve_model_policy_default ?getenv (policy : model_policy) =
   | None -> policy.default_model_fallback
 ;;
 
-let resolve_auto_models ?getenv (policy : model_policy) =
-  match policy.auto_models with
-  | No_auto_models -> None
-  | Zai_general_auto_models -> Some (Llm_provider.Zai_catalog.glm_auto_models ())
-  | Zai_coding_auto_models -> Some (Llm_provider.Zai_catalog.glm_coding_auto_models ())
-  | Env_csv_or_default { env_var; defaults; prefer_default_model_env } ->
-    (match env_value_opt ?getenv env_var with
-     | Some raw ->
-       (match csv_items raw with
-        | [] -> Some defaults
-        | items -> Some items)
-     | None when prefer_default_model_env ->
-       (match policy.default_model_env with
-        | Some default_env ->
-          (match env_value_opt ?getenv default_env with
-           | Some model_id -> Some [ model_id ]
-           | None -> Some defaults)
-        | None -> Some defaults)
-     | None -> Some defaults)
+let auto_models_env_var_of_cascade_prefix provider_name =
+  let normalized =
+    provider_name
+    |> String.trim
+    |> String.map (function
+      | 'a' .. 'z' as c -> Char.uppercase_ascii c
+      | 'A' .. 'Z' | '0' .. '9' as c -> c
+      | _ -> '_')
+  in
+  "MASC_" ^ normalized ^ "_AUTO_MODELS"
+;;
+
+let explicit_auto_models_for_cascade_prefix ?getenv provider_name =
+  match env_value_opt ?getenv (auto_models_env_var_of_cascade_prefix provider_name) with
+  | Some raw ->
+    (match csv_items raw with
+     | [] -> None
+     | items -> Some items)
+  | None -> None
+;;
+
+let catalog_auto_models_for_adapter (adapter : adapter) =
+  match adapter.model_policy.family with
+  | Glm_general -> Some (Llm_provider.Zai_catalog.glm_auto_models ())
+  | Glm_coding -> Some (Llm_provider.Zai_catalog.glm_coding_auto_models ())
+  | Generic | Kimi_api_family -> None
+;;
+
+let auto_models_for_adapter ?getenv (adapter : adapter) =
+  match explicit_auto_models_for_cascade_prefix ?getenv adapter.cascade_prefix with
+  | Some _ as models -> models
+  | None -> catalog_auto_models_for_adapter adapter
 ;;
 
 let default_model_id_for_cascade_prefix ?getenv provider_name =
@@ -712,17 +656,13 @@ let default_model_id_for_cascade_prefix ?getenv provider_name =
 
 let auto_models_for_provider ?getenv provider_name =
   match find_direct_adapter_by_alias provider_name with
-  | Some adapter when adapter.model_policy.expand_auto ->
-    resolve_auto_models ?getenv adapter.model_policy
-  | Some _ -> None
+  | Some adapter -> auto_models_for_adapter ?getenv adapter
   | None -> None
 ;;
 
 let auto_models_for_cascade_prefix ?getenv provider_name =
   match resolve_adapter_by_cascade_prefix provider_name with
-  | Some adapter when adapter.model_policy.expand_auto ->
-    resolve_auto_models ?getenv adapter.model_policy
-  | Some _ -> None
+  | Some adapter -> auto_models_for_adapter ?getenv adapter
   | None -> None
 ;;
 
@@ -1795,25 +1735,6 @@ let accepts_runtime_mcp_http_header_for_config
       List.exists
         (fun k -> normalize_header_key k = normalized)
         adapter.tool_policy.identity_runtime_mcp_header_keys)
-;;
-
-(** SSOT for the OAS provider_kind → capabilities mapping.  This is the
-    one place that pattern-matches on [Llm_provider.Provider_config.provider_kind]
-    for capability lookup — RFC-0058 §2.4 forbids the dispatch in consumer
-    modules; centralising it here keeps consumers off the closed variant. *)
-let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
-  match cfg.kind with
-  | Llm_provider.Provider_config.Ollama -> Llm_provider.Capabilities.ollama_capabilities
-  | Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
-  | Kimi -> Llm_provider.Capabilities.kimi_capabilities
-  | Glm -> Llm_provider.Capabilities.glm_capabilities
-  | Gemini -> Llm_provider.Capabilities.gemini_capabilities
-  | DashScope -> Llm_provider.Capabilities.dashscope_capabilities
-  | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
-  | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
-  | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
-  | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
-  | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
 ;;
 
 (* ── Generic provider auth detail ─────────────────────────────── *)

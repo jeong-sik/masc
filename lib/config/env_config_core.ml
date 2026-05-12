@@ -228,7 +228,7 @@ let default_http_port_int = Masc_network_defaults.masc_http_default_port
 
 (** SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352).
     Defined here so in-process readers and out-of-process callers
-    (snapshot, provider_adapter presence check, bootstrap putenv)
+    (snapshot, runtime_catalog presence check, bootstrap putenv)
     share one literal. *)
 let host_env_key = "MASC_HOST"
 let http_port_env_key = "MASC_HTTP_PORT"

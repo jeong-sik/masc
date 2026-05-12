@@ -23,13 +23,13 @@ type cli_transport_overrides =
   }
 
 (* SSOT for the Claude Code subprocess hard cap lives in
-   [Provider_adapter] (claude adapter's [tool_policy.max_turns_per_attempt]).
+   [Runtime_catalog] (claude adapter's [tool_policy.max_turns_per_attempt]).
    The constant below is a backward-compat re-export for the existing test
    suite; new code reads the cap via [provider_effective_max_turns] or
-   [Provider_adapter.adapter_of_provider_kind]. *)
+   [Runtime_catalog.adapter_of_provider_kind]. *)
 let claude_code_max_turns_hard_cap =
   match
-    Provider_adapter.adapter_of_provider_kind
+    Runtime_catalog.adapter_of_provider_kind
       Llm_provider.Provider_config.Claude_code
   with
   | Some adapter ->
@@ -38,7 +38,7 @@ let claude_code_max_turns_hard_cap =
 ;;
 
 let provider_effective_max_turns kind requested =
-  match Provider_adapter.adapter_of_provider_kind kind with
+  match Runtime_catalog.adapter_of_provider_kind kind with
   | Some adapter ->
     (match adapter.tool_policy.max_turns_per_attempt with
      | Some cap -> min requested cap
@@ -421,7 +421,7 @@ let codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
       policy's non-masc headers, which were removed in step 1.
 
    Invariant: this function is only reached from the dispatch site when
-   [Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_
+   [Runtime_catalog.requires_per_keeper_bridging_for_bound_actor_tools_
    for_config = true], i.e. the adapter cannot carry arbitrary per-
    request HTTP headers.  Body is intentionally identical in semantics
    to the prior [codex_runtime_mcp_policy_for_agent] — the rename
@@ -459,12 +459,12 @@ let runtime_mcp_policy_for_provider
     let trimmed = String.trim agent_name in
     if String.equal trimmed "" then None else Some trimmed
   in
-  (* Dispatch by capability flag from [Provider_adapter.tool_policy], not
+  (* Dispatch by capability flag from [Runtime_catalog.tool_policy], not
      by provider name (RFC-0058 §2.4).  [requires_per_keeper_bridging]
      gates the strip-and-bridge path; Codex CLI is currently the only
      adapter that returns [true]. *)
   let requires_per_keeper_bridging =
-    Provider_adapter
+    Runtime_catalog
     .requires_per_keeper_bridging_for_bound_actor_tools_for_config
       provider_cfg
   in
@@ -641,7 +641,7 @@ let kimi_cli_auth_value (provider_cfg : Llm_provider.Provider_config.t) =
   | Some key -> Some key
   | None ->
     first_nonempty_env
-      (Provider_adapter.auth_env_keys_of_provider_kind Llm_provider.Provider_config.Kimi)
+      (Runtime_catalog.auth_env_keys_of_provider_kind Llm_provider.Provider_config.Kimi)
 ;;
 
 let kimi_cli_base_url () =
@@ -714,7 +714,7 @@ let resolve_tool_lane_for_oas_tools
     | _ -> []
   in
   let requires_per_keeper_bridging =
-    Provider_adapter
+    Runtime_catalog
     .requires_per_keeper_bridging_for_bound_actor_tools_for_config
       provider_cfg
   in

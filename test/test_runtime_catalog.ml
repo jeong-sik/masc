@@ -1,5 +1,5 @@
 open Alcotest
-module Adapter = Masc_mcp.Provider_adapter
+module Adapter = Masc_mcp.Runtime_catalog
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -393,20 +393,26 @@ let test_stt_request_mcp_rejected () =
   | Error _ -> ()
 ;;
 
-let test_auto_models_use_declared_policy () =
+let test_auto_models_use_explicit_env_or_catalog () =
   with_env "MASC_KIMI_CLI_AUTO_MODELS" None (fun () ->
     check
       (option (list string))
-      "kimi cli declared default"
-      (Some [ "kimi-for-coding" ])
+      "kimi cli has no baked-in rotation"
+      None
       (Adapter.auto_models_for_cascade_prefix "kimi_cli");
     with_env "MASC_GEMINI_CLI_AUTO_MODELS" None (fun () ->
       with_env "GEMINI_DEFAULT_MODEL" (Some "gemini-3-flash-preview") (fun () ->
         check
           (option (list string))
-          "gemini cli prefers explicit default model env"
-          (Some [ "gemini-3-flash-preview" ])
-          (Adapter.auto_models_for_cascade_prefix "gemini_cli"))))
+          "gemini cli ignores API default model env for rotation"
+          None
+          (Adapter.auto_models_for_cascade_prefix "gemini_cli")));
+    with_env "MASC_KIMI_CLI_AUTO_MODELS" (Some "kimi-a,kimi-b") (fun () ->
+      check
+        (option (list string))
+        "kimi cli uses explicit operator rotation"
+        (Some [ "kimi-a"; "kimi-b" ])
+        (Adapter.auto_models_for_cascade_prefix "kimi_cli")))
 ;;
 
 let test_runtime_mcp_header_support_uses_declared_policy () =
@@ -686,7 +692,7 @@ let test_timeout_bounds_unconstrained_kinds_have_no_bounds () =
    These tests seal the invariant that the keeper layer no longer
    needs to pattern-match on [provider_cfg.kind] and the SDK's
    [provider] variant: every shape gets routed by this single helper
-   inside [Provider_adapter]. *)
+   inside [Runtime_catalog]. *)
 
 let agent_sdk_local_cfg ~base_url ~model_id ~api_key_env =
   { Agent_sdk.Provider.provider = Agent_sdk.Provider.Local { base_url }
@@ -922,7 +928,7 @@ let test_tool_policy_of_cascade_capabilities_default_matches_none () =
 
 let () =
   run
-    "Provider Adapter"
+    "Runtime Catalog"
     [ ( "registry"
       , [ test_case "resolve direct aliases" `Quick test_resolve_direct_aliases
         ; test_case "resolve cli canonicals" `Quick test_resolve_cli_canonical_names
@@ -963,7 +969,7 @@ let () =
         ; test_case
             "declared auto model policy"
             `Quick
-            test_auto_models_use_declared_policy
+            test_auto_models_use_explicit_env_or_catalog
         ; test_case
             "declared runtime MCP header policy"
             `Quick

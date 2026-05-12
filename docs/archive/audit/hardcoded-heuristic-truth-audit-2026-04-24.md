@@ -44,7 +44,7 @@ catalog metadata instead of reintroducing local string grouping.
 
 ### No longer confirmed by current audit: provider label heuristics
 
-The previous `provider_adapter.ml` audit handles (`prefix_classification_vocabulary`,
+The previous `runtime_catalog.ml` audit handles (`prefix_classification_vocabulary`,
 `bare_heuristic`, model-prefix provider guesses) no longer match active source.
 Provider identity should remain metadata/capability-driven rather than inferred
 from display labels.

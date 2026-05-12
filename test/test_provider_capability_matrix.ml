@@ -26,6 +26,7 @@
 
     Cross-reference:
     - [lib/provider_tool_support.ml] — [oas_capabilities_of_config]
+      resolves provider-level bases through the OAS Provider_registry/catalog.
       and [normalize_cli_caps_when]
     - [planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-hashed-pretzel.md]
       Step 15 line item ("test_provider_capability_matrix.ml")
@@ -123,9 +124,8 @@ let test_cli_runtime_mcp_lane () =
 
 (** Total function check: [capabilities_of_config] returns for
     every kind, regardless of model_id.  Catches a regression
-    where adding a kind to [Provider_kind.t] but not to
-    [oas_capabilities_of_config]'s base_caps match would make
-    the function partial. *)
+    where OAS Provider_registry/catalog lookup stops resolving a
+    provider-level capability base for a known kind. *)
 let test_capabilities_of_config_total () =
   List.iter
     (fun kind ->
@@ -133,6 +133,71 @@ let test_capabilities_of_config_total () =
       ())
     (cli_kinds @ api_kinds);
   Alcotest.(check bool) "all 11 provider kinds resolve" true true
+
+let with_provider_catalog entries f =
+  let previous = Llm_provider.Provider_catalog.global () in
+  Llm_provider.Provider_catalog.set_global entries;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some entries -> Llm_provider.Provider_catalog.set_global entries
+      | None -> Llm_provider.Provider_catalog.clear_global ())
+    f
+
+let test_provider_catalog_overlay_drives_base_capabilities () =
+  let caps =
+    { Llm_provider.Capabilities.openai_chat_capabilities with
+      max_context_tokens = Some 4242
+    ; supports_tools = false
+    ; supports_runtime_mcp_tools = true
+    ; supports_runtime_tool_events = true
+    }
+  in
+  let entry : Llm_provider.Provider_catalog.entry =
+    { id = "local-vllm-fixture"
+    ; aliases = [ "vllm-fixture" ]
+    ; kind = PC.OpenAI_compat
+    ; transport = Llm_provider.Provider_catalog.Custom_openai_compat
+    ; command = None
+    ; base_url = "https://runtime-catalog-fixture.invalid"
+    ; request_path = "/v1/chat/completions"
+    ; api_key_env = ""
+    ; auth = Llm_provider.Provider_catalog.No_auth
+    ; default_model = Some "fixture-model"
+    ; max_context = Some 4242
+    ; capabilities = caps
+    ; non_interactive = true
+    ; interactive_required = false
+    ; daemon_safe = true
+    ; credential_scope = None
+    }
+  in
+  with_provider_catalog [ entry ] (fun () ->
+    let cfg =
+      PC.make
+        ~kind:PC.OpenAI_compat
+        ~model_id:"fixture-model"
+        ~base_url:"https://runtime-catalog-fixture.invalid/"
+        ~request_path:"/v1/chat/completions"
+        ()
+    in
+    let resolved = PTS.oas_capabilities_of_config cfg in
+    Alcotest.(check (option int))
+      "catalog max_context flows through OAS registry"
+      (Some 4242)
+      resolved.max_context_tokens;
+    Alcotest.(check bool)
+      "catalog can override inline tool support"
+      false
+      resolved.supports_tools;
+    Alcotest.(check bool)
+      "catalog runtime MCP tools"
+      true
+      resolved.supports_runtime_mcp_tools;
+    Alcotest.(check bool)
+      "catalog runtime MCP events"
+      true
+      resolved.supports_runtime_tool_events)
 
 let () =
   Alcotest.run "provider_capability_matrix"
@@ -151,5 +216,11 @@ let () =
             `Quick test_cli_no_inline_tools;
           Alcotest.test_case "CLI providers expose runtime MCP lane"
             `Quick test_cli_runtime_mcp_lane;
+        ] );
+      ( "provider_catalog",
+        [
+          Alcotest.test_case
+            "OAS provider catalog overlay drives base capabilities"
+            `Quick test_provider_catalog_overlay_drives_base_capabilities;
         ] );
     ]

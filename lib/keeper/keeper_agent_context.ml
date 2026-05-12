@@ -85,7 +85,7 @@ let default_config
   =
   let provider =
     Agent_sdk.Provider.config_of_provider_config provider_cfg
-    |> Provider_adapter.apply_wire_overlay ~provider_cfg
+    |> Runtime_catalog.apply_wire_overlay ~provider_cfg
   in
   { name
   ; provider_cfg

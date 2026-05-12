@@ -273,12 +273,12 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
      inject provider-specific discovery so routing stays isolated by
      endpoint (e.g. ollama:auto must not pick up llama-server models). *)
   let discover =
-    if String.equal provider_name Provider_adapter.cn_ollama then
+    if String.equal provider_name Runtime_catalog.cn_ollama then
       Some
         (fun () ->
           Llm_provider.Discovery.first_discovered_model_id_for_url
             defaults.base_url)
-    else if String.equal provider_name Provider_adapter.cn_llama then
+    else if String.equal provider_name Runtime_catalog.cn_llama then
       Some Llm_provider.Discovery.first_discovered_model_id
     else None
   in
@@ -288,7 +288,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
   in
   let resolved_model_id = model_resolution.resolved_model_id in
   let base_url =
-    if String.equal provider_name Provider_adapter.cn_llama then
+    if String.equal provider_name Runtime_catalog.cn_llama then
       (* Route to the endpoint that has this model; round-robin fallback *)
       match Llm_provider.Discovery.endpoint_for_model resolved_model_id with
       | Some url -> url
@@ -525,7 +525,7 @@ let expand_auto_model_string ?rotation_scope (s : string) : string list =
   match split_provider_model trimmed with
   | Some (provider_name, model_id)
     when String_util.equals_ci model_id "auto" -> (
-      match Provider_adapter.auto_models_for_cascade_prefix provider_name with
+      match Runtime_catalog.auto_models_for_cascade_prefix provider_name with
       | Some models when models <> [] ->
           expand_provider_auto ?rotation_scope ~spec:trimmed provider_name models
       | _ -> [ trimmed ])
@@ -812,7 +812,7 @@ let weighted_shuffle
     ["claude_code:auto"] and ["gemini_cli:auto"] remain independent. *)
 let provider_key_of_model_string s =
   match parse_model_string s with
-  | Some cfg -> Provider_adapter.provider_health_key_of_config cfg
+  | Some cfg -> Runtime_catalog.provider_health_key_of_config cfg
   | None -> (
       match String.split_on_char ':' s with
       | provider :: _rest when String.trim provider <> "" -> String.trim provider
@@ -938,13 +938,13 @@ let display_model_string s =
   match split_provider_model s with
   | Some (provider_name, model_id) ->
       Printf.sprintf "%s:%s"
-        (Provider_adapter.display_provider_name provider_name)
+        (Runtime_catalog.display_provider_name provider_name)
         model_id
   | None -> s
 
 let runtime_kind_of_provider_name provider_name =
-  match Provider_adapter.resolve_direct_adapter provider_name with
-  | Some adapter -> Some (Provider_adapter.string_of_runtime_kind adapter.runtime_kind)
+  match Runtime_catalog.resolve_direct_adapter provider_name with
+  | Some adapter -> Some (Runtime_catalog.string_of_runtime_kind adapter.runtime_kind)
   | None -> None
 
 (** Build a [candidate_info] for a model string given its config weight.
@@ -997,7 +997,7 @@ let candidate_info_of_weighted (e : Cascade_config_loader.weighted_entry) =
   let provider_name, display_provider_name, runtime_kind =
     match split_provider_model e.model with
     | Some (provider_name, _model_id) ->
-        let display_name = Provider_adapter.display_provider_name provider_name in
+        let display_name = Runtime_catalog.display_provider_name provider_name in
         (Some provider_name, Some display_name,
          runtime_kind_of_provider_name provider_name)
     | None -> (None, None, None)

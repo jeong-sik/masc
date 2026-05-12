@@ -82,7 +82,7 @@ MASC `agent`와 OAS `keeper`는 다른 개념이다 (`docs/design/oas-masc-state
 
 - `Keeper_cascade_routing.select_cascade` — phase→cascade 매핑 (`lib/keeper/keeper_cascade_routing.mli`)
 - `Cascade_runtime.models_of_cascade_name` — cascade 이름 → provider list
-- `Provider_adapter.is_local_provider` — provider 분류
+- `Runtime_catalog.is_local_provider` — provider 분류
 - `Keeper_exec_status_metrics.last_model_used` — 마지막 사용 provider
 - `Local_runtime_pool` slot telemetry — slot full 판정
 

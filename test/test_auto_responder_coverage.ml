@@ -148,11 +148,11 @@ let test_extract_nickname_multiline () =
    ============================================================ *)
 
 let test_spawnable_agents_nonempty () =
-  let agents = Masc_mcp.Provider_adapter.spawnable_canonical_names () in
+  let agents = Masc_mcp.Runtime_catalog.spawnable_canonical_names () in
   check bool "nonempty" true (List.length agents > 0)
 
 let test_spawnable_agents_contains_claude () =
-  let agents = Masc_mcp.Provider_adapter.spawnable_canonical_names () in
+  let agents = Masc_mcp.Runtime_catalog.spawnable_canonical_names () in
   check bool "contains claude" true (List.mem "claude" agents)
 
 let test_agent_type_of_mention_claude () =

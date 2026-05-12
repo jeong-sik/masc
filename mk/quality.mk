@@ -74,7 +74,7 @@ check-silent:
 # SSOT fingerprint diff + orphan spec validation.
 # Runs all three SSOT gate scripts:
 #   1. scripts/check-ssot.sh          — ratchet-based bypass checks (R1–R5)
-#   2. scripts/ci/check-ssot-spawn-drift.sh — Provider_adapter ↔ Spawn symmetry
+#   2. scripts/ci/check-ssot-spawn-drift.sh — Runtime_catalog ↔ Spawn symmetry
 #   3. scripts/check-spec-truth.sh    — TLA+ Mirrors: orphan spec validator
 # Meta-issue: #9516
 check-ssot:

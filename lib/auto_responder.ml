@@ -98,7 +98,7 @@ let agent_type_of_mention = Mention.agent_type_of_mention
 
 let is_spawnable mention =
   let base = agent_type_of_mention mention in
-  Provider_adapter.resolve_spawn_key base <> None
+  Runtime_catalog.resolve_spawn_key base <> None
 
 (* --- CLI spawn (Spawn mode) --- *)
 
@@ -126,8 +126,8 @@ let cli_argv_of_agent_type (agent_type : string) : string list =
   | None -> [agent_type]
 
 let run_cli_agent ~agent_type ~prompt =
-  if Provider_adapter.is_bare_ollama_label agent_type then
-    debug_log (Provider_adapter.bare_ollama_migration_message ())
+  if Runtime_catalog.is_bare_ollama_label agent_type then
+    debug_log (Runtime_catalog.bare_ollama_migration_message ())
   else
     let base = cli_argv_of_agent_type agent_type in
     let argv = base in

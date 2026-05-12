@@ -32,7 +32,7 @@ val load_voice_config : unit -> (Voice_config.t, string) result
 (** Cached load of the voice configuration JSON. *)
 
 val default_agent_voices : unit -> (string * string) list
-(** [agent_id -> voice_id] pairs from the {!Provider_adapter}
+(** [agent_id -> voice_id] pairs from the {!Runtime_catalog}
     registry, used as a fallback when the JSON config is missing. *)
 
 val agent_voices : unit -> (string * string) list

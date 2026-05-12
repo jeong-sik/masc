@@ -11,13 +11,13 @@
   `lib/keeper/keeper_cascade_profile.ml:14-22`,
   `lib/keeper/keeper_unified_turn.ml:319-394`,
   `config/cascade.toml:[tier_small]`,
-  `lib/provider_adapter.ml:296`
+  `lib/runtime_catalog.ml:296`
 
 ## 1. Problem
 
 A keeper cannot be enabled to use Ollama with a single configuration switch.
-RFC-0024 completed the *registration* layer (provider_adapter has the Ollama
-entry at `lib/provider_adapter.ml:296`; cascade.toml has a commented `[tier_small]`
+RFC-0024 completed the *registration* layer (runtime_catalog has the Ollama
+entry at `lib/runtime_catalog.ml:296`; cascade.toml has a commented `[tier_small]`
 slot). What is still missing is the **boundary** between two layers:
 
 1. **Harness layer** (deterministic, automatic) — should make Ollama work
@@ -148,19 +148,19 @@ callers fall through to the substring scan, behavior unchanged.
 
 ### 4.5 Harness — local provider cooldown policy (H)
 
-`Cascade_health_tracker` currently has no `Provider_adapter.is_local_provider`
+`Cascade_health_tracker` currently has no `Runtime_catalog.is_local_provider`
 awareness. Add a per-class cooldown profile:
 
 ```ocaml
 let cooldown_config_for ~provider_key =
-  if Provider_adapter.is_local_provider provider_key then
+  if Runtime_catalog.is_local_provider provider_key then
     { threshold = 5; cooldown_sec = 10.0 }       (* generous: local probe is flaky by nature *)
   else
     { threshold = cooldown_threshold; cooldown_sec = cooldown_sec }   (* existing 3 / 30s *)
 ```
 
-`Provider_adapter.is_local_provider` exists today
-(`lib/provider_adapter.mli:221`). This change does not introduce a new
+`Runtime_catalog.is_local_provider` exists today
+(`lib/runtime_catalog.mli:221`). This change does not introduce a new
 primitive; it wires an existing one.
 
 ### 4.6 Harness — saturation skip cap (H, in flight)
@@ -220,7 +220,7 @@ Defer until Phase 2 stabilizes.
   prefer the catalog.
 - Knob defaults match prior behavior: `MASC_LOCAL_COOLDOWN_THRESHOLD=5`
   is more generous than today's `3`, but the change applies only to
-  endpoints that pass `Provider_adapter.is_local_provider`.
+  endpoints that pass `Runtime_catalog.is_local_provider`.
 
 ## 7. Validation
 

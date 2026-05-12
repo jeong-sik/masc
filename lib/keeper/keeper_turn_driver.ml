@@ -500,10 +500,10 @@ let run_named
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
       let provider_health_key =
-        Provider_adapter.provider_health_key_of_config provider_cfg
+        Runtime_catalog.provider_health_key_of_config provider_cfg
       in
       let provider_model_health_key =
-        Provider_adapter.provider_model_health_key_of_config provider_cfg
+        Runtime_catalog.provider_model_health_key_of_config provider_cfg
       in
       match first_health_cooldown provider_cfg with
       | Some (blocked_health_key, msg) ->
@@ -1044,14 +1044,14 @@ let run_named
   in
   let candidate_capacity_keys = List.map capacity_key_of candidate_cfgs in
   (* Register HTTP-probe-capable provider URLs explicitly.  Capability
-     check goes through [Provider_adapter.is_http_probe_capable_kind] —
+     check goes through [Runtime_catalog.is_http_probe_capable_kind] —
      keeper code does not name a provider variant.  Both registries
      receive the same URL: [Cascade_client_capacity] for the per-process
      semaphore, [Cascade_http_probe] for the [/api/ps] probe adapter. *)
   let http_probe_max_concurrent = Option.value ollama_max ~default:1 in
   List.iter
     (fun (cfg : Llm_provider.Provider_config.t) ->
-       if Provider_adapter.is_http_probe_capable_kind cfg.kind
+       if Runtime_catalog.is_http_probe_capable_kind cfg.kind
           && cfg.base_url <> ""
        then begin
          if not (Cascade_client_capacity.is_registered cfg.base_url) then
@@ -1074,7 +1074,7 @@ let run_named
      Cascade_client_capacity.auto_register_cli_with_override
        ~capacity_keys:candidate_capacity_keys ~max_concurrent:n);
   let adapter : Llm_provider.Provider_config.t Cascade_strategy.adapter = {
-    health_key = Provider_adapter.provider_health_key_of_config;
+    health_key = Runtime_catalog.provider_health_key_of_config;
     capacity_key = capacity_key_of;
     weight = (fun _ -> 1);
   } in

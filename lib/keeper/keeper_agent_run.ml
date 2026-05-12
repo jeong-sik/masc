@@ -538,7 +538,7 @@ let run_turn
        then (
          let uses_cli_missing_sync =
            List.exists
-             Provider_adapter.supports_runtime_mcp_http_headers_for_model_label
+             Runtime_catalog.supports_runtime_mcp_http_headers_for_model_label
              meta.models
          in
          if uses_cli_missing_sync

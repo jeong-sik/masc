@@ -259,11 +259,12 @@
         test_turn_id_propagation
         test_per_keeper_token_fallback
         test_auth_strict_mode
-        test_keeper_turn_fsm_emit
-        test_keeper_event_queue
-        test_keeper_relevance_check
-        test_gh_api_classification
-        test_effect_evidence_source_path
+          test_keeper_turn_fsm_emit
+          test_keeper_event_queue
+          test_keeper_relevance_check
+          test_gh_api_classification
+          test_provider_capability_matrix
+          test_effect_evidence_source_path
         test_cognitive_gravity
         test_intentional_projection
         test_chronicle_event
@@ -629,7 +630,7 @@
         test_with_process_coverage
         test_bg_task_stub
         test_process_eio_detached
-        test_provider_adapter
+        test_runtime_catalog
         test_worker_container_coverage
         test_resilience
         test_common
@@ -849,7 +850,7 @@
         test_with_process_coverage
         test_bg_task_stub
         test_process_eio_detached
-        test_provider_adapter
+        test_runtime_catalog
         test_worker_container_coverage
         test_resilience
         test_common
@@ -1401,4 +1402,3 @@
  (name test_tool_descriptors_gen)
  (modules test_tool_descriptors_gen)
  (libraries masc_test_deps))
-

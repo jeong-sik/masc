@@ -162,21 +162,21 @@ let model_id_of_label label =
   | _ -> None
 
 (* auth_kind_for_provider and endpoint_url_for_provider removed.
-   Use Provider_adapter.auth_detail_of_provider instead. *)
+   Use Runtime_catalog.auth_detail_of_provider instead. *)
 
 let catalog_models_for_provider provider =
-  match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when String.equal canonical_name Provider_adapter.cn_llama -> []
+  match Runtime_catalog.resolve_direct_adapter provider with
+  | Some { canonical_name; _ } when String.equal canonical_name Runtime_catalog.cn_llama -> []
   | Some _ -> (
-      match Provider_adapter.auto_models_for_provider provider with
+      match Runtime_catalog.auto_models_for_provider provider with
       | Some models -> models
       | None -> [ "auto" ])
   | None -> []
 
 let default_model_for_provider provider =
-  match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when String.equal canonical_name Provider_adapter.cn_llama -> (
-      match Provider_adapter.explicit_llama_model_id_result () with
+  match Runtime_catalog.resolve_direct_adapter provider with
+  | Some { canonical_name; _ } when String.equal canonical_name Runtime_catalog.cn_llama -> (
+      match Runtime_catalog.explicit_llama_model_id_result () with
       | Ok model_id -> trim_nonempty model_id
       | Error _ -> None)
   | Some { default_model_id; _ } -> (
@@ -231,35 +231,35 @@ let llama_snapshot () =
     default_model = default_model_for_provider "llama";
     models;
     source = "masc/local-runtime";
-    endpoint_url = (Provider_adapter.auth_detail_of_provider "llama").endpoint_url;
+    endpoint_url = (Runtime_catalog.auth_detail_of_provider "llama").endpoint_url;
     note;
     discovery;
   }
 
 (** Build snapshot for any direct-API provider.
     Vendor-specific logic (Gemini Vertex ADC, etc.) is encapsulated
-    inside Provider_adapter.auth_detail_of_provider. *)
-let provider_snapshot_of_adapter (adapter : Provider_adapter.adapter) =
+    inside Runtime_catalog.auth_detail_of_provider. *)
+let provider_snapshot_of_adapter (adapter : Runtime_catalog.adapter) =
   let provider = adapter.canonical_name in
-  let detail = Provider_adapter.auth_detail_of_provider provider in
+  let detail = Runtime_catalog.auth_detail_of_provider provider in
   let default_model = default_model_for_provider provider in
   let kind =
     match adapter.runtime_kind with
-    | Provider_adapter.Local -> "local"
-    | Provider_adapter.Cli_agent -> "cli"
-    | Provider_adapter.Direct_api -> "cloud"
+    | Runtime_catalog.Local -> "local"
+    | Runtime_catalog.Cli_agent -> "cli"
+    | Runtime_catalog.Direct_api -> "cloud"
   in
   {
     provider;
     kind;
-    runtime_kind = Provider_adapter.string_of_runtime_kind adapter.runtime_kind;
+    runtime_kind = Runtime_catalog.string_of_runtime_kind adapter.runtime_kind;
     auth_kind = detail.auth_kind;
     status = detail.status;
     available = detail.available;
     supports_single_agent_run = detail.supports_run && Option.is_some default_model;
     default_model;
     models = candidate_models_for_provider provider;
-    source = "masc/provider-adapter";
+    source = "masc/runtime-catalog";
     endpoint_url = detail.endpoint_url;
     note = detail.note;
     discovery = None;
@@ -267,9 +267,9 @@ let provider_snapshot_of_adapter (adapter : Provider_adapter.adapter) =
 
 let provider_snapshots () : provider_snapshot list =
   let managed =
-    Provider_adapter.direct_adapters
-    |> List.filter (fun (a : Provider_adapter.adapter) ->
-         not ((=) a.runtime_kind Provider_adapter.Local)
+    Runtime_catalog.direct_adapters
+    |> List.filter (fun (a : Runtime_catalog.adapter) ->
+         not ((=) a.runtime_kind Runtime_catalog.Local)
          && Option.is_some a.default_model_id)
     |> List.map provider_snapshot_of_adapter
   in
@@ -356,9 +356,9 @@ let response_text_of_api_response (response : Agent_sdk.Types.api_response) =
   Agent_sdk.Types.text_of_content response.content |> String.trim
 
 let provider_label_for_model provider model =
-  match Provider_adapter.resolve_direct_adapter provider with
+  match Runtime_catalog.resolve_direct_adapter provider with
   | Some adapter ->
-    Ok (Provider_adapter.cascade_prefix_of_adapter adapter ^ ":" ^ model)
+    Ok (Runtime_catalog.cascade_prefix_of_adapter adapter ^ ":" ^ model)
   | None ->
     Error
       (Printf.sprintf
@@ -410,7 +410,7 @@ let is_label_runnable (label : string) : bool =
     | None -> false
     | Some idx ->
       let prefix = String.sub label 0 idx |> String.trim in
-      let detail = Provider_adapter.auth_detail_of_provider prefix in
+      let detail = Runtime_catalog.auth_detail_of_provider prefix in
       detail.available && detail.supports_run
 
 let run_system_prompt provider =

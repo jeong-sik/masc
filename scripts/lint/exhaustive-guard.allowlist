@@ -737,7 +737,7 @@ lib/process/exec_tap.ml:171
 lib/process/process_eio.ml:113
 lib/process/process_eio.ml:809
 lib/prompt_registry/prompt_registry.ml:276
-lib/provider_adapter.ml:1251
+lib/runtime_catalog.ml:1251
 lib/provider_kind_resolver.ml:40
 lib/repo_manager/credential_materializer.ml:52
 lib/repo_manager/keeper_repo_mapping.ml:428

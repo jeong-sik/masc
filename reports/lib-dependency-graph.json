@@ -52,7 +52,7 @@
       42
     ],
     [
-      "Provider_adapter",
+      "Runtime_catalog",
       40
     ],
     [
@@ -1159,13 +1159,13 @@
       "Keeper_cascade_profile",
       "Keeper_turn_driver",
       "Masc_oas_bridge",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Spawn",
       "Tool_name"
     ],
     "Autoresearch": [
       "Autoresearch_codegen",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Autoresearch_codegen": [
       "Agent_sdk_response",
@@ -1295,7 +1295,7 @@
       "Cascade_state",
       "Cascade_strategy",
       "Cascade_throttle",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_kind_resolver"
     ],
     "Cascade_config_loader": [
@@ -1309,7 +1309,7 @@
     "Cascade_declarative_adapter": [
       "Cascade_config",
       "Cascade_strategy",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Cascade_declarative_hotpath": [
       "Cascade_declarative_adapter",
@@ -1322,7 +1322,7 @@
       "Keeper_cascade_profile",
       "Keeper_types",
       "Prometheus",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Cascade_event_bridge": [
       "Agent_sdk_metrics_bridge",
@@ -1350,7 +1350,7 @@
       "Cascade_metrics",
       "Keeper_metrics",
       "Prometheus",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Cascade_http_probe": [
       "Cascade_throttle"
@@ -1359,19 +1359,19 @@
       "Cascade_health_tracker",
       "Cascade_strategy",
       "Keeper_cascade_profile",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Cascade_legacy_runner": [
       "Cascade_metrics",
       "Keeper_cascade_profile",
       "Llm_metric_bridge",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Cascade_metrics": [
       "Prometheus"
     ],
     "Cascade_model_resolve": [
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Cascade_oas_runner": [
       "Cascade_catalog_runtime",
@@ -1383,7 +1383,7 @@
       "Keeper_identity",
       "Keeper_types",
       "Llm_metric_bridge",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_tool_support",
       "Tool_catalog"
     ],
@@ -1404,7 +1404,7 @@
       "Keeper_agent_context",
       "Keeper_oas_checkpoint",
       "Masc_grpc_transport",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_tool_support",
       "Tool_bridge",
       "Tool_result"
@@ -1415,7 +1415,7 @@
       "Cascade_metrics",
       "Config_dir_resolver",
       "Keeper_cascade_profile",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_tool_support"
     ],
     "Cascade_state": [
@@ -1451,7 +1451,7 @@
       "Cascade_metrics",
       "Inference_utils",
       "Prometheus",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_tool_support",
       "Tool_catalog"
     ],
@@ -1467,7 +1467,7 @@
       "Cascade_config",
       "Cascade_config_loader",
       "Cascade_strategy",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_tool_support"
     ],
     "Cascade_inference": [
@@ -1621,7 +1621,7 @@
       "Dashboard"
     ],
     "Dashboard_execution_fixture": [
-      "Provider_adapter",
+      "Runtime_catalog",
       "Version"
     ],
     "Dashboard_execution_helpers": [
@@ -1751,7 +1751,7 @@
       "Keeper_execution",
       "Keeper_memory",
       "Keeper_types",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Dashboard_http_monitoring": [
       "Audit_log",
@@ -1917,7 +1917,7 @@
       "Keeper_cascade_profile",
       "Keeper_turn_driver_wrappers",
       "Masc_oas_bridge",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Tool_local_runtime_core"
     ],
     "Dashboard_tla_specs": [],
@@ -2167,7 +2167,7 @@
       "Cascade_legacy_runner",
       "Cascade_transport",
       "Masc_grpc_transport",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Keeper_agent_error": [
       "Cascade_legacy_runner",
@@ -2233,7 +2233,7 @@
       "Keeper_wake_telemetry",
       "Memory_oas_bridge",
       "Prometheus",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Telemetry_coverage_gap",
       "Trajectory"
     ],
@@ -2381,7 +2381,7 @@
       "Keeper_text_processing",
       "Keeper_types",
       "Prometheus",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Keeper_contract_classifier": [
       "Keeper_world_observation"
@@ -2564,7 +2564,7 @@
       "Keeper_model_labels",
       "Keeper_state_machine",
       "Keeper_types",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Keeper_exec_status_metrics": [
       "Keeper_accountability",
@@ -2785,7 +2785,7 @@
       "Metric_emit_dropped_site",
       "Observability_redact",
       "Prometheus",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Telemetry_coverage_gap",
       "Tool_catalog",
       "Tool_dispatch",
@@ -3338,7 +3338,7 @@
       "Keeper_turn_slot",
       "Keeper_types",
       "Prometheus",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Keeper_state_machine": [
       "Attribution"
@@ -3397,7 +3397,7 @@
       "Keeper_status_bridge",
       "Keeper_types",
       "Keeper_types_profile",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Tool_args"
     ],
     "Keeper_stay_silent_loop_detector": [
@@ -3686,14 +3686,14 @@
       "Llm_metric_bridge",
       "Masc_grpc_transport",
       "Prometheus",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_tool_support"
     ],
     "Keeper_turn_driver_helpers": [
       "Cascade_error_classify",
       "Cascade_health_tracker",
       "Cascade_oas_runner",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_tool_support"
     ],
     "Keeper_turn_driver_try_provider": [
@@ -3709,7 +3709,7 @@
       "Keeper_types",
       "Masc_eio_env",
       "Masc_grpc_transport",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Keeper_turn_driver_wrappers": [
       "Admission_queue",
@@ -3912,7 +3912,7 @@
       "Keeper_world_observation",
       "Metrics_sse_failure_kind",
       "Prometheus",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Sse",
       "Tool_name"
     ],
@@ -3984,7 +3984,7 @@
       "Write_meta_cycle_failure_site"
     ],
     "Keeper_usage_trust": [
-      "Provider_adapter",
+      "Runtime_catalog",
       "Provider_kind_resolver"
     ],
     "Keeper_wake_telemetry": [],
@@ -4333,7 +4333,7 @@
     "Model_inference_metrics": [
       "Keeper_cascade_profile",
       "Keeper_hooks_oas",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Notify": [],
     "Observability_redact": [],
@@ -4461,7 +4461,7 @@
       "Keeper_metrics",
       "Prometheus"
     ],
-    "Provider_adapter": [
+    "Runtime_catalog": [
       "Voice_config"
     ],
     "Provider_kind_resolver": [
@@ -4469,7 +4469,7 @@
     ],
     "Provider_tool_support": [
       "Prometheus",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Rate_limit": [],
     "Relation_materializer": [
@@ -5276,7 +5276,7 @@
     ],
     "Spawn": [
       "Agent_tool_surfaces",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Sse": [
       "Lockfree_atomic",
@@ -5353,7 +5353,7 @@
       "Autoresearch",
       "Autoresearch_knowledge",
       "Coord",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Tool_args",
       "Tool_autoresearch_context",
       "Tool_autoresearch_cycle",
@@ -5433,7 +5433,7 @@
     ],
     "Tool_call_quality_benchmark_types": [],
     "Tool_call_replay_harness": [
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Tool_catalog": [
       "Tool_catalog_surfaces",
@@ -5516,7 +5516,7 @@
       "Keeper_approval_queue",
       "Mcp_server",
       "Mcp_server_eio_governance",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Session",
       "Spawn",
       "Tool_args",
@@ -5623,7 +5623,7 @@
       "Inference_utils",
       "Local_runtime_pool",
       "Masc_eio_env",
-      "Provider_adapter"
+      "Runtime_catalog"
     ],
     "Tool_local_runtime_core": [
       "Coord",
@@ -5903,13 +5903,13 @@
     ],
     "Version": [],
     "Voice_bridge": [
-      "Provider_adapter",
+      "Runtime_catalog",
       "Tool_args",
       "Transport",
       "Voice_config"
     ],
     "Voice_bridge_core": [
-      "Provider_adapter",
+      "Runtime_catalog",
       "Voice_config"
     ],
     "Voice_config": [
@@ -5936,7 +5936,7 @@
       "Eval_gate",
       "Masc_context_injector",
       "Orchestrator",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Tool_access_policy",
       "Tool_dispatch",
       "Verifier_oas",
@@ -5951,7 +5951,7 @@
     "Worker_runtime_docker": [
       "Cascade_config",
       "Config_dir_resolver",
-      "Provider_adapter",
+      "Runtime_catalog",
       "Worker_container",
       "Worker_container_types",
       "Worker_execution_spec",

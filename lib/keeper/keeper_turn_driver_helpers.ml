@@ -13,9 +13,9 @@
     @since RFC-0048 — keeper_turn_driver split, helpers slice *)
 
 let provider_health_keys_of_config provider_cfg =
-  let provider_key = Provider_adapter.provider_health_key_of_config provider_cfg in
+  let provider_key = Runtime_catalog.provider_health_key_of_config provider_cfg in
   let model_key =
-    Provider_adapter.provider_model_health_key_of_config provider_cfg
+    Runtime_catalog.provider_model_health_key_of_config provider_cfg
   in
   if String.equal provider_key model_key then [ provider_key ]
   else [ provider_key; model_key ]
@@ -31,18 +31,18 @@ let first_health_cooldown provider_cfg =
          | Ok () -> None
          | Error msg -> Some (provider_key, msg))
 
-(* Manifest alias of [Provider_adapter.timeout_bounds]: keeps the
+(* Manifest alias of [Runtime_catalog.timeout_bounds]: keeps the
    keeper-public type name stable while the [match provider_cfg.kind]
    that produces values lives inside the adapter boundary
    (RFC-0058 Phase 5.6). *)
-type provider_attempt_timeout_constraints = Provider_adapter.timeout_bounds = {
+type provider_attempt_timeout_constraints = Runtime_catalog.timeout_bounds = {
   min_timeout_s : float option;
   max_timeout_s : float option;
 }
 
 let provider_attempt_timeout_constraints
     (provider_cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.timeout_bounds_of_kind provider_cfg.kind
+  Runtime_catalog.timeout_bounds_of_kind provider_cfg.kind
 
 let apply_provider_attempt_timeout_constraints constraints timeout_s =
   let timeout_s =

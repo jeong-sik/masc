@@ -516,7 +516,7 @@ let test_client_capacity_clamp_max () =
    [test_ollama_register_with_override] tests exercised the substring-scan
    auto-registration path inside [Cascade_client_capacity]. That path is
    gone now — the caller ([Keeper_turn_driver]) consults
-   [Provider_adapter.is_http_probe_capable_kind] and calls
+   [Runtime_catalog.is_http_probe_capable_kind] and calls
    [Cascade_client_capacity.register] explicitly, so the test surface
    for the removed [auto_register_for_candidates] /
    [auto_register_ollama_with_override] functions is gone with them. *)

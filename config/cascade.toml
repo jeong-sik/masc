@@ -68,7 +68,7 @@ key = "GEMINI_API_KEY"
 #
 # NOTE (data-only until cutover): this declaration is parsed into the
 # in-memory cascade-decl config, but [Cascade_catalog_validator] still
-# reads [Provider_adapter]'s hardcoded value for this kind. Toggling
+# reads [Runtime_catalog]'s hardcoded value for this kind. Toggling
 # this line therefore does not move the validator warn surface until
 # the caller cutover lands (see #14659 bridge primitive).
 [providers.gemini_cli.capabilities]

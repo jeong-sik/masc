@@ -3,11 +3,11 @@
 - **Status**: Draft
 - **Author**: vincent (with Claude)
 - **Created**: 2026-05-03
-- **Related**: backend_ollama.ml (agent_sdk), provider_adapter.ml, config/cascade.toml
+- **Related**: backend_ollama.ml (agent_sdk), runtime_catalog.ml, config/cascade.toml
 
 ## 1. Problem
 
-agent_sdk에 이미 `backend_ollama.ml`이 완전 구현되어 있으나 (`/api/chat`, `think` 제어, `keep_alive=-1` 기본, 스트리밍), masc-mcp의 `provider_adapter.ml`과 `cascade.toml`에 Ollama provider가 등록되어 있지 않아 로컬 모델을 cascade에서 사용할 수 없음.
+agent_sdk에 이미 `backend_ollama.ml`이 완전 구현되어 있으나 (`/api/chat`, `think` 제어, `keep_alive=-1` 기본, 스트리밍), masc-mcp의 `runtime_catalog.ml`과 `cascade.toml`에 Ollama provider가 등록되어 있지 않아 로컬 모델을 cascade에서 사용할 수 없음.
 
 ## 2. Current State
 
@@ -21,7 +21,7 @@ agent_sdk `backend_ollama.ml` 지원:
 - provider.ml에 `Ollama` variant 이미 정의
 
 masc-mcp 누락:
-- `provider_adapter.ml`에 Ollama adapter entry 없음
+- `runtime_catalog.ml`에 Ollama adapter entry 없음
 - `cascade.toml`에 Ollama model 없음
 - 로컬 런타임 프로브는 `tool_local_runtime_probe.ml`에 존재하나 cascade 라우팅과 연결 안 됨
 
@@ -37,7 +37,7 @@ masc-mcp 누락:
 
 ### 4.1 Provider Adapter Entry
 
-In `lib/provider_adapter.ml`, add Ollama adapter:
+In `lib/runtime_catalog.ml`, add Ollama adapter:
 
 ```ocaml
 { canonical_name = "ollama";
@@ -83,8 +83,8 @@ ollama pull llama3.2:3b-q8_0
 
 | File | Change |
 |------|--------|
-| `lib/provider_adapter.ml` | Ollama adapter entry 추가 |
-| `lib/provider_adapter.mli` | 필요시 expose |
+| `lib/runtime_catalog.ml` | Ollama adapter entry 추가 |
+| `lib/runtime_catalog.mli` | 필요시 expose |
 | `config/cascade.toml` | `[local_small]` 프로파일 추가 (주석처리, opt-in) |
 
 ## 6. Scope Exclusions

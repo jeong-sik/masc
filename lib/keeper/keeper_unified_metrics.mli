@@ -131,7 +131,7 @@ val record_turn_latency_bucket :
 
 val provider_kind_of_model_used : string -> string
 (** Derive the bounded provider label from a keeper [model_used] surface via
-    the provider adapter registry. Empty, unprefixed, or unregistered
+    the runtime catalog. Empty, unprefixed, or unregistered
     provider prefixes collapse to [unknown]. *)
 
 val record_turn_latency_by_model_bucket :

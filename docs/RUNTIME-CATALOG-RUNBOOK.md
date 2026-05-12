@@ -2,11 +2,11 @@
 status: runbook
 last_verified: 2026-05-01
 code_refs:
-  - lib/provider_adapter.ml
-  - lib/provider_adapter.mli
+  - lib/runtime_catalog.ml
+  - lib/runtime_catalog.mli
 ---
 
-# Provider Adapter Runbook
+# Runtime Catalog Runbook
 
 이 문서는 `MASC`에서 provider/runtime/auth를 어떻게 나누는지에 대한 SSOT다.
 

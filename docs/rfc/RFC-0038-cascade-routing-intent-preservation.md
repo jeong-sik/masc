@@ -364,7 +364,7 @@ and capability_filter_summary = {
 ## 11. References
 
 - RFC-0001: det/nondet boundary harness — silent substitution anti-pattern, "표현" axis
-- RFC-0024: ollama cascade integration — provider adapter, KV cache
+- RFC-0024: ollama cascade integration — runtime catalog, KV cache
 - RFC-0026: work-conserving keeper admission — admission layer 와 분리
 - RFC-0027: capability-typed cascade catalog — capability profile registry, §3.4 후속 PR 표
 - Anchor commit: `065e568be1` (PR #11210, 2026-04-27)

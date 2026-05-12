@@ -3,7 +3,7 @@
     Tests the adapter that converts a parsed [cascade_config] into an
     [adapted_catalog] that mirrors the runtime's expected shape.
 
-    The adapter depends on [Provider_adapter.resolve_adapter_by_cascade_prefix]
+    The adapter depends on [Runtime_catalog.resolve_adapter_by_cascade_prefix]
     and [Cascade_config.parse_model_string], so tests use provider IDs that
     exist in the actual provider registry (claude_code, codex_cli, ollama, etc.). *)
 
@@ -80,7 +80,7 @@ let adapt_toml (toml : string) : adapted_catalog =
 
 (* --- TOML fixtures ---
 
-   Provider IDs must match [Provider_adapter] cascade_prefix values:
+   Provider IDs must match [Runtime_catalog] cascade_prefix values:
    claude_code, codex_cli, gemini_cli, ollama, glm-coding, etc.
 
    Model api_names must be parseable by [Cascade_config.parse_model_string]. *)

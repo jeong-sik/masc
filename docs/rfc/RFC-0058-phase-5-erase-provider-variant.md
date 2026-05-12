@@ -16,7 +16,7 @@ on `feat/rfc-0058-phase4`:
 
 | File | Symptom |
 |------|---------|
-| `lib/provider_adapter.ml` | `cascade_prefix = "claude_code" / "codex_cli" / "kimi_cli" / "gemini_cli" / "glm-coding"` and per-provider `aliases = [...]` lists hardcode every vendor name and its synonyms |
+| `lib/runtime_catalog.ml` | legacy runtime records carried cascade prefixes and per-provider `aliases = [...]` lists that hardcoded every vendor name and its synonyms |
 | `lib/provider_tool_support.ml` | Closed variant `Claude_code | Gemini_cli | Kimi_cli | Codex_cli` with per-variant capability lookup |
 | `lib/cascade/cascade_attempt_liveness_config.ml:54-56` | Liveness tunables keyed by literal `"codex_cli"` / `"claude_code"` / `"glm-coding"` etc. |
 | `lib/cascade/cascade_catalog_validator.ml:162-168` | Warn message and detection logic enumerate provider names |
@@ -94,9 +94,9 @@ resolved budget used for the attempt.
 - If validator rules are added, they should ensure no shipped provider
   declares a liveness class so future entries cannot silently regress.
 
-### Phase 5.3 — Erase `cascade_prefix` literals from `provider_adapter`
+### Phase 5.3 — Erase `cascade_prefix` literals from runtime catalog
 
-- `provider_adapter.ml` becomes a thin lookup over the TOML
+- `runtime_catalog.ml` becomes a thin lookup over the TOML
   `[providers.<id>]` table — `aliases` synonyms move into TOML
   `aliases = [...]` field on each provider.
 - Removes the giant per-provider record list at the bottom of the file.
@@ -122,17 +122,17 @@ Closed by an 8-PR sweep (2026-05-11):
 |----|------|-------------------------------------|
 | #14691 | `keeper_turn_liveness.ml` (8 ollama tokens) | `Cascade_capacity_probe.can_probe` registry replaces the inline `is_ollama_cfg` variant match |
 | #14710 | `cascade_http_probe.ml` (3 internal `is_ollama_url` calls) | Explicit URL registry — `Http_probe.register_url` retires the `:11434` substring scan |
-| #14717 | `keeper_agent_context.ml:83` (`OpenAI_compat + Local` rewrap) | `Provider_adapter.apply_wire_overlay` — keeper layer no longer inspects either `Provider_config` or `Agent_sdk.Provider` variants |
-| #14721 | `cascade_client_capacity.auto_register_for_candidates` (substring auto-register) | `Provider_adapter.is_http_probe_capable_kind` predicate; caller registers explicitly |
+| #14717 | `keeper_agent_context.ml:83` (`OpenAI_compat + Local` rewrap) | runtime-catalog wire overlay — keeper layer no longer inspects either `Provider_config` or `Agent_sdk.Provider` variants |
+| #14721 | `cascade_client_capacity.auto_register_for_candidates` (substring auto-register) | runtime-catalog HTTP probe predicate; caller registers explicitly |
 | #14729 | `keeper_turn_fsm.guard_transition` violation warn | dead-after-raise log line moved above `wrap_unit` — diagnostics reach operators |
-| #14736 | `keeper_turn_driver_helpers.ml:41` (per-provider attempt timeout bounds) | `Provider_adapter.timeout_bounds_of_kind` — last keeper-layer `match provider_cfg.kind` site closed |
+| #14736 | `keeper_turn_driver_helpers.ml:41` (per-provider attempt timeout bounds) | runtime-catalog timeout bounds — last keeper-layer `match provider_cfg.kind` site closed |
 | #14745 | `keeper_bootstrap_stats.enabled` (producer-only field) | Removed; `should_start_supervisor_sweep` had already ignored it after the 2026-04-24 incident |
 | #14753 | `handle_keeper_down` swallowed `pending_confirms_removed` count | Log + JSON response now expose the count; aligned with `server_dashboard_http_delete_actions.purge_agent_filesystem_artifacts` |
 
 End-state invariant verified against `origin/main` HEAD `d3dd1086b`:
 
 ```bash
-rg "match provider_cfg\.kind with" lib/keeper/ | grep -v provider_adapter
+rg "match provider_cfg\\.kind with" lib/keeper/
 # (no matches — keeper layer is variant-agnostic)
 ```
 
@@ -142,7 +142,7 @@ remain inside `keeper_turn_driver_helpers.{ml,mli}` docstrings (Phase 5.6
 history notes) do not trip the invariant.
 
 The only `provider_cfg.kind` reads left in `lib/` outside
-`provider_adapter` are out of scope:
+`runtime_catalog` are out of scope:
 
 - `cascade_transport.ml:1706` uses `provider_cfg.kind` as a `Hashtbl`
   registry key (lookup, not variant dispatch) — legitimate runtime

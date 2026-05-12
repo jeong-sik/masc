@@ -1,6 +1,6 @@
 # `-buggy.cfg` `CHECK_DEADLOCK` pattern catalog — non-KSM corpus (iter 99 extension of iter 98)
 
-**Date**: 2026-05-12 · **Iteration**: 99 · **Phase**: meta-audit (extends iter 98 `buggy-cfg-check-deadlock-pattern-catalog-2026-05-12.md` from `specs/keeper-state-machine/` to the remaining 9 spec dirs)
+**Date**: 2026-05-12 · **Iteration**: 99 · **Phase**: meta-audit (extends iter 98 catalog — see PR #15011 — from `specs/keeper-state-machine/` to the remaining 9 spec dirs)
 
 ## What this is
 
@@ -8,7 +8,7 @@ iter 98 #15011 catalogued 32 `-buggy.cfg` files in `specs/keeper-state-machine/`
 
 ## Method (extends iter 98)
 
-Same procedure: extract `NextBuggy` shape, cross-check `CHECK_DEADLOCK` directive. Then *additionally* run TLC on each missing-CD instance to empirically confirm the buggy run exits via invariant/property violation (exit 12 or 13) and **not** deadlock (exit 11) — closing iter 98's deferred Class D verification by analog.
+Same procedure: extract `NextBuggy` shape, cross-check `CHECK_DEADLOCK` directive. Then *additionally* run TLC on each missing-CD instance to empirically confirm the buggy run exits via invariant/property violation (`Invariant ... is violated` diagnostic) and **not** deadlock (`Deadlock reached` diagnostic) — closing iter 98's deferred Class D verification by analog.
 
 ## Non-KSM inventory (35 cfgs across 9 dirs)
 
@@ -69,7 +69,7 @@ Same reasoning as iter 98: pre-emptive `CHECK_DEADLOCK FALSE` widening to the 13
 ## What this PR does
 
 - Adds `docs/tla-audit/buggy-cfg-check-deadlock-pattern-catalog-non-ksm-2026-05-12.md` (this memo, ~130 LOC).
-- **No spec, cfg, or `INDEX.md` edits.** All 7 missing-CD cfgs continue to be `CHECK_DEADLOCK`-absent and continue to pass TLC. The corpus is unchanged.
+- **No spec, cfg, or `INDEX.md` edits.** All 7 missing-CD cfgs continue to be `CHECK_DEADLOCK`-absent and each buggy run correctly surfaces its intended invariant violation (as verified above). The corpus is unchanged.
 
 ## Trade-offs
 
@@ -88,4 +88,4 @@ Same reasoning as iter 98: pre-emptive `CHECK_DEADLOCK FALSE` widening to the 13
 - Corpus enumeration: `for d in specs/cascade specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do ls $d/*-buggy.cfg; done | wc -l` → 35.
 - Missing-CD detection: `for f in $d/*-buggy.cfg; do grep -q CHECK_DEADLOCK $f || echo $f; done` → 7 paths.
 - TLC runs: 7 invocations of `tlc -config <spec>-buggy.cfg <spec>.tla`, each `exit 12` with invariant-violation diagnostic. Total wall time ~30s.
-- Base: `162f89631` (iter 97 #15008 in base; iter 98 #15011 OPEN — this memo extends #15011's argument).
+- Base: `162f89631` (iter 97 #15008 in base; iter 98 #15011 — this memo extends #15011's argument).

@@ -344,37 +344,40 @@ module Ring = struct
        written.  Pre-fix this used [Unix.localtime] which on KST hosts
        loaded a file 9 hours skewed from the today computation. *)
     let yesterday = format_utc_date_of (Time_compat.now () -. 86400.0) in
-    let load_file path =
-      (* Stream the JSONL log via [Fs_compat.fold_jsonl_lines] so a
-         large rotated log does not load fully into a [String] before
-         per-line parsing.  The fold returns [init] for missing files
-         (parity with the old [Sys.file_exists] check), JSON parse
-         errors are skipped with a stderr line, and the resulting
-         accumulator is built in reverse and flipped once at the end. *)
+    (* Drive the fold into a bounded [Queue.t] sized to [capacity].
+       Each new entry pushes onto the tail; if the queue overflows
+       past [capacity] we drop the head (oldest seen).  Combined with
+       the yesterday-then-today fold order this keeps the last
+       [capacity] entries across both files in O(capacity) live
+       memory — the previous accumulator built an unbounded
+       per-file list and only trimmed *after* concatenation, so a
+       full daily log allocated O(line_count) entry records on
+       boot even when [capacity] was much smaller.
+
+       [Fs_compat.fold_jsonl_lines] also gives us non-blocking IO
+       under Eio, max-line-size enforcement from [Eio.Buf_read.lines],
+       and consistent malformed-line handling (stderr warning + skip)
+       in place of the prior silent drop on [Yojson.Json_error]. *)
+    let buf_ring : entry Queue.t = Queue.create () in
+    let push_file path =
       Fs_compat.fold_jsonl_lines
-        ~init:[]
-        ~f:(fun acc ~line_no:_ json ->
+        ~init:()
+        ~f:(fun () ~line_no:_ json ->
           match entry_of_json json with
-          | Some e -> e :: acc
-          | None -> acc)
+          | None -> ()
+          | Some e ->
+            Queue.add e buf_ring;
+            if Queue.length buf_ring > capacity then ignore (Queue.pop buf_ring))
         path
-      |> List.rev
     in
-    let yesterday_entries = load_file (log_file_path dir yesterday) in
-    let today_entries = load_file (log_file_path dir today) in
-    let all = yesterday_entries @ today_entries in
-    (* Take only last [capacity] entries *)
-    let len = List.length all in
-    let to_load = if len > capacity then
-      let skip = len - capacity in
-      let rec drop n = function [] -> [] | _ :: tl when n > 0 -> drop (n-1) tl | l -> l in
-      drop skip all
-    else all in
-    List.iter (fun e ->
-      let seq = Atomic.fetch_and_add total 1 in
-      let idx = seq mod capacity in
-      buf.(idx) <- { e with seq }
-    ) to_load
+    push_file (log_file_path dir yesterday);
+    push_file (log_file_path dir today);
+    Queue.iter
+      (fun e ->
+        let seq = Atomic.fetch_and_add total 1 in
+        let idx = seq mod capacity in
+        buf.(idx) <- { e with seq })
+      buf_ring
 
   let init_file_sink dir =
     close_sink ();

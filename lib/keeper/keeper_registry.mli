@@ -441,6 +441,35 @@ type packed_compaction_stage =
 val compaction_stage_to_witness : compaction_stage -> packed_compaction_stage
 val witness_to_compaction_stage : packed_compaction_stage -> compaction_stage
 
+(** Diagnostic label using the constructor name (e.g. ["Compaction_done"]).
+    Used by the [Compaction_transition_violation] [Printexc] printer. *)
+val packed_compaction_stage_label : packed_compaction_stage -> string
+
+(** RFC-0072 Phase 6: typed error for the 3 forbidden compaction-stage
+    transitions (3 idempotent + 3 valid + 3 forbidden = 9 = 3×3). *)
+type compaction_transition_spec_violation =
+  | Accumulating_to_done
+  | Done_to_accumulating
+  | Done_to_compacting
+
+val compaction_transition_spec_violation_to_tag
+  :  compaction_transition_spec_violation
+  -> string
+
+(** RFC-0072 Phase 6: raised by [validate_compaction_transition] on a
+    forbidden compaction transition, carrying the typed
+    [compaction_transition_spec_violation] payload (replaces the prior bare
+    [assert] / [Assert_failure]).  [where] is a diagnostic label naming the
+    raising function.  A [Printexc] printer is registered so
+    [Printexc.to_string] renders the labelled message. *)
+exception
+  Compaction_transition_violation of
+    { where : string
+    ; from : packed_compaction_stage
+    ; to_ : packed_compaction_stage
+    ; violation : compaction_transition_spec_violation
+    }
+
 type turn_measurement = {
   tm_captured_at : float;
   tm_auto_rules : Keeper_state_machine.auto_rule_summary;
@@ -686,11 +715,12 @@ val set_turn_phase :
     [validate_turn_phase_transition] dispatches through
     [resolve_turn_phase_transition] and raises the typed
     [Turn_phase_transition_violation] on a forbidden pair (RFC-0072
-    Phase 4b + 5).  [validate_compaction_transition] is still the
-    [@@fsm_guard]-style [assert]-based shim (raises [Assert_failure]);
-    extending the resolver pattern to the compaction axis is a future
-    RFC-0072 phase.  Both bump [Prometheus.metric_fsm_guard_violation]
-    via [Keeper_fsm_guard_runtime.wrap_unit]. *)
+    Phase 4b + 5).  [validate_compaction_transition] is an exhaustive
+    3×3 match raising the typed [Compaction_transition_violation] on a
+    forbidden pair (RFC-0072 Phase 6 — no GADT/resolver indirection,
+    the axis has 3 states and a single consumer).  Both bump
+    [Prometheus.metric_fsm_guard_violation] via
+    [Keeper_fsm_guard_runtime.wrap_unit]. *)
 val validate_turn_phase_transition :
   from:packed_turn_phase -> to_:packed_turn_phase -> unit
 

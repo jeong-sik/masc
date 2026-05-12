@@ -6,8 +6,9 @@
     spec-violation payload, and bump [masc_fsm_guard_violation_total].
     [decision_stage] forbidden transitions are unrepresentable at the
     call site ([decision_stage_active] [to_] type) — a compile-time
-    invariant, not a runtime check.  [compaction_stage] still raises
-    [Assert_failure] (the resolver pattern has not reached that axis). *)
+    invariant, not a runtime check.  [compaction_stage] forbidden
+    transitions raise the typed [Compaction_transition_violation]
+    (RFC-0072 Phase 6 — exhaustive 3×3 match, no GADT/resolver). *)
 
 open Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
@@ -301,7 +302,7 @@ let test_valid_compaction_transitions () =
   List.iter
     (fun (from, to_) ->
        try validate_compaction_transition ~from ~to_ with
-       | Assert_failure _ ->
+       | Assert_failure _ | Compaction_transition_violation _ ->
          Alcotest.fail
            (Printf.sprintf
               "valid compaction %s -> %s rejected"
@@ -327,7 +328,17 @@ let test_invalid_compaction_transitions () =
               (Obs.compaction_stage_to_string from)
               (Obs.compaction_stage_to_string to_))
        with
-       | Assert_failure _ -> ())
+       (* RFC-0072 Phase 6: forbidden pairs raise the typed exception, not
+          a bare [Assert_failure].  The payload's endpoints must match. *)
+       | Compaction_transition_violation { from = ef; to_ = et; _ } ->
+         Alcotest.(check string)
+           "violation.from matches"
+           (packed_compaction_stage_label from)
+           (packed_compaction_stage_label ef);
+         Alcotest.(check string)
+           "violation.to_ matches"
+           (packed_compaction_stage_label to_)
+           (packed_compaction_stage_label et))
     cases
 ;;
 
@@ -428,6 +439,37 @@ let test_cascade_violation_payload () =
     assert_str_contains ~haystack:rendered ~needle:(packed_cascade_state_label to_)
 ;;
 
+let test_compaction_violation_payload () =
+  let from : packed_compaction_stage = Packed Compaction_done in
+  let to_ : packed_compaction_stage = Packed Compaction_compacting in
+  match validate_compaction_transition ~from ~to_ with
+  | () -> Alcotest.fail "validator should have raised Compaction_transition_violation"
+  | exception Compaction_transition_violation { where; from = ef; to_ = et; violation } ->
+    Alcotest.(check string)
+      "where names the validator"
+      "validate_compaction_transition"
+      where;
+    Alcotest.(check string)
+      "violation.from"
+      (packed_compaction_stage_label from)
+      (packed_compaction_stage_label ef);
+    Alcotest.(check string)
+      "violation.to_"
+      (packed_compaction_stage_label to_)
+      (packed_compaction_stage_label et);
+    Alcotest.(check string)
+      "violation tag"
+      "done->compacting"
+      (compaction_transition_spec_violation_to_tag violation);
+    let rendered =
+      Printexc.to_string
+        (Compaction_transition_violation { where; from = ef; to_ = et; violation })
+    in
+    assert_str_contains ~haystack:rendered ~needle:"validate_compaction_transition";
+    assert_str_contains ~haystack:rendered ~needle:(packed_compaction_stage_label from);
+    assert_str_contains ~haystack:rendered ~needle:(packed_compaction_stage_label to_)
+;;
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -474,6 +516,10 @@ let () =
             "cascade violation carries typed payload + Printexc text"
             `Quick
             test_cascade_violation_payload
+        ; Alcotest.test_case
+            "compaction violation carries typed payload + Printexc text"
+            `Quick
+            test_compaction_violation_payload
         ] )
     ]
 ;;

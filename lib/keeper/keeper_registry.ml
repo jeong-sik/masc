@@ -396,32 +396,43 @@ module Decision_transition = struct
 end
 
 (* Living-matrix documentation of the decision-stage transition relation.
-   Forbidden [<active>_to_undecided] pairs are unrepresentable through the
-   [decision_stage_active] target type (PR #14887 made [set_turn_decision_stage]
-   reject them at compile time; this validator now mirrors that invariant
-   at the test surface).  Each branch is the explicit type-level acknowledgement
-   that the pair is admitted by the spec — adding a new [decision_stage] or
-   [decision_stage_active] constructor will fail Warning 8 here, forcing
-   the maintainer to decide whether the new variant participates. *)
+   Forbidden [<active>_to_undecided] pairs are unrepresentable through
+   the [decision_stage_active] target type (PR #14887 made
+   [set_turn_decision_stage] reject them at compile time; this
+   validator mirrors that invariant at the test surface).
+
+   We pattern-match on the raw [decision_stage] / [decision_stage_active]
+   variants — *not* on the packed GADT witnesses returned by
+   [stage_to_witness] / [decision_stage_active_to_packed].  The packed
+   wrappers existentially quantify away the witness phantom, after
+   which the compiler can no longer see that [decision_stage_active]
+   has no [Decision_active_undecided] constructor; Warning 8 then
+   spuriously demands the unreachable [(Packed Decision_undecided,
+   Packed Decision_undecided)] case (regression introduced by #14893).
+
+   By matching directly on the source variants the exhaustiveness
+   check ranges over the *actual* input domain: 4 [decision_stage]
+   sources × 3 [decision_stage_active] targets = 12 admitted pairs,
+   no false-positive cases.  Adding a new [decision_stage] or
+   [decision_stage_active] constructor still fails Warning 8 here,
+   preserving the original tripwire intent. *)
 let validate_decision_transition
     ~(from : decision_stage)
     ~(to_ : decision_stage_active)
   =
-  let from_packed = stage_to_witness from in
-  let to_packed = decision_stage_active_to_packed to_ in
-  match from_packed, to_packed with
-  | Packed Decision_undecided, Packed Decision_guard_ok -> ()
-  | Packed Decision_undecided, Packed Decision_gate_rejected -> ()
-  | Packed Decision_undecided, Packed Decision_tool_policy_selected -> ()
-  | Packed Decision_guard_ok, Packed Decision_guard_ok -> ()
-  | Packed Decision_guard_ok, Packed Decision_gate_rejected -> ()
-  | Packed Decision_guard_ok, Packed Decision_tool_policy_selected -> ()
-  | Packed Decision_gate_rejected, Packed Decision_gate_rejected -> ()
-  | Packed Decision_gate_rejected, Packed Decision_guard_ok -> ()
-  | Packed Decision_gate_rejected, Packed Decision_tool_policy_selected -> ()
-  | Packed Decision_tool_policy_selected, Packed Decision_tool_policy_selected -> ()
-  | Packed Decision_tool_policy_selected, Packed Decision_guard_ok -> ()
-  | Packed Decision_tool_policy_selected, Packed Decision_gate_rejected -> ()
+  match from, to_ with
+  | Decision_undecided, Decision_active_guard_ok -> ()
+  | Decision_undecided, Decision_active_gate_rejected -> ()
+  | Decision_undecided, Decision_active_tool_policy_selected -> ()
+  | Decision_guard_ok, Decision_active_guard_ok -> ()
+  | Decision_guard_ok, Decision_active_gate_rejected -> ()
+  | Decision_guard_ok, Decision_active_tool_policy_selected -> ()
+  | Decision_gate_rejected, Decision_active_guard_ok -> ()
+  | Decision_gate_rejected, Decision_active_gate_rejected -> ()
+  | Decision_gate_rejected, Decision_active_tool_policy_selected -> ()
+  | Decision_tool_policy_selected, Decision_active_guard_ok -> ()
+  | Decision_tool_policy_selected, Decision_active_gate_rejected -> ()
+  | Decision_tool_policy_selected, Decision_active_tool_policy_selected -> ()
 ;;
 
 type cascade_state =

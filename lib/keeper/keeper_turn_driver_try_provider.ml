@@ -76,7 +76,40 @@ type try_provider_ctx =
   ; proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
+  ; cascade_engine : Keeper_cascade_engine.t
+  ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
+  ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
+  ; runtime_manifest_required_tool_names : string list
   }
+
+let emit_runtime_manifest
+      (ctx : try_provider_ctx)
+      ?status
+      ?decision
+      ?provider_kind
+      ?model_id
+      event
+  =
+  match ctx.runtime_manifest_context, ctx.runtime_manifest_append with
+  | Some manifest_ctx, Some append ->
+    let decision =
+      match decision with
+      | None -> Some (`Assoc (Keeper_cascade_engine.manifest_fields ctx.cascade_engine))
+      | Some (`Assoc fields) ->
+          Some
+            (`Assoc
+              (Keeper_cascade_engine.manifest_fields ctx.cascade_engine @ fields))
+      | Some other ->
+          Some
+            (`Assoc
+              (Keeper_cascade_engine.manifest_fields ctx.cascade_engine
+               @ [ ("decision", other) ]))
+    in
+    Keeper_runtime_manifest.make_for_context manifest_ctx ~event
+      ~cascade_name:ctx.cascade_name ?provider_kind ?model_id ?status ?decision
+      ()
+    |> append
+  | _ -> ()
 
 (** Run a single provider attempt within the cascade.
 
@@ -98,16 +131,19 @@ let run_try_provider
       (provider_cfg : Llm_provider.Provider_config.t)
   =
   let config_result =
-    Cascade_runner.resolve_tool_lane_for_oas_tools
-      ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt ctx.keeper_name)
-      ~tool_requirement:
-        (if ctx.require_tool_choice_support || ctx.require_tool_support
-         then `Required
-         else `Optional)
-      ~provider_cfg
-      ~tools:ctx.tools
-      ()
-    |> Result.map (fun (effective_tools, runtime_mcp_policy) ->
+    match
+      Cascade_runner.resolve_tool_lane_for_oas_tools
+        ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt ctx.keeper_name)
+        ~tool_requirement:
+          (if ctx.require_tool_choice_support || ctx.require_tool_support
+           then `Required
+           else `Optional)
+        ~provider_cfg
+        ~tools:ctx.tools
+        ()
+    with
+    | Error _ as err -> err
+    | Ok (effective_tools, runtime_mcp_policy) ->
       let runtime_mcp_policy =
         match runtime_mcp_policy, String.trim ctx.keeper_name with
         | Some policy, keeper_name when keeper_name <> "" ->
@@ -117,62 +153,131 @@ let run_try_provider
             (Some policy)
         | _ -> runtime_mcp_policy
       in
-      { (Cascade_runner.default_config
-           ~name:ctx.name
-           ~provider_cfg
-           ~system_prompt:ctx.system_prompt
-           ~tools:effective_tools)
-        with
-        priority = ctx.priority
-      ; max_turns = ctx.max_turns
-      ; max_tokens = ctx.max_tokens
-      ; max_input_tokens = ctx.max_input_tokens
-      ; max_cost_usd = ctx.max_cost_usd
-      ; stream_idle_timeout_s =
-          (match per_provider_timeout_s with
-           | Some _ as timeout_s -> timeout_s
-           | None ->
-             Some
-               (Option.value
-                  ~default:Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
-                  ctx.stream_idle_timeout_s))
-      ; max_execution_time_s =
-          Some
-            (Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
-               ~estimated_input_tokens:0)
-      ; temperature = ctx.temperature
-      ; max_idle_turns = ctx.max_idle_turns
-      ; guardrails = ctx.guardrails
-      ; hooks = ctx.hooks
-      ; context_reducer = ctx.context_reducer
-      ; memory = ctx.memory
-      ; tool_retry_policy = ctx.tool_retry_policy
-      ; required_tool_satisfaction = ctx.required_tool_satisfaction
-      ; description =
-          Some (Printf.sprintf "cascade:%s/%s" ctx.cascade_name provider_cfg.model_id)
-      ; transport = ctx.transport_resolved
-      ; allowed_paths = ctx.allowed_paths
-      ; checkpoint_sidecar = ctx.checkpoint_sidecar
-      ; session_id = ctx.session_id
-      ; cache_system_prompt = ctx.cache_system_prompt
-      ; compact_ratio = ctx.compact_ratio
-      ; contract = ctx.contract
-      ; checkpoint_dir = ctx.checkpoint_dir
-      ; context_injector = ctx.context_injector
-      ; context = ctx.context
-      ; slot_id = ctx.slot_id
-      ; enable_thinking = ctx.enable_thinking
-      ; event_bus = ctx.event_bus
-      ; approval = ctx.approval
-      ; exit_condition = ctx.exit_condition
-      ; exit_condition_result = ctx.exit_condition_result
-      ; summarizer = ctx.summarizer
-      ; initial_messages = ctx.initial_messages
-      ; raw_trace = ctx.raw_trace
-      ; yield_on_tool = ctx.yield_on_tool
-      ; runtime_mcp_policy
-      ; cli_transport_overrides = ctx.cli_transport_overrides
-      })
+      let requested_tool_names =
+        List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) ctx.tools
+      in
+      let materialized_tool_names =
+        Keeper_turn_driver_helpers.materialized_tool_names_after_lane
+          ~effective_tools
+          ~runtime_mcp_policy
+      in
+      let missing_required_tool_names =
+        Keeper_turn_driver_helpers.missing_required_tool_names_after_lane
+          ~required_tool_names:ctx.runtime_manifest_required_tool_names
+          ~effective_tools
+          ~runtime_mcp_policy
+      in
+      let resolved_lane =
+        Keeper_turn_driver_helpers.resolved_tool_lane_label ~effective_tools
+          ~runtime_mcp_policy
+      in
+      emit_runtime_manifest ctx
+        ~status:(if missing_required_tool_names = [] then "resolved" else "error")
+        ~provider_kind:
+          (Llm_provider.Provider_config.string_of_provider_kind
+             provider_cfg.kind)
+        ~model_id:provider_cfg.model_id
+        ~decision:
+          (`Assoc
+            [
+              ( "requested_tool_names",
+                `List (List.map (fun name -> `String name) requested_tool_names) );
+              ( "required_tool_names",
+                `List
+                  (List.map
+                     (fun name -> `String name)
+                     ctx.runtime_manifest_required_tool_names) );
+              ( "materialized_tool_names",
+                `List
+                  (List.map (fun name -> `String name) materialized_tool_names) );
+              ( "missing_required_tool_names_after_lane",
+                `List
+                  (List.map
+                     (fun name -> `String name)
+                     missing_required_tool_names) );
+              ("resolved_lane", `String resolved_lane);
+              ("effective_tool_count", `Int (List.length effective_tools));
+              ("runtime_mcp_policy_present", `Bool (Option.is_some runtime_mcp_policy));
+              ( "tool_requirement",
+                `String
+                  (if ctx.require_tool_choice_support || ctx.require_tool_support
+                   then "required"
+                   else "optional") );
+            ])
+        Keeper_runtime_manifest.Provider_lane_resolved;
+      if missing_required_tool_names <> [] then
+        Error
+          (Agent_sdk.Error.Internal
+             (Printf.sprintf
+                "required_tool_lane_unavailable: provider=%s model=%s lane=%s \
+                 missing_required_tools=[%s] materialized_tools=[%s]"
+                (Llm_provider.Provider_config.string_of_provider_kind
+                   provider_cfg.kind)
+                provider_cfg.model_id
+                resolved_lane
+                (String.concat ", " missing_required_tool_names)
+                (String.concat ", " materialized_tool_names)))
+      else
+        Ok
+          { (Cascade_runner.default_config
+               ~name:ctx.name
+               ~provider_cfg
+               ~system_prompt:ctx.system_prompt
+               ~tools:effective_tools)
+            with
+            priority = ctx.priority
+          ; max_turns = ctx.max_turns
+          ; max_tokens = ctx.max_tokens
+          ; max_input_tokens = ctx.max_input_tokens
+          ; max_cost_usd = ctx.max_cost_usd
+          ; stream_idle_timeout_s =
+              (match per_provider_timeout_s with
+               | Some _ as timeout_s -> timeout_s
+               | None ->
+                 Some
+                   (Option.value
+                      ~default:
+                        Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
+                      ctx.stream_idle_timeout_s))
+          ; max_execution_time_s =
+              Some
+                (Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
+                   ~estimated_input_tokens:0)
+          ; temperature = ctx.temperature
+          ; max_idle_turns = ctx.max_idle_turns
+          ; guardrails = ctx.guardrails
+          ; hooks = ctx.hooks
+          ; context_reducer = ctx.context_reducer
+          ; memory = ctx.memory
+          ; tool_retry_policy = ctx.tool_retry_policy
+          ; required_tool_satisfaction = ctx.required_tool_satisfaction
+          ; description =
+              Some
+                (Printf.sprintf "cascade:%s/%s" ctx.cascade_name
+                   provider_cfg.model_id)
+          ; transport = ctx.transport_resolved
+          ; allowed_paths = ctx.allowed_paths
+          ; checkpoint_sidecar = ctx.checkpoint_sidecar
+          ; session_id = ctx.session_id
+          ; cache_system_prompt = ctx.cache_system_prompt
+          ; compact_ratio = ctx.compact_ratio
+          ; contract = ctx.contract
+          ; checkpoint_dir = ctx.checkpoint_dir
+          ; context_injector = ctx.context_injector
+          ; context = ctx.context
+          ; slot_id = ctx.slot_id
+          ; enable_thinking = ctx.enable_thinking
+          ; event_bus = ctx.event_bus
+          ; approval = ctx.approval
+          ; exit_condition = ctx.exit_condition
+          ; exit_condition_result = ctx.exit_condition_result
+          ; summarizer = ctx.summarizer
+          ; initial_messages = ctx.initial_messages
+          ; raw_trace = ctx.raw_trace
+          ; yield_on_tool = ctx.yield_on_tool
+          ; runtime_mcp_policy
+          ; cli_transport_overrides = ctx.cli_transport_overrides
+          }
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
   match config_result with

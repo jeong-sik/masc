@@ -21,6 +21,7 @@ val keeper_suffix_shutdown : string
 val keeper_suffix_reset : string
 val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
+val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 
 (** {1 Trajectory merge}
@@ -96,6 +97,9 @@ val extract_keeper_name_for_suffix : string -> string -> string
 val is_keeper_checkpoints_get_path : string -> bool
 (** [true] for [GET /api/dashboard/keeper/<name>/checkpoints] paths. *)
 
+val is_keeper_runtime_trace_get_path : string -> bool
+(** [true] for [GET /api/dashboard/keeper/<name>/runtime-trace] paths. *)
+
 (** {1 Trajectory preview helpers} *)
 
 val trim_to_opt : string -> string option
@@ -130,6 +134,16 @@ val oas_checkpoint_summary_json :
 val keeper_checkpoint_inventory_json :
   Coord.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
 (** Inventory JSON for [GET /checkpoints]. *)
+
+val keeper_runtime_trace_json :
+  Coord.config ->
+  string ->
+  ?trace_id:string ->
+  ?turn_id:int ->
+  ?limit:int ->
+  unit ->
+  [ `Not_found | `OK ] * Yojson.Safe.t
+(** Runtime manifest + receipt evidence chain for [GET /runtime-trace]. *)
 
 val handle_keeper_checkpoints_post :
   Mcp_server.server_state ->

@@ -25,7 +25,7 @@ import {
   keeperNeedsDiagnosticAttention,
   runSocialSweep,
 } from './keeper-detail-helpers'
-import { useKeeperComposite } from './keeper-detail-hooks'
+import { useKeeperComposite, useKeeperRuntimeTrace } from './keeper-detail-hooks'
 import { KeeperLifecycleButtons } from './keeper-detail-lifecycle'
 import {
   KeeperDetailHeaderInfo,
@@ -68,6 +68,7 @@ export function KeeperDetailPage() {
   // RFC-0046 §7 #1: single composite snapshot shared with the two
   // derived panels (state-diagram + memory-tier).
   const compositeSnapshot = useKeeperComposite(keeper.name)
+  const runtimeTrace = useKeeperRuntimeTrace(keeper.name)
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
     prevKeeperRef.current = keeper.name
@@ -212,6 +213,7 @@ export function KeeperDetailPage() {
         effectiveModel=${effectiveModel}
         activityDisplay=${activityDisplay}
         compositeSnapshot=${compositeSnapshot}
+        runtimeTrace=${runtimeTrace}
         diagOpen=${diagOpen}
         onDiagToggle=${setDiagOpen}
         checkpointRefreshToken=${checkpointRefreshToken}

@@ -8,6 +8,7 @@ import {
   fetchKeeperComposite,
   type KeeperCompositeExecution,
   type KeeperCompositeSnapshot,
+  type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { fetchGateKeepers } from '../api/gate'
 import { executionLoaded, keepers, refreshExecution } from '../store'
@@ -175,6 +176,126 @@ function executionReceiptClass(execution: KeeperCompositeExecution | undefined):
   }
 }
 
+function runtimeTraceTone(trace: KeeperRuntimeTraceResponse): 'ok' | 'warn' | 'bad' | 'muted' {
+  const health = trace.health.toLowerCase()
+  if (health === 'ok' || health === 'healthy') return 'ok'
+  if (health === 'stale' || health === 'partial' || health === 'warning') return 'warn'
+  if (health === 'missing' || health === 'error' || health.includes('gap')) return 'bad'
+  return trace.manifest_path_present ? 'warn' : 'muted'
+}
+
+function runtimeTraceClass(trace: KeeperRuntimeTraceResponse): string {
+  switch (runtimeTraceTone(trace)) {
+    case 'ok':
+      return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
+    case 'bad':
+      return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
+    case 'warn':
+      return 'border-[var(--warn-20)] text-[var(--color-status-warn)] bg-[var(--warn-10)]'
+    case 'muted':
+      return 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] bg-[var(--color-bg-surface)]'
+  }
+}
+
+function runtimeProviderAttemptClass(trace: KeeperRuntimeTraceResponse): string {
+  const provider = trace.provider_attempts
+  const status = provider.terminal_status?.toLowerCase() ?? ''
+  if (provider.finished_count < provider.started_count) {
+    return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
+  }
+  if (status === 'provider_returned') {
+    return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
+  }
+  if (status === 'timeout' || status === 'error' || status === 'exception' || status === 'cancelled') {
+    return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
+  }
+  return 'border-[var(--color-border-default)] text-[var(--color-fg-muted)] bg-[var(--color-bg-surface)]'
+}
+
+function runtimeProviderAttemptLabel(trace: KeeperRuntimeTraceResponse): string {
+  const provider = trace.provider_attempts
+  const model = shortText(provider.terminal_model_id, 20)
+  const status = shortText(provider.terminal_status, 18) || 'unknown'
+  return ['prov', status, model].filter(Boolean).join(' ')
+}
+
+function formatRuntimeTraceUnknown(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return shortText(value, 160)
+  try {
+    return shortText(JSON.stringify(value), 160)
+  } catch {
+    return String(value)
+  }
+}
+
+function runtimeTraceTurnLabel(trace: KeeperRuntimeTraceResponse): string {
+  const keeperTurn = trace.turn_identity.requested_keeper_turn_id
+    ?? trace.turn_identity.manifest_keeper_turn_ids.at(-1)
+    ?? null
+  const oasTurn = trace.turn_identity.max_oas_turn_count
+  const keeperLabel = keeperTurn == null ? '—' : `#${keeperTurn}`
+  const oasLabel = oasTurn == null ? '—' : String(oasTurn)
+  return `turn ${keeperLabel} / oas ${oasLabel}`
+}
+
+function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
+  const turn = trace.turn_identity
+  const eventBus = trace.event_bus
+  const memory = trace.memory
+  const provider = trace.provider_attempts
+  return [
+    `trace_id: ${trace.trace_id || '(unknown)'}`,
+    trace.stale_reason ? `stale_reason: ${trace.stale_reason}` : '',
+    trace.manifest_path ? `manifest: ${trace.manifest_path}` : '',
+    `manifest rows: ${trace.manifest_returned_rows}/${trace.manifest_total_rows}`,
+    `receipt rows: ${trace.receipt_returned_rows}`,
+	    turn.manifest_keeper_turn_ids.length > 0 ? `keeper_turn_ids: ${turn.manifest_keeper_turn_ids.join(', ')}` : '',
+	    turn.receipt_turn_counts.length > 0 ? `receipt_turn_counts: ${turn.receipt_turn_counts.join(', ')}` : '',
+	    `provider attempts: ${turn.provider_attempt_started_count}/${turn.provider_attempt_finished_count}`,
+	    provider.terminal_status ? `provider terminal: ${provider.terminal_status}` : '',
+	    provider.terminal_provider_kind ? `provider kind: ${provider.terminal_provider_kind}` : '',
+	    provider.terminal_model_id ? `provider model: ${provider.terminal_model_id}` : '',
+	    provider.terminal_exception_kind ? `provider exception: ${provider.terminal_exception_kind}` : '',
+	    provider.terminal_error ? `provider error: ${shortText(provider.terminal_error, 220)}` : '',
+	    eventBus.correlation_ids.length > 0 ? `correlation_ids: ${eventBus.correlation_ids.join(', ')}` : '',
+    eventBus.run_ids.length > 0 ? `run_ids: ${eventBus.run_ids.join(', ')}` : '',
+    `context compaction: ${eventBus.context_compacted_count}/${eventBus.context_compact_started_count}`,
+    formatRuntimeTraceUnknown(eventBus.last_compaction),
+    `memory injected/flushed: ${memory.memory_injected_count}/${memory.memory_flushed_count}`,
+    `memory flush ok/error: ${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`,
+  ].filter(Boolean).join('\n')
+}
+
+function RuntimeEvidenceSummary({
+  trace,
+}: {
+  trace?: KeeperRuntimeTraceResponse | null
+}) {
+  if (!trace) return null
+  const eventBus = trace.event_bus
+  const memory = trace.memory
+  const commonClass = 'px-1.5 py-0.5 rounded-[var(--r-1)] border text-3xs font-mono'
+  const title = runtimeTraceTitle(trace)
+  return html`
+    <span class=${`${commonClass} ${runtimeTraceClass(trace)}`} title=${title}>
+      증거 ${trace.health || 'unknown'}
+    </span>
+	    <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-primary)]`} title=${title}>
+	      ${runtimeTraceTurnLabel(trace)}
+	    </span>
+	    <span class=${`${commonClass} ${runtimeProviderAttemptClass(trace)}`} title=${title}>
+	      ${runtimeProviderAttemptLabel(trace)}
+	    </span>
+	    <span class=${`${commonClass} border-[var(--info-border)] text-[var(--info-fg)]`} title=${title}>
+      evt ${eventBus.event_bus_correlated_count} · ctx ${eventBus.context_compacted_count}/${eventBus.context_compact_started_count}
+    </span>
+    <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-muted)]`} title=${title}>
+      mem ${memory.memory_injected_count}/${memory.memory_flushed_count}
+    </span>
+  `
+}
+
 // ── State Reducer ──────────────────────────────────────
 
 function reduceHubState(state: HubState, action: HubAction): HubState {
@@ -249,6 +370,8 @@ export interface FsmHubProps {
    *  selector tablist drives `selectedName` directly and the parent
    *  has no single snapshot to share. */
   externalSnapshot?: KeeperCompositeSnapshot | null
+  /** Parent-supplied runtime manifest/receipt evidence for detail mode. */
+  runtimeTrace?: KeeperRuntimeTraceResponse | null
 }
 
 export function FsmHub(props: FsmHubProps = {}) {
@@ -571,6 +694,7 @@ export function FsmHub(props: FsmHubProps = {}) {
         transitionCount=${history.length}
         observationCount=${view.observations.length}
         mode=${mode}
+        runtimeTrace=${mode === 'detail' ? props.runtimeTrace ?? null : null}
       />
 
       ${activeSelected == null ? html`
@@ -720,6 +844,7 @@ function StatusBar({
   transitionCount,
   observationCount,
   mode,
+  runtimeTrace,
 }: {
   snapshot: KeeperCompositeSnapshot | null
   lastFetchAt: number
@@ -738,6 +863,7 @@ function StatusBar({
   transitionCount: number
   observationCount: number
   mode: 'fleet' | 'detail'
+  runtimeTrace?: KeeperRuntimeTraceResponse | null
 }) {
   useNowSecondsTicker()
   const now = nowSecondsSignal.value
@@ -806,6 +932,7 @@ function StatusBar({
               receipt ${receiptLabel}
             </span>
           ` : null}
+          <${RuntimeEvidenceSummary} trace=${runtimeTrace} />
           ${loading ? html`<${InlineSpinner} size="xs" />` : null}
           ${paused ? html`
             <span

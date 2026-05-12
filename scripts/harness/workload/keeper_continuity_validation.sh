@@ -21,7 +21,8 @@ PORT="${PORT:-}"
 BASE_PATH="${BASE_PATH:-}"
 SERVER_EXE="${SERVER_EXE:-}"
 MCP_URL="${MCP_URL:-}"
-KEEPER_MODELS="${KEEPER_MODELS:-}"
+MCP_TOKEN="${MASC_MCP_TOKEN:-}"
+KEEPER_CASCADE_NAME="${KEEPER_CASCADE_NAME:-}"
 KEEPER_NAME="${KEEPER_NAME:-continuity-${RUN_ID}}"
 TARGET_PHASES="${TARGET_PHASES:-bootstrap,liveness,continuity,compaction,handoff,recovery}"
 MAX_TURNS="${MAX_TURNS:-4}"
@@ -30,12 +31,10 @@ HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-20}"
 HEARTBEAT_WAIT_SEC="${HEARTBEAT_WAIT_SEC:-15}"
 PRESSURE_BYTES="${PRESSURE_BYTES:-20000}"
 PRESSURE_PAUSE_SEC="${PRESSURE_PAUSE_SEC:-1}"
-KEEPER_PRESENCE_KEEPALIVE_SEC="${KEEPER_PRESENCE_KEEPALIVE_SEC:-5}"
 KEEPER_COMPACTION_RATIO_GATE="${KEEPER_COMPACTION_RATIO_GATE:-0.10}"
 KEEPER_COMPACTION_MESSAGE_GATE="${KEEPER_COMPACTION_MESSAGE_GATE:-2}"
 KEEPER_CONTINUITY_COOLDOWN_SEC="${KEEPER_CONTINUITY_COOLDOWN_SEC:-0}"
 KEEPER_HANDOFF_THRESHOLD="${KEEPER_HANDOFF_THRESHOLD:-0.01}"
-KEEPER_CONTEXT_BUDGET="${KEEPER_CONTEXT_BUDGET:-0.60}"
 
 SERVER_PID=""
 SERVER_LOG="$RUN_DIR/server.log"
@@ -124,18 +123,9 @@ append_phase() {
       phase: $phase,
       status: $status,
       summary: $summary,
-      snapshot_file: ($snapshot_file | select(length > 0)),
-      heartbeat_file: ($heartbeat_file | select(length > 0))
+      snapshot_file: (if ($snapshot_file | length) > 0 then $snapshot_file else null end),
+      heartbeat_file: (if ($heartbeat_file | length) > 0 then $heartbeat_file else null end)
     }' >>"$RUN_DIR/phases.jsonl"
-}
-
-models_json() {
-  jq -cn --arg csv "$KEEPER_MODELS" '
-    $csv
-    | split(",")
-    | map(gsub("^\\s+|\\s+$"; ""))
-    | map(select(length > 0))
-  '
 }
 
 call_mcp_tool() {
@@ -146,8 +136,16 @@ call_mcp_tool() {
 
   local saved_timeout="${HTTP_TIMEOUT_SEC:-}"
   HTTP_TIMEOUT_SEC="$timeout_sec"
-  LAST_TOOL_RAW="$(mcp_call_tool "$req_id" "$tool_name" "$args_json")"
+  set +e
+  LAST_TOOL_RAW="$(mcp_call_tool "$req_id" "$tool_name" "$args_json" "${MCP_SESSION_ID:-}" "$MCP_TOKEN" "$MCP_URL")"
+  local call_status=$?
+  set -e
   HTTP_TIMEOUT_SEC="$saved_timeout"
+
+  if [[ "$call_status" -ne 0 ]]; then
+    LAST_TOOL_ERROR="MCP helper failed with status $call_status"
+    return 1
+  fi
 
   if printf '%s' "$LAST_TOOL_RAW" | jq -e '._harness_error? != null' >/dev/null 2>&1; then
     LAST_TOOL_ERROR="$(printf '%s' "$LAST_TOOL_RAW" | jq -r '._harness_error.message // "transport error"')"
@@ -165,6 +163,104 @@ call_mcp_tool() {
     return 1
   fi
   return 0
+}
+
+load_mcp_token() {
+  local prefer_file="${1:-0}"
+  local token_file="$BASE_PATH/.masc/auth/codex-mcp-client.token"
+  if [[ "$prefer_file" == "1" ]]; then
+    local attempt
+    for attempt in $(seq 1 20); do
+      if [[ -f "$token_file" ]]; then
+        MCP_TOKEN="$(tr -d '\n' <"$token_file")"
+        return 0
+      fi
+      sleep 0.2
+    done
+    MCP_TOKEN=""
+    return 0
+  fi
+  if [[ -n "$MCP_TOKEN" ]]; then
+    return 0
+  fi
+  if [[ -f "$token_file" ]]; then
+    MCP_TOKEN="$(tr -d '\n' <"$token_file")"
+  fi
+}
+
+init_mcp_session() {
+  if [[ -n "${MCP_SESSION_ID:-}" ]]; then
+    return 0
+  fi
+
+  local headers_file body_file init_body session_id protocol_version
+  headers_file="$(mcp_mktemp_file "keeper-continuity-init" ".headers")"
+  body_file="$(mcp_mktemp_file "keeper-continuity-init" ".body")"
+  init_body="$(
+    jq -cn '{
+      jsonrpc:"2.0",
+      id:1,
+      method:"initialize",
+      params:{
+        protocolVersion:"2025-11-25",
+        clientInfo:{name:"keeper-continuity-validation", version:"1.0"},
+        capabilities:{}
+      }
+    }'
+  )"
+
+  local -a cmd=(
+    curl -sS --max-time 20
+    -D "$headers_file"
+    -o "$body_file"
+    -X POST "$MCP_URL"
+    -H "Content-Type: application/json"
+    -H "Accept: application/json, text/event-stream"
+  )
+  if [[ -n "$MCP_TOKEN" ]]; then
+    cmd+=( -H "Authorization: Bearer $MCP_TOKEN" )
+  fi
+  cmd+=( --data-binary "$init_body" )
+
+  if ! "${cmd[@]}" >/dev/null 2>"$RAW_DIR/mcp-initialize.stderr"; then
+    LAST_TOOL_ERROR="MCP initialize transport failed"
+    rm -f "$headers_file" "$body_file"
+    return 1
+  fi
+
+  session_id="$(
+    awk '
+      tolower($0) ~ /^mcp-session-id:/ {
+        sub(/^[^:]+:[[:space:]]*/, "", $0)
+        sub(/\r$/, "", $0)
+        print $0
+        exit
+      }' "$headers_file"
+  )"
+  protocol_version="$(
+    awk '
+      tolower($0) ~ /^mcp-protocol-version:/ {
+        sub(/^[^:]+:[[:space:]]*/, "", $0)
+        sub(/\r$/, "", $0)
+        print $0
+        exit
+      }' "$headers_file"
+  )"
+
+  if [[ -z "$session_id" ]]; then
+    LAST_TOOL_ERROR="MCP initialize did not return Mcp-Session-Id"
+    cp "$body_file" "$RAW_DIR/mcp-initialize.body" 2>/dev/null || true
+    rm -f "$headers_file" "$body_file"
+    return 1
+  fi
+
+  MCP_SESSION_ID="$session_id"
+  export MCP_SESSION_ID
+  if [[ -n "$protocol_version" ]]; then
+    MCP_PROTOCOL_VERSION="$protocol_version"
+    export MCP_PROTOCOL_VERSION
+  fi
+  rm -f "$headers_file" "$body_file"
 }
 
 tool_text() {
@@ -212,18 +308,47 @@ keeper_status_json() {
     tail_messages: 5,
     tail_turns: 3
   }')"
-  call_mcp_tool 1001 "masc_keeper_status" "$raw_args" 60
-  tool_json
+  if call_mcp_tool 1001 "masc_keeper_status" "$raw_args" 60; then
+    if ! tool_json; then
+      jq -nc '{keepalive_running:false, agent:{exists:false}, harness_error:"invalid keeper status JSON"}'
+    fi
+  else
+    jq -nc --arg error "$LAST_TOOL_ERROR" \
+      '{keepalive_running:false, agent:{exists:false}, harness_error:$error}'
+  fi
+}
+
+wait_for_keeper_status_condition() {
+  local jq_filter="$1"
+  local timeout_sec="$2"
+  local deadline=$(( $(date +%s) + timeout_sec ))
+  local status_json=""
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
+    status_json="$(keeper_status_json)"
+    if printf '%s' "$status_json" | jq -e "$jq_filter" >/dev/null 2>&1; then
+      printf '%s' "$status_json"
+      return 0
+    fi
+    sleep 1
+  done
+  printf '%s' "$status_json"
+  return 1
 }
 
 heartbeat_text() {
-  call_mcp_tool 1002 "masc_heartbeat_list" '{}' 20
-  tool_text
+  if call_mcp_tool 1002 "masc_heartbeat_list" '{}' 20; then
+    tool_text
+  else
+    printf 'harness_error: %s\n' "$LAST_TOOL_ERROR"
+  fi
 }
 
 room_status_text() {
-  call_mcp_tool 1003 "masc_status" '{}' 20
-  tool_text
+  if call_mcp_tool 1003 "masc_status" '{}' 20; then
+    tool_text
+  else
+    printf 'harness_error: %s\n' "$LAST_TOOL_ERROR"
+  fi
 }
 
 capture_snapshot() {
@@ -241,6 +366,33 @@ capture_snapshot() {
   write_text "$room_file" "$room_output"
 
   printf '%s\n%s\n%s\n' "$snapshot_file" "$heartbeat_file" "$room_file"
+}
+
+runtime_terminal_summary() {
+  local status_json="$1"
+  local expected_turn="$2"
+  local trace_id manifest_path summary
+  trace_id="$(printf '%s' "$status_json" | jq -r '.meta.trace_id // ""' 2>/dev/null || true)"
+  [[ -n "$trace_id" && "$trace_id" != "null" ]] || return 0
+  manifest_path="$BASE_PATH/.masc/keepers/$KEEPER_NAME/runtime-manifests/${trace_id}.jsonl"
+  [[ -f "$manifest_path" ]] || return 0
+  summary="$(jq -sr --argjson turn "$expected_turn" '
+    [ .[] | select(.keeper_turn_id == $turn or (.keeper_turn_id == null and .event == "turn_finished")) ] as $rows
+    | if (($rows | length) == 0) then ""
+      else
+        {
+          turn_status: (([ $rows[] | select(.event == "turn_finished") | .status // empty ] | last) // ""),
+          terminal_reason: (([ $rows[] | select(.event == "turn_finished") | .decision.terminal_reason_code // empty ] | last) // ""),
+          provider_status: (([ $rows[] | select(.event == "provider_attempt_finished") | .status // empty ] | last) // ""),
+          provider_error: (([ $rows[] | select(.event == "provider_attempt_finished") | .decision.error // empty ] | last) // "")
+        }
+        | if ([.turn_status,.terminal_reason,.provider_status,.provider_error] | map(select(length > 0)) | length) == 0 then ""
+          else "runtime_terminal turn_status=\(.turn_status) terminal_reason=\(.terminal_reason) provider_status=\(.provider_status) provider_error=\(.provider_error)"
+          end
+      end
+  ' "$manifest_path" 2>/dev/null || true)"
+  [[ -n "$summary" ]] || return 0
+  trim_preview "$summary"
 }
 
 wait_for_bootstrap() {
@@ -310,9 +462,11 @@ send_keeper_message() {
     --arg name "$KEEPER_NAME" \
     --arg message "$message" \
     --argjson timeout "$TURN_TIMEOUT_SEC" \
-    '{name:$name,message:$message,timeout_sec:$timeout,require_existing:true}')"
+    '{name:$name,message:$message,timeout_sec:$timeout}')"
 
-  call_mcp_tool "$request_id" "masc_keeper_msg" "$raw_args" "$((TURN_TIMEOUT_SEC + 30))"
+  if ! call_mcp_tool "$request_id" "masc_keeper_msg" "$raw_args" "$((TURN_TIMEOUT_SEC + 30))"; then
+    return 1
+  fi
   output_text="$(tool_text)"
   output_json="$(jq -nc \
     --arg timestamp "$(iso_now)" \
@@ -325,26 +479,20 @@ send_keeper_message() {
 }
 
 create_keeper() {
-  local models_json_payload="$1"
   local args
   args="$(jq -cn \
     --arg name "$KEEPER_NAME" \
     --arg goal "Validate real keeper continuity under isolated load." \
     --arg instructions "모든 응답은 한국어로 작성하세요. 짧고 구조적으로 답하세요." \
-    --argjson models "$models_json_payload" \
-    --argjson presence_keepalive_sec "$KEEPER_PRESENCE_KEEPALIVE_SEC" \
+    --arg cascade_name "$KEEPER_CASCADE_NAME" \
     --argjson compaction_ratio_gate "$KEEPER_COMPACTION_RATIO_GATE" \
     --argjson compaction_message_gate "$KEEPER_COMPACTION_MESSAGE_GATE" \
     --argjson continuity_compaction_cooldown_sec "$KEEPER_CONTINUITY_COOLDOWN_SEC" \
     --argjson handoff_threshold "$KEEPER_HANDOFF_THRESHOLD" \
-    --argjson context_budget "$KEEPER_CONTEXT_BUDGET" \
     '{
       name:$name,
       goal:$goal,
       instructions:$instructions,
-      models:$models,
-      presence_keepalive:true,
-      presence_keepalive_sec:$presence_keepalive_sec,
       proactive_enabled:false,
       auto_handoff:true,
       compaction_profile:"custom",
@@ -354,9 +502,8 @@ create_keeper() {
       continuity_compaction_cooldown_sec:$continuity_compaction_cooldown_sec,
       handoff_threshold:$handoff_threshold,
       handoff_cooldown_sec:30,
-      context_budget:$context_budget,
       drift_enabled:false
-    }')"
+    } + (if ($cascade_name | length) > 0 then {cascade_name:$cascade_name} else {} end)')"
   call_mcp_tool 1100 "masc_keeper_up" "$args" 60
 }
 
@@ -434,6 +581,16 @@ cleanup() {
     rm -rf "$TEMP_BASE_PATH"
   fi
 }
+
+record_unexpected_error() {
+  local exit_code=$?
+  local line_no="${BASH_LINENO[0]:-unknown}"
+  if [[ "$(normalize_bool "$DRY_RUN")" != "1" && ! -s "$RUN_DIR/phases.jsonl" ]]; then
+    append_phase "harness" "fail" "unexpected harness error at line ${line_no} (exit=${exit_code})" "" "" || true
+  fi
+  return "$exit_code"
+}
+trap record_unexpected_error ERR
 trap cleanup EXIT
 
 finalize_report() {
@@ -476,7 +633,7 @@ finalize_report() {
     --arg server_log "$SERVER_LOG" \
     --arg base_path "${BASE_PATH:-$TEMP_BASE_PATH}" \
     --arg keeper_name "$KEEPER_NAME" \
-    --arg models "$KEEPER_MODELS" \
+    --arg cascade_name "$KEEPER_CASCADE_NAME" \
     --arg latest_input_preview "$LATEST_INPUT_PREVIEW" \
     --arg latest_output_preview "$LATEST_OUTPUT_PREVIEW" \
     --arg latest_trace_id "$LATEST_TRACE_ID" \
@@ -509,7 +666,7 @@ finalize_report() {
         base_path:$base_path,
         server_log:$server_log,
         keeper_name:$keeper_name,
-        models:$models,
+        cascade_name:$cascade_name,
         target_phases:$target_phases
       },
       evidence:{
@@ -541,7 +698,7 @@ finalize_report() {
 - Classification: **$classification**
 - Dry run: $( [[ "$(normalize_bool "$DRY_RUN")" == "1" ]] && echo "yes" || echo "no" )
 - Keeper: \`$KEEPER_NAME\`
-- Models: \`$KEEPER_MODELS\`
+- Cascade: \`$KEEPER_CASCADE_NAME\`
 - MCP URL: \`${MCP_URL:-n/a}\`
 
 ## Result
@@ -617,18 +774,13 @@ EOF
 }
 
 real_run() {
-  local models_json_payload status_json heartbeat_output snapshot_info snapshot_file heartbeat_file room_file
+  local status_json heartbeat_output snapshot_info snapshot_file heartbeat_file room_file
   local baseline_continuity_ts baseline_compactions baseline_generation baseline_handoffs baseline_trace
   local turn status_after heartbeat_after agent_name compaction_done handoff_done
 
   require_cmd jq || { echo "jq is required" >&2; return 1; }
   require_cmd curl || { echo "curl is required" >&2; return 1; }
   require_cmd python3 || { echo "python3 is required" >&2; return 1; }
-
-  if [[ -z "$KEEPER_MODELS" ]]; then
-    echo "KEEPER_MODELS is required (example: KEEPER_MODELS='glm:auto')" >&2
-    return 1
-  fi
 
   if [[ "$(normalize_bool "$START_SERVER")" == "1" ]]; then
     TEMP_BASE_PATH="$(mktemp -d "${TMPDIR:-/tmp}/keeper-continuity.${RUN_ID}.XXXXXX")"
@@ -643,14 +795,19 @@ real_run() {
       harness_print_log_tail "$SERVER_LOG" 120
       return 1
     fi
+    load_mcp_token 1
   elif [[ -z "$MCP_URL" ]]; then
     echo "MCP_URL is required when START_SERVER=0" >&2
     return 1
+  else
+    load_mcp_token 0
+  fi
+  if ! init_mcp_session; then
+    append_phase "bootstrap" "fail" "MCP initialize failed: $LAST_TOOL_ERROR" "" ""
+    return 1
   fi
 
-  models_json_payload="$(models_json)"
-
-  if ! create_keeper "$models_json_payload"; then
+  if ! create_keeper; then
     append_phase "bootstrap" "fail" "keeper creation failed: $LAST_TOOL_ERROR" "" ""
     return 1
   fi
@@ -681,6 +838,9 @@ real_run() {
   fi
 
   if phase_enabled liveness; then
+    local baseline_turns
+    status_json="$(keeper_status_json)"
+    baseline_turns="$(printf '%s' "$status_json" | jq -r '(.meta.total_turns | tonumber?) // 0')"
     if ! send_keeper_message 1200 "$(short_prompt liveness)"; then
       snapshot_info="$(capture_snapshot liveness)"
       snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
@@ -688,7 +848,19 @@ real_run() {
       append_phase "liveness" "fail" "keeper turn failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
-    sleep "$PRESSURE_PAUSE_SEC"
+	    if ! wait_for_keeper_status_condition "((.meta.total_turns | tonumber?) // 0) > $baseline_turns" "$((TURN_TIMEOUT_SEC + 30))" >/dev/null; then
+	      snapshot_info="$(capture_snapshot liveness)"
+	      snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
+	      heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
+	      status_json="$(cat "$snapshot_file")"
+	      runtime_summary="$(runtime_terminal_summary "$status_json" "$((baseline_turns + 1))")"
+	      if [[ -n "$runtime_summary" ]]; then
+	        append_phase "liveness" "fail" "keeper message was queued but no completed turn was observed before timeout; $runtime_summary" "$snapshot_file" "$heartbeat_file"
+	      else
+	        append_phase "liveness" "fail" "keeper message was queued but no completed turn was observed before timeout" "$snapshot_file" "$heartbeat_file"
+	      fi
+	      return 1
+	    fi
     snapshot_info="$(capture_snapshot liveness)"
     snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
@@ -697,6 +869,7 @@ real_run() {
     heartbeat_output="$(cat "$heartbeat_file")"
     agent_name="$(printf '%s' "$status_json" | jq -r '.meta.agent_name')"
     if [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]] \
+      && [[ "$(printf '%s' "$status_json" | jq -r "(((.meta.total_turns | tonumber?) // 0) > ($baseline_turns | tonumber))")" == "true" ]] \
       && [[ "$(printf '%s' "$status_json" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
       && [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]]; then
       LIVENESS_PASS=1
@@ -719,6 +892,9 @@ real_run() {
   handoff_done=0
 
   if phase_enabled continuity; then
+    local continuity_baseline_turns
+    status_json="$(keeper_status_json)"
+    continuity_baseline_turns="$(printf '%s' "$status_json" | jq -r '(.meta.total_turns | tonumber?) // 0')"
     if ! send_keeper_message 1300 "$(pressure_prompt 1)"; then
       snapshot_info="$(capture_snapshot continuity)"
       snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
@@ -726,7 +902,19 @@ real_run() {
       append_phase "continuity" "fail" "continuity turn failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
-    sleep "$PRESSURE_PAUSE_SEC"
+	    if ! wait_for_keeper_status_condition "(((.meta.total_turns | tonumber?) // 0) > $continuity_baseline_turns) and ((((.meta.last_continuity_update_ts | tonumber?) // 0) > (($baseline_continuity_ts | tonumber))) and (((.continuity_summary // \"\") | length) > 0))" "$((TURN_TIMEOUT_SEC + 30))" >/dev/null; then
+	      snapshot_info="$(capture_snapshot continuity)"
+	      snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
+	      heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
+	      status_json="$(cat "$snapshot_file")"
+	      runtime_summary="$(runtime_terminal_summary "$status_json" "$((continuity_baseline_turns + 1))")"
+	      if [[ -n "$runtime_summary" ]]; then
+	        append_phase "continuity" "fail" "keeper message was queued but continuity did not update before timeout; $runtime_summary" "$snapshot_file" "$heartbeat_file"
+	      else
+	        append_phase "continuity" "fail" "keeper message was queued but continuity did not update before timeout" "$snapshot_file" "$heartbeat_file"
+	      fi
+	      return 1
+	    fi
     snapshot_info="$(capture_snapshot continuity)"
     snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
@@ -808,7 +996,7 @@ real_run() {
       append_phase "recovery" "fail" "keeper_down failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
     else
       sleep 1
-      if ! call_mcp_tool 1500 "masc_keeper_up" "$(jq -cn --arg name "$KEEPER_NAME" '{name:$name,presence_keepalive:true}')" 30; then
+      if ! call_mcp_tool 1500 "masc_keeper_up" "$(jq -cn --arg name "$KEEPER_NAME" --arg cascade_name "$KEEPER_CASCADE_NAME" '{name:$name} + (if ($cascade_name | length) > 0 then {cascade_name:$cascade_name} else {} end)')" 30; then
         snapshot_info="$(capture_snapshot recovery-up)"
         snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
         heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"

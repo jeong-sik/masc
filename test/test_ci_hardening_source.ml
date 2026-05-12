@@ -1587,6 +1587,51 @@ let test_dashboard_component_split_contracts () =
     (file_not_contains_pattern "lib/coord/coord_utils_backend_setup.ml"
        "Transaction Pooler companion")
 
+let test_keeper_continuity_harness_auth_contracts () =
+  let harness = "scripts/harness/workload/keeper_continuity_validation.sh" in
+  check bool "continuity harness accepts external MCP bearer token" true
+    (file_contains_pattern harness {|MCP_TOKEN="${MASC_MCP_TOKEN:-}"|});
+  check bool "continuity harness can load generated codex token" true
+    (file_contains_pattern harness
+       {|local token_file="$BASE_PATH/.masc/auth/codex-mcp-client.token"|});
+  check bool "continuity harness initializes MCP sessions before tool calls" true
+    (file_contains_pattern harness {|method:"initialize"|});
+  check bool "isolated continuity harness prefers generated token file" true
+    (file_contains_pattern harness {|load_mcp_token 1|});
+  check bool "continuity harness keeps empty snapshot fields nullable" true
+    (file_contains_pattern harness
+       {|snapshot_file: (if ($snapshot_file | length) > 0 then $snapshot_file else null end)|});
+  check bool "continuity harness captures MCP helper failures" true
+    (file_contains_pattern harness {|LAST_TOOL_ERROR="MCP helper failed with status $call_status"|});
+  check bool "continuity harness status snapshots do not abort phase reporting" true
+    (file_contains_pattern harness
+       {|{keepalive_running:false, agent:{exists:false}, harness_error:$error}|});
+  check bool "continuity harness records unexpected errors into phase log" true
+    (file_contains_pattern harness {|record_unexpected_error()|});
+  check bool "continuity harness sends bearer token through MCP helper" true
+    (file_contains_pattern harness
+       {|mcp_call_tool "$req_id" "$tool_name" "$args_json" "${MCP_SESSION_ID:-}" "$MCP_TOKEN" "$MCP_URL"|});
+  check bool "continuity harness uses cascade_name instead of legacy models" true
+    (file_contains_pattern harness {|cascade_name:$cascade_name|});
+  check bool "continuity harness no longer sends legacy models" true
+    (file_not_contains_pattern harness {|models:$models|});
+  check bool "continuity harness no longer sends removed keepalive args" true
+    (file_not_contains_pattern harness {|presence_keepalive:true|});
+  check bool "continuity harness no longer sends removed keeper_msg args" true
+    (file_not_contains_pattern harness {|require_existing:true|});
+  check bool "continuity harness returns failed keeper_msg calls" true
+    (file_contains_pattern harness
+       {|if ! call_mcp_tool "$request_id" "masc_keeper_msg"|});
+  check bool "continuity harness waits for queued turns to complete" true
+    (file_contains_pattern harness {|wait_for_keeper_status_condition|});
+  check bool "continuity harness proves liveness with total_turns" true
+    (file_contains_pattern harness {|.meta.total_turns|});
+  check bool "keeper_up schema exposes cascade_name" true
+    (file_contains_pattern "lib/keeper/keeper_schema.ml" {|("cascade_name"|});
+  check bool "keeper_up parser stores cascade_name arg" true
+    (file_contains_pattern "lib/keeper/keeper_turn_up_args.ml"
+       {|cascade_name_opt_res = parse_cascade_name_opt args|})
+
 let test_mission_briefing_memory_guard_contracts () =
   check bool "mission briefing snapshot disables keeper payload" true
     (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
@@ -2347,6 +2392,8 @@ let () =
              test_room_current_validation_contracts;
            test_case "root redirect contracts" `Quick test_root_redirect_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
+           test_case "keeper continuity harness auth contracts" `Quick
+             test_keeper_continuity_harness_auth_contracts;
            test_case "mission briefing memory guard contracts" `Quick
              test_mission_briefing_memory_guard_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;

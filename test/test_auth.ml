@@ -563,6 +563,27 @@ let test_save_raw_token_credential_uses_provided_token () =
            "provided raw token should verify after save_raw_token_credential: %s"
            (Masc_domain.masc_error_to_string e))
 
+let test_save_raw_token_credential_in_eio_runtime () =
+  let dir = setup_test_room () in
+  let raw_token = "runtime-admin-token" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        match
+          Auth.save_raw_token_credential dir ~agent_name:"bootstrap-admin"
+            ~role:Masc_domain.Admin ~raw_token
+        with
+        | Ok cred ->
+            check string "saved credential owner" "bootstrap-admin" cred.agent_name;
+            check int "credential mode 0600" 0o600
+              (permission_bits (Auth.credential_file dir "bootstrap-admin"))
+        | Error e ->
+            fail
+              (Printf.sprintf
+                 "save_raw_token_credential should work inside Eio runtime: %s"
+                 (Masc_domain.masc_error_to_string e))))
+
 let test_ensure_keeper_credential_uses_per_keeper_token () =
   let dir = setup_test_room () in
   Fun.protect
@@ -1083,6 +1104,8 @@ let () =
         test_verify_token_dashboard_legacy_alias_fallback;
       test_case "save_raw_token_credential uses provided token" `Quick
         test_save_raw_token_credential_uses_provided_token;
+      test_case "save_raw_token_credential works in eio runtime" `Quick
+        test_save_raw_token_credential_in_eio_runtime;
       test_case "ensure_keeper_credential uses per-keeper token" `Quick
         test_ensure_keeper_credential_uses_per_keeper_token;
       test_case "ensure_keeper_credential reuses uuid" `Quick

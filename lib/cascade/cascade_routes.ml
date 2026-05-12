@@ -30,9 +30,9 @@ type route_spec = {
 }
 
 (* Per RFC-0041 cascade routing SSOT, the live cascade catalog
-   (cascade.json) is the single source of truth for keeper-assignable
+   (cascade.toml) is the single source of truth for keeper-assignable
    profile names.  This module performs static lookup only — operator
-   spec (cascade.json [routes] + fallback_cascade) decides routing and
+   spec (cascade.toml [routes] + fallback_cascade) decides routing and
    the runtime cascade chain handles try/fail/next-cascade.  If the
    catalog is empty at runtime,
    [Cascade_catalog_runtime.validate_path_result] already rejects keeper
@@ -261,7 +261,7 @@ let warn_unvalidated_route_target_once ~route_key ~target ~fallback =
     Hashtbl.add logged_unvalidated_route_targets key ();
     Log.Misc.warn
       "[CascadeRoutes] routes.%s targets %s but no live catalog profiles \
-       were validated; using %s"
+       were validated; preserving configured target (legacy fallback would be %s)"
       route_key target fallback
   end
 
@@ -281,7 +281,7 @@ let cascade_name_for_use ?config_path use =
   | Some target when catalog_names = [] ->
       Cascade_metrics.on_route_resolve_fallback ~reason:"catalog_unvalidated";
       warn_unvalidated_route_target_once ~route_key ~target ~fallback;
-      fallback
+      target
   | Some target when List.mem target catalog_names -> target
   | Some target ->
       Cascade_metrics.on_route_resolve_fallback ~reason:"target_not_in_catalog";

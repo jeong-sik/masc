@@ -165,6 +165,8 @@ let prepare_agent_setup
       ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(tool_overlay : Agent_sdk.Tool_op.t ref option)
+      ?runtime_manifest_context
+      ?runtime_manifest_append
       ()
   : (agent_setup, Agent_sdk.Error.sdk_error) result
   =
@@ -1663,6 +1665,8 @@ let prepare_agent_setup
           ~world_backend:memory_backend
           ~episode_limit:30
           ~procedure_limit:10
+          ?runtime_manifest_context
+          ?runtime_manifest_append
           ()
       in
       Memory_hooks.compose_with_inner ~memory_hooks:mem_hooks ~inner:hooks

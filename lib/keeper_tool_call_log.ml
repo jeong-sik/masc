@@ -487,6 +487,18 @@ let store_dir () =
   | None -> None
 ;;
 
+let current_log_path () =
+  match store_dir () with
+  | None -> None
+  | Some dir ->
+    let tm = Unix.gmtime (Unix.gettimeofday ()) in
+    let month =
+      Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
+    in
+    let day = Printf.sprintf "%02d.jsonl" tm.Unix.tm_mday in
+    Some (Filename.concat (Filename.concat dir month) day)
+;;
+
 let configured_masc_root () = Option.map fst !configured_store_ref
 
 let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =

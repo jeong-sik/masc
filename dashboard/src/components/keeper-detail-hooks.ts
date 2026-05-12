@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'preact/hooks'
-import { fetchKeeperComposite } from '../api/keeper'
-import type { KeeperCompositeSnapshot } from '../api/keeper'
+import { fetchKeeperComposite, fetchKeeperRuntimeTrace } from '../api/keeper'
+import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 
 const COMPOSITE_REFRESH_MS = 30_000
+const RUNTIME_TRACE_REFRESH_MS = 30_000
 
 /**
  * RFC-0046 §7 follow-up #1: single composite snapshot fetch shared
@@ -37,4 +38,31 @@ export function useKeeperComposite(keeperName: string): KeeperCompositeSnapshot 
     }
   }, [keeperName])
   return snapshot
+}
+
+export function useKeeperRuntimeTrace(keeperName: string): KeeperRuntimeTraceResponse | null {
+  const [trace, setTrace] = useState<KeeperRuntimeTraceResponse | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const result = await fetchKeeperRuntimeTrace(keeperName, {
+          limit: 200,
+          signal: controller.signal,
+        })
+        if (!cancelled && !controller.signal.aborted) setTrace(result)
+      } catch {
+        // best-effort polling — leave the previous evidence in place
+      }
+    }
+    void refresh()
+    const cleanup = setupVisibleAutoRefresh(refresh, RUNTIME_TRACE_REFRESH_MS)
+    return () => {
+      cancelled = true
+      controller.abort()
+      cleanup()
+    }
+  }, [keeperName])
+  return trace
 }

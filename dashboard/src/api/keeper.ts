@@ -602,6 +602,227 @@ export async function fetchKeeperComposite(
   return parseKeeperCompositeSnapshot(await resp.json())
 }
 
+// --- Runtime trace evidence ---
+
+export interface KeeperRuntimeTraceTurnIdentity {
+  requested_keeper_turn_id: number | null
+  manifest_keeper_turn_ids: number[]
+  receipt_turn_counts: number[]
+  max_oas_turn_count: number | null
+  provider_lane_resolved_count: number
+  provider_attempt_started_count: number
+  provider_attempt_finished_count: number
+  checkpoint_saved_count: number
+  event_bus_correlated_count: number
+  memory_injected_count: number
+  memory_flushed_count: number
+  receipt_appended_count: number
+  turn_finished_count: number
+}
+
+export interface KeeperRuntimeTraceEventBusSummary {
+  event_bus_correlated_count: number
+  correlation_ids: string[]
+  run_ids: string[]
+  context_compact_started_count: number
+  context_compacted_count: number
+  last_compaction: unknown | null
+}
+
+export interface KeeperRuntimeTraceMemorySummary {
+  memory_injected_count: number
+  memory_injected_present_count: number
+  memory_flushed_count: number
+  memory_flush_success_count: number
+  memory_flush_error_count: number
+  episodes_flushed: number
+  procedures_flushed: number
+}
+
+export interface KeeperRuntimeTraceProviderAttempt {
+  ts: string
+  event: string
+  cascade_name: string | null
+  provider_kind: string | null
+  model_id: string | null
+  status: string
+  error: string | null
+  exception_kind: string | null
+}
+
+export interface KeeperRuntimeTraceProviderAttemptsSummary {
+  started_count: number
+  finished_count: number
+  terminal_status: string | null
+  terminal_provider_kind: string | null
+  terminal_model_id: string | null
+  terminal_error: string | null
+  terminal_exception_kind: string | null
+  attempts: KeeperRuntimeTraceProviderAttempt[]
+}
+
+export interface KeeperRuntimeTraceResponse {
+  keeper: string
+  trace_id: string
+  turn_id: number | null
+  manifest_path: string
+  manifest_path_present: boolean
+  manifest_total_rows: number
+  manifest_returned_rows: number
+  receipt_returned_rows: number
+  turn_identity: KeeperRuntimeTraceTurnIdentity
+  provider_attempts: KeeperRuntimeTraceProviderAttemptsSummary
+  event_bus: KeeperRuntimeTraceEventBusSummary
+  memory: KeeperRuntimeTraceMemorySummary
+  health: string
+  stale_reason: string | null
+}
+
+function numberField(raw: Record<string, unknown>, key: string): number {
+  const value = raw[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function nullableNumberField(raw: Record<string, unknown>, key: string): number | null {
+  const value = raw[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function stringField(raw: Record<string, unknown>, key: string): string {
+  const value = raw[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function nullableStringField(raw: Record<string, unknown>, key: string): string | null {
+  const value = raw[key]
+  return typeof value === 'string' ? value : null
+}
+
+function numberListField(raw: Record<string, unknown>, key: string): number[] {
+  const value = raw[key]
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item))
+}
+
+function stringListField(raw: Record<string, unknown>, key: string): string[] {
+  const value = raw[key]
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string')
+}
+
+function parseRuntimeTraceTurnIdentity(raw: unknown): KeeperRuntimeTraceTurnIdentity {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    requested_keeper_turn_id: nullableNumberField(obj, 'requested_keeper_turn_id'),
+    manifest_keeper_turn_ids: numberListField(obj, 'manifest_keeper_turn_ids'),
+    receipt_turn_counts: numberListField(obj, 'receipt_turn_counts'),
+    max_oas_turn_count: nullableNumberField(obj, 'max_oas_turn_count'),
+    provider_lane_resolved_count: numberField(obj, 'provider_lane_resolved_count'),
+    provider_attempt_started_count: numberField(obj, 'provider_attempt_started_count'),
+    provider_attempt_finished_count: numberField(obj, 'provider_attempt_finished_count'),
+    checkpoint_saved_count: numberField(obj, 'checkpoint_saved_count'),
+    event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
+    memory_injected_count: numberField(obj, 'memory_injected_count'),
+    memory_flushed_count: numberField(obj, 'memory_flushed_count'),
+    receipt_appended_count: numberField(obj, 'receipt_appended_count'),
+    turn_finished_count: numberField(obj, 'turn_finished_count'),
+  }
+}
+
+function parseRuntimeTraceEventBus(raw: unknown): KeeperRuntimeTraceEventBusSummary {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
+    correlation_ids: stringListField(obj, 'correlation_ids'),
+    run_ids: stringListField(obj, 'run_ids'),
+    context_compact_started_count: numberField(obj, 'context_compact_started_count'),
+    context_compacted_count: numberField(obj, 'context_compacted_count'),
+    last_compaction: obj.last_compaction ?? null,
+  }
+}
+
+function parseRuntimeTraceMemory(raw: unknown): KeeperRuntimeTraceMemorySummary {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    memory_injected_count: numberField(obj, 'memory_injected_count'),
+    memory_injected_present_count: numberField(obj, 'memory_injected_present_count'),
+    memory_flushed_count: numberField(obj, 'memory_flushed_count'),
+    memory_flush_success_count: numberField(obj, 'memory_flush_success_count'),
+    memory_flush_error_count: numberField(obj, 'memory_flush_error_count'),
+    episodes_flushed: numberField(obj, 'episodes_flushed'),
+    procedures_flushed: numberField(obj, 'procedures_flushed'),
+  }
+}
+
+function parseRuntimeTraceProviderAttempt(raw: unknown): KeeperRuntimeTraceProviderAttempt {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    ts: stringField(obj, 'ts'),
+    event: stringField(obj, 'event'),
+    cascade_name: nullableStringField(obj, 'cascade_name'),
+    provider_kind: nullableStringField(obj, 'provider_kind'),
+    model_id: nullableStringField(obj, 'model_id'),
+    status: stringField(obj, 'status'),
+    error: nullableStringField(obj, 'error'),
+    exception_kind: nullableStringField(obj, 'exception_kind'),
+  }
+}
+
+function parseRuntimeTraceProviderAttempts(raw: unknown): KeeperRuntimeTraceProviderAttemptsSummary {
+  const obj = isRecord(raw) ? raw : {}
+  const attempts = Array.isArray(obj.attempts)
+    ? obj.attempts.map(parseRuntimeTraceProviderAttempt)
+    : []
+  return {
+    started_count: numberField(obj, 'started_count'),
+    finished_count: numberField(obj, 'finished_count'),
+    terminal_status: nullableStringField(obj, 'terminal_status'),
+    terminal_provider_kind: nullableStringField(obj, 'terminal_provider_kind'),
+    terminal_model_id: nullableStringField(obj, 'terminal_model_id'),
+    terminal_error: nullableStringField(obj, 'terminal_error'),
+    terminal_exception_kind: nullableStringField(obj, 'terminal_exception_kind'),
+    attempts,
+  }
+}
+
+export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceResponse {
+  if (!isRecord(raw)) throw new Error('runtime trace response is not a record')
+  return {
+    keeper: stringField(raw, 'keeper'),
+    trace_id: stringField(raw, 'trace_id'),
+    turn_id: nullableNumberField(raw, 'turn_id'),
+    manifest_path: stringField(raw, 'manifest_path'),
+    manifest_path_present: raw.manifest_path_present === true,
+    manifest_total_rows: numberField(raw, 'manifest_total_rows'),
+    manifest_returned_rows: numberField(raw, 'manifest_returned_rows'),
+    receipt_returned_rows: numberField(raw, 'receipt_returned_rows'),
+    turn_identity: parseRuntimeTraceTurnIdentity(raw.turn_identity),
+    provider_attempts: parseRuntimeTraceProviderAttempts(raw.provider_attempts),
+    event_bus: parseRuntimeTraceEventBus(raw.event_bus),
+    memory: parseRuntimeTraceMemory(raw.memory),
+    health: stringField(raw, 'health') || 'unknown',
+    stale_reason: nullableStringField(raw, 'stale_reason'),
+  }
+}
+
+export async function fetchKeeperRuntimeTrace(
+  name: string,
+  opts?: { traceId?: string; turnId?: number; limit?: number; signal?: AbortSignal },
+): Promise<KeeperRuntimeTraceResponse> {
+  const params = new URLSearchParams()
+  if (opts?.traceId) params.set('trace_id', opts.traceId)
+  if (typeof opts?.turnId === 'number') params.set('turn_id', String(opts.turnId))
+  if (typeof opts?.limit === 'number') params.set('limit', String(opts.limit))
+  const qs = params.toString()
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/runtime-trace${qs ? `?${qs}` : ''}`,
+    { headers: jsonHeaders(), signal: opts?.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw new Error(`runtime trace fetch failed: ${resp.status}`)
+  return parseKeeperRuntimeTrace(await resp.json())
+}
+
 /**
  * LT-16a: fetch the fleet-wide composite snapshot in one envelope.
  * Backend reuses the same per-snapshot shape as fetchKeeperComposite,

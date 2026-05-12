@@ -1325,6 +1325,84 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
           |> Option.value ~default:fallback
       | _ -> fallback)
 
+let latest_state_snapshot_sidecar_path session =
+  Filename.concat session.session_dir "state-snapshot.latest.json"
+
+let state_snapshot_of_sidecar_payload (json : Yojson.Safe.t) =
+  try
+    let open Yojson.Safe.Util in
+    match json |> member "schema_version" |> to_int_option with
+    | Some 1 ->
+        Keeper_memory_policy.keeper_state_snapshot_of_json
+          (json |> member "state_snapshot")
+    | _ -> Keeper_memory_policy.snapshot_of_structured_working_context json
+  with
+  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+
+let load_latest_state_snapshot_sidecar session =
+  let path = latest_state_snapshot_sidecar_path session in
+  if not (Fs_compat.file_exists path) then None
+  else
+    try
+      match Yojson.Safe.from_string (Fs_compat.load_file path)
+            |> state_snapshot_of_sidecar_payload with
+      | Some snapshot -> Some (path, snapshot)
+      | None ->
+          Log.Keeper.warn
+            "keeper:%s state snapshot sidecar malformed: %s"
+            session.session_id path;
+          None
+    with exn ->
+      Log.Keeper.warn
+        "keeper:%s state snapshot sidecar load failed: %s (%s)"
+        session.session_id path (Printexc.to_string exn);
+      None
+
+let latest_message_metadata_snapshot messages =
+  let rec loop = function
+    | [] -> None
+    | msg :: rest -> (
+        match Keeper_memory_policy.snapshot_of_message_metadata msg with
+        | Some _ as snapshot -> snapshot
+        | None -> loop rest)
+  in
+  loop (List.rev messages)
+
+let checkpoint_has_structured_state_snapshot (cp : Agent_sdk.Checkpoint.t) =
+  match cp.working_context with
+  | Some json
+    when Option.is_some
+           (Keeper_memory_policy.snapshot_of_structured_working_context json) ->
+      true
+  | _ -> Option.is_some (latest_message_metadata_snapshot cp.messages)
+
+let hydrate_checkpoint_with_state_snapshot_sidecar session
+    (cp : Agent_sdk.Checkpoint.t) =
+  if checkpoint_has_structured_state_snapshot cp then cp
+  else
+    match load_latest_state_snapshot_sidecar session with
+    | None -> cp
+    | Some (path, snapshot) ->
+        let last_assistant_idx = ref (-1) in
+        List.iteri
+          (fun idx (msg : Agent_sdk.Types.message) ->
+            if msg.role = Agent_sdk.Types.Assistant then last_assistant_idx := idx)
+          cp.messages;
+        if !last_assistant_idx < 0 then cp
+        else (
+          Log.Keeper.debug
+            "keeper:%s hydrating checkpoint continuity from state sidecar: %s"
+            session.session_id path;
+          let messages =
+            List.mapi
+              (fun idx msg ->
+                if idx = !last_assistant_idx then
+                  Keeper_memory_policy.with_snapshot_metadata msg snapshot
+                else msg)
+              cp.messages
+          in
+          { cp with messages })
+
 (* ================================================================ *)
 (* Checkpoint Loading                                                *)
 (* ================================================================ *)
@@ -1435,6 +1513,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
                trace_id detail)
       end;
       sanitized)
+    |> Option.map (hydrate_checkpoint_with_state_snapshot_sidecar session)
   in
   match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
   | (false, Some checkpoint, _) ->

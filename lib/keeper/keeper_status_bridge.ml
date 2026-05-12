@@ -203,6 +203,8 @@ let blocker_class_of_string (reason : string) : blocker_class option =
        Prometheus blocker-class series were silent on this failure mode. *)
     String_util.contains_substring_ci trimmed "completion contract"
   then Some Completion_contract_violation
+  else if String_util.contains_substring_ci trimmed "cost budget"
+  then Some Sdk_cost_budget_exceeded
   else None
 ;;
 
@@ -233,6 +235,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> Some Sdk_max_turns_exceeded
      | Agent_sdk.Error.Agent (TokenBudgetExceeded _) -> Some Sdk_token_budget_exceeded
      | Agent_sdk.Error.Agent (CostBudgetExceeded _) -> Some Sdk_cost_budget_exceeded
+     | Agent_sdk.Error.Agent (CostBudgetUnenforceable _) -> Some Sdk_cost_budget_exceeded
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
      | Agent_sdk.Error.Agent (IdleDetected _) -> Some Sdk_idle_detected

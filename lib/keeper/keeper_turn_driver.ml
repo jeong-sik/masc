@@ -254,22 +254,65 @@ let run_named
           ~require_tool_choice_support ~require_tool_support
           original_candidate_cfgs
       in
+      let internal_error =
+        if require_tool_choice_support || require_tool_support then
+          No_tool_capable_provider
+            {
+              cascade_name = error_cascade_name;
+              configured_labels;
+              required_tool_names;
+              provider_rejections;
+            }
+        else
+          Cascade_exhausted
+            {
+              cascade_name = error_cascade_name;
+              reason = Keeper_types.No_providers_available;
+            }
+      in
+      (match runtime_manifest_context, runtime_manifest_append with
+       | Some manifest_ctx, Some append ->
+         let provider_rejection_to_json
+             (r : Cascade_error_classify.provider_rejection)
+           =
+           `Assoc
+             [
+               ("provider_label", `String r.provider_label);
+               ("provider_kind", `String r.provider_kind);
+               ("reason", `String r.reason);
+             ]
+         in
+         Keeper_runtime_manifest.make_for_context manifest_ctx
+           ~event:Keeper_runtime_manifest.Pre_dispatch_blocked
+           ~cascade_name
+           ~status:"error"
+           ~decision:
+             (`Assoc
+               (Keeper_cascade_engine.manifest_fields cascade_engine
+                @ [
+                    ("reason", `String (kind_of_masc_internal_error internal_error));
+                    ( "configured_labels",
+                      `List (List.map (fun label -> `String label) configured_labels)
+                    );
+                    ( "required_tool_names",
+                      `List
+                        (List.map
+                           (fun tool_name -> `String tool_name)
+                           required_tool_names) );
+                    ( "provider_rejections",
+                      `List (List.map provider_rejection_to_json provider_rejections)
+                    );
+                    ( "require_tool_choice_support",
+                      `Bool require_tool_choice_support );
+                    ("require_tool_support", `Bool require_tool_support);
+                    ( "original_candidate_count",
+                      `Int (List.length original_candidate_cfgs) );
+                  ]))
+           ()
+         |> append
+       | _ -> ());
       Error
-        (sdk_error_of_masc_internal_error
-           (if require_tool_choice_support || require_tool_support then
-              No_tool_capable_provider
-                {
-                  cascade_name = error_cascade_name;
-                  configured_labels;
-                  required_tool_names;
-                  provider_rejections;
-                }
-            else
-              Cascade_exhausted
-                {
-                  cascade_name = error_cascade_name;
-                  reason = Keeper_types.No_providers_available;
-                }))
+        (sdk_error_of_masc_internal_error internal_error)
   | _ ->
   let capture, _metrics =
     Cascade_legacy_runner.cascade_metrics_for_candidates ~candidate_cfgs ()

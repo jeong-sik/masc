@@ -1,7 +1,7 @@
 # Keeper Runtime Truth Unification Goal
 
 Date: 2026-05-12
-Status: not product-ready; live liveness still times out, but failure chain is now runtime-truth complete
+Status: not product-ready; latest live liveness fails fast with a structured no-tool-capable-provider terminal
 Parent audit: `docs/audit/2026-05-12-keeper-oas-agent-runtime-flow-comparison.md`
 
 ## Current Implementation Slice
@@ -141,28 +141,41 @@ Implemented in this branch:
   `provider_attempt_started` row with a terminal
   `provider_attempt_finished` row carrying `status = timeout`,
   `exception_kind = outer_oas_timeout`, and the bridge error text.
+- Attempt-liveness tick fibers now have an explicit stop signal. A provider
+  can return a terminal API error before the liveness FSM sees a terminal
+  stream event; the attempt owner now wakes the tick fiber before leaving the
+  attempt switch so the original provider error is not masked as a 120s outer
+  timeout.
+- `no_tool_capable_provider` now remains a structured terminal reason instead
+  of collapsing to `internal_error`. The runtime manifest also records a
+  `pre_dispatch_blocked` row with the configured labels, required tool names,
+  provider rejections, and MASC/OAS cascade-boundary fields.
+- OAS pin is bumped to `v0.193.8` /
+  `7885ff316cfd64a3ed7d7550186b64141214b801`, with `dune-project`,
+  `masc_mcp.opam`, docs, and `scripts/oas-api-surface.json` regenerated from
+  that pinned OAS checkout.
 
-Latest post-rebase verification:
+Latest verification:
 
 - `git fetch origin main`
-- `git rebase origin/main`
-- `git rev-list --left-right --count HEAD...origin/main` -> `0 0`
-- `env MASC_SKIP_PIN_CHECK=1 scripts/dune-local.sh build test/test_auth.exe test/test_ci_hardening_source.exe test/test_memory_hooks.exe test/test_keeper_runtime_manifest.exe test/test_keeper_unified.exe test/test_cascade_routes_decoder.exe test/test_cascade_catalog_runtime.exe bin/masc_trace.exe bin/main_eio.exe`
-- `./_build/default/test/test_auth.exe` (46 tests)
-- `./_build/default/test/test_memory_hooks.exe` (13 tests)
-- `./_build/default/test/test_keeper_runtime_manifest.exe` (16 tests)
-- `./_build/default/test/test_ci_hardening_source.exe test source_guard 33`
+- `git fetch origin main` in `../oas`
+- `./scripts/check-oas-pin.sh`
+- `opam list --installed agent_sdk` -> `agent_sdk 0.193.8`
+- `scripts/dune-local.sh build test/test_cascade_attempt_liveness_observer.exe test/test_ci_hardening_source.exe test/test_keeper_runtime_manifest.exe test/test_keeper_terminal_reason.exe test/test_keeper_sdk_error_typed_bridge.exe test/test_keeper_unified.exe bin/main_eio.exe`
+- `./_build/default/test/test_cascade_attempt_liveness_observer.exe` (11 tests; tick-fiber pending-stop regression now completes in 0.003s)
+- `./_build/default/test/test_ci_hardening_source.exe test source_guard 37`
+- `./_build/default/test/test_keeper_runtime_manifest.exe` (18 tests)
+- `./_build/default/test/test_keeper_terminal_reason.exe` (34 tests)
+- `./_build/default/test/test_keeper_sdk_error_typed_bridge.exe` (2 tests)
 - `./_build/default/test/test_keeper_unified.exe` (359 tests)
-- `./_build/default/test/test_cascade_routes_decoder.exe` (5 tests)
-- `./_build/default/test/test_cascade_catalog_runtime.exe` (23 tests)
-- `bash -n scripts/keeper-runtime-truth-gate.sh`
-- `bash -n scripts/harness/workload/keeper_continuity_validation.sh`
 - `scripts/keeper-runtime-truth-gate.sh --self-test` (success fixture plus
   timeout/error fixture)
-- `cd dashboard && npx tsc --noEmit --pretty`
-- `cd dashboard && npx vitest run --config vitest.config.ts src/api/keeper.test.ts --no-file-parallelism --maxWorkers=1` (15 tests)
 - `env RUN_ID=keeper-runtime-truth-live-20260512-codex5 RUN_DIR=/private/tmp/keeper-runtime-truth-live-20260512-codex5 KEEP_ARTIFACTS=1 TARGET_PHASES=bootstrap,liveness MAX_TURNS=1 TURN_TIMEOUT_SEC=120 HEALTH_TIMEOUT_SEC=45 HEARTBEAT_WAIT_SEC=20 PRESSURE_BYTES=1000 MASC_CONFIG_DIR=/Users/dancer/me/.masc/config scripts/harness_keeper_continuity_validation.sh`
-  (expected FAIL: liveness provider timeout; runtime truth chain preserved)
+  (expected FAIL before tick-stop fix: provider API error was masked as outer timeout)
+- `env RUN_ID=keeper-runtime-truth-live-20260513-codex8 RUN_DIR=/private/tmp/keeper-runtime-truth-live-20260513-codex8 KEEP_ARTIFACTS=1 TARGET_PHASES=bootstrap,liveness MAX_TURNS=1 TURN_TIMEOUT_SEC=120 HEALTH_TIMEOUT_SEC=45 HEARTBEAT_WAIT_SEC=20 PRESSURE_BYTES=1000 MASC_CONFIG_DIR=/Users/dancer/me/.masc/config scripts/harness_keeper_continuity_validation.sh`
+  (expected FAIL after tick-stop fix: GLM insufficient-balance error propagates in 0.74s; keeper turn then fails on no tool-capable provider)
+- `env RUN_ID=keeper-runtime-truth-live-20260513-codex9 RUN_DIR=/private/tmp/keeper-runtime-truth-live-20260513-codex9 KEEP_ARTIFACTS=1 TARGET_PHASES=bootstrap,liveness MAX_TURNS=1 TURN_TIMEOUT_SEC=30 HEALTH_TIMEOUT_SEC=30 HEARTBEAT_WAIT_SEC=10 PRESSURE_BYTES=1000 MASC_CONFIG_DIR=/Users/dancer/me/.masc/config scripts/harness_keeper_continuity_validation.sh`
+  (expected FAIL: terminal reason is now `no_tool_capable_provider` and manifest includes `pre_dispatch_blocked`)
 - `scripts/keeper-runtime-truth-gate.sh --base-path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T//keeper-continuity.keeper-runtime-truth-live-20260512-codex5.2OnAhW --keeper continuity-keeper-runtime-truth-live-20260512-codex5 --trace-id trace-1778579781467-00000 --turn-id 1 --mode provider`
 - `git diff --check`
 
@@ -170,7 +183,10 @@ Latest-main live evidence:
 
 - Current branch was rebased onto `origin/main` at
   `429cf1c47cc1f69c8ba55f88491017cde53117c5`
-  (`HEAD...origin/main = 0 0`).
+  (`HEAD` merge-base with `origin/main` is
+  `429cf1c47cc1f69c8ba55f88491017cde53117c5`).
+- Current OAS pin matches fetched OAS `origin/main` at
+  `7885ff316cfd64a3ed7d7550186b64141214b801` (`v0.193.8`).
 - Bootstrap-only isolated run:
   `/private/tmp/keeper-runtime-truth-live-20260512-bootstrap9`
   classified `PASS`; phase log shows active keepalive and room presence.
@@ -193,11 +209,19 @@ Latest-main live evidence:
   `event_bus_correlated` only because `turn_finished.status = error`, treating
   that as an OAS rollback/pre-correlation terminal-failure path rather than a
   healthy success path.
-
-Verification note: the repo-local wrapper's pin guard currently expects
-`agent_sdk` at `188efa67bdb95de6888f0c7660d236e3cc9de2df`, while the shared
-opam switch has newer `agent_sdk 0.193.2`; the repair script refused a
-downgrade, so focused verification used `MASC_SKIP_PIN_CHECK=1`.
+- Post tick-stop live run:
+  `/private/tmp/keeper-runtime-truth-live-20260513-codex8` still classified
+  `FAIL`, but the GLM insufficient-balance provider error propagated after
+  `0.738s` instead of being masked as a 120s outer timeout.
+- Latest live run:
+  `/private/tmp/keeper-runtime-truth-live-20260513-codex9` classified `FAIL`;
+  phase summary reports `turn_status=error
+  terminal_reason=no_tool_capable_provider`.
+- The codex9 manifest includes `pre_dispatch_blocked` with
+  `reason = no_tool_capable_provider`, `configured_labels = ["glm:glm-5.1"]`,
+  `require_tool_support = true`, and `original_candidate_count = 1`.
+- The codex9 receipt and `turn_finished` rows both carry
+  `terminal_reason_code = no_tool_capable_provider`.
 
 ## Goal
 
@@ -224,10 +248,11 @@ or retried without reconstructing the story from unrelated files.
 Current state is improved and closer to product-grade, but the latest-main
 live run is still a hard stop for a product-ready claim. The immediate
 hardening slice is healthy enough to ship as an observability/reliability
-improvement, because it now exposes the timeout failure precisely and the gate
-can validate the failed turn chain. The keeper runtime as a whole is not
-healthy enough to call fully product-ready until live provider turns finish
-reliably or fail fast with a shorter operator-actionable route.
+improvement, because it now exposes timeout and pre-dispatch capability
+failures precisely and the gate can validate failed turn chains. The keeper
+runtime as a whole is not healthy enough to call fully product-ready until live
+provider turns finish reliably or the active keeper route includes a concrete
+tool-capable provider.
 
 Healthy parts:
 
@@ -276,11 +301,12 @@ Fragile parts:
   should still remove module-init route constants in favor of explicit dynamic
   route resolution or literal phase sentinels. The current slice closes the
   observed failures, not the whole historical naming ambiguity.
-- Production-like config can still time out a keeper turn for 120 seconds
-  before failing with `provider_runtime_error`. The missing
-  `provider_attempt_finished` terminal gap is fixed and re-proven against a
-  live-like failed turn, but the active provider route still does not complete
-  the keeper turn under production-like config.
+- Production-like config no longer masks the observed GLM provider error as a
+  120-second outer timeout, but the active keeper route still does not
+  complete a keeper turn under production-like config. The latest failure is
+  now earlier and more precise: `no_tool_capable_provider` because the active
+  route has `glm:glm-5.1` while the turn requires materialized keeper tool
+  support.
 - Live config drift is real: the current config root exposes `coding_plan` as
   the only active catalog profile, while older scripts assumed `big_three`.
   The harness now avoids that hardcoded default, but operator docs/config still
@@ -298,18 +324,19 @@ Verdict as of this slice: do not promote as fully product-healthy yet.
 It is acceptable to ship behind an operator-facing experimental gate if the
 goal is observability hardening. It is not yet acceptable as a final product
 runtime guarantee because the strongest live-like evidence on latest main now
-fails at provider runtime: the keeper message queues, OAS starts, but the
-keeper turn times out and never records a successful provider attempt finish.
+fails at route capability: the keeper message queues, but the active
+`tier-group.coding_plan` route has no tool-capable provider for the keeper's
+materialized internal tool surface.
 
 Highest-risk gaps:
 
-1. Provider-runtime reliability gap: latest live-like run
-   `/private/tmp/keeper-runtime-truth-live-20260512-codex4` timed out after
-   120 seconds and emitted `provider_runtime_error`. Timeout/error terminals
-   are now normalized into `provider_attempt_finished` rows, including outer
-   bridge timeouts that interrupt `run_named`, and the gate passes the failed
-   live-like turn. Still open: make `coding_plan` complete or fail fast before
-   the full keeper turn budget is exhausted.
+1. Route capability gap: latest live run
+   `/private/tmp/keeper-runtime-truth-live-20260513-codex9` fails with
+   `no_tool_capable_provider`. The manifest now records
+   `pre_dispatch_blocked`, and the receipt/turn terminal reason stays
+   structured. Still open: configure `tier-group.coding_plan` with a concrete
+   tool-capable provider for keeper-internal tools, or route these keeper turns
+   to a provider lane that can materialize runtime MCP/inline tools.
 2. Real-turn evidence gap: closed for focused fixture coverage. The successful
    provider/OAS fixture proves the manifest, checkpoint, state sidecar,
    tool-call log, and receipt chain together. Remaining risk is live
@@ -401,15 +428,17 @@ Prompt-to-artifact checklist:
 6. Product readiness judgment: this branch is shippable as a gated
    observability/reliability improvement. It is not yet a final product
    runtime guarantee because the latest-main live-like run failed with a
-   provider timeout and the live manifest proved the missing terminal
-   provider-attempt coverage.
+   structured route-capability error:
+   `no_tool_capable_provider` for `tier-group.coding_plan` with
+   `glm:glm-5.1`.
 
 Completion status: not complete as a full product-readiness goal. The immediate
 observability slice is useful and verified locally, and the first P0 follow-up
-is now proven on a live-like failed turn: provider timeout/error terminals are
-normalized into a complete manifest chain and the gate passes that failed
-turn. Still open: make the active provider route complete or fail fast under
-production-like config.
+is now proven on live-like failed turns: provider timeout/error terminals are
+normalized, no-tool-capable pre-dispatch failures stay structured, and both
+are represented in the manifest/receipt chain. Still open: make the active
+provider route complete with a tool-capable provider under production-like
+config.
 
 ## Non-Goals
 

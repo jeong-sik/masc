@@ -47,13 +47,35 @@ OAS:
 - Provider/cascade primitives: `oas/lib/llm_provider/provider_config.ml`, `oas/lib/llm_provider/complete.ml`, `oas/lib/llm_provider/complete_cascade.ml:191`.
 - Context/memory: `oas/lib/context_reducer.ml:16`, `:98`; `oas/lib/memory.ml:16`, `:65`, `:80`.
 
-External official/primary sources checked on 2026-05-12:
+External official/primary sources:
 
-- Claude Agent SDK: https://code.claude.com/docs/en/agent-sdk/agent-loop, https://code.claude.com/docs/en/agent-sdk/sessions
-- Google ADK: https://adk.dev/agents/llm-agents/, https://adk.dev/sessions/
-- OpenAI Agents SDK: https://openai.github.io/openai-agents-python/ref/run/, https://openai.github.io/openai-agents-python/sessions/
-- OpenClaw: https://docs.openclaw.ai/concepts/model-failover, https://docs.openclaw.ai/concepts/compaction
-- Hermes Agent: https://hermes-agent.nousresearch.com/docs/developer-guide/agent-loop/, https://hermes-agent.nousresearch.com/docs/developer-guide/context-compression-and-caching/
+- [근거] Claude Agent SDK: official Claude Code docs
+  (`https://code.claude.com/docs/en/agent-sdk/agent-loop`,
+  `https://code.claude.com/docs/en/agent-sdk/sessions`), checked
+  `2026-05-12 19:12 KST`, trust `High`. Used for loop/tool/session/compaction
+  behavior: Claude evaluates, calls tools, receives results, repeats, emits
+  compact-boundary/session messages, and supports resume/fork session flows.
+- [근거] Google ADK: official ADK docs
+  (`https://adk.dev/agents/llm-agents/`, `https://adk.dev/sessions/`),
+  checked `2026-05-12 19:12 KST`, trust `High`. Used for LLM agent,
+  Session/State, `SessionService`, and `MemoryService` comparison.
+- [근거] OpenAI Agents SDK: official OpenAI Agents SDK docs
+  (`https://openai.github.io/openai-agents-python/ref/run/`,
+  `https://openai.github.io/openai-agents-python/sessions/`), checked
+  `2026-05-12 19:12 KST`, trust `High`. Used for `Runner.run`,
+  `RunConfig.model`, `model_provider`, session retrieval/storage, and
+  Responses compaction session behavior.
+- [근거] OpenClaw: official OpenClaw docs
+  (`https://docs.openclaw.ai/concepts/model-failover`,
+  `https://docs.openclaw.ai/concepts/compaction`), checked
+  `2026-05-12 19:12 KST`, trust `High`. Used for model failover and
+  compaction/tool-pair preservation comparison.
+- [근거] Hermes Agent: official Hermes Agent docs
+  (`https://hermes-agent.nousresearch.com/docs/developer-guide/agent-loop/`,
+  `https://hermes-agent.nousresearch.com/docs/developer-guide/context-compression-and-caching/`),
+  checked `2026-05-12 19:12 KST`, trust `High`. Used for
+  `AIAgent.run_conversation`, concurrent tool execution, fallback providers,
+  session persistence, and 50%/85% compression thresholds.
 
 ## 1. Keeper Lifecycle
 

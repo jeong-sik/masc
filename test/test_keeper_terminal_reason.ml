@@ -226,6 +226,17 @@ let test_agent_cost_budget_exceeded () =
           (Agent_sdk.Error.CostBudgetExceeded { spent_usd = 5.5; limit_usd = 10.0 })))
 ;;
 
+let test_agent_cost_budget_unenforceable () =
+  check
+    string
+    "cost_budget_unenforceable"
+    "agent_error_cost_budget_unenforceable:model_id=glm-5.1,limit_usd=10.00"
+    (code
+       (mk_agent
+          (Agent_sdk.Error.CostBudgetUnenforceable
+             { model_id = "glm-5.1"; limit_usd = 10.0 })))
+;;
+
 let test_agent_idle_detected () =
   check
     string
@@ -312,7 +323,7 @@ let test_all_api_codes_distinct () =
   check int "9 variants -> 9 distinct codes" 9 unique
 ;;
 
-(* Same property for Agent variants: 10 distinct codes. *)
+(* Same property for Agent variants: 11 distinct codes. *)
 
 let test_all_agent_codes_distinct () =
   let codes =
@@ -331,6 +342,10 @@ let test_all_agent_codes_distinct () =
     ; code
         (mk_agent
            (Agent_sdk.Error.CostBudgetExceeded { spent_usd = 1.0; limit_usd = 1.0 }))
+    ; code
+        (mk_agent
+           (Agent_sdk.Error.CostBudgetUnenforceable
+              { model_id = "glm-5.1"; limit_usd = 1.0 }))
     ; code (mk_agent (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 1 }))
     ; code
         (mk_agent
@@ -341,7 +356,7 @@ let test_all_agent_codes_distinct () =
     ]
   in
   let unique = List.sort_uniq String.compare codes |> List.length in
-  check int "10 agent variants -> 10 distinct codes" 10 unique
+  check int "11 agent variants -> 11 distinct codes" 11 unique
 ;;
 
 let test_structured_required_tool_no_tool_call () =
@@ -393,6 +408,22 @@ let test_structured_turn_wall_clock_timeout () =
   in
   let terminal = KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err in
   check string "code" "turn_wall_clock_timeout" (terminal_code terminal)
+;;
+
+let test_structured_no_tool_capable_provider () =
+  let err =
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.No_tool_capable_provider
+         { cascade_name =
+             Masc_mcp.Keeper_turn_driver.cascade_name_of_string
+               "tier-group.coding_plan"
+         ; configured_labels = [ "glm:glm-5.1" ]
+         ; required_tool_names = [ "keeper_tool_search" ]
+         ; provider_rejections = []
+         })
+  in
+  let terminal = KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err in
+  check string "code" "no_tool_capable_provider" (terminal_code terminal)
 ;;
 
 let test_legacy_gh_worktree_text () =
@@ -457,7 +488,7 @@ let () =
             `Quick
             test_all_api_codes_distinct
         ; test_case
-            "all 10 agent codes are pairwise distinct"
+            "all 11 agent codes are pairwise distinct"
             `Quick
             test_all_agent_codes_distinct
         ] )
@@ -471,6 +502,10 @@ let () =
         ; test_case "UnrecognizedStopReason" `Quick test_agent_unrecognized_stop_reason
         ; test_case "TokenBudgetExceeded" `Quick test_agent_token_budget_exceeded
         ; test_case "CostBudgetExceeded" `Quick test_agent_cost_budget_exceeded
+        ; test_case
+            "CostBudgetUnenforceable"
+            `Quick
+            test_agent_cost_budget_unenforceable
         ; test_case "IdleDetected" `Quick test_agent_idle_detected
         ; test_case "ToolRetryExhausted" `Quick test_agent_tool_retry_exhausted
         ; test_case "GuardrailViolation" `Quick test_agent_guardrail_violation
@@ -486,6 +521,10 @@ let () =
             "turn wall-clock timeout"
             `Quick
             test_structured_turn_wall_clock_timeout
+        ; test_case
+            "no tool-capable provider"
+            `Quick
+            test_structured_no_tool_capable_provider
         ; test_case "legacy gh missing worktree text" `Quick test_legacy_gh_worktree_text
         ] )
     ]

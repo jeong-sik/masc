@@ -1719,8 +1719,11 @@ let test_keeper_oas_cleanup_contracts () =
        (file_contains_pattern "lib/keeper/keeper_turn.ml"
           "Context_manager"));
   check bool "tool compact comment now references OAS-backed pipeline" true
-    (file_contains_pattern "lib/tool_compact.ml"
-       "OAS-backed compaction pipeline")
+    (file_contains_pattern "lib/context_compact_oas.mli"
+       "OAS-backed compaction pipeline");
+  check bool "provider hard errors propagate before agent close cleanup" true
+    (file_contains_pattern "lib/cascade/cascade_runner.ml"
+       "skipping Agent.close after terminal provider error so the error can")
 
 let test_dashboard_executor_pool_contracts () =
   check bool "dashboard runtime support defines executor pool helper" true

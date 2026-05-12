@@ -6,7 +6,8 @@
       structural contract).
     - [Enforce] mode: raises [Liveness_kill] via Switch.fail on Outcome.
     - [Off] mode: wrap_on_event returns the original callback verbatim.
-    - Tick fiber dies with parent switch (Eio resource ledger). *)
+    - Tick fiber is explicitly stopped when the provider attempt ends
+      without a terminal stream event (Eio resource ledger). *)
 
 open Masc_mcp
 module L = Cascade_attempt_liveness
@@ -225,7 +226,7 @@ let test_enforce_switch_fail () =
     "Liveness_kill raised in Enforce mode"
     (Some "provider_error") !raised
 
-(* -- Tick fiber dies with parent switch -------------------------- *)
+(* -- Tick fiber lifetime ----------------------------------------- *)
 
 let test_tick_fiber_dies_with_switch () =
   (* Build observer in Observe mode (no kill), start tick fiber, then
@@ -245,6 +246,23 @@ let test_tick_fiber_dies_with_switch () =
            | None -> ());
           Eio.Fiber.yield ()));
   Alcotest.(check bool) "Switch.run returned cleanly" true true
+
+let test_tick_fiber_stops_without_terminal_event () =
+  (* A provider can return an API error before any SSE terminal event.
+     The attempt owner must be able to stop the tick loop immediately;
+     otherwise Switch.run waits for the long bootstrap TTFT tick. *)
+  Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Time.with_timeout_exn clock 0.5 (fun () ->
+          Eio.Switch.run (fun sw ->
+              let obs =
+                mk_observer ~mode:Cfg.Enforce ~started_at:(Time_compat.now ()) ()
+              in
+              Obs.start_tick_fiber obs ~sw ~clock;
+              Obs.stop_tick_fiber obs;
+              Eio.Fiber.yield ())));
+  Alcotest.(check bool)
+    "pending tick fiber stopped before bootstrap tick" true true
 
 let () =
   Alcotest.run "cascade_attempt_liveness_observer"
@@ -279,5 +297,9 @@ let () =
         [
           Alcotest.test_case "tick fiber dies with switch" `Quick
             test_tick_fiber_dies_with_switch;
+          Alcotest.test_case
+            "tick fiber stops without terminal stream event"
+            `Quick
+            test_tick_fiber_stops_without_terminal_event;
         ] );
     ]

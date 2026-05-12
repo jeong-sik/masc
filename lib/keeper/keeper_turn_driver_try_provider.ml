@@ -346,6 +346,11 @@ let run_try_provider
            })
     in
     let with_liveness_attempt f =
+      let stop_liveness_tick () =
+        match liveness_observer_opt with
+        | None -> ()
+        | Some obs -> Cascade_attempt_liveness_observer.stop_tick_fiber obs
+      in
       let run_attempt () =
         try
           Eio.Switch.run (fun attempt_sw ->
@@ -369,7 +374,14 @@ let run_try_provider
               | Some obs ->
                 Cascade_attempt_liveness_observer.wrap_on_event obs ctx.on_event
             in
-            f ~attempt_sw ~liveness_on_event)
+            match f ~attempt_sw ~liveness_on_event with
+            | result ->
+              stop_liveness_tick ();
+              result
+            | exception exn ->
+              let bt = Printexc.get_raw_backtrace () in
+              stop_liveness_tick ();
+              Printexc.raise_with_backtrace exn bt)
         with
         | Cascade_attempt_liveness_observer.Liveness_kill failure ->
           Error (liveness_timeout_error failure)

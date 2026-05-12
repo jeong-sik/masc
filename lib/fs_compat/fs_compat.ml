@@ -164,7 +164,7 @@ let fd_cache_max_size = 16
 
 module Append_fd_cache = struct
   type entry =
-    { mutable channel : Stdlib.out_channel
+    { channel : Stdlib.out_channel
     ; mutable last_used : int
     }
 

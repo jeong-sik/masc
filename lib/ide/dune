@@ -1,0 +1,19 @@
+(include_subdirs no)
+
+(library
+ (name masc_ide)
+ (public_name masc_mcp.ide)
+ (wrapped false)
+ (modules
+  ide_annotation_types
+  ide_annotations
+  ide_meta_sync
+  ide_region_tracker)
+ (libraries
+  unix
+  mtime
+  mtime.clock.os
+  yojson
+  uuidm
+  fs_compat
+  dated_jsonl))

@@ -14,22 +14,23 @@
     [specs/keeper-state-machine/KeeperApprovalQueue.tla] (Cycle 9 /
     Tier B3, PR #11417).
 
-    Spec lines 5-6 already cite this module:
-    "[submit_and_await] at line 751, [submit_pending] at line 772,
-    [expire_stale] at line 941".  This block is the reverse-direction
+    The spec preamble cites this module by function name
+    ([submit_and_await], [submit_pending], [expire_stale]).  It used to
+    carry line numbers (751 / 772 / 941) but iter 64 N-2.a removed them
+    after the OCaml line drift reached +245..+413 — function names are
+    stable, line numbers are not.  This block is the reverse-direction
     citation so code search for "KeeperApprovalQueue" lands here.
 
     Action mapping (TLA+ -> OCaml):
-      Submit                 [submit_and_await] (~line 751) /
-                             [submit_pending] (~line 772) record a
-                             new pending entry and suspend the fiber
-                             on [Eio.Promise.await].
+      Submit                 [submit_and_await] / [submit_pending]
+                             record a new pending entry and suspend
+                             the fiber on [Eio.Promise.await].
       Resolve                operator approves/rejects via the HTTP
                              handler in [server_dashboard_http.ml],
                              which calls [resolve] on the queue and
                              wakes the suspended fiber.
-      ExpireStale            [expire_stale] (~line 941) sweeps
-                             timed-out entries and forces
+      ExpireStale            [expire_stale] sweeps timed-out entries
+                             and forces
                              [Eio.Promise.resolve resolver (Reject ...)]
                              so no fiber is left blocked indefinitely.
       ExpireStaleNoResolve   bug action — entries are removed from

@@ -133,7 +133,18 @@ let append_lineage_artifacts_best_effort
     the *actual* LLM response for the last turn: when a proactive turn errored
     with an overflow-class blocker, rollover is triggered regardless of the
     checkpoint ratio — the ratio gate structurally cannot fire once compaction
-    shrinks the checkpoint below the threshold (umbrella #7036). *)
+    shrinks the checkpoint below the threshold (umbrella #7036).
+
+    Spec mirror: [specs/keeper-state-machine/KeeperRolloverDecision.tla] models
+    this gate (vars autoHandoff / cooldownElapsed / ratioGate / lastOutcome /
+    blockerClass / decision); [SignalGateOverflowOnly] is the safety invariant
+    that the signal half fires only on an overflow-class blocker, and the
+    bug-model cfg checks that the historical "any non-empty class" substring
+    drift would violate it.  The spec models the [last_blocker_info] +
+    [Proactive_error] disjunct only; the [?current_turn_blocker_info] disjunct
+    uses the same typed [blocker_class_indicates_overflow] predicate so it is
+    covered by construction.  Reverse-citation so code search for
+    "KeeperRolloverDecision" lands here. *)
 let classify_rollover_gate
     ~(auto_handoff : bool) ~(cooldown_elapsed : bool)
     ~(ratio : float) ~(handoff_threshold : float)

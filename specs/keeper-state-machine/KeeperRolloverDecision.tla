@@ -12,6 +12,18 @@
 \*   blockerClass     | lib/keeper/keeper_rollover.ml:blocker_class_indicates_overflow | typed Keeper_types.blocker_class
 \*   decision         | lib/keeper/keeper_rollover.ml:rollover_gate_decision    | Skip(reason) | Go(reason)
 \*
+\* Spec scope (2026-05-12, iter 75 R-2.a — see docs/tla-audit/krd-r2-rollover-decision-spec-ocaml-verified-2026-05-12.md):
+\*   The OCaml signal gate is a disjunction of TWO overflow signals:
+\*     (a) ?current_turn_blocker_info — the in-flight turn's blocker (fires
+\*         regardless of last_outcome), and
+\*     (b) last_blocker_info gated on last_outcome = Proactive_error.
+\*   This spec models only (b) via SignalFires.  (a) is intentionally omitted:
+\*   it exercises the same typed predicate blocker_class_indicates_overflow on
+\*   the same blocker_class set, so SignalGateOverflowOnly already covers it by
+\*   construction (the spec under-approximates the trigger conditions, never
+\*   over-approximates the safety guarantee).  If (a) ever grows class-specific
+\*   behaviour, add it here as a second SignalFires disjunct + a Next variable.
+\*
 \* Architectural invariant:
 \*   OAS/MASC treat provider/model as opaque aliases.  The keeper layer
 \*   reasons only over typed blocker_class — substring matching at this

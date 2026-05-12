@@ -24,6 +24,10 @@ on:
       - 'lib/cascade/cascade_fsm.mli'
       - 'scripts/audit-tla-annotation-drift.sh'
       - 'scripts/audit-tla-phase-count.sh'
+      - 'scripts/audit-ocaml-phase-count.sh'
+      - 'scripts/ocaml-phase-count-baseline.txt'
+      - 'lib/keeper/**/*.ml'
+      - 'lib/keeper/**/*.mli'
       - 'scripts/tla-annotation-drift-baseline.txt'
       - '.github/workflows/tla-annotation-drift.yml'
   push:
@@ -37,6 +41,10 @@ on:
       - 'lib/cascade/cascade_fsm.mli'
       - 'scripts/audit-tla-annotation-drift.sh'
       - 'scripts/audit-tla-phase-count.sh'
+      - 'scripts/audit-ocaml-phase-count.sh'
+      - 'scripts/ocaml-phase-count-baseline.txt'
+      - 'lib/keeper/**/*.ml'
+      - 'lib/keeper/**/*.mli'
       - 'scripts/tla-annotation-drift-baseline.txt'
   workflow_dispatch: {}
 
@@ -76,3 +84,16 @@ jobs:
         # same way.  See docs/tla-audit/rh1b-sweep-zombie-12-phases-
         # stale-2026-05-12.md for the audit that motivated it.
         run: bash scripts/audit-tla-phase-count.sh
+
+      - name: Run OCaml phase-count validator (R-H-1.f)
+        # OCaml-side twin of R-H-1.c.  Iter 54 (#14886) discovered the
+        # same 12→13 stale-count drift class in lib/keeper/*.{ml,mli}
+        # docstrings — six sites, two of them ("11-state" in
+        # keeper_registry) predating even Zombie addition.  Baseline
+        # file grandfathers the four sites still pending fix from PR
+        # #14886; once that PR merges, the corresponding baseline lines
+        # must be removed in a follow-up so future regressions are
+        # caught.
+        run: |
+          bash scripts/audit-ocaml-phase-count.sh \
+            --baseline scripts/ocaml-phase-count-baseline.txt

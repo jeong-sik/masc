@@ -492,7 +492,7 @@ type turn_measurement =
 type registry_entry =
   { base_path : string
   ; name : string
-  ; meta : keeper_meta (** Keeper lifecycle phase (RFC-0002 11-state machine). *)
+  ; meta : keeper_meta (** Keeper lifecycle phase (RFC-0002 13-state machine; 11 at #5229 → 12 Overflowed (MASC-1) → 13 Zombie #14707). *)
   ; phase : Keeper_state_machine.phase (** Observable conditions that derive [phase]. *)
   ; conditions : Keeper_state_machine.conditions
   ; fiber_stop : bool Atomic.t

@@ -25,9 +25,15 @@
 \*   attempt_phase           | implicit (state of try_cascade recursion)       | lib/keeper/keeper_turn_driver.ml::try_cascade
 \*   tier_index              | recursion depth in try_cascade                  | lib/keeper/keeper_turn_driver.ml (remaining)
 \*   slot_held               | with_keeper_turn_slot acquire/release           | lib/keeper/keeper_turn_slot.ml::with_keeper_turn_slot
-\*   provider_outcome        | type provider_outcome [@@deriving tla]          | lib/cascade/cascade_fsm.ml:7-12
-\*   decision                | type decision [@@deriving tla]                  | lib/cascade/cascade_fsm.ml:14-19
-\*   hard_quota_taken        | sdk_error_is_hard_quota force-Exhausted branch  | lib/keeper/keeper_turn_driver.ml:657-669
+\*   provider_outcome        | type provider_outcome [@@deriving tla]          | lib/cascade/cascade_fsm.ml — type provider_outcome
+\*   decision                | type decision [@@deriving tla]                  | lib/cascade/cascade_fsm.ml — type decision
+\*   hard_quota_taken        | sdk_error_is_hard_quota force-Exhausted branch  | lib/keeper/keeper_turn_driver.ml — the hard-quota fast-path in run_named
+\*
+\* OCaml refs are cited by symbol/function name, not line number (iter 64
+\* N-2.a convention; the previous "cascade_fsm.ml:NNN" / "keeper_turn_driver.ml:NNN"
+\* anchors were converted in the iter 85 scattered-singles line-ref sweep —
+\* cascade_fsm.ml is a small stable file so the drift was minor, but symbol
+\* anchors stay correct as keeper_turn_driver.ml's run_named grows).
 \*
 \* Provider opacity (G3 acceptance gate):
 \*   The spec uses abstract symbols "Provider_1, Provider_2, Provider_3"
@@ -47,10 +53,12 @@
 \*   The spec's two terminal phases `exhausted_normal` and
 \*   `exhausted_hard_quota` are ROLE IDENTITIES at the FSM level — both
 \*   collapse to a single `Cascade_fsm.Exhausted { last_err }`
-\*   constructor on the OCaml side (`lib/cascade/cascade_fsm.ml:20`).
+\*   constructor on the OCaml side (the `Exhausted` constructor of
+\*   `type decision` in `lib/cascade/cascade_fsm.ml`).
 \*
 \*   Classification happens UPSTREAM of `decide` in
-\*   `lib/keeper/keeper_turn_driver.ml:654-672`:
+\*   `lib/keeper/keeper_turn_driver.ml`'s `run_named` — the hard-quota
+\*   fast-path block (pinned by the "Hard-quota fast-path" comment):
 \*
 \*     if sdk_error_is_hard_quota sdk_err then
 \*       Cascade_fsm.Exhausted { last_err }   (* fast-path, skips decide *)
@@ -197,7 +205,7 @@ ResolveExhaustedNormal ==
     /\ step' = step + 1
 
 \* Hard quota override: force Exhausted immediately, bypassing decide,
-\* WITHOUT advancing tier_index.  Mirrors keeper_turn_driver.ml:657-669.
+\* WITHOUT advancing tier_index.  Mirrors the hard-quota fast-path in keeper_turn_driver.ml's run_named.
 ResolveHardQuota ==
     /\ attempt_phase = "awaiting_response"
     /\ step < MaxSteps
@@ -222,7 +230,7 @@ Spec == Init /\ [][Next]_vars
 
 \* BugAction #1: hard quota does NOT use the override; it routes through
 \* decide and falls through to the next tier.  Models the regression
-\* "remove the override at keeper_turn_driver.ml:657-669".
+\* "remove the hard-quota fast-path override in keeper_turn_driver.ml's run_named".
 BugHardQuotaBypass ==
     /\ attempt_phase = "awaiting_response"
     /\ tier_index < MaxTiers - 1
@@ -270,7 +278,7 @@ SlotReleasedOnTerminal ==
     attempt_phase \in TerminalSet => ~slot_held
 
 \* I2: hard-quota termination implies tier_index did not advance after
-\* the quota error.  The override at keeper_turn_driver.ml:657-669 forces
+\* the quota error.  The hard-quota fast-path override (keeper_turn_driver.ml's run_named) forces
 \* Exhausted on the *current* tier rather than continuing to the next.
 HardQuotaTerminalImmediate ==
     attempt_phase = "exhausted_hard_quota" => hard_quota_taken

@@ -62,12 +62,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
-rg_status=0
-rg -nP '\("status",\s*`String\s+"ok"\)' lib/ -g '*.ml' >"$matches_file" 2>"$errors_file" || rg_status=$?
-if [[ $rg_status -gt 1 ]]; then
-  echo "ERROR: ripgrep failed while scanning ok-envelope literals" >&2
-  cat "$errors_file" >&2
-  exit "$rg_status"
+scan_status=0
+if command -v rg >/dev/null 2>&1; then
+  rg -nP '\("status",\s*`String\s+"ok"\)' lib/ -g '*.ml' >"$matches_file" 2>"$errors_file" || scan_status=$?
+  if [[ $scan_status -gt 1 ]]; then
+    echo "ERROR: ripgrep failed while scanning ok-envelope literals" >&2
+    cat "$errors_file" >&2
+    exit "$scan_status"
+  fi
+else
+  grep -RInE --include='*.ml' '\("status",[[:space:]]*`String[[:space:]]+"ok"\)' lib/ >"$matches_file" 2>"$errors_file" || scan_status=$?
+  if [[ $scan_status -gt 1 ]]; then
+    echo "ERROR: grep failed while scanning ok-envelope literals" >&2
+    cat "$errors_file" >&2
+    exit "$scan_status"
+  fi
 fi
 
 while IFS= read -r match; do

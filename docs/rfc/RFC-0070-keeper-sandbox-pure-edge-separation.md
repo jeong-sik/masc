@@ -13,6 +13,11 @@ implementation_prs: []
 
 # RFC-0070: Keeper Sandbox Runtime — Pure/Edge Separation
 
+## Changelog
+
+- **v1 (2026-05-12, initial Draft, PR #14714)**: single `Sandbox_plan.t` covering one-shot semantics. Sandbox_executor + Docker_client.S + Mock + parser shipped through Phase 3b-iv.2.5 (#14741 / #14752 / #14764 / #14781 / #14786 / #14792 / #14797 / #14802 / #14808 / #14814 / #14821 / #14827 / #14832 / #14838 / #14844 / #14854 / #14862 / #14889).
+- **v2 (2026-05-12, this amendment)**: Phase 4.1 prep audit (caller survey at line 184/820/838) found the v1 Plan models the *anonymous one-shot* pattern only — 1 of 3 caller patterns. `keeper_turn_sandbox_runtime` uses a *persistent session* (`run -d` + `exec` × N + `rm`) that the v1 Plan cannot represent. v2 splits §3.1 into `Oneshot_plan` (renamed from v1's `Sandbox_plan`) + `Session_plan`; adds `Sandbox_session_executor` (§3.2.3) + `Docker_client.S.run_detached` (§3.2.3); re-orders §4 Migration table to gate Phase 4 cutover on the new Session API (Phase 3e). No v1 code is invalidated — all merged work remains, only the `keeper_sandbox_plan` filename is renamed in Phase 3d.
+
 - **Depends on**: RFC-0036 Phase A (cleanup hook plumbing — foundation)
 - **Extends**: RFC-0006 Phase B-2 (Read/Edit/Grep docker exec routing)
 - **Related**: RFC-0002 (keeper FSM), RFC-0003 (composite lifecycle observer)
@@ -56,54 +61,175 @@ F1, F3, F6 are direct instances of CLAUDE.md §AI 코드 생성 안티패턴: ha
 
 ## 3. Design
 
-### 3.1 Pure core (Sandbox_plan)
+### 3.0 v2 caller survey (amendment driver)
+
+Phase 4.1 prep audit (2026-05-12) catalogued the 3 caller sites and discovered they use **3 distinct docker invocation patterns**, not one. v1 §3.1 modelled only the third:
+
+| Caller | Site | Pattern | Lifetime | Existing v1 Plan fit |
+|--------|------|---------|----------|----------------------|
+| `keeper_turn_sandbox_runtime` | line 184 | `docker run -d --rm --name <n> ... sh -lc "trap : TERM INT; while :; do sleep 3600; done"` + `docker exec <n> <cmd>` × N + `docker rm -f <n>` | **session** (turn-scoped) | ❌ not representable |
+| `keeper_shell_docker` | line 820 | `docker run --rm --name <n> <image> sh -lc <cmd>` | **named one-shot** | ⚠ partial (Plan has `container_name`, but caller treats name as observable identity, not derivation byproduct) |
+| `keeper_sandbox_runtime` | line 838 | `docker run --rm --network none --entrypoint sh <image> -lc <script>` | **anonymous one-shot** | ✅ closest to v1 Plan |
+
+The cleanup/probe path (`docker ps -a`, `docker inspect`, `docker rm -f`) is shared across all three callers and is fully covered by v1 `Docker_client.S.ps_query` + `rm` — no amend needed.
+
+### 3.1 Pure core (Plan family)
+
+**v2 splits the single `Sandbox_plan.t` into two sibling types**, one per lifetime model. Both share the same `Container_name.t` derivation, hash algo, and result-typed `of_request` constructor — only the runtime shape differs.
+
+#### 3.1.1 `Keeper_sandbox_oneshot_plan` (already shipped — v1 type, renamed)
 
 ```ocaml
-(* lib/keeper/keeper_sandbox_plan.mli *)
+(* lib/keeper/keeper_sandbox_oneshot_plan.mli — was keeper_sandbox_plan in v1 *)
 type t = private {
-  container_name  : Container_name.t;
-  image_pin       : Image.digest;          (* sha256:..., NOT a tag *)
-  mounts          : Mount.t list;
-  env_passthrough : (string * string) list;
-  ulimits         : Ulimit.t list;
-  network_mode    : Network.t;
-  timeout_budget  : Eio.Time.span;
+  container_name  : Container_name.t;       (* derived; opaque to caller *)
+  image           : string;                 (* TODO: tighten to Image.digest *)
+  command         : string;                 (* single sh -lc payload *)
+  timeout_budget_sec : float;
 }
 
 val of_request
-  : turn_id:Turn_id.t
+  : turn_id:int
     -> attempt:int
-    -> meta:Keeper_types.keeper_meta
-    -> cmd:Cmd.t
-    -> (t, Plan_error.t) result
-
-(* Same input ⇒ identical plan. No Random, no Unix.time. *)
+    -> meta_name:string
+    -> cmd:string
+    -> (t, plan_error) result
 ```
 
-`Container_name.t` is a private string derived as `"masc-keeper-" ^ hex(Keeper_hash_algo.digest_bytes hash_algo (turn_id ‖ attempt ‖ suffix))[0..31]`, where `Keeper_hash_algo.t = SHA_256 | SHA_512` (closed variant, default `SHA_256` per §8 Q1). The hex slice takes the first **32 hex chars = 16 bytes (128 bits)** of the digest. Direct collision probability is 1/2^128; birthday-bound collision threshold (concurrent keepers in the same fleet) is ~2^64 ≈ 1.8×10^19 — effectively zero under any realistic load. Test backdoor `Container_name.of_string_for_test` is exposed only under `let%test_module` and not in the public `.mli`. **The algorithm choice is parametric** — wall-clock is the only construction-time dependency that must remain absent.
+Covers `keeper_sandbox_runtime` site 838 (anonymous one-shot, even though the Plan does emit a derived `--name`; docker accepts the name for `--rm` invocations).
 
-(BLAKE3 was originally in the variant; deferred to a follow-up — opam `digestif` 1.3.0 ships BLAKE2B/2S but not BLAKE3, and adding a separate `blake3` opam dependency is out of Phase 3b-i scope. RFC §8 Q1 updated. Hex encoding chosen over base36 to match the existing `Digestif.to_hex` convention used 8+ times elsewhere in `lib/` — see `lib/cache_eio.ml:58`, `lib/rate_limit.ml:230`, `lib/eval_calibration.ml:126`.)
+Phase 3b-iv.2.* shipped this; v2 rename happens in Phase 3d (see §4).
 
-### 3.2 Edge layer (Docker_client + Sandbox_executor)
+#### 3.1.2 `Keeper_sandbox_session_plan` (new — Phase 4 dependency)
 
 ```ocaml
-(* lib/keeper/docker_client.mli *)
-module type S = sig
-  val run         : Sandbox_plan.t -> (Exec_result.t, sandbox_error) result
-  val exec        : container:Container_name.t -> cmd:Cmd.t -> (Exec_result.t, sandbox_error) result
-  val ps_query    : labels:(string * string) list -> (Ps_record.t list, sandbox_error) result
-  val rm          : Container_name.t -> (unit, sandbox_error) result
-end
+(* lib/keeper/keeper_sandbox_session_plan.mli — NEW in v2 *)
+type t = private {
+  container_name      : Container_name.t;
+  image               : string;
+  mounts              : mount list;         (* host:container:mode *)
+  env_passthrough     : (string * string) list;
+  network_mode        : network;            (* None | Bridge | Custom of string *)
+  user                : (int * int) option; (* uid:gid *)
+  ulimits             : (string * int) list;
+  read_only_rootfs    : bool;
+  tmpfs               : string option;
+  workdir             : string option;
+  startup_command     : string;             (* default: idle-sleep loop *)
+  labels              : (string * string) list;
+  cap_drop_all        : bool;
+  no_new_privileges   : bool;
+  seccomp_profile     : seccomp_choice;     (* Default | Unconfined | File of path *)
+  pids_limit          : int;
+  memory_limit        : string;             (* "2g", etc. *)
+}
 
-module Real : S    (* spawns real docker via Eio.Process *)
-module Mock : sig
-  include S
-  val inject_response : Sandbox_plan.t -> (Exec_result.t, sandbox_error) result -> unit
-  val inject_ps_latency : Eio.Time.span -> unit
+val of_request
+  : turn_id:int
+    -> attempt:int
+    -> meta:Keeper_types.keeper_meta
+    -> host_root:string
+    -> uid:int
+    -> gid:int
+    -> network_mode:network
+    -> (t, plan_error) result
+```
+
+Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup_command default is the existing trap-and-sleep idiom. The `Plan` represents *one container's lifetime*, NOT a single command — commands are issued via `Session.exec` (§3.2.2) against an already-started container.
+
+#### 3.1.3 Named one-shot — represented via Oneshot_plan extension
+
+`keeper_shell_docker:820` (named one-shot) is *not* a third sibling type. It is `Oneshot_plan` with caller-observable `container_name`. The existing `container_name` field is already exposed by `Oneshot_plan.container_name`; the only delta is that `keeper_shell_docker` will *consume* the field for probe/cleanup, where `keeper_sandbox_runtime` ignores it. No type extension required.
+
+#### 3.1.4 `Container_name.t` derivation (unchanged)
+
+`Container_name.t` is a private string derived as `"masc-keeper-" ^ hex(Keeper_hash_algo.digest_bytes hash_algo (turn_id ‖ attempt ‖ suffix))[0..31]`, where `Keeper_hash_algo.t = SHA_256 | SHA_512` (closed variant, default `SHA_256` per §8 Q1). The hex slice takes the first **32 hex chars = 16 bytes (128 bits)** of the digest. Direct collision probability is 1/2^128; birthday-bound collision threshold (concurrent keepers in the same fleet) is ~2^64 ≈ 1.8×10^19. Both Oneshot and Session Plan share this derivation. `Container_name.of_external_string` (#14871) remains the unsafe-wrap escape hatch for `docker ps` output ingestion.
+
+(BLAKE3 was originally in the variant; deferred to a follow-up — opam `digestif` 1.3.0 ships BLAKE2B/2S but not BLAKE3. Hex encoding chosen over base36 to match the existing `Digestif.to_hex` convention used 8+ times elsewhere in `lib/`.)
+
+### 3.2 Edge layer (Docker_client + executors)
+
+#### 3.2.1 `Docker_client.S` (v1 surface — kept as base capability layer)
+
+```ocaml
+(* lib/keeper/docker_client.mli — v1, unchanged *)
+module type S = sig
+  val run         : Keeper_sandbox_oneshot_plan.t -> (Docker_response.exec_result, sandbox_error) result
+  val exec        : container:Container_name.t -> cmd:string -> (Docker_response.exec_result, sandbox_error) result
+  val ps_query    : labels:(string * string) list -> (Docker_response.ps_record list, sandbox_error) result
+  val rm          : Container_name.t -> (unit, sandbox_error) result
 end
 ```
 
-`Sandbox_executor` consumes a `Sandbox_plan.t` and a `Docker_client.S` instance; returns `Result.t`. The current `keeper_sandbox_runtime.ml` / `keeper_shell_docker.ml` callers cut over to `Sandbox_executor.run` in Phase 4 (see §4).
+`run` is *one-shot only*. Session lifecycle is built on top via `start` + multiple `exec` + `rm` rather than extending `S` with a `start_session` primitive (kept compositional — `Sandbox_session_executor` orchestrates).
+
+#### 3.2.2 `Sandbox_executor` (v1 — for `Oneshot_plan`)
+
+```ocaml
+module Make (D : Docker_client.S) : sig
+  val execute_plan
+    :  Keeper_sandbox_oneshot_plan.t
+    -> (Docker_response.exec_result, sandbox_error) result
+  val execute_plan_with_retry
+    :  retry:Keeper_backoff_policy.t
+    -> Keeper_sandbox_oneshot_plan.t
+    -> (Docker_response.exec_result, sandbox_error) result
+end
+```
+
+Shipped Phase 3c.0/3c.1. Consumer: `keeper_sandbox_runtime:838` (anonymous one-shot, Phase 4.3 below).
+
+#### 3.2.3 `Sandbox_session_executor` (NEW in v2 — for `Session_plan`)
+
+```ocaml
+(* lib/keeper/sandbox_session_executor.mli — NEW *)
+module Make (D : Docker_client.S) : sig
+  type t  (* private — opaque session handle wrapping Container_name.t + state *)
+
+  val start
+    :  Keeper_sandbox_session_plan.t
+    -> (t, sandbox_error) result
+  (** Spawns [docker run -d --rm --name <derived> ... <startup_command>].
+      Calls [D.run] internally with a synthesised inner one-shot plan
+      whose [command] is the session's [startup_command]. Returns
+      [t] holding the [Container_name.t] for subsequent [exec]/[rm]. *)
+
+  val exec
+    :  t
+    -> cmd:string
+    -> (Docker_response.exec_result, sandbox_error) result
+  (** Delegates to [D.exec] against the held container_name. *)
+
+  val cleanup
+    :  t
+    -> (unit, sandbox_error) result
+  (** Delegates to [D.rm]. Idempotent. *)
+
+  val container_name : t -> Container_name.t
+  (** Observable for probe/inspect from the caller's POV. *)
+end
+```
+
+Determinism contract: same `Session_plan.t` ⇒ identical inner one-shot plan ⇒ identical `Container_name.t`. The session handle `t` carries non-determinism (start time, state) but is opaque to callers.
+
+`-d` (detach) is the only `S.run` invocation that produces a session-shaped output (PID instead of exec_result). v2 §3.2.3 keeps `D.run` returning `exec_result` and treats the `-d` *flag* as a session-runtime concern: `Sandbox_session_executor.start` composes the `-d` argv internally by *not* using `D.run` directly. The cleanest factoring is: extend `Docker_client.S` with `run_detached : Session_plan.t -> (Container_name.t, sandbox_error) result` (separate from `run`). Phase 3e (v2 amend) implements both `Mock` and `Real` variants of `run_detached`.
+
+#### 3.2.4 Composition diagram
+
+```text
+Oneshot_plan ─→ Sandbox_executor.Make(D).execute_plan ─→ D.run
+                                                          ↑
+                                                  same D underneath
+                                                          ↓
+Session_plan ─→ Sandbox_session_executor.Make(D).start ─→ D.run_detached
+                                                  ↑
+                                                  ↓
+                                                  D.exec (N times)
+                                                  ↓
+                                                  D.rm
+```
+
+Both `Sandbox_executor` and `Sandbox_session_executor` are functors on the same `Docker_client.S` capability layer. `D.run` and `D.run_detached` are sibling primitives.
 
 ### 3.3 Typed docker probe
 
@@ -165,16 +291,29 @@ val cleanup_tick
 
 ## 4. Migration
 
-| Phase | Deliverable | RFC dependency | Risk |
-|-------|-------------|----------------|------|
-| **0** | `pr-rfc-check.sh` sandbox patterns + bash 3.2 compat | none | done in `~/me`@`d0add960d7` |
-| **1** | `keeper_sandbox_plan.mli` + `docker_client.mli` (signatures, empty stubs) | none | LOW — no runtime change |
-| **2** | Plan + Real Docker_client implementations, existing callers unchanged | Phase 1 | LOW — both paths coexist |
-| **3** | `Sandbox_executor` + `Sandbox_cleanup` + `Docker_client.Mock` + property tests | Phase 2, RFC-0036 Phase A | MEDIUM — first behavior coexistence |
-| **4** | Caller cutover (one site per PR): `keeper_shell_docker` / `keeper_sandbox_runtime` / `keeper_turn_sandbox_runtime` → `Sandbox_executor.run` | Phase 3 | MEDIUM — caller surface preserved by `Sandbox_executor` wrapper |
-| **5** | Catch-all removal: delete the 8 `try ... with _ -> None` sites in `keeper_sandbox_control.ml`; compiler enforces caller migration | Phase 4 | LOW — compiler is the migration check |
+v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0-3 shipped before v2 and retain their v1 numbering.
 
-Phases 1-5 are independently mergeable and revertible. Phase 5 closes the loop by making the old anti-pattern syntactically unwritable in this subsystem.
+| Phase | Deliverable | RFC dependency | Risk | Status |
+|-------|-------------|----------------|------|--------|
+| **0** | `pr-rfc-check.sh` sandbox patterns + bash 3.2 compat | none | done | ✅ `~/me`@`d0add960d7` |
+| **1** | `keeper_sandbox_plan.mli` + `docker_client.mli` (signatures, empty stubs) | none | LOW | ✅ Phase 3a #14741 |
+| **2** | Plan + Real Docker_client implementations, existing callers unchanged | Phase 1 | LOW | ✅ Phase 3b-iv.2.0–2.4 #14838/14844/14854/14862/14871 |
+| **3** | `Sandbox_executor` (oneshot) + `Docker_client.Mock` + parser unit tests | Phase 2 | MEDIUM | ✅ Phase 3c.0/3c.1 #14821/14827, Phase 3b-iv.2.5 #14889 |
+| **3d** *(v2)* | Rename `keeper_sandbox_plan` → `keeper_sandbox_oneshot_plan` (file + caller renames; no behavior change). Necessary to free the unqualified name for the Session/Oneshot split. | Phase 3 | LOW — pure rename refactor | ⏳ pending |
+| **3e** *(v2)* | `Docker_client.S.run_detached` (Mock + Real) + `Keeper_sandbox_session_plan` + `Sandbox_session_executor.Make` + unit tests | Phase 3d | MEDIUM — new edge primitive | ⏳ pending |
+| **3c.2** | Cleanup quarantine state machine (`Quarantine.t` + alert path) | Phase 3, **RFC-0036 §3.1 cleanup_hook on main** | MEDIUM | ⏸ blocked — RFC-0036 cleanup_hook still missing on origin/main |
+| **4.1** *(v2)* | Caller cutover `keeper_turn_sandbox_runtime` → `Sandbox_session_executor` (one PR) | Phase 3e | MEDIUM | ⏳ pending |
+| **4.2** *(v2)* | Caller cutover `keeper_shell_docker:820` → `Sandbox_executor` w/ named one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |
+| **4.3** *(v2)* | Caller cutover `keeper_sandbox_runtime:838` → `Sandbox_executor` w/ anonymous one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |
+| **5** | Catch-all removal: delete the 8 `try ... with _ -> None` sites in `keeper_sandbox_control.ml`; compiler enforces caller migration | Phase 4.1+4.2+4.3 all merged | LOW — compiler is the migration check | ⏳ pending |
+
+**v2 ordering rationale**:
+- Phase 4.2 + 4.3 (one-shot caller cutovers) do NOT depend on Phase 3e — they can land in parallel with Session API work. Originally v1 implied a serial order; v2 makes the parallelism explicit.
+- Phase 4.1 (session caller) is the only branch that *requires* Phase 3e.
+- Phase 5 still gates on all 3 cutovers (compiler exhaustiveness across the subsystem).
+- Phase 3c.2 (cleanup quarantine) is independent of Phase 4 — it's a deeper RFC-0036 dependency. Phase 4 callers all use the *existing* cleanup path until Phase 3c.2 lands; v2 acknowledges this is a separate critical-path.
+
+Phases are independently mergeable and revertible. Phase 5 closes the loop by making the old anti-pattern syntactically unwritable in this subsystem.
 
 ## 5. Validation
 
@@ -197,19 +336,24 @@ Phases 1-5 are independently mergeable and revertible. Phase 5 closes the loop b
 | RFC-0036 cleanup hook *non-throwing* contract vs this RFC's Result.t *escalating* contract | `Sandbox_cleanup.adapter` wraps internal Result.t into the public hook (`log + swallow`). Public hook contract preserved. Internal logic retains typed errors. |
 | BLAKE3 dependency in OCaml — current opam constraints | RESOLVED Phase 3b-i (#14741 follow-up): `digestif` 1.3.0 (already present, used 8+ times in `lib/`) ships BLAKE2B/2S/SHA-256/SHA-512 but **not BLAKE3**. Adopted `Keeper_hash_algo.t = SHA_256 \| SHA_512` for Phase 3b. Future BLAKE3 = separate PR adding `blake3` opam dep + variant arm. |
 
-## 7. Out of Scope (v2 candidates)
+## 7. Out of Scope
 
 - Docker socket multiplexing for fleet (multi-host scaling)
 - BuildKit cache pinning per keeper profile
 - seccomp profile generation from FS access trace
 - `Docker_client.S` extension for `docker stats` / `docker top` (only needed if dashboard adopts container-per-keeper)
+- **Generalised container orchestration** — RFC-0070 v2 covers only the three docker invocation patterns surveyed in §3.0. Hypothetical fourth patterns (e.g. `docker compose` multi-container, `docker swarm` service replication) are out of scope; a new RFC would be required.
+- **Streaming exec** — `Sandbox_session_executor.exec` returns the full `Exec_result.t` (stdout/stderr captured). Streaming output back to the caller during long-running commands is not in scope; callers needing streaming continue to bypass this layer.
 
 ## 8. Open Questions
 
 1. **Default Keeper_hash_algo.t** — RESOLVED Phase 3b-i: variant is `SHA_256 | SHA_512`, default `SHA_256`. BLAKE3 deferred (digestif 1.3.0 lacks it). Future expansion = variant arm + opam dep in a separate PR.
-2. **`Container_name.t` representation** — `private string` vs phantom-typed wrapper? Default: `private string` for opam-friendly cross-compilation.
-3. **Mock client thread safety** — single-fiber injection vs concurrent? Default: single-fiber; concurrent injection adds complexity not yet justified by test patterns.
-4. **Quarantine persistence across server restart** — in-memory only, or JSONL trail? Default: in-memory; restart loses state, restart-cleanup catches it via labels.
+2. **`Container_name.t` representation** — RESOLVED Phase 3b-ii (#14764): `private string` with `to_string` accessor and `of_external_string` unsafe-wrap escape hatch (#14871) for docker ps output ingestion.
+3. **Mock client thread safety** — RESOLVED Phase 3b-iv.1b (#14808 → Queue.t perf fix #14814): single-fiber strict-FIFO injection.
+4. **Quarantine persistence across server restart** — in-memory only, or JSONL trail? Default: in-memory; restart loses state, restart-cleanup catches it via labels. (Phase 3c.2 will revisit when RFC-0036 cleanup_hook lands.)
+5. **Session container `--rm` flag** *(v2)* — `Session_plan` startup will use `docker run -d --rm --name <n>` to match current `keeper_turn_sandbox_runtime` behavior. `--rm` means the container is *auto-removed on stop* — explicit `Session.cleanup` (calling `D.rm`) handles the *normal* shutdown path; `--rm` is a backstop for crash/kill exits. Open: should `Session.cleanup` log a warning if the container is already gone (auto-removed by docker)? Default: silent success (idempotent), since `D.rm` returns Ok on a vanished container would be ambiguous vs Cleanup_failed.
+6. **Session.exec timeout policy** *(v2)* — Each `exec` call carries its own timeout (per-command), while the Session_plan has no aggregate session lifetime budget. Open: should there be a session-wide deadline that fires when sum-of-exec-timeouts exceeds it, or is per-call sufficient? Default: per-call; turn-level orchestrator (the caller) is responsible for aggregate budget. The session itself is an indefinite resource lease.
+7. **`run_detached` vs `start_session`** *(v2)* — §3.2.3 declares `Docker_client.S.run_detached : Session_plan.t -> (Container_name.t, sandbox_error) result` as a new edge primitive. Alternative considered: a higher-level `Sandbox_session_executor.start` that calls `D.run` with a synthesised plan whose result is discarded and whose name is extracted post-hoc from `D.ps_query`. Decision: `run_detached` is cleaner — `-d` flag is not representable in `D.run`'s `Oneshot_plan` input (which carries `image + command`, not lifecycle), so introducing it would distort the one-shot type. Cost: two `Docker_client.S` primitives instead of one. Benefit: each carries a typed lifetime contract.
 
 ## 9. Rollback
 

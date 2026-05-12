@@ -3,5 +3,7 @@
 (library
  (name tool_schemas_specs)
  (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 enabled. Leaf util sublib.
+ (flags (:standard -w +4))
  (libraries yojson)
  (modules tool_schemas_specs_types))

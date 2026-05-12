@@ -7,7 +7,8 @@
       - 11 phases at RFC-0002 Phase 1 introduction (#5229, 2026-04-05)
       - +1 → 12 when [Overflowed] was added (MASC-1, 2026-04)
       - +1 → 13 when [Zombie] was added (#14707, /loop iter 4)
-    SSOT is the [type phase] declaration below; spec doc counts are
+    Single Source of Truth (SSOT) is the [type phase] declaration below;
+    spec doc counts are
     cross-checked by [scripts/audit-tla-phase-count.sh] (R-H-1.c #14874).
 
     Architecture:

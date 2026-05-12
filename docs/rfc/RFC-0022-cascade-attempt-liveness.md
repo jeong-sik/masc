@@ -143,7 +143,7 @@ because their probable causes differ:
 
 ## 4. Design
 
-### 4.1 Three-tier attempt liveness gate
+### 4.1 Living attempt liveness gate
 
 ```ocaml
 (** Attempt liveness budget. All durations in seconds. *)
@@ -154,17 +154,19 @@ type liveness_budget = {
 }
 ```
 
-Recommended defaults (per cascade profile, override-able):
+The first attempt for a concrete provider/model candidate uses an
+explicit bootstrap budget. After successful streaming attempts exist,
+the runtime derives the budget from recent successful samples for that
+same candidate:
 
-| Profile | TTFT | Inter-chunk | Wall |
+| Source | TTFT | Inter-chunk | Wall |
 |---|---|---|---|
-| `cloud_fast` (codex_cli, claude, gemini) | 30s | 20s | 180s |
-| `cloud_thinking` (any with `thinking=true`) | 60s | 30s | 300s |
-| `local_27b` (ollama_only, llama-server) | 120s | 60s | 900s |
-| `local_70b+` | 240s | 90s | 1800s |
+| bootstrap | conservative fixed floor | conservative fixed floor | conservative fixed floor |
+| observed success | padded P95 successful TTFT | padded P95 successful max gap | padded P95 successful wall |
 
-The values are starting points; final values must be empirically
-calibrated against the 14-keeper diag table after PR-A merge.
+Rejected, killed, errored, or cancelled attempts do not train the
+budget. There is no provider-size taxonomy in this RFC: model labels
+must not imply liveness classes.
 
 ### 4.2 Thinking-aware
 
@@ -374,7 +376,8 @@ need a higher value (60-90s) under load.
 | `lib/cascade/cascade_health_tracker.ml` | classify attempt-liveness failures into `persistent` vs `transient` per §3 table |
 | `lib/cascade/cascade_config.ml` | add `liveness_budget` field per profile |
 | `lib/cascade/cascade_config.mli` | surface `liveness_budget` reader |
-| `config/cascade.toml` | add seed values per profile (cloud_fast / cloud_thinking / local_27b / local_70b+) |
+| `config/cascade.toml` | no liveness class; runtime learns from successful concrete candidates |
+| `lib/cascade/cascade_attempt_liveness_config.ml` | bootstrap budget plus recent successful sample store |
 | `lib/config/env_config_keeper.ml` | env override hooks for the three thresholds (per profile) |
 | `lib/keeper/keeper_hooks_oas.ml` | bridge `Stream_chunk` events to RFC-0012 `record_progress` (Invariant L1) |
 | `test/test_cascade_attempt_liveness.ml` (new) | property tests (§9) |
@@ -397,7 +400,8 @@ The decision table in §4.5 is the source of truth. Tests:
    `Keeper_registry.record_progress` advance at the same monotonic
    time.
 4. **Thinking protection.** A 600s thinking-only stream with chunks
-   every 5s is *not* killed under `cloud_thinking` profile.
+   every 5s is *not* killed when the candidate's observed-success
+   budget allows that stream shape.
 5. **Hung-first-byte.** A provider that holds the connection without
    any chunks is killed at exactly TTFT_MAX (±10ms).
 6. **Mid-stream stall.** A provider that sends 3 chunks then stalls
@@ -409,17 +413,18 @@ The decision table in §4.5 is the source of truth. Tests:
 
 ## 9. Operational rollout
 
-Phase A (default-off, observation only) — **wiring landed (PR-2)**:
+Phase A (historical observation rollout) — **wiring landed (PR-2)**:
 - FSM module + tests in PR-1 (`lib/cascade/cascade_attempt_liveness.{ml,mli}`).
 - Observer + tick fiber + `oas_worker_named.ml::try_provider` integration in PR-2 (`lib/cascade/cascade_attempt_liveness_observer.{ml,mli}`, `lib/cascade/cascade_attempt_liveness_config.{ml,mli}`).
-- Behind `MASC_CASCADE_ATTEMPT_LIVENESS=off|observe|enforce` (default `observe`).
+- Behind `MASC_CASCADE_ATTEMPT_LIVENESS=off|observe|enforce`. Current runtime default is `enforce` when the env var is unset; an empty or unknown value resolves to `observe`.
 - `observe`: liveness clock runs, kills emit `masc_cascade_attempt_liveness_kill_total{mode=observe}` and `masc_cascade_attempt_liveness_observed_total{outcome=...}` but no `Switch.fail`; cascade still advances on real wire errors.
 - 24h on dev base path; compare `diag-keeper-cycle.sh` MAX_S/P95.
 
-Phase B (enforce per profile):
-- Flip per-profile to `enforce`. Start with `cloud_fast` (lowest blast radius — short answers).
+Phase B (enforce with living budgets):
+- Flip liveness to `enforce` after observe-mode samples show the bootstrap and observed-success budgets are not producing false positives.
 - Watch `cascade_attempt_liveness_kill_total{kind=...}` Prometheus counter.
-- Roll up to `cloud_thinking`, then `local_27b`, last `local_70b+`.
+- Inspect budget source labels (`bootstrap` vs `observed_success`) in
+  debug logs and receipts while candidate histories warm up.
 
 Phase C (default `enforce` everywhere):
 - After a 2-week soak with no false-positive reports, default flips
@@ -459,7 +464,8 @@ Phase C (default `enforce` everywhere):
   RFC/test minimum useful post-admission provider run window.
 - Provider-side cost metrics (covered by RFC-0009 Phase 3).
 - Wholesale replacement of OAS HTTP single-bulk-read with chunked. That is `feedback_oas_execution_uncancellable_mid_turn` ("masc-mcp 단독 fix 영역 zero").
-- Per-keeper liveness override (deferred — start with per-profile).
+- Per-keeper liveness override (deferred — start with per-candidate
+  living budgets).
 
 ## 11. Open questions
 
@@ -468,13 +474,13 @@ Phase C (default `enforce` everywhere):
    reasoning), Invariant T1 fires `No_first_token` and we kill what
    was actually a healthy long-think. Mitigation: server-side
    heartbeat is standard on all currently-cascaded providers; if a
-   future provider lacks it, gate it behind a profile that disables
-   TTFT (set `ttft_max = wall_max`).
+   future provider lacks it, it needs a dedicated runtime lane or an
+   explicit bootstrap override that accounts for that transport.
 
 2. **Inter-chunk vs token-rate.** A provider streaming at 0.5 tok/s
-   passes inter-chunk on `local_27b` (60s) but feels dead to a
-   keeper. Token-rate-aware liveness is a follow-up RFC; this RFC
-   uses inter-chunk only to avoid over-engineering Phase A.
+   may pass inter-chunk but still feel dead to a keeper.
+   Token-rate-aware liveness is a follow-up RFC; this RFC uses
+   inter-chunk only to avoid over-engineering Phase A.
 
 3. **Calibration data freshness.** Defaults in §4.1 are starting
    points. Final values come from `diag-keeper-cycle.sh` after Phase
@@ -495,7 +501,7 @@ Phase C (default `enforce` everywhere):
 | Formal (mutation) | TLC on `-buggy.cfg` | invariant violated |
 | Empirical pre | `diag-keeper-cycle.sh` snapshot | recorded as baseline |
 | Empirical post Phase A | `diag-keeper-cycle.sh` 24h | counter `cascade_attempt_liveness_kill_total{mode=observe}` non-zero on at least one provider; no behaviour change |
-| Empirical post Phase B (cloud_fast) | `diag-keeper-cycle.sh` 24h | P95_S for affected keepers drops by ≥30% versus baseline |
+| Empirical post Phase B | `diag-keeper-cycle.sh` 24h | P95_S for affected keepers drops by ≥30% versus baseline without false-positive kills |
 | Soak | 2 weeks Phase B | zero false-positive reports |
 
 ## 13. References

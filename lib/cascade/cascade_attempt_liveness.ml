@@ -13,24 +13,12 @@ type budget = {
   attempt_wall_max : float;
 }
 
-(* §4.1 Recommended starting points. Final values must be empirically
-   calibrated against [scripts/diag-keeper-cycle.sh] output after
-   PR-2 wiring is enabled in [observe] mode. *)
-
-let cloud_fast : budget =
-  { ttft_max = 30.0; inter_chunk_max = 20.0; attempt_wall_max = 180.0 }
-
-let cloud_thinking : budget =
-  { ttft_max = 60.0; inter_chunk_max = 30.0; attempt_wall_max = 300.0 }
-
-(* Calibrated 2026-05-09 against cold-start TTFT for qwen3.6:27b-coding-nvfp4
-   on Apple Silicon: 452s cold vs 31s warm (same prompt). Previous 180s
-   rejected legitimate cold-start turns before first token. *)
-let local_27b : budget =
-  { ttft_max = 600.0; inter_chunk_max = 90.0; attempt_wall_max = 1200.0 }
-
-let local_70b_plus : budget =
-  { ttft_max = 300.0; inter_chunk_max = 120.0; attempt_wall_max = 1800.0 }
+(* Conservative first-attempt budget used before the runtime has observed a
+   successful sample for the concrete provider/model candidate. Later attempts
+   are tuned from successful TTFT/inter-chunk/wall samples in
+   [Cascade_attempt_liveness_config]. *)
+let bootstrap : budget =
+  { ttft_max = 600.0; inter_chunk_max = 120.0; attempt_wall_max = 1800.0 }
 
 module Stream_chunk = struct
   type kind =

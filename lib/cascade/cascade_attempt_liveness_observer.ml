@@ -13,6 +13,12 @@ type t = {
   budget : L.budget;
   cascade_label : string;
   provider_label : string;
+  candidate_key : string option;
+  started_at : float;
+  first_chunk_at : float option ref;
+  last_chunk_at : float option ref;
+  max_inter_chunk_s : float ref;
+  success_sample : (string * Cfg.success_sample) option ref;
   state : L.state ref;
   sw_ref : Eio.Switch.t option ref;
   finalized : bool ref;
@@ -20,12 +26,19 @@ type t = {
 
 let mode (t : t) : Cfg.mode = t.mode
 
-let create ~mode ~budget ~cascade_label ~provider_label ~started_at =
+let create ~mode ~budget ~cascade_label ~provider_label ?candidate_key
+    ~started_at () =
   {
     mode;
     budget;
     cascade_label;
     provider_label;
+    candidate_key;
+    started_at;
+    first_chunk_at = ref None;
+    last_chunk_at = ref None;
+    max_inter_chunk_s = ref 0.0;
+    success_sample = ref None;
     state = ref (L.initial ~started_at);
     sw_ref = ref None;
     finalized = ref false;
@@ -128,6 +141,18 @@ let react_to_output (t : t) (output : L.output) : unit =
 
 let now_seconds () = Time_compat.now ()
 
+let observe_chunk_clock (t : t) ~(at : float) : unit =
+  (match !(t.first_chunk_at) with
+   | None -> t.first_chunk_at := Some at
+   | Some _ -> ());
+  (match !(t.last_chunk_at) with
+   | None -> ()
+   | Some prev ->
+     let gap = at -. prev in
+     if Float.is_finite gap && gap > !(t.max_inter_chunk_s)
+     then t.max_inter_chunk_s := gap);
+  t.last_chunk_at := Some at
+
 let prometheus_recorder (t : t) : L.recorder =
   let labels = [ ("cascade", t.cascade_label); ("provider", t.provider_label) ] in
   {
@@ -155,6 +180,9 @@ let step_with_event (t : t) (evt : Agent_sdk.Types.sse_event) : unit =
     match liveness_event with
     | None -> ()
     | Some le ->
+        (match le with
+         | L.Chunk (_, at) -> observe_chunk_clock t ~at
+         | L.Tick _ | L.Provider_wire_error _ -> ());
         let new_state, output =
           L.step ~recorder:(prometheus_recorder t) t.budget !(t.state) le
         in
@@ -257,7 +285,19 @@ let finalize (t : t) : unit =
     | Cfg.Off -> ()
     | Cfg.Observe | Cfg.Enforce ->
         let outcome = outcome_of_state !(t.state) in
+        (match !(t.state), t.candidate_key, !(t.first_chunk_at), !(t.last_chunk_at) with
+         | L.Success, Some candidate_key, Some first_chunk_at, Some last_chunk_at ->
+           t.success_sample :=
+             Some
+               ( candidate_key
+               , { Cfg.ttft_ms = (first_chunk_at -. t.started_at) *. 1000.0
+                 ; max_inter_chunk_ms = !(t.max_inter_chunk_s) *. 1000.0
+                 ; wall_ms = (last_chunk_at -. t.started_at) *. 1000.0
+                 } )
+         | _ -> ());
         Prometheus.inc_counter
           Prometheus.metric_cascade_attempt_liveness_observed
           ~labels:(observed_labels t ~outcome) ()
   end
+
+let success_sample_for_candidate (t : t) = !(t.success_sample)

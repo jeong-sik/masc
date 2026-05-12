@@ -1,4 +1,4 @@
-(** Tri-state env flag + per-label budget lookup for the cascade
+(** Tri-state env flag + living budget selection for the cascade
     attempt-liveness gate (RFC-0022 PR-2/4 §2).
 
     The flag [MASC_CASCADE_ATTEMPT_LIVENESS] selects one of three modes:
@@ -8,7 +8,8 @@
     - [enforce]  — observer raises [Liveness_kill] via [Eio.Switch.fail]
                    on the first {!Cascade_attempt_liveness.Outcome}.
 
-    Default is [observe] (RFC-0022 §9 Phase A).
+    When the env var is absent, current production default is [enforce].
+    Empty or unparseable values resolve to [observe].
 
     The mode is read once and cached on first call (mirrors
     [Keeper_admission_glue.use_new_admission]) so that mid-attempt env
@@ -25,38 +26,63 @@ type mode =
 val current_mode : unit -> mode
 (** Cached env-flag read. First call reads
     [MASC_CASCADE_ATTEMPT_LIVENESS] and caches the result. Subsequent
-    calls return the cached value. Default when unset / unparseable is
-    {!Observe}. *)
+    calls return the cached value. *)
 
 val mode_label : mode -> string
 (** Stable label for telemetry / Prometheus counter values. One of
     [off | observe | enforce]. *)
 
-val budget_for_provider_id :
-  provider_id:string -> Cascade_attempt_liveness.budget
-(** Map a cascade [provider_id] (e.g. [codex_cli], [claude_code],
-    [gemini_cli], [glm-coding], [ollama_only], [llama-server]) to a
-    per-profile budget.
+type success_sample =
+  { ttft_ms : float
+  ; max_inter_chunk_ms : float
+  ; wall_ms : float
+  }
+(** Successful attempt timing sample for one concrete provider/model
+    candidate. Values are milliseconds and are recorded only after the
+    liveness FSM reaches [Success]. Failed, killed, or rejected attempts do not
+    train future budgets. *)
 
-    The argument is the {b provider} dispatch key — not a model id.
-    Callers should pass the value from
-    [Provider_adapter.provider_label_of_config provider_cfg] or an
-    equivalent provider-level identifier.
+type budget_source =
+  | Bootstrap
+  | Observed_success of { samples : int }
 
-    Unknown provider ids fall back to
-    {!Cascade_attempt_liveness.cloud_fast} which is the conservative
-    cloud-streaming default. *)
+type resolved_budget =
+  { budget : Cascade_attempt_liveness.budget
+  ; source : budget_source
+  }
+
+val budget_source_label : budget_source -> string
+(** Stable debug/receipt label: [bootstrap] or [observed_success]. *)
+
+val budget_for_candidate : candidate_key:string -> resolved_budget
+(** Resolve the budget for a concrete provider/model candidate. The key should
+    be derived from [Provider_adapter.provider_model_health_key_of_config] or
+    an equivalent model-scoped runtime key. When no successful samples exist,
+    returns {!Cascade_attempt_liveness.bootstrap} with [source = Bootstrap]. *)
+
+val record_success_sample :
+  candidate_key:string -> success_sample -> unit
+(** Append a successful attempt timing sample for [candidate_key]. Invalid
+    negative/non-finite values are ignored. Each candidate keeps at most
+    [MASC_CASCADE_LIVENESS_SUCCESS_HISTORY_SIZE] samples, and the process keeps
+    at most [MASC_CASCADE_LIVENESS_SUCCESS_CANDIDATES] candidate keys. *)
 
 val reset_cache_for_test : unit -> unit
 (** Test-only: reset the cached flag read so a new value of
     [MASC_CASCADE_ATTEMPT_LIVENESS] takes effect. Production callers
     must not invoke this. *)
 
+val reset_success_history_for_test : unit -> unit
+(** Test-only: clear the in-process success-history budget store. *)
+
+val success_sample_count_for_test : candidate_key:string -> int
+(** Test-only: number of retained samples for [candidate_key]. *)
+
 val outer_wall_for_attempt
   :  mode:mode
   -> observer_attached:bool
   -> per_provider_timeout_s:float option
-  -> provider_id:string
+  -> candidate_key:string
   -> float option
 (** RFC-0022 §1 — backstop wall for the legacy [per_provider_timeout_s]
     knob.
@@ -70,10 +96,10 @@ val outer_wall_for_attempt
       attempt wall budget breach. The legacy outer wall must not
       pre-empt it.
     - [Off] / [Observe] + observer attached: returns
-      [Some (max t (budget_for_provider_id ~provider_id).attempt_wall_max)]
-      when [per_provider_timeout_s = Some t]. Slow-but-legitimate
-      streams (local Ollama 27B / 70B+) get the profile's attempt wall
-      so the legacy 120s knob cannot prematurely fall back the cascade.
+      [Some (max t (budget_for_candidate ~candidate_key).budget.attempt_wall_max)]
+      when [per_provider_timeout_s = Some t]. Successful prior attempts for
+      the same candidate can raise the legacy wall so a slow-but-honest stream
+      is not killed before the liveness observer's own deadline.
     - No observer attached (any mode): returns [per_provider_timeout_s]
       unchanged. Without an observer there is no per-provider budget
       to clamp against, so the caller's legacy knob is honored as-is.

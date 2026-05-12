@@ -46,17 +46,10 @@ type budget = {
   (** Hard backstop on total attempt wall-clock duration. *)
 }
 
-val cloud_fast : budget
-(** [30s / 20s / 180s] — [codex_cli], [claude], [gemini] short answers. *)
-
-val cloud_thinking : budget
-(** [60s / 30s / 300s] — adaptive-reasoning models with thinking deltas. *)
-
-val local_27b : budget
-(** [120s / 60s / 900s] — [ollama_only], [llama-server] mid-size local. *)
-
-val local_70b_plus : budget
-(** [240s / 90s / 1800s] — [70B+] local backstop. *)
+val bootstrap : budget
+(** Conservative first-attempt budget used only until
+    {!Cascade_attempt_liveness_config} has recent successful samples for the
+    concrete provider/model candidate. *)
 
 (** {1 Stream chunk taxonomy}
 

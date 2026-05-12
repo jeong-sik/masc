@@ -1,19 +1,16 @@
-(** RFC-0022 §1 — outer-wall backstop respects the per-profile budget.
+(** RFC-0022 §1 — outer-wall backstop respects living candidate budgets.
 
     The legacy [per_provider_timeout_s] knob (default 120s) used to be
     enforced as a raw [Eio.Time.with_timeout_exn]. That pre-empted
-    attempts before the per-profile attempt-wall ([cloud_fast 180s],
-    [cloud_thinking 300s], [local_27b 900s], [local_70b_plus 1800s])
-    could fire — making slow local LLMs (Ollama) impossible to use.
+    attempts before the liveness observer's attempt-wall could fire.
 
     This module verifies the new contract enforced by
     {!Cascade_attempt_liveness_config.outer_wall_for_attempt}.
 
-    The Ollama scenario (slow streaming past 120s) is exercised at the
-    rule level: with [Enforce + observer] the outer wall returns
-    [None], and the observer drives cancellation. With [Observe /
-    Off + observer] the outer wall is raised to the profile's wall so
-    the legacy 120s knob cannot kill a healthy slow stream. *)
+    With [Enforce + observer] the outer wall returns [None], and the
+    observer drives cancellation. With [Observe / Off + observer] the
+    outer wall is raised to the candidate's living budget so the legacy
+    knob cannot kill a healthy slow stream. *)
 
 open Masc_mcp
 module Cfg = Cascade_attempt_liveness_config
@@ -30,7 +27,7 @@ let test_enforce_with_observer_returns_none () =
       ~mode:Cfg.Enforce
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_id:"codex_cli"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f) "Enforce + observer → None" None actual
 
@@ -40,79 +37,91 @@ let test_enforce_with_observer_ollama_returns_none () =
       ~mode:Cfg.Enforce
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_id:"ollama_only"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f)
     "Enforce + observer + ollama → None (observer is authority)"
     None actual
 
-(* ─── Observe / Off + observer: clip outer wall to profile budget ─── *)
+(* ─── Observe / Off + observer: clip outer wall to living budget ─── *)
 
-let test_observe_ollama_clips_to_local_27b_wall () =
+let test_observe_empty_history_clips_to_bootstrap_wall () =
+  Cfg.reset_success_history_for_test ();
   let actual =
     Cfg.outer_wall_for_attempt
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_id:"ollama_only"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f)
-    "Observe + ollama → local_27b wall 900s (not 120s)"
-    (Some L.local_27b.attempt_wall_max)
+    "Observe + empty history → bootstrap wall (not 120s)"
+    (Some L.bootstrap.attempt_wall_max)
     actual
 
-let test_off_ollama_clips_to_local_27b_wall () =
+let test_off_empty_history_clips_to_bootstrap_wall () =
+  Cfg.reset_success_history_for_test ();
   let actual =
     Cfg.outer_wall_for_attempt
       ~mode:Cfg.Off
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_id:"llama-server"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f)
-    "Off + llama-server → local_27b wall 900s"
-    (Some L.local_27b.attempt_wall_max)
+    "Off + empty history → bootstrap wall"
+    (Some L.bootstrap.attempt_wall_max)
     actual
 
-let test_observe_ollama_70b_clips_to_local_70b_plus_wall () =
+let test_observed_success_history_clips_to_candidate_wall () =
+  Cfg.reset_success_history_for_test ();
+  Cfg.record_success_sample
+    ~candidate_key:"provider:model-a"
+    { Cfg.ttft_ms = 50_000.0; max_inter_chunk_ms = 10_000.0; wall_ms = 600_000.0 };
+  let expected =
+    let resolved = Cfg.budget_for_candidate ~candidate_key:"provider:model-a" in
+    resolved.budget.attempt_wall_max
+  in
   let actual =
     Cfg.outer_wall_for_attempt
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_id:"ollama_70b"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f)
-    "Observe + ollama_70b → local_70b_plus wall 1800s"
-    (Some L.local_70b_plus.attempt_wall_max)
+    "Observe + observed success history → candidate wall"
+    (Some expected)
     actual
 
-let test_observe_cloud_fast_keeps_user_t_when_larger () =
-  (* User explicitly set a larger budget than the profile default —
+let test_observe_keeps_user_t_when_larger () =
+  Cfg.reset_success_history_for_test ();
+  (* User explicitly set a larger budget than the bootstrap default —
      respect it. The clip rule is [max user_t profile_wall]. *)
   let actual =
     Cfg.outer_wall_for_attempt
       ~mode:Cfg.Observe
       ~observer_attached:true
-      ~per_provider_timeout_s:(Some 600.0)
-      ~provider_id:"codex_cli"
+      ~per_provider_timeout_s:(Some 3600.0)
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f)
-    "Observe + codex_cli + user 600s → 600s (>cloud_fast 180s)"
-    (Some 600.0) actual
+    "Observe + user 3600s → 3600s (>bootstrap)"
+    (Some 3600.0) actual
 
-let test_observe_cloud_fast_clips_when_user_smaller () =
-  (* The legacy 120s knob is below cloud_fast 180s — clip up. *)
+let test_observe_bootstrap_clips_when_user_smaller () =
+  Cfg.reset_success_history_for_test ();
+  (* The legacy 120s knob is below bootstrap — clip up. *)
   let actual =
     Cfg.outer_wall_for_attempt
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_id:"codex_cli"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f)
-    "Observe + codex_cli + user 120s → cloud_fast 180s"
-    (Some L.cloud_fast.attempt_wall_max)
+    "Observe + user 120s → bootstrap wall"
+    (Some L.bootstrap.attempt_wall_max)
     actual
 
 (* ─── No observer: pass-through (legacy behaviour preserved) ─── *)
@@ -123,7 +132,7 @@ let test_no_observer_passes_through_user_value () =
       ~mode:Cfg.Off
       ~observer_attached:false
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_id:"ollama_only"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f)
     "Off + no observer → unchanged 120s (legacy)"
@@ -138,7 +147,7 @@ let test_enforce_without_observer_passes_through () =
       ~mode:Cfg.Enforce
       ~observer_attached:false
       ~per_provider_timeout_s:(Some 120.0)
-      ~provider_id:"codex_cli"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f)
     "Enforce + no observer → unchanged 120s (no silent drop)"
@@ -152,7 +161,7 @@ let test_none_input_stays_none_observe_with_observer () =
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:None
-      ~provider_id:"ollama_only"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f) "None input → None output" None actual
 
@@ -162,23 +171,24 @@ let test_none_input_stays_none_off_no_observer () =
       ~mode:Cfg.Off
       ~observer_attached:false
       ~per_provider_timeout_s:None
-      ~provider_id:"codex_cli"
+      ~candidate_key:"provider:model-a"
   in
   Alcotest.(check opt_f) "None + no observer → None" None actual
 
-(* ─── Unknown labels fall back to cloud_fast ─── *)
+(* ─── Unknown candidate keys fall back to explicit bootstrap ─── *)
 
-let test_unknown_label_falls_back_to_cloud_fast () =
+let test_unknown_candidate_uses_bootstrap () =
+  Cfg.reset_success_history_for_test ();
   let actual =
     Cfg.outer_wall_for_attempt
       ~mode:Cfg.Observe
       ~observer_attached:true
       ~per_provider_timeout_s:(Some 60.0)
-      ~provider_id:"some-future-provider"
+      ~candidate_key:"some-future-provider:some-model"
   in
   Alcotest.(check opt_f)
-    "Observe + unknown → cloud_fast 180s"
-    (Some L.cloud_fast.attempt_wall_max)
+    "Observe + unknown candidate → bootstrap"
+    (Some L.bootstrap.attempt_wall_max)
     actual
 
 let () =
@@ -193,16 +203,16 @@ let () =
         ] );
       ( "observe-clips-to-budget",
         [
-          Alcotest.test_case "ollama_only → local_27b wall" `Quick
-            test_observe_ollama_clips_to_local_27b_wall;
-          Alcotest.test_case "llama-server (Off) → local_27b wall" `Quick
-            test_off_ollama_clips_to_local_27b_wall;
-          Alcotest.test_case "ollama_70b → local_70b_plus wall" `Quick
-            test_observe_ollama_70b_clips_to_local_70b_plus_wall;
-          Alcotest.test_case "user 600s > cloud_fast 180s preserved" `Quick
-            test_observe_cloud_fast_keeps_user_t_when_larger;
-          Alcotest.test_case "user 120s < cloud_fast 180s clipped" `Quick
-            test_observe_cloud_fast_clips_when_user_smaller;
+          Alcotest.test_case "empty history → bootstrap wall" `Quick
+            test_observe_empty_history_clips_to_bootstrap_wall;
+          Alcotest.test_case "Off empty history → bootstrap wall" `Quick
+            test_off_empty_history_clips_to_bootstrap_wall;
+          Alcotest.test_case "observed history → candidate wall" `Quick
+            test_observed_success_history_clips_to_candidate_wall;
+          Alcotest.test_case "user 3600s > bootstrap preserved" `Quick
+            test_observe_keeps_user_t_when_larger;
+          Alcotest.test_case "user 120s < bootstrap clipped" `Quick
+            test_observe_bootstrap_clips_when_user_smaller;
         ] );
       ( "no-observer-pass-through",
         [
@@ -220,7 +230,7 @@ let () =
         ] );
       ( "fallback",
         [
-          Alcotest.test_case "unknown label → cloud_fast" `Quick
-            test_unknown_label_falls_back_to_cloud_fast;
+          Alcotest.test_case "unknown candidate → bootstrap" `Quick
+            test_unknown_candidate_uses_bootstrap;
         ] );
     ]

@@ -1007,12 +1007,11 @@ module KeeperRetryBackoff = struct
       @category Timeouts
       @ops_class operator
 
-      Calibrated to match [Cascade_attempt_liveness.local_27b.ttft_max]
-      (180 s) so that slow-but-honest Ollama 27B/70B streams are not
-      denied a degraded retry solely because their first-token latency
-      exceeds the old 60 s floor.  Cloud providers rarely need retries
-      at all; when they do, 180 s is still well within reasonable
-      tail latency. *)
+      Calibrated to the attempt-liveness bootstrap floor so that
+      slow-but-honest streams are not denied a degraded retry solely
+      because their first-token latency exceeds the old 60 s floor.
+      Providers with successful history can learn a wider candidate
+      budget without hard-coding provider or model-size classes. *)
   let degraded_retry_slot_phase_budget_sec =
     Float.max
       5.0

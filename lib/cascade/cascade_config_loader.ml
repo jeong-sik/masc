@@ -99,7 +99,7 @@ let read_json_file path =
    [Cascade_metrics.on_toml_read_race] so operators can alert on
    pathological reload churn (e.g. a writer that fsyncs in a tight
    loop). *)
-let load_toml_in_memory config_path =
+let load_toml_in_memory ~emit_telemetry config_path =
   let source_state =
     Cascade_toml_materializer.source_state ~config_path
   in
@@ -137,36 +137,41 @@ let load_toml_in_memory config_path =
            | Some mp when Float.equal mp mtime_pre ->
              with_cache_lock (fun () ->
                Hashtbl.replace config_cache cache_key (mp, json));
-             Eio.traceln
-               "[CascadeConfig] loaded TOML %s mtime=%.0f (in-memory)"
-               cache_key
-               mp;
-             Ok json
+            if emit_telemetry then
+              Eio.traceln
+                "[CascadeConfig] loaded TOML %s mtime=%.0f (in-memory)"
+                cache_key
+                mp;
+            Ok json
            | Some mp ->
              (* mtime moved between the pre-stat and the post-stat.
                 The rendered content is fresh-as-of mp but we cannot
                 prove it matches either sample, so we don't cache —
                 next call will re-stat and converge. *)
-             Cascade_metrics.on_toml_read_race ();
-             Log.warn
-               ~ctx:"CascadeConfig"
-               "TOML changed mid-read (mtime %.0f -> %.0f) for %s; \
-                serving fresh content but skipping cache update to \
-                force re-stat on next call"
-               mtime_pre
-               mp
-               cache_key;
+             if emit_telemetry then begin
+               Cascade_metrics.on_toml_read_race ();
+               Log.warn
+                 ~ctx:"CascadeConfig"
+                 "TOML changed mid-read (mtime %.0f -> %.0f) for %s; \
+                  serving fresh content but skipping cache update to \
+                  force re-stat on next call"
+                 mtime_pre
+                 mp
+                 cache_key
+             end;
              Ok json
            | None ->
              (* Post-stat failed (file vanished mid-read).  Treat
                 like a race so the caller re-converges next time. *)
-             Cascade_metrics.on_toml_read_race ();
-             Log.warn
-               ~ctx:"CascadeConfig"
-               "TOML disappeared mid-read after mtime=%.0f for %s; \
-                returning in-memory render but skipping cache update"
-               mtime_pre
-               cache_key;
+             if emit_telemetry then begin
+               Cascade_metrics.on_toml_read_race ();
+               Log.warn
+                 ~ctx:"CascadeConfig"
+                 "TOML disappeared mid-read after mtime=%.0f for %s; \
+                  returning in-memory render but skipping cache update"
+                 mtime_pre
+                 cache_key
+             end;
              Ok json)))
 ;;
 
@@ -180,8 +185,8 @@ let load_toml_in_memory config_path =
    on-disk JSON is read: a sibling [cascade.toml] is parsed and
    rendered to an in-memory [Yojson.Safe.t] view that legacy
    JSON-shaped consumers walk via [Yojson.Safe.Util]. *)
-let load_catalog_source path =
-  try load_toml_in_memory path with
+let load_catalog_source_impl ~emit_telemetry path =
+  try load_toml_in_memory ~emit_telemetry path with
   | Sys_error msg -> Error msg
   | Unix.Unix_error (err, fn, arg) ->
     Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
@@ -193,6 +198,14 @@ let load_catalog_source path =
        second call raises [End_of_file]. Surface as an [Error] instead
        of crashing the loader. *)
     Error (Printf.sprintf "cascade source truncated mid-read: %s" path)
+;;
+
+let load_catalog_source path =
+  load_catalog_source_impl ~emit_telemetry:true path
+;;
+
+let load_catalog_source_for_diagnostics path =
+  load_catalog_source_impl ~emit_telemetry:false path
 ;;
 
 (** A model entry with an optional weight for weighted cascade selection.
@@ -552,7 +565,7 @@ let detect_capability_mismatches (entries : catalog_entry list)
 ;;
 
 let load_catalog_impl ~emit_telemetry ~config_path =
-  match load_catalog_source config_path with
+  match load_catalog_source_impl ~emit_telemetry config_path with
   | Error _ as err -> err
   | Ok (`Assoc fields) ->
     (* RFC-0058: register TOML-declared profiles before catalog parsing
@@ -715,9 +728,9 @@ let load_catalog_for_diagnostics ~config_path =
   load_catalog_impl ~emit_telemetry:false ~config_path
 ;;
 
-let load_profile_weighted ~config_path ~name =
+let load_profile_weighted_impl ~emit_telemetry ~config_path ~name =
   let key = name ^ "_models" in
-  match load_catalog_source config_path with
+  match load_catalog_source_impl ~emit_telemetry config_path with
   | Error msg ->
     (* Surface the load failure on the standard logging channel so
          operators see it without tailing stderr. Returning the empty
@@ -737,6 +750,14 @@ let load_profile_weighted ~config_path ~name =
     (match json |> member key with
      | `List items -> List.filter_map parse_weighted_item items
      | _ -> [])
+;;
+
+let load_profile_weighted ~config_path ~name =
+  load_profile_weighted_impl ~emit_telemetry:true ~config_path ~name
+;;
+
+let load_profile_weighted_for_diagnostics ~config_path ~name =
+  load_profile_weighted_impl ~emit_telemetry:false ~config_path ~name
 ;;
 
 let load_profile ~config_path ~name =
@@ -985,8 +1006,8 @@ let empty_strategy_config =
   }
 ;;
 
-let resolve_strategy_config ~config_path ~name =
-  match load_catalog_source config_path with
+let resolve_strategy_config_impl ~emit_telemetry ~config_path ~name =
+  match load_catalog_source_impl ~emit_telemetry config_path with
   | Error msg ->
     Log.Misc.warn
       "[CascadeConfig] resolve_strategy_config: %s (name=%s, path=%s)"
@@ -1013,6 +1034,14 @@ let resolve_strategy_config ~config_path ~name =
     ; server_error_decay_base = read_float_field json (name ^ "_server_error_decay_base")
     ; server_error_skip_after = read_int_field json (name ^ "_server_error_skip_after")
     }
+;;
+
+let resolve_strategy_config ~config_path ~name =
+  resolve_strategy_config_impl ~emit_telemetry:true ~config_path ~name
+;;
+
+let resolve_strategy_config_for_diagnostics ~config_path ~name =
+  resolve_strategy_config_impl ~emit_telemetry:false ~config_path ~name
 ;;
 
 (* ── RFC-0041: cascade_profile loader ──────────────────────────────── *)

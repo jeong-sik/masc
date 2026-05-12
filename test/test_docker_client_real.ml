@@ -509,6 +509,47 @@ let test_is_eintr_127_false_on_signal () =
     (Docker_client_real.is_eintr_127 (Unix.WSIGNALED 9) "interrupted system call")
 ;;
 
+let test_exec_gate_blocked_detects_126_sentinel () =
+  check
+    bool
+    "blocked"
+    true
+    (Docker_client_real.is_exec_gate_blocked
+       (Unix.WEXITED 126)
+       "exec_gate_blocked: policy denied")
+;;
+
+let test_exec_gate_blocked_rejects_plain_126 () =
+  check
+    bool
+    "plain 126"
+    false
+    (Docker_client_real.is_exec_gate_blocked (Unix.WEXITED 126) "permission denied")
+;;
+
+let test_docker_real_timeout_budgets_are_separated () =
+  check
+    (float 0.001)
+    "exec keeps shell budget"
+    60.0
+    (Docker_client_real.session_exec_timeout_sec ());
+  check
+    (float 0.001)
+    "probe keeps sandbox budget"
+    10.0
+    (Docker_client_real.docker_probe_timeout_sec ());
+  check
+    (float 0.001)
+    "start keeps turn-up budget"
+    15.0
+    (Docker_client_real.session_start_timeout_sec ());
+  check
+    (float 0.001)
+    "preflight keeps short turn-sandbox budget"
+    2.0
+    (Docker_client_real.session_preflight_timeout_sec ())
+;;
+
 let () =
   run
     "Docker_client_real (Phase 3b-iv.2.3)"
@@ -603,6 +644,20 @@ let () =
             `Quick
             test_is_eintr_127_false_on_other_exit_codes
         ; test_case "signal ⇒ false" `Quick test_is_eintr_127_false_on_signal
+        ] )
+    ; ( "exec gate / timeout policy (pure, Phase 4.1-g)"
+      , [ test_case
+            "126 + exec_gate_blocked marker ⇒ true"
+            `Quick
+            test_exec_gate_blocked_detects_126_sentinel
+        ; test_case
+            "plain 126 ⇒ false"
+            `Quick
+            test_exec_gate_blocked_rejects_plain_126
+        ; test_case
+            "Docker real timeout callers stay separated"
+            `Quick
+            test_docker_real_timeout_budgets_are_separated
         ] )
     ]
 ;;

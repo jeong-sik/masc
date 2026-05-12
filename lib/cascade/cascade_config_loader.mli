@@ -20,6 +20,10 @@
     JSON is read or written. *)
 val load_catalog_source : string -> (Yojson.Safe.t, string) result
 
+(** Same as {!load_catalog_source}, but suppresses TOML source-read
+    trace / race telemetry for high-frequency diagnostic polling. *)
+val load_catalog_source_for_diagnostics : string -> (Yojson.Safe.t, string) result
+
 (** Drop the cached entry for one cascade source path.
 
     Intended for in-process editors/tests that overwrite the file and need
@@ -184,6 +188,13 @@ val load_profile_weighted :
   name:string ->
   weighted_entry list
 
+(** Diagnostics-only variant of {!load_profile_weighted}; suppresses
+    TOML source-read trace / race telemetry. *)
+val load_profile_weighted_for_diagnostics :
+  config_path:string ->
+  name:string ->
+  weighted_entry list
+
 (** Per-cascade inference parameter overrides. *)
 type inference_params = {
   temperature: float option;
@@ -317,6 +328,9 @@ type strategy_config = {
 }
 
 val resolve_strategy_config :
+  config_path:string -> name:string -> strategy_config
+
+val resolve_strategy_config_for_diagnostics :
   config_path:string -> name:string -> strategy_config
 
 (** {1 RFC-0041 cascade_profile bridge} *)

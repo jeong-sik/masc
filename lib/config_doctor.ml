@@ -110,6 +110,7 @@ let option_field name = function
 type cascade_diagnosis = {
   issues : catalog_issue list;
   fallback_cycles : string list list;
+  missing_toml_with_legacy_json : bool;
   (** Cycles surface as warning issues inside [issues] for the
       flat warnings list, but we keep the raw list here so
       {!cascade_catalog_next_actions} can emit a cycle-specific
@@ -160,12 +161,17 @@ let diagnose_cascade_catalog ~active_config_root =
             }
           ]
       ; fallback_cycles = []
+      ; missing_toml_with_legacy_json = true
       }
     else
-      { issues = []; fallback_cycles = [] }
+      { issues = []; fallback_cycles = []; missing_toml_with_legacy_json = false }
   else
-    let profiles = Cascade_catalog_validator.discover_profiles ~config_path in
-    let validator_issues = Cascade_catalog_validator.diagnose_catalog ~config_path in
+    let profiles =
+      Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path
+    in
+    let validator_issues =
+      Cascade_catalog_validator.diagnose_catalog_for_diagnostics ~config_path
+    in
     (* Surface fallback-cycle detection alongside the per-profile
        validator output.  [Cascade_config_loader.load_catalog]
        already detects cycles and bumps
@@ -205,7 +211,7 @@ let diagnose_cascade_catalog ~active_config_root =
     in
     let issues = validator_issues @ cycle_issues in
     if issues = [] then
-      { issues = []; fallback_cycles }
+      { issues = []; fallback_cycles; missing_toml_with_legacy_json = false }
     else
       let error_count =
         issues
@@ -224,10 +230,10 @@ let diagnose_cascade_catalog ~active_config_root =
             error_count
             warn_count;
       } in
-      { issues = summary :: issues; fallback_cycles }
+      { issues = summary :: issues; fallback_cycles; missing_toml_with_legacy_json = false }
 
 let cascade_catalog_next_actions ~config_path
-    { issues; fallback_cycles } =
+    { issues; fallback_cycles; missing_toml_with_legacy_json } =
   if issues = [] then
     []
   else
@@ -239,6 +245,16 @@ let cascade_catalog_next_actions ~config_path
         Printf.sprintf
           "Fix or disable the broken cascade preset entries in %s before \
            assigning keepers to them."
+          config_path
+      else if missing_toml_with_legacy_json then
+        let legacy_json =
+          Filename.concat
+            (Filename.dirname config_path)
+            Config_dir_resolver.cascade_json_filename
+        in
+        Printf.sprintf
+          "Migrate or rename %s to %s before relying on catalog diagnostics."
+          legacy_json
           config_path
       else if fallback_cycles <> [] then
         (* Cycle warnings are a runtime-stalling loop, not degraded

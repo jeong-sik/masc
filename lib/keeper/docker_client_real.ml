@@ -43,6 +43,9 @@ let map_status_to_exec_result
       ((status, stdout, stderr) : Unix.process_status * string * string)
   =
   match status with
+  | Unix.WEXITED 126
+    when String_util.contains_substring_ci (stdout ^ "\n" ^ stderr) "exec_gate_blocked:"
+    -> Error Docker_client.Daemon_unreachable
   | Unix.WEXITED 125 | Unix.WEXITED 127 -> Error Docker_client.Daemon_unreachable
   | Unix.WEXITED code -> Ok Docker_response.{ exit_code = code; stdout; stderr }
   | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error Docker_client.Daemon_unreachable
@@ -76,15 +79,35 @@ let is_eintr_127 (status : Unix.process_status) (out : string) =
   | _ -> false
 ;;
 
-(* Sandbox subprocess timeout default.  [Exec_gate.run_argv_with_status*]
+let is_exec_gate_blocked (status : Unix.process_status) (out : string) =
+  match status with
+  | Unix.WEXITED 126 -> String_util.contains_substring_ci out "exec_gate_blocked:"
+  | _ -> false
+;;
+
+let docker_probe_timeout_sec () =
+  Env_config_exec_timeout.timeout_sec ~caller:Env_config_exec_timeout.Sandbox ()
+;;
+
+let session_exec_timeout_sec () =
+  Env_config_exec_timeout.timeout_sec ~caller:Env_config_exec_timeout.Shell ()
+;;
+
+let session_start_timeout_sec () =
+  Env_config_exec_timeout.timeout_sec ~caller:Env_config_exec_timeout.Turn_up ()
+;;
+
+let session_preflight_timeout_sec () =
+  Env_config_exec_timeout.timeout_sec ~caller:Env_config_exec_timeout.Turn_sandbox ()
+;;
+
+(* Docker probe timeout default.  [Exec_gate.run_argv_with_status*]
    all carry a hard-coded [?(timeout_sec = 60.0)] default that bypasses
-   the per-caller env override ([MASC_EXEC_TIMEOUT_TURN_SANDBOX_SEC]);
-   routing through [Env_config_exec_timeout] keeps the SSOT live for
-   sites that omit a caller-specific timeout. *)
+   the per-caller env override ([MASC_EXEC_TIMEOUT_SANDBOX_SEC]); routing
+   through [Env_config_exec_timeout] keeps the SSOT live for short
+   daemon probes that omit a caller-specific timeout. *)
 let default_timeout_sec () =
-  Env_config_exec_timeout.timeout_sec
-    ~caller:Env_config_exec_timeout.Turn_sandbox
-    ()
+  docker_probe_timeout_sec ()
 ;;
 
 let gated_argv_with_status ?timeout_sec ~(summary : string) argv =
@@ -214,10 +237,14 @@ let exec ?user ?workdir ?stdin ~container ~cmd () =
   match stdin with
   | None ->
     map_status_to_exec_result
-      (gated_argv_with_status_split ~summary:"keeper docker exec" argv)
+      (gated_argv_with_status_split
+         ~timeout_sec:(session_exec_timeout_sec ())
+         ~summary:"keeper docker exec"
+         argv)
   | Some stdin_content ->
     map_status_to_exec_result
       (gated_argv_with_stdin_and_status_split
+         ~timeout_sec:(session_exec_timeout_sec ())
          ~summary:"keeper docker exec (stdin-piped)"
          ~stdin_content
          argv)
@@ -245,8 +272,10 @@ let run plan =
 
 let rm container =
   let argv = [ "docker"; "rm"; "-f"; Keeper_container_name.to_string container ] in
-  let status, _stdout = gated_argv_with_status ~summary:"keeper docker rm" argv in
-  map_exit_status_for_rm status
+  let status, stdout = gated_argv_with_status ~summary:"keeper docker rm" argv in
+  if is_exec_gate_blocked status stdout
+  then Error Docker_client.Daemon_unreachable
+  else map_exit_status_for_rm status
 ;;
 
 (* Pure: parses the stdout of [docker info --format
@@ -277,6 +306,8 @@ let info_security_options () =
     gated_argv_with_status_split ~summary:"keeper docker info security-options" argv
   with
   | Unix.WEXITED 0, out, _ -> parse_security_options out
+  | status, out, err when is_exec_gate_blocked status (out ^ "\n" ^ err) ->
+    Error Docker_client.Daemon_unreachable
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ ->
     (* Any non-zero exit means the daemon could not answer (not
        running, permission denied, CLI missing → synthesized
@@ -302,6 +333,8 @@ let image_present ~image =
   let argv = [ "docker"; "image"; "inspect"; image ] in
   match gated_argv_with_status ~summary:"keeper docker image inspect" argv with
   | Unix.WEXITED 0, _ -> Ok ()
+  | status, out when is_exec_gate_blocked status out ->
+    Error Docker_client.Daemon_unreachable
   | Unix.WEXITED 127, _ -> Error Docker_client.Daemon_unreachable
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
     Error Docker_client.Image_pull_failed
@@ -400,9 +433,8 @@ let run_detached (plan : Keeper_sandbox_session_plan.t) =
   match write_identity_files plan with
   | Error _ as err -> err
   | Ok () ->
-    let ensure_timeout =
-      Env_config_exec_timeout.timeout_sec ~caller:Env_config_exec_timeout.Turn_sandbox ()
-    in
+    let ensure_timeout = session_preflight_timeout_sec () in
+    let start_timeout = session_start_timeout_sec () in
     (match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec:ensure_timeout with
      | Error _ ->
        (* docker runtime could not be ensured — daemon-level. *)
@@ -416,8 +448,8 @@ let run_detached (plan : Keeper_sandbox_session_plan.t) =
            ~started_at:(Unix.gettimeofday ())
        in
        (match
-          gated_argv_with_status_split
-            ~timeout_sec:ensure_timeout
+         gated_argv_with_status_split
+            ~timeout_sec:start_timeout
             ~summary:"keeper docker run -d (session)"
             argv
         with

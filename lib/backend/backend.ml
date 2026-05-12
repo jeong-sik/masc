@@ -684,7 +684,9 @@ module FileSystem = struct
                    | Ok () -> Ok true
                    | Error e -> Error e))
          | Error _ -> Ok false)
-    | Error e -> Error e
+    | Error
+        (( NotFound _ | IOError _ | InvalidKey _ | ConnectionFailed _
+         | BackendNotSupported _ ) as e) -> Error e
 
   let release_lock t ~key ~owner =
     let lock_key = "locks:" ^ key in
@@ -697,7 +699,9 @@ module FileSystem = struct
               | Error _ -> Ok false)
          | _ -> Ok false)  (* Not owner or invalid *)
     | Error (NotFound _) -> Ok true  (* Already released *)
-    | Error e -> Error e
+    | Error
+        (( AlreadyExists _ | IOError _ | InvalidKey _ | ConnectionFailed _
+         | BackendNotSupported _ ) as e) -> Error e
 
   let extend_lock t ~key ~owner ~ttl_seconds =
     let lock_key = "locks:" ^ key in

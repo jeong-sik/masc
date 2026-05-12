@@ -15,8 +15,8 @@
 |--------|-----|----------|
 | 총 LOC (`.ml`) | **3037** | `wc -l lib/keeper/keeper_unified_turn.ml` |
 | `.mli` LOC | 317 | `wc -l lib/keeper/keeper_unified_turn.mli` |
-| 최상위 `let` 바인딩 | **13** | `rg "^let " lib/keeper/keeper_unified_turn.ml \| wc -l` |
-| `mli` 공개 `val` | **30** | `rg "^val " lib/keeper/keeper_unified_turn.mli \| wc -l` |
+| 최상위 `let` 바인딩 | **13** | `rg -c "^let " lib/keeper/keeper_unified_turn.ml` |
+| `mli` 공개 `val` | **30** | `rg -c "^val " lib/keeper/keeper_unified_turn.mli` |
 | 최상위 `type` | 1 (`turn_tool_event_tracker`, line 128) | `rg "^type " lib/keeper/keeper_unified_turn.ml` |
 | `let rec` | 0 | `rg "^let rec " lib/keeper/keeper_unified_turn.ml` |
 | `include` 라인 | 3 (lines 13–15) | `keeper_turn_helpers`, `keeper_turn_liveness`, `keeper_turn_cascade_budget` |
@@ -255,10 +255,10 @@ wc -l lib/keeper/keeper_unified_turn.ml
 wc -l lib/keeper/keeper_unified_turn.mli
 
 # Top-level let 개수
-rg "^let " lib/keeper/keeper_unified_turn.ml -n
+rg -c "^let " lib/keeper/keeper_unified_turn.ml
 
 # mli 공개 val 개수
-rg "^val " lib/keeper/keeper_unified_turn.mli | wc -l
+rg -c "^val " lib/keeper/keeper_unified_turn.mli
 
 # 외부 caller
 rg "Keeper_unified_turn\." lib/ test/ bin/ --type ml -n

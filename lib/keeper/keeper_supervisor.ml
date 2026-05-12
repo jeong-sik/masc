@@ -259,7 +259,58 @@ let launch_supervised_fiber
       }
     in
     Keeper_registry.enqueue_event ~base_path meta.name bootstrap_signal;
-    Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+    (* RFC-0059 PR-7-pilot: when [MASC_KEEPER_DOMAIN_POOL_ENABLED] is set
+       AND the shared [Executor_pool_ref] has a pool, route the per-keeper
+       fork body through the pool so the heavy heartbeat loop runs on a
+       worker Domain instead of contending for the main Domain's Eio
+       scheduler with HTTP/SSE handlers and every other keeper.
+
+       Default OFF: opt-in only. When ON the body still owns its own
+       state via [Keeper_registry] (file-backed, cross-domain safe);
+       the outer [Eio.Fiber.fork] on [ctx.sw] preserves the existing
+       structured-concurrency contract — exceptions from the worker
+       propagate via [submit_exn] back to the awaiting main-domain
+       fiber and on to [ctx.sw].
+
+       Cross-domain switch / fiber-local-state safety inside
+       [run_heartbeat_loop] is the open architectural question this
+       pilot exists to validate; see RFC-0059 §10 risks. *)
+    let pool_for_keeper =
+      if Env_config.KeeperSupervisor.domain_pool_enabled
+      then Executor_pool_ref.get ()
+      else None
+    in
+    (* IO-bound weight: 0.05 mirrors [Domain_pool.weight_io] (the
+       canonical IO weight from [lib/core/domain_pool.ml:9]).  The
+       supervisor talks to [Eio.Executor_pool.t] directly via
+       [Executor_pool_ref] (no [Domain_pool.t] wrapper available here),
+       so the constant is re-named locally with a reference comment
+       rather than going through [Domain_pool.submit_io].  Drift between
+       these two values would silently change keeper concurrency under
+       the pool. *)
+    let keeper_io_weight = 0.05 in
+    let fork_body body =
+      match pool_for_keeper with
+      | Some pool ->
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+          try Eio.Executor_pool.submit_exn pool ~weight:keeper_io_weight body with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            (* Match the dashboard offload pattern in
+               [server_dashboard_http_runtime_support]: if the pool
+               itself fails (rather than the body raising on
+               cancellation), warn-log and fall back inline so a
+               misconfigured pool does not bring down the supervisor
+               by surfacing the exception to [ctx.sw]. *)
+            Log.Keeper.warn
+              "keeper supervise pool submit failed, running inline: \
+               keeper=%s err=%s"
+              meta.name
+              (Printexc.to_string exn);
+            body ())
+      | None -> Eio.Fiber.fork ~sw:ctx.sw body
+    in
+    fork_body (fun () ->
       let resolved = ref false in
       let resolve_done value =
         if (not !resolved) && Keeper_registry.try_resolve_done reg value

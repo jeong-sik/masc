@@ -81,13 +81,6 @@ let html_entity_replacements =
   |> List.map (fun (entity, replacement) ->
          (Re.str entity |> Re.compile, replacement))
 
-let json_error message =
-  Yojson.Safe.to_string
-    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
-
-let json_ok fields =
-  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
-
 let normalize_spaces text =
   text |> Re.replace_string whitespace_re ~by:" " |> String.trim
 
@@ -428,7 +421,7 @@ let result_json ~query ~search_url ~engine hits =
                ("published_at", Json_util.string_opt_to_json hit.published_at);
              ])
   in
-  json_ok
+  Tool_args.ok_response
     [
       ( "result",
         `Assoc

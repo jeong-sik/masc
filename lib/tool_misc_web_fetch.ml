@@ -19,14 +19,6 @@ open Tool_args
 
 let default_timeout_sec = 15
 
-(** JSON response helpers — same pattern as Tool_misc_web_search *)
-let json_error message =
-  Yojson.Safe.to_string
-    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
-
-let json_ok fields =
-  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
-
 (** Extract <title> from HTML *)
 let title_tag_re =
   Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<title[^>]*>(.*?)</title>"
@@ -213,7 +205,7 @@ let handle ~tool_name ~start_time args =
                   | Some d -> [ ("description", `String d) ]
                   | None -> [])
                 in
-                let json = json_ok fields in
+                let json = Tool_args.ok_response fields in
                 cache_store key json now;
                 Tool_result.ok ~tool_name ~start_time json
             | Error message -> Tool_result.error ~tool_name ~start_time message))

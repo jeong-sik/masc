@@ -51,10 +51,19 @@ OAS  ──does not know──→ MASC
 
 ## Config Ownership
 
-- `config/cascade.json`은 **MASC runtime contract**다.
+- `config/cascade.toml`은 **MASC runtime contract**다. On-disk
+  `cascade.json`은 legacy compatibility/fallback input일 뿐이며 새 authoring SSOT가 아니다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
 - cascade schema, parsing, label semantics, selection policy의 owner는 MASC다.
 - MASC는 repo-level default와 keeper별 `cascade_name` override를 해석해 concrete provider/model 후보를 고른다.
 - OAS는 MASC가 선택한 concrete provider/model config를 실행하는 단일-provider runtime으로 남는다.
+- OAS provider catalog / capability manifest / pricing override는 generic
+  provider runtime contract다. MASC may project `cascade.toml` provider/model
+  facts into those OAS contracts, but OAS must not learn MASC routes,
+  keeper phases, tier-groups, board/governance semantics, or dashboard policy.
+- `provider/model-free` in MASC means MASC policy code routes by logical use,
+  declared capability, profile order, health, capacity, and receipt state; it
+  does not branch on vendor/model literals. Provider/model ids remain operator
+  configuration data.
 - 따라서 checked-in repo defaults는 review-stable pinning이 중요할 때 explicit `provider:model_id`를 쓰고, adapter default 자체를 계약으로 삼을 때만 `provider:auto`를 쓴다.
 - legacy `allowed_providers` keeper TOML/meta fields는 compatibility input일 뿐이며, active runtime policy로 취급하지 않는다.
 - persisted legacy keeper meta tool-policy fields are scrubbed into canonical `tool_access` on read; direct `meta_of_json` callers must use canonical keeper meta keys.
@@ -99,6 +108,8 @@ OAS  ──does not know──→ MASC
 
 These are the next changes that are generic enough to propose upstream:
 
+- generic provider catalog / model capability / pricing manifest contracts for
+  broad cloud APIs and non-interactive CLI/subscriber runtimes
 - harness case/result/verdict/repair-directive primitives that MASC evaluators can reuse
 - richer swarm `agent_entry` metadata so `planned_worker` routing and telemetry survive end to end
 - structured runtime-health probe callback to replace the current boolean `resource_check`
@@ -137,7 +148,8 @@ Use this checklist when reviewing boundary-touching PRs:
 1. **OAS가 MASC를 새로 알게 되는가?**
    - generic runtime/harness primitive가 아니라 room/task/governance/session semantics가 OAS public contract로 새어 나오면 안 된다.
 2. **MASC core가 provider/model 세부를 새로 배우는가?**
-   - model ID, vendor, token/cost detail은 OAS-facing adapter/bridge에 머물러야 한다.
+   - model ID, vendor, token/cost detail은 config 또는 OAS-facing adapter/bridge에 머물러야 한다.
+   - routing/policy code가 vendor/model literal로 분기하면 provider/model-free 위반이다.
 3. **문서 truth가 코드 truth와 일치하는가?**
    - 특히 cascade labels, runtime-health semantics, boundary-audit snapshot은 구현과 SSOT 문서가 함께 갱신되어야 한다.
 4. **Checked-in cascade labels are explicit enough for stable review**

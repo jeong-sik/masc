@@ -1,6 +1,7 @@
 ---- MODULE KeeperTaskAcquisition ----
 \* Task acquisition control flow for [lib/keeper/keeper_unified_turn.ml]
-\* [run_keeper_cycle] (line 1042+).
+\* [run_keeper_cycle] (iter 64 N-2.c removed line number — function name
+\* is stable, line number drifts).
 \*
 \* The OCaml runtime composes task acquisition out of three pieces:
 \*   1. Producers (operator, supervisor, autoresearch, board posts)

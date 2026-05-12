@@ -2,8 +2,12 @@
 \* Operator approval queue control flow for
 \* [lib/keeper/keeper_approval_queue.ml].
 \*
-\* Runtime entities modelled (see [submit_and_await] at line 751,
-\* [submit_pending] at line 772, [expire_stale] at line 941):
+\* Runtime entities modelled (see functions [submit_and_await],
+\* [submit_pending], [expire_stale]; iter 64 N-2.a removed line numbers
+\* because OCaml line drift had reached +245..+413 from the original
+\* cites — function names are stable, line numbers are not.  The drift
+\* was audited in iter 63 #14919; iter 64 N-2.c adds a structural guard
+\* at scripts/audit-tla-ml-line-refs.sh):
 \*
 \*   pending  : SMap from id to entry, holding submitted-but-unresolved
 \*              approval requests. Each entry carries a resolver that
@@ -16,7 +20,7 @@
 \* [Eio.Promise.await]; if the operator UI disconnects without a
 \* forced rejection path, the fiber stays blocked indefinitely. The
 \* current OCaml code calls [Eio.Promise.resolve resolver (Reject
-\* reason)] inside [expire_stale] (line 970-972) which is correct,
+\* reason)] inside [expire_stale] which is correct,
 \* but the safety property "every submitted approval is eventually
 \* resolved or expired (and the fiber wakes)" was not enforced —
 \* a future refactor could regress it silently.
@@ -82,8 +86,8 @@ Resolve ==
     /\ UNCHANGED submitted_total
 
 \* [expire_stale] removes the pending entry AND resolves the promise
-\* with [Reject "approval timed out after Ns"] (keeper_approval_queue.ml
-\* lines 970-972). The fiber wakes up with a Reject decision.
+\* with [Reject "approval timed out after Ns"] in keeper_approval_queue.ml.
+\* The fiber wakes up with a Reject decision.
 ExpireStale ==
     /\ pending_count > 0
     /\ pending_count'    = pending_count - 1

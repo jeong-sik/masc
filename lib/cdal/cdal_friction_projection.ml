@@ -352,8 +352,8 @@ let project_window
   | Single_run, [ proof ] ->
     project_single_run ~store ~completeness_gaps ~tripwire_threshold proof
   | Single_run, _ -> None (* Single_run requires exactly one proof *)
-  | _, [] -> None
-  | _, _ ->
+  | (Last_n_runs _ | Session _ | Rolling_seconds _), [] -> None
+  | (Last_n_runs _ | Session _ | Rolling_seconds _), (_ :: _) ->
     let per_run =
       List.map
         (fun proof ->

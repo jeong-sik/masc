@@ -171,6 +171,7 @@
   tool_catalog_surfaces
   tool_misc_transport
   tool_misc_admin
+  enforcement_status
   tool_misc_web_search
   tool_misc_web_fetch
   meta_cognition_types

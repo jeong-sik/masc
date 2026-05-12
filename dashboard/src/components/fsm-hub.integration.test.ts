@@ -86,6 +86,7 @@ const REAL_COMPOSITE_PAYLOAD = {
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
+  fsm_guard_violations: 0,
   is_live: false,
   last_outcome: null,
 }

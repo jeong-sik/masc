@@ -4,6 +4,10 @@ import {
   CompositeSchemaDriftError,
 } from './keeper-composite'
 
+// Minimal snapshot mirroring the required keys of
+// `keeper_composite_observer.ml` `snapshot_to_json`. Optional keys
+// (keeper, collapsed_from, circuit_breaker, phase_diagnosis, execution,
+// runtime_attention, recommended_actions) are added per-test.
 const VALID_SNAPSHOT = {
   correlation_id: 'corr-1',
   run_id: 'run-1',
@@ -21,6 +25,7 @@ const VALID_SNAPSHOT = {
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
+  fsm_guard_violations: 0,
   is_live: true,
   last_outcome: null,
 }
@@ -34,6 +39,17 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.is_live).toBe(true)
     expect(result.last_outcome).toBeNull()
     expect(result.recommended_actions).toEqual([])
+    expect(result.fsm_guard_violations).toBe(0)
+  })
+
+  it('parses a non-zero fsm_guard_violations count', () => {
+    const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, fsm_guard_violations: 3 })
+    expect(result.fsm_guard_violations).toBe(3)
+  })
+
+  it('throws CompositeSchemaDriftError when fsm_guard_violations is absent', () => {
+    const { fsm_guard_violations: _, ...noViolations } = VALID_SNAPSHOT
+    expect(() => parseKeeperCompositeSnapshot(noViolations)).toThrow(CompositeSchemaDriftError)
   })
 
   it('parses explicit keeper identity when emitted by the backend', () => {

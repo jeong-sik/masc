@@ -81,7 +81,9 @@ let of_process_status = function
     in
     (* cat is provably one of {Oom_killed, Segfault, Signal _} from the
        [match signum] above; the remaining category ctors are listed
-       explicitly so a new ctor forces a compile error here (warning 4). *)
+       explicitly (no [_ ->] arm) so a new ctor makes this match
+       non-exhaustive — warning 8, which the top-level dune turns into a
+       compile error via [-warn-error +8]. *)
     let lab = match cat with
       | Oom_killed -> "oom_killed"
       | Segfault -> "segfault"

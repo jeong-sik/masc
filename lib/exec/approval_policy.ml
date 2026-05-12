@@ -13,13 +13,13 @@ type t = {
    it short-circuits the policy — the approval UI cannot "yes" its way
    past this one.
 
-   [@warning "-4"]: the [_ :: rest] arm is a find-first scan that
-   *intentionally* skips every non-matching capability — including
-   future [Capability.t] ctors and future [Git_op.t] ctors that are not
-   [Destructive]. Forcing an explicit enumeration over both nested
-   variants adds friction with no safety gain (the answer is always
-   "skip and keep scanning"). RFC-0071 §3.4.1 — nested find-first scan
-   exemption, not a closed-sum dispatch. *)
+   [@@warning "-4"] (on the function below): the [_ :: rest] arm is a
+   find-first scan that *intentionally* skips every non-matching
+   capability — including future [Capability.t] ctors and future
+   [Git_op.t] ctors that are not [Destructive]. Forcing an explicit
+   enumeration over both nested variants adds friction with no safety
+   gain (the answer is always "skip and keep scanning"). RFC-0071
+   §3.4.1 — nested find-first scan exemption, not a closed-sum dispatch. *)
 let find_destructive_git (caps : Capability.t list) : Git_op.t option =
   let rec scan = function
     | [] -> None
@@ -37,10 +37,10 @@ let find_destructive_git (caps : Capability.t list) : Git_op.t option =
    because write-outside is the "is this supposed to touch the host?"
    smell.
 
-   [@warning "-4"]: same find-first-scan rationale as
-   [find_destructive_git] — the [_ :: rest] arm intentionally skips
-   every non-escaping capability, future ctors included.
-   RFC-0071 §3.4.1 nested find-first scan exemption. *)
+   [@@warning "-4"] (on the function below): same find-first-scan
+   rationale as [find_destructive_git] — the [_ :: rest] arm
+   intentionally skips every non-escaping capability, future ctors
+   included. RFC-0071 §3.4.1 nested find-first scan exemption. *)
 let find_write_escape (caps : Capability.t list) : Path_scope.t option =
   let escapes (ps : Path_scope.t) : bool =
     match Path_scope.scope ps with

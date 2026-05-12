@@ -39,13 +39,13 @@
     - [run] — wired: spawns
       [docker run --rm --name <name> <image> sh -lc <cmd>] via
       [Process_eio.run_argv_with_status_split], passing
-      [Keeper_sandbox_plan.timeout_budget_sec] as the
+      [Keeper_sandbox_oneshot_plan.timeout_budget_sec] as the
       [?timeout_sec] parameter. Status mapping is the same as [exec]
       ({!Docker_response.exec_result} on container-command exit;
       [Error Daemon_unreachable] on daemon-level status). [--rm]
       flag removes the container after exit (RFC §3.1's interim
       default cleanup; a typed cleanup-policy field on
-      {!Keeper_sandbox_plan.t} is deferred to a follow-up RFC).
+      {!Keeper_sandbox_oneshot_plan.t} is deferred to a follow-up RFC).
     - [ps_query] — still [Error Cleanup_failed] placeholder pending
       3b-iv.2.4 (JSON parser for
       [docker ps --format '\{\{json .\}\}']).

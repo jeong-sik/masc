@@ -21,7 +21,7 @@ include Docker_client.S
 
 (** [inject_run plan response] enqueues [response] to be returned when
     {!run} is called with a plan that equals [plan] (via
-    [Keeper_sandbox_plan.equal]).
+    [Keeper_sandbox_oneshot_plan.equal]).
 
     Strict FIFO: only the *front* of the queue is consulted. If the
     incoming plan does not equal the front, the queue is NOT scanned
@@ -29,7 +29,7 @@ include Docker_client.S
     queue is left intact. This guarantees test-failure on
     out-of-order or unexpected calls instead of papering them over. *)
 val inject_run
-  :  Keeper_sandbox_plan.t
+  :  Keeper_sandbox_oneshot_plan.t
   -> (Docker_response.exec_result, Docker_client.sandbox_error) result
   -> unit
 

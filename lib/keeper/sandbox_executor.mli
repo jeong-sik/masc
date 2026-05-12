@@ -1,7 +1,7 @@
 (** RFC-0070 Phase 3c.1 — Sandbox_executor (scaffold + retry).
 
     Functor on {!Docker_client.S}. Composes a pure
-    {!Keeper_sandbox_plan.t} with a daemon client to execute one
+    {!Keeper_sandbox_oneshot_plan.t} with a daemon client to execute one
     sandbox call end-to-end. Both Mock (Phase 3b-iv.1b) and the
     upcoming Real (Phase 3b-iv.2) satisfy [S], so this functor is
     interchangeable across them.
@@ -23,7 +23,7 @@
 module Make : functor (D : Docker_client.S) -> sig
   (** [execute_plan plan] runs [plan] through [D.run] once. *)
   val execute_plan
-    :  Keeper_sandbox_plan.t
+    :  Keeper_sandbox_oneshot_plan.t
     -> (Docker_response.exec_result, Docker_client.sandbox_error) result
 
   (** [execute_plan_with_retry ~retry plan] calls [D.run plan] up to
@@ -45,6 +45,6 @@ module Make : functor (D : Docker_client.S) -> sig
       back-to-back retries are acceptable. *)
   val execute_plan_with_retry
     :  retry:Keeper_backoff_policy.t
-    -> Keeper_sandbox_plan.t
+    -> Keeper_sandbox_oneshot_plan.t
     -> (Docker_response.exec_result, Docker_client.sandbox_error) result
 end

@@ -22,7 +22,7 @@ module Real_executor = Sandbox_executor.Make (Docker_client_real)
 
 let sample_plan () =
   match
-    Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"alice" ~cmd:"echo hi"
+    Keeper_sandbox_oneshot_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"alice" ~cmd:"echo hi"
   with
   | Ok p -> p
   | Error _ -> failwith "test fixture"

@@ -14,7 +14,7 @@ let setup () = Docker_client_mock.reset ()
 
 let sample_plan ?(turn_id = 1) ?(meta_name = "alice") () =
   match
-    Keeper_sandbox_plan.of_request
+    Keeper_sandbox_oneshot_plan.of_request
       ~turn_id
       ~attempt:0
       ~meta_name

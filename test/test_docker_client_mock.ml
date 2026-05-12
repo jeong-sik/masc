@@ -14,7 +14,7 @@ let (_ : (module Docker_client.S)) = (module Docker_client_mock)
 
 let sample_plan () =
   match
-    Keeper_sandbox_plan.of_request
+    Keeper_sandbox_oneshot_plan.of_request
       ~turn_id:1
       ~attempt:0
       ~meta_name:"alice"
@@ -63,7 +63,7 @@ let test_run_unmatched_plan_returns_daemon_unreachable () =
   let p1 = sample_plan () in
   let p2 =
     match
-      Keeper_sandbox_plan.of_request
+      Keeper_sandbox_oneshot_plan.of_request
         ~turn_id:99 ~attempt:0 ~meta_name:"bob" ~cmd:"x"
     with
     | Ok p -> p
@@ -83,7 +83,7 @@ let test_run_fifo_order () =
   let p1 = sample_plan () in
   let p2 =
     match
-      Keeper_sandbox_plan.of_request
+      Keeper_sandbox_oneshot_plan.of_request
         ~turn_id:2 ~attempt:0 ~meta_name:"bob" ~cmd:"y"
     with
     | Ok p -> p

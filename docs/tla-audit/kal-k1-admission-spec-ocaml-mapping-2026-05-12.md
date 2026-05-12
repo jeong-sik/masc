@@ -31,7 +31,7 @@ This memo is the snapshot before any activation. It does two things:
 
 | Module | LOC | Role |
 |--------|-----|------|
-| `keeper_provider_token_bucket.ml` | 103 | Per-provider token bucket; `try_acquire`, `release`, `refill_tokens` |
+| `keeper_provider_token_bucket.ml` | 103 | Per-provider token bucket; `try_acquire`, `release`, `refill_locked` (lazy), `add_on_refill`/`fire_on_refill_callbacks` |
 | `keeper_wfq_overflow.ml` | 94 | Weighted-fair-queueing overflow heap; `enqueue`, `wake_one`, deficit accounting |
 | `keeper_admission_policy.ml` | 139 | Decision logic — picks among candidate providers, computes outcome |
 | `keeper_admission_router.ml` | 123 | Public entry point; orchestrates policy + bucket + queue |

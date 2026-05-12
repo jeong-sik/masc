@@ -9,5 +9,5 @@
  ; existing code but locks in the type-level guarantee for any future closed
  ; concrete variant. Smallest justifiable scope to prove Phase 5 end-to-end.
  (flags (:standard -w +4))
- (modules json_util safe_ops common validation circuit_breaker eio_guard executor_pool_ref masc_runtime_events provider_error text_similarity string_util list_util read_drop_reason actor_types actor_mailbox domain_pool)
+ (modules json_util safe_ops common validation circuit_breaker eio_guard executor_pool_ref masc_runtime_events provider_error text_similarity string_util list_util set_util read_drop_reason actor_types actor_mailbox domain_pool)
  (libraries yojson unix re re.pcre eio eio.unix time_compat fs_compat masc_log runtime_events))

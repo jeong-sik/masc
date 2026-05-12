@@ -758,6 +758,7 @@
         test_goal_store
         test_goal_verification
         test_string_util
+        test_set_util
         test_board_core_payload
         test_board_attachment_meta
         test_board_moderation
@@ -974,6 +975,7 @@
         test_goal_store
         test_goal_verification
         test_string_util
+        test_set_util
         test_board_core_payload
         test_board_attachment_meta
         test_board_moderation

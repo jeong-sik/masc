@@ -304,34 +304,11 @@ let read_events_since ?fs config ~since : event_record list =
 
 (** Metrics calculation functions (pure) *)
 
-(* Count distinct elements in [present_set] that are not in [absent_set] —
-   shared kernel for [count_active_agents] (joined \ left) and
-   [count_tasks_in_progress] (started \ completed).  Each event list is
-   walked once into a Hashtbl, then the second pass filters and counts.
-   Replaces the previous O(N x M) [List.filter ... List.mem] + O(N log N)
-   [List.sort_uniq] pipeline with two linear passes. *)
-let count_distinct_set_difference
-    (events : event_record list)
-    ~(present : event_record -> string option)
-    ~(absent : event_record -> string option)
-    : int =
-  let absent_set : (string, unit) Hashtbl.t = Hashtbl.create 16 in
-  let present_set : (string, unit) Hashtbl.t = Hashtbl.create 16 in
-  List.iter (fun r ->
-    (match absent r with
-     | Some id -> Hashtbl.replace absent_set id ()
-     | None -> ());
-    match present r with
-    | Some id -> Hashtbl.replace present_set id ()
-    | None -> ()
-  ) events;
-  Hashtbl.fold
-    (fun id () acc -> if Hashtbl.mem absent_set id then acc else acc + 1)
-    present_set
-    0
-
+(* [count_active_agents] = joined \ left,
+   [count_tasks_in_progress] = started \ completed.
+   Kernel lives in [Set_util.count_difference] (lib/core/set_util.ml). *)
 let count_active_agents events =
-  count_distinct_set_difference events
+  Set_util.count_difference events
     ~present:(fun r ->
       match r.event with
       | Agent_joined { agent_id; _ } -> Some agent_id
@@ -344,7 +321,7 @@ let count_active_agents events =
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
 
 let count_tasks_in_progress events =
-  count_distinct_set_difference events
+  Set_util.count_difference events
     ~present:(fun r ->
       match r.event with
       | Task_started { task_id; _ } -> Some task_id

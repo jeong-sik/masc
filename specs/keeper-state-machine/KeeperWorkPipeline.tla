@@ -1,19 +1,37 @@
 ---- MODULE KeeperWorkPipeline ----
 \* ── STATUS: ASPIRATIONAL DESIGN INVARIANT (not wired to current runtime) ──
-\* This spec describes a future workspace/PR/commit pipeline. As of
-\* 2026-04-20:
-\*   - lib/keeper/keeper_exec_github.ml does NOT exist
-\*     (`find lib -name "*github*"` returns 0 hits in lib/keeper/)
+\* This spec describes a future workspace/PR/commit pipeline. Re-verified
+\* 2026-05-12 (iter 88 — banner anti-staleness check):
+\*   - lib/keeper/keeper_exec_github.ml STILL does not exist (the module
+\*     this spec models).  NOTE: the 2026-04-20 probe `find lib -name
+\*     "*github*"` is no longer the right signal — a *different*
+\*     github-named file appeared since (lib/keeper/keeper_tool_github_pr.ml,
+\*     "Dedicated GitHub PR keeper tools" — a PR-operations tool surface,
+\*     not the autonomous-work-pipeline exec module).  The durable signal
+\*     is the primitive set below.
 \*   - The primitives this spec models — `force_push_attempted`,
 \*     `workspace_init`, `workspace_cleaned`, `commit_identity`,
-\*     `submit_count` — have 0 hits in lib/keeper/
-\*   - This spec is NOT in scripts/tla-check.sh (TLC does not run it)
+\*     `submit_count` — STILL have 0 hits in lib/keeper/ (this is the
+\*     anti-staleness probe to use: `rg 'force_push_attempted|workspace_init'
+\*     lib/keeper/` → 0).
+\*   - Runner status (was "NOT in scripts/tla-check.sh"): this spec IS in
+\*     the corpus (specs/Makefile, scripts/ci/check-tla-harness-coverage.sh)
+\*     and has a bug-model partner (specs/bug-models/KeeperWorkPipelineBug.tla),
+\*     but it is listed in specs/Makefile's KNOWN_FAILURES — "clean spec
+\*     violates invariant (exit 13) — model needs fix, not path issue" — so
+\*     `make -C specs check-clean` skips it.  That invariant violation is a
+\*     MODEL bug in the clean spec, separate from the runtime-not-wired
+\*     situation; it is a standing follow-up (the aspirational properties
+\*     below are not even self-consistent yet, which strengthens the case
+\*     for revisiting the #9044 trichotomy — see below).
 \* The actual keeper exec surface is keeper_exec_board / _context / _fs /
-\* _masc / _memory + keeper_tool_pr_review, with a different state shape.
+\* _masc / _memory + keeper_tool_pr_review (+ keeper_tool_github_pr), with a
+\* different state shape.
 \* See issue #9044 for the retire / re-target / banner trichotomy.
 \* This banner takes the "banner" option to make the aspirational nature
 \* explicit; treat the safety properties below as forward-looking design
-\* documentation, not runtime invariants.
+\* documentation, not runtime invariants — and note that one of them is
+\* currently violated by the model itself (KNOWN_FAILURES, above).
 \* ──────────────────────────────────────────────────────────────────────
 \*
 \* Keeper Autonomous Work Pipeline — TLA+ Formal Specification (DESIGN)

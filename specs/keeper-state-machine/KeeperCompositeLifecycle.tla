@@ -27,12 +27,12 @@
 \*      a NoDrainTransition / GhostDispatch *.mli docstring callout, not
 \*      the event type. Anchor here is the [type event] declaration that
 \*      starts at line 139 with [Context_measured] at line 144.
-\*   2. The 12-state parent phase from RFC-0002 is projected to the
+\*   2. The 13-state parent phase from RFC-0002 is projected to the
 \*      7-element set
 \*      {Running, Failing, Overflowed, Compacting, HandingOff, Draining,
 \*       Stable}
 \*      — exactly the phases that matter for cross-spec ordering.
-\*      (See Comment A for the explicit 12->7 mapping; the 6 phases that
+\*      (See Comment A for the explicit 13->7 mapping; the 7 phases that
 \*      collapse to "Stable" are out of scope for the joint invariants
 \*      because they sit outside the turn cycle.)
 \*   3. Parent-lifecycle recovery is modeled directly as Running/Failing
@@ -119,14 +119,19 @@ vars == <<ksm_phase, ktc_turn_phase, kdp_decision, kcl_cascade_state,
 
 \* ── Enumerated value sets ───────────────────────────────
 
-\* Comment A — 12->7 phase projection (from RFC-0002 Transition Matrix):
+\* Comment A — 13->7 phase projection (from RFC-0002 Transition Matrix):
 \*   Running     -> Running
 \*   Failing     -> Failing
 \*   Overflowed  -> Overflowed     (added 2026-04, MASC-1)
 \*   Compacting  -> Compacting
 \*   HandingOff  -> HandingOff
 \*   Draining    -> Draining
-\*   Offline, Paused, Stopped, Crashed, Restarting, Dead -> Stable
+\*   Offline, Paused, Stopped, Crashed, Restarting, Dead, Zombie -> Stable
+\*                                                       (Zombie added iter 4
+\*                                                        #14707, terminal-
+\*                                                        terminal post-Dead,
+\*                                                        outside turn cycle
+\*                                                        ⇒ structurally Stable)
 \* This is a LOSSY projection; the joint invariants here hold for all
 \* states that collapse to Stable by construction (they are outside the
 \* turn cycle). Overflowed is tracked as its own phase because it couples

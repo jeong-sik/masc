@@ -32,7 +32,9 @@
 \*   provider_ceiling   <-> Oas_model_resolve.resolve_max_cascade_context
 \*   requested_max_tokens <-> Cascade_inference.resolve_max_tokens
 \*
-\* (The canonical 12->7 phase mapping lives next to TypeOK on line ~89.
+\* (The canonical 13->7 phase mapping lives next to TypeOK on line ~89.
+\*  Pre-Zombie this was "12->7"; iter 4 #14707 added Zombie which folds
+\*  into the "Terminal" symbol via the iter 51 #14865 mapping update.
 \*  An earlier version of this preamble carried a separate "Phase
 \*  simplification (12 -> 7)" mapping that classified HandingOff / Paused /
 \*  Restarting differently from the canonical one.  Removed in #8970 to

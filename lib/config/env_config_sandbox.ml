@@ -150,6 +150,15 @@ module Shell_timeout = struct
   let known_buckets () =
     [ Io; Read; Git_meta; Gh_min; User_max; Cleanup_rm ]
 
+  (* [Gh_min] is the only read-only floor bucket — see .mli: operators
+     MUST NOT lower it via env (doing so cascades 401 retries, #8688).
+     Exhaustive match (warning 4) so a new bucket forces a deliberate
+     floor/non-floor classification here, once, rather than at every
+     call site that branches on it. *)
+  let is_floor_bucket : bucket -> bool = function
+    | Gh_min -> true
+    | Io | Read | Git_meta | User_max | Cleanup_rm | Unknown _ -> false
+
   let known_default_sec = function
     | Io -> Some 30.0
     | Read -> Some 15.0
@@ -183,12 +192,11 @@ module Shell_timeout = struct
     | None -> None
 
   let timeout_sec ~bucket () =
-    match bucket with
-    | Gh_min ->
+    if is_floor_bucket bucket then
       (* Read-only floor — see .mli.  Operators MUST NOT lower this
          via env; doing so cascades 401 retries (#8688). *)
       15.0
-    | Io | Read | Git_meta | User_max | Cleanup_rm | Unknown _ ->
+    else
       let per_bucket_env = per_bucket_env_var ~bucket in
       match trimmed_value_opt per_bucket_env with
       | Some v ->
@@ -325,9 +333,8 @@ let raw_shell_timeout () : Yojson.Safe.t =
     let key = Shell_timeout.bucket_key b in
     let value = float_v (Shell_timeout.timeout_sec ~bucket:b ()) in
     let entry =
-      match b with
-      | Gh_min -> entry_floor value
-      | Io | Read | Git_meta | User_max | Cleanup_rm | Unknown _ ->
+      if Shell_timeout.is_floor_bucket b then entry_floor value
+      else
         entry_env_overridable
           ~env_var:(Shell_timeout.per_bucket_env_var ~bucket:b)
           value

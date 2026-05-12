@@ -14,6 +14,51 @@ written to disk (TOML-only mode, RFC-0058).
 parses TOML and converts to JSON in memory. No sibling `cascade.json` is
 needed or generated.
 
+### Live Config Versus Repo Seed
+
+There are two common authoring contexts:
+
+| Context | Path | Use it for |
+|---------|------|------------|
+| Live operator config | `$MASC_BASE_PATH/.masc/config/cascade.toml` | Machine-specific provider lanes, credentials, temporary failover choices, and local experiments. |
+| Checked-in repo seed | [`config/cascade.toml`](../config/cascade.toml) | Shared defaults that should be inherited by every checkout after review. |
+
+Do not commit a personal live route just because it works on one machine. Commit
+docs or seed changes only when the behavior should be reproducible for other
+operators.
+
+The checked-in seed uses the RFC-0058 declarative provider/model/tier schema.
+Small live configs may still use top-level profile sections when an operator
+needs a compact one-machine override. Use `doctor config` to confirm what the
+runtime actually loaded.
+
+### Z.AI GLM Coding Plan Endpoint
+
+For Z.AI GLM Coding Plan, use the `glm-coding` provider id:
+
+```toml
+models = ["glm-coding:auto"]
+```
+
+`glm-coding` resolves to the dedicated Coding endpoint:
+
+```text
+https://api.z.ai/api/coding/paas/v4
+```
+
+Do not use the general Z.AI endpoint for Coding Plan traffic:
+
+```text
+https://api.z.ai/api/paas/v4
+```
+
+Also do not use the obsolete provider label `glm-coding-plan` in new configs.
+The checked-in provider id is `glm-coding`.
+
+Source checked on 2026-05-12: Z.AI's official API docs say GLM Coding Plan uses
+the dedicated Coding endpoint instead of the general endpoint:
+https://docs.z.ai/api-reference/introduction
+
 ## TOML-Only Mode (RFC-0058)
 
 When `cascade.toml` is present alongside `cascade.json`:
@@ -178,22 +223,88 @@ The repo seed stays intentionally small.
 
 ## Edit Workflow
 
+For repo seed changes:
+
 1. Edit [`config/cascade.toml`](../config/cascade.toml).
 2. Run focused checks:
 
 ```bash
-dune runtest --root . test/test_cascade_toml_materialization.exe
-dune runtest --root . test/test_cascade_phase1_smoke.exe
-dune exec --root . ./test/test_keeper_cascade_profile.exe
+scripts/dune-local.sh build test/test_cascade_toml_materialization.exe
+scripts/dune-local.sh build test/test_cascade_phase1_smoke.exe
+scripts/dune-local.sh build test/test_keeper_cascade_profile.exe
 ```
 
-Optionally verify JSON output:
+`cascade_materialize` is retired. Runtime TOML loading is in-memory, and no
+`cascade.json` file should be generated for normal verification.
+
+For human inspection of the active runtime view, prefer `doctor config`.
+
+For live operator changes:
+
+1. Edit `$MASC_BASE_PATH/.masc/config/cascade.toml`.
+2. Validate the active config root and catalog snapshot:
 
 ```bash
-dune exec --root . ./bin/cascade_materialize.exe -- config/cascade.json
+./_build/default/bin/main_eio.exe doctor config \
+  --base-path "$MASC_BASE_PATH" \
+  --json
 ```
 
+Read these fields first:
+
+- `active_config_root`
+- `catalog_validation.status`
+- `catalog_validation.snapshot.default_profile_name`
+- `catalog_validation.snapshot.profile_count`
+- `catalog_validation.snapshot.profiles[].candidates[].base_url`
+
+`doctor config` also runs sandbox preflight. A Docker warning can make the
+overall doctor status `warn` or the command exit non-zero while
+`catalog_validation.status` is still `validated`.
+
 ## Examples
+
+### Single Z.AI Coding Plan Live Profile
+
+This is the smallest useful live config when every route should go through the
+GLM Coding Plan lane.
+
+```toml
+comment = "Single Z.AI Coding Plan cascade. Machine-local live config."
+
+[routes]
+keeper_turn = "coding_plan"
+phase_recovery = "coding_plan"
+phase_buffer = "coding_plan"
+tool_required = "coding_plan"
+governance_judge = "coding_plan"
+operator_judge = "coding_plan"
+cross_verifier = "coding_plan"
+verifier = "coding_plan"
+autoresearch = "coding_plan"
+adversarial_reviewer = "coding_plan"
+auto_responder = "coding_plan"
+routing = "coding_plan"
+openai_compat = "coding_plan"
+persona_generation = "coding_plan"
+provider_benchmark = "coding_plan"
+llm_rerank = "coding_plan"
+simple_task = "coding_plan"
+moderate_task = "coding_plan"
+complex_task = "coding_plan"
+
+[coding_plan]
+models = [
+  { model = "glm-coding:auto", weight = 1 },
+]
+temperature = 0.2
+max_tokens = 16384
+strategy = "failover"
+keeper_assignable = true
+
+[coding_plan.api_key_env]
+"glm-coding" = "ZAI_API_KEY"
+```
 
 ### Minimal Profile
 

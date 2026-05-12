@@ -42,6 +42,7 @@ type t =
   | TurnQueueDepth
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
+  | DomainPoolFork
   | SemaphoreWaitTimeout
   | TurnSlotBookkeepingFailures
   | SemaphoreWaitSeconds
@@ -238,6 +239,7 @@ let to_string = function
   | TurnQueueDepth -> "masc_keeper_turn_queue_depth"
   | SupervisorSweepStarts -> "masc_keeper_supervisor_sweep_starts_total"
   | SupervisorLastSweepUnixtime -> "masc_keeper_supervisor_last_sweep_unixtime"
+  | DomainPoolFork -> "masc_keeper_domain_pool_fork_total"
   | SemaphoreWaitTimeout -> "masc_keeper_semaphore_wait_timeout_total"
   | TurnSlotBookkeepingFailures -> "masc_keeper_turn_slot_bookkeeping_failures_total"
   | SemaphoreWaitSeconds -> "masc_keeper_semaphore_wait_seconds"
@@ -456,6 +458,17 @@ let metric_keeper_supervisor_sweep_starts = "masc_keeper_supervisor_sweep_starts
 let metric_keeper_supervisor_last_sweep_unixtime =
   "masc_keeper_supervisor_last_sweep_unixtime"
 ;;
+
+(* RFC-0059 PR-7 soak observability.  Each per-keeper supervised launch
+   increments this counter with one of four outcome labels:
+   - "pool"            flag ON + [Executor_pool_ref] returned a pool,
+                       body submitted to a worker Domain.
+   - "inline_no_pool"  flag ON but [Executor_pool_ref] was [None]
+                       (boot-order or misconfig); body ran inline.
+   - "inline_disabled" flag OFF (default); body ran inline on [ctx.sw].
+   - "submit_failed"   pool submit raised a non-cancellation exception;
+                       body ran inline via the fallback path. *)
+let metric_keeper_domain_pool_fork = to_string DomainPoolFork
 
 let metric_keeper_semaphore_wait_timeout = "masc_keeper_semaphore_wait_timeout_total"
 

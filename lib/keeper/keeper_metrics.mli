@@ -34,6 +34,7 @@ type t =
   | TurnQueueDepth
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
+  | DomainPoolFork
   | SemaphoreWaitTimeout
   | TurnSlotBookkeepingFailures
   | SemaphoreWaitSeconds
@@ -227,6 +228,12 @@ val metric_keeper_provider_block_duration_sec : string
 val metric_keeper_turn_queue_depth : string
 val metric_keeper_supervisor_sweep_starts : string
 val metric_keeper_supervisor_last_sweep_unixtime : string
+
+(** RFC-0059 PR-7 soak observability counter; labels: [outcome]
+    in {"pool" | "inline_no_pool" | "inline_disabled" | "submit_failed"},
+    [keeper] = keeper name. *)
+val metric_keeper_domain_pool_fork : string
+
 val metric_keeper_semaphore_wait_timeout : string
 val metric_keeper_turn_slot_bookkeeping_failures : string
 val metric_keeper_semaphore_wait_seconds : string

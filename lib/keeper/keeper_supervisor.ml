@@ -275,10 +275,15 @@ let launch_supervised_fiber
        Cross-domain switch / fiber-local-state safety inside
        [run_heartbeat_loop] is the open architectural question this
        pilot exists to validate; see RFC-0059 §10 risks. *)
+    let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
     let pool_for_keeper =
-      if Env_config.KeeperSupervisor.domain_pool_enabled
-      then Executor_pool_ref.get ()
-      else None
+      if domain_pool_flag then Executor_pool_ref.get () else None
+    in
+    let bump_fork_outcome outcome =
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_domain_pool_fork
+        ~labels:[ "outcome", outcome; "keeper", meta.name ]
+        ()
     in
     (* IO-bound weight: 0.05 mirrors [Domain_pool.weight_io] (the
        canonical IO weight from [lib/core/domain_pool.ml:9]).  The
@@ -292,6 +297,7 @@ let launch_supervised_fiber
     let fork_body body =
       match pool_for_keeper with
       | Some pool ->
+        bump_fork_outcome "pool";
         Eio.Fiber.fork ~sw:ctx.sw (fun () ->
           try Eio.Executor_pool.submit_exn pool ~weight:keeper_io_weight body with
           | Eio.Cancel.Cancelled _ as e -> raise e
@@ -301,14 +307,21 @@ let launch_supervised_fiber
                itself fails (rather than the body raising on
                cancellation), warn-log and fall back inline so a
                misconfigured pool does not bring down the supervisor
-               by surfacing the exception to [ctx.sw]. *)
+               by surfacing the exception to [ctx.sw].  We emit a
+               second counter increment with [outcome=submit_failed]
+               so dashboards can see the failure ratio without losing
+               the original "pool" launch attempt. *)
+            bump_fork_outcome "submit_failed";
             Log.Keeper.warn
               "keeper supervise pool submit failed, running inline: \
                keeper=%s err=%s"
               meta.name
               (Printexc.to_string exn);
             body ())
-      | None -> Eio.Fiber.fork ~sw:ctx.sw body
+      | None ->
+        bump_fork_outcome
+          (if domain_pool_flag then "inline_no_pool" else "inline_disabled");
+        Eio.Fiber.fork ~sw:ctx.sw body
     in
     fork_body (fun () ->
       let resolved = ref false in

@@ -1,0 +1,17 @@
+; RFC-0071 §3.2 codemod — Phase 2 scaffold (PR-1).
+;
+; Standalone executable (NOT a ppx). Reads typed AST (.cmt) emitted by
+; `dune build @check` from _build/default/lib/**/*.cmt and walks for
+; fragile-match sites (catch-all on closed concrete variant).
+;
+; Scaffold scope (this PR): CLI + .cmt loader smoke test. Scanner /
+; triage / rewriter land in subsequent PRs (RFC-0071 §3.2 WS-3, PR-2..5).
+;
+; Dependencies:
+;   - compiler-libs.common: Cmt_format.read_cmt, Typedtree (stdlib distribution)
+;   - str: regex for path filters
+; PR-2 adds ppxlib (already in masc_mcp.opam as transitive dep).
+
+(executable
+ (name main)
+ (libraries compiler-libs.common str unix))

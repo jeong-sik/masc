@@ -141,9 +141,17 @@ MANIFEST_DIR="$KEEPER_DIR/runtime-manifests"
 [[ -d "$MANIFEST_DIR" ]] || fail "runtime manifest directory missing: $MANIFEST_DIR"
 
 if [[ -z "$TRACE_ID" ]]; then
-  latest_manifest="$(find "$MANIFEST_DIR" -type f -name '*.jsonl' -print0 \
-    | xargs -0 ls -t 2>/dev/null | head -n1 || true)"
-  [[ -n "$latest_manifest" ]] || fail "no runtime manifest JSONL files under $MANIFEST_DIR"
+  manifest_candidates=()
+  while IFS= read -r -d '' candidate; do
+    manifest_candidates+=("$candidate")
+  done < <(find "$MANIFEST_DIR" -type f -name '*.jsonl' -print0)
+  [[ ${#manifest_candidates[@]} -gt 0 ]] || fail "no runtime manifest JSONL files under $MANIFEST_DIR"
+  latest_manifest="${manifest_candidates[0]}"
+  for candidate in "${manifest_candidates[@]}"; do
+    if [[ "$candidate" -nt "$latest_manifest" ]]; then
+      latest_manifest="$candidate"
+    fi
+  done
   TRACE_ID="$(basename "$latest_manifest" .jsonl)"
 else
   latest_manifest="$MANIFEST_DIR/$TRACE_ID.jsonl"

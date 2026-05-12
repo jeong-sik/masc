@@ -460,22 +460,160 @@ let manifest_row_matches ?turn_id keeper_name trace_id
   | None -> true
   | Some wanted -> row.keeper_turn_id = Some wanted
 
-let read_runtime_manifest_rows ~config ~keeper_name ~trace_id ?turn_id () =
+type runtime_manifest_scan =
+  { path : string
+  ; limit : int
+  ; returned_rows : Keeper_runtime_manifest.t Queue.t
+  ; provider_attempt_rows : Keeper_runtime_manifest.t Queue.t
+  ; event_counts : (string, int) Hashtbl.t
+  ; mutable total_rows : int
+  ; mutable has_terminal : bool
+  ; mutable max_oas_turn_count : int option
+  ; mutable keeper_turn_ids : int list
+  ; mutable event_bus_count : int
+  ; mutable event_bus_correlation_ids : string list
+  ; mutable event_bus_run_ids : string list
+  ; mutable context_compact_started_count : int
+  ; mutable context_compacted_count : int
+  ; mutable last_compaction : Yojson.Safe.t option
+  ; mutable memory_injected_count : int
+  ; mutable memory_injected_present_count : int
+  ; mutable memory_flushed_count : int
+  ; mutable memory_flush_success_count : int
+  ; mutable memory_flush_error_count : int
+  ; mutable episodes_flushed : int
+  ; mutable procedures_flushed : int
+  ; mutable provider_started_count : int
+  ; mutable provider_finished_count : int
+  ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
+  }
+
+let make_runtime_manifest_scan ~path ~limit =
+  { path
+  ; limit
+  ; returned_rows = Queue.create ()
+  ; provider_attempt_rows = Queue.create ()
+  ; event_counts = Hashtbl.create 17
+  ; total_rows = 0
+  ; has_terminal = false
+  ; max_oas_turn_count = None
+  ; keeper_turn_ids = []
+  ; event_bus_count = 0
+  ; event_bus_correlation_ids = []
+  ; event_bus_run_ids = []
+  ; context_compact_started_count = 0
+  ; context_compacted_count = 0
+  ; last_compaction = None
+  ; memory_injected_count = 0
+  ; memory_injected_present_count = 0
+  ; memory_flushed_count = 0
+  ; memory_flush_success_count = 0
+  ; memory_flush_error_count = 0
+  ; episodes_flushed = 0
+  ; procedures_flushed = 0
+  ; provider_started_count = 0
+  ; provider_finished_count = 0
+  ; provider_terminal_row = None
+  }
+
+let push_bounded queue limit value =
+  if limit > 0 then (
+    Queue.push value queue;
+    if Queue.length queue > limit then ignore (Queue.pop queue))
+
+let queue_to_list queue =
+  let values = ref [] in
+  Queue.iter (fun value -> values := value :: !values) queue;
+  List.rev !values
+
+let increment_event_count scan event =
+  let key = Keeper_runtime_manifest.event_kind_to_string event in
+  let current = Option.value (Hashtbl.find_opt scan.event_counts key) ~default:0 in
+  Hashtbl.replace scan.event_counts key (current + 1)
+
+let runtime_manifest_scan_event_count scan event =
+  let key = Keeper_runtime_manifest.event_kind_to_string event in
+  Option.value (Hashtbl.find_opt scan.event_counts key) ~default:0
+
+let max_int_opt current value =
+  match current with
+  | None -> Some value
+  | Some existing -> Some (max existing value)
+
+let update_runtime_manifest_scan scan row =
+  scan.total_rows <- scan.total_rows + 1;
+  push_bounded scan.returned_rows scan.limit row;
+  increment_event_count scan row.Keeper_runtime_manifest.event;
+  (match row.Keeper_runtime_manifest.keeper_turn_id with
+   | Some value -> scan.keeper_turn_ids <- value :: scan.keeper_turn_ids
+   | None -> ());
+  (match row.Keeper_runtime_manifest.oas_turn_count with
+   | Some value -> scan.max_oas_turn_count <- max_int_opt scan.max_oas_turn_count value
+   | None -> ());
+  (match row.Keeper_runtime_manifest.event with
+   | Keeper_runtime_manifest.Turn_finished -> scan.has_terminal <- true
+   | Keeper_runtime_manifest.Event_bus_correlated ->
+     let decision = row.Keeper_runtime_manifest.decision in
+     scan.event_bus_count <- scan.event_bus_count + 1;
+     (match json_string_member_opt "correlation_id" decision with
+      | Some value -> scan.event_bus_correlation_ids <- value :: scan.event_bus_correlation_ids
+      | None -> ());
+     (match json_string_member_opt "run_id" decision with
+      | Some value -> scan.event_bus_run_ids <- value :: scan.event_bus_run_ids
+      | None -> ());
+     scan.context_compact_started_count <-
+       scan.context_compact_started_count
+       + Option.value
+           (json_int_member_opt "context_compact_started_count" decision)
+           ~default:0;
+     scan.context_compacted_count <-
+       scan.context_compacted_count
+       + Option.value (json_int_member_opt "context_compacted_count" decision)
+           ~default:0;
+     (match Yojson.Safe.Util.member "last_compaction" decision with
+      | `Assoc _ as obj -> scan.last_compaction <- Some obj
+      | _ -> ())
+   | Keeper_runtime_manifest.Memory_injected ->
+     scan.memory_injected_count <- scan.memory_injected_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "injected"
+     then scan.memory_injected_present_count <- scan.memory_injected_present_count + 1
+   | Keeper_runtime_manifest.Memory_flushed ->
+     let decision = row.Keeper_runtime_manifest.decision in
+     scan.memory_flushed_count <- scan.memory_flushed_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "success"
+     then scan.memory_flush_success_count <- scan.memory_flush_success_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "error"
+     then scan.memory_flush_error_count <- scan.memory_flush_error_count + 1;
+     scan.episodes_flushed <-
+       scan.episodes_flushed
+       + Option.value (json_int_member_opt "episodes_flushed" decision) ~default:0;
+     scan.procedures_flushed <-
+       scan.procedures_flushed
+       + Option.value (json_int_member_opt "procedures_flushed" decision) ~default:0
+   | Keeper_runtime_manifest.Provider_attempt_started ->
+     scan.provider_started_count <- scan.provider_started_count + 1;
+     push_bounded scan.provider_attempt_rows scan.limit row
+   | Keeper_runtime_manifest.Provider_attempt_finished ->
+     scan.provider_finished_count <- scan.provider_finished_count + 1;
+     scan.provider_terminal_row <- Some row;
+     push_bounded scan.provider_attempt_rows scan.limit row
+   | _ -> ())
+
+let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
+  =
   let path =
     Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id
   in
-  let rows =
-    Fs_compat.fold_jsonl_lines
-      ~init:[]
-      ~f:(fun acc ~line_no:_ json ->
-        match Keeper_runtime_manifest.of_json json with
-        | Ok row when manifest_row_matches ?turn_id keeper_name trace_id row ->
-            row :: acc
-        | Ok _ | Error _ -> acc)
-      path
-    |> List.rev
-  in
-  path, rows
+  let scan = make_runtime_manifest_scan ~path ~limit in
+  Fs_compat.fold_jsonl_lines
+    ~init:()
+    ~f:(fun () ~line_no:_ json ->
+      match Keeper_runtime_manifest.of_json json with
+      | Ok row when manifest_row_matches ?turn_id keeper_name trace_id row ->
+          update_runtime_manifest_scan scan row
+      | Ok _ | Error _ -> ())
+    path;
+  scan
 
 let receipt_row_matches ?turn_id keeper_name trace_id json =
   let keeper_matches = json_string_member_opt "keeper_name" json = Some keeper_name in
@@ -513,106 +651,44 @@ let json_int_opt = function
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
-let manifest_event_count event rows =
-  rows
-  |> List.fold_left
-       (fun count row ->
-         if row.Keeper_runtime_manifest.event = event then count + 1
-         else count)
-       0
-
-let manifest_event_decisions event rows =
-  rows
-  |> List.filter_map (fun row ->
-       if row.Keeper_runtime_manifest.event = event then
-         Some row.Keeper_runtime_manifest.decision
-       else None)
-
-let sum_decision_int_field field decisions =
-  decisions
-  |> List.fold_left
-       (fun total decision ->
-         match json_int_member_opt field decision with
-         | Some value -> total + value
-         | None -> total)
-       0
-
-let event_bus_summary_json manifest_rows =
-  let decisions =
-    manifest_event_decisions Keeper_runtime_manifest.Event_bus_correlated
-      manifest_rows
-  in
+let event_bus_summary_json scan =
   let correlation_ids =
-    decisions
-    |> List.filter_map (json_string_member_opt "correlation_id")
+    scan.event_bus_correlation_ids
+    |> List.rev
     |> Json_util.dedupe_keep_order
   in
   let run_ids =
-    decisions
-    |> List.filter_map (json_string_member_opt "run_id")
-    |> Json_util.dedupe_keep_order
+    scan.event_bus_run_ids |> List.rev |> Json_util.dedupe_keep_order
   in
   let last_compaction =
-    decisions
-    |> List.filter_map (fun decision ->
-         match Yojson.Safe.Util.member "last_compaction" decision with
-         | `Assoc _ as obj -> Some obj
-         | _ -> None)
-    |> List.rev
-    |> function
-    | last :: _ -> last
-    | [] -> `Null
+    match scan.last_compaction with
+    | Some value -> value
+    | None -> `Null
   in
   `Assoc
     [
-      ("event_bus_correlated_count", `Int (List.length decisions));
+      ("event_bus_correlated_count", `Int scan.event_bus_count);
       ("correlation_ids", json_string_list correlation_ids);
       ("run_ids", json_string_list run_ids);
       ( "context_compact_started_count",
-        `Int (sum_decision_int_field "context_compact_started_count" decisions)
-      );
+        `Int scan.context_compact_started_count );
       ( "context_compacted_count",
-        `Int (sum_decision_int_field "context_compacted_count" decisions) );
+        `Int scan.context_compacted_count );
       ("last_compaction", last_compaction);
     ]
 
-let manifest_rows_for_event event rows =
-  rows
-  |> List.filter (fun row -> row.Keeper_runtime_manifest.event = event)
-
-let manifest_status_count status rows =
-  rows
-  |> List.fold_left
-       (fun count row ->
-         if String.equal row.Keeper_runtime_manifest.status status then
-           count + 1
-         else count)
-       0
-
-let memory_summary_json manifest_rows =
-  let injected_rows =
-    manifest_rows_for_event Keeper_runtime_manifest.Memory_injected
-      manifest_rows
-  in
-  let flushed_rows =
-    manifest_rows_for_event Keeper_runtime_manifest.Memory_flushed
-      manifest_rows
-  in
-  let flush_decisions =
-    List.map (fun row -> row.Keeper_runtime_manifest.decision) flushed_rows
-  in
+let memory_summary_json scan =
   `Assoc
     [
-      ("memory_injected_count", `Int (List.length injected_rows));
-      ("memory_injected_present_count", `Int (manifest_status_count "injected" injected_rows));
-      ("memory_flushed_count", `Int (List.length flushed_rows));
-      ("memory_flush_success_count", `Int (manifest_status_count "success" flushed_rows));
-      ("memory_flush_error_count", `Int (manifest_status_count "error" flushed_rows));
-      ( "episodes_flushed",
-        `Int (sum_decision_int_field "episodes_flushed" flush_decisions) );
-	      ( "procedures_flushed",
-	        `Int (sum_decision_int_field "procedures_flushed" flush_decisions) );
-	    ]
+      ("memory_injected_count", `Int scan.memory_injected_count);
+      ( "memory_injected_present_count",
+        `Int scan.memory_injected_present_count );
+      ("memory_flushed_count", `Int scan.memory_flushed_count);
+      ("memory_flush_success_count", `Int scan.memory_flush_success_count);
+      ("memory_flush_error_count", `Int scan.memory_flush_error_count);
+      ("episodes_flushed", `Int scan.episodes_flushed);
+      ("procedures_flushed", `Int scan.procedures_flushed);
+    ]
 
 let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
   `Assoc
@@ -628,32 +704,13 @@ let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
         json_string_opt (json_string_member_opt "exception_kind" row.decision) );
     ]
 
-let provider_attempts_summary_json manifest_rows =
-  let attempt_rows =
-    manifest_rows
-    |> List.filter (fun row ->
-         match row.Keeper_runtime_manifest.event with
-         | Keeper_runtime_manifest.Provider_attempt_started
-         | Keeper_runtime_manifest.Provider_attempt_finished -> true
-         | _ -> false)
-  in
-  let started_rows =
-    manifest_rows_for_event Keeper_runtime_manifest.Provider_attempt_started
-      manifest_rows
-  in
-  let finished_rows =
-    manifest_rows_for_event Keeper_runtime_manifest.Provider_attempt_finished
-      manifest_rows
-  in
-  let terminal =
-    match List.rev finished_rows with
-    | [] -> None
-    | row :: _ -> Some row
-  in
+let provider_attempts_summary_json scan =
+  let attempt_rows = queue_to_list scan.provider_attempt_rows in
+  let terminal = scan.provider_terminal_row in
   `Assoc
     [
-      ("started_count", `Int (List.length started_rows));
-      ("finished_count", `Int (List.length finished_rows));
+      ("started_count", `Int scan.provider_started_count);
+      ("finished_count", `Int scan.provider_finished_count);
       ( "terminal_status",
         json_string_opt
           (Option.map (fun row -> row.Keeper_runtime_manifest.status) terminal) );
@@ -678,19 +735,10 @@ let provider_attempts_summary_json manifest_rows =
       ("attempts", `List (List.map provider_attempt_row_json attempt_rows));
     ]
 
-let max_manifest_oas_turn_count rows =
-  rows
-  |> List.filter_map (fun row -> row.Keeper_runtime_manifest.oas_turn_count)
-  |> List.fold_left (fun acc value ->
-       match acc with
-       | None -> Some value
-       | Some current -> Some (max current value))
-       None
-
-let turn_identity_summary_json ?turn_id manifest_rows receipts =
+let turn_identity_summary_json ?turn_id scan receipts =
   let manifest_keeper_turn_ids =
-    manifest_rows
-    |> List.filter_map (fun row -> row.Keeper_runtime_manifest.keeper_turn_id)
+    scan.keeper_turn_ids
+    |> List.rev
     |> unique_ints
   in
   let receipt_turn_counts =
@@ -704,43 +752,43 @@ let turn_identity_summary_json ?turn_id manifest_rows receipts =
         match turn_id with Some value -> `Int value | None -> `Null );
       ("manifest_keeper_turn_ids", json_int_list manifest_keeper_turn_ids);
       ("receipt_turn_counts", json_int_list receipt_turn_counts);
-      ("max_oas_turn_count", json_int_opt (max_manifest_oas_turn_count manifest_rows));
+      ("max_oas_turn_count", json_int_opt scan.max_oas_turn_count);
       ( "provider_lane_resolved_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Provider_lane_resolved
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_lane_resolved) );
       ( "provider_attempt_started_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Provider_attempt_started
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_attempt_started) );
       ( "provider_attempt_finished_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Provider_attempt_finished
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_attempt_finished) );
       ( "checkpoint_saved_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Checkpoint_saved
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Checkpoint_saved) );
       ( "event_bus_correlated_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Event_bus_correlated
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Event_bus_correlated) );
       ( "memory_injected_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Memory_injected
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Memory_injected) );
       ( "memory_flushed_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Memory_flushed
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Memory_flushed) );
       ( "receipt_appended_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Receipt_appended
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Receipt_appended) );
       ( "turn_finished_count",
         `Int
-          (manifest_event_count Keeper_runtime_manifest.Turn_finished
-             manifest_rows) );
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Turn_finished) );
     ]
 
 let keeper_runtime_trace_json (config : Coord.config) (name : string)
@@ -774,11 +822,11 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
             ] )
     | Some trace_id ->
         let limit = max 1 (min 500 limit) in
-        let manifest_path, all_manifest_rows =
-          read_runtime_manifest_rows ~config ~keeper_name:name ~trace_id
-            ?turn_id ()
+        let manifest_scan =
+          read_runtime_manifest_scan ~config ~keeper_name:name ~trace_id
+            ?turn_id ~limit ()
         in
-        let manifest_rows = take_last limit all_manifest_rows in
+        let manifest_rows = queue_to_list manifest_scan.returned_rows in
         let receipt_paths =
           manifest_rows
           |> List.map (fun row -> row.Keeper_runtime_manifest.links.receipt_path)
@@ -799,14 +847,10 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
           read_receipt_rows ~keeper_name:name ~trace_id ?turn_id receipt_paths
           |> take_last limit
         in
-        let has_terminal =
-          List.exists
-            (fun row -> row.Keeper_runtime_manifest.event = Keeper_runtime_manifest.Turn_finished)
-            all_manifest_rows
-        in
         let health, stale_reason =
-          if all_manifest_rows = [] then ("empty", Some "no_manifest_rows")
-          else if not has_terminal then ("incomplete", Some "missing_turn_finished")
+          if manifest_scan.total_rows = 0 then ("empty", Some "no_manifest_rows")
+          else if not manifest_scan.has_terminal then
+            ("incomplete", Some "missing_turn_finished")
           else if receipts = [] then ("partial", Some "no_matching_receipt_rows")
           else ("ok", None)
         in
@@ -820,16 +864,16 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
                 match turn_id with
                 | Some value -> `Int value
                 | None -> `Null );
-              ("manifest_path", `String manifest_path);
-              ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_path));
-              ("manifest_total_rows", `Int (List.length all_manifest_rows));
+              ("manifest_path", `String manifest_scan.path);
+              ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_scan.path));
+              ("manifest_total_rows", `Int manifest_scan.total_rows);
               ("manifest_returned_rows", `Int (List.length manifest_rows));
               ("receipt_returned_rows", `Int (List.length receipts));
-	              ( "turn_identity",
-	                turn_identity_summary_json ?turn_id all_manifest_rows receipts );
-	              ("provider_attempts", provider_attempts_summary_json all_manifest_rows);
-	              ("event_bus", event_bus_summary_json all_manifest_rows);
-	              ("memory", memory_summary_json all_manifest_rows);
+              ( "turn_identity",
+                turn_identity_summary_json ?turn_id manifest_scan receipts );
+              ("provider_attempts", provider_attempts_summary_json manifest_scan);
+              ("event_bus", event_bus_summary_json manifest_scan);
+              ("memory", memory_summary_json manifest_scan);
               ("health", `String health);
               ( "stale_reason",
                 match stale_reason with

@@ -350,6 +350,14 @@ let read_jsonl path =
   |> List.filter (fun line -> not (String.equal line ""))
   |> List.map Yojson.Safe.from_string
 
+let append_raw_line path line =
+  let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc line;
+      output_char oc '\n')
+
 let parsed_manifest_rows path =
   read_jsonl path
   |> List.map (fun json ->
@@ -384,6 +392,11 @@ let json_int_list_member name json =
         | `Intlit raw -> int_of_string_opt raw
         | _ -> None)
   | _ -> []
+
+let json_list_length name json =
+  match Yojson.Safe.Util.member name json with
+  | `List values -> List.length values
+  | _ -> 0
 
 let json_bool_member name json =
   match Yojson.Safe.Util.member name json with
@@ -554,6 +567,112 @@ let test_runtime_trace_api_links_manifest_and_receipt_rows () =
             true
             Yojson.Safe.Util.(receipt |> member "present" |> to_bool)
       | [] -> Alcotest.fail "expected linked receipt")
+
+let test_runtime_trace_api_bounds_rows_but_counts_full_manifest () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let meta = make_meta ~name:"runtime-trace-bounded" () in
+      let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+      Masc_mcp.Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+        ~config
+        ~meta
+        ~generation:meta.runtime.generation
+        ~cascade_name:
+          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string "default")
+        ~outcome:`Skipped
+        ~terminal_reason_code:"phase_not_executable"
+        ~activity_kind:"keeper.turn_skipped"
+        ~trajectory_outcome:(Masc_mcp.Trajectory.Gated "phase_not_executable")
+        ~keeper_turn_id
+        ();
+      let trace_id =
+        Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      in
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config meta.name ~trace_id ~turn_id:keeper_turn_id ~limit:2 ()
+      in
+      Alcotest.(check string)
+        "bounded runtime trace status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      Alcotest.(check int)
+        "bounded trace total rows"
+        3
+        (json_int_member "manifest_total_rows" json);
+      Alcotest.(check int)
+        "bounded trace returned rows"
+        2
+        (json_int_member "manifest_returned_rows" json);
+      Alcotest.(check int)
+        "bounded trace manifest rows array"
+        2
+        (json_list_length "manifest_rows" json);
+      let turn_identity =
+        Yojson.Safe.Util.(json |> member "turn_identity")
+      in
+      Alcotest.(check int)
+        "bounded trace counts terminal row from full scan"
+        1
+        (json_int_member "turn_finished_count" turn_identity);
+      Alcotest.(check int)
+        "bounded trace counts receipt append from full scan"
+        1
+        (json_int_member "receipt_appended_count" turn_identity))
+
+let test_unfinished_provider_attempt_repair_skips_malformed_manifest_rows () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let ctx =
+        {
+          M.manifest_keeper_name = "runtime-manifest-repair";
+          manifest_agent_name = Some "runtime-manifest-repair-agent";
+          manifest_trace_id = "trace-runtime-manifest-repair";
+          manifest_generation = Some 3;
+          manifest_keeper_turn_id = Some 11;
+        }
+      in
+      let started =
+        M.make_for_context ctx ~event:M.Provider_attempt_started
+          ~provider_kind:"openai_compat" ~model_id:"model-a" ()
+      in
+      begin
+        match M.append config started with
+        | Ok () -> ()
+        | Error msg -> Alcotest.fail ("started append failed: " ^ msg)
+      end;
+      let manifest_path =
+        M.path_for_trace config ~keeper_name:ctx.manifest_keeper_name
+          ~trace_id:ctx.manifest_trace_id
+      in
+      append_raw_line manifest_path "{not-json";
+      M.append_unfinished_provider_attempt_finished_best_effort config ctx
+        ~status:"timeout" ~error:"Timeout after 1s" ();
+      let valid_rows =
+        read_file manifest_path
+        |> String.split_on_char '\n'
+        |> List.filter_map (fun line ->
+             if String.equal line "" then None
+             else
+               match Yojson.Safe.from_string line with
+               | exception _ -> None
+               | json -> (
+                   match M.of_json json with
+                   | Ok row -> Some row
+                   | Error _ -> None))
+      in
+      let finished = require_manifest_event M.Provider_attempt_finished valid_rows in
+      Alcotest.(check string) "repair status" "timeout" finished.M.status;
+      Alcotest.(check (option string))
+        "repair error"
+        (Some "Timeout after 1s")
+        (json_string_member_opt "error" finished.M.decision))
 
 let test_successful_provider_turn_links_runtime_artifacts () =
   let base_dir = temp_dir () in
@@ -1345,6 +1464,13 @@ let () =
           Alcotest.test_case
             "runtime trace API links manifest and receipt rows"
             `Quick test_runtime_trace_api_links_manifest_and_receipt_rows;
+          Alcotest.test_case
+            "runtime trace API bounds rows while counting full manifest"
+            `Quick test_runtime_trace_api_bounds_rows_but_counts_full_manifest;
+          Alcotest.test_case
+            "provider attempt repair skips malformed manifest rows"
+            `Quick
+            test_unfinished_provider_attempt_repair_skips_malformed_manifest_rows;
         ] );
       ( "runtime",
         [

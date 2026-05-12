@@ -1,6 +1,6 @@
 (** Server Dashboard HTTP — keeper-API surface.
 
-    Implements the [/api/dashboard/keeper/<name>/...] family used by the
+    Implements the [/api/v1/keepers/<name>/...] family used by the
     operator dashboard.  Owns the route classifier, request body
     handlers, trajectory merge logic, and checkpoint inventory.  Most
     helpers are exported so the dashboard test suite can exercise the
@@ -12,7 +12,7 @@ module Http = Http_server_eio
 (** {1 Route prefix and suffixes} *)
 
 val keeper_api_prefix : string
-(** [/api/dashboard/keeper] common prefix for every route below. *)
+(** [/api/v1/keepers/] common prefix for every route below. *)
 
 val keeper_suffix_tools : string
 val keeper_suffix_config : string
@@ -82,7 +82,7 @@ type keeper_post_route_kind =
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_unknown
-(** Sub-route kind for a [POST /api/dashboard/keeper/<name>/...] path. *)
+(** Sub-route kind for a [POST /api/v1/keepers/<name>/...] path. *)
 
 val classify_keeper_post_route : string -> keeper_post_route_kind
 (** Map a request path to its [keeper_post_route_kind]. *)
@@ -92,13 +92,13 @@ val keeper_path_ends_with : string -> string -> bool
 
 val extract_keeper_name_for_suffix : string -> string -> string
 (** [extract_keeper_name_for_suffix suffix path] returns the keeper name
-    from a path of shape [/api/dashboard/keeper/<name>/<suffix>]. *)
+    from a path of shape [/api/v1/keepers/<name>/<suffix>]. *)
 
 val is_keeper_checkpoints_get_path : string -> bool
-(** [true] for [GET /api/dashboard/keeper/<name>/checkpoints] paths. *)
+(** [true] for [GET /api/v1/keepers/<name>/checkpoints] paths. *)
 
 val is_keeper_runtime_trace_get_path : string -> bool
-(** [true] for [GET /api/dashboard/keeper/<name>/runtime-trace] paths. *)
+(** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
 
 (** {1 Trajectory preview helpers} *)
 
@@ -198,5 +198,5 @@ val handle_keeper_directive_post :
 val handle_keeper_get_subroutes :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Dispatch [GET /api/dashboard/keeper/<name>/<sub>] sub-routes
+(** Dispatch [GET /api/v1/keepers/<name>/<sub>] sub-routes
     (status / tools / checkpoints listing / etc.). *)

@@ -5858,7 +5858,7 @@ let test_decide_local_only_liveness_keeps_explicit_local_only () =
   | UT.Probe_local_only_urls _ -> fail "unexpected local-only probe decision"
 ;;
 
-let test_decide_local_only_liveness_requests_deduped_ollama_probe () =
+let test_decide_local_only_liveness_keeps_phase_buffer_route () =
   let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
   match
     UT.decide_local_only_liveness
@@ -12017,9 +12017,9 @@ let () =
             `Quick
             test_decide_local_only_liveness_keeps_explicit_local_only
         ; test_case
-            "local_only liveness decision requests deduped probe"
+            "local_only liveness decision keeps phase-buffer route"
             `Quick
-            test_decide_local_only_liveness_requests_deduped_ollama_probe
+            test_decide_local_only_liveness_keeps_phase_buffer_route
         ; test_case
             "local_only fail-open falls back when ollama is down"
             `Quick

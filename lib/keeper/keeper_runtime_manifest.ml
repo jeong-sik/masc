@@ -358,38 +358,21 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
         msg
 
 let read_rows_from_path path =
-  if not (Sys.file_exists path) then
-    Ok []
-  else
-    try
-      let ic = open_in_bin path in
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () ->
-          let rec loop acc =
-            match input_line ic with
-            | line ->
-              if String.trim line = "" then
-                loop acc
-              else
-                let parsed =
-                  match Yojson.Safe.from_string line |> of_json with
-                  | Ok row -> row
-                  | Error msg ->
-                    raise
-                      (Failure
-                         (Printf.sprintf
-                            "runtime manifest row parse failed path=%s: %s"
-                            path
-                            msg))
-                in
-                loop (parsed :: acc)
-            | exception End_of_file -> Ok (List.rev acc)
-          in
-          loop [])
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
+  try
+    let rows =
+      Fs_compat.fold_jsonl_lines
+        ~init:[]
+        ~f:(fun acc ~line_no:_ json ->
+          match of_json json with
+          | Ok row -> row :: acc
+          | Error _ -> acc)
+        path
+      |> List.rev
+    in
+    Ok rows
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
 
 let last_unfinished_provider_attempt config (ctx : turn_context) =
   let path =

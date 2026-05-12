@@ -13,17 +13,17 @@ KRL preamble lists five OCaml "mirror" entry points; **three of them do not exis
 |------------------------------|---------|-------|
 | `lib/keeper/keeper_event_queue.ml` | ✅ 91 LOC | Stimulus queue: `type stimulus`, `enqueue`, `dequeue`, `classify`, `drain_board_window`.  No `receipt_issued` concept. |
 | `lib/keeper/keeper_unified_turn.ml` | ✅ 3037 LOC | Heavy `terminal_reason` machinery (`Keeper_turn_terminal.t`).  Maps loosely to KRL's `IssueTerminalReason`.  No `verification_state` / `goal_phase` / `task_state` concepts. |
-| `lib/keeper/goal_store.ml` | ❌ MISSING | No file. |
+| `lib/keeper/goal_store.ml` | ❌ MISSING at cited path | `lib/goal/goal_store.{ml,mli}` does exist with `parse_goal_phase` etc., but the spec cites the `lib/keeper/` path. Citation is wrong; concept partly exists elsewhere. |
 | `lib/keeper/keeper_task_dispatch.ml` | ❌ MISSING | No file. |
-| `lib/keeper/keeper_board_observer.ml` | ❌ MISSING | No file. |
+| `lib/keeper/keeper_board_observer.ml` | ❌ MISSING | No file. `board_cursor_*` *is* used by `lib/keeper/keeper_world_observation.ml` + defined in `lib/keeper/keeper_registry.{ml,mli}` — but as opaque state, not as the per-stimulus board-observer FSM the spec models. |
 
-Cross-checked with `rg` across all 251 `.ml` files under `lib/keeper/`: none of the spec's modeled concepts (`goal_phase`, `task_state`, `board_cursor`, `verifier_reaction`, `receipt_issued`) appear *anywhere* in the codebase. The spec is pure design ground.
+Cross-checked with `rg` across `lib/`: **no module implements the KRL reaction/receipt FSM**. Of the five spec concepts, `goal_phase` (10 files under `lib/goal/`, `lib/coord_goals*`, `lib/dashboard/dashboard_goals.ml`, etc.) and `board_cursor` (3 files under `lib/keeper/`) appear as data-shape references in adjacent subsystems; `task_state`, `verifier_reaction`, `receipt_issued` are entirely absent. The reaction/receipt liveness FSM itself has no runtime — spec is design ground.
 
 ## Comparison to iter 56 KAL audit
 
 | Aspect | KAL (iter 56 #14895) | KRL (this audit) |
 |--------|----------------------|------------------|
-| OCaml LOC matching spec concepts | 845 (7 modules) | ~3128 (2 modules) but **0 spec concept hits** |
+| OCaml LOC matching spec concepts | 845 (7 modules) | ~3128 (2 cited modules); **0 reaction/receipt FSM hits**, with `goal_phase`/`board_cursor` only as data-shape refs outside the cited modules |
 | Activation status | dormant — `MASC_ADMISSION_USE_NEW=1` flag-gated | **non-existent** — no flag, no code path |
 | Drift class | *flag-gated dormancy* | *design ground without runtime* |
 | Risk severity (today) | LOW (flag off by default) | LOW (no caller, no harm) |
@@ -47,7 +47,7 @@ Only **L1 partial** has any OCaml representation today, and even that is one-lev
 
 These are call-outs, **not fixes in this audit**.
 
-1. **L-2.a (LOW, doc-only)** — Mirror iter 57 K-2.d: add a "Runtime status" block to KRL preamble explaining that this is a pure design ground for MASC task `goal-world-reaction-liveness/task-134`, not the running runtime.  Cross-reference this audit memo.  Honest-doc pattern, 11th datapoint candidate.
+1. **L-2.a (LOW, doc-only)** — Mirror iter 56 K-2.d (#14895): add a "Runtime status" block to KRL preamble explaining that this is a pure design ground for MASC task `goal-world-reaction-liveness/task-134`, not the running runtime.  Cross-reference this audit memo.  Honest-doc pattern, 11th datapoint candidate.
 
 2. **L-2.b (LOW, doc-only)** — Replace the 3 broken module citations with the truthful state.  Options:
    - (b.1) Remove the citations entirely until the modules exist.
@@ -79,7 +79,9 @@ Each is a distinct first-entry class.  Cataloguing them lets future first-entrie
 
 - `wc -l specs/keeper-state-machine/KeeperReactionLiveness.tla` → 327 LOC.
 - `ls lib/keeper/{goal_store,keeper_task_dispatch,keeper_board_observer}.ml*` → all three "no matches".
-- `rg -l 'goal_phase|task_state|board_cursor|verifier_reaction|receipt_issued' lib/` → 0 matches across 251 `.ml` files.
+- `rg -l 'goal_phase|task_state|board_cursor|verifier_reaction|receipt_issued' lib/keeper/` → 3 files match (`keeper_registry.ml`, `keeper_registry.mli`, `keeper_world_observation.ml`) — all `board_cursor_*` only; no `goal_phase` / `task_state` / `verifier_reaction` / `receipt_issued` under `lib/keeper/`.
+- `rg -l 'goal_phase' lib/` → 10 files (`lib/goal/`, `lib/coord_goals*`, `lib/coordination_product*`, `lib/dashboard/dashboard_goals.ml`, `lib/tool_schemas/tool_schemas_coord_extra.ml`). Data-shape only; no reaction-liveness FSM.
+- `rg -l 'verifier_reaction|receipt_issued|task_state' lib/` → 0 matches. These three KRL concepts are *truly* absent everywhere.
 - `keeper_event_queue.mli` surface: `stimulus` / `enqueue` / `dequeue` / `classify` / `drain_board_window` — pure queue, no receipt FSM.
 - `keeper_unified_turn.ml` surface: heavy `terminal_reason` usage (line 25, 31, 87, 96, 98, 339, 361, 369 ...), no `goal_phase` / `verification_state` / `task_state`.
 

@@ -270,17 +270,13 @@ let handle_config ~tool_name ~start_time args : tool_result =
 let handle_tool_admin_snapshot ~tool_name ~start_time ctx args =
   let include_hidden = get_bool args "include_hidden" true in
   let include_deprecated = get_bool args "include_deprecated" true in
-  let payload =
-    `Assoc
-      [
-        ("status", `String "ok");
-        ("generated_at", `String (Masc_domain.now_iso ()));
-        ("auth", auth_snapshot_json ctx);
-        ( "tool_inventory",
-          tool_inventory_json ctx ~include_hidden ~include_deprecated );
-      ]
-  in
-  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
+  Tool_args.ok_result ~tool_name ~start_time
+    [
+      ("generated_at", `String (Masc_domain.now_iso ()));
+      ("auth", auth_snapshot_json ctx);
+      ( "tool_inventory",
+        tool_inventory_json ctx ~include_hidden ~include_deprecated );
+    ]
 
 let handle_tool_admin_update ~tool_name ~start_time ctx args =
   let section =
@@ -330,16 +326,12 @@ let handle_tool_admin_update ~tool_name ~start_time ctx args =
             }
           in
           Auth.save_auth_config ctx.config.base_path updated;
-          let payload =
-            `Assoc
-              [
-                ("status", `String "ok");
-                ("section", `String "auth");
-                ("room_secret", json_string_option room_secret);
-                ("result", auth_snapshot_json ctx);
-              ]
-          in
-          Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string payload))
+          Tool_args.ok_result ~tool_name ~start_time
+            [
+              ("section", `String "auth");
+              ("room_secret", json_string_option room_secret);
+              ("result", auth_snapshot_json ctx);
+            ])
   | _ ->
       Tool_result.error ~tool_name ~start_time
         (Printf.sprintf "section must be one of: %s"

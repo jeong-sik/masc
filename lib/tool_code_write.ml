@@ -459,13 +459,11 @@ let handle_code_write ~tool_name ~start_time ctx args =
           Fs_compat.mkdir_p dir
         end;
         Fs_compat.save_file abs_path content;
-        let response = `Assoc [
-          ("status", `String "ok");
+        Tool_args.ok_result ~tool_name ~start_time [
           ("path", `String path);
           ("bytes_written", `Int (String.length content));
           ("agent", `String ctx.agent_name);
-        ] in
-        Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+        ]
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Tool_result.error ~tool_name ~start_time (Printf.sprintf "Write failed: %s" (Stdlib.Printexc.to_string exn))
   end
@@ -579,13 +577,11 @@ let handle_code_edit ~tool_name ~start_time ctx args =
               end
             in
             Fs_compat.save_file abs_path new_content;
-            let response = `Assoc [
-              ("status", `String "ok");
+            Tool_args.ok_result ~tool_name ~start_time [
               ("path", `String path);
               ("replacements", `Int !count);
               ("agent", `String ctx.agent_name);
-            ] in
-            Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+            ]
           end
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Tool_result.error ~tool_name ~start_time (Printf.sprintf "Edit failed: %s" (Stdlib.Printexc.to_string exn))
@@ -608,12 +604,10 @@ let handle_code_delete ~tool_name ~start_time ctx args =
       else begin
         try
           Sys.remove abs_path;
-          let response = `Assoc [
-            ("status", `String "ok");
+          Tool_args.ok_result ~tool_name ~start_time [
             ("path", `String path);
             ("agent", `String ctx.agent_name);
-          ] in
-          Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+          ]
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Tool_result.error ~tool_name ~start_time (Printf.sprintf "Delete failed: %s" (Stdlib.Printexc.to_string exn))
       end

@@ -27,6 +27,7 @@ implementation_prs: ["14714", "14741", "14821", "14827", "14889", "14899", "1493
   - No v1 code is invalidated — all merged work remains, only the `keeper_sandbox_plan` filename is renamed in Phase 3d. Phase 3e absorbs *all four* v2-discovered gaps in a single batch so Phase 4 cutover (4.1/4.2/4.3) can land without further `Docker_client.S` extension PRs. Phase 3c.2 is now independently schedulable.
 - **v2.1 (2026-05-12, doc sync)**: Phase 3d shipped (#14934 — pure rename, 14 files, +51/-51); §4 status flipped to ✅; §3.1.1 / naming-convention / §3.5 / §5 Phase 2 references updated from `Keeper_sandbox_plan` to the shipped `Keeper_sandbox_oneshot_plan`. §1 F6 corrected: iter-1-2 counted 8 `try ... with _ -> None` sites in `keeper_sandbox_control.ml`; the `Masc_exec.Exec_gate` migration (#14329/#14359) since resolved ~7, leaving 1 `Cancelled`-guarded residual at `git_string_opt:306-308` — §4 Phase 5 re-scoped accordingly; §5 Phase 5 validation note clarified (single-line `rg` misses the multi-line catch-all). §3.5 `Keeper_sandbox.t`/`of_request` relationship corrected (`of_request` takes `~meta_name:string`, not `Keeper_sandbox.t`). Sources: PR #14899 review comments (iter 39/40 audits), PR #14934.
 - **v2.2 (2026-05-12, Phase 3e sync + §3.1.2 design resolution)**: Phase 3e fragmented — the three self-contained edge primitives shipped one PR each rather than the single batch v2 envisaged (safe: none exposes a new layer): (b) `Docker_client.S.exec` gains `?user`/`?workdir` + pure `Docker_client_real.exec_argv` (#14947); (c) `info_security_options` + pure `parse_security_options` (#14951); (d) `image_present` — **narrowed** from the earlier `image_inspect → image_info` sketch (§3.0.3 corrected: nothing consumes inspect data, so it's a presence check `(unit, _) result`; no new `Image_not_found` variant) (#14956). §3.2.1 surface block updated to the current shape; §4 Phase 3e split into 3e-b/c/d (✅) + 3e-aef (⏳ — `run_detached` (a) + `Keeper_sandbox_session_plan` (e) + `Sandbox_session_executor.Make` (f), one PR). §3.1.2's 4 paper-design questions (iter 37 audit) resolved: `labels` is a derived field (`of_request` composes it from `~meta_name`/`~base_path`/`~container_kind`/`~network_mode`/`~turn_id`); `mounts` is unified (`of_request` composes workspace + identity mounts from `~host_root`/`~uid`/`~gid`); `env_passthrough` renamed `env_overrides` (4 hardcoded defaults + `?extra_env`, not a host-env passthrough); `ulimits : ulimit list` with `type ulimit = {name;soft;hard}` (default `nofile=N:N` unchanged). `of_request` takes `~meta_name:string` not `~meta:keeper_meta` (cross-module-dep-free, matching `Oneshot_plan`). §3.2.3 `Sandbox_session_executor.exec` now threads the plan's `user`/`workdir` through `D.exec`. Sources: PRs #14947/#14951/#14956, PR #14899 iter 37 comment.
+- **v2.3 (2026-05-12, §3.1.2 pure/edge boundary correction)**: iter 47 measured the helper *bodies* `start_container` calls (not just its argv shape) and found the v2.2 §3.1.2 resolution was incomplete on two points. (1) `docker_label_args` is **not purely derivable** — it emits an `owner_pid = Unix.getpid()` label and a `started_at = "%.3f" (Unix.gettimeofday())` label. So `Keeper_sandbox_session_plan.of_request` (pure) composes only the **7 deterministic** labels (component / `base_path_hash` / keeper / kind / network / turn_id / ttl_sec); the edge (`run_detached` / `Sandbox_session_executor.start`) appends the PID + started_at labels at spawn (order-irrelevant to docker). (2) `docker_user_identity_mount_args` performs **file I/O** — `mkdir_p <host_root>/.docker-identity` + `save_file_atomic` of `passwd`/`group` — before returning the mount args. So the Plan carries both `mounts` (the deterministic `-v …:/etc/passwd:ro` etc. args) *and* `identity_files : (string * string) list` (the `(path, content)` pairs the edge must write); the *content* is deterministic given `uid`/`gid`, only *writing* is I/O. Also: seccomp *resolution* (`ensure_keeper_sandbox_runtime`, a daemon probe) and the `docker_command_argv ()` prefix are edge. `of_request` reads `Env_config_keeper.KeeperSandbox.*` for `pids_limit`/`memory_limit`/`ulimits` — config reads are stable per run, not the wall-clock/PID/random/daemon-I/O non-determinism the split targets. §3.1.2 rewritten with a pure/edge table; §3.2.3 `run_detached` prose updated to spell out the edge work. Source: iter 47 measurement of `keeper_sandbox_runtime.ml:179-271` + `keeper_turn_sandbox_runtime.ml:152-220`.
 
 - **Depends on**: RFC-0036 Phase A (cleanup hook plumbing — foundation)
 - **Extends**: RFC-0006 Phase B-2 (Read/Edit/Grep docker exec routing)
@@ -207,14 +208,20 @@ Phase 3b-iv.2.* shipped this; Phase 3d (#14934) renamed the module — no shape 
 
 #### 3.1.2 `Keeper_sandbox_session_plan` (new — Phase 3e (e); Phase 4.1 dependency)
 
-The 16 fields below were measured byte-for-byte against `keeper_turn_sandbox_runtime.start_container`'s argv (iter 37 audit). 13 fields mapped cleanly; 4 needed a design decision (labels, mounts, env, ulimits). Those are resolved here so Phase 3e (e) implements against a concrete spec:
+The fields below were measured byte-for-byte against `keeper_turn_sandbox_runtime.start_container`'s argv (iter 37 audit), and the *helper bodies* it calls (`docker_label_args`, `docker_user_identity_mount_args`, `docker_user_env_args`, `docker_nofile_args`) were measured in iter 47 — that pass found two things the iter-37/v2.2 resolution missed: **`docker_label_args` is not purely derivable** (it includes `owner_pid = Unix.getpid()` and `started_at = Unix.gettimeofday()` labels), and **`docker_user_identity_mount_args` performs file I/O** (`mkdir_p` + `save_file_atomic` of `passwd`/`group`) before returning the mount args. v2.3 corrects the pure/edge boundary accordingly.
 
-| Field | Issue (iter 37) | Resolution |
-|-------|-----------------|------------|
-| `labels` | argv builds them via a 5-arg composer (`docker_label_args ~base_path ~keeper_name ~container_kind ~network_label ~turn_id`), not a flat list the caller supplies | `labels : (string * string) list` stays as a **derived output** field. `of_request` takes the *inputs* (`~meta_name` for the keeper key, `~base_path`, `~container_kind`, `~network_mode` — which drives both `network_args` and `network_label`, `~turn_id`/`~attempt`) and composes the label list internally, mirroring `docker_label_args`. |
-| `mounts` | argv has a workspace volume (`-v host_root:container_root:rw`) *and* identity mounts (uid/gid passwd entries from `docker_user_identity_mount_args`) — 2-3 mounts total | `mounts : mount list` stays **unified**. `of_request` takes `~host_root ~uid ~gid` and composes the workspace mount + the identity mounts internally; the caller never hand-builds the list. |
-| `env_passthrough` | misleading name — `docker_user_env_args` emits a *hardcoded* 4-var set (`HOME=/tmp`, `USER=keeper`, `LOGNAME=keeper`, `SHELL=/bin/sh`), not a passthrough of the caller's environment | renamed to `env_overrides`. `of_request` composes the 4 hardcoded defaults internally and takes `?extra_env:(string * string) list` (default `[]`) for *opt-in* caller additions. The container never inherits the host environment implicitly. |
-| `ulimits` | `(string * int) list` cannot express docker's `name=soft:hard` syntax — `docker_nofile_args` currently emits `nofile=N:N` (soft = hard), but that is an accident of the current default, not a constraint | `ulimits : ulimit list` where `type ulimit = { name : string; soft : int; hard : int }`. The shipped default stays `[ { name = "nofile"; soft = N; hard = N } ]` (backwards-compatible argv); future ulimits with `soft ≠ hard` are now representable. |
+**Pure/edge split for `Keeper_sandbox_session_plan`:**
+
+| Concern | Lives in | Why |
+|---------|----------|-----|
+| `container_name` (hash of turn_id‖attempt‖suffix), `image`, `startup_command`, `cap_drop_all`, `no_new_privileges`, `seccomp_profile` (the *choice*), `read_only_rootfs`, `tmpfs`, `workdir`, `user`, `network_mode`, `pids_limit`, `memory_limit`, `env_overrides` (4 hardcoded `HOME`/`USER`/`LOGNAME`/`SHELL` + `?extra_env`), `ulimits` | **Plan** (`of_request`, pure) | deterministic given the request inputs. (`pids_limit`/`memory_limit`/`ulimits` are read from `Env_config_keeper.KeeperSandbox.*` — config reads are stable per run, not the wall-clock/PID/random/daemon-I/O non-determinism the split targets.) |
+| `mounts` — the workspace volume (`-v host_root:container_root:rw`) **and** the identity mounts (`-v <host_root>/.docker-identity/passwd:/etc/passwd:ro`, `…/group:/etc/group:ro`) | **Plan** | the mount *args* are deterministic (path concat). Note: the identity mounts only *work* if the files exist — see `identity_files` below. |
+| `identity_files : (string * string) list` — the `(path, content)` pairs the edge must write before the mounts are valid: `(<host_root>/.docker-identity/passwd, "root:x:0:0:…\nkeeper:x:<uid>:<gid>:…\n")` and `(…/group, "root:x:0:\nkeeper:x:<gid>:\n")` | **Plan** | the *content* is deterministic given `uid`/`gid`; only *writing* it is I/O. The Plan describes what must exist; the edge materialises it. |
+| `labels` — the 7 **deterministic** labels: component (static), `base_path_hash` (MD5 of normalised `base_path`), keeper (`sanitize_label_value meta_name`), kind (`sanitize_label_value container_kind`), network (`sanitize_label_value network_label`, where `network_label` is derived from `network_mode`), turn_id, ttl_sec | **Plan** | pure string ops. |
+| `owner_pid` label (`Unix.getpid()`), `started_at` label (`Printf.sprintf "%.3f" (Unix.gettimeofday())`) | **edge** (`run_detached` / `Sandbox_session_executor.start`) | PID and wall-clock are spawn-time facts, not plan facts. Appended to the Plan's `labels` at spawn; docker treats `--label` order-independently so position is irrelevant. |
+| seccomp *resolution* (`ensure_keeper_sandbox_runtime` → `--security-opt seccomp=<path>`), the `docker_command_argv ()` prefix (binary path + global flags), the actual `docker run -d` spawn | **edge** | `ensure_keeper_sandbox_runtime` is a daemon probe; the prefix and spawn are the invocation envelope. |
+
+The 4 iter-37 design questions, re-resolved under this split: `labels` is **derived** but only its *deterministic* part lives in `of_request` (the edge adds PID/started_at); `mounts` is **unified** (workspace + identity, both as `mount`s) *plus* `identity_files` carries the file specs the edge writes; `env_passthrough` → **`env_overrides`** (4 hardcoded + `?extra_env`, no host-env inheritance); `ulimits : ulimit list` with `type ulimit = { name; soft; hard }` (default `nofile=N:N` unchanged).
 
 ```ocaml
 (* lib/keeper/keeper_sandbox_session_plan.mli — Phase 3e (e) *)
@@ -222,43 +229,43 @@ type ulimit = { name : string; soft : int; hard : int }
 
 type t  (** abstract — like Oneshot_plan; accessors below, no exposed record *)
 
-(* Accessors (the 16 conceptual fields):
-     container_name : t -> Container_name.t
-     image          : t -> string
-     mounts         : t -> mount list          (* workspace + identity, composed *)
-     env_overrides  : t -> (string * string) list   (* 4 defaults + ?extra_env *)
-     network_mode   : t -> network             (* None | Bridge | Custom of string *)
-     user           : t -> (int * int) option  (* uid:gid → --user *)
-     ulimits        : t -> ulimit list
+(* Accessors:
+     container_name   : t -> Container_name.t
+     image            : t -> string
+     mounts           : t -> mount list                  (* workspace + identity mount ARGS *)
+     identity_files   : t -> (string * string) list      (* (path, content) for the edge to write *)
+     env_overrides    : t -> (string * string) list      (* 4 hardcoded defaults + ?extra_env *)
+     network_mode     : t -> network                     (* Network_none | Network_inherit | … *)
+     user             : t -> (int * int) option          (* uid:gid → --user *)
+     ulimits          : t -> ulimit list
      read_only_rootfs : t -> bool
-     tmpfs          : t -> string option
-     workdir        : t -> string option
-     startup_command : t -> string             (* default: trap-and-sleep idle loop *)
-     labels         : t -> (string * string) list   (* composed, not caller-supplied *)
-     cap_drop_all   : t -> bool
+     tmpfs            : t -> string option
+     workdir          : t -> string option
+     startup_command  : t -> string                      (* default: trap-and-sleep idle loop *)
+     labels           : t -> (string * string) list      (* 7 deterministic labels; edge adds PID + started_at *)
+     cap_drop_all     : t -> bool
      no_new_privileges : t -> bool
-     seccomp_profile : t -> seccomp_choice      (* Default | Unconfined | File of path *)
-     pids_limit     : t -> int
-     memory_limit   : t -> string               (* "2g", etc. *) *)
+     seccomp_profile  : t -> seccomp_choice               (* Default | Unconfined | File of path — the choice, not the resolved path *)
+     pids_limit       : t -> int
+     memory_limit     : t -> string                       (* "2g", etc. *) *)
 
 val of_request
   :  turn_id:int
   -> attempt:int
   -> meta_name:string            (* keeper key for label derivation; NOT keeper_meta — stays cross-module-dep-free, like Oneshot_plan *)
-  -> base_path:string            (* for label derivation *)
-  -> container_kind:string       (* "turn" | "shell" | ... — for the container_kind label *)
-  -> network_mode:network        (* drives network_args AND network_label *)
-  -> host_root:string            (* workspace mount source *)
+  -> base_path:string            (* for the base_path_hash label *)
+  -> container_kind:string       (* "turn" | "shell" | … — for the container_kind label *)
+  -> network_mode:network        (* drives network args AND the network label *)
+  -> host_root:string            (* workspace mount source AND .docker-identity dir root *)
   -> uid:int
   -> gid:int
+  -> ?ttl_sec:float              (* if > 0, emits a ttl label; default None *)
   -> ?extra_env:(string * string) list   (* opt-in caller env additions; default [] *)
-  -> unit                        (* trailing unit so OCaml can erase ?extra_env *)
+  -> unit                        (* trailing unit so OCaml can erase ?ttl_sec / ?extra_env *)
   -> (t, plan_error) result
 ```
 
 Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup_command default is the existing trap-and-sleep idiom. The `Plan` represents *one container's lifetime*, NOT a single command — commands are issued via `Session.exec` (§3.2.3) against an already-started container.
-
-Not yet covered by the 16 fields: the `docker_command_argv ()` prefix (the docker binary path + any global flags). `Sandbox_session_executor` (§3.2.3) prepends it when building the `docker run -d` argv — the Plan models the *container spec*, the executor owns the *invocation envelope*.
 
 #### 3.1.3 Named one-shot — represented via Oneshot_plan extension
 
@@ -326,10 +333,18 @@ module Make (D : Docker_client.S) : sig
   val start
     :  Keeper_sandbox_session_plan.t
     -> (t, sandbox_error) result
-  (** Spawns [docker run -d --rm --name <derived> ... <startup_command>]
-      by delegating to [D.run_detached] (added in Phase 3e — see prose
-      below). Returns [t] holding the [Container_name.t] for subsequent
-      [exec]/[rm]. *)
+  (** Delegates to [D.run_detached plan] (Phase 3e item (a)). The
+      [Real] [run_detached] does the edge work the Plan deliberately
+      cannot: writes the plan's [identity_files] ([mkdir_p] +
+      atomic write — failure ⇒ a typed error), resolves the seccomp
+      choice via [ensure_keeper_sandbox_runtime] (a daemon probe),
+      appends the [owner_pid] / [started_at] labels, prepends
+      [docker_command_argv ()], assembles the
+      [docker run -d --rm --name <plan.container_name> ...] argv from
+      the Plan's fields, spawns, and returns the [Container_name.t].
+      The [Mock] [run_detached] returns [Ok plan.container_name] with
+      no spawn (deterministic — the mock has no daemon). [start] wraps
+      that into [t]. *)
 
   val exec
     :  t
@@ -352,7 +367,9 @@ end
 
 Determinism contract: same `Keeper_sandbox_session_plan.t` ⇒ identical inner one-shot plan ⇒ identical `Container_name.t`. The session handle `t` carries non-determinism (start time, state) but is opaque to callers.
 
-`-d` (detach) is the only `S.run` invocation that produces a session-shaped output (a container id, not an `exec_result`). `D.run` keeps returning `exec_result` and the `-d` *flag* is a session-runtime concern: `Sandbox_session_executor.start` does not use `D.run` directly — instead `Docker_client.S` gets a separate `run_detached : Keeper_sandbox_session_plan.t -> (Container_name.t, sandbox_error) result` (Phase 3e item (a), still ⏳ pending — to land with (e) `Keeper_sandbox_session_plan` and (f) `Sandbox_session_executor.Make` in one PR so Phase 4.1 needs no further `S` extension). The executor prepends `docker_command_argv ()` (the binary path + global flags) when assembling the `docker run -d ...` argv; the Plan models the container spec, the executor owns the invocation envelope (§3.1.2 tail note). Both `Mock` and `Real` variants of `run_detached` ship together.
+`-d` (detach) is the only `S.run` invocation that produces a session-shaped output (a container id, not an `exec_result`). `D.run` keeps returning `exec_result`; the `-d` *flag* — and all the spawn-time work around it — is `Docker_client.S.run_detached : Keeper_sandbox_session_plan.t -> (Container_name.t, sandbox_error) result` (Phase 3e item (a), ⏳ pending — landing with (e) `Keeper_sandbox_session_plan` and (f) `Sandbox_session_executor.Make` so Phase 4.1 needs no further `S` extension; both `Mock` and `Real` variants together).
+
+`run_detached` is *the edge* — it is where every non-deterministic / I/O concern the `Session_plan` factored out comes back: writing `identity_files`, the seccomp daemon probe, `Unix.getpid ()` / `Unix.gettimeofday ()` for the PID/started_at labels, the `docker_command_argv ()` prefix, and the spawn itself. The `Session_plan` is the pure spec; `run_detached` materialises it; `Sandbox_session_executor` is a thin orchestrator over it (`start` → `run_detached` → wrap; `exec` → `D.exec`; `cleanup` → `D.rm`). This keeps the determinism contract crisp: same `Keeper_sandbox_session_plan.t` ⇒ same argv *modulo* the two spawn-time labels and the resolved seccomp path, ⇒ same `Container_name.t`.
 
 #### 3.2.4 Composition diagram
 
@@ -450,7 +467,7 @@ v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0
 | **3e-b** *(v2)* | `Docker_client.S.exec` gains `?user` + `?workdir` (+ pure `Docker_client_real.exec_argv`) | Phase 3d | LOW | ✅ #14947 (2026-05-12) |
 | **3e-c** *(v2)* | `Docker_client.S.info_security_options` (+ pure `Docker_client_real.parse_security_options`) | Phase 3d | LOW | ✅ #14951 (2026-05-12) |
 | **3e-d** *(v2)* | `Docker_client.S.image_present` (presence check — narrowed from the earlier `image_inspect → image_info` sketch, §3.0.3) | Phase 3d | LOW | ✅ #14956 (2026-05-12) |
-| **3e-aef** *(v2)* | `Docker_client.S.run_detached` (a) + `Keeper_sandbox_session_plan` (e) + `Sandbox_session_executor.Make` (f), Mock + Real, unit tests. §3.1.2's 4 design questions resolved (labels derived / mounts unified / `env_overrides` + `?extra_env` / `ulimit` record). One PR so Phase 4.1 needs no further `S` extension. | Phase 3e-b/c/d | MEDIUM — new edge primitive + new plan type + new executor functor | ⏳ pending |
+| **3e-aef** *(v2)* | `Docker_client.S.run_detached` (a) + `Keeper_sandbox_session_plan` (e) + `Sandbox_session_executor.Make` (f), Mock + Real, unit tests. §3.1.2's 4 design questions resolved + pure/edge boundary corrected (v2.3 — `Session_plan` carries the deterministic spec incl. `identity_files`; `run_detached`/edge writes the identity files, resolves seccomp, adds PID/started_at labels, prepends `docker_command_argv`, spawns). One PR so Phase 4.1 needs no further `S` extension. | Phase 3e-b/c/d | MEDIUM — new edge primitive + new plan type + new executor functor | ⏳ pending |
 | **3c.2** | Cleanup quarantine state machine (`Quarantine.t` + alert path; no `Keeper_lifecycle_hooks` adapter — sibling path per §2 / §3.4) | Phase 3 | MEDIUM | ⏳ pending — Phase 3 is the sole prerequisite (no cross-RFC dependency) |
 | **4.1** *(v2)* | Caller cutover `keeper_turn_sandbox_runtime` → `Sandbox_session_executor` (one PR) | Phase 3e-aef | MEDIUM | ⏳ pending |
 | **4.2** *(v2)* | Caller cutover `keeper_shell_docker:820` → `Sandbox_executor` w/ named one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |

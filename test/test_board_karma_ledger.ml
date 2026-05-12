@@ -39,6 +39,18 @@ let with_eio f () =
   Board_dispatch.init_jsonl ();
   f ()
 
+(** Variant of [with_eio] that forwards the Eio environment to [f].
+    Use this for tests that need [Eio.Stdenv.clock] (e.g. to wrap a
+    potentially-hanging fiber section in [Eio.Time.with_timeout_exn]). *)
+let with_eio_env f () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  ignore (fresh_test_base_path ());
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  f env
+
 (** Create a post and fail the test on error *)
 let create_post_exn ~author ~content =
   match
@@ -340,6 +352,64 @@ let test_events_sorted_oldest_first () =
          (Float.compare e1.ts e2.ts <= 0)
    | _ -> ())
 
+(** {1 Cache lock discipline regression}
+
+    Regression for [Board.get_all_karma]: previously [store.karma_cache]
+    was read and written *outside* [with_lock] while the rebuild was
+    *inside* — a DCL pattern that admitted both wasted concurrent
+    rebuilds and a window where an invalidation between an unlocked
+    [Some _] read and downstream use could be lost.  The fix moves the
+    whole check/rebuild/write into a single [with_lock] block.
+
+    Externally observable invariants exercised here:
+    - After an action that invalidates the karma cache (a vote on a
+      newly-created post — the vote path calls
+      [Board_core.invalidate_*_caches]), the next [get_all_karma]
+      returns fresh data.
+    - Two fibers calling [get_all_karma] concurrently return the same
+      value and do not deadlock — a regression where the locked rebuild
+      tried to re-enter the same non-reentrant [Eio.Mutex] would surface
+      as a hang. *)
+
+let test_invalidate_propagates_to_next_read () =
+  let post1 = create_post_exn ~author:"alice" ~content:"first" in
+  let pid1 = Board.Post_id.to_string post1.id in
+  vote_exn ~voter:"bob" ~post_id:pid1 ~direction:Board.Up;
+  let karma1 = Board_dispatch.get_all_karma () in
+  Alcotest.(check int) "alice has 1 karma after first upvote" 1
+    (List.assoc_opt "alice" karma1 |> Option.value ~default:0);
+  let post2 = create_post_exn ~author:"alice" ~content:"second" in
+  let pid2 = Board.Post_id.to_string post2.id in
+  vote_exn ~voter:"carol" ~post_id:pid2 ~direction:Board.Up;
+  let karma2 = Board_dispatch.get_all_karma () in
+  Alcotest.(check int)
+    "alice has 2 karma after invalidating vote (cache was rebuilt)" 2
+    (List.assoc_opt "alice" karma2 |> Option.value ~default:0)
+
+let test_concurrent_get_all_karma_returns_same_value env =
+  let post = create_post_exn ~author:"alice" ~content:"concurrent" in
+  let pid = Board.Post_id.to_string post.id in
+  vote_exn ~voter:"bob" ~post_id:pid ~direction:Board.Up;
+  let r1 = ref [] and r2 = ref [] in
+  (* Wrap the concurrent section in a hard timeout so a regression
+     that reintroduces mutex re-entry surfaces as a failing assertion
+     instead of an indefinite hang (which would stall the test
+     suite).  5 s is generous: the locked karma rebuild runs in
+     ~milliseconds on the test fixture. *)
+  (try
+     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+       Eio.Fiber.both
+         (fun () -> r1 := Board_dispatch.get_all_karma ())
+         (fun () -> r2 := Board_dispatch.get_all_karma ()))
+   with Eio.Time.Timeout ->
+     Alcotest.fail
+       "concurrent get_all_karma timed out after 5s — likely deadlock \
+        from non-reentrant mutex re-entry");
+  Alcotest.(check (list (pair string int)))
+    "concurrent reads return identical maps" !r1 !r2;
+  Alcotest.(check int) "concurrent reads see the upvote" 1
+    (List.assoc_opt "alice" !r1 |> Option.value ~default:0)
+
 (** {1 Test runner} *)
 
 let () =
@@ -380,5 +450,11 @@ let () =
     "serialisation", [
       Alcotest.test_case "json fields" `Quick
         (with_eio test_karma_event_json_fields);
+    ];
+    "cache_lock_discipline", [
+      Alcotest.test_case "invalidation propagates to next read" `Quick
+        (with_eio test_invalidate_propagates_to_next_read);
+      Alcotest.test_case "concurrent reads return same value" `Quick
+        (with_eio_env test_concurrent_get_all_karma_returns_same_value);
     ];
   ]

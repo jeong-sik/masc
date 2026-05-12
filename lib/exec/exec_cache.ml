@@ -13,7 +13,7 @@ type cache_entry = {
 }
 
 type t = {
-  mutable table : (string, cache_entry) Hashtbl.t;
+  table : (string, cache_entry) Hashtbl.t;
   mutable hits : int;
   mutable misses : int;
 }

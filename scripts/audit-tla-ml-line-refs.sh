@@ -198,12 +198,13 @@ if [[ "${drift_count}" -gt 0 || "${colon_ref_count}" -gt 0 ]]; then
   echo "" >&2
   if [[ "${drift_count}" -gt 0 ]]; then
     echo "${drift_count} line-reference drift(s) detected across ${spec_count} spec(s) (${cite_count} citation(s) checked)." >&2
+    echo "Fix (Rule 1, drift): update the cited line numbers, OR replace the line-number cite with a symbol reference (N-2.a shape — e.g. \`keeper_foo.ml:my_function\` or \`keeper_foo.ml — my_function\`; iter 59 L-2.b precedent)." >&2
   fi
   if [[ "${colon_ref_count}" -gt 0 ]]; then
     echo "${colon_ref_count} colon-form line-ref(s) (\`file.ml:NNN\`) detected in specs/keeper-state-machine/*.tla — N-2.a requires symbol anchors." >&2
+    echo "Fix (Rule 2, colon-form forbidden): replace each \`file.ml:NNN\` with a symbol anchor (\`file.ml:symbol\`) or a prose mention; line-number cites are not allowed under N-2.a." >&2
   fi
-  echo "Fix: update the cited line numbers, OR replace the line-number cite with a symbol reference (N-2.a shape — e.g. \`keeper_foo.ml:my_function\` or \`keeper_foo.ml — my_function\`; iter 59 L-2.b precedent)." >&2
   exit 1
 fi
 
-echo "line-ref audit clean: ${cite_count} prose-form citation(s) verified + 0 colon-form line-ref(s) across ${spec_count} spec(s)." >&2
+echo "line-ref audit clean: ${cite_count} prose-form citation(s) verified + ${colon_ref_count} colon-form line-ref(s) across ${spec_count} spec(s)." >&2

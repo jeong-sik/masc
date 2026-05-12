@@ -98,4 +98,22 @@ module type S = sig
       daemon-level call. (RFC §3.0.3 sketched a richer
       [image_inspect → image_info]; nothing consumes inspect data, so
       this is the presence-check it actually needs.) *)
+
+  val run_detached
+    :  Keeper_sandbox_session_plan.t
+    -> (Keeper_container_name.t, sandbox_error) result
+  (** [run_detached plan] spawns the session container:
+      [docker run -d --rm --name <plan.container_name> ...]. This is
+      *the edge* — it does everything the pure {!Keeper_sandbox_session_plan}
+      deliberately omits: writes the plan's [identity_files] (mkdir_p +
+      atomic write; a write failure ⇒ [Daemon_unreachable] — closest
+      existing variant for "cannot stand up a container"), resolves the
+      seccomp choice via [ensure_keeper_sandbox_runtime] (a daemon
+      probe; failure ⇒ [Daemon_unreachable]), appends the spawn-time
+      [owner_pid] / [started_at] labels ([Unix.getpid ()] /
+      [Unix.gettimeofday ()]), prepends [docker_command_argv ()], and
+      spawns. Returns the plan's [Container_name.t] on [WEXITED 0]
+      (deterministic — no [docker inspect] round-trip needed for the
+      name); any other exit / signal ⇒ [Daemon_unreachable]. The
+      [Mock] returns [Ok plan.container_name] with no spawn. *)
 end

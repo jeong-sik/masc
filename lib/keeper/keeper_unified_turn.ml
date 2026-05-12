@@ -254,21 +254,25 @@ let run_keeper_cycle
      specs/keeper-state-machine/KeeperTaskAcquisition.tla (Cycle 8 /
      Tier B2, PR #11412).
 
-     Spec line 3 already cites this function: "[run_keeper_cycle]
-     (line 1042+)".  This block is the reverse-direction citation
-     so code search for "KeeperTaskAcquisition" lands here.
+     The spec preamble cites this function by symbol: see
+     KeeperTaskAcquisition.tla preamble [run_keeper_cycle] reference
+     (iter 64 N-2.a removed the line number — function names are
+     stable identifiers, line refs drift on every edit).  This block
+     is the reverse-direction citation so code search for
+     "KeeperTaskAcquisition" lands here.
 
      Action mapping (TLA+ -> OCaml):
        SubmitTask        external producers (operator, supervisor,
                          autoresearch, board) populate
                          [observation.pending_*] before this function
                          is called.
-       AssignTask        below (~line 2559) the channel decision —
+       AssignTask        the channel decision below —
                          [observation.pending_mentions <> []] OR
                          [pending_board_events <> []] OR
                          [pending_scope_messages <> []] picks
                          channel = "turn", which is the OCaml form of
-                         spec's AssignTask.
+                         spec's AssignTask.  Cited by symbol; iter 64
+                         N-2.a — locate via grep for the disjunction.
        EmptyQueueSleep   the [else] branch picks
                          "scheduled_autonomous", which exits the
                          claim-and-finish path for this cycle.
@@ -2373,9 +2377,12 @@ let run_keeper_cycle
              "stuck=cascade_exhausted" from "stuck=genuinely idle".
 
              Reset path is unchanged: any successful turn clears the
-             field via [reset_turn_failures] + [set_failure_reason None]
-             at line 966-967.  Auto-pause site below (line 2275) still
-             stamps the same value at threshold — idempotent overwrite. *)
+             field via [reset_turn_failures] in the
+             [MutationBoundaryReached]/checkpoint-saved arm of the
+             post-turn match.  Auto-pause site below — the
+             [cascade_auto_paused || tool_contract_auto_paused] branch
+             — still stamps the same value at threshold (idempotent
+             overwrite).  Cited by symbol; iter 64 N-2.a. *)
                   if EC.is_cascade_exhausted_error err && count > 0
                   then
                     Keeper_registry.set_failure_reason

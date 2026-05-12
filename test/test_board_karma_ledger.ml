@@ -39,6 +39,18 @@ let with_eio f () =
   Board_dispatch.init_jsonl ();
   f ()
 
+(** Variant of [with_eio] that forwards the Eio environment to [f].
+    Use this for tests that need [Eio.Stdenv.clock] (e.g. to wrap a
+    potentially-hanging fiber section in [Eio.Time.with_timeout_exn]). *)
+let with_eio_env f () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  ignore (fresh_test_base_path ());
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  f env
+
 (** Create a post and fail the test on error *)
 let create_post_exn ~author ~content =
   match
@@ -374,14 +386,25 @@ let test_invalidate_propagates_to_next_read () =
     "alice has 2 karma after invalidating vote (cache was rebuilt)" 2
     (List.assoc_opt "alice" karma2 |> Option.value ~default:0)
 
-let test_concurrent_get_all_karma_returns_same_value () =
+let test_concurrent_get_all_karma_returns_same_value env =
   let post = create_post_exn ~author:"alice" ~content:"concurrent" in
   let pid = Board.Post_id.to_string post.id in
   vote_exn ~voter:"bob" ~post_id:pid ~direction:Board.Up;
   let r1 = ref [] and r2 = ref [] in
-  Eio.Fiber.both
-    (fun () -> r1 := Board_dispatch.get_all_karma ())
-    (fun () -> r2 := Board_dispatch.get_all_karma ());
+  (* Wrap the concurrent section in a hard timeout so a regression
+     that reintroduces mutex re-entry surfaces as a failing assertion
+     instead of an indefinite hang (which would stall the test
+     suite).  5 s is generous: the locked karma rebuild runs in
+     ~milliseconds on the test fixture. *)
+  (try
+     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+       Eio.Fiber.both
+         (fun () -> r1 := Board_dispatch.get_all_karma ())
+         (fun () -> r2 := Board_dispatch.get_all_karma ()))
+   with Eio.Time.Timeout ->
+     Alcotest.fail
+       "concurrent get_all_karma timed out after 5s — likely deadlock \
+        from non-reentrant mutex re-entry");
   Alcotest.(check (list (pair string int)))
     "concurrent reads return identical maps" !r1 !r2;
   Alcotest.(check int) "concurrent reads see the upvote" 1
@@ -432,6 +455,6 @@ let () =
       Alcotest.test_case "invalidation propagates to next read" `Quick
         (with_eio test_invalidate_propagates_to_next_read);
       Alcotest.test_case "concurrent reads return same value" `Quick
-        (with_eio test_concurrent_get_all_karma_returns_same_value);
+        (with_eio_env test_concurrent_get_all_karma_returns_same_value);
     ];
   ]

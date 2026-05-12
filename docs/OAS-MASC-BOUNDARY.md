@@ -51,8 +51,8 @@ OAS  ──does not know──→ MASC
 
 ## Config Ownership
 
-- `config/cascade.toml`은 **MASC runtime contract**다. Legacy
-  `cascade.json`은 compatibility/fallback input일 뿐이며 새 authoring SSOT가 아니다.
+- `config/cascade.toml`은 **MASC runtime contract**다. On-disk
+  `cascade.json`은 legacy compatibility/fallback input일 뿐이며 새 authoring SSOT가 아니다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
 - cascade schema, parsing, label semantics, selection policy의 owner는 MASC다.
 - MASC는 repo-level default와 keeper별 `cascade_name` override를 해석해 concrete provider/model 후보를 고른다.
 - OAS는 MASC가 선택한 concrete provider/model config를 실행하는 단일-provider runtime으로 남는다.

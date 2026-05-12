@@ -53,7 +53,7 @@ existing OAS wire protocol should be:
 2. Add the provider id/model label to `cascade.toml`.
 3. Add capability/pricing facts through OAS manifests when the defaults are not
    enough.
-4. Run the cascade materialization and OAS boundary checks.
+4. Run `masc-mcp doctor` (or the dashboard raw_config endpoint) to validate the TOML parse and verify OAS boundary compliance.
 
 Adding a subscription-backed CLI runtime is the same shape: the provider
 catalog declares `transport = "cli"`, cached-login auth, non-interactive

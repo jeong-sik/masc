@@ -13,6 +13,8 @@
    channel_gate_metrics
    gate_protocol
    gate_time_util)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ (flags (:standard -w +4))
  (libraries
    yojson
    unix

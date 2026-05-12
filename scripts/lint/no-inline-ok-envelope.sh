@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lint-ok-envelope.sh — Block inline `("status", `String "ok")` literals
+# no-inline-ok-envelope.sh — Block inline `("status", `String "ok")` literals
 # in lib/. Use Tool_args.ok_response / ok_assoc / ok_result instead.
 #
 # Rationale: T27/T28/T29 consolidated 11+ inline ok-envelope sites into
@@ -55,6 +55,21 @@ ALLOWLIST=(
 )
 
 count=0
+matches_file="$(mktemp)"
+errors_file="$(mktemp)"
+cleanup() {
+  rm -f "$matches_file" "$errors_file"
+}
+trap cleanup EXIT
+
+rg_status=0
+rg -nP '\("status",\s*`String\s+"ok"\)' lib/ -g '*.ml' >"$matches_file" 2>"$errors_file" || rg_status=$?
+if [[ $rg_status -gt 1 ]]; then
+  echo "ERROR: ripgrep failed while scanning ok-envelope literals" >&2
+  cat "$errors_file" >&2
+  exit "$rg_status"
+fi
+
 while IFS= read -r match; do
   file=${match%%:*}
 
@@ -75,7 +90,7 @@ while IFS= read -r match; do
   # Strip the line:linenumber prefix for display.
   echo "ERROR: inline ok-envelope literal (use Tool_args.ok_response / ok_assoc / ok_result): $match"
   count=$((count + 1))
-done < <(rg -nP '\("status",\s*`String\s+"ok"\)' lib/ --type-add 'ocaml:*.ml' -tocaml 2>/dev/null || true)
+done < "$matches_file"
 
 if [[ $count -gt 0 ]]; then
   echo ""

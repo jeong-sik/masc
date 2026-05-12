@@ -23,7 +23,48 @@
 
       I5 (Drift Observability): every [Dispatch] decision exposes
       [preferred_provider] and [actual_provider] (which may differ);
-      callers log this pair to the dispatch counter. *)
+      callers log this pair to the dispatch counter.
+
+    Spec ↔ OCaml mapping (KeeperAdmissionLiveness.tla, iter 60 K-2.c):
+
+      The TLA+ spec models five FSM phases for a single keeper
+      [{Idle, Waiting, Dispatched, Working, Done}].  This OCaml
+      module's [type decision] is the result of one [schedule] call,
+      not an FSM — three discrete outcomes, not five.  The mapping
+      is therefore "spec transition" ↔ "OCaml call result", spread
+      across one [schedule] call and one paired [Keeper_admission_runtime.release_bucket]
+      callback.  Reader who expects 5↔5 will be confused; the
+      correspondence is:
+
+        spec phase             | OCaml call / outcome
+        -----------------------+---------------------------------------------
+        Idle                   | (pre-state; no admission call yet)
+        Idle -> Waiting        | caller invokes [schedule]
+        Waiting -> Dispatched  | [schedule] returns [Dispatch _]
+        Waiting -> Waiting     | [schedule] returns [Wait] (caller enqueues)
+        Waiting -> Surface     | [schedule] returns [Surface _] (operator alert)
+        Dispatched -> Working  | (caller's LLM call; opaque to this module)
+        Working -> Done        | caller invokes [Keeper_admission_runtime.release_bucket]
+
+      The five spec states are the caller's *external* FSM; this
+      module is a stateless oracle that drives one transition per
+      call.  K-2.a (HIGH, not yet applied) is the proposal to wrap
+      the [Dispatch -> release_bucket] window in
+      [Eio.Switch.on_release] so that a cancelled or panicking
+      caller cannot leak the bucket in flight; without that, the
+      spec's [RateRespect] invariant
+      ([in_flight[p] <= Capacity[p]]) is only enforced on the
+      happy path.
+
+      Full audit and the four follow-up risks (K-2.a..d):
+      [docs/tla-audit/kal-k1-admission-spec-ocaml-mapping-
+      2026-05-12.md] (iter 56 #14895).
+
+      Note: iter 56 audit memo line ~80 cited the OCaml outcome
+      as a "4-variant policy enum"; that was speculative.  The
+      verified count is three: [Dispatch | Wait | Surface].  A
+      follow-up amendment of the audit memo will correct that line
+      after iter 60 lands (gh issue tracked as K-2.c.1). *)
 
 (** {1 Decision type} *)
 

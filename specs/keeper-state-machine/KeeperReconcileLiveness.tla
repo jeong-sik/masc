@@ -118,8 +118,14 @@ Phase == DerivePhase
 \*   "Offline"  ↔ Offline       \*  Stable (cold)
 \*
 \* Unmodeled here (covered in companion specs):
-\*   Failing, Overflowed, Compacting, HandingOff, Draining, Restarting
+\*   Failing, Overflowed, Compacting, HandingOff, Draining, Restarting,
+\*   Zombie
 \*   See KeeperCoreTriad.tla and KeeperContextLifecycle.tla.
+\*   Zombie (added iter 4 #14707) is terminal-terminal: it is reached
+\*   only post-Dead when supervisor cleanup latches a never-cleared
+\*   failure, so no reconcile-liveness driving is possible.  Safety
+\*   surface lives in KeeperStateMachine.tla (ZombieIsForever /
+\*   ZombieRequiresTerminalFailureLatched).
 TerminalPhases == {"Stopped", "Dead"}
 NotTerminal == Phase \notin TerminalPhases
 StablePhases == {"Running", "Paused", "Crashed", "Stopped", "Dead", "Offline"}

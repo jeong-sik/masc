@@ -102,10 +102,18 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 \*   "Compacting"  ↔ Compacting
 \*   "HandingOff"  ↔ HandingOff
 \*   "Draining"    ↔ Draining
-\*   "Terminal"    ↔ Offline | Paused | Stopped | Crashed | Restarting | Dead
+\*   "Terminal"    ↔ Offline | Paused | Stopped | Crashed | Restarting | Dead | Zombie
+\*
+\* Zombie (added iter 4 #14707) is terminal-terminal: reached only
+\* post-Dead when supervisor cleanup latches a never-cleared failure
+\* (see ZombieIsForever / ZombieRequiresTerminalFailureLatched in
+\* KeeperStateMachine.tla).  Collapsed into "Terminal" because the
+\* core triad invariants do not distinguish Dead from Zombie — both
+\* are terminal-with-no-progress for the running/failure/compaction
+\* axes this spec tracks.
 \*
 \* Unmodeled here (covered in companion specs):
-\*   none
+\*   none (all 13 OCaml phases are represented in the 7-symbol triad)
 Phases == {"Running", "Failing", "Overflowed", "Compacting", "HandingOff", "Draining", "Terminal"}
 TurnStatuses == {"idle", "selecting", "executing", "retrying", "done"}
 Cascades == {BaseCascade, "local_recovery", "local_only", "none"}

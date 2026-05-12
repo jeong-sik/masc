@@ -1610,14 +1610,26 @@ let mark_turn_measurement ~base_path name =
    requires updating [resolve_cascade_transition]; this function reflects
    the change automatically. *)
 let validate_cascade_transition ~from ~to_ =
-  match resolve_cascade_transition ~from ~target:to_ with
-  | Resolved_idempotent | Resolved_transition _ -> ()
-  | Resolved_violation violation ->
-    raise_cascade_transition_violation
-      ~where:"validate_cascade_transition"
-      ~from
-      ~to_
-      ~violation
+  (* Wrapped in [Keeper_fsm_guard_runtime.wrap_unit] for symmetry with
+     [validate_turn_phase_transition] and the setters
+     ([set_turn_cascade_state] / [set_turn_phase]): a forbidden pair
+     reached via this validator bumps [metric_fsm_guard_violation]
+     (action=cascade_transition, stage=guard) before re-raising the typed
+     [Cascade_transition_violation] with its backtrace intact. Without
+     this wrap, a direct call to this validator on a forbidden pair was
+     uninstrumented (RFC-0072 Phase 5 left it as a thin shim). *)
+  Keeper_fsm_guard_runtime.wrap_unit
+    ~action:"cascade_transition"
+    ~stage:"guard"
+    (fun () ->
+       match resolve_cascade_transition ~from ~target:to_ with
+       | Resolved_idempotent | Resolved_transition _ -> ()
+       | Resolved_violation violation ->
+         raise_cascade_transition_violation
+           ~where:"validate_cascade_transition"
+           ~from
+           ~to_
+           ~violation)
 ;;
 
 (* RFC-0072 Phase 4b + Phase 5: collapse the 49-pair turn_phase matrix onto

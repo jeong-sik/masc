@@ -16,12 +16,15 @@ implementation_prs: []
 ## Changelog
 
 - **v1 (2026-05-12, initial Draft, PR #14714)**: single `Sandbox_plan.t` covering one-shot semantics. Sandbox_executor + Docker_client.S + Mock + parser shipped through Phase 3b-iv.2.5 (#14741 / #14752 / #14764 / #14781 / #14786 / #14792 / #14797 / #14802 / #14808 / #14814 / #14821 / #14827 / #14832 / #14838 / #14844 / #14854 / #14862 / #14889).
-- **v2 (2026-05-12, this amendment)**: Phase 4.1 prep audit found scope gaps in v1's §3.1 single Plan model. Audit happened in two passes:
+- **v2 (2026-05-12, this amendment)**: Phase 4.1 prep audit found scope gaps in v1's §3.1 single Plan model. Audit happened in three passes:
   - First pass (iter 33) — caller survey at line 184/820/838 found 3 distinct *lifetime* patterns (session / named one-shot / anonymous one-shot). v1 Plan models only the third. v2 splits §3.1 into `Oneshot_plan` + `Session_plan`; adds `Sandbox_session_executor` (§3.2.3) + `Docker_client.S.run_detached` (§3.2.3); re-orders §4 to gate Phase 4 on Phase 3e.
   - Second pass (iter 34) — exhaustive enumeration of *all 16 docker call sites* (not just the representative line per caller) surfaced 2 additional v2 gaps:
     - `Docker_client.S.exec` v1 signature is missing `?user` and `?workdir` (proven by `keeper_turn_sandbox_runtime:278`).
     - **4th orthogonal capability**: preflight queries (`docker info --format`, `docker image inspect`) — not container lifecycle but docker-state queries. Phase 3e absorbs these as `info_security_options` + `image_inspect` on `Docker_client.S`.
-  - No v1 code is invalidated — all merged work remains, only the `keeper_sandbox_plan` filename is renamed in Phase 3d. Phase 3e absorbs *all four* v2-discovered gaps in a single batch so Phase 4 cutover (4.1/4.2/4.3) can land without further `Docker_client.S` extension PRs.
+  - Third pass (iter 35) — measurement-anchored verification of dependency assertions revealed two corrections:
+    - **RFC-0036 cleanup_hook is on main**, not missing. v2 §4 Phase 3c.2 status changed from ⏸ blocked to ⏳ pending. PRs that landed it: #13848 (P0/P1 cleanup), #13935 (count failures), #13971 (coverage gaps). Module: `lib/keeper/keeper_lifecycle_hooks.mli`, call sites: `lib/server/server_bootstrap_loops.ml:570-571`.
+    - **`Keeper_lifecycle_hooks` is a *sibling* cleanup path, not a consumer of `cleanup_outcome`**. Earlier v2 draft assumed an adapter `cleanup_outcome → unit` would be registered against the lifecycle hook; the actual `Keeper_lifecycle_hooks.event` is `Phase_transition | Tombstone_reaped` (keeper-lifecycle events), distinct from the container-level cleanup outcomes from `Sandbox_cleanup.cleanup_tick`. Both flow in parallel. §3.4 + §3.5 corrected.
+  - No v1 code is invalidated — all merged work remains, only the `keeper_sandbox_plan` filename is renamed in Phase 3d. Phase 3e absorbs *all four* v2-discovered gaps in a single batch so Phase 4 cutover (4.1/4.2/4.3) can land without further `Docker_client.S` extension PRs. Phase 3c.2 is now independently schedulable.
 
 - **Depends on**: RFC-0036 Phase A (cleanup hook plumbing — foundation)
 - **Extends**: RFC-0006 Phase B-2 (Read/Edit/Grep docker exec routing)
@@ -61,7 +64,7 @@ F1, F3, F6 are direct instances of CLAUDE.md §AI 코드 생성 안티패턴: ha
 **Non-Goals**
 - *Multi-container topology* — RFC-0036 territory. This RFC is single-container-aware; container-per-keeper layout layer is orthogonal.
 - *New sandbox profiles* — RFC-0006 territory. `Local | Docker` variants stay as-is.
-- *Cleanup hook surface change* — RFC-0036 §3.1 defines `cleanup_hook : keeper_id -> cleanup_event -> unit`, synchronous best-effort non-throwing. This RFC's `cleanup_outcome` is the *internal* Result.t form; an adapter wraps it into the public hook (log + swallow).
+- *Cleanup hook surface* — RFC-0036's hook (now on main as `Keeper_lifecycle_hooks.hook : keeper_id:string -> event -> unit`, event = `Phase_transition | Tombstone_reaped`) is **distinct** from this RFC's `cleanup_outcome`. The lifecycle hook fires on *keeper-level* events (Tombstone_reaped after registry unregister). The `cleanup_outcome` is *container-level* — produced by `Sandbox_cleanup.cleanup_tick` against the Docker fleet. The two flow in parallel: keeper-tombstoning emits the lifecycle hook, AND triggers a final `cleanup_tick`; the tick's `cleanup_outcome` is consumed by the internal `Quarantine.t` retry/alert path, not by the lifecycle hook. Phase 3c.2 does NOT need to register a hook against `Keeper_lifecycle_hooks.register_hook` to function; the existing call sites (`server_bootstrap_loops.ml:570-571`) own keeper-lifecycle cleanup, while `Sandbox_cleanup.cleanup_tick` owns container-level cleanup.
 - *`Keeper_sandbox.t` public surface change* — the existing closed record + `of_meta` + `Keeper_sandbox_factory.resolve` (introduced 2026-05-11) are preserved unmodified.
 
 ## 3. Design
@@ -351,7 +354,11 @@ val cleanup_tick
     -> cleanup_outcome
 ```
 
-`Quarantine.t` is a per-server-session Set of `(Container_name.t, attempts:int, first_seen:Mtime.t)`. Retry/alert thresholds are NOT magic numbers — they live in a typed `Backoff_policy.t = { max_attempts : int; backoff : Time.span -> int -> Time.span; alert_after : int }` resolved at edge from `config/sandbox.toml`. Default values (`max_attempts=3`, exponential `backoff` from 1s to 60s, `alert_after=3`) are *defaults*, not literals scattered through the implementation. On `attempts ≥ alert_after`, `alert_dispatched` becomes true and an operator alert fires (separate from the existing Prometheus counter, which becomes a *by-product*, not the decision mechanism). The cleanup hook adapter for RFC-0036 §3.1 wraps `cleanup_outcome` into a `unit` via log-and-swallow.
+`Quarantine.t` is a per-server-session Set of `(Container_name.t, attempts:int, first_seen:Mtime.t)`. Retry/alert thresholds are NOT magic numbers — they live in a typed `Backoff_policy.t = { max_attempts : int; backoff : Time.span -> int -> Time.span; alert_after : int }` resolved at edge from `config/sandbox.toml`. Default values (`max_attempts=3`, exponential `backoff` from 1s to 60s, `alert_after=3`) are *defaults*, not literals scattered through the implementation. On `attempts ≥ alert_after`, `alert_dispatched` becomes true and an operator alert fires (separate from the existing Prometheus counter, which becomes a *by-product*, not the decision mechanism).
+
+**Relationship to `Keeper_lifecycle_hooks` (RFC-0036 surface on main)** *(measurement-anchored, iter 35)*: This RFC's `cleanup_outcome` is *not* a hook payload. The lifecycle hook receives `event = Tombstone_reaped` after a keeper unregister; the container cleanup tick is a separate critical-path that produces `cleanup_outcome` for internal `Quarantine.t` consumption. No `cleanup_outcome → unit` adapter against `Keeper_lifecycle_hooks` is needed — they are sibling cleanup paths, not layered. (Earlier v2 draft assumed they were layered; iter 35 audit corrected this.)
+
+`Phase_transition` event in `Keeper_lifecycle_hooks.event` is *not yet emitted* (Phase A.2 follow-up). Phase 3c.2 must NOT depend on it.
 
 ### 3.5 Containment with existing modules
 
@@ -360,7 +367,7 @@ val cleanup_tick
 | `Keeper_sandbox.t` (closed record, `of_meta`) | Input to `Sandbox_plan.of_request` — preserved unchanged |
 | `Keeper_sandbox_factory.resolve` (memoized per `(in_playground, network_mode)`) | Calls into `Sandbox_executor` in Phase 4 — wiring change only |
 | `Keeper_sandbox_containment.check_{read,write}_target` (RFC-0006 Phase B-1) | Continues as host-side defense-in-depth — unchanged |
-| RFC-0036 `cleanup_hook` | Registers `Sandbox_cleanup.adapter` that wraps `cleanup_outcome` |
+| `Keeper_lifecycle_hooks` (RFC-0036, on main) | Sibling cleanup path — keeper-level Tombstone_reaped event; NOT the consumer of `cleanup_outcome` (corrected iter 35). Container-level cleanup runs in `Sandbox_cleanup.cleanup_tick` independently. |
 
 ## 4. Migration
 
@@ -374,7 +381,7 @@ v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0
 | **3** | `Sandbox_executor` (oneshot) + `Docker_client.Mock` + parser unit tests | Phase 2 | MEDIUM | ✅ Phase 3c.0/3c.1 #14821/14827, Phase 3b-iv.2.5 #14889 |
 | **3d** *(v2)* | Rename `keeper_sandbox_plan` → `keeper_sandbox_oneshot_plan` (file + caller renames; no behavior change). Necessary to free the unqualified name for the Session/Oneshot split. | Phase 3 | LOW — pure rename refactor | ⏳ pending |
 | **3e** *(v2)* | `Docker_client.S` extensions: (a) `run_detached`, (b) `exec` adds `?user` + `?workdir`, (c) `info_security_options`, (d) `image_inspect`. Plus `Keeper_sandbox_session_plan` + `Sandbox_session_executor.Make` + unit tests. Mock + Real both updated. | Phase 3d | MEDIUM — new edge primitives + signature extension | ⏳ pending |
-| **3c.2** | Cleanup quarantine state machine (`Quarantine.t` + alert path) | Phase 3, **RFC-0036 §3.1 cleanup_hook on main** | MEDIUM | ⏸ blocked — RFC-0036 cleanup_hook still missing on origin/main |
+| **3c.2** | Cleanup quarantine state machine (`Quarantine.t` + alert path + cleanup_hook adapter) | Phase 3 + RFC-0036 cleanup_hook (✅ on main: `lib/keeper/keeper_lifecycle_hooks.mli` + `server_bootstrap_loops.ml:570-571`, via PRs #13848/#13935/#13971) | MEDIUM | ⏳ pending — dependency satisfied as of iter 35 (2026-05-12) |
 | **4.1** *(v2)* | Caller cutover `keeper_turn_sandbox_runtime` → `Sandbox_session_executor` (one PR) | Phase 3e | MEDIUM | ⏳ pending |
 | **4.2** *(v2)* | Caller cutover `keeper_shell_docker:820` → `Sandbox_executor` w/ named one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |
 | **4.3** *(v2)* | Caller cutover `keeper_sandbox_runtime:838` → `Sandbox_executor` w/ anonymous one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |
@@ -384,7 +391,7 @@ v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0
 - Phase 4.2 + 4.3 (one-shot caller cutovers) do NOT depend on Phase 3e — they can land in parallel with Session API work. Originally v1 implied a serial order; v2 makes the parallelism explicit.
 - Phase 4.1 (session caller) is the only branch that *requires* Phase 3e.
 - Phase 5 still gates on all 3 cutovers (compiler exhaustiveness across the subsystem).
-- Phase 3c.2 (cleanup quarantine) is independent of Phase 4 — it's a deeper RFC-0036 dependency. Phase 4 callers all use the *existing* cleanup path until Phase 3c.2 lands; v2 acknowledges this is a separate critical-path.
+- Phase 3c.2 (cleanup quarantine) is independent of Phase 4 — it owns container-level cleanup orthogonal to `Keeper_lifecycle_hooks` keeper-level cleanup. As of iter 35 (2026-05-12) the RFC-0036 cleanup_hook is on main and the dependency is satisfied; Phase 3c.2 is now schedulable independently of Phase 4.
 
 Phases are independently mergeable and revertible. Phase 5 closes the loop by making the old anti-pattern syntactically unwritable in this subsystem.
 

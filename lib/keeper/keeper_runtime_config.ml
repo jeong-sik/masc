@@ -132,7 +132,9 @@ let toml_path ~base_path =
     Config_dir_resolver.keeper_runtime_toml_filename
 
 let read_file path =
-  try Ok (In_channel.with_open_text path In_channel.input_all)
+  (* Eio-native read (Fs_compat.load_file) so the keeper-runtime TOML
+     read does not block the whole domain on each refresh. *)
+  try Ok (Fs_compat.load_file path)
   with Sys_error msg -> Error msg
 
 (** Format a TOML scalar back to a string suitable for the boot override store.

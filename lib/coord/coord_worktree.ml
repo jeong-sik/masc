@@ -523,8 +523,7 @@ let keeper_uses_docker_sandbox ~config ~agent_name =
   else
     try
       let lines =
-        In_channel.with_open_text path In_channel.input_all
-        |> String.split_on_char '\n'
+        Fs_compat.load_file path |> String.split_on_char '\n'
       in
       let rec loop in_keeper = function
         | [] -> false

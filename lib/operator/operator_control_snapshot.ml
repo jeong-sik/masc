@@ -190,7 +190,7 @@ type action_log_entry =
   ; created_at : string
   }
 
-let json_ok fields = `Assoc (("status", `String "ok") :: fields)
+let json_ok = Tool_args.ok_assoc
 
 let get_payload args =
   match U.member "payload" args with

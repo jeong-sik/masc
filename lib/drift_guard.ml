@@ -281,36 +281,41 @@ let get_drift_stats config ~days =
     let cutoff =
       Time_compat.now () -. (float_of_int (max 0 days) *. 24.0 *. 3600.0)
     in
-    let rows = Fs_compat.load_jsonl path in
+    (* Streaming aggregation — total / drift_count / similarity_sum
+       fold over the JSONL without materialising the row list. The
+       cutoff predicate also rejects most pre-window rows on long
+       histories. *)
     let total = ref 0 in
     let drift_count = ref 0 in
     let similarity_sum = ref 0.0 in
-    List.iter (fun row ->
-      match row with
-      | `Assoc fields -> (
-          let timestamp =
-            match List.assoc_opt "timestamp" fields with
-            | Some (`Float value) -> value
-            | Some (`Int value) -> float_of_int value
-            | _ -> 0.0
-          in
-          if timestamp >= cutoff then (
-            match List.assoc_opt "result" fields with
-            | Some (`Assoc result_fields) ->
-                let similarity =
-                  match List.assoc_opt "similarity" result_fields with
-                  | Some (`Float value) -> value
-                  | Some (`Int value) -> float_of_int value
-                  | _ -> 0.0
-                in
-                incr total;
-                similarity_sum := !similarity_sum +. similarity;
-                (match List.assoc_opt "passed" result_fields with
-                | Some (`Bool false) -> incr drift_count
-                | Some (`Bool true) | Some _ | None -> ())
-            | None | Some _ -> ()))
-      | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
-    ) rows;
+    Fs_compat.fold_jsonl_lines
+      ~init:()
+      ~f:(fun () ~line_no:_ row ->
+        match row with
+        | `Assoc fields -> (
+            let timestamp =
+              match List.assoc_opt "timestamp" fields with
+              | Some (`Float value) -> value
+              | Some (`Int value) -> float_of_int value
+              | _ -> 0.0
+            in
+            if timestamp >= cutoff then (
+              match List.assoc_opt "result" fields with
+              | Some (`Assoc result_fields) ->
+                  let similarity =
+                    match List.assoc_opt "similarity" result_fields with
+                    | Some (`Float value) -> value
+                    | Some (`Int value) -> float_of_int value
+                    | _ -> 0.0
+                  in
+                  incr total;
+                  similarity_sum := !similarity_sum +. similarity;
+                  (match List.assoc_opt "passed" result_fields with
+                  | Some (`Bool false) -> incr drift_count
+                  | Some (`Bool true) | Some _ | None -> ())
+              | None | Some _ -> ()))
+        | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ())
+      path;
     let avg_similarity =
       if !total = 0 then 0.0 else !similarity_sum /. float_of_int !total
     in

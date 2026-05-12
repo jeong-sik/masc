@@ -793,8 +793,19 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
     let entries =
       protect_source_read Goal_event ~site:"read_goal_events" ~default:[]
         (fun () ->
-        Fs_compat.load_jsonl path
-        |> List.filter (within_requested_window ?since_ts ?until_ts))
+          (* Streaming filter — the time-window predicate drops most
+             entries on the typical {since_ts,until_ts} request shape,
+             so folding lets us hold only the survivors instead of the
+             full goal_events.jsonl content. The subsequent sort still
+             needs the filtered set in memory; that part can't stream. *)
+          Fs_compat.fold_jsonl_lines
+            ~init:[]
+            ~f:(fun acc ~line_no:_ json ->
+              if within_requested_window ?since_ts ?until_ts json
+              then json :: acc
+              else acc)
+            path
+          |> List.rev)
     in
     let entries = sort_newest_first entries in
     let entries = if n <= 0 then entries else take_first n entries in

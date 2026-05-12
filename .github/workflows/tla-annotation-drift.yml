@@ -27,6 +27,8 @@ on:
       - 'scripts/audit-ocaml-phase-count.sh'
       - 'scripts/ocaml-phase-count-baseline.txt'
       - 'scripts/audit-tla-ml-line-refs.sh'
+      - 'scripts/audit-ocaml-spec-nav-line-refs.sh'
+      - 'scripts/ocaml-spec-nav-line-refs-baseline.txt'
       - 'lib/keeper/**/*.ml'
       - 'lib/keeper/**/*.mli'
       - 'scripts/tla-annotation-drift-baseline.txt'
@@ -45,6 +47,8 @@ on:
       - 'scripts/audit-ocaml-phase-count.sh'
       - 'scripts/ocaml-phase-count-baseline.txt'
       - 'scripts/audit-tla-ml-line-refs.sh'
+      - 'scripts/audit-ocaml-spec-nav-line-refs.sh'
+      - 'scripts/ocaml-spec-nav-line-refs-baseline.txt'
       - 'lib/keeper/**/*.ml'
       - 'lib/keeper/**/*.mli'
       - 'scripts/tla-annotation-drift-baseline.txt'
@@ -114,3 +118,18 @@ jobs:
         # See scripts/audit-tla-ml-line-refs.sh and docs/tla-audit/
         # kaq-n1-approval-queue-line-ref-drift-2026-05-12.md.
         run: bash scripts/audit-tla-ml-line-refs.sh
+
+      - name: Run OCaml-docstring spec-nav line-ref validator (R-1.a)
+        # OCaml-docstring twin of N-2.c.  iter 70 #14939 / iter 71 #14943
+        # found `[symbol] (~line N)` reverse-citations in lib/keeper/*.{ml,mli}
+        # header docstrings whose line numbers had drifted +29 .. +424
+        # (keeper_approval_queue, keeper_failure_circuit_breaker,
+        # keeper_memory_policy, keeper_execution_receipt).  The TLA-side
+        # guard (audit-tla-ml-line-refs.sh) only scans *.tla preambles, so
+        # the OCaml side went uncaught.  Baseline grandfathers the sites
+        # in flight (N-2.e #14943 + N-2.f/g TBD); drain a line when its
+        # fix-PR merges — see the baseline file header and docs/tla-audit/
+        # ocaml-docstring-lineref-drift-class-2026-05-12.md.
+        run: |
+          bash scripts/audit-ocaml-spec-nav-line-refs.sh \
+            --baseline scripts/ocaml-spec-nav-line-refs-baseline.txt

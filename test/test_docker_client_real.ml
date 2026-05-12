@@ -262,6 +262,24 @@ let test_info_security_options_returns_typed () =
        Probe_format_drift"
 ;;
 
+(* Phase 3e (d) — [image_present] runs [docker image inspect <image>].
+   Env-dependent: a present image ⇒ [Ok ()], an absent one ⇒
+   [Image_pull_failed] (or [Daemon_unreachable] if docker is missing).
+   Only the typed contract is asserted; a random-looking image name
+   means [Ok] is unlikely on a clean host but not impossible, so it is
+   accepted. The forbidden variants would indicate a mapping bug. *)
+let test_image_present_returns_typed () =
+  match Docker_client_real.image_present ~image:"definitely-not-a-real-image:0xnope" with
+  | Ok () -> () (* extremely unlikely, but a real local image with this name is legal *)
+  | Error Docker_client.Image_pull_failed -> () (* not present locally / daemon down *)
+  | Error Docker_client.Daemon_unreachable -> () (* docker CLI missing *)
+  | Error Docker_client.Cleanup_failed
+  | Error Docker_client.Container_oom
+  | Error Docker_client.Exec_timeout
+  | Error Docker_client.Probe_format_drift ->
+    fail "image_present should only surface Ok | Image_pull_failed | Daemon_unreachable"
+;;
+
 (* ── Functor instantiation works with Real ───────────────────── *)
 
 (* Phase 3b-iv.2.3 — executor.execute_plan calls Real.run, which is
@@ -326,6 +344,12 @@ let () =
             "info_security_options → Ok | Daemon_unreachable | Probe_format_drift"
             `Quick
             test_info_security_options_returns_typed
+        ] )
+    ; ( "image_present (Phase 3e d)"
+      , [ test_case
+            "image_present → Ok | Image_pull_failed | Daemon_unreachable"
+            `Quick
+            test_image_present_returns_typed
         ] )
     ; ( "Functor composition"
       , [ test_case

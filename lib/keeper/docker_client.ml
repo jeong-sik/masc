@@ -28,4 +28,6 @@ module type S = sig
   val rm : Keeper_container_name.t -> (unit, sandbox_error) result
 
   val info_security_options : unit -> (string list, sandbox_error) result
+
+  val image_present : image:string -> (unit, sandbox_error) result
 end

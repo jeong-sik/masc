@@ -57,6 +57,14 @@ val inject_info_security_options
   :  (string list, Docker_client.sandbox_error) result
   -> unit
 
+(** [inject_image_present ~image response] enqueues [response] to be
+    returned when {!image_present} is called with that [image] string
+    (exact match). Strict FIFO, fail-closed on mismatch. *)
+val inject_image_present
+  :  image:string
+  -> (unit, Docker_client.sandbox_error) result
+  -> unit
+
 (** {1 Fixture lifecycle} *)
 
 (** [reset ()] empties every injection queue. Call between tests so

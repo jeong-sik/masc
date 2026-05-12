@@ -201,6 +201,30 @@ let test_info_security_options_error_injection () =
   | Error Docker_client.Probe_format_drift -> ()
   | _ -> fail "expected Probe_format_drift"
 
+(* ── image_present (Phase 3e d) ───────────────────────────────── *)
+
+let test_image_present_matches () =
+  setup ();
+  Docker_client_mock.inject_image_present ~image:"alpine:3.20" (Ok ());
+  match Docker_client_mock.image_present ~image:"alpine:3.20" with
+  | Ok () -> check int "queue drained" 0 (Docker_client_mock.pending_calls ())
+  | Error _ -> fail "expected Ok"
+
+let test_image_present_wrong_image_miss () =
+  setup ();
+  Docker_client_mock.inject_image_present ~image:"alpine:3.20" (Ok ());
+  match Docker_client_mock.image_present ~image:"ubuntu:24.04" with
+  | Error Docker_client.Daemon_unreachable ->
+    check int "queue intact on miss" 1 (Docker_client_mock.pending_calls ())
+  | _ -> fail "expected miss on different image"
+
+let test_image_present_error_injection () =
+  setup ();
+  Docker_client_mock.inject_image_present ~image:"missing:img" (Error Docker_client.Image_pull_failed);
+  match Docker_client_mock.image_present ~image:"missing:img" with
+  | Error Docker_client.Image_pull_failed -> ()
+  | _ -> fail "expected Image_pull_failed"
+
 (* ── reset / pending_calls ────────────────────────────────────── *)
 
 let test_reset_clears_all_queues () =
@@ -211,7 +235,8 @@ let test_reset_clears_all_queues () =
   Docker_client_mock.inject_ps_query ~labels:[] (Ok []);
   Docker_client_mock.inject_rm c (Ok ());
   Docker_client_mock.inject_info_security_options (Ok []);
-  check int "5 queued" 5 (Docker_client_mock.pending_calls ());
+  Docker_client_mock.inject_image_present ~image:"a:b" (Ok ());
+  check int "6 queued" 6 (Docker_client_mock.pending_calls ());
   Docker_client_mock.reset ();
   check int "reset clears everything" 0 (Docker_client_mock.pending_calls ())
 
@@ -252,6 +277,14 @@ let () =
             test_info_security_options_empty_queue;
           test_case "Error injection round-trip" `Quick
             test_info_security_options_error_injection;
+        ] );
+      ( "image_present",
+        [
+          test_case "matches injection" `Quick test_image_present_matches;
+          test_case "wrong image → miss; queue intact" `Quick
+            test_image_present_wrong_image_miss;
+          test_case "Error injection round-trip" `Quick
+            test_image_present_error_injection;
         ] );
       ( "lifecycle",
         [ test_case "reset clears all queues" `Quick test_reset_clears_all_queues ] );

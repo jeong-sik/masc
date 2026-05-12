@@ -442,7 +442,10 @@ type provider_table_entry =
    TomlInlineTable) from everything else. Enumerating the other 10 once
    here satisfies warning 4 and means an [otoml] version bump that adds a
    value constructor breaks exactly this site rather than a dozen call
-   sites. *)
+   sites — every "is this a table?" decision in this module goes through
+   [is_toml_table], and the one place that needs the table's contents
+   ([parse_provider_alias_table]) uses [is_toml_table] + [Otoml.get_table]
+   rather than re-matching the constructors. *)
 let is_toml_table : Otoml.t -> bool = function
   | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> true
   | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
@@ -506,8 +509,11 @@ let parse_provider_alias_table (provider_id : string) (tbl : Otoml.t)
   let entries = Otoml.get_table tbl in
   List.concat_map
     (fun (model_id_or_alias, sub) ->
-       match sub with
-       | Otoml.TomlTable fields | Otoml.TomlInlineTable fields ->
+       if is_toml_table sub
+       then (
+         (* [sub] is TomlTable/TomlInlineTable (per [is_toml_table]); both
+            unwrap to a (key, value) list via [Otoml.get_table]. *)
+         let fields = Otoml.get_table sub in
          let leaf_fields = List.filter (fun (_, v) -> not (is_toml_table v)) fields in
          let sub_tables = List.filter (fun (_, v) -> is_toml_table v) fields in
          let binding =
@@ -521,12 +527,8 @@ let parse_provider_alias_table (provider_id : string) (tbl : Otoml.t)
                   (parse_alias_fields provider_id model_id_or_alias alias_name alias_tbl))
              sub_tables
          in
-         Binding_entry binding :: aliases
-       | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-       | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
-       | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
-       | Otoml.TomlTableArray _ ->
-         [ Binding_entry (parse_binding_fields provider_id model_id_or_alias sub) ])
+         Binding_entry binding :: aliases)
+       else [ Binding_entry (parse_binding_fields provider_id model_id_or_alias sub) ])
     entries
 ;;
 

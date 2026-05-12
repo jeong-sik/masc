@@ -3,6 +3,7 @@
  (name masc_coord)
  (public_name masc_mcp.masc_coord)
  (wrapped false)
+ (flags (:standard -w +4))
  (modules
   coord_backlog
   coord_bootstrap

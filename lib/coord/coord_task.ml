@@ -94,7 +94,11 @@ let transition_task_r
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
-          | _ -> Ok ()
+          | Masc_domain.Claim, None
+          | ( Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel
+            | Masc_domain.Release | Masc_domain.Submit_for_verification
+            | Masc_domain.Approve_verification | Masc_domain.Reject_verification
+            | Masc_domain.Submit_pr_evidence ), _ -> Ok ()
         in
         let now = now_iso () in
         let now_ts = Time_compat.now () in
@@ -153,7 +157,13 @@ let transition_task_r
                retried with the same action rather than claiming first.
                Name the exact next call to make so small-LLM keepers can
                recover on the next turn. *)
-            let remediation =
+            (* WORKAROUND: task_status (6 ctors) × task_action (9 ctors) =
+               54 combos, with ~11 specific hint cases. 명시적 enumeration은
+               hint-string 경로(graceful degradation 가능)에서 churn 비용이
+               컴파일러 강제의 가치를 초과.
+               근본 해결: 도메인 모델링 변경 — (status, action) -> error_kind
+               분류기를 분리한 RFC 후보. *)
+            let[@warning "-4"] remediation =
               let own_assignee =
                 match task_assignee_of_status task.task_status with
                 | Some a when same_task_actor config a agent_name -> true
@@ -207,8 +217,13 @@ let transition_task_r
         in
         let new_status = decision.Coord_task_lifecycle.new_status in
         let set_current = decision.set_current in
+        (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2)
+           = 648 combos. action+option은 enumeration되었으나 task_status/new_status는
+           대부분 _. task_status enumeration은 cross-product 폭발 — 도메인 신규 ctor
+           추가 시 의미 변경 없는 caller가 churn.
+           근본 해결: precondition validator를 도메인 모델에 흡수 (RFC 후보). *)
         let* () =
-          match action, task.task_status, new_status, prepare_verification_request with
+          (match action, task.task_status, new_status, prepare_verification_request with
           | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
             , _
             , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
@@ -262,10 +277,13 @@ let transition_task_r
               | Masc_domain.Submit_pr_evidence )
             , _
             , _
-            , None ) -> Ok ()
+            , None ) -> Ok ()) [@warning "-4"]
         in
+        (* WORKAROUND: same justification as previous let*. action (9) × task_status (6)
+           × option (2) = 108 combos, action+option enumerated, task_status mostly _.
+           근본 해결: 위와 동일 RFC 후보. *)
         let* () =
-          match action, task.task_status, prepare_verification_verdict with
+          (match action, task.task_status, prepare_verification_verdict with
           | ( Masc_domain.Approve_verification
             , Masc_domain.AwaitingVerification { verification_id; _ }
             , Some prepare ) ->
@@ -338,7 +356,7 @@ let transition_task_r
               | Masc_domain.Approve_verification
               | Masc_domain.Reject_verification )
             , _
-            , None ) -> Ok ()
+            , None ) -> Ok ()) [@warning "-4"]
         in
         (match decision.drift with
          | Some Coord_task_lifecycle.Claimed_to_done_skip ->
@@ -663,7 +681,14 @@ let transition_task_r
              own worktree, leaving the original orphaned.  Best-effort
              matches the existing Done branch: filesystem GC must not
              fail the state transition. *)
-          let cleanup_worktree_for_transition reason_label =
+          (* WORKAROUND: Masc_error.t는 framework-tier 합타입 (7 ctor),
+             각 ctor가 자체 합타입 (Task_error, System_error 등). best-effort
+             cleanup의 변별점은 WorktreeNotFound 한 경로뿐이고 나머지 ctor 전체는
+             동일하게 WARN 처리. 명시적 enumeration은 framework 신규 ctor마다
+             best-effort path가 churn 대상이 됨.
+             근본 해결: Masc_error.t를 best_effort_cleanup_outcome 변환기로
+             1차 분류 후 다루기 (RFC 후보). *)
+          let[@warning "-4"] cleanup_worktree_for_transition reason_label =
             match task.worktree with
             | None -> ()
             | Some _ ->

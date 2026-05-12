@@ -29,7 +29,7 @@ let is_shallow_repo repo_path =
     match git_meta repo_path [ "rev-parse"; "--is-shallow-repository" ] with
     | Unix.WEXITED 0, output ->
         String.equal "true" (String.trim output)
-    | _ -> false
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> false
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> false
@@ -44,12 +44,12 @@ let update
     let branch =
       match git_meta repo_path [ "rev-parse"; "--abbrev-ref"; "HEAD" ] with
       | Unix.WEXITED 0, output -> String.trim output
-      | _ -> "unknown"
+      | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> "unknown"
     in
     let commit =
       match git_meta repo_path [ "log"; "--oneline"; "-1" ] with
       | Unix.WEXITED 0, output -> String.trim output
-      | _ -> ""
+      | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> ""
     in
     let ts = Printf.sprintf "%.0f" (Unix.gettimeofday ()) in
     let entry =

@@ -249,7 +249,11 @@ let broadcast ?trace_context ?(msg_type = "broadcast")
    | Ok _ -> ()
    | Error (Backend_types.BackendNotSupported msg) when String.starts_with ~prefix:"FileSystem backend" msg ->
        Log.Misc.debug "broadcast publish skipped: %s" msg
-   | Error e -> Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
+   | Error ((Backend_types.BackendNotSupported _
+            | Backend_types.NotFound _ | Backend_types.AlreadyExists _
+            | Backend_types.IOError _ | Backend_types.InvalidKey _
+            | Backend_types.ConnectionFailed _) as e) ->
+       Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention ();
   (try !on_broadcast_mention mention

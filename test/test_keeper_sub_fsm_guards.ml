@@ -110,25 +110,33 @@ let test_invalid_turn_phase_transitions () =
 
 (* ── KDP: decision_stage ────────────────────────────────── *)
 
+(* PR #14887 + this PR moved decision_stage forbidden transitions into the
+   type system via [decision_stage_active] as the [to_] argument:
+   [<active>_to_undecided] pairs are unrepresentable, so the prior
+   [test_invalid_decision_transitions] and [test_decision_message_includes_labels]
+   cases are gone (their contracts are now compile-time invariants — the only
+   "test" that can fail is the build itself).  This remaining valid-transitions
+   case enumerates the 12 admitted [(from, to_active)] pairs so that adding a
+   new [decision_stage] / [decision_stage_active] constructor will fail
+   compilation here, forcing a deliberate classification. *)
 let test_valid_decision_transitions () =
-  let cases : (decision_stage * decision_stage) list =
+  let cases : (decision_stage * decision_stage_active) list =
     [ (* from Decision_undecided *)
-      Decision_undecided, Decision_undecided
-    ; Decision_undecided, Decision_guard_ok
-    ; Decision_undecided, Decision_gate_rejected
-    ; Decision_undecided, Decision_tool_policy_selected
+      Decision_undecided, Decision_active_guard_ok
+    ; Decision_undecided, Decision_active_gate_rejected
+    ; Decision_undecided, Decision_active_tool_policy_selected
       (* from Decision_guard_ok *)
-    ; Decision_guard_ok, Decision_guard_ok
-    ; Decision_guard_ok, Decision_gate_rejected
-    ; Decision_guard_ok, Decision_tool_policy_selected
+    ; Decision_guard_ok, Decision_active_guard_ok
+    ; Decision_guard_ok, Decision_active_gate_rejected
+    ; Decision_guard_ok, Decision_active_tool_policy_selected
       (* from Decision_gate_rejected *)
-    ; Decision_gate_rejected, Decision_guard_ok
-    ; Decision_gate_rejected, Decision_gate_rejected
-    ; Decision_gate_rejected, Decision_tool_policy_selected
+    ; Decision_gate_rejected, Decision_active_guard_ok
+    ; Decision_gate_rejected, Decision_active_gate_rejected
+    ; Decision_gate_rejected, Decision_active_tool_policy_selected
       (* from Decision_tool_policy_selected *)
-    ; Decision_tool_policy_selected, Decision_guard_ok
-    ; Decision_tool_policy_selected, Decision_gate_rejected
-    ; Decision_tool_policy_selected, Decision_tool_policy_selected
+    ; Decision_tool_policy_selected, Decision_active_guard_ok
+    ; Decision_tool_policy_selected, Decision_active_gate_rejected
+    ; Decision_tool_policy_selected, Decision_active_tool_policy_selected
     ]
   in
   List.iter
@@ -137,31 +145,8 @@ let test_valid_decision_transitions () =
        | (Assert_failure _ | Invalid_argument _) ->
          Alcotest.fail
            (Printf.sprintf
-              "valid decision %s -> %s rejected"
-              (Obs.decision_stage_to_string (stage_to_witness from))
-              (Obs.decision_stage_to_string (stage_to_witness to_))))
-    cases
-;;
-
-let test_invalid_decision_transitions () =
-  let cases : (decision_stage * decision_stage) list =
-    [ (* Only _ -> undecided is invalid (reset, not transition) *)
-      Decision_guard_ok, Decision_undecided
-    ; Decision_gate_rejected, Decision_undecided
-    ; Decision_tool_policy_selected, Decision_undecided
-    ]
-  in
-  List.iter
-    (fun (from, to_) ->
-       try
-         validate_decision_transition ~from ~to_;
-         Alcotest.fail
-           (Printf.sprintf
-              "invalid decision %s -> %s should raise"
-              (Obs.decision_stage_to_string (stage_to_witness from))
-              (Obs.decision_stage_to_string (stage_to_witness to_)))
-       with
-       | Invalid_argument _ -> ())
+              "valid decision %s rejected"
+              (Obs.decision_stage_to_string (stage_to_witness from))))
     cases
 ;;
 
@@ -384,22 +369,11 @@ let test_turn_phase_message_includes_labels () =
     assert_msg_contains ~msg ~needle:(packed_turn_phase_label to_)
 ;;
 
-let test_decision_message_includes_labels () =
-  let from : decision_stage = Decision_guard_ok in
-  let to_ : decision_stage = Decision_undecided in
-  match
-    capture_invalid_arg (fun () -> validate_decision_transition ~from ~to_)
-  with
-  | None -> Alcotest.fail "validator should have raised Invalid_argument"
-  | Some msg ->
-    assert_msg_contains ~msg ~needle:"validate_decision_transition";
-    assert_msg_contains
-      ~msg
-      ~needle:(packed_decision_stage_label (stage_to_witness from));
-    assert_msg_contains
-      ~msg
-      ~needle:(packed_decision_stage_label (stage_to_witness to_))
-;;
+(* test_decision_message_includes_labels removed: validate_decision_transition
+   no longer raises Invalid_argument (the forbidden [<active>_to_undecided]
+   pairs are unrepresentable through the [decision_stage_active] [to_] type).
+   The contract that "rejection messages include the typed labels" is now a
+   compile-time absence-of-rejection — there is no message to assert on. *)
 
 let test_cascade_message_includes_labels () =
   let from : packed_cascade_state = Packed Cascade_idle in
@@ -434,10 +408,10 @@ let () =
             "valid transitions"
             `Quick
             test_valid_decision_transitions
-        ; Alcotest.test_case
-            "invalid transitions"
-            `Quick
-            test_invalid_decision_transitions
+          (* "invalid transitions" case removed: forbidden
+             [<active>_to_undecided] pairs are unrepresentable through the
+             [decision_stage_active] [to_] type — the test would not
+             compile.  Compile-time enforcement supersedes runtime test. *)
         ] )
     ; ( "cascade_state"
       , [ Alcotest.test_case
@@ -474,10 +448,9 @@ let () =
             "turn_phase rejection includes from/to labels"
             `Quick
             test_turn_phase_message_includes_labels
-        ; Alcotest.test_case
-            "decision rejection includes from/to labels"
-            `Quick
-            test_decision_message_includes_labels
+          (* "decision rejection includes from/to labels" removed:
+             validate_decision_transition no longer raises (the forbidden
+             pairs are unrepresentable, see runner note above). *)
         ; Alcotest.test_case
             "cascade rejection includes from/to labels"
             `Quick

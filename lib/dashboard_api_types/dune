@@ -3,5 +3,7 @@
  (name masc_dashboard_api_types)
  (public_name masc_mcp.masc_dashboard_api_types)
  (modules keepers)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ (flags (:standard -w +4))
  (libraries yojson)
  (preprocess (pps ppx_deriving_yojson)))

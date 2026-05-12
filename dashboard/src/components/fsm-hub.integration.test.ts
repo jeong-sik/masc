@@ -42,7 +42,7 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   correlation_id: '10510-64f79d602ce6c-60c',
   run_id: 'r-1776233076-0',
   ts: 1776235685.221697,
-  phase: 'Running',
+  phase: 'running',
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
   cascade: { state: 'idle' },
@@ -68,12 +68,17 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
 }
 
 /** Real-world payload observed from `keeper_composite_observer.ml`
-    snapshot_to_json — the schema MUST accept this without transformation. */
+    snapshot_to_json — the schema MUST accept this without transformation.
+    FSM strings are lowercase snake_case because the observer serializes
+    via `Keeper_state_machine.phase_to_string` (and the parallel
+    *_to_string for turn_phase / decision / cascade / compaction).  The
+    capitalized `Stable` form lives in the TLA+ composite projection,
+    not in the runtime JSON. */
 const REAL_COMPOSITE_PAYLOAD = {
   correlation_id: '10510-64f79d602ce6c-60c',
   run_id: 'r-1776233076-0',
   ts: 1776235685.221697,
-  phase: 'Running',
+  phase: 'running',
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
   cascade: { state: 'idle' },
@@ -86,6 +91,7 @@ const REAL_COMPOSITE_PAYLOAD = {
     event_priority_monotone: true,
     phase_derivation_agreement: true,
   },
+  fsm_guard_violations: 0,
   is_live: false,
   last_outcome: null,
 }
@@ -121,7 +127,7 @@ describe('FSM Hub integration — API response shape', () => {
   describe('composite snapshot schema (valibot pilot)', () => {
     it('accepts the current backend payload shape end-to-end', () => {
       const parsed = parseKeeperCompositeSnapshot(REAL_COMPOSITE_PAYLOAD)
-      expect(parsed.phase).toBe('Running')
+      expect(parsed.phase).toBe('running')
       expect(parsed.collapsed_from).toBeUndefined()
       expect(parsed.invariants.phase_turn_alignment).toBe(true)
       expect(parsed.last_outcome).toBeNull()

@@ -866,7 +866,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.dashboard == 'true' }}
+    # PR mode: stay path-scoped (dashboard=true only when dashboard/ changes).
+    # Non-PR events (push to main/develop, schedule, workflow_dispatch):
+    # ignore path scope and always run, so a dashboard test regression
+    # introduced by a non-dashboard-path change (e.g. a shared-type refactor,
+    # or a dashboard-touching Draft merged via admin-merge fast-track while
+    # the dashboard job was red) is detected on the next main/develop push
+    # rather than persisting silently. Mirrors the tla-specs job; root cause:
+    # keeper-fsm-specs.test.ts / keeper-composite.test.ts sat red on main
+    # after #14252/#14380 because no main-push run re-checked them.
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.dashboard == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
 
     steps:
       - name: Checkout

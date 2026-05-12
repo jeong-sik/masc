@@ -3,5 +3,7 @@
 (library
  (name multimodal)
  (public_name masc_mcp.multimodal)
+ ; RFC-0071 Phase 5 ratchet (warning 4)
+ (flags (:standard -w +4))
  (libraries shared_types unix yojson)
  (preprocess (pps ppx_tla)))

@@ -11,6 +11,12 @@ cd "$root"
 
 mkdir -p "$(dirname "$current_graph")"
 
+# Fail loudly if module discovery is broken.  Pre-2026-05 the analyzer parsed a
+# `(modules ...)` stanza from `lib/dune`; after that stanza was replaced with
+# `(include_subdirs unqualified)` it silently returned 0 modules and this whole
+# step produced an empty graph for weeks.
+python3 scripts/analyze_lib_deps.py --self-test
+
 python3 scripts/analyze_lib_deps.py --json
 
 baseline_args=()

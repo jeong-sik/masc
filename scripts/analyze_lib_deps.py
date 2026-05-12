@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Analyze module dependencies in lib/ monolith for sub-library extraction.
 
-Phase 0 of #3593: dependency graph analysis.
+Phase 0 of #3593: dependency graph analysis. Feeds RFC-0056 §3.4 (the
+fan-in/fan-out audit that prioritizes future sub-library extractions).
 
 Usage:
     python3 scripts/analyze_lib_deps.py [--json] [--cycles] [--clusters]
+    python3 scripts/analyze_lib_deps.py --self-test   # regression guard
 """
 
 import re
@@ -32,56 +34,35 @@ def discover_sub_libraries() -> None:
 
 
 def get_monolith_modules() -> dict[str, Path]:
-    """Parse lib/dune to get explicit module list."""
-    dune_path = LIB_DIR / "dune"
-    content = dune_path.read_text()
+    """Discover every .ml file absorbed into the flat `masc_mcp` library.
 
-    # Extract modules from (modules ...) stanza
+    `lib/dune` declares the library with `(include_subdirs unqualified)` and no
+    explicit `(modules ...)` stanza, so the module set is *every* `.ml` under
+    `lib/` that is not inside a sub-library directory — a direct child of `lib/`
+    whose `dune` declares its own `(library ...)`.  (Nested sub-libraries such as
+    `lib/exec/parser/` live inside an already-skipped tree, so pruning at the
+    top-level child name is sufficient.)
+
+    Pre-2026-05 this parsed a `(modules ...)` stanza; after `lib/dune` switched
+    to `(include_subdirs unqualified)` that stanza disappeared and the parser
+    silently returned `{}`, making the whole analysis (and the CI "lib
+    dependency delta" step) a no-op.  See `--self-test`.
+    """
     modules: dict[str, Path] = {}
-    in_modules = False
-    paren_depth = 0
-
-    for line in content.split("\n"):
-        stripped = line.strip()
-        if "(modules" in stripped:
-            in_modules = True
-            paren_depth = 1
-            # Extract any modules on same line after (modules
-            after = stripped.split("(modules")[1]
-            for word in after.split():
-                w = word.strip(")")
-                if w and not w.startswith("("):
-                    modules[w] = _find_ml_file(w)
+    for path in sorted(LIB_DIR.rglob("*.ml")):
+        rel = path.relative_to(LIB_DIR)
+        # Skip files inside an extracted sub-library directory.
+        if len(rel.parts) > 1 and rel.parts[0] in SUB_LIBRARY_DIRS:
             continue
-
-        if in_modules:
-            paren_depth += stripped.count("(") - stripped.count(")")
-            if paren_depth <= 0:
-                in_modules = False
-                continue
-            for word in stripped.split():
-                w = word.strip(")")
-                if w and not w.startswith(";") and not w.startswith("("):
-                    modules[w] = _find_ml_file(w)
-
+        # Skip build artifacts (`_build`, dune `.formatted`, etc.).
+        if any(part == "_build" or part.startswith(".") for part in rel.parts):
+            continue
+        stem = path.stem
+        # Within the flat namespace `(include_subdirs unqualified)` forbids
+        # duplicate module names, so a stem collision means a stray file
+        # (e.g. a vendored copy); keep the first deterministically.
+        modules.setdefault(stem, path)
     return modules
-
-
-def _find_ml_file(module_name: str) -> Path:
-    """Find .ml file for a module name, searching lib/ and subdirs."""
-    # Direct in lib/
-    direct = LIB_DIR / f"{module_name}.ml"
-    if direct.exists():
-        return direct
-
-    # Search subdirectories (non-sub-library ones only)
-    for child in LIB_DIR.iterdir():
-        if child.is_dir() and child.name not in SUB_LIBRARY_DIRS:
-            candidate = child / f"{module_name}.ml"
-            if candidate.exists():
-                return candidate
-
-    return direct  # fallback even if missing
 
 
 def strip_ocaml_comments_and_strings(content: str) -> str:
@@ -365,8 +346,48 @@ def identify_clusters(
     return sorted(candidates, key=lambda x: (-x["coupling_ratio"], -x["module_count"]))
 
 
+# Regression floor: the flat `masc_mcp` namespace has had 600+ modules for the
+# whole life of this script.  If discovery returns far fewer, module discovery
+# is broken (the pre-2026-05 `(modules ...)`-parsing bug returned 0).
+_SELF_TEST_MIN_MODULES = 400
+_SELF_TEST_MIN_EDGES = 200
+
+
+def run_self_test() -> int:
+    """Assert module discovery and graph construction are not silently empty."""
+    discover_sub_libraries()
+    modules = get_monolith_modules()
+    graph = build_dependency_graph(modules)
+    edges = sum(len(v) for v in graph.values())
+    problems: list[str] = []
+    if len(modules) < _SELF_TEST_MIN_MODULES:
+        problems.append(
+            f"discovered {len(modules)} flat-ns modules, expected >= "
+            f"{_SELF_TEST_MIN_MODULES} (module discovery broken?)"
+        )
+    if edges < _SELF_TEST_MIN_EDGES:
+        problems.append(
+            f"graph has {edges} edges, expected >= {_SELF_TEST_MIN_EDGES}"
+        )
+    missing = [n for n, p in modules.items() if not p.exists()]
+    if missing:
+        problems.append(f"{len(missing)} discovered modules have no .ml file")
+    if problems:
+        for p in problems:
+            print(f"SELF-TEST FAIL: {p}", file=sys.stderr)
+        return 1
+    print(
+        f"SELF-TEST OK: {len(modules)} flat-ns modules, {edges} internal edges, "
+        f"{len(SUB_LIBRARY_DIRS)} sub-libraries"
+    )
+    return 0
+
+
 def main() -> None:
     args = set(sys.argv[1:])
+
+    if "--self-test" in args:
+        sys.exit(run_self_test())
 
     discover_sub_libraries()
     print(f"Sub-libraries already extracted: {len(SUB_LIBRARY_DIRS)}")
@@ -374,7 +395,7 @@ def main() -> None:
     print()
 
     modules = get_monolith_modules()
-    print(f"Monolith modules in lib/dune: {len(modules)}")
+    print(f"Flat-namespace modules (absorbed into masc_mcp): {len(modules)}")
 
     missing = [n for n, p in modules.items() if not p.exists()]
     if missing:

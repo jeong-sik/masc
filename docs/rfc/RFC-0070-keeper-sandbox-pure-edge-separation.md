@@ -151,26 +151,38 @@ The 7 operations are fully covered by the v2 RFC after the additions in §3.0.3 
 
 ### 3.1 Pure core (Plan family)
 
-**v2 splits the single `Sandbox_plan.t` into two sibling types**, one per lifetime model. Both share the same `Container_name.t` derivation, hash algo, and result-typed `of_request` constructor — only the runtime shape differs.
+**v2 splits the single `Keeper_sandbox_plan.t` into two sibling types**, one per lifetime model. Both share the same `Keeper_container_name.t` derivation, hash algo, and result-typed `of_request` constructor — only the runtime shape differs.
 
-#### 3.1.1 `Keeper_sandbox_oneshot_plan` (already shipped — v1 type, renamed)
+**Naming convention used in §3.1–§3.3 below**: snippets describe the *post-Phase-3d* shape. v1 ships `Keeper_sandbox_plan` (abstract `type t`) + `Keeper_container_name.t`; Phase 3d renames the file/module to `Keeper_sandbox_oneshot_plan` with no shape change. Shorthand `Container_name.t` in snippets stands for `Keeper_container_name.t`.
+
+#### 3.1.1 `Keeper_sandbox_oneshot_plan` (already shipped as `Keeper_sandbox_plan` — v1 type; Phase 3d is a pure rename, no shape change)
+
+v1 ships this in `lib/keeper/keeper_sandbox_plan.{ml,mli}` with an *abstract* `type t` + accessors (not a `private` record), and `Keeper_container_name.t` (not `Container_name.t`). Phase 3d is a **pure file/caller rename** — the public surface stays identical:
 
 ```ocaml
-(* lib/keeper/keeper_sandbox_oneshot_plan.mli — was keeper_sandbox_plan in v1 *)
-type t = private {
-  container_name  : Container_name.t;       (* derived; opaque to caller *)
-  image           : string;                 (* TODO: tighten to Image.digest *)
-  command         : string;                 (* single sh -lc payload *)
-  timeout_budget_sec : float;
-}
+(* Post-Phase-3d: lib/keeper/keeper_sandbox_oneshot_plan.mli
+   v1 shipped form today: lib/keeper/keeper_sandbox_plan.mli *)
+
+type plan_error = (* closed sum — see v1 .mli for current arms *)
+
+type t  (** abstract *)
 
 val of_request
-  : turn_id:int
-    -> attempt:int
-    -> meta_name:string
-    -> cmd:string
-    -> (t, plan_error) result
+  :  turn_id:int
+  -> attempt:int
+  -> meta_name:string
+  -> cmd:string
+  -> (t, plan_error) result
+
+val container_name     : t -> Keeper_container_name.t
+val image              : t -> string
+val command            : t -> string
+val timeout_budget_sec : t -> float
+val equal              : t -> t -> bool
+val pp                 : Format.formatter -> t -> unit
 ```
+
+The conceptual fields (`container_name`, `image`, `command`, `timeout_budget_sec`) remain the same; readers should not assume an exposed record form.
 
 Covers `keeper_sandbox_runtime` site 838 (anonymous one-shot, even though the Plan does emit a derived `--name`; docker accepts the name for `--rm` invocations).
 
@@ -225,10 +237,11 @@ Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup_comma
 
 ### 3.2 Edge layer (Docker_client + executors)
 
-#### 3.2.1 `Docker_client.S` (v1 surface — kept as base capability layer)
+#### 3.2.1 `Docker_client.S` (v1 surface — kept as base capability layer; post-Phase-3d naming)
 
 ```ocaml
-(* lib/keeper/docker_client.mli — v1, unchanged *)
+(* lib/keeper/docker_client.mli — v1 surface, post-Phase-3d names
+   (v1 shipped today: takes Keeper_sandbox_plan.t / Keeper_container_name.t) *)
 module type S = sig
   val run         : Keeper_sandbox_oneshot_plan.t -> (Docker_response.exec_result, sandbox_error) result
   val exec        : container:Container_name.t -> cmd:string -> (Docker_response.exec_result, sandbox_error) result
@@ -265,10 +278,10 @@ module Make (D : Docker_client.S) : sig
   val start
     :  Keeper_sandbox_session_plan.t
     -> (t, sandbox_error) result
-  (** Spawns [docker run -d --rm --name <derived> ... <startup_command>].
-      Calls [D.run] internally with a synthesised inner one-shot plan
-      whose [command] is the session's [startup_command]. Returns
-      [t] holding the [Container_name.t] for subsequent [exec]/[rm]. *)
+  (** Spawns [docker run -d --rm --name <derived> ... <startup_command>]
+      by delegating to [D.run_detached] (added in Phase 3e — see prose
+      below). Returns [t] holding the [Container_name.t] for subsequent
+      [exec]/[rm]. *)
 
   val exec
     :  t
@@ -309,28 +322,29 @@ Both `Sandbox_executor` and `Sandbox_session_executor` are functors on the same 
 
 ### 3.3 Typed docker probe
 
-```ocaml
-(* lib/keeper/ps_record.mli *)
-type ps_status =
-  | Running
-  | Created
-  | Exited of { code : int }
-  | Paused
-  | Dead
-  | Restarting
-[@@deriving yojson, show, eq]
+**Shipped surface today** (`lib/keeper/docker_response.mli`, post Phase 3b-iv.2):
 
-type t = {
-  id         : Container_id.t;
-  name       : Container_name.t;
-  status     : ps_status;
-  labels     : (string * string) list;
-  created_at : Mtime.t;                     (* Mtime, not Unix.gettimeofday *)
+```ocaml
+type ps_status =
+  | Created | Running | Paused | Restarting | Exited | Dead
+[@@deriving show, eq]
+
+type ps_record = {
+  id     : string;
+  name   : Keeper_container_name.t;
+  status : ps_status;
+  labels : (string * string) list;
 }
-[@@deriving yojson, show, eq]
+[@@deriving show, eq]
 ```
 
-Underlying call: `docker ps --format '{{json .}}' --filter label=...`. JSON line-delimited, parsed via `ppx_deriving_yojson`. `Probe_format_drift` error fired if a record fails to parse — caller sees a typed alert, not a silent miss.
+**Intent (follow-up beyond v2 scope, not in this RFC)** — listed here so the cleanup/quarantine path's data needs are explicit, NOT promised by this RFC:
+
+- Carry exit code on `Exited` (today `parse_state` consumes only the `State` token and discards the exit code; the exit code is available from `docker inspect` separately).
+- Add `created_at : Mtime.t` to `ps_record` (today the cleanup tick reads `first_seen` from `Quarantine.t`, not from the ps row).
+- Strengthen `id : string` to a typed `Container_id.t`.
+
+These are explicitly **out of scope for v2**; v2 ships against the shipped surface above. The intent block is preserved as a forward marker for the post-Phase-4 cleanup hardening RFC. Underlying call: `docker ps --format '{{json .}}' --filter label=...`. JSON line-delimited, parsed via `ppx_deriving_yojson`. `Probe_format_drift` error fired if a record fails to parse — caller sees a typed alert, not a silent miss.
 
 ### 3.4 Cleanup quarantine state machine
 

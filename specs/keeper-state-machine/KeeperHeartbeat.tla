@@ -1,19 +1,33 @@
 ---- MODULE KeeperHeartbeat ----
-\* Heartbeat loop control flow for [lib/keeper/keeper_keepalive.ml].
+\* Heartbeat loop control flow.  The OCaml side carries a fully-annotated
+\* correspondence to this spec — see [keeper_keepalive_signal.ml]
+\* ([post_wakeup_signal], [post_heartbeat_tick] with [@@fsm_guard] PPX
+\* post-action checks that mirror this spec's postconditions, and
+\* [interruptible_sleep] whose [Atomic.compare_and_set wakeup true false]
+\* IS the HeartbeatTick action), [keeper_heartbeat_loop.ml]
+\* ([run_heartbeat_loop] the outer loop, [run_smart_heartbeat_gate] the
+\* dispatcher that turns a [Woken] sleep-outcome into a turn,
+\* [Heartbeat_smart.Skip_idle] the path that — if it consumed the CAS
+\* and then skipped — is the MissedWakeup bug-action), and
+\* [keeper_keepalive.ml] ([wakeup_keeper_by_agent_name] and
+\* [Atomic.set entry.fiber_wakeup true] on the WakeupSignal side; it
+\* re-exports [Keeper_heartbeat_loop] via [include]).
 \*
 \* Function names are stable identifiers; lines drift across edits.
-\* Verified against main as of 2026-04-28 (sibling refresh to #11641,
-\* #11645; see Cycle 27 PR #11596 for the OCaml-side anchor).
+\* iter 64 N-2.a removed line numbers; N-2.c adds a structural guard at
+\* scripts/audit-tla-ml-line-refs.sh.  Re-verified iter 90, 2026-05-12.
 \*
-\* Runtime entities modelled (see functions [run_heartbeat_loop] and
-\* [Atomic.set entry.fiber_wakeup true]; iter 64 N-2.a removed line
-\* numbers — function names are stable, line numbers drift; N-2.c adds a
-\* structural guard at scripts/audit-tla-ml-line-refs.sh):
+\* Runtime entities modelled:
 \*
-\*   wakeup_signaled  : bool Atomic.t — set by external supervisor /
-\*                      operator code when a keeper should service a
-\*                      pending event.  Cleared when the heartbeat tick
-\*                      starts a turn.
+\*   wakeup_signaled  : bool Atomic.t — [entry.fiber_wakeup].  Set by
+\*                      external supervisor / operator code
+\*                      ([wakeup_keeper] / [Atomic.set entry.fiber_wakeup
+\*                      true]) when a keeper should service a pending
+\*                      event.  Cleared by the heartbeat tick via
+\*                      [Atomic.compare_and_set wakeup true false] in
+\*                      [interruptible_sleep] (NOT [Atomic.exchange] — the
+\*                      CAS-true->false semantics matter: of two racing
+\*                      ticks only one wins, the other sees FALSE).
 \*   turn_state       : "idle" | "running" — abstract over the rich
 \*                      OCaml turn FSM (see [keeper_turn_fsm.mli]); for
 \*                      this spec we only need to know whether a turn
@@ -74,8 +88,12 @@ WakeupSignal ==
 
 \* The heartbeat loop ticks: it observes a pending wakeup while idle
 \* and starts a turn.  In OCaml this is the path where
-\* [Atomic.exchange wakeup false] returns true and the loop calls
-\* [run_keeper_cycle] (or the equivalent dispatch).
+\* [Atomic.compare_and_set wakeup true false] (in [interruptible_sleep],
+\* keeper_keepalive_signal.ml) succeeds — the sleep returns [Woken] and
+\* [run_smart_heartbeat_gate] dispatches a cycle.  The
+\* [post_heartbeat_tick] [@@fsm_guard] PPX (`Atomic.get wakeup = false`)
+\* enforces this spec's [wakeup_signaled' = FALSE] postcondition at
+\* runtime.
 HeartbeatTick ==
     /\ wakeup_signaled = TRUE
     /\ turn_state = "idle"
@@ -100,9 +118,12 @@ Done ==
 
 \* Models the "missed wakeup": the heartbeat tick observes the
 \* signal, clears it, but does NOT start a turn.  In the OCaml
-\* runtime this is what happens if (for example) the polling logic
-\* reads-then-clears the atomic and then takes an early-return
-\* before the dispatch path.
+\* runtime this is the [Heartbeat_smart.Skip_idle] branch consuming
+\* the [Atomic.compare_and_set wakeup true false] (so the CAS-true->false
+\* edge fires) and then skipping the cycle — i.e. the discriminator that
+\* couples [Woken] sleep-outcome to [run_smart_heartbeat_gate]'s dispatch
+\* is missing or wrong (see keeper_keepalive_signal.ml's [interruptible_sleep]
+\* comment on exactly this risk).
 MissedWakeup ==
     /\ wakeup_signaled = TRUE
     /\ turn_state = "idle"

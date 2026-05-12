@@ -10,10 +10,27 @@
 \* at scripts/audit-tla-ml-line-refs.sh):
 \*
 \*   pending  : SMap from id to entry, holding submitted-but-unresolved
-\*              approval requests. Each entry carries a resolver that
-\*              wakes the suspended fiber.
+\*              approval requests. Each entry carries either a resolver
+\*              (the [submit_and_await] case — see scope note below) or
+\*              an [on_resolution] callback (the [submit_pending] case),
+\*              recorded as [entry.resolver : ... Eio.Promise.u option].
 \*   resolver : Eio.Promise resolver tied to a fiber blocked on
 \*              [Eio.Promise.await]. Resolving wakes the fiber.
+\*
+\* Scope (which path is modelled).  keeper_approval_queue.ml has two
+\* submit entry points: [submit_and_await] (creates an [Eio.Promise],
+\* registers the entry with [~resolver:(Some resolver)], then blocks the
+\* caller on [Eio.Promise.await] — the entry has a SUSPENDED FIBER) and
+\* [submit_pending] (registers with [~resolver:None] + an [on_resolution]
+\* callback, returns the id immediately — NO suspended fiber; the
+\* decision is delivered later via the callback).  This spec models the
+\* [submit_and_await] variant — `suspended_fibers` counts those fibers.
+\* The [submit_pending] variant has a different, weaker failure mode (a
+\* dropped [on_resolution] callback, not a permanently blocked fiber);
+\* it is out of scope here.  [expire_stale] handles BOTH (`match
+\* entry.resolver with Some r -> Eio.Promise.resolve r (Reject ...) |
+\* None -> f (Reject ...)`); the model abstracts only its effect on the
+\* suspended-fiber population.
 \*
 \* The boundary critique flagged this as a black-box area: a tool call
 \* submits an approval request and gets suspended on
@@ -103,10 +120,16 @@ Done ==
 \* ── Bug action (only in SpecBuggy) ─────────────────────────────
 
 \* Models the regression where [expire_stale] removes the pending
-\* entry but forgets to call [Eio.Promise.resolve resolver]. The
-\* fiber stays suspended forever. In the OCaml runtime this maps to
-\* code paths where [entry.resolver] is None at expire time, or
-\* where a future refactor moves the cleanup before the resolve.
+\* entry of a [submit_and_await] request but forgets to call
+\* [Eio.Promise.resolve resolver] — the suspended fiber stays blocked
+\* forever. In the OCaml runtime this is the path where a future
+\* refactor moves the [pending] cleanup before the
+\* [Eio.Promise.resolve resolver (Reject ...)] in [expire_stale]'s
+\* [Some resolver] branch, or otherwise drops the resolve.  (NB: an
+\* [entry.resolver = None] entry is a [submit_pending] request — it has
+\* NO suspended fiber, so dropping it does not produce the modelled
+\* harm; its weaker failure mode — a dropped [on_resolution] callback —
+\* is out of scope, see the header.)
 ExpireStaleNoResolve ==
     /\ pending_count > 0
     /\ pending_count' = pending_count - 1

@@ -175,10 +175,10 @@ type snapshot = {
   run_id : string;
   ts : float;
   phase : Keeper_state_machine.phase;
-      (** Full 12-state keeper phase (RFC-0002). Previously collapsed to
-          a collapsed projection (7 states) for dashboard brevity; now exposed raw
-          so the fleet matrix renders every state with its own chip colour.
-          The 12-state alphabet matches
+      (** Full 13-state keeper phase (RFC-0002, post-Zombie #14707). Previously
+          collapsed to a 7-state projection for dashboard brevity; now exposed
+          raw so the fleet matrix renders every state with its own chip colour.
+          The 13-state alphabet matches
           [specs/keeper-state-machine/KeeperStateMachine.tla] exactly. *)
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;

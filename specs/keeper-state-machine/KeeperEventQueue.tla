@@ -15,19 +15,23 @@
 \*     - enqueue wiring: keeper_keepalive_signal.ml calls
 \*       Keeper_registry.enqueue_event before the wakeup flag flips and
 \*       comments "RFC-0020 Rule 1 (enqueue is independent of policy)".
-\*     - dequeue + override: keeper_heartbeat_loop.ml dequeues once per
-\*       turn ("pins the [Conservation] invariant ... in production",
-\*       dequeued_total <= enqueued_total) and forces Emit when the
-\*       queue is non-empty ("Pinned by KeeperEventQueue.tla
-\*       QueueNeverStarvedBySkip invariant").
-\*   Remaining honest gap: the consumer-side wiring of
-\*   Heartbeat_smart.should_emit (so the Policy Layer reads the queue
-\*   before answering Skip) is flagged "follow-up" in keeper_event_queue.mli
-\*   and at keeper_heartbeat_loop.ml. The drift this note closes was
-\*   audited in iter 68 #14933 (docs/tla-audit/keq-q1-event-queue-spec-
-\*   banner-vs-runtime-2026-05-12.md) — the inverse of KOAS M-2.a, where
-\*   the runtime owes the spec; here the spec banner had simply not
-\*   caught up to the runtime.
+\*     - dequeue: keeper_heartbeat_loop.ml drains the board-signal batch
+\*       within the debounce window via Keeper_registry.drain_board_events
+\*       (a CAS loop over Keeper_event_queue.drain_board_window) and
+\*       falls back to a single non-board dequeue_event when that batch
+\*       is empty — either path pins [Conservation]
+\*       (dequeued_total <= enqueued_total) in production.
+\*     - override: run_smart_heartbeat_gate snapshots the queue
+\*       (Keeper_registry.event_queue_snapshot) and forces Emit when it
+\*       is non-empty (metric_keeper_event_queue_override
+\*       reason="event_queue"), pinning QueueNeverStarvedBySkip — the
+\*       queue is read before any Skip takes effect, though that read
+\*       currently lives in the gate rather than inside
+\*       Heartbeat_smart.should_emit itself.
+\*   The drift this note closes was audited in iter 68 #14933
+\*   (docs/tla-audit/keq-q1-event-queue-spec-banner-vs-runtime-2026-05-12.md)
+\*   — the inverse of KOAS M-2.a, where the runtime owes the spec; here
+\*   the spec banner had simply not caught up to the runtime.
 \*
 \* Runtime entities modelled (see [keeper_event_queue.ml],
 \* [keeper_keepalive_signal.ml], [keeper_heartbeat_loop.ml]):

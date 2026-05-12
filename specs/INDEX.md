@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-12T02:43:01Z (HEAD: f71ee64b1)
+Generated: 2026-05-12T03:07:45Z (HEAD: 44dbd4d08)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -131,7 +131,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperCounterCausality.tla | KeeperCounterCausality | manual | 2 | 1 | clean={inv:Safety} buggy={inv:CausePresentWhenCounted} | 531942a050de |
 | KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} | 3476c0518970 |
 | KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | 805be4907879 |
-| KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | b6a4ce692708 |
+| KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | c2c464472dca |
 | KeeperGenerationLineage.tla | KeeperGenerationLineage | manual | 2 | 1 | clean={inv:TypeOK, inv:CurrentTraceIsolation, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage, prop:HandoffEventuallyResolves} buggy={inv:TypeOK, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage} | bc957a36caf6 |
 | KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 35344ff2f4be |
 | KeeperLaunchPending.tla | KeeperLaunchPending | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 29a782dc0677 |

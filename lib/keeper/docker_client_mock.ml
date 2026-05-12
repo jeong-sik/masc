@@ -34,6 +34,10 @@ let info_security_options_queue
   : (string list, Docker_client.sandbox_error) result Queue.t
   = Queue.create ()
 
+let image_present_queue
+  : (string * (unit, Docker_client.sandbox_error) result) Queue.t
+  = Queue.create ()
+
 (* ── Injection API ──────────────────────────────────────────── *)
 
 let inject_run plan response = Queue.add (plan, response) run_queue
@@ -50,6 +54,10 @@ let inject_rm container response = Queue.add (container, response) rm_queue
 
 let inject_info_security_options response =
   Queue.add response info_security_options_queue
+;;
+
+let inject_image_present ~image response =
+  Queue.add (image, response) image_present_queue
 ;;
 
 (* ── Docker_client.S implementation ─────────────────────────── *)
@@ -112,6 +120,13 @@ let info_security_options () =
   | None -> Error Docker_client.Daemon_unreachable
 ;;
 
+let image_present ~image =
+  match Queue.peek_opt image_present_queue with
+  | Some (expected, response) when String.equal image expected ->
+    ignore (Queue.pop image_present_queue);
+    response
+  | _ -> Error Docker_client.Daemon_unreachable
+
 (* ── Fixture lifecycle ──────────────────────────────────────── *)
 
 let reset () =
@@ -119,7 +134,8 @@ let reset () =
   Queue.clear exec_queue;
   Queue.clear ps_query_queue;
   Queue.clear rm_queue;
-  Queue.clear info_security_options_queue
+  Queue.clear info_security_options_queue;
+  Queue.clear image_present_queue
 
 let pending_calls () =
   Queue.length run_queue
@@ -127,3 +143,4 @@ let pending_calls () =
   + Queue.length ps_query_queue
   + Queue.length rm_queue
   + Queue.length info_security_options_queue
+  + Queue.length image_present_queue

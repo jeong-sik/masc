@@ -141,3 +141,24 @@ let info_security_options () =
        surface as [Ok]. *)
     Error Docker_client.Daemon_unreachable
 ;;
+
+let image_present ~image =
+  (* [docker image inspect <image>] — exit 0 ⇒ present locally. A
+     non-zero exit conflates "image not found locally" (exit 1 — the
+     common case, the caller may then pull) with "daemon down" (also
+     exit 1, with a connection-error message). The shipped
+     [keeper_sandbox_runtime.docker_image_present] makes the same
+     conflation. We surface [Image_pull_failed] as the single "image
+     is not available for this run" signal, except a synthesized
+     [WEXITED 127] (docker CLI itself missing), which is unambiguously
+     [Daemon_unreachable]. A future RFC could split this into
+     [Image_not_found | Daemon_unreachable] if the preflight needs to
+     distinguish. [image] is assumed non-empty — the plan layer
+     validates that, not this daemon-level call. *)
+  let argv = [ "docker"; "image"; "inspect"; image ] in
+  match Process_eio.run_argv_with_status argv with
+  | Unix.WEXITED 0, _ -> Ok ()
+  | Unix.WEXITED 127, _ -> Error Docker_client.Daemon_unreachable
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
+    Error Docker_client.Image_pull_failed
+;;

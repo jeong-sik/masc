@@ -83,4 +83,19 @@ module type S = sig
       a JSON array nor [null], or that fails to parse — i.e. a docker
       output-format change — ⇒ [Error Probe_format_drift] rather than
       a silent [Ok []]. *)
+
+  val image_present : image:string -> (unit, sandbox_error) result
+  (** [image_present ~image] runs [docker image inspect <image>].
+      [Ok ()] when the image exists locally.
+
+      A non-zero exit conflates "image not found locally" (exit 1 — the
+      common case; the caller may then pull) with "daemon down" (also
+      exit 1, with a connection-error message), so it surfaces as
+      [Error Image_pull_failed] — the single "image is not available
+      for this run" signal. The one disambiguated case is a docker CLI
+      that is missing entirely ⇒ [Error Daemon_unreachable]. [image] is
+      assumed non-empty; the plan layer validates that, not this
+      daemon-level call. (RFC §3.0.3 sketched a richer
+      [image_inspect → image_info]; nothing consumes inspect data, so
+      this is the presence-check it actually needs.) *)
 end

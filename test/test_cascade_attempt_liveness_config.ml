@@ -41,6 +41,15 @@ let check_mode label expected actual =
 
 (* -- mode parsing --------------------------------------------------- *)
 
+(* Covers the empty-string env value, which is the closest a pure-OCaml
+   test can get to "unset": the stdlib [Unix] module has [putenv] but no
+   [unsetenv], so we can't actually remove the variable here. That's
+   acceptable: [current_mode] maps both the truly-unset case
+   ([Sys.getenv_opt = None] -> [Observe]) and the empty-string case
+   ([parse_mode ""] -> [Observe]) to the same result, so the observable
+   behavior this asserts is identical for both. The only regression this
+   can't catch is a future change to the [None] arm alone — guard that
+   by keeping the arm and [parse_mode ""] in sync. *)
 let test_default_unset () =
   let prior = Sys.getenv_opt env_var in
   Unix.putenv env_var "";
@@ -155,13 +164,13 @@ let make_cfg (providers : Decl.cascade_provider list) : Decl.cascade_config =
    as canonical fixtures; each row exercises one [liveness_class]. *)
 let fixture_cfg =
   make_cfg
-    [ make_provider ~id:"codex_cli" ~liveness_class:(Some Cloud_fast)
-    ; make_provider ~id:"claude_code" ~liveness_class:(Some Cloud_fast)
-    ; make_provider ~id:"gemini_cli" ~liveness_class:(Some Cloud_fast)
-    ; make_provider ~id:"kimi_cli" ~liveness_class:(Some Cloud_thinking)
-    ; make_provider ~id:"glm-coding" ~liveness_class:(Some Cloud_thinking)
-    ; make_provider ~id:"ollama" ~liveness_class:(Some Local_27b)
-    ; make_provider ~id:"big-local" ~liveness_class:(Some Local_70b_plus)
+    [ make_provider ~id:"codex_cli" ~liveness_class:(Some Decl.Cloud_fast)
+    ; make_provider ~id:"claude_code" ~liveness_class:(Some Decl.Cloud_fast)
+    ; make_provider ~id:"gemini_cli" ~liveness_class:(Some Decl.Cloud_fast)
+    ; make_provider ~id:"kimi_cli" ~liveness_class:(Some Decl.Cloud_thinking)
+    ; make_provider ~id:"glm-coding" ~liveness_class:(Some Decl.Cloud_thinking)
+    ; make_provider ~id:"ollama" ~liveness_class:(Some Decl.Local_27b)
+    ; make_provider ~id:"big-local" ~liveness_class:(Some Decl.Local_70b_plus)
     ; make_provider ~id:"no-class" ~liveness_class:None
     ]
 ;;

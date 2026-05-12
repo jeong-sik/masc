@@ -16,12 +16,12 @@
 # here, reference the fix-PR in this comment, and remove it once that
 # PR merges (same convention as the ocaml-phase-count baseline).
 #
-# iter 95 R-1.c (this PR): scanner gained multi-line scan capability
-# (the single-line `grep -oE` regex couldn't match `[sym]` and `line N`
-# split across adjacent comment lines).  The widened scan immediately
-# surfaced one drift hidden from the previous regex; baselined here
-# while its fix-PR is in flight:
-#   keeper_unified_turn.ml:run_keeper_cycle — iter 94 #15002 (drains
-#     the `[run_keeper_cycle] (line 1042+)` reverse-citation in the
-#     run_keeper_cycle header; remove this line once #15002 merges).
-lib/keeper/keeper_unified_turn.ml:run_keeper_cycle
+# iter 95 R-1.c (#15004) widened the scanner from `grep -oE` (line-
+# oriented) to awk whole-file scan + bounded multi-line match + comment-
+# boundary filter; it surfaced one previously hidden citation
+# (`keeper_unified_turn.ml [run_keeper_cycle]`, -803 drift), which
+# iter 94 #15002 had already drained on origin/main minutes earlier.
+# iter 96 R-1.d (this PR) drains the transient baseline line that
+# #15004 had to keep while #15002 was OPEN.  STATUS returns to empty,
+# zero OCaml-docstring line-ref drift across all five baseline chains
+# (R-1.a -> R-1.b -> R-1.c -> R-1.d).

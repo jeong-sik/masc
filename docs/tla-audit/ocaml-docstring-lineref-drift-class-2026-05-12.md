@@ -4,7 +4,7 @@
 **Scope**: `lib/keeper/*.{ml,mli}` "Spec navigation (OCaml -> TLA+)" reverse-citation blocks that cite their own functions/types at `(~line N)`.
 **Verdict**: this is the OCaml-docstring twin of the 8th drift sub-class (TLA-preamble line-reference drift, iter 63 KAQ N-1). iter 64 N-2.a fixed the *spec preamble* side and N-2.c added a guard (`scripts/audit-tla-ml-line-refs.sh`) — but that guard only scans `specs/keeper-state-machine/*.tla`, not OCaml docstrings, and `scripts/audit-ocaml-phase-count.sh` only checks phase counts. So the OCaml-side mirror of the same stale citations has gone uncaught. This PR fixes the clearest case (`keeper_approval_queue.ml`, N-2.e) and catalogues the rest.
 
-## Survey (`rg '\(~?line N\)' lib/keeper/*.ml`)
+## Survey (`rg '\(~?line [0-9]+\)' lib/keeper/*.ml`)
 
 | Module | Cited | Actual | Drift | Status |
 |---|---|---|---|---|

@@ -81,6 +81,32 @@ val docker_label_args
   -> unit
   -> string list
 
+(** {2 Label building blocks (RFC-0070 Phase 3e — used by
+    [Keeper_sandbox_session_plan] to compose the *deterministic* subset
+    of [docker_label_args] byte-identically; re-defining them there
+    would risk drift)} *)
+
+val sandbox_component_label_key : string
+val sandbox_base_path_hash_label_key : string
+val sandbox_keeper_label_key : string
+val sandbox_kind_label_key : string
+val sandbox_owner_pid_label_key : string
+val sandbox_started_at_label_key : string
+val sandbox_network_label_key : string
+val sandbox_ttl_sec_label_key : string
+val sandbox_turn_id_label_key : string
+
+(** Value of {!sandbox_component_label_key} ([= "keeper-sandbox"]). *)
+val sandbox_component_label_value : string
+
+(** [base_path_hash base_path] = the {!sandbox_base_path_hash_label_key}
+    label value: hex MD5 of the normalised base path. Pure. *)
+val base_path_hash : string -> string
+
+(** [sanitize_label_value v] maps any character outside
+    [[A-Za-z0-9_.-]] to ['_']. Pure. *)
+val sanitize_label_value : string -> string
+
 (** Docker network argv fragment and the MASC network label.  In
     particular, [Network_inherit] maps to [--network host] so the
     container shares the host network namespace (needed for

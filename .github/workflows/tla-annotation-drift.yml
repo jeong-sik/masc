@@ -23,6 +23,7 @@ on:
       - 'lib/cascade/cascade_fsm.ml'
       - 'lib/cascade/cascade_fsm.mli'
       - 'scripts/audit-tla-annotation-drift.sh'
+      - 'scripts/audit-tla-phase-count.sh'
       - 'scripts/tla-annotation-drift-baseline.txt'
       - '.github/workflows/tla-annotation-drift.yml'
   push:
@@ -35,6 +36,7 @@ on:
       - 'lib/cascade/cascade_fsm.ml'
       - 'lib/cascade/cascade_fsm.mli'
       - 'scripts/audit-tla-annotation-drift.sh'
+      - 'scripts/audit-tla-phase-count.sh'
       - 'scripts/tla-annotation-drift-baseline.txt'
   workflow_dispatch: {}
 
@@ -64,3 +66,13 @@ jobs:
           bash scripts/audit-tla-annotation-drift.sh \
             --baseline scripts/tla-annotation-drift-baseline.txt \
             --check-cross-spec
+
+      - name: Run phase-count validator (R-H-1.c)
+        # Catches stale "N phases" mentions in spec comments where N
+        # disagrees with the OCaml `type phase` constructor count.
+        # iter 4 added Zombie (12→13) but 7 specs still cited 12 for
+        # six months until iter 49 audit caught them; this guard
+        # prevents the next phase-count change from regressing the
+        # same way.  See docs/tla-audit/rh1b-sweep-zombie-12-phases-
+        # stale-2026-05-12.md for the audit that motivated it.
+        run: bash scripts/audit-tla-phase-count.sh

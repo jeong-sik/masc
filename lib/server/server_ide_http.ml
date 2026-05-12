@@ -249,14 +249,18 @@ let add_routes router =
          in
          let store_dir = Filename.concat base ".masc-ide" in
          let path = Filename.concat store_dir "regions.jsonl" in
-         let raw = if not (Sys.file_exists path) then [] else Fs_compat.load_jsonl path in
+         (* Streaming filter — file_path filter usually drops most lines,
+            and regions.jsonl grows append-only. fold_jsonl_lines avoids
+            the full-list materialisation that List.filter_map needed. *)
          let regions =
-           List.filter_map
-             (fun j ->
-                match Ide_annotation_types.region_of_json j with
-                | Ok r when file_path = "" || r.file_path = file_path -> Some r
-                | _ -> None)
-             raw
+           Fs_compat.fold_jsonl_lines
+             ~init:[]
+             ~f:(fun acc ~line_no:_ j ->
+               match Ide_annotation_types.region_of_json j with
+               | Ok r when file_path = "" || r.file_path = file_path -> r :: acc
+               | _ -> acc)
+             path
+           |> List.rev
          in
          let json = `List (List.map Ide_annotation_types.region_to_json regions) in
          Http.Response.json

@@ -215,8 +215,14 @@ let read_logs config ~task_id ?limit () : log_entry list =
   if not (Sys.file_exists file) then []
   else
     let entries =
-      Fs_compat.load_jsonl file
-      |> List.filter_map log_entry_of_json
+      Fs_compat.fold_jsonl_lines
+        ~init:[]
+        ~f:(fun acc ~line_no:_ j ->
+          match log_entry_of_json j with
+          | Some e -> e :: acc
+          | None -> acc)
+        file
+      |> List.rev
     in
     match limit with
     | None -> entries

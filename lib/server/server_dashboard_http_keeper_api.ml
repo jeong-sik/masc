@@ -82,8 +82,17 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
 let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
     : Trajectory.trajectory_line list =
   let path = Keeper_types.keeper_internal_history_path config trace_id in
-  Fs_compat.load_jsonl path
-  |> List.filter_map internal_history_json_to_trajectory_line
+  (* Streaming filter — avoid materialising the full JSONL list when
+     only a subset of lines decode to [trajectory_line]. Output is built
+     in reverse and reversed once, matching List.filter_map ordering. *)
+  Fs_compat.fold_jsonl_lines
+    ~init:[]
+    ~f:(fun acc ~line_no:_ json ->
+      match internal_history_json_to_trajectory_line json with
+      | Some line -> line :: acc
+      | None -> acc)
+    path
+  |> List.rev
 
 let merge_keeper_trace_lines ~(config : Coord.config) ~(trace_id : string)
     (trajectory_lines : Trajectory.trajectory_line list)

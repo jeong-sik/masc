@@ -158,15 +158,18 @@ let is_fresh ?(now = Unix.gettimeofday ()) value =
 
 let load_all config =
   let path = judgments_path config in
-  Fs_compat.load_jsonl path
-  |> List.filter_map (fun json ->
-         try
-           match of_yojson json with
-           | Ok value -> Some value
-           | Error _ -> None
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Governance.warn "operator judgment parse: %s" (Printexc.to_string exn);
-           None)
+  Fs_compat.fold_jsonl_lines
+    ~init:[]
+    ~f:(fun acc ~line_no:_ json ->
+      try
+        match of_yojson json with
+        | Ok value -> value :: acc
+        | Error _ -> acc
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Log.Governance.warn "operator judgment parse: %s" (Printexc.to_string exn);
+        acc)
+    path
+  |> List.rev
 
 let append config values =
   ensure_dir (operator_dir config);

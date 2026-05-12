@@ -786,30 +786,32 @@ let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings 
   episode
 ;;
 
-(** Load recent episodes from JSONL (last N entries). *)
+(** Load recent episodes from JSONL (last N entries) via a bounded
+    [Queue] ring — O(limit) resident memory regardless of file size,
+    one pass over the JSONL via [Fs_compat.fold_jsonl_lines]. *)
 let load_recent_episodes_jsonl ~limit : episode list =
   let path = episodes_jsonl_path () in
-  let jsons = Fs_compat.load_jsonl path in
-  let all =
-    List.filter_map
-      (fun json ->
-         try Some (episode_of_json json) with
-         | Yojson.Safe.Util.Type_error _ -> None
-         | exn ->
-           Log.Institution.warn "episode parse failed: %s" (Printexc.to_string exn);
-           None)
-      jsons
-  in
-  let total = List.length all in
-  if total <= limit
-  then all
+  if limit <= 0
+  then []
   else (
-    let rec drop n = function
-      | [] -> []
-      | remaining when n <= 0 -> remaining
-      | _ :: rest -> drop (n - 1) rest
-    in
-    drop (total - limit) all)
+    let buf : episode Queue.t = Queue.create () in
+    Fs_compat.fold_jsonl_lines
+      ~init:()
+      ~f:(fun () ~line_no:_ json ->
+        let parsed =
+          try Some (episode_of_json json) with
+          | Yojson.Safe.Util.Type_error _ -> None
+          | exn ->
+            Log.Institution.warn "episode parse failed: %s" (Printexc.to_string exn);
+            None
+        in
+        match parsed with
+        | None -> ()
+        | Some ep ->
+          Queue.add ep buf;
+          if Queue.length buf > limit then ignore (Queue.pop buf))
+      path;
+    List.of_seq (Queue.to_seq buf))
 ;;
 
 (** Cap episodes JSONL to at most [max_lines] by keeping the most recent ones.
@@ -824,27 +826,32 @@ let cap_episodes_jsonl ?(max_lines = episodes_jsonl_default_cap) () : int =
   if not (Sys.file_exists path)
   then 0
   else (
-    let lines = Fs_compat.load_jsonl path in
-    let total = List.length lines in
+    (* Bounded ring + total counter — O(max_lines) memory regardless
+       of input size. The ring holds the trailing [max_lines] parsed
+       JSON values that survive into the rewrite. *)
+    let buf : Yojson.Safe.t Queue.t = Queue.create () in
+    let total_ref = ref 0 in
+    Fs_compat.fold_jsonl_lines
+      ~init:()
+      ~f:(fun () ~line_no:_ json ->
+        incr total_ref;
+        Queue.add json buf;
+        if Queue.length buf > max_lines then ignore (Queue.pop buf))
+      path;
+    let total = !total_ref in
     if total <= max_lines
     then 0
     else (
-      let rec drop n = function
-        | [] -> []
-        | rest when n <= 0 -> rest
-        | _ :: rest -> drop (n - 1) rest
-      in
-      let keep = drop (total - max_lines) lines in
       let tmp_path = path ^ ".tmp" in
       let oc = open_out tmp_path in
       Eio_guard.protect
         ~finally:(fun () -> close_out_noerr oc)
         (fun () ->
-           List.iter
+           Queue.iter
              (fun line ->
                 output_string oc (Yojson.Safe.to_string line);
                 output_char oc '\n')
-             keep);
+             buf);
       Sys.rename tmp_path path;
       total - max_lines))
 ;;

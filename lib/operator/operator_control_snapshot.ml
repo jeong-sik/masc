@@ -308,12 +308,16 @@ let recent_actions_json config =
   if not (Sys.file_exists path)
   then `List []
   else (
-    let all = Fs_compat.load_jsonl path in
-    let len = List.length all in
-    let tail =
-      if len <= 20 then all else all |> List.to_seq |> Seq.drop (len - 20) |> List.of_seq
-    in
-    `List tail)
+    (* Bounded ring — keep the trailing 20 entries via [Queue.t] so the
+       action log JSONL does not need to materialise as a full list. *)
+    let buf : Yojson.Safe.t Queue.t = Queue.create () in
+    Fs_compat.fold_jsonl_lines
+      ~init:()
+      ~f:(fun () ~line_no:_ json ->
+        Queue.add json buf;
+        if Queue.length buf > 20 then ignore (Queue.pop buf))
+      path;
+    `List (List.of_seq (Queue.to_seq buf)))
 ;;
 
 let recent_messages_json config =

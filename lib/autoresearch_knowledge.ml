@@ -127,13 +127,16 @@ let load_all_findings ~base_path () : finding list =
   let path = findings_file ~base_path in
   if not (Sys.file_exists path) then []
   else
-    Fs_compat.load_jsonl path
-    |> List.filter_map (fun json ->
-         match finding_of_yojson json with
-         | Ok f -> Some f
-         | Error msg ->
-           Log.Keeper.warn "Skipping malformed finding: %s" msg;
-           None)
+    Fs_compat.fold_jsonl_lines
+      ~init:[]
+      ~f:(fun acc ~line_no:_ json ->
+        match finding_of_yojson json with
+        | Ok f -> f :: acc
+        | Error msg ->
+          Log.Keeper.warn "Skipping malformed finding: %s" msg;
+          acc)
+      path
+    |> List.rev
 
 (* Empty needle preserves the legacy "matches all" semantic; non-empty
    matching delegates to [String_util.contains_substring_ci]. The

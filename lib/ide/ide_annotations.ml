@@ -57,15 +57,20 @@ let load_all ~base_dir =
   let path = annotations_file ~base_dir in
   if not (Sys.file_exists path)
   then []
-  else (
-    let lines = Fs_compat.load_jsonl path in
-    let non_tombstones = List.filter (fun j -> not (is_tombstone j)) lines in
-    List.filter_map
-      (fun j ->
-         match annotation_of_json j with
-         | Ok a -> Some a
-         | Error _ -> None)
-      non_tombstones)
+  else
+    (* Streaming filter + decode — tombstone rejection happens during the
+       fold so the full JSONL list never lands in memory at once. *)
+    Fs_compat.fold_jsonl_lines
+      ~init:[]
+      ~f:(fun acc ~line_no:_ j ->
+        if is_tombstone j
+        then acc
+        else (
+          match annotation_of_json j with
+          | Ok a -> a :: acc
+          | Error _ -> acc))
+      path
+    |> List.rev
 ;;
 
 let write_all ~base_dir annotations =
@@ -175,12 +180,18 @@ let delete ~base_dir ~id ~keeper_id =
     let ts = now_ms () in
     let store = Dated_jsonl.create ~base_dir:(store_path ~base_dir) () in
     Dated_jsonl.append store (tombstone_json id keeper_id ts);
-    let raw_lines = Fs_compat.load_jsonl (annotations_file ~base_dir) in
-    let tombstones = List.filter is_tombstone raw_lines in
-    let total = List.length all + List.length tombstones in
+    (* Streaming count — we only need cardinalities to compute the
+       compaction ratio, not the row list itself. *)
+    let tombstone_count =
+      Fs_compat.fold_jsonl_lines
+        ~init:0
+        ~f:(fun acc ~line_no:_ j -> if is_tombstone j then acc + 1 else acc)
+        (annotations_file ~base_dir)
+    in
+    let total = List.length all + tombstone_count in
     if
       total > 0
-      && float_of_int (List.length tombstones) /. float_of_int total >= compact_threshold
+      && float_of_int tombstone_count /. float_of_int total >= compact_threshold
     then compact ~base_dir;
     Ok ()
 ;;

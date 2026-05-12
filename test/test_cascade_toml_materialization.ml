@@ -1172,7 +1172,8 @@ let test_serving_last_known_good_entry_and_recovery () =
   Unix.utimes toml_path t1 t1;
   (match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
    | Ok (Masc_mcp.Cascade_catalog_runtime.Serving_last_known_good _) -> ()
-   | Ok Validated _ -> fail "step 2: expected LKG, got Validated"
+   | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) ->
+     fail "step 2: expected LKG, got Validated"
    | Ok (Validated_with_rejections _) ->
      fail "step 2: expected LKG, got Validated_with_rejections"
    | Error _ -> fail "step 2: expected LKG, got Error");

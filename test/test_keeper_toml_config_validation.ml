@@ -160,6 +160,23 @@ let write_file path contents =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc contents)
 
+let repo_config_dir () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some repo_root -> Filename.concat repo_root "config"
+  | None -> "config"
+
+let with_repo_config_dir f =
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" (repo_config_dir ());
+  Masc_mcp.Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ())
+    f
+
 let contains ~needle haystack =
   let len = String.length haystack in
   let nlen = String.length needle in
@@ -169,27 +186,6 @@ let contains ~needle haystack =
       if String.sub haystack i nlen = needle then found := true
     done;
   !found
-
-let with_config_dir contents f =
-  let dir = Filename.temp_file "keeper_config_dir_" "" in
-  Sys.remove dir;
-  Unix.mkdir dir 0o755;
-  let toml_path = Filename.concat dir "cascade.toml" in
-  let json_path = Filename.concat dir "cascade.json" in
-  write_file toml_path contents;
-  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  Unix.putenv "MASC_CONFIG_DIR" dir;
-  Masc_mcp.Config_dir_resolver.reset ();
-  Fun.protect
-    ~finally:(fun () ->
-      (match prior with
-       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
-       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Masc_mcp.Config_dir_resolver.reset ();
-      (try Sys.remove json_path with _ -> ());
-      (try Sys.remove toml_path with _ -> ());
-      try Unix.rmdir dir with _ -> ())
-    (fun () -> f dir)
 
 let test_cascade_name_rejects_unknown () =
   let result =
@@ -204,6 +200,7 @@ let test_cascade_name_rejects_unknown () =
         (contains ~needle:"invalid cascade_name" e)
 
 let test_cascade_name_accepts_known () =
+  with_repo_config_dir @@ fun () ->
   let check_ok label cascade_name =
     let result =
       with_temp_toml
@@ -251,36 +248,10 @@ let test_cascade_name_accepts_tool_lane_without_catalog () =
                 a readable live catalog: %s"
                e))
 
-let test_cascade_name_error_lists_live_catalog () =
-  with_config_dir
-    {|
-[custom_live]
-models = ["ollama:auto"]
-
-[tool_use_strict]
-models = ["ollama:auto"]
-keeper_assignable = false
-|}
-    (fun _dir ->
-      let result =
-        with_temp_toml
-          "[keeper]\nname = \"testkeeper\"\ncascade_name = \"missing_profile\"\n"
-          KTP.load_keeper_toml
-      in
-      match result with
-      | Ok _ -> fail "missing_profile cascade_name should be rejected"
-      | Error e ->
-          check bool "error lists live catalog profile" true
-            (contains ~needle:"custom_live" e))
-
 let test_cascade_name_accepts_catalog_entry () =
-  (* "tool_use_strict" is a known catalog entry in cascade.json,
-     distinct from compile-time variants.  Tests that the live catalog
-     is consulted during validation.
-
-     #10388: must filter out system-only ([keeper_assignable=false])
-     entries — the validator now rejects those, and a real-catalog
-     entry like [cross_verifier] is system-only. *)
+  with_repo_config_dir @@ fun () ->
+  (* Tests that the live declarative catalog is consulted during
+     validation. *)
   let catalog =
     try Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ()
     with _ -> []
@@ -309,66 +280,6 @@ let test_cascade_name_accepts_catalog_entry () =
       (* If catalog is unavailable, skip rather than fail *)
       if catalog = [] then ()
       else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
-
-(** #10388: keepers must not reference cascades flagged
-    [keeper_assignable=false].  Pre-fix the validator only checked
-    catalog membership; system-only cascades (e.g. [tool_use_strict])
-    passed and the keeper failed every reconcile tick at runtime
-    (4 keepers / 59 events/day on 2026-04-25). *)
-let test_cascade_name_rejects_system_only () =
-  with_config_dir
-    {|
-[everyday_assignable]
-models = ["ollama:auto"]
-keeper_assignable = true
-
-[system_only_lane]
-models = ["ollama:auto"]
-keeper_assignable = false
-|}
-    (fun _dir ->
-      let result =
-        with_temp_toml
-          "[keeper]\nname = \"testkeeper\"\ncascade_name = \"system_only_lane\"\n"
-          KTP.load_keeper_toml
-      in
-      match result with
-      | Ok _ -> fail "system-only cascade_name should be rejected"
-      | Error e ->
-          check bool "error mentions system-only" true
-            (contains ~needle:"system-only" e);
-          check bool "error mentions keeper_assignable" true
-            (contains ~needle:"keeper_assignable=false" e);
-          check bool "error lists assignable subset" true
-            (contains ~needle:"everyday_assignable" e))
-
-let test_cascade_name_accepts_assignable_after_system_only_added () =
-  (* Sanity: the new gate must not regress assignable cascades when a
-     sibling profile happens to be system-only. *)
-  with_config_dir
-    {|
-[everyday_assignable]
-models = ["ollama:auto"]
-keeper_assignable = true
-
-[system_only_lane]
-models = ["ollama:auto"]
-keeper_assignable = false
-|}
-    (fun _dir ->
-      let result =
-        with_temp_toml
-          "[keeper]\nname = \"testkeeper\"\ncascade_name = \"everyday_assignable\"\n"
-          KTP.load_keeper_toml
-      in
-      match result with
-      | Ok _ -> ()
-      | Error e ->
-          fail
-            (Printf.sprintf
-               "everyday_assignable (keeper_assignable=true) should be \
-                accepted: %s"
-               e))
 
 let test_tool_access_accepts_dispatch () =
   let result =
@@ -475,11 +386,13 @@ let () =
     [
       ( "config/keepers",
         [
-          test_case "all toml files parse" `Quick test_all_keeper_tomls_parse;
+          test_case "all toml files parse" `Quick
+            (fun () -> with_repo_config_dir test_all_keeper_tomls_parse);
           test_case "named keepers default to docker" `Quick
-            test_named_keeper_docker_defaults;
+            (fun () -> with_repo_config_dir test_named_keeper_docker_defaults);
           test_case "committed keepers can do PR work" `Quick
-            test_committed_keepers_are_pr_work_capable;
+            (fun () ->
+              with_repo_config_dir test_committed_keepers_are_pr_work_capable);
         ] );
       ( "cascade_name validation",
         [
@@ -489,14 +402,8 @@ let () =
             test_cascade_name_accepts_known;
           test_case "accepts reserved tool lane without live catalog" `Quick
             test_cascade_name_accepts_tool_lane_without_catalog;
-          test_case "invalid cascade message lists live catalog" `Quick
-            test_cascade_name_error_lists_live_catalog;
-          test_case "accepts catalog entry (legacy alias)" `Quick
+          test_case "accepts live catalog entry" `Quick
             test_cascade_name_accepts_catalog_entry;
-          test_case "rejects system-only cascade (keeper_assignable=false)"
-            `Quick test_cascade_name_rejects_system_only;
-          test_case "accepts assignable when system-only sibling exists"
-            `Quick test_cascade_name_accepts_assignable_after_system_only_added;
           test_case "accepts dispatch tool_access preset" `Quick
             test_tool_access_accepts_dispatch;
         ] );

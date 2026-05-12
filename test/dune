@@ -58,9 +58,6 @@
         test_reward_advice_artifact
         test_keeper_cascade_profile
         test_cascade_capability_profile
-        test_cascade_required_capability_profile
-        test_cascade_phase1_smoke
-        test_cascade_secondary_entry_parser
         test_cascade_secondary_expand
         test_cascade_validator_capability_lint
         test_keeper_hooks_oas_provider
@@ -219,9 +216,7 @@
         test_observability_redact
         test_observability_provider_contracts
         test_config_doctor
-        test_cascade_toml_materialization
         test_cascade_routes_decoder
-        test_cascade_toml_section_fallback_10259
         test_cascade_declarative_parser
         test_cascade_declarative_validator
         test_cascade_declarative_adapter
@@ -303,9 +298,6 @@
         test_reward_advice_artifact
           test_keeper_cascade_profile
           test_cascade_capability_profile
-          test_cascade_required_capability_profile
-          test_cascade_phase1_smoke
-          test_cascade_secondary_entry_parser
           test_cascade_secondary_expand
           test_cascade_validator_capability_lint
           test_keeper_hooks_oas_provider
@@ -465,9 +457,7 @@
           test_observability_redact
           test_observability_provider_contracts
           test_config_doctor
-          test_cascade_toml_materialization
           test_cascade_routes_decoder
-          test_cascade_toml_section_fallback_10259
           test_cascade_declarative_parser
           test_cascade_declarative_validator
           test_cascade_declarative_adapter
@@ -564,7 +554,6 @@
         test_dashboard_harness_health
         test_eval_feed
         test_dashboard_tools
-        test_dashboard_cascade
         test_dashboard_verification
         test_tool_quality_classify
         test_tui_decode
@@ -784,7 +773,6 @@
         test_dashboard_harness_health
         test_eval_feed
         test_dashboard_tools
-        test_dashboard_cascade
         test_dashboard_verification
         test_tool_quality_classify
         test_tui_decode
@@ -1185,7 +1173,6 @@
 (include stanzas/test_cascade_http_probe.inc)
 (include stanzas/test_cascade_runtime.inc)
 (include stanzas/test_cascade_strategy.inc)
-(include stanzas/test_cascade_hierarchical_routing.inc)
 (include stanzas/test_cascade_trust_persist.inc)
 (include stanzas/test_audit_keeper_fleet_readiness.inc)
 (include stanzas/test_cdal_ledger_health_10115.inc)
@@ -1401,4 +1388,3 @@
  (name test_tool_descriptors_gen)
  (modules test_tool_descriptors_gen)
  (libraries masc_test_deps))
-

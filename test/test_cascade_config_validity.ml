@@ -28,134 +28,40 @@ let cascade_toml_path () =
       "MASC_CASCADE_TOML_PATH not set; dune stanza must inject it before running the test"
 ;;
 
-(** Render the TOML source once and cache the parsed [Yojson.Safe.t].
-    No disk write — Phase 9.2 will migrate runtime consumers to the
-    same in-memory path, and the test suite leads by example. *)
-let cascade_json_cache : Yojson.Safe.t Lazy.t =
+(** Parse the declarative TOML source once and cache its runtime snapshot. *)
+let cascade_snapshot_cache : Masc_mcp.Cascade_declarative_hotpath.decl_snapshot Lazy.t =
   lazy
     (let toml_path = cascade_toml_path () in
-     match
-       Masc_mcp.Cascade_toml_materializer.render_toml_to_json_string
-         ~config_path:toml_path
-     with
-     | Error msg ->
-       failwith (Printf.sprintf "cascade.toml failed to render to in-memory JSON: %s" msg)
-     | Ok (_info, json_str) -> Yojson.Safe.from_string json_str)
+     match Masc_mcp.Cascade_declarative_hotpath.try_load_declarative toml_path with
+     | Some (Ok snapshot) -> snapshot
+     | Some (Error errors) ->
+       let rendered =
+         errors
+         |> List.map Masc_mcp.Cascade_declarative_adapter.show_adapter_error
+         |> String.concat "; "
+       in
+       failwith (Printf.sprintf "cascade.toml declarative adapter failed: %s" rendered)
+     | None -> failwith "cascade.toml is not an RFC-0058 declarative catalog")
 ;;
 
-let cascade_json () = Lazy.force cascade_json_cache
+let cascade_snapshot () = Lazy.force cascade_snapshot_cache
 
-(** Profile names discovered from the rendered cascade catalog. Kept as
-    a function so the test always reflects the current TOML rather than
-    a frozen list that drifts the next time someone adds a profile. *)
-let discover_profiles_in (json : Yojson.Safe.t) : string list =
-  match json with
-  | `Assoc fields ->
-    fields
-    |> List.filter_map (fun (k, v) ->
-      match v with
-      | `List _ ->
-        let suffix = "_models" in
-        let k_len = String.length k in
-        let s_len = String.length suffix in
-        if k_len > s_len && String.sub k (k_len - s_len) s_len = suffix
-        then Some (String.sub k 0 (k_len - s_len))
-        else None
-      | _ -> None)
-  | _ -> []
-;;
-
-let load_profile_strings_in ~(json : Yojson.Safe.t) ~profile : string list =
-  let open Yojson.Safe.Util in
-  let key = profile ^ "_models" in
-  match json |> member key with
-  | `List items ->
-    List.filter_map
-      (function
-        | `String s -> Some (String.trim s)
-        | `Assoc _ as obj ->
-          (* Weighted entry: {"model": "provider:id", "weight": N} *)
-          (match obj |> member "model" with
-           | `String s when String.trim s <> "" -> Some (String.trim s)
-           | _ -> None)
-        | _ -> None)
-      items
-  | _ -> []
-;;
-
-let empty_profile_has_safe_fallback_in ~(json : Yojson.Safe.t) ~profile : bool =
-  let open Yojson.Safe.Util in
-  let fallback = json |> member (profile ^ "_fallback_cascade") |> to_string_option in
-  let keeper_assignable =
-    match json |> member (profile ^ "_keeper_assignable") with
-    | `Bool value -> value
-    | _ -> true
-  in
-  Option.is_some fallback && not keeper_assignable
-;;
-
-(* The fixture-based tests below load JSON from temp files via
-   [Cascade_config.resolve_strategy], which still needs a path-shaped
-   helper. Keep the file-based loaders for that scope only. *)
-let load_profile_strings_from_file ~path ~profile : string list =
-  let ic = open_in path in
-  let content =
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         let len = in_channel_length ic in
-         let buf = Bytes.create len in
-         really_input ic buf 0 len;
-         Bytes.to_string buf)
-  in
-  load_profile_strings_in ~json:(Yojson.Safe.from_string content) ~profile
-;;
-
-let test_profile_parses_non_empty profile () =
-  let json = cascade_json () in
-  let strings = load_profile_strings_in ~json ~profile in
-  if strings = []
-  then
-    check
-      bool
-      (Printf.sprintf "%s empty profile has non-keeper fallback" profile)
-      true
-      (empty_profile_has_safe_fallback_in ~json ~profile)
-  else (
-    let contains_substring ~needle s =
-      let nl = String.length needle in
-      let sl = String.length s in
-      if nl = 0 || nl > sl
-      then false
-      else (
-        let limit = sl - nl in
-        let rec loop i =
-          if i > limit
-          then false
-          else if String.sub s i nl = needle
-          then true
-          else loop (i + 1)
-        in
-        loop 0)
-    in
-    (* error format from OAS: `provider "glm" unavailable (missing env var "ZAI_API_KEY")` *)
-    let is_unavailable_error msg = contains_substring ~needle:"unavailable" msg in
-    let expanded = Masc_mcp.Cascade_config.expand_auto_models strings in
-    List.iter
-      (fun s ->
-         match Masc_mcp.Cascade_config.parse_model_string_result s with
-         | Ok (cfg : Llm_provider.Provider_config.t) ->
-           check
-             bool
-             (Printf.sprintf "%s: %S has non-empty model_id" profile s)
-             true
-             (String.trim cfg.model_id <> "")
-         | Error msg when is_unavailable_error msg ->
-           (* Provider known but its API key env var is empty — accepted. *)
-           ()
-         | Error msg ->
-           Alcotest.fail (Printf.sprintf "%s: %S hard-fails parse: %s" profile s msg))
-      expanded)
+let test_profile_parses_non_empty
+    (profile : Masc_mcp.Cascade_declarative_hotpath.profile)
+    () =
+  check
+    bool
+    (Printf.sprintf "%s has resolved candidates" profile.name)
+    true
+    (profile.candidates <> []);
+  List.iter
+    (fun (candidate : Masc_mcp.Cascade_declarative_hotpath.candidate) ->
+      check
+        bool
+        (Printf.sprintf "%s: %S has non-empty model_id" profile.name candidate.model_string)
+        true
+        (String.trim candidate.provider_cfg.model_id <> ""))
+    profile.candidates
 ;;
 
 (** Meta / regression guard: prove that the happy-path assertion in
@@ -172,37 +78,21 @@ let test_profile_parses_non_empty profile () =
     equal, the happy-path guarantee is broken and both tests will fire
     loudly. *)
 let test_unknown_provider_is_dropped () =
-  let tmp = Filename.temp_file "cascade-negative-" ".json" in
-  Fun.protect
-    ~finally:(fun () ->
-      try Sys.remove tmp with
-      | _ -> ())
-    (fun () ->
-       let oc = open_out tmp in
-       Fun.protect
-         ~finally:(fun () -> close_out_noerr oc)
-         (fun () ->
-            output_string
-              oc
-              {|{
-  "regression_models": [
-    "ollama:qwen3.5:35b-a3b-nvfp4",
-    "__nonexistent_provider_sentinel__:fake-model"
-  ]
-}|});
-       let strings = load_profile_strings_from_file ~path:tmp ~profile:"regression" in
-       check int "fixture has both entries" 2 (List.length strings);
-       let parsed = Masc_mcp.Cascade_config.parse_model_strings strings in
-       (* At least one entry must be dropped. Using "<" (not "=") keeps
-         the test correct if a future registry happens to also gate the
-         ollama entry behind an availability flag — the invariant we
-         care about is "unknown providers are non-identity for parse",
-         not an exact surviving count. *)
-       check
-         bool
-         "unknown provider entry is dropped by parse_model_strings"
-         true
-         (List.length parsed < List.length strings))
+  let strings =
+    [ "ollama:qwen3.5:35b-a3b-nvfp4"; "__nonexistent_provider_sentinel__:fake-model" ]
+  in
+  check int "fixture has both entries" 2 (List.length strings);
+  let parsed = Masc_mcp.Cascade_config.parse_model_strings strings in
+  (* At least one entry must be dropped. Using "<" (not "=") keeps
+     the test correct if a future registry happens to also gate the
+     ollama entry behind an availability flag — the invariant we care
+     about is "unknown providers are non-identity for parse", not an
+     exact surviving count. *)
+  check
+    bool
+    "unknown provider entry is dropped by parse_model_strings"
+    true
+    (List.length parsed < List.length strings)
 ;;
 
 (* RFC-0058 §9 Phase 9.1 (Acceptance Criteria): cascade.json must not
@@ -272,144 +162,17 @@ let test_cascade_json_is_not_committed () =
          repo_root)
 ;;
 
-(* RFC-0058 §9 Phase 9.3: cascade.toml is the only authoring surface.
-   Helper renamed from [with_temp_cascade_json] to [with_temp_cascade_toml]
-   so the file extension matches the only source kind the materializer
-   accepts. *)
-let with_temp_cascade_toml body =
-  let tmp = Filename.temp_file "cascade-strategy-" ".toml" in
-  Fun.protect
-    ~finally:(fun () ->
-      try Sys.remove tmp with
-      | _ -> ())
-    (fun () -> body tmp)
-;;
-
-let test_priority_tier_label_tiers_normalize_to_model_ids () =
-  with_temp_cascade_toml
-  @@ fun tmp ->
-  let oc = open_out tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-       output_string
-         oc
-         {|
-[regression]
-models = [
-  "claude_code:claude-haiku-4-5-20251001",
-  "gemini_cli:gemini-3-flash-preview",
-]
-strategy = "priority_tier"
-tiers = [
-  ["claude_code:claude-haiku-4-5-20251001"],
-  ["gemini_cli:gemini-3-flash-preview"],
-]
-|});
-  let strategy =
-    Masc_mcp.Cascade_config.resolve_strategy ~config_path:tmp ~name:"regression" ()
-  in
-  check
-    string
-    "priority_tier preserved"
-    "priority_tier"
-    (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind);
-  check
-    (list (list string))
-    "tiers normalized to model ids"
-    [ [ "claude-haiku-4-5-20251001" ]; [ "gemini-3-flash-preview" ] ]
-    strategy.tiers
-;;
-
-let test_priority_tier_invalid_tiers_fall_back_to_default_strategy () =
-  with_temp_cascade_toml
-  @@ fun tmp ->
-  let oc = open_out tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-       output_string
-         oc
-         {|
-[regression]
-models = ["claude_code:claude-haiku-4-5-20251001"]
-strategy = "priority_tier"
-tiers = [["codex_cli:auto"]]
-|});
-  let strategy =
-    Masc_mcp.Cascade_config.resolve_strategy ~config_path:tmp ~name:"regression" ()
-  in
-  check
-    string
-    "invalid tiers demote to default strategy"
-    "round_robin"
-    (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind);
-  check (list (list string)) "default strategy carries no tiers" [] strategy.tiers
-;;
-
-let test_keeper_assignable_profile_defaults_to_round_robin () =
-  with_temp_cascade_toml
-  @@ fun tmp ->
-  let oc = open_out tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-       output_string
-         oc
-         {|
-[regression]
-models = [
-  "claude_code:claude-haiku-4-5-20251001",
-  "gemini_cli:gemini-3-flash-preview",
-]
-keeper_assignable = true
-|});
-  let strategy =
-    Masc_mcp.Cascade_config.resolve_strategy ~config_path:tmp ~name:"regression" ()
-  in
-  check
-    string
-    "keeper assignable defaults to round_robin"
-    "round_robin"
-    (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind)
-;;
-
-let test_non_keeper_assignable_profile_defaults_to_failover () =
-  with_temp_cascade_toml
-  @@ fun tmp ->
-  let oc = open_out tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-       output_string
-         oc
-         {|
-[regression]
-models = [
-  "claude_code:claude-haiku-4-5-20251001",
-  "gemini_cli:gemini-3-flash-preview",
-]
-keeper_assignable = false
-|});
-  let strategy =
-    Masc_mcp.Cascade_config.resolve_strategy ~config_path:tmp ~name:"regression" ()
-  in
-  check
-    string
-    "non-keeper profile stays failover"
-    "failover"
-    (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind)
-;;
-
 let () =
-  let profiles = discover_profiles_in (cascade_json ()) in
+  let profiles : Masc_mcp.Cascade_declarative_hotpath.profile list =
+    (cascade_snapshot ()).profiles
+  in
   let profile_cases =
     List.map
-      (fun p ->
+      (fun (profile : Masc_mcp.Cascade_declarative_hotpath.profile) ->
          test_case
-           (Printf.sprintf "%s parses cleanly" p)
+           (Printf.sprintf "%s parses cleanly" profile.name)
            `Quick
-           (test_profile_parses_non_empty p))
+           (test_profile_parses_non_empty profile))
       profiles
   in
   run
@@ -424,22 +187,6 @@ let () =
             "cascade.json is not committed (RFC-0058 §9)"
             `Quick
             test_cascade_json_is_not_committed
-        ; test_case
-            "priority_tier label tiers normalize to model ids"
-            `Quick
-            test_priority_tier_label_tiers_normalize_to_model_ids
-        ; test_case
-            "priority_tier invalid tiers fall back to default strategy"
-            `Quick
-            test_priority_tier_invalid_tiers_fall_back_to_default_strategy
-        ; test_case
-            "keeper-assignable profile defaults to round_robin"
-            `Quick
-            test_keeper_assignable_profile_defaults_to_round_robin
-        ; test_case
-            "non-keeper-assignable profile defaults to failover"
-            `Quick
-            test_non_keeper_assignable_profile_defaults_to_failover
         ] )
     ]
 ;;

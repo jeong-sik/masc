@@ -6492,10 +6492,10 @@ let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_to
     EC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:[ "big_three"; "local_recovery" ]
       ~fallback_hint:"local_recovery"
-      ~base_cascade:"tier_fast"
-      ~effective_cascade:"keeper_bound_safe"
+      ~base_cascade:"primary_required"
+      ~effective_cascade:"secondary_required"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "tier_fast"; "keeper_bound_safe"; "big_three" ]
+      ~attempted_cascades:[ "primary_required"; "secondary_required"; "big_three" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry

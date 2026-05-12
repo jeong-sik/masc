@@ -204,12 +204,9 @@ let discover_profile_names ~config_path ~json : string list =
              else true)
       |> List.sort_uniq String.compare
   | Some (Error errs) ->
-      (* Declarative parser ran but produced adapter errors.  The
-         previous behavior was to silently fall through to the legacy
-         [_models] scan, hiding the cause of why the SSOT path failed.
-         Surface each error via WARN so operators can act on the live
-         cascade.toml fault, and tick a dedicated counter so the fault
-         rate is observable in Prometheus. *)
+      (* Declarative parser ran but produced adapter errors.  Do not fall
+         through to the retired flat TOML reader: cascade.toml is now
+         declarative-only, so adapter errors are the real fault. *)
       Cascade_metrics.on_declarative_parse_error ();
       List.iter
         (fun err ->
@@ -217,29 +214,12 @@ let discover_profile_names ~config_path ~json : string list =
             "[CascadeProfileDiscovery] declarative parse error: %s"
             (Cascade_declarative_adapter.show_adapter_error err))
         errs;
-      let legacy = discover_legacy_profile_names_from_json json in
-      Cascade_metrics.on_profile_discovery ~path:"legacy_after_decl_error";
-      (if legacy <> [] then
-         Log.Misc.warn
-           "[CascadeProfileDiscovery] using legacy _models fallback after \
-            declarative parse error (%d profile(s), %d adapter error(s)); \
-            cascade.toml is likely malformed or a pre-RFC-0058 fixture."
-           (List.length legacy)
-           (List.length errs));
-      legacy
+      Cascade_metrics.on_profile_discovery ~path:"declarative_error";
+      []
   | None ->
-      (* Declarative parser produced no result — most commonly a
-         pre-RFC-0058 fixture TOML in test code.  RFC-0066 Phase 4
-         target: this branch goes away once fixtures migrate. *)
-      let legacy = discover_legacy_profile_names_from_json json in
-      Cascade_metrics.on_profile_discovery ~path:"legacy_no_decl";
-      (if legacy <> [] then
-         Log.Misc.debug
-           "[CascadeProfileDiscovery] using legacy _models fallback (no \
-            5-layer schema present, %d profile(s)); likely a pre-RFC-0058 \
-            fixture TOML."
-           (List.length legacy));
-      legacy
+      ignore json;
+      Cascade_metrics.on_profile_discovery ~path:"declarative_missing";
+      []
 
 let float_opt_to_json = function
   | Some value -> `Float value
@@ -755,6 +735,28 @@ let validate_profile_static
               required_capability_profile;
             }
 
+let profile_build_of_declarative
+    (profile : Cascade_declarative_hotpath.profile)
+    : profile_build =
+  let candidates =
+    List.map
+      (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+        { model_string = candidate.model_string; provider_cfg = candidate.provider_cfg })
+      profile.candidates
+  in
+  {
+    name = profile.name;
+    weighted_entries = profile.weighted_entries;
+    inference_params = profile.inference_params;
+    api_key_env_overrides = [];
+    strategy = profile.strategy;
+    ollama_max_concurrent = profile.ollama_max_concurrent;
+    cli_max_concurrent = profile.cli_max_concurrent;
+    candidates;
+    probes = profile_probes candidates;
+    required_capability_profile = None;
+  }
+
 let runtime_required_profiles ~config_path =
   let keepers_from_catalog =
     match Cascade_config_loader.load_catalog ~config_path with
@@ -826,49 +828,49 @@ let validate_path_result ?sw ?net ~config_path () =
               Cascade_routes.Keeper_turn
           in
           let route_target_errors =
-          Cascade_routes.configured_route_targets ~config_path ()
-          |> List.filter_map (fun target ->
-                 if List.mem target profiles then None
-                 else
-                   Some
-                     (Printf.sprintf
-                        "cascade route targets missing profile %S"
-                        target))
-        in
-        let route_key_errors =
-          Cascade_routes.configured_unknown_route_keys ~config_path ()
-          |> List.map (fun key ->
-                 Printf.sprintf "unknown cascade route key %S" key)
-        in
-        (* Emit per-class schema-error counters so operators can tell
-           "typo storm" (unknown_route_key) from "deleted profile"
-           (missing_target_profile) on the dashboard.  Detail (the
-           specific route key / target name) stays in the rejection
-           error string; the counter only quantifies frequency. *)
-        Cascade_metrics.on_route_config_error
-          ~error_type:"missing_target_profile"
-          ~count:(List.length route_target_errors);
-        Cascade_metrics.on_route_config_error
-          ~error_type:"unknown_route_key"
-          ~count:(List.length route_key_errors);
-        let top_errors =
-          let base =
-            if profiles = [] then
-              [ "active cascade catalog declares no profiles" ]
-            else
-              []
+            Cascade_routes.configured_route_targets ~config_path ()
+            |> List.filter_map (fun target ->
+                   if List.mem target profiles then None
+                   else
+                     Some
+                       (Printf.sprintf
+                          "cascade route targets missing profile %S"
+                          target))
           in
-          let base = base @ route_key_errors @ route_target_errors in
-          if List.mem required_default_profile profiles then base
-          else
-            base
-            @
-            [
-              Printf.sprintf
-                "required default profile %S is missing"
-                required_default_profile;
-            ]
-        in
+          let route_key_errors =
+            Cascade_routes.configured_unknown_route_keys ~config_path ()
+            |> List.map (fun key ->
+                   Printf.sprintf "unknown cascade route key %S" key)
+          in
+          (* Emit per-class schema-error counters so operators can tell
+             "typo storm" (unknown_route_key) from "deleted profile"
+             (missing_target_profile) on the dashboard.  Detail (the
+             specific route key / target name) stays in the rejection
+             error string; the counter only quantifies frequency. *)
+          Cascade_metrics.on_route_config_error
+            ~error_type:"missing_target_profile"
+            ~count:(List.length route_target_errors);
+          Cascade_metrics.on_route_config_error
+            ~error_type:"unknown_route_key"
+            ~count:(List.length route_key_errors);
+          let top_errors =
+            let base =
+              if profiles = [] then
+                [ "active cascade catalog declares no profiles" ]
+              else
+                []
+            in
+            let base = base @ route_key_errors @ route_target_errors in
+            if List.mem required_default_profile profiles then base
+            else
+              base
+              @
+              [
+                Printf.sprintf
+                  "required default profile %S is missing"
+                  required_default_profile;
+              ]
+          in
         (* RFC-0066 Phase 3: hoist [load_catalog] out of the per-profile
            validator so that [required_capability_profile] hints are
            read once per [validate_path] regardless of how many profiles
@@ -1259,9 +1261,13 @@ let lookup_active_profile ?sw ?net ?clock raw_name =
                     cascade name"))
       else
         let normalized =
-          if Option.is_some (profile_lookup snapshot.profiles trimmed)
-          then trimmed
-          else normalize_declared_name raw_name
+          match
+            [ trimmed; "tier-group." ^ trimmed; "tier." ^ trimmed ]
+            |> List.find_opt (fun candidate ->
+                   Option.is_some (profile_lookup snapshot.profiles candidate))
+          with
+          | Some candidate -> candidate
+          | None -> normalize_declared_name raw_name
         in
         match profile_lookup snapshot.profiles normalized with
         | Some profile -> Ok (snapshot, normalized, profile)
@@ -1287,6 +1293,17 @@ let models_of_cascade_name ?sw ?net ?clock raw_name =
         (expand_weighted_entries ~cascade:normalized profile.weighted_entries
          |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
                 entry.model))
+
+let direct_candidate_providers (profile : profile_snapshot) =
+  List.map
+    (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
+    profile.candidates
+
+let prefer_direct_candidates_when_entry_parse_drops
+    (profile : profile_snapshot)
+    (parsed : Llm_provider.Provider_config.t list) =
+  let direct = direct_candidate_providers profile in
+  if direct <> [] && List.length parsed < List.length direct then direct else parsed
 
 let resolve_named_providers ?sw ?net ?clock ?provider_filter
     ?(require_tool_choice_support = false)
@@ -1314,6 +1331,7 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
              ~api_key_env_overrides:profile.api_key_env_overrides
              ~cascade_name:normalized
           ordered_entries
+        |> prefer_direct_candidates_when_entry_parse_drops profile
       in
       let filtered_declared_providers =
         Cascade_config.apply_provider_filter
@@ -1386,6 +1404,7 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
              ~api_key_env_overrides:profile.api_key_env_overrides
              ~cascade_name:normalized
           ordered_entries
+        |> prefer_direct_candidates_when_entry_parse_drops profile
       in
       let filtered_declared_providers =
         match Cascade_config.apply_provider_filter_strict
@@ -1490,6 +1509,14 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
                             profile.api_key_env_overrides
                           ~cascade:normalized
                           entry ))
+      in
+      let parsed_pairs =
+        let direct_pairs =
+          direct_candidate_providers profile |> List.map (fun cfg -> cfg, None)
+        in
+        if direct_pairs <> [] && List.length parsed_pairs < List.length direct_pairs
+        then direct_pairs
+        else parsed_pairs
       in
       let primaries = List.map fst parsed_pairs in
       (match

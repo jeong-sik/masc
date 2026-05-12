@@ -313,7 +313,7 @@ to Phase 4, when its dependents are dissolved.
   release.
 - Risk: high. This is the production-touching path. Mitigation:
   - Pre-PR draft for review by user before merge (no auto-merge).
-  - Production canary via cascade `keeper_bound_safe` for 24h after
+  - Production canary via cascade `retired_tool_profile` for 24h after
     merge.
   - Regression test: replay the RFC-0045 production stack trace fixture
     against the new structure to verify the assert is still caught.
@@ -368,7 +368,7 @@ to Phase 4, when its dependents are dissolved.
   `rg '\bKeeper_|\bMasc_' lib/cascade/*.ml | wc -l` returning 0 (or a
   documented per-file allowlist).
 - **Production canary**: after Phase 4 merge, run a single
-  `keeper_bound_safe` for 24h and confirm zero new asserts/regressions
+  `retired_tool_profile` for 24h and confirm zero new asserts/regressions
   via Prometheus `keeper_assert_failure_total` counter.
 - **RFC-0045 regression fixture**: existing 4 tests in
   `test_keeper_registry.ml` `rfc_0045_sdk_turn_boundary` group must

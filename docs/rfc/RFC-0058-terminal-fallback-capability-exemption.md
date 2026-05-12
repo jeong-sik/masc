@@ -22,7 +22,7 @@ However, the current enforcement has a gap: **removing the `_required_capability
 | _ -> None  (* <-- Cp_unset / None on EITHER side: skip check entirely *)
 ```
 
-This is the current workaround in `~/.masc/config/cascade.json`: `local_recovery`, `local_test`, `ollama_only`, `ollama_bench` have no `_required_capability_profile` field, so the monotonicity gate is bypassed implicitly.
+This is the current workaround in `~/.masc/config/cascade.json`: `local_recovery`, `retired_local_profile`, `ollama_only`, `ollama_bench` have no `_required_capability_profile` field, so the monotonicity gate is bypassed implicitly.
 
 ### 1.1 Why This Matters
 
@@ -148,9 +148,9 @@ This makes the profile's capability explicit and self-documenting, instead of re
 ### 4.1 Full Chain with Terminal Exemption
 
 ```
-keeper_bound_safe (tool_strict)
-  └─► tier_fast (tool_strict)           [monotonicity: tool_strict ⊆ tool_strict]
-        └─► cloud_strict (tool_strict)  [monotonicity: tool_strict ⊆ tool_strict]
+retired_tool_profile (tool_strict)
+  └─► retired_fast_profile (tool_strict)           [monotonicity: tool_strict ⊆ tool_strict]
+        └─► retired_cloud_profile (tool_strict)  [monotonicity: tool_strict ⊆ tool_strict]
               └─► local_recovery (local_inline, terminal)
                     [terminal exemption: capability degradation allowed]
 ```

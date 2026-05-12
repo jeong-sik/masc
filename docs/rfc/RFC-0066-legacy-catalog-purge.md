@@ -46,7 +46,7 @@ Delete `Cascade_config_loader.load_catalog` / `load_profile_weighted` / `load_pr
 - `load_catalog : config_path:string -> (catalog_entry list, string) result` — scans `<name>_models` keys at the root of the materialized JSON.
 - `load_profile_weighted : config_path:string -> name:string -> weighted_entry list` — pulls the `<name>_models` array, parses each item.
 - `load_profile : config_path:string -> name:string -> string list` — derived from `load_profile_weighted`.
-- `load_cascade_profile_flat_models` (internal, RFC-0058 §9.4 rename) — `cascade_profile` shape from flat keys.
+- The removed per-profile bridge converted flat keys into `Cascade_ref.cascade_profile`.
 - `is_deprecated_logical_profile_name` — filters route-alias names out of catalog discovery.
 
 `lib/cascade/cascade_toml_materializer.ml:404`:
@@ -70,13 +70,9 @@ The snapshot already carries every field `catalog_entry` exposes; readers can be
 
 After the Pattern A sweep (PR #14616), ~30 test fixtures across 6 suites write per-profile `[X]\nmodels = [...]` TOML and rely on the materializer's flat key arm + legacy reader. They pass today because the materializer still emits the flat keys; under this RFC's Phase 4 they would all fail.
 
-Affected suites:
-- `test_cascade_catalog_runtime` (23 fixtures via the inline `flat_json_to_toml` helper)
-- `test_cascade_toml_materialization` (~5 fixtures)
-- `test_cascade_required_capability_profile` (~5 fixtures)
-- `test_cascade_secondary_entry_parser` (~8 fixtures)
-- `test_cascade_hierarchical_routing` (1 fixture uses `[X]\nmodels`; 2 already use `groups`)
-- `test_dashboard_cascade` (~10 fixtures)
+Affected suites at RFC drafting time were the catalog runtime suite plus several
+TOML materialization and dashboard cascade fixtures. The purge branch deletes
+the standalone legacy flat-TOML suites instead of rewriting them.
 
 ---
 
@@ -93,7 +89,9 @@ Affected suites:
 
 ### 3.2 Materializer arm removal
 
-`profile_field_json ~field_name:"models"` (and `temperature`/`strategy`/`fallback_cascade`/... per-profile arms): once no reader consumes the flat JSON shape, the arms become dead emitters. Delete them; the per-profile `[X]` block becomes a parse error so operators discover the new schema requirement explicitly rather than silently being ignored.
+The old per-profile TOML materializer arms are deleted; a per-profile `[X]`
+block is now a parse error so operators discover the new schema requirement
+explicitly rather than silently being ignored.
 
 ### 3.3 Snapshot reentrancy
 
@@ -145,11 +143,8 @@ Acceptance:
 
 ### Phase 3 — Test fixture migration (Task #31)
 
-Migrate fixtures suite-by-suite. Order by mechanical-ness:
-- `test_cascade_catalog_runtime`: extend `flat_json_to_toml` to emit declarative TOML (strategy 2).
-- `test_cascade_required_capability_profile`: hand-rewrite 5 fixtures (strategy 1).
-- `test_cascade_secondary_entry_parser`: hand-rewrite 8 fixtures.
-- `test_cascade_toml_materialization`, `test_cascade_hierarchical_routing`, `test_dashboard_cascade`: hand-rewrite specific fixtures.
+Migrate fixtures suite-by-suite, or delete fixtures whose only assertion is
+legacy flat-TOML compatibility.
 
 Acceptance:
 - All cascade-area suites pass on declarative-only fixtures.
@@ -161,10 +156,10 @@ Remove:
 - `Cascade_config_loader.load_catalog` + `.mli` signature.
 - `load_profile_weighted` + `.mli`.
 - `load_profile` + `.mli`.
-- `load_cascade_profile_flat_models` and `load_cascade_profile` (the per-profile bridge).
+- The per-profile bridge that converted flat keys into `Cascade_ref.cascade_profile`.
 - `weighted_entry` type if no other reader consumes it.
 - `catalog_entry` type — replaced by the snapshot's profile representation.
-- The per-profile field arms in `Cascade_toml_materializer.profile_field_json` (`models`, `temperature`, `strategy`, ...) and the surrounding `profile_table_json_fields` if nothing else uses them.
+- The per-profile field arms in `Cascade_toml_materializer`.
 
 Final acceptance:
 - `rg "load_catalog\|load_profile" lib/` returns zero hits.
@@ -198,7 +193,7 @@ Audit each known operator setup (kidsnote, internal envs). If any operator has a
 Cumulative across phases:
 
 1. `Keeper_config.default_cascade_name ()` returns the live snapshot's first profile (not the init-cached spec fallback) when a catalog is installed. Closes #14624.
-2. `Cascade_config_loader.load_catalog` / `load_profile_weighted` / `load_profile` / `load_cascade_profile_flat_models` deleted. No lib reader of `<profile>_models` flat JSON keys remains.
+2. `Cascade_config_loader.load_catalog` / `load_profile_weighted` / `load_profile` and the old per-profile bridge deleted. No lib reader of `<profile>_models` flat JSON keys remains.
 3. `Cascade_toml_materializer` no longer emits `<profile>_models` keys. Per-profile `[X]\nmodels = [...]` TOML blocks parse-error explicitly.
 4. All cascade-area test suites (8 suites, ~166 tests) green on declarative-only fixtures.
 5. CI green; `dune build` clean; no new ocamlformat violations in changed files (existing pre-existing violations not reformatted per project policy).

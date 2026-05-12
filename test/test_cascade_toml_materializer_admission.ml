@@ -23,14 +23,36 @@ let parse_json_string (s : string) : Yojson.Safe.t =
 let test_admission_namespace_passthrough () =
   let toml =
     {|
-[big_three]
-models = [
-  { model = "anthropic:claude_code:auto", weight = 1 },
-]
-temperature = 0.2
-max_tokens = 30000
-keeper_assignable = true
-strategy = "weighted_random"
+[providers.glm-coding]
+display-name = "Zhipu GLM Coding"
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+[models.glm-auto]
+api-name = "auto"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[glm-coding.glm-auto]
+is-default = true
+max-concurrent = 2
+
+[tier.coding_plan]
+members = ["glm-coding.glm-auto"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["coding_plan"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
 
 [admission.analyst]
 weight = 1
@@ -79,14 +101,36 @@ let test_admission_with_no_blocks_still_renders () =
      still render cleanly. *)
   let toml =
     {|
-[big_three]
-models = [
-  { model = "anthropic:claude_code:auto", weight = 1 },
-]
-temperature = 0.2
-max_tokens = 30000
-keeper_assignable = true
-strategy = "weighted_random"
+[providers.glm-coding]
+display-name = "Zhipu GLM Coding"
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+[models.glm-auto]
+api-name = "auto"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[glm-coding.glm-auto]
+is-default = true
+max-concurrent = 2
+
+[tier.coding_plan]
+members = ["glm-coding.glm-auto"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["coding_plan"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
 |}
   in
   match render toml with

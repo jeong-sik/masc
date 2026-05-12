@@ -58,6 +58,44 @@ let resolve_provider_prefix (provider_id : string) : string option =
     | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
     | None -> None
 
+let find_provider (cfg : cascade_config) (provider_id : string) :
+    cascade_provider option =
+  List.find_opt (fun (p : cascade_provider) -> p.id = provider_id) cfg.providers
+
+let api_key_of_credential = function
+  | Some (Env key) ->
+      (match Sys.getenv_opt key with
+       | Some value -> value
+       | None -> "")
+  | Some (Inline value) -> value
+  | Some (File _) | None -> ""
+
+let provider_config_from_http_provider
+    (provider : cascade_provider)
+    (spec : cascade_model_spec)
+    ~(max_tokens : int option)
+    : Llm_provider.Provider_config.t option =
+  match provider.transport, provider.api_format with
+  | Http base_url, Chat_completions_api
+    when Provider_adapter.resolve_adapter_by_cascade_prefix provider.id = None ->
+      Some
+        (Llm_provider.Provider_config.make
+           ~kind:Llm_provider.Provider_config.OpenAI_compat
+           ~model_id:spec.api_name
+           ~base_url
+           ~api_key:(api_key_of_credential provider.credentials)
+           ?max_tokens
+           ())
+  | Http base_url, Ollama_api ->
+      Some
+        (Llm_provider.Provider_config.make
+           ~kind:Llm_provider.Provider_config.Ollama
+           ~model_id:spec.api_name
+           ~base_url
+           ?max_tokens
+           ())
+  | _ -> None
+
 (* --- Model lookup --- *)
 
 let find_model (cfg : cascade_config) (model_id : string) :
@@ -70,53 +108,50 @@ let resolve_binding_config (cfg : cascade_config)
     (binding : cascade_binding)
     (errors : adapter_error list ref) :
     Llm_provider.Provider_config.t option =
-  let prefix =
-    match resolve_provider_prefix binding.provider_id with
-    | Some p -> Some p
-    | None ->
-      errors := Provider_not_found binding.provider_id :: !errors;
-      None
-  in
-  match prefix with
-  | None -> None
-  | Some cascade_prefix ->
-    let model_spec =
-      find_model cfg binding.model_id
+  let model_spec = find_model cfg binding.model_id in
+  match model_spec with
+  | None ->
+    errors := Model_not_found binding.model_id :: !errors;
+    None
+  | Some spec ->
+    let max_tokens =
+      match binding.price_input, binding.price_output with
+      | Some input_cost, Some _ when input_cost > 0.0 -> Some spec.max_context
+      | _ -> None
     in
-    (match model_spec with
+    let parse_registered_provider () =
+      match resolve_provider_prefix binding.provider_id with
+      | None ->
+        errors := Provider_not_found binding.provider_id :: !errors;
+        None
+      | Some cascade_prefix ->
+        let model_string = Printf.sprintf "%s:%s" cascade_prefix spec.api_name in
+        Cascade_config.parse_model_string ?max_tokens model_string
+    in
+    let result =
+      match find_provider cfg binding.provider_id with
+      | Some provider ->
+        (match provider_config_from_http_provider provider spec ~max_tokens with
+         | Some cfg -> Some cfg
+         | None -> parse_registered_provider ())
+      | None -> parse_registered_provider ()
+    in
+    (match result with
+     | Some config ->
+       if binding.max_concurrent > 0
+       then
+         Some
+           { config with
+             Llm_provider.Provider_config.internal_model_rotation_count =
+               Some binding.max_concurrent
+           }
+       else Some config
      | None ->
-       errors := Model_not_found binding.model_id :: !errors;
-       None
-     | Some spec ->
-       let model_string =
-         Printf.sprintf "%s:%s" cascade_prefix spec.api_name
-       in
-       let max_tokens =
-         match binding.price_input, binding.price_output with
-         | Some input_cost, Some _ when input_cost > 0.0 ->
-           Some spec.max_context
-         | _ -> None
-       in
-       let result =
-         Cascade_config.parse_model_string
-           ?max_tokens
-           model_string
-       in
-       (match result with
-        | Some config ->
-          let max_concurrent =
-            if binding.max_concurrent > 0 then
-              Some { config with
-                Llm_provider.Provider_config.internal_model_rotation_count =
-                  Some binding.max_concurrent }
-            else Some config
-          in
-          max_concurrent
-        | None ->
-          errors := Binding_resolution_failed
-            (Printf.sprintf "%s.%s" binding.provider_id binding.model_id)
-            :: !errors;
-          None))
+       errors :=
+         Binding_resolution_failed
+           (Printf.sprintf "%s.%s" binding.provider_id binding.model_id)
+         :: !errors;
+       None)
 
 (* --- Alias overrides --- *)
 
@@ -304,16 +339,20 @@ let build_profile_from_tier_group (cfg : cascade_config)
       (fun name -> Hashtbl.find_opt tiers_by_name name)
       tg.tiers
   in
-  let provider_configs =
-    List.concat_map (fun (tier : cascade_tier) ->
-      List.filter_map
-        (resolve_member cfg bindings_by_key aliases_by_key
-           resolved_configs errors)
-        tier.members)
+  let resolved_configs_by_tier =
+    List.map
+      (fun (tier : cascade_tier) ->
+         List.filter_map
+           (resolve_member cfg bindings_by_key aliases_by_key
+              resolved_configs errors)
+           tier.members)
       resolved_tiers
   in
+  let provider_configs = List.concat resolved_configs_by_tier in
   let tier_member_keys =
-    List.map (fun (tier : cascade_tier) -> tier.members) resolved_tiers
+    List.map
+      (List.map Provider_adapter.provider_health_key_of_config)
+      resolved_configs_by_tier
   in
   let strategy = build_tier_group_strategy tg tier_member_keys in
   {

@@ -1858,10 +1858,9 @@ let init () =
     Counter;
   add
     metric_cascade_fallback_cycle_detected_total
-    "Total cascade fallback_cascade cycles detected during load_catalog. A cycle (e.g. \
-     default → glm_coding_plan_only → default) means a provider stall propagates through \
-     both cascades silently for 600s+ without escaping.  Labeled by [cascade] (cycle \
-     entry point)."
+    "Total cascade fallback_cascade cycles detected during load_catalog. A cycle means \
+     a provider stall propagates through the loop silently for 600s+ without escaping. \
+     Labeled by [cascade] (cycle entry point)."
     Counter;
   add
     metric_provider_health_probe_skipped

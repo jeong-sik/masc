@@ -70,6 +70,46 @@ let catalog_entries_result ?config_path () =
   | Some path ->
       Cascade_config_loader.load_catalog ~config_path:path
 
+let strip_declarative_profile_prefix name =
+  let tier_group_prefix = "tier-group." in
+  let tier_prefix = "tier." in
+  if String.starts_with ~prefix:tier_group_prefix name then
+    String.sub name (String.length tier_group_prefix)
+      (String.length name - String.length tier_group_prefix)
+  else if String.starts_with ~prefix:tier_prefix name then
+    String.sub name (String.length tier_prefix)
+      (String.length name - String.length tier_prefix)
+  else name
+
+let public_names_of_declarative_snapshot snapshot =
+  Cascade_declarative_hotpath.decl_snapshot_profile_names snapshot
+  |> List.map strip_declarative_profile_prefix
+  |> List.sort_uniq String.compare
+
+let declarative_public_catalog_names ?config_path () =
+  let path_opt =
+    match config_path with
+    | Some path -> Some path
+    | None -> Config_dir_resolver.cascade_path_opt ()
+  in
+  match path_opt with
+  | None -> Error "cascade catalog path is not resolved"
+  | Some path -> (
+      match Cascade_declarative_hotpath.try_load_declarative path with
+      | Some (Ok snapshot) ->
+          let names = public_names_of_declarative_snapshot snapshot in
+          if names = []
+          then Error "declarative cascade catalog contains no profiles"
+          else Ok names
+      | Some (Error errors) ->
+          let rendered =
+            errors
+            |> List.map Cascade_declarative_adapter.show_adapter_error
+            |> String.concat "; "
+          in
+          Error ("declarative cascade catalog invalid: " ^ rendered)
+      | None -> Error "cascade.toml is not a declarative cascade catalog")
+
 (** RFC-0066 Phase 2: prefer the live validated snapshot (declarative
     [provider]/[model]/[profile] aware) over the legacy
     [Cascade_config_loader.load_catalog] (only sees `*_models` namespaces).
@@ -99,39 +139,7 @@ let catalog_names_result ?config_path () =
                 (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
                 entries))
 
-(** #10259 — degraded fallback for the keeper cascade-name validator.
-
-    Materializer regressions of the form
-    [unknown field "X" in profile Y] make the full catalog load fail even
-    though [cascade.toml] is parseable and already enumerates every
-    cascade the operator has configured.  In that state
-    {!catalog_names_result} returns [Error _], the validator collapses to
-    the compile-time reserved list, and operator-defined cascades like
-    [ollama_only] get reconcile-rejected fleet-wide while the runtime
-    keeps running on a stale cached catalog — silent regression, log
-    spam only.
-
-    [catalog_names_with_toml_fallback] decouples the cascade-name accept
-    list from strict materialization:
-
-    - On [Ok catalog]: forward the live names ([Live_catalog]).
-    - On [Error _]: parse [cascade.toml] with a lenient reader that
-      enumerates only top-level table sections; if the TOML is
-      parseable, return those names tagged
-      [Toml_section_fallback { catalog_error }] so callers can still
-      surface the degraded mode in WARN logs.
-    - If neither path produces names, return [Error _] with both errors
-      attached for diagnosis.
-
-    The validator wires this in so that a materializer field-whitelist
-    regression no longer manifests as "every keeper config rejected" —
-    it stays as a WARN about the materializer, which is the correct
-    blast radius. *)
-type catalog_names_source =
-  | Live_catalog
-  | Toml_section_fallback of { catalog_error : string }
-
-let catalog_names_with_toml_fallback ?config_path () =
+let catalog_names_for_validation ?config_path () =
   let path_opt =
     match config_path with
     | Some path -> Some path
@@ -139,34 +147,7 @@ let catalog_names_with_toml_fallback ?config_path () =
   in
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
-  | Some path -> (
-      match Cascade_config_loader.load_catalog ~config_path:path with
-      | Ok entries ->
-          let names =
-            List.map
-              (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-              entries
-          in
-          Ok (names, Live_catalog)
-      | Error catalog_error -> (
-          match
-            Cascade_toml_materializer.toml_section_names_result
-              ~config_path:path
-          with
-          | Ok [] ->
-              Error
-                (Printf.sprintf
-                   "live catalog unavailable: %s; toml section fallback \
-                    returned no cascade profile names"
-                   catalog_error)
-          | Ok names ->
-              Ok (names, Toml_section_fallback { catalog_error })
-          | Error toml_error ->
-              Error
-                (Printf.sprintf
-                   "live catalog unavailable: %s; toml section fallback \
-                    also failed: %s"
-                   catalog_error toml_error)))
+  | Some path -> declarative_public_catalog_names ~config_path:path ()
 
 let is_system_only_cascade raw =
   let name = String.trim raw in
@@ -179,13 +160,31 @@ let is_system_only_cascade raw =
         entries
 
 let keeper_catalog_names ?config_path () =
-  match catalog_entries ?config_path () with
-  | Some entries ->
-      entries
-      |> List.filter_map
-           (fun (entry : Cascade_config_loader.catalog_entry) ->
-             if entry.keeper_assignable then Some entry.name else None)
-  | None -> []
+  let declarative_names =
+    match config_path with
+    | Some path -> (
+        match Cascade_declarative_hotpath.try_load_declarative path with
+        | Some (Ok snapshot) ->
+            public_names_of_declarative_snapshot snapshot
+        | Some (Error _) | None -> [])
+    | None -> (
+        match declarative_public_catalog_names () with
+        | Ok names -> names
+        | Error _ -> (
+            match Cascade_catalog_runtime.known_profile_names () with
+            | Ok names -> List.map strip_declarative_profile_prefix names
+            | Error _ -> []))
+  in
+  match declarative_names with
+  | _ :: _ -> declarative_names
+  | [] ->
+      (match catalog_entries ?config_path () with
+       | Some entries ->
+           entries
+           |> List.filter_map
+                (fun (entry : Cascade_config_loader.catalog_entry) ->
+                  if entry.keeper_assignable then Some entry.name else None)
+       | None -> [])
 
 let system_catalog_names ?config_path () =
   match catalog_entries ?config_path () with

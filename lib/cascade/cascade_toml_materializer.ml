@@ -392,149 +392,14 @@ let profiles_json ~path value =
     loop [] profile_tables
 ;;
 
-let profile_field_json ~profile_name ~field_name field_value =
-  let profile_path = profile_name ^ "." ^ field_name in
-  match field_name with
-  | "comment" ->
-    (match string_value ~path:profile_path field_value with
-     | Ok value -> Ok [ "_comment_" ^ profile_name, `String value ]
-     | Error _ as err -> err)
-  | "models" ->
-    (match model_array_value ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_models", value ]
-     | Error _ as err -> err)
-  | "temperature" ->
-    (match float_value ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_temperature", `Float value ]
-     | Error _ as err -> err)
-  | "max_tokens"
-  | "max_cycles"
-  | "backoff_base_ms"
-  | "backoff_cap_ms"
-  | "ollama_max_concurrent"
-  | "cli_max_concurrent"
-  | "sticky_ttl_ms"
-  | "num_ctx"
-  | "rate_limit_skip_after"
-  | "server_error_skip_after"
-  | "thinking_budget" ->
-    (match int_value ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_" ^ field_name, `Int value ]
-     | Error _ as err -> err)
-  | "latency_baseline_ms"
-  | "rate_limit_recency_window_s"
-  | "rate_limit_decay_base"
-  | "server_error_recency_window_s"
-  | "server_error_decay_base" ->
-    (match float_value ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_" ^ field_name, `Float value ]
-     | Error _ as err -> err)
-  | "timeout_sec" ->
-    (* Legacy cascade.toml field from pre-route runtime configs. Timeout
-         behavior is controlled by runtime/env timeout knobs now; accept the
-         old field so one stale profile cannot block the whole catalog. *)
-    (match float_value ~path:profile_path field_value with
-     | Ok _ -> Ok []
-     | Error _ as err -> err)
-  | "strategy" ->
-    (match trimmed_nonempty_string ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_strategy", `String value ]
-     | Error _ as err -> err)
-  | "fallback_cascade" ->
-    (match trimmed_nonempty_string ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_fallback_cascade", `String value ]
-     | Error _ as err -> err)
-  | "required_capability_profile" ->
-    (* RFC-0027 PR-2.  String-typed; loader (cascade_config_loader.ml)
-         parses through Cascade_capability_profile.profile_of_string and
-         fails with a [Catalog_error] on unknown values.  Materializer
-         only enforces nonempty-string here; profile-name validity is
-         the loader's responsibility (single source of truth for the
-         enumeration). *)
-    (match trimmed_nonempty_string ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_required_capability_profile", `String value ]
-     | Error _ as err -> err)
-  | "keeper_assignable" | "thinking_enabled" ->
-    (match bool_value ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_" ^ field_name, `Bool value ]
-     | Error _ as err -> err)
-  | "tiers" ->
-    (match string_matrix_value ~path:profile_path field_value with
-     | Ok rows -> Ok [ profile_name ^ "_tiers", `List (List.map json_string_list rows) ]
-     | Error _ as err -> err)
-  | "api_key_env" ->
-    (match api_key_env_json ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_api_key_env", value ]
-     | Error _ as err -> err)
-  | "keep_alive" ->
-    (* Ollama [keep_alive] override surfaced from cascade.toml. Value is a
-         duration string ("5m", "30m"), integer-as-string ("3600"), or "-1"
-         to keep the model loaded indefinitely. Honored only when the
-         resolved provider is Ollama. The downstream consumer in
-         cascade_config_loader.ml (line 324-328) already reads
-         "<profile>_keep_alive" via read_string_field; without this
-         materializer arm the loader silently falls back to
-         default_keep_alive and the per-cascade override is unreachable
-         from TOML. *)
-    (match trimmed_nonempty_string ~path:profile_path field_value with
-     | Ok value -> Ok [ profile_name ^ "_keep_alive", `String value ]
-     | Error _ as err -> err)
-  | "groups" ->
-    (* RFC-0041 hierarchical group/item profile format. Each element is an
-         inline table describing a [Cascade_ref.cascade_group]. The array is
-         materialized as [<profile>_groups] in JSON so the loader can use
-         [Cascade_ref.cascade_group_of_json] for parsing.
-
-         Accept both [TomlArray] (inline array of tables) and
-         [TomlTableArray] (TOML [[...]] syntax) so operators are not forced
-         into one concrete TOML style. *)
-    (match field_value with
-     | Otoml.TomlArray items | Otoml.TomlTableArray items ->
-       Ok [ profile_name ^ "_groups", `List (List.map otoml_to_yojson items) ]
-     | _ ->
-       errorf
-         "expected %s to be an array of group tables, found %s"
-         profile_path
-         (toml_type_name field_value))
-  | other ->
-    errorf
-      "unknown field %S in profile %s; allowed fields are comment, models, temperature, \
-       max_tokens, strategy, max_cycles, backoff_base_ms, backoff_cap_ms, \
-       ollama_max_concurrent, cli_max_concurrent, tiers, sticky_ttl_ms, \
-       latency_baseline_ms, rate_limit_recency_window_s, rate_limit_decay_base, \
-       rate_limit_skip_after, server_error_recency_window_s, server_error_decay_base, \
-       server_error_skip_after, keeper_assignable, thinking_enabled, thinking_budget, \
-       fallback_cascade, required_capability_profile, api_key_env, keep_alive, num_ctx, \
-       timeout_sec, groups"
-      other
-      profile_name
-;;
-
-let profile_table_json_fields ~profile_name value =
-  match table_fields ~path:profile_name value with
-  | Error _ as err -> err
-  | Ok fields ->
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc |> List.concat)
-      | (field_name, field_value) :: rest ->
-        (match profile_field_json ~profile_name ~field_name field_value with
-         | Ok rendered -> loop (rendered :: acc) rest
-         | Error _ as err -> err)
-    in
-    loop [] fields
-;;
-
 let render_toml_to_yojson toml =
   match table_fields ~path:"<root>" toml with
   | Error _ as err -> err
   | Ok fields ->
     (* RFC-0058 v2 5-layer declarative namespaces. These tables describe
          providers, models, bindings, tiers, tier-groups, etc. and are
-         consumed by [Cascade_declarative_parser]/[..._validator] rather
-         than the legacy per-profile cascade loader. Passthrough preserves
-         the TOML shape so the declarative loader can parse the JSON; it
-         also unblocks the legacy materializer when an operator stages a
-         5-layer cascade.toml ahead of the loader switchover. *)
+         consumed by the declarative loader. Passthrough preserves the TOML
+         shape for JSON-shaped readers such as route decoding. *)
     let is_rfc_0058_namespace = function
       | "providers" | "models" | "tier" | "tier-group" -> true
       | _ -> false
@@ -587,10 +452,12 @@ let render_toml_to_yojson toml =
           in
           if is_provider_binding
           then loop ([ key, otoml_to_yojson value ] :: acc) rest
-          else (
-            match profile_table_json_fields ~profile_name:key value with
-            | Ok rendered -> loop (rendered :: acc) rest
-            | Error _ as err -> err))
+          else
+            errorf
+              "legacy flat cascade TOML profile %S is no longer supported; use \
+               RFC-0058 declarative namespaces ([providers.*], [models.*], \
+               [<provider>.<binding>], [tier.*], [tier-group.*], [routes.*])"
+              key)
     in
     loop [] fields
 ;;
@@ -610,85 +477,6 @@ let render_toml_file_to_json_string toml_path =
     render_toml_string_to_json_string content
   with
   | Sys_error msg -> Error msg
-;;
-
-(* #10259: degraded fallback for the keeper-name validator.
-
-   When [render_toml_to_yojson] fails (strict field whitelist refuses
-   an unknown key) the whole catalog becomes unavailable, even though
-   the TOML itself parses fine and its top-level tables already
-   enumerate every cascade the operator has configured.  That gap
-   turns one parse error into a fleet-wide silent regression: keepers
-   whose [cascade_name] is defined in [cascade.toml] but absent from
-   the compile-time reserved list (e.g. operator-defined [ollama_only])
-   get reconcile-rejected and the runtime falls back to a stale cached
-   catalog.
-
-   This function does the minimum needed by the validator: parse the
-   TOML, walk the top-level table, and return the keys that look like
-   cascade definitions.  Meta-keys starting with ['_'] ([_comment_*],
-   [_schema], [_revision]) are filtered so that documentation
-   /housekeeping fields don't leak into the accept list.
-
-   RFC-0058 §9 Phase 9.3: source_kind = Json is gone; TOML is the only
-   cascade source. *)
-let toml_section_names_result ~config_path =
-  let info = source_info ~config_path in
-  match info.kind with
-  | Toml ->
-    (try
-       let content = Fs_compat.load_file info.source_path in
-       match Otoml.Parser.from_string_result content with
-       | Error msg -> Error msg
-       | Ok toml ->
-         (match toml with
-          | Otoml.TomlTable fields | Otoml.TomlInlineTable fields ->
-            let is_meta_key key = String.length key > 0 && key.[0] = '_' in
-            let is_reserved_table key =
-              String.equal key "routes"
-              || String.equal key "profiles"
-              || String.equal key "admission"
-              (* RFC-0058 v2 declarative namespaces: these describe
-                 providers, models, tiers, and tier-groups, not legacy
-                 cascade profiles. Without this filter the degraded
-                 fallback validator would treat e.g. "providers" or
-                 "tier" as a cascade name and expand them into bogus
-                 profile names. *)
-              || String.equal key "providers"
-              || String.equal key "models"
-              || String.equal key "tier"
-              || String.equal key "tier-group"
-            in
-            (* Top-level provider-alias binding tables (e.g. [claude_code.haiku]
-               appears as a top-level "claude_code" key with sub-table
-               "haiku"). Identify them by checking the [providers]
-               namespace declared earlier so they are not surfaced as
-               cascade profile names either. *)
-            let provider_ids =
-              match List.assoc_opt "providers" fields with
-              | Some (Otoml.TomlTable inner) | Some (Otoml.TomlInlineTable inner) ->
-                List.map fst inner
-              | _ -> []
-            in
-            let is_provider_binding key = List.mem key provider_ids in
-            let names =
-              fields
-              |> List.filter_map (fun (key, value) ->
-                if is_meta_key key || is_reserved_table key || is_provider_binding key
-                then None
-                else (
-                  match value with
-                  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> Some key
-                  | _ -> None))
-            in
-            Ok names
-          | _ ->
-            Error
-              (Printf.sprintf
-                 "cascade.toml root is %s, expected table"
-                 (toml_type_name toml)))
-     with
-     | Sys_error msg -> Error msg)
 ;;
 
 let render_toml_to_json_string ~config_path =

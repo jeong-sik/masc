@@ -37,10 +37,10 @@ L2 (transport keeper-identity gap) 와 L3 (permission-aware filtering) 는 본 R
 | Cascade | Substitutions |
 |---------|---------------|
 | `big_three` | 108 |
-| `glm_coding_plan_only` | **100/100 (100%)** — 별개 namespace mismatch bug |
-| `local_test` | 20/21 (95%) |
-| `tier_fast` | 18 |
-| `keeper_bound_safe` | 7 |
+| `retired_coding_profile` | **100/100 (100%)** — 별개 namespace mismatch bug |
+| `retired_local_profile` | 20/21 (95%) |
+| `retired_fast_profile` | 18 |
+| `retired_tool_profile` | 7 |
 
 **Substitution 후 실패 원인 — top 4**:
 
@@ -187,7 +187,7 @@ RFC-0027 §3.4 PR #3 가 "cross-cascade fallback resolver capability propagation
 |---|------|
 | NG1 | ollama transport 가 keeper-bound MCP HTTP header (`X-MASC-Agent-Name`) 를 carry 하도록 만드는 것 — fundamental architectural change, 별도 RFC. |
 | NG2 | Permission-aware candidate filtering (keeper credential set 과 모델 권한 매칭) — 별도 RFC, RFC-0026 admission layer 와 통합 검토. |
-| NG3 | `glm-coding:*` ↔ `glm-coding-plan:*` namespace mismatch (B2 — 100% substitution 의 직접 원인) — 본 RFC 와 병렬 단일 hot fix PR 로 분리 (`glm_coding_plan_only` cascade 의 model label 정규화). |
+| NG3 | `glm-coding:*` ↔ `glm-coding-plan:*` namespace mismatch (B2 — 100% substitution 의 직접 원인) — 본 RFC 와 병렬 단일 hot fix PR 로 분리 (`retired_coding_profile` cascade 의 model label 정규화). |
 | NG4 | BDI defer loop (PR #11210 의 원래 motivation) — fallback chain 명시화로 자연스레 해소될 것으로 예상하나 본 RFC 의 success criterion 에는 미포함. |
 | NG5 | RFC-0026 admission scheduler 변경. |
 | NG6 | **Streaming-state provider-level timeout** (현재 keeper hard cap 3600s 만 존재, provider 가 stream tool-call 없이 멈출 때 graceful recovery 부재). 별도 RFC — Kimi `executor_reanalysis.md` §4 문제 1. |
@@ -228,7 +228,7 @@ let cross_cascade_mode_current () = (* MASC_CROSS_CASCADE_FALLBACK *)
 **Migration guide**: cascade.toml 의 모든 user-facing cascade 가 `fallback_cascade` 명시. 예:
 ```toml
 [big_three]
-fallback_cascade = "tier_fast"  # 기존 implicit cross-cascade 대신
+fallback_cascade = "retired_fast_profile"  # 기존 implicit cross-cascade 대신
 ```
 
 ### 4.2 L1 — Dynamic capability classification

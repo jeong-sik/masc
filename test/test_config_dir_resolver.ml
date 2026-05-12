@@ -75,8 +75,32 @@ let make_toml_only_config_root root =
   write_file
     (Filename.concat config "cascade.toml")
     {|
-[big_three]
-models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+[providers.ollama]
+display-name = "Ollama Local"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen]
+api-name = "qwen3.5:35b-a3b-nvfp4"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[ollama.qwen]
+is-default = true
+max-concurrent = 1
+
+[tier.big_three]
+members = ["ollama.qwen"]
+strategy = "failover"
+
+[tier-group.big_three]
+tiers = ["big_three"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.big_three"
 |};
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config

@@ -11,7 +11,6 @@
     [trimmed_nonempty_string], [bool_value], [int_value],
     [float_value], [string_array_value], [string_matrix_value],
     [model_entry_json], [model_array_value], [api_key_env_json],
-    [profile_field_json], [profile_table_json_fields],
     [render_toml_to_yojson]) are hidden — callers consume the typed
     source-info / state types and the four entry-point functions
     only. *)
@@ -56,16 +55,6 @@ val render_toml_string_to_json_string : string -> (string, string) result
 (** {!render_toml_string_to_json_string} applied to the contents of
     [toml_path]; surfaces filesystem errors as [Error msg]. *)
 val render_toml_file_to_json_string : string -> (string, string) result
-
-(** {1 Validator hook (#10259)} *)
-
-(** Best-effort enumeration of cascade names defined in the TOML
-    catalog, used by the keeper-name validator as a degraded
-    fallback when {!render_toml_to_yojson} rejects a key.
-
-    Returns [Ok names] on success (meta keys starting with [_] are
-    filtered), and [Error msg] when the TOML cannot be parsed at all. *)
-val toml_section_names_result : config_path:string -> (string list, string) result
 
 (** {1 Rendering} *)
 

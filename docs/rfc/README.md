@@ -109,12 +109,13 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0068 | Typed `Keeper_turn_disposition` (operator-facing closed sum) | Draft | (pending #14692) | 구 RFC-0047 — collision 해결 |
 | 0069 | Awareness Channel Split | Active | f762e88a2 2026-04-30 | 구 awareness-channel-split.md (PR-1.7) — PR-1.7a 머지 #12129, PR-1.7b/c 미완 |
 | 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Draft | (pending #14714) | depends on RFC-0036 Phase A, extends RFC-0006 Phase B-2 |
-| 0072 | Type-encoded keeper sub-FSM transitions (cascade + turn_phase) | Draft | 2026-05-12 (this PR) | follows PR #14887 + #14893 decision-axis precedent. RFC-0071 reserved by #14888 (`lib/core/dune`); body unwritten — 0072 chosen to avoid race. |
+| 0071 | Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern | Draft | 2026-05-12 | body written by this PR; lib/core/dune reference (#14888) realized. Related RFC-0042, RFC-0068. |
+| 0072 | Type-encoded keeper sub-FSM transitions (cascade + turn_phase) | Draft | 2026-05-12 | follows PR #14887 + #14893 decision-axis precedent. |
 
 ### 사용 가능한 다음 번호
 
-- 누락 번호 (이전 사용 후 해제됨): 0010, 0011, 0014, 0015, 0016, 0021, 0060, 0071 (body 미작성, dune 참조만).
-- 다음 신규: **0073** (현재 0071 은 #14888 `lib/core/dune` 에서 참조 중이나 RFC body 미작성 → race 회피 위해 0073 이상 권장).
+- 누락 번호 (이전 사용 후 해제됨): 0010, 0011, 0014, 0015, 0016, 0021, 0060.
+- 다음 신규: **0073** (현재 가장 작은 사용 가능 번호는 0010 이지만, 누락 번호 재사용은 race-condition 위험 — 새 작성은 0073 이후 권장).
 
 ## 검색 / 발견
 

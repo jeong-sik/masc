@@ -85,14 +85,14 @@ let run plan =
     response
   | _ -> Error Docker_client.Daemon_unreachable
 
-let exec ?user:_ ?workdir:_ ~container ~cmd () =
-  (* [?user] / [?workdir] shape the real [docker exec] argv (see
-     {!Docker_client_real.exec_argv}) but do not affect the mocked
+let exec ?user:_ ?workdir:_ ?stdin:_ ~container ~cmd () =
+  (* [?user] / [?workdir] / [?stdin] shape the real [docker exec] argv
+     (see {!Docker_client_real.exec_argv}) but do not affect the mocked
      response, so they are accepted and ignored for matching here —
-     the injection key stays [(container, cmd)]. When a caller
-     (Phase 4.1 [keeper_turn_sandbox_runtime] cutover) needs to
-     assert the user/workdir threaded through, widen the injection
-     key then; until then a narrower key keeps test setup minimal. *)
+     the injection key stays [(container, cmd)]. When a caller (Phase
+     4.1 [keeper_turn_sandbox_runtime] cutover) needs to assert the
+     user/workdir/stdin threaded through, widen the injection key
+     then; until then a narrower key keeps test setup minimal. *)
   match Queue.peek_opt exec_queue with
   | Some ((expected_c, expected_cmd), response)
     when Keeper_container_name.equal container expected_c

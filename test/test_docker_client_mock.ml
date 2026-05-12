@@ -159,6 +159,42 @@ let test_exec_ignores_user_workdir_for_matching () =
   | Ok er -> check string "stdout" "ok" er.stdout
   | Error _ -> fail "expected Ok — user/workdir must not affect matching"
 
+(* Phase 4.1-h — [?stdin] is the same kind of "shape, not match-key"
+   field as [?user] / [?workdir]. The mock must accept it and still
+   consume the [(container, cmd)] injection unchanged. *)
+let test_exec_ignores_stdin_for_matching () =
+  setup ();
+  let c = sample_container () in
+  Docker_client_mock.inject_exec ~container:c ~cmd:"cat > /tmp/x" (Ok sample_exec_result);
+  match
+    Docker_client_mock.exec
+      ~stdin:"hello world"
+      ~container:c
+      ~cmd:"cat > /tmp/x"
+      ()
+  with
+  | Ok er -> check string "stdout" "ok" er.stdout
+  | Error _ -> fail "expected Ok — ?stdin must not affect matching"
+;;
+
+let test_exec_ignores_all_three_optionals_together () =
+  setup ();
+  let c = sample_container () in
+  Docker_client_mock.inject_exec ~container:c ~cmd:"tee /tmp/x" (Ok sample_exec_result);
+  match
+    Docker_client_mock.exec
+      ~user:(1000, 1000)
+      ~workdir:"/work"
+      ~stdin:"payload"
+      ~container:c
+      ~cmd:"tee /tmp/x"
+      ()
+  with
+  | Ok _ ->
+    check int "injection consumed (1 → 0)" 0 (Docker_client_mock.pending_calls ())
+  | Error _ -> fail "expected Ok — all three optionals must be ignored for matching"
+;;
+
 (* ── ps_query ────────────────────────────────────────────────── *)
 
 let test_ps_query_matches () =
@@ -299,6 +335,10 @@ let () =
           test_case "wrong cmd → miss" `Quick test_exec_unmatched_cmd;
           test_case "user/workdir ignored for matching" `Quick
             test_exec_ignores_user_workdir_for_matching;
+          test_case "?stdin ignored for matching (Phase 4.1-h)" `Quick
+            test_exec_ignores_stdin_for_matching;
+          test_case "user + workdir + stdin all ignored for matching" `Quick
+            test_exec_ignores_all_three_optionals_together;
         ] );
       ( "ps_query",
         [

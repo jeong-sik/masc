@@ -26,31 +26,45 @@
 \*               bumping both but observed_turns only once.
 \*               ConservationLaw MUST be violated.
 \*
-\* OCaml ↔ TLA+ mapping (see #8642 family):
+\* OCaml ↔ TLA+ mapping (see #8642 family).  Symbol-anchored, no line
+\* numbers — iter 64 N-2.a convention; the previous "lines 81/82/89"
+\* anchors had all drifted, and "observed_turns = succ_turns + fail_turn"
+\* was a stale 2-bucket form (the runtime is now 3-bucket).  All three
+\* refs live inside [compute_outcomes_rollup] in
+\* lib/dashboard/dashboard_http_keeper.ml:
 \*
-\*   spec variable     | OCaml ref / counter                         | source
-\*   ------------------+---------------------------------------------+--------
-\*   successes         | `succ_turns` (incr on Turn_succeeded)       | lib/dashboard/dashboard_http_keeper.ml:81
-\*   failures          | `fail_turn`  (incr on Turn_failed _)        | lib/dashboard/dashboard_http_keeper.ml:82
-\*   rejected          | `gate_rejected` field (currently 0 — see    | lib/dashboard/dashboard_http_keeper.ml (compute_outcomes_rollup)
-\*                     | "scope drift" below)                        |
-\*   observed_turns    | succ_turns + fail_turn                      | lib/dashboard/dashboard_http_keeper.ml:89
+\*   spec variable    | OCaml ref / counter (inside compute_outcomes_rollup)
+\*   -----------------+----------------------------------------------------
+\*   successes        | `succ_turns` ref — incr when a completed_turn_record
+\*                    | has outcome [Keeper_transition_audit.Turn_substantive]
+\*   failures         | `fail_turn` ref — incr on [Turn_failed]
+\*   rejected         | `fail_gate_rejected` ref — incr on [Turn_gate_rejected]
+\*                    | (NO LONGER always 0; see "Runtime status" below)
+\*   observed_turns   | `List.length completed_turns` — the size of the
+\*                    | [Keeper_transition_audit.recent_completed_turns]
+\*                    | 50-entry ring; the three buckets partition exactly
+\*                    | this list, so conservation holds by construction
 \*
 \* Aggregation entry point:
-\*   lib/dashboard/dashboard_http_keeper.ml:compute_outcomes_rollup
-\*   — called from the per-keeper detail JSON builder.
+\*   lib/dashboard/dashboard_http_keeper.ml — [compute_outcomes_rollup],
+\*   called from the per-keeper detail JSON builder.  Its doc-comment
+\*   cites {!KeeperOutcomesConservation.tla} and states the same law:
+\*     successes.substantive_turns + failures.turn_failed + failures.gate_rejected
+\*       = observed_turns
+\*   "holds by construction because all three turn buckets now come from
+\*    the same completed-turn ring."
 \*
-\* SCOPE DRIFT (worth knowing, NOT a spec violation):
-\*   The OCaml comment above compute_outcomes_rollup (lines 60-64) reads:
-\*     "Historical [gate_rejected] counts are not yet persisted in the
-\*      same read model, so the field remains 0 until a keeper-turn
-\*      source is added."
-\*   Today the spec's 3-bucket law (s + f + r = observed) holds vacuously
-\*   because r is always 0. When `gate_rejected` becomes a live counter
-\*   the spec invariant becomes load-bearing — the increment site for
-\*   `gate_rejected` must also bump `observed_turns`, otherwise the law
-\*   breaks. Anyone wiring the third bucket should run the spec's clean
-\*   AND buggy cfgs to confirm the wiring honours conservation.
+\* Runtime status (2026-05-12, iter 79 R-6 — supersedes the old "SCOPE
+\* DRIFT" note that said r is always 0):
+\*   The third bucket has landed.  `fail_gate_rejected` is a live counter,
+\*   incremented when a completed-turn record carries the [Turn_gate_rejected]
+\*   outcome, and `observed_turns = List.length completed_turns` counts every
+\*   record — so `gate_rejected` increments inherently bump the denominator
+\*   (they're the same list, not separate sources).  The spec's 3-bucket
+\*   ConservationLaw is therefore load-bearing now, not vacuous, and the
+\*   OCaml satisfies it by construction.  The old advice ("anyone wiring the
+\*   third bucket should run the spec's clean AND buggy cfgs") was followed —
+\*   this entry is the retrospective confirmation.
 \*
 \* Out-of-scope counters (intentionally not modelled here):
 \*   - succ_compactions / fail_compaction / succ_handoffs / fail_handoff

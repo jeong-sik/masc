@@ -1,9 +1,10 @@
 (* See cascade_attempt_liveness_config.mli for documentation.
 
-   RFC-0022 PR-2/4 §2 — tri-state env flag + per-label budget map.
-   RFC-0058 Phase 5.2b — provider→budget routing reads
-   [Cascade_declarative_types.cascade_provider.liveness_class] declared
-   in [config/cascade.toml]. The hardcoded
+   RFC-0022 PR-2/4 §2 — tri-state env flag + per-liveness-class budget map.
+   RFC-0058 Phase 5.2b — provider→budget routing now reads each provider's
+   [Cascade_declarative_types.cascade_provider.liveness_class] declared in
+   [config/cascade.toml] (the budget itself is still keyed by liveness
+   class via [budget_of_class]); the prior hardcoded
    [match provider_id with "codex_cli" | "claude_code" | …] block is
    deleted (RFC-0058 §4 Phase 5.2b acceptance). *)
 

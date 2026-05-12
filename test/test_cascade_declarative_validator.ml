@@ -24,11 +24,13 @@ let has_rule_at (rule : string) (path : string) (errs : validation_error list) =
 ;;
 
 (* R13 (every provider declares liveness.class) is exercised explicitly by
-   its own tests. Other rule-specific fixtures do not bother to declare a
-   liveness class, so this helper ignores R13 to keep those tests focused
-   on the rule under exam. The dedicated [test_r13_*] tests pin both the
-   error and the no-error cases. *)
-let no_errors (errs : validation_error list) =
+   its own [test_r13_*] tests, which pin both the error and the no-error
+   cases. Other rule-specific fixtures do not declare a liveness class, so
+   this helper filters R13 out before asserting "no errors" — the
+   [_except_r13] suffix is deliberate so a future test that needs the full
+   error set (R13 included) reaches for an inline [check int ... errs]
+   instead of accidentally masking an unexpected R13 failure. *)
+let no_errors_except_r13 (errs : validation_error list) =
   let non_r13 = List.filter (fun (e : validation_error) -> e.rule <> "R13") errs in
   check int "no errors (R13 excluded — see dedicated R13 tests)" 0 (List.length non_r13)
 ;;
@@ -236,7 +238,7 @@ max-input = 4096
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 (* --- R5: Tier member does not resolve --- *)
@@ -286,7 +288,7 @@ strategy = "failover"
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 (* --- R6: Tier-group references unknown tier --- *)
@@ -359,7 +361,7 @@ target = "claude-code.haiku"
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 let test_r7_route_to_tier () =
@@ -385,7 +387,7 @@ target = "tier.primary"
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 (* --- R8: System target does not resolve --- *)
@@ -433,7 +435,7 @@ target = "claude-code.haiku.gov"
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 (* --- R9: Multiple is-default per provider --- *)
@@ -484,7 +486,7 @@ max-concurrent = 1
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 (* --- Multiple errors at once --- *)
@@ -565,7 +567,7 @@ backoff-cap-ms = 10000
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 let test_r10_sticky_ttl_on_wrong_strategy () =
@@ -611,7 +613,7 @@ sticky-ttl-ms = 600000
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 let test_r10_scoring_on_wrong_strategy () =
@@ -669,7 +671,7 @@ server-error-skip-after = 5
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 let test_r10_no_strategy_fields_is_ok () =
@@ -691,7 +693,7 @@ strategy = "failover"
 |}
   in
   let errs = validate_toml toml in
-  no_errors errs
+  no_errors_except_r13 errs
 ;;
 
 let test_r10_multiple_mismatches () =

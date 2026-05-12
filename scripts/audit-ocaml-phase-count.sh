@@ -146,6 +146,22 @@ while IFS= read -r entry; do
   # `(*` / `*` nor contain `*)`.  This is more reliable than the prior
   # left-anchored keyword filter, which let prefixed-whitespace code
   # through and could flag string literals.
+  #
+  # KNOWN LIMITATION (false negative class):
+  # Block comments whose continuation lines lack a leading `*` are not
+  # detected as in-comment by this heuristic.  Example that *would* be
+  # missed:
+  #
+  #     (* The keeper has
+  #        12-phase lifecycle *)
+  #
+  # The middle line ("12-phase lifecycle") does not start with `(*`/`*`
+  # and does not contain `*)`.  Deliberate trade-off — proper detection
+  # requires lexing the full file's comment-span state (this is shell,
+  # not ocaml).  Mitigations: (1) ocamlformat's default prefixes every
+  # continuation line with `*`, which this filter accepts; (2) for
+  # high-stakes audits use the OCaml-side companion validator backed by
+  # `compiler-libs` typed comments (zero false negatives).
   stripped="${content#"${content%%[![:space:]]*}"}"
   case "${stripped}" in
     '(*'*|'(**'*|'*'*) : ;;          # comment open or continuation

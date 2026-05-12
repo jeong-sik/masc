@@ -18,37 +18,35 @@ let test_valid_turn_phase_transitions () =
   let cases : (packed_turn_phase * packed_turn_phase) list =
     [ (* from Turn_idle *)
       Packed Turn_idle, Packed Turn_idle
-    ; Packed Turn_idle, Packed Turn_prompting
-      (* from Turn_prompting *)
+    ; Packed Turn_idle, Packed Turn_prompting (* from Turn_prompting *)
     ; Packed Turn_prompting, Packed Turn_prompting
     ; Packed Turn_prompting, Packed Turn_routing
     ; Packed Turn_prompting, Packed Turn_executing
     ; Packed Turn_prompting, Packed Turn_finalizing
-    ; Packed Turn_prompting, Packed Turn_exhausted  (* mark_terminal_error before any cascade attempt *)
+    ; Packed Turn_prompting, Packed Turn_exhausted
+      (* mark_terminal_error before any cascade attempt *)
       (* from Turn_routing *)
     ; Packed Turn_routing, Packed Turn_prompting
     ; Packed Turn_routing, Packed Turn_routing
     ; Packed Turn_routing, Packed Turn_executing
-    ; Packed Turn_routing, Packed Turn_exhausted  (* mark_terminal_error during cascade-fallback model selection *)
+    ; Packed Turn_routing, Packed Turn_exhausted
+      (* mark_terminal_error during cascade-fallback model selection *)
       (* from Turn_executing *)
     ; Packed Turn_executing, Packed Turn_prompting
     ; Packed Turn_executing, Packed Turn_routing
     ; Packed Turn_executing, Packed Turn_executing
     ; Packed Turn_executing, Packed Turn_compacting
     ; Packed Turn_executing, Packed Turn_finalizing
-    ; Packed Turn_executing, Packed Turn_exhausted
-      (* from Turn_compacting *)
+    ; Packed Turn_executing, Packed Turn_exhausted (* from Turn_compacting *)
     ; Packed Turn_compacting, Packed Turn_prompting
     ; Packed Turn_compacting, Packed Turn_compacting
     ; Packed Turn_compacting, Packed Turn_finalizing
-    ; Packed Turn_compacting, Packed Turn_exhausted
-      (* from Turn_finalizing *)
+    ; Packed Turn_compacting, Packed Turn_exhausted (* from Turn_finalizing *)
     ; Packed Turn_finalizing, Packed Turn_prompting
     ; Packed Turn_finalizing, Packed Turn_routing
     ; Packed Turn_finalizing, Packed Turn_executing
     ; Packed Turn_finalizing, Packed Turn_finalizing
-    ; Packed Turn_finalizing, Packed Turn_exhausted
-      (* from Turn_exhausted *)
+    ; Packed Turn_finalizing, Packed Turn_exhausted (* from Turn_exhausted *)
     ; Packed Turn_exhausted, Packed Turn_prompting
     ; Packed Turn_exhausted, Packed Turn_routing
     ; Packed Turn_exhausted, Packed Turn_executing
@@ -74,24 +72,18 @@ let test_invalid_turn_phase_transitions () =
     ; Packed Turn_idle, Packed Turn_executing
     ; Packed Turn_idle, Packed Turn_compacting
     ; Packed Turn_idle, Packed Turn_finalizing
-    ; Packed Turn_idle, Packed Turn_exhausted
-      (* from Turn_prompting *)
+    ; Packed Turn_idle, Packed Turn_exhausted (* from Turn_prompting *)
     ; Packed Turn_prompting, Packed Turn_idle
-    ; Packed Turn_prompting, Packed Turn_compacting
-      (* from Turn_routing *)
+    ; Packed Turn_prompting, Packed Turn_compacting (* from Turn_routing *)
     ; Packed Turn_routing, Packed Turn_idle
     ; Packed Turn_routing, Packed Turn_compacting
-    ; Packed Turn_routing, Packed Turn_finalizing
-      (* from Turn_executing *)
-    ; Packed Turn_executing, Packed Turn_idle
-      (* from Turn_compacting *)
+    ; Packed Turn_routing, Packed Turn_finalizing (* from Turn_executing *)
+    ; Packed Turn_executing, Packed Turn_idle (* from Turn_compacting *)
     ; Packed Turn_compacting, Packed Turn_idle
     ; Packed Turn_compacting, Packed Turn_routing
-    ; Packed Turn_compacting, Packed Turn_executing
-      (* from Turn_finalizing *)
+    ; Packed Turn_compacting, Packed Turn_executing (* from Turn_finalizing *)
     ; Packed Turn_finalizing, Packed Turn_idle
-    ; Packed Turn_finalizing, Packed Turn_compacting
-      (* from Turn_exhausted *)
+    ; Packed Turn_finalizing, Packed Turn_compacting (* from Turn_exhausted *)
     ; Packed Turn_exhausted, Packed Turn_idle
     ; Packed Turn_exhausted, Packed Turn_compacting
     ; Packed Turn_exhausted, Packed Turn_finalizing
@@ -156,7 +148,7 @@ let test_valid_decision_transitions () =
   List.iter
     (fun (from, to_) ->
        try validate_decision_transition ~from ~to_ with
-       | (Assert_failure _ | Invalid_argument _) ->
+       | Assert_failure _ | Invalid_argument _ ->
          Alcotest.fail
            (Printf.sprintf
               "valid decision %s rejected"
@@ -170,23 +162,19 @@ let test_valid_cascade_transitions () =
   let cases : (packed_cascade_state * packed_cascade_state) list =
     [ (* from Cascade_idle *)
       Packed Cascade_idle, Packed Cascade_idle
-    ; Packed Cascade_idle, Packed Cascade_selecting
-      (* from Cascade_selecting *)
+    ; Packed Cascade_idle, Packed Cascade_selecting (* from Cascade_selecting *)
     ; Packed Cascade_selecting, Packed Cascade_idle
     ; Packed Cascade_selecting, Packed Cascade_selecting
-    ; Packed Cascade_selecting, Packed Cascade_trying
-      (* from Cascade_trying *)
+    ; Packed Cascade_selecting, Packed Cascade_trying (* from Cascade_trying *)
     ; Packed Cascade_trying, Packed Cascade_idle
     ; Packed Cascade_trying, Packed Cascade_selecting
     ; Packed Cascade_trying, Packed Cascade_trying
     ; Packed Cascade_trying, Packed Cascade_done
-    ; Packed Cascade_trying, Packed Cascade_exhausted
-      (* from Cascade_done *)
+    ; Packed Cascade_trying, Packed Cascade_exhausted (* from Cascade_done *)
     ; Packed Cascade_done, Packed Cascade_idle
     ; Packed Cascade_done, Packed Cascade_selecting
     ; Packed Cascade_done, Packed Cascade_trying
-    ; Packed Cascade_done, Packed Cascade_done
-      (* from Cascade_exhausted *)
+    ; Packed Cascade_done, Packed Cascade_done (* from Cascade_exhausted *)
     ; Packed Cascade_exhausted, Packed Cascade_idle
     ; Packed Cascade_exhausted, Packed Cascade_selecting
     ; Packed Cascade_exhausted, Packed Cascade_trying
@@ -209,20 +197,17 @@ let test_invalid_cascade_transitions () =
   let cases : (packed_cascade_state * packed_cascade_state) list =
     [ (* from Cascade_idle *)
       Packed Cascade_idle, Packed Cascade_trying
-        (* Regression: pre-fix [Keeper_unified_turn.retry_loop] line
+      (* Regression: pre-fix [Keeper_unified_turn.retry_loop] line
            1138 era marked Cascade_trying immediately after budget
            resolution, jumping past Cascade_selecting.  The fix moves
            the trying mark into the disclosure hook so the matrix
            below keeps rejecting any future re-introduction of the
            direct jump. *)
     ; Packed Cascade_idle, Packed Cascade_done
-    ; Packed Cascade_idle, Packed Cascade_exhausted
-      (* from Cascade_selecting *)
+    ; Packed Cascade_idle, Packed Cascade_exhausted (* from Cascade_selecting *)
     ; Packed Cascade_selecting, Packed Cascade_done
-    ; Packed Cascade_selecting, Packed Cascade_exhausted
-      (* from Cascade_done *)
-    ; Packed Cascade_done, Packed Cascade_exhausted
-      (* from Cascade_exhausted *)
+    ; Packed Cascade_selecting, Packed Cascade_exhausted (* from Cascade_done *)
+    ; Packed Cascade_done, Packed Cascade_exhausted (* from Cascade_exhausted *)
     ; Packed Cascade_exhausted, Packed Cascade_done
     ]
   in
@@ -351,15 +336,19 @@ let test_invalid_compaction_transitions () =
 let contains haystack needle =
   let h_len = String.length haystack in
   let n_len = String.length needle in
-  if n_len = 0 then true
-  else if n_len > h_len then false
-  else
+  if n_len = 0
+  then true
+  else if n_len > h_len
+  then false
+  else (
     let rec loop i =
-      if i + n_len > h_len then false
-      else if String.sub haystack i n_len = needle then true
+      if i + n_len > h_len
+      then false
+      else if String.sub haystack i n_len = needle
+      then true
       else loop (i + 1)
     in
-    loop 0
+    loop 0)
 ;;
 
 let assert_str_contains ~haystack ~needle =
@@ -379,7 +368,10 @@ let test_turn_phase_violation_payload () =
   match validate_turn_phase_transition ~from ~to_ with
   | () -> Alcotest.fail "validator should have raised Turn_phase_transition_violation"
   | exception Turn_phase_transition_violation { where; from = ef; to_ = et; violation } ->
-    Alcotest.(check string) "where names the validator" "validate_turn_phase_transition" where;
+    Alcotest.(check string)
+      "where names the validator"
+      "validate_turn_phase_transition"
+      where;
     Alcotest.(check string)
       "violation.from"
       (packed_turn_phase_label from)
@@ -392,7 +384,10 @@ let test_turn_phase_violation_payload () =
       "violation tag"
       "routing->compacting"
       (turn_phase_transition_spec_violation_to_tag violation);
-    let rendered = Printexc.to_string (Turn_phase_transition_violation { where; from = ef; to_ = et; violation }) in
+    let rendered =
+      Printexc.to_string
+        (Turn_phase_transition_violation { where; from = ef; to_ = et; violation })
+    in
     assert_str_contains ~haystack:rendered ~needle:"validate_turn_phase_transition";
     assert_str_contains ~haystack:rendered ~needle:(packed_turn_phase_label from);
     assert_str_contains ~haystack:rendered ~needle:(packed_turn_phase_label to_)
@@ -408,7 +403,10 @@ let test_cascade_violation_payload () =
   match validate_cascade_transition ~from ~to_ with
   | () -> Alcotest.fail "validator should have raised Cascade_transition_violation"
   | exception Cascade_transition_violation { where; from = ef; to_ = et; violation } ->
-    Alcotest.(check string) "where names the validator" "validate_cascade_transition" where;
+    Alcotest.(check string)
+      "where names the validator"
+      "validate_cascade_transition"
+      where;
     Alcotest.(check string)
       "violation.from"
       (packed_cascade_state_label from)
@@ -421,7 +419,10 @@ let test_cascade_violation_payload () =
       "violation tag"
       "idle->exhausted"
       (cascade_transition_spec_violation_to_tag violation);
-    let rendered = Printexc.to_string (Cascade_transition_violation { where; from = ef; to_ = et; violation }) in
+    let rendered =
+      Printexc.to_string
+        (Cascade_transition_violation { where; from = ef; to_ = et; violation })
+    in
     assert_str_contains ~haystack:rendered ~needle:"validate_cascade_transition";
     assert_str_contains ~haystack:rendered ~needle:(packed_cascade_state_label from);
     assert_str_contains ~haystack:rendered ~needle:(packed_cascade_state_label to_)
@@ -433,50 +434,29 @@ let () =
   Alcotest.run
     "Keeper_sub_fsm_guards"
     [ ( "turn_phase"
-      , [ Alcotest.test_case
-            "valid transitions"
-            `Quick
-            test_valid_turn_phase_transitions
+      , [ Alcotest.test_case "valid transitions" `Quick test_valid_turn_phase_transitions
         ; Alcotest.test_case
             "invalid transitions"
             `Quick
             test_invalid_turn_phase_transitions
         ] )
     ; ( "decision_stage"
-      , [ Alcotest.test_case
-            "valid transitions"
-            `Quick
-            test_valid_decision_transitions
+      , [ Alcotest.test_case "valid transitions" `Quick test_valid_decision_transitions
           (* "invalid transitions" case removed: forbidden
              [<active>_to_undecided] pairs are unrepresentable through the
              [decision_stage_active] [to_] type — the test would not
              compile.  Compile-time enforcement supersedes runtime test. *)
         ] )
     ; ( "cascade_state"
-      , [ Alcotest.test_case
-            "valid transitions"
-            `Quick
-            test_valid_cascade_transitions
-        ; Alcotest.test_case
-            "invalid transitions"
-            `Quick
-            test_invalid_cascade_transitions
+      , [ Alcotest.test_case "valid transitions" `Quick test_valid_cascade_transitions
+        ; Alcotest.test_case "invalid transitions" `Quick test_invalid_cascade_transitions
         ] )
     ; ( "cascade_sequences"
-      , [ Alcotest.test_case
-            "first-turn attempt"
-            `Quick
-            test_first_turn_attempt_sequence
-        ; Alcotest.test_case
-            "retry attempt"
-            `Quick
-            test_retry_attempt_sequence
+      , [ Alcotest.test_case "first-turn attempt" `Quick test_first_turn_attempt_sequence
+        ; Alcotest.test_case "retry attempt" `Quick test_retry_attempt_sequence
         ] )
     ; ( "compaction_stage"
-      , [ Alcotest.test_case
-            "valid transitions"
-            `Quick
-            test_valid_compaction_transitions
+      , [ Alcotest.test_case "valid transitions" `Quick test_valid_compaction_transitions
         ; Alcotest.test_case
             "invalid transitions"
             `Quick

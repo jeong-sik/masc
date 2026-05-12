@@ -123,7 +123,14 @@ let per_caller_env_var ~caller =
 let legacy_per_caller_env_var = function
   | Operator_judge -> Some "MASC_OPERATOR_JUDGE_TIMEOUT_SEC"
   | Governance_judge -> Some "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC"
-  | _ -> None
+  | Auto_responder
+  | Dashboard_provider_runs
+  | Autoresearch_codegen
+  | Keeper_persona_authoring
+  | Server_openai_compat
+  | Tool_deep_review
+  | Anti_rationalization -> None
+  | Unknown _ -> None
 ;;
 
 let global_env_var = "MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC"

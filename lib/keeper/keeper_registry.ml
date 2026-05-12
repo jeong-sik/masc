@@ -389,8 +389,8 @@ type turn_phase_resolve_outcome =
   | Resolved_turn_violation of turn_phase_transition_spec_violation
 
 let resolve_turn_phase_transition
-    ~(from : packed_turn_phase)
-    ~(target : packed_turn_phase)
+      ~(from : packed_turn_phase)
+      ~(target : packed_turn_phase)
   : turn_phase_resolve_outcome
   =
   match from, target with
@@ -401,55 +401,76 @@ let resolve_turn_phase_transition
   | Packed Turn_executing, Packed Turn_executing
   | Packed Turn_compacting, Packed Turn_compacting
   | Packed Turn_finalizing, Packed Turn_finalizing
-  | Packed Turn_exhausted, Packed Turn_exhausted ->
-    Resolved_turn_idempotent
+  | Packed Turn_exhausted, Packed Turn_exhausted -> Resolved_turn_idempotent
   (* Valid cross-state transitions (23). *)
   | Packed Turn_idle, Packed Turn_prompting ->
     Resolved_turn_transition (Turn_phase_transition.Packed_transition Idle_to_prompting)
   | Packed Turn_prompting, Packed Turn_routing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Prompting_to_routing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Prompting_to_routing)
   | Packed Turn_prompting, Packed Turn_executing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Prompting_to_executing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Prompting_to_executing)
   | Packed Turn_prompting, Packed Turn_finalizing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Prompting_to_finalizing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Prompting_to_finalizing)
   | Packed Turn_prompting, Packed Turn_exhausted ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Prompting_to_exhausted)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Prompting_to_exhausted)
   | Packed Turn_routing, Packed Turn_prompting ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Routing_to_prompting)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Routing_to_prompting)
   | Packed Turn_routing, Packed Turn_executing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Routing_to_executing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Routing_to_executing)
   | Packed Turn_routing, Packed Turn_exhausted ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Routing_to_exhausted)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Routing_to_exhausted)
   | Packed Turn_executing, Packed Turn_prompting ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Executing_to_prompting)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Executing_to_prompting)
   | Packed Turn_executing, Packed Turn_routing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Executing_to_routing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Executing_to_routing)
   | Packed Turn_executing, Packed Turn_compacting ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Executing_to_compacting)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Executing_to_compacting)
   | Packed Turn_executing, Packed Turn_finalizing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Executing_to_finalizing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Executing_to_finalizing)
   | Packed Turn_executing, Packed Turn_exhausted ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Executing_to_exhausted)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Executing_to_exhausted)
   | Packed Turn_compacting, Packed Turn_prompting ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Compacting_to_prompting)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Compacting_to_prompting)
   | Packed Turn_compacting, Packed Turn_finalizing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Compacting_to_finalizing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Compacting_to_finalizing)
   | Packed Turn_compacting, Packed Turn_exhausted ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Compacting_to_exhausted)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Compacting_to_exhausted)
   | Packed Turn_finalizing, Packed Turn_prompting ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Finalizing_to_prompting)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Finalizing_to_prompting)
   | Packed Turn_finalizing, Packed Turn_routing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Finalizing_to_routing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Finalizing_to_routing)
   | Packed Turn_finalizing, Packed Turn_executing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Finalizing_to_executing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Finalizing_to_executing)
   | Packed Turn_finalizing, Packed Turn_exhausted ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Finalizing_to_exhausted)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Finalizing_to_exhausted)
   | Packed Turn_exhausted, Packed Turn_prompting ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Exhausted_to_prompting)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Exhausted_to_prompting)
   | Packed Turn_exhausted, Packed Turn_routing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Exhausted_to_routing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Exhausted_to_routing)
   | Packed Turn_exhausted, Packed Turn_executing ->
-    Resolved_turn_transition (Turn_phase_transition.Packed_transition Exhausted_to_executing)
+    Resolved_turn_transition
+      (Turn_phase_transition.Packed_transition Exhausted_to_executing)
   (* Spec violations (19). *)
   | Packed Turn_idle, Packed Turn_routing -> Resolved_turn_violation Idle_to_routing
   | Packed Turn_idle, Packed Turn_executing -> Resolved_turn_violation Idle_to_executing
@@ -460,12 +481,16 @@ let resolve_turn_phase_transition
   | Packed Turn_prompting, Packed Turn_compacting ->
     Resolved_turn_violation Prompting_to_compacting
   | Packed Turn_routing, Packed Turn_idle -> Resolved_turn_violation Routing_to_idle
-  | Packed Turn_routing, Packed Turn_compacting -> Resolved_turn_violation Routing_to_compacting
-  | Packed Turn_routing, Packed Turn_finalizing -> Resolved_turn_violation Routing_to_finalizing
+  | Packed Turn_routing, Packed Turn_compacting ->
+    Resolved_turn_violation Routing_to_compacting
+  | Packed Turn_routing, Packed Turn_finalizing ->
+    Resolved_turn_violation Routing_to_finalizing
   | Packed Turn_executing, Packed Turn_idle -> Resolved_turn_violation Executing_to_idle
   | Packed Turn_compacting, Packed Turn_idle -> Resolved_turn_violation Compacting_to_idle
-  | Packed Turn_compacting, Packed Turn_routing -> Resolved_turn_violation Compacting_to_routing
-  | Packed Turn_compacting, Packed Turn_executing -> Resolved_turn_violation Compacting_to_executing
+  | Packed Turn_compacting, Packed Turn_routing ->
+    Resolved_turn_violation Compacting_to_routing
+  | Packed Turn_compacting, Packed Turn_executing ->
+    Resolved_turn_violation Compacting_to_executing
   | Packed Turn_finalizing, Packed Turn_idle -> Resolved_turn_violation Finalizing_to_idle
   | Packed Turn_finalizing, Packed Turn_compacting ->
     Resolved_turn_violation Finalizing_to_compacting
@@ -521,9 +546,8 @@ type decision_stage_active =
   | Decision_active_gate_rejected
   | Decision_active_tool_policy_selected
 
-let decision_stage_active_to_packed
-    : decision_stage_active -> packed_decision_stage
-  = function
+let decision_stage_active_to_packed : decision_stage_active -> packed_decision_stage =
+  function
   | Decision_active_guard_ok -> Packed Decision_guard_ok
   | Decision_active_gate_rejected -> Packed Decision_gate_rejected
   | Decision_active_tool_policy_selected -> Packed Decision_tool_policy_selected
@@ -589,10 +613,7 @@ end
    no false-positive cases.  Adding a new [decision_stage] or
    [decision_stage_active] constructor still fails Warning 8 here,
    preserving the original tripwire intent. *)
-let validate_decision_transition
-    ~(from : decision_stage)
-    ~(to_ : decision_stage_active)
-  =
+let validate_decision_transition ~(from : decision_stage) ~(to_ : decision_stage_active) =
   match from, to_ with
   | Decision_undecided, Decision_active_guard_ok -> ()
   | Decision_undecided, Decision_active_gate_rejected -> ()
@@ -806,8 +827,8 @@ type cascade_resolve_outcome =
   | Resolved_violation of cascade_transition_spec_violation
 
 let resolve_cascade_transition
-    ~(from : packed_cascade_state)
-    ~(target : packed_cascade_state)
+      ~(from : packed_cascade_state)
+      ~(target : packed_cascade_state)
   : cascade_resolve_outcome
   =
   match from, target with
@@ -816,8 +837,7 @@ let resolve_cascade_transition
   | Packed Cascade_selecting, Packed Cascade_selecting
   | Packed Cascade_trying, Packed Cascade_trying
   | Packed Cascade_done, Packed Cascade_done
-  | Packed Cascade_exhausted, Packed Cascade_exhausted ->
-    Resolved_idempotent
+  | Packed Cascade_exhausted, Packed Cascade_exhausted -> Resolved_idempotent
   (* Valid cross-state transitions (13). *)
   | Packed Cascade_idle, Packed Cascade_selecting ->
     Resolved_transition (Cascade_transition.Packed_transition Idle_to_selecting)
@@ -846,20 +866,14 @@ let resolve_cascade_transition
   | Packed Cascade_exhausted, Packed Cascade_trying ->
     Resolved_transition (Cascade_transition.Packed_transition Exhausted_to_trying)
   (* Spec violations (7). *)
-  | Packed Cascade_idle, Packed Cascade_trying ->
-    Resolved_violation Idle_to_trying
-  | Packed Cascade_idle, Packed Cascade_done ->
-    Resolved_violation Idle_to_done
-  | Packed Cascade_idle, Packed Cascade_exhausted ->
-    Resolved_violation Idle_to_exhausted
-  | Packed Cascade_selecting, Packed Cascade_done ->
-    Resolved_violation Selecting_to_done
+  | Packed Cascade_idle, Packed Cascade_trying -> Resolved_violation Idle_to_trying
+  | Packed Cascade_idle, Packed Cascade_done -> Resolved_violation Idle_to_done
+  | Packed Cascade_idle, Packed Cascade_exhausted -> Resolved_violation Idle_to_exhausted
+  | Packed Cascade_selecting, Packed Cascade_done -> Resolved_violation Selecting_to_done
   | Packed Cascade_selecting, Packed Cascade_exhausted ->
     Resolved_violation Selecting_to_exhausted
-  | Packed Cascade_done, Packed Cascade_exhausted ->
-    Resolved_violation Done_to_exhausted
-  | Packed Cascade_exhausted, Packed Cascade_done ->
-    Resolved_violation Exhausted_to_done
+  | Packed Cascade_done, Packed Cascade_exhausted -> Resolved_violation Done_to_exhausted
+  | Packed Cascade_exhausted, Packed Cascade_done -> Resolved_violation Exhausted_to_done
 ;;
 
 type compaction_stage =
@@ -1619,14 +1633,14 @@ let validate_turn_phase_transition ~from ~to_ =
     ~action:"turn_phase_transition"
     ~stage:"guard"
     (fun () ->
-      match resolve_turn_phase_transition ~from ~target:to_ with
-      | Resolved_turn_idempotent | Resolved_turn_transition _ -> ()
-      | Resolved_turn_violation violation ->
-        raise_turn_phase_transition_violation
-          ~where:"validate_turn_phase_transition"
-          ~from
-          ~to_
-          ~violation)
+       match resolve_turn_phase_transition ~from ~target:to_ with
+       | Resolved_turn_idempotent | Resolved_turn_transition _ -> ()
+       | Resolved_turn_violation violation ->
+         raise_turn_phase_transition_violation
+           ~where:"validate_turn_phase_transition"
+           ~from
+           ~to_
+           ~violation)
 ;;
 
 let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_active) =
@@ -1668,7 +1682,13 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
      - Forbidden transitions (7 pairs) raise the typed
        [Cascade_transition_violation] (RFC-0072 Phase 5), carrying the
        [cascade_transition_spec_violation] payload directly instead of a
-       string-formatted [Invalid_argument].
+       string-formatted [Invalid_argument].  The raise is routed through
+       [wrap_unit] (same pattern #14926 applied to [set_turn_phase]) so
+       [metric_fsm_guard_violation] (action=cascade_transition,
+       stage=guard) fires for forbidden transitions reached via this
+       setter — without it, the cascade-side setter rejection would be
+       uninstrumented (the [validate_cascade_transition] call below only
+       runs on the [Resolved_transition] arm).
 
      [validate_turn_phase_transition] is invoked here for the turn_phase
      axis (which also dispatches through its resolver as of Phase 4b). *)
@@ -1684,11 +1704,16 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
         changed := true;
         { obs with cascade_state; turn_phase = new_turn_phase }
       | Resolved_violation violation ->
-        raise_cascade_transition_violation
-          ~where:"set_turn_cascade_state"
-          ~from:obs.cascade_state
-          ~to_:cascade_state
-          ~violation));
+        Keeper_fsm_guard_runtime.wrap_unit
+          ~action:"cascade_transition"
+          ~stage:"guard"
+          (fun () ->
+             raise_cascade_transition_violation
+               ~where:"set_turn_cascade_state"
+               ~from:obs.cascade_state
+               ~to_:cascade_state
+               ~violation);
+        obs));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -1709,11 +1734,27 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
         changed := true;
         { obs with turn_phase }
       | Resolved_turn_violation violation ->
-        raise_turn_phase_transition_violation
-          ~where:"set_turn_phase"
-          ~from:obs.turn_phase
-          ~to_:turn_phase
-          ~violation));
+        (* #14926: route the violation raise through [wrap_unit] so the
+           guard's Prometheus counter [metric_fsm_guard_violation]
+           (action=turn_phase_transition, stage=guard) keeps firing for
+           forbidden transitions reached via this setter — prior to
+           RFC-0072 Phase 4b (#14918) the instrumentation was transitive
+           through [validate_turn_phase_transition], and the resolver swap
+           dropped it.  Phase 5: the inner raise is now the typed
+           [Turn_phase_transition_violation]; [wrap_unit]'s catch was
+           widened to all exceptions so it still bumps the counter.  The
+           trailing [obs] is unreachable (a no-op transition is the
+           correct fallback should [wrap_unit] ever return). *)
+        Keeper_fsm_guard_runtime.wrap_unit
+          ~action:"turn_phase_transition"
+          ~stage:"guard"
+          (fun () ->
+             raise_turn_phase_transition_violation
+               ~where:"set_turn_phase"
+               ~from:obs.turn_phase
+               ~to_:turn_phase
+               ~violation);
+        obs));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 

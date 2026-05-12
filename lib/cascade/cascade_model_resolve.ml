@@ -91,22 +91,6 @@ let default_resolution ?getenv provider_name ~requested_model_id =
 let glm_auto_models = Llm_provider.Zai_catalog.glm_auto_models
 let glm_coding_auto_models = Llm_provider.Zai_catalog.glm_coding_auto_models
 
-let gemini_cli_auto_models () =
-  Provider_adapter.auto_models_for_cascade_prefix "gemini_cli"
-  |> Option.value ~default:[]
-
-let codex_cli_auto_models () =
-  Provider_adapter.auto_models_for_cascade_prefix "codex_cli"
-  |> Option.value ~default:[]
-
-let claude_code_auto_models () =
-  Provider_adapter.auto_models_for_cascade_prefix "claude_code"
-  |> Option.value ~default:[]
-
-let kimi_cli_auto_models () =
-  Provider_adapter.auto_models_for_cascade_prefix "kimi_cli"
-  |> Option.value ~default:[]
-
 let resolve_glm_model ?getenv selector =
   let model_id = match selector with Concrete s -> s | Auto -> "auto" in
   let default_model = default_resolution ?getenv "glm" ~requested_model_id:model_id in

@@ -37,7 +37,7 @@ let handle_plan_init ~tool_name ~start_time ctx args =
   match result with
   | Ok _ctx ->
       let response = `Assoc [
-        ("status", `String "initialized");
+        Plan_action_outcome.(status_field Initialized);
         ("task_id", `String task_id);
         ("message", `String (Printf.sprintf "Planning context created for %s" task_id));
       ] in
@@ -52,7 +52,7 @@ let handle_plan_update ~tool_name ~start_time ctx args =
   match result with
   | Ok plan_ctx ->
       let response = `Assoc [
-        ("status", `String "updated");
+        Plan_action_outcome.(status_field Updated);
         ("task_id", `String task_id);
         ("updated_at", `String plan_ctx.Planning_eio.updated_at);
       ] in
@@ -67,7 +67,7 @@ let handle_note_add ~tool_name ~start_time ctx args =
   match result with
   | Ok plan_ctx ->
       let response = `Assoc [
-        ("status", `String "added");
+        Plan_action_outcome.(status_field Added);
         ("task_id", `String task_id);
         ("note_count", `Int (List.length plan_ctx.Planning_eio.notes));
       ] in
@@ -88,7 +88,7 @@ let handle_deliver ~tool_name ~start_time ctx args =
   match result with
   | Ok plan_ctx ->
       let response = `Assoc [
-        ("status", `String "delivered");
+        Plan_action_outcome.(status_field Delivered);
         ("task_id", `String task_id);
         ("updated_at", `String plan_ctx.Planning_eio.updated_at);
       ] in
@@ -121,7 +121,7 @@ let handle_plan_set_task ~tool_name ~start_time ctx args =
   else begin
     Planning_eio.set_current_task ctx.config ~task_id;
     let response = `Assoc [
-      ("status", `String "set");
+      Plan_action_outcome.(status_field Set);
       ("current_task", `String task_id);
     ] in
     Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
@@ -144,7 +144,7 @@ let handle_plan_get_task ~tool_name ~start_time ctx _args =
 let handle_plan_clear_task ~tool_name ~start_time ctx _args =
   Planning_eio.clear_current_task ctx.config;
   let response = `Assoc [
-    ("status", `String "cleared");
+    Plan_action_outcome.(status_field Cleared);
     ("message", `String "Current task cleared");
   ] in
   Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)

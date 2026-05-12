@@ -6,9 +6,11 @@ let refresh_policy_for_test () = ()
 let assert_mode_for_test () = true
 
 let bump_counter ~action ~stage =
-  Prometheus.inc_counter Prometheus.metric_fsm_guard_violation
-    ~labels:[ ("action", action); ("stage", stage) ]
+  Prometheus.inc_counter
+    Prometheus.metric_fsm_guard_violation
+    ~labels:[ "action", action; "stage", stage ]
     ()
+;;
 
 (* Any exception escaping a [@@fsm_guard]-bearing identity helper is the
    spec-violation channel for instrumentation purposes: the wrapped thunk's
@@ -20,9 +22,13 @@ let bump_counter ~action ~stage =
    [Turn_phase_transition_violation]); naming those here would create a
    module dependency cycle ([Keeper_registry] already depends on this
    module), so the catch is widened to all exceptions.  The counter is
-   bumped and the exception re-raised unchanged. *)
+   bumped and the exception re-raised with its original backtrace intact
+   ([bump_counter] runs a [Prometheus.inc_counter] call in between, which
+   would otherwise clobber [Printexc]'s current backtrace). *)
 let wrap_unit ~action ~stage thunk =
   try thunk () with
   | exn ->
+    let bt = Printexc.get_raw_backtrace () in
     bump_counter ~action ~stage;
-    raise exn
+    Printexc.raise_with_backtrace exn bt
+;;

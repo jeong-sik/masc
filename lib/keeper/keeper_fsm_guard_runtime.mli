@@ -22,11 +22,7 @@
     [unit] (a function whose only purpose is to carry the
     [@@fsm_guard] attribute). *)
 
-val wrap_unit :
-  action:string ->
-  stage:string ->
-  (unit -> unit) ->
-  unit
+val wrap_unit : action:string -> stage:string -> (unit -> unit) -> unit
 
 (** Compatibility no-op retained for older tests.  The guard policy no
     longer reads [MASC_FSM_GUARD_ASSERT]. *)

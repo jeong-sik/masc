@@ -65,9 +65,22 @@ These are call-outs for follow-up PRs, **not** fixes in this audit.
    The spec comment around `Fairness` notes that `TryDispatch` must be *strongly* fair (not just weakly): "TLC 6243-state counter-example confirmed this 2026-05-05". OCaml side has no retry-with-bounded-backoff loop matching SF. Today this is invisible because the dormant path doesn't admit; on activation, a hostile burst of `Refill`/`Complete` interleaving could starve a keeper indefinitely.
    *Suggested fix-PR*: `K-2.b` — define and test a bounded-retry policy in `keeper_admission_router.ml`. Cross-reference TLC counter-example referenced in the spec comment for the test fixture.
 
-3. **Five-state vs seven-state status enumeration (LOW)**
-   Spec uses `{"Idle", "Waiting", "Dispatched", "Working", "Done"}`. OCaml admission policy result type uses a different enumeration: `{ Dispatch_immediate p; Enqueue_overflow; Bypass_admission; Capacity_exhausted }`. The mapping is implicit ("Dispatch_immediate" subsumes both spec `TryDispatch` *and* `StartWork`). This is acceptable as an abstraction but should be documented in the OCaml `.mli`, because today the abstraction relationship is reconstructed only by reading both files in parallel.
-   *Suggested fix-PR*: `K-2.c` — add OCaml `.mli` comment block citing this spec's mapping table. 6th drift class precedent — this is the same shape as `iter 47 KCtxL doc-layer drift`.
+3. **5-element spec state set vs 3-variant OCaml `decision` (LOW)**
+
+   > **Correction (iter 66, K-2.c.1)** — the original wording of this item
+   > said the OCaml result type was a 4-variant enum
+   > `{ Dispatch_immediate p; Enqueue_overflow; Bypass_admission; Capacity_exhausted }`.
+   > That was speculative and wrong: `rg 'Dispatch_immediate|Enqueue_overflow|Bypass_admission' lib/`
+   > returns 0 matches. The actual type is
+   > `lib/keeper/keeper_admission_router.mli` `type decision = Dispatch of {…} | Wait | Surface of surface_reason`
+   > — **three** variants. (`Capacity_exhausted` exists, but as a Prometheus
+   > *event* name in `keeper_admission_policy.mli`, not a decision constructor.)
+   > Discovered while implementing K-2.c in iter 60 #14906; this paragraph
+   > is the K-2.c.1 follow-up that fixes the audit memo's record. The
+   > corrected mapping was already written into the `.mli` by #14906.
+
+   The spec's `keeper_state` is a 5-element set `{"Idle", "Waiting", "Dispatched", "Working", "Done"}` modelling the keeper's lifecycle *position*. The OCaml `type decision` is a different kind of thing — the result of one `schedule` call — with 3 variants `Dispatch | Wait | Surface`. The mapping is one-to-many in time (one `Dispatch` covers the spec's `TryDispatch` *and* `StartWork` transitions) and was implicit until #14906 added the `.mli` block. This is acceptable as an abstraction but needed documenting because the relationship was reconstructed only by reading both files in parallel.
+   *Fix-PR (DONE)*: `K-2.c` — `.mli` comment block citing this spec's mapping table, merged as #14906 (iter 60). 6th drift class precedent — same shape as `iter 47 KCtxL doc-layer drift`.
 
 4. **Dormancy not visible from the spec (LOW)**
    The spec preamble lists invariants I1–I5 with no acknowledgement that the runtime does not yet apply them. A new contributor reading only the spec would assume `MASC_ADMISSION_USE_NEW` is on. Spec comment should add a "Status: design ground, runtime dormant pending `MASC_ADMISSION_USE_NEW=1` activation; see RFC-0026 PR-E-1.6" line.

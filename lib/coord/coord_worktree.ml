@@ -387,7 +387,7 @@ let is_usable_git_worktree path =
       match first_nonempty_line output with
       | Some top -> same_realpath top path
       | None -> false)
-  | _ -> false
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> false
 
 let run_git_in_clone clone_path args =
   run_argv_with_status ([ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args)
@@ -961,7 +961,7 @@ let partial_clone_error ~clone_path ~msg =
 let git_origin_url root =
   match run_argv_with_status [ "git"; "-C"; root; "remote"; "get-url"; "origin" ] with
   | Unix.WEXITED 0, output -> first_nonempty_line output
-  | _ -> None
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
 
 let normalize_origin_remote_to_https root =
   match git_origin_url root with
@@ -975,7 +975,7 @@ let normalize_origin_remote_to_https root =
             [ "git"; "-C"; root; "remote"; "set-url"; "origin"; normalized ]
         with
         | Unix.WEXITED 0, _ -> Some normalized
-        | _ -> None
+        | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
 
 let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
   let search_root = project_root config in
@@ -1161,7 +1161,11 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
           in
 
           (* Link worktree to task in backlog *)
-          let maybe_link_task () =
+          (* WORKAROUND: Masc_error.t has 7 ctors with nested per-domain
+             variants (Task_error has its own ctors). 정확한 enumeration은
+             도메인 신규 ctor마다 무관한 caller가 churn 대상이 됨.
+             근본 해결: per-domain error-to-string helper로 분류 일원화 (RFC 후보). *)
+          let[@warning "-4"] maybe_link_task () =
             if link_task then begin
               match link_worktree_to_task config ~task_id ~worktree_info:wt_info with
               | Ok () -> ""

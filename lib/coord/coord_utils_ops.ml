@@ -458,7 +458,7 @@ let with_distributed_lock ?clock config _path key f =
     else
       match backend_acquire_lock config ~key ~ttl_seconds ~owner with
       | Ok true -> true
-      | _ ->
+      | Ok false | Error _ ->
           sleep_lock_retry ?clock (backoff_with_jitter delay);
           acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
   in
@@ -495,7 +495,7 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
     else
       match backend_acquire_lock config ~key ~ttl_seconds ~owner with
       | Ok true -> true
-      | _ ->
+      | Ok false | Error _ ->
           sleep_lock_retry ?clock (backoff_with_jitter delay);
           acquire (attempts - 1) (Float.min 0.5 (delay *. 2.0))
   in

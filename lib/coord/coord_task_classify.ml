@@ -46,11 +46,16 @@ let classify_completion_path
       ~(drift : Coord_task_lifecycle.drift option)
       ~(force : bool)
   =
-  match action, drift, force with
-  | Masc_domain.Approve_verification, _, _ -> "via_verification"
-  | _, _, true -> "forced_done"
-  | _, Some Coord_task_lifecycle.Claimed_to_done_skip, false -> "claimed_to_done_skip"
-  | _, None, false -> "in_progress_to_done"
+  match action with
+  | Masc_domain.Approve_verification -> "via_verification"
+  | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action
+  | Masc_domain.Cancel | Masc_domain.Release
+  | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification
+  | Masc_domain.Submit_pr_evidence ->
+    if force then "forced_done"
+    else (match drift with
+          | Some Coord_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
+          | None -> "in_progress_to_done")
 ;;
 
 let task_actor_kind agent_name =

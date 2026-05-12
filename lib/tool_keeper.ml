@@ -67,12 +67,8 @@ let keeper_list_cache_ttl_s () =
   cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0
 
 let invalidate_text_cache cache_ref =
-  let rec loop () =
-    let current = Atomic.get cache_ref in
-    let next = empty_text_cache ~generation:(current.generation + 1) in
-    if not (Atomic.compare_and_set cache_ref current next) then loop ()
-  in
-  loop ()
+  Lockfree_atomic.update cache_ref (fun current ->
+    empty_text_cache ~generation:(current.generation + 1))
 
 let invalidate_keeper_list_cache () = invalidate_text_cache _keeper_list_cache
 

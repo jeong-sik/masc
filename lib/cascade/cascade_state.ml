@@ -25,12 +25,7 @@ let record_sticky_choice ~keeper ~cascade ~provider ~ttl_ms ~now =
     let expires_at = now +. (float_of_int ttl_ms /. 1000.) in
     let entry = { provider; expires_at } in
     let key = (keeper, cascade) in
-    let rec loop () =
-      let cur = Atomic.get sticky_table in
-      let next = Sticky_map.add key entry cur in
-      if not (Atomic.compare_and_set sticky_table cur next) then loop ()
-    in
-    loop ()
+    Lockfree_atomic.update sticky_table (fun cur -> Sticky_map.add key entry cur)
 
 let lookup_sticky ~keeper ~cascade ~now =
   let key = (keeper, cascade) in

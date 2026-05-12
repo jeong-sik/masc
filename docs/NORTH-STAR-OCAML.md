@@ -18,7 +18,7 @@
 | `.mli` 커버리지 | 1005/1033 (97%, 2026-05-12) | 216/218 (99%) | Tier 1-A 사실상 완료 |
 | `Obj.magic` (실사용) | 0건 (2026-05-12; `lib/cdal/adversarial_eval.ml` 의 1건은 금지패턴 문자열 리터럴) | 0건 | 깨끗함 |
 | `Stdlib.Mutex` 생성 | `Stdlib.Mutex.create` 39 호출 / `module Mutex = Stdlib.Mutex` 105 파일 (2026-05-12) — 다수는 의도된 컨벤션 (`prometheus.ml` 등 짧은 critical section, Eio 의존 회피 주석 명시) | 2군데 | 무분별 신규 추가만 경계 |
-| `Eio.Mutex` 사용 | 112 파일 (2026-05-12) | 19군데 | 과잉 여부 재평가 필요 |
+| `Eio.Mutex` 사용 | `Eio.Mutex.create` 113 호출 / `Eio.Mutex` 등장 142 파일 (2026-05-12) | 19군데 (호출/등장 횟수) | 과잉 여부 재평가 필요 — masc-mcp 열은 `Stdlib.Mutex` 행과 같은 단위 (호출 수 / 파일 수), OAS 열은 등장 횟수 |
 | 와일드카드 `_` (Top 파일) | (2026-04, 재측정 필요) keeper_status_detail: 35, verification: 28 | runtime_server: 25 | RFC-0071 §3.4 (warning 4 활성화) 이 진행 중 — §2-B/§3 참조 |
 | GADT | (2026-04) 2군데+ | 5군데 | 미활용 |
 | Effect Handlers | 0건 (2026-05-12; `Effect.perform`/`Effect.Deep`/`Effect.Shallow` 0건 — Eio 내부 사용 제외) | 0건 | **공백** |
@@ -162,7 +162,7 @@ OCaml 5.4 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 
 
 ### 3A. String-typed enum → variant 타입 (keeper_unified_metrics.ml) — ✅ 적용된 것으로 판단
 
-**현재** (line 750-761):
+**(2026-04 당시)** `keeper_unified_metrics.ml` 의 `type turn_mode` (라인 번호 제거 — 위 §1 표 노트 "라인 번호 신뢰 금지, 심볼명으로 찾을 것" 참조):
 ```ocaml
 type turn_mode =
   | Tool_use

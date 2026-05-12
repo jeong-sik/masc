@@ -8,7 +8,7 @@ author: yousleepwhen
 supersedes: []
 superseded_by: null
 related: ["0002", "0003", "0006", "0036"]
-implementation_prs: []
+implementation_prs: ["14714", "14741", "14821", "14827", "14889", "14899", "14934"]
 ---
 
 # RFC-0070: Keeper Sandbox Runtime — Pure/Edge Separation
@@ -25,6 +25,7 @@ implementation_prs: []
     - **RFC-0036 cleanup_hook is on main**, not missing. v2 §4 Phase 3c.2 status changed from ⏸ blocked to ⏳ pending. PRs that landed it: #13848 (P0/P1 cleanup), #13935 (count failures), #13971 (coverage gaps). Module: `lib/keeper/keeper_lifecycle_hooks.mli`, call sites: `lib/server/server_bootstrap_loops.ml:570-571`.
     - **`Keeper_lifecycle_hooks` is a *sibling* cleanup path, not a consumer of `cleanup_outcome`**. Earlier v2 draft assumed an adapter `cleanup_outcome → unit` would be registered against the lifecycle hook; the actual `Keeper_lifecycle_hooks.event` is `Phase_transition | Tombstone_reaped` (keeper-lifecycle events), distinct from the container-level cleanup outcomes from `Sandbox_cleanup.cleanup_tick`. Both flow in parallel. §3.4 + §3.5 corrected.
   - No v1 code is invalidated — all merged work remains, only the `keeper_sandbox_plan` filename is renamed in Phase 3d. Phase 3e absorbs *all four* v2-discovered gaps in a single batch so Phase 4 cutover (4.1/4.2/4.3) can land without further `Docker_client.S` extension PRs. Phase 3c.2 is now independently schedulable.
+- **v2.1 (2026-05-12, doc sync)**: Phase 3d shipped (#14934 — pure rename, 14 files, +51/-51); §4 status flipped to ✅; §3.1.1 / naming-convention / §3.5 / §5 Phase 2 references updated from `Keeper_sandbox_plan` to the shipped `Keeper_sandbox_oneshot_plan`. §1 F6 corrected: iter-1-2 counted 8 `try ... with _ -> None` sites in `keeper_sandbox_control.ml`; the `Masc_exec.Exec_gate` migration (#14329/#14359) since resolved ~7, leaving 1 `Cancelled`-guarded residual at `git_string_opt:306-308` — §4 Phase 5 re-scoped accordingly; §5 Phase 5 validation note clarified (single-line `rg` misses the multi-line catch-all). §3.5 `Keeper_sandbox.t`/`of_request` relationship corrected (`of_request` takes `~meta_name:string`, not `Keeper_sandbox.t`). Sources: PR #14899 review comments (iter 39/40 audits), PR #14934.
 
 - **Depends on**: RFC-0036 Phase A (cleanup hook plumbing — foundation)
 - **Extends**: RFC-0006 Phase B-2 (Read/Edit/Grep docker exec routing)
@@ -47,10 +48,10 @@ The resulting failure modes (catalogued during `/loop` iterations 1-2 against `l
 | F3 | `docker ps -a` substring parsing — output format changes between docker 24.x/25.x silently break the gate | `keeper_sandbox_runtime.ml:562, 643-674` | MEDIUM |
 | F4 | 5s minimum timeout floor as a magic literal — first-turn image pull can exceed | `keeper_shell_docker.ml:640` | MEDIUM |
 | F5 | `Unix.kill(pid, 0)` liveness check races on PID reuse — dead owner false-positive | `keeper_sandbox_runtime.ml:477-499` | MEDIUM |
-| F6 | 8× `try ... with _ -> None` in git/probe paths — any failure becomes "not found", reason lost | `keeper_sandbox_control.ml:261-308` | MEDIUM |
+| F6 | `try ... with _ -> None` in git/probe paths — any failure becomes "not found", reason lost. Iter 1-2 counted 8 sites in `keeper_sandbox_control.ml`; the `Masc_exec.Exec_gate` migration (#14329 / #14359) since resolved ~7 of them. **1 residual** catch-all remains at `git_string_opt` (`keeper_sandbox_control.ml:306-308`), `Cancelled`-guarded (re-raises `Eio.Cancel.Cancelled` before swallowing). The two `Sys_error _ -> false` catches at `:261-266` are *typed*, not catch-all. | `keeper_sandbox_control.ml:306-308` | LOW (mostly resolved) |
 | F7 | Cleanup loop increments `metric_keeper_turn_cleanup_failures` counter and returns empty — no retry, no escalation | `keeper_turn_sandbox_runtime.ml:466-468`, `keeper_sandbox_runtime.ml:618-625` | HIGH (CLAUDE.md §워크어라운드 §1 — counter-as-fix) |
 
-F1, F3, F6 are direct instances of CLAUDE.md §AI 코드 생성 안티패턴: hardcoded scattered (#1), unknown→permissive default (#2), `_ -> None` catch-all (#4). F7 trips the §워크어라운드 거부 §1 — telemetry-as-fix.
+F1, F3, F6 are direct instances of CLAUDE.md §AI 코드 생성 안티패턴: hardcoded scattered (#1), unknown→permissive default (#2), `_ -> None` catch-all (#4). F7 trips the §워크어라운드 거부 §1 — telemetry-as-fix. (F6 has since been largely closed by the exec_gate migration — see the F6 row; Phase 5 below now scopes to the 1 residual site rather than 8.)
 
 ## 2. Goals / Non-Goals
 
@@ -155,15 +156,14 @@ The 7 operations are fully covered by the v2 RFC after the additions in §3.0.3 
 
 **v2 splits the single `Keeper_sandbox_plan.t` into two sibling types**, one per lifetime model. Both share the same `Keeper_container_name.t` derivation, hash algo, and result-typed `of_request` constructor — only the runtime shape differs.
 
-**Naming convention used in §3.1–§3.3 below**: snippets describe the *post-Phase-3d* shape. v1 ships `Keeper_sandbox_plan` (abstract `type t`) + `Keeper_container_name.t`; Phase 3d renames the file/module to `Keeper_sandbox_oneshot_plan` with no shape change. Shorthands used in prose and diagrams: `Container_name.t` stands for `Keeper_container_name.t`; `Oneshot_plan` stands for `Keeper_sandbox_oneshot_plan`; `Session_plan` stands for `Keeper_sandbox_session_plan` (introduced in §3.1.2). The shorthands carry no implementation alias — Phase 3e ships the fully-qualified module names.
+**Naming convention used in §3.1–§3.3 below**: snippets describe the *current* shape. The v1 type was `Keeper_sandbox_plan` (abstract `type t`) + `Keeper_container_name.t`; Phase 3d (#14934, merged 2026-05-12) renamed the file/module to `Keeper_sandbox_oneshot_plan` with no shape change. Shorthands used in prose and diagrams: `Container_name.t` stands for `Keeper_container_name.t`; `Oneshot_plan` stands for `Keeper_sandbox_oneshot_plan`; `Session_plan` stands for `Keeper_sandbox_session_plan` (introduced in §3.1.2, ships in Phase 3e). The shorthands carry no implementation alias — the fully-qualified module names are authoritative.
 
-#### 3.1.1 `Keeper_sandbox_oneshot_plan` (already shipped as `Keeper_sandbox_plan` — v1 type; Phase 3d is a pure rename, no shape change)
+#### 3.1.1 `Keeper_sandbox_oneshot_plan` (shipped — renamed from `Keeper_sandbox_plan` in Phase 3d #14934, no shape change)
 
-v1 ships this in `lib/keeper/keeper_sandbox_plan.{ml,mli}` with an *abstract* `type t` + accessors (not a `private` record), and `Keeper_container_name.t` (not `Container_name.t`). Phase 3d is a **pure file/caller rename** — the public surface stays identical:
+Shipped in `lib/keeper/keeper_sandbox_oneshot_plan.{ml,mli}` (renamed from `keeper_sandbox_plan.{ml,mli}` in Phase 3d #14934) with an *abstract* `type t` + accessors (not a `private` record), and `Keeper_container_name.t` (not `Container_name.t`). Phase 3d was a **pure file/caller rename** — the public surface is identical to the v1 type:
 
 ```ocaml
-(* Post-Phase-3d: lib/keeper/keeper_sandbox_oneshot_plan.mli
-   v1 shipped form today: lib/keeper/keeper_sandbox_plan.mli *)
+(* lib/keeper/keeper_sandbox_oneshot_plan.mli — shipped (#14934) *)
 
 type plan_error = (* closed sum — see v1 .mli for current arms *)
 
@@ -188,7 +188,7 @@ The conceptual fields (`container_name`, `image`, `command`, `timeout_budget_sec
 
 Covers `keeper_sandbox_runtime` site 838 (anonymous one-shot, even though the Plan does emit a derived `--name`; docker accepts the name for `--rm` invocations).
 
-Phase 3b-iv.2.* shipped this; v2 rename happens in Phase 3d (see §4).
+Phase 3b-iv.2.* shipped this; Phase 3d (#14934) renamed the module — no shape change.
 
 #### 3.1.2 `Keeper_sandbox_session_plan` (new — Phase 4 dependency)
 
@@ -382,7 +382,7 @@ val cleanup_tick
 
 | Existing | Role in this RFC |
 |----------|------------------|
-| `Keeper_sandbox.t` (closed record, `of_meta`) | Input to `Sandbox_plan.of_request` — preserved unchanged |
+| `Keeper_sandbox.t` (closed record, `of_meta`) | Phase 4 callers extract `meta_name` / `cmd` from their `Keeper_sandbox.t` and pass them to `Oneshot_plan.of_request` (which takes `~meta_name:string`, not `Keeper_sandbox.t`, to stay free of cross-module deps — see `keeper_sandbox_oneshot_plan.mli`). The record is preserved unchanged. |
 | `Keeper_sandbox_factory.resolve` (memoized per `(in_playground, network_mode)`) | Calls into `Sandbox_executor` in Phase 4 — wiring change only |
 | `Keeper_sandbox_containment.check_{read,write}_target` (RFC-0006 Phase B-1) | Continues as host-side defense-in-depth — unchanged |
 | `Keeper_lifecycle_hooks` (RFC-0036, on main) | Sibling cleanup path — keeper-level Tombstone_reaped event; NOT the consumer of `cleanup_outcome` (corrected iter 35). Container-level cleanup runs in `Sandbox_cleanup.cleanup_tick` independently. |
@@ -399,13 +399,13 @@ v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0
 | **1** | `keeper_sandbox_plan.mli` + `docker_client.mli` (signatures, empty stubs) | none | LOW | ✅ Phase 3a #14741 |
 | **2** | Plan + Real Docker_client implementations, existing callers unchanged | Phase 1 | LOW | ✅ Phase 3b-iv.2.0–2.4 #14838/14844/14854/14862/14871 |
 | **3** | `Sandbox_executor` (oneshot) + `Docker_client.Mock` + parser unit tests | Phase 2 | MEDIUM | ✅ Phase 3c.0/3c.1 #14821/14827, Phase 3b-iv.2.5 #14889 |
-| **3d** *(v2)* | Rename `keeper_sandbox_plan` → `keeper_sandbox_oneshot_plan` (file + caller renames; no behavior change). Necessary to free the unqualified name for the Session/Oneshot split. | Phase 3 | LOW — pure rename refactor | ⏳ pending |
+| **3d** *(v2)* | Rename `keeper_sandbox_plan` → `keeper_sandbox_oneshot_plan` (file + caller renames; no behavior change). Frees the unqualified name for the Session/Oneshot split. | Phase 3 | LOW — pure rename refactor | ✅ #14934 (2026-05-12) — 14 files, +51/-51, no shape change |
 | **3e** *(v2)* | `Docker_client.S` extensions: (a) `run_detached`, (b) `exec` adds `?user` + `?workdir`, (c) `info_security_options`, (d) `image_inspect`. Plus `Keeper_sandbox_session_plan` + `Sandbox_session_executor.Make` + unit tests. Mock + Real both updated. | Phase 3d | MEDIUM — new edge primitives + signature extension | ⏳ pending |
 | **3c.2** | Cleanup quarantine state machine (`Quarantine.t` + alert path; no `Keeper_lifecycle_hooks` adapter — sibling path per §2 / §3.4) | Phase 3 | MEDIUM | ⏳ pending — Phase 3 is the sole prerequisite (no cross-RFC dependency) |
 | **4.1** *(v2)* | Caller cutover `keeper_turn_sandbox_runtime` → `Sandbox_session_executor` (one PR) | Phase 3e | MEDIUM | ⏳ pending |
 | **4.2** *(v2)* | Caller cutover `keeper_shell_docker:820` → `Sandbox_executor` w/ named one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |
 | **4.3** *(v2)* | Caller cutover `keeper_sandbox_runtime:838` → `Sandbox_executor` w/ anonymous one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |
-| **5** | Catch-all removal: delete the 8 `try ... with _ -> None` sites in `keeper_sandbox_control.ml`; compiler enforces caller migration | Phase 4.1+4.2+4.3 all merged | LOW — compiler is the migration check | ⏳ pending |
+| **5** | Catch-all removal: remove or justify the 1 residual `try ... with _ -> None` site in `keeper_sandbox_control.ml` (`git_string_opt:306-308`; the 7 git/probe siblings were resolved by the exec_gate migration #14329/#14359 — see §1 F6). Where Phase 4 cutover touches the area, the compiler enforces the migration. | Phase 4.1+4.2+4.3 all merged | LOW — mostly resolved; 1 residual site | ⏳ pending |
 
 **v2 ordering rationale**:
 - Phase 4.2 + 4.3 (one-shot caller cutovers) do NOT depend on Phase 3e — they can land in parallel with Session API work. Originally v1 implied a serial order; v2 makes the parallelism explicit.
@@ -418,13 +418,13 @@ Phases are independently mergeable and revertible. Phase 5 closes the loop by ma
 ## 5. Validation
 
 - **Phase 1**: alcotest for type-only signatures (parse + emit JSON for `Sandbox_plan.t` and `Ps_record.t`).
-- **Phase 2**: `Sandbox_plan.of_request` property test (qcheck) — `∀ (turn_id, attempt, meta), of_request → Ok` (no panic, no Random). Same input twice → identical plan.
+- **Phase 2**: `Keeper_sandbox_oneshot_plan.of_request` property test (qcheck) — `∀ (turn_id, attempt, meta_name, cmd), of_request → Ok` (no panic, no Random). Same input twice → identical plan.
 - **Phase 3**: `Docker_client.Mock` driven tests:
   - Daemon-unreachable response → `Daemon_unreachable` propagates to caller, no silent fail.
   - `ps_query` malformed JSON → `Probe_format_drift` typed error.
   - Cleanup loop with 3-fail-then-success → `Clean_quarantine` → `Clean_partial` → `Clean_success` sequence.
 - **Phase 4**: integration test running a real `Sandbox_executor.run` end-to-end against a local docker daemon, side-by-side with the legacy path for one keeper persona.
-- **Phase 5**: `rg "try.*with _ -> None" lib/keeper/keeper_sandbox_control.ml` returns zero hits.
+- **Phase 5**: zero `try ... with _ -> None` (or wildcard-only `with`) catch-alls in `keeper_sandbox_control.ml`, except those that re-raise `Eio.Cancel.Cancelled` first. A single-line `rg "try.*with _ -> None"` misses the multi-line `git_string_opt` form (`| Eio.Cancel.Cancelled _ as e -> raise e | _ -> None`), so the check is an AST / multi-line scan rather than a one-line grep.
 
 ## 6. Risks
 

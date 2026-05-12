@@ -14,8 +14,11 @@ module type S = sig
     -> (Docker_response.exec_result, sandbox_error) result
 
   val exec
-    :  container:Keeper_container_name.t
+    :  ?user:int * int
+    -> ?workdir:string
+    -> container:Keeper_container_name.t
     -> cmd:string
+    -> unit
     -> (Docker_response.exec_result, sandbox_error) result
 
   val ps_query

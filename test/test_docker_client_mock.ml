@@ -114,7 +114,7 @@ let test_exec_matches_injection () =
   let c = sample_container () in
   Docker_client_mock.inject_exec ~container:c ~cmd:"ls -la"
     (Ok sample_exec_result);
-  match Docker_client_mock.exec ~container:c ~cmd:"ls -la" with
+  match Docker_client_mock.exec ~container:c ~cmd:"ls -la" () with
   | Ok er -> check string "stdout" "ok" er.stdout
   | Error _ -> fail "expected Ok"
 
@@ -123,9 +123,22 @@ let test_exec_unmatched_cmd () =
   let c = sample_container () in
   Docker_client_mock.inject_exec ~container:c ~cmd:"ls -la"
     (Ok sample_exec_result);
-  match Docker_client_mock.exec ~container:c ~cmd:"different cmd" with
+  match Docker_client_mock.exec ~container:c ~cmd:"different cmd" () with
   | Error Docker_client.Daemon_unreachable -> ()
   | _ -> fail "expected miss on different cmd"
+
+(* Phase 3e (b) — [exec] now takes [?user] / [?workdir]; the mock
+   ignores them for matching (key stays [(container, cmd)]). Passing
+   them must not change which injection is consumed. *)
+let test_exec_ignores_user_workdir_for_matching () =
+  setup ();
+  let c = sample_container () in
+  Docker_client_mock.inject_exec ~container:c ~cmd:"id" (Ok sample_exec_result);
+  match
+    Docker_client_mock.exec ~user:(1000, 1000) ~workdir:"/work" ~container:c ~cmd:"id" ()
+  with
+  | Ok er -> check string "stdout" "ok" er.stdout
+  | Error _ -> fail "expected Ok — user/workdir must not affect matching"
 
 (* ── ps_query ────────────────────────────────────────────────── *)
 
@@ -195,6 +208,8 @@ let () =
         [
           test_case "matches" `Quick test_exec_matches_injection;
           test_case "wrong cmd → miss" `Quick test_exec_unmatched_cmd;
+          test_case "user/workdir ignored for matching" `Quick
+            test_exec_ignores_user_workdir_for_matching;
         ] );
       ( "ps_query",
         [

@@ -73,7 +73,7 @@ let test_run_returns_typed_result () =
    (no daemon / CLI missing). Other [sandbox_error] variants are
    semantically out of scope for [exec] and must NOT surface. *)
 let test_exec_returns_typed_result () =
-  match Docker_client_real.exec ~container:(sample_container ()) ~cmd:"echo hi" with
+  match Docker_client_real.exec ~container:(sample_container ()) ~cmd:"echo hi" () with
   | Ok _ -> () (* daemon present *)
   | Error Docker_client.Daemon_unreachable -> () (* daemon / CLI missing *)
   | Error Docker_client.Cleanup_failed
@@ -82,6 +82,70 @@ let test_exec_returns_typed_result () =
   | Error Docker_client.Exec_timeout
   | Error Docker_client.Probe_format_drift ->
     fail "exec should only surface Ok exec_result or Error Daemon_unreachable"
+;;
+
+(* Phase 3e (b) — [exec_argv] is the pure argv builder behind [exec].
+   Deterministic (no daemon needed): assert option presence and the
+   [--user]-before-[-w] ordering. The container suffix is PID+nonce so
+   its string form is unique per invocation; the test only checks it
+   lands in the right position. *)
+let test_exec_argv_plain () =
+  let c = sample_container () in
+  check
+    (list string)
+    "no user, no workdir"
+    [ "docker"; "exec"; Keeper_container_name.to_string c; "sh"; "-lc"; "ls -la" ]
+    (Docker_client_real.exec_argv ~container:c ~cmd:"ls -la" ())
+;;
+
+let test_exec_argv_user_only () =
+  let c = sample_container () in
+  check
+    (list string)
+    "user only → --user uid:gid"
+    [ "docker"
+    ; "exec"
+    ; "--user"
+    ; "1000:1000"
+    ; Keeper_container_name.to_string c
+    ; "sh"
+    ; "-lc"
+    ; "id"
+    ]
+    (Docker_client_real.exec_argv ~user:(1000, 1000) ~container:c ~cmd:"id" ())
+;;
+
+let test_exec_argv_workdir_only () =
+  let c = sample_container () in
+  check
+    (list string)
+    "workdir only → -w <dir>"
+    [ "docker"; "exec"; "-w"; "/work"; Keeper_container_name.to_string c; "sh"; "-lc"; "pwd" ]
+    (Docker_client_real.exec_argv ~workdir:"/work" ~container:c ~cmd:"pwd" ())
+;;
+
+let test_exec_argv_user_and_workdir () =
+  let c = sample_container () in
+  check
+    (list string)
+    "user + workdir → --user before -w"
+    [ "docker"
+    ; "exec"
+    ; "--user"
+    ; "1000:1000"
+    ; "-w"
+    ; "/work"
+    ; Keeper_container_name.to_string c
+    ; "sh"
+    ; "-lc"
+    ; "whoami"
+    ]
+    (Docker_client_real.exec_argv
+       ~user:(1000, 1000)
+       ~workdir:"/work"
+       ~container:c
+       ~cmd:"whoami"
+       ())
 ;;
 
 let test_ps_query_placeholder () =
@@ -139,6 +203,15 @@ let () =
             "rm → typed error (Daemon_unreachable | Cleanup_failed)"
             `Quick
             test_rm_returns_typed_error
+        ] )
+    ; ( "exec_argv (pure, Phase 3e b)"
+      , [ test_case "plain (no user/workdir)" `Quick test_exec_argv_plain
+        ; test_case "user only" `Quick test_exec_argv_user_only
+        ; test_case "workdir only" `Quick test_exec_argv_workdir_only
+        ; test_case
+            "user + workdir (--user before -w)"
+            `Quick
+            test_exec_argv_user_and_workdir
         ] )
     ; ( "Functor composition"
       , [ test_case

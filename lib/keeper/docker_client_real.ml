@@ -52,10 +52,30 @@ let map_status_to_exec_result
 
 let ps_query ~labels:_ = placeholder
 
-let exec ~container ~cmd =
-  let argv =
-    [ "docker"; "exec"; Keeper_container_name.to_string container; "sh"; "-lc"; cmd ]
+(* Pure: builds the [docker exec] argv. Separated from {!exec} so the
+   argv shape is unit-testable without a daemon (RFC-0070's pure/edge
+   split — deterministic argv construction here, daemon spawn in
+   {!exec}). [--user] precedes [-w] to match the order
+   [keeper_turn_sandbox_runtime] currently emits. *)
+let exec_argv ?user ?workdir ~container ~cmd () =
+  let user_args =
+    match user with
+    | None -> []
+    | Some (uid, gid) -> [ "--user"; Printf.sprintf "%d:%d" uid gid ]
   in
+  let workdir_args =
+    match workdir with
+    | None -> []
+    | Some w -> [ "-w"; w ]
+  in
+  [ "docker"; "exec" ]
+  @ user_args
+  @ workdir_args
+  @ [ Keeper_container_name.to_string container; "sh"; "-lc"; cmd ]
+;;
+
+let exec ?user ?workdir ~container ~cmd () =
+  let argv = exec_argv ?user ?workdir ~container ~cmd () in
   (* [Process_eio.run_argv_with_status_split] returns
      [(status, stdout, stderr)]; on spawn failure the status is
      synthesized as [WEXITED 127] (see 3b-iv.2.1 commit on rm). *)

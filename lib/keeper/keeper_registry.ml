@@ -1537,105 +1537,32 @@ let validate_cascade_transition ~from ~to_ =
          (cascade_transition_spec_violation_to_tag v))
 ;;
 
+(* RFC-0072 Phase 4b: collapse the 49-pair turn_phase matrix onto
+   [resolve_turn_phase_transition] (PR #14912).  The transition matrix is
+   now a single source of truth in the resolver — this validator becomes a
+   thin compatibility shim wrapped in [Keeper_fsm_guard_runtime.wrap_unit]
+   so the existing metric / observability instrumentation
+   ([metric_fsm_guard_violation], etc.) keeps firing on forbidden pairs.
+   The typed [turn_phase_transition_spec_violation] tag is folded into the
+   [Invalid_argument] message for diagnostic clarity.  Test surface
+   ([test_keeper_sub_fsm_guards.ml] uses [capture_invalid_arg] +
+   [packed_turn_phase_label] needles) is preserved by keeping the function
+   name and label keywords in the message. *)
 let validate_turn_phase_transition ~from ~to_ =
-  let (_ : packed_turn_phase) = from in
-  let (_ : packed_turn_phase) = to_ in
   Keeper_fsm_guard_runtime.wrap_unit
     ~action:"turn_phase_transition"
     ~stage:"guard"
     (fun () ->
-       let valid =
-         match from, to_ with
-         (* from Turn_idle *)
-         | Packed Turn_idle, Packed Turn_idle -> true
-         | Packed Turn_idle, Packed Turn_prompting ->
-           true (* via turn init / prepare_turn_retry_after_compaction *)
-         | Packed Turn_idle, Packed Turn_routing -> false
-         | Packed Turn_idle, Packed Turn_executing -> false
-         | Packed Turn_idle, Packed Turn_compacting -> false
-         | Packed Turn_idle, Packed Turn_finalizing -> false
-         | Packed Turn_idle, Packed Turn_exhausted -> false
-         (* from Turn_prompting *)
-         | Packed Turn_prompting, Packed Turn_idle ->
-           false (* new turn init is reset, not transition *)
-         | Packed Turn_prompting, Packed Turn_prompting -> true
-         | Packed Turn_prompting, Packed Turn_routing ->
-           true (* via set_turn_cascade_state: Cascade_selecting *)
-         | Packed Turn_prompting, Packed Turn_executing -> true (* via set_turn_phase *)
-         | Packed Turn_prompting, Packed Turn_compacting -> false
-         | Packed Turn_prompting, Packed Turn_finalizing ->
-           true (* via mark_turn_gate_rejected_by_name *)
-         | Packed Turn_prompting, Packed Turn_exhausted -> true
-         (* via set_turn_cascade_state: Cascade_exhausted before any cascade attempt (e.g. all candidates filtered out at admission) *)
-         (* from Turn_routing *)
-         | Packed Turn_routing, Packed Turn_idle ->
-           false (* new turn init is reset, not transition *)
-         | Packed Turn_routing, Packed Turn_prompting ->
-           true (* via set_turn_cascade_state: Cascade_idle on retry *)
-         | Packed Turn_routing, Packed Turn_routing -> true
-         | Packed Turn_routing, Packed Turn_executing ->
-           true (* via set_turn_cascade_state: Cascade_trying *)
-         | Packed Turn_routing, Packed Turn_compacting -> false
-         | Packed Turn_routing, Packed Turn_finalizing -> false
-         | Packed Turn_routing, Packed Turn_exhausted -> true
-         (* via set_turn_cascade_state: Cascade_exhausted during model selection (cascade-fallback exhausted before Cascade_trying) *)
-         (* from Turn_executing *)
-         | Packed Turn_executing, Packed Turn_idle ->
-           false (* new turn init is reset, not transition *)
-         | Packed Turn_executing, Packed Turn_prompting ->
-           true (* via set_turn_cascade_state: Cascade_idle retry *)
-         | Packed Turn_executing, Packed Turn_routing ->
-           true (* via set_turn_cascade_state: Cascade_selecting retry *)
-         | Packed Turn_executing, Packed Turn_executing -> true
-         | Packed Turn_executing, Packed Turn_compacting ->
-           true (* via set_turn_phase: retry plan *)
-         | Packed Turn_executing, Packed Turn_finalizing ->
-           true (* via set_turn_cascade_state: Cascade_done *)
-         | Packed Turn_executing, Packed Turn_exhausted ->
-           true (* via set_turn_cascade_state: Cascade_exhausted *)
-         (* from Turn_compacting *)
-         | Packed Turn_compacting, Packed Turn_idle ->
-           false (* new turn init is reset, not transition *)
-         | Packed Turn_compacting, Packed Turn_prompting ->
-           true (* via prepare_turn_retry_after_compaction *)
-         | Packed Turn_compacting, Packed Turn_routing -> false
-         | Packed Turn_compacting, Packed Turn_executing -> false
-         | Packed Turn_compacting, Packed Turn_compacting -> true
-         | Packed Turn_compacting, Packed Turn_finalizing ->
-           true (* via set_turn_phase: compaction failure *)
-         | Packed Turn_compacting, Packed Turn_exhausted ->
-           true (* via set_turn_cascade_state: Cascade_exhausted on terminal error *)
-         (* from Turn_finalizing *)
-         | Packed Turn_finalizing, Packed Turn_idle -> false (* new turn is reset *)
-         | Packed Turn_finalizing, Packed Turn_prompting ->
-           true (* via set_turn_cascade_state: degraded retry Cascade_idle *)
-         | Packed Turn_finalizing, Packed Turn_routing ->
-           true (* via set_turn_cascade_state: degraded retry Cascade_selecting *)
-         | Packed Turn_finalizing, Packed Turn_executing ->
-           true (* via set_turn_cascade_state: degraded retry Cascade_trying *)
-         | Packed Turn_finalizing, Packed Turn_compacting -> false
-         | Packed Turn_finalizing, Packed Turn_finalizing -> true
-         | Packed Turn_finalizing, Packed Turn_exhausted ->
-           true (* via set_turn_cascade_state: Cascade_exhausted on terminal error *)
-         (* from Turn_exhausted *)
-         | Packed Turn_exhausted, Packed Turn_idle -> false (* new turn is reset *)
-         | Packed Turn_exhausted, Packed Turn_prompting ->
-           true (* via prepare_turn_retry_after_compaction: Cascade_idle *)
-         | Packed Turn_exhausted, Packed Turn_routing ->
-           true (* via set_turn_cascade_state: retry Cascade_selecting *)
-         | Packed Turn_exhausted, Packed Turn_executing ->
-           true (* via set_turn_cascade_state: retry Cascade_trying *)
-         | Packed Turn_exhausted, Packed Turn_compacting -> false
-         | Packed Turn_exhausted, Packed Turn_finalizing -> false
-         | Packed Turn_exhausted, Packed Turn_exhausted -> true
-       in
-       if not valid
-       then
-         invalid_arg
-           (Printf.sprintf
-              "validate_turn_phase_transition: invalid transition %s -> %s"
-              (packed_turn_phase_label from)
-              (packed_turn_phase_label to_)))
+      match resolve_turn_phase_transition ~from ~target:to_ with
+      | Resolved_turn_idempotent | Resolved_turn_transition _ -> ()
+      | Resolved_turn_violation v ->
+        invalid_arg
+          (Printf.sprintf
+             "validate_turn_phase_transition: invalid transition %s -> %s \
+              (spec_violation=%s)"
+             (packed_turn_phase_label from)
+             (packed_turn_phase_label to_)
+             (turn_phase_transition_spec_violation_to_tag v)))
 ;;
 
 let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_active) =
@@ -1705,13 +1632,29 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
 ;;
 
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
+  (* RFC-0072 Phase 4b: dispatch via [resolve_turn_phase_transition] (PR #14912)
+     instead of the [validate_turn_phase_transition] call.  Mirrors the
+     cascade-side wiring (PR #14908) — idempotent self-loops no longer flip
+     [changed] or emit a broadcast, and forbidden transitions carry the
+     typed [turn_phase_transition_spec_violation] tag in the
+     [Invalid_argument] message. *)
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs ->
-      validate_turn_phase_transition ~from:obs.turn_phase ~to_:turn_phase;
-      changed := true;
-      { obs with turn_phase }));
+      match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
+      | Resolved_turn_idempotent -> obs
+      | Resolved_turn_transition _ ->
+        changed := true;
+        { obs with turn_phase }
+      | Resolved_turn_violation v ->
+        invalid_arg
+          (Printf.sprintf
+             "set_turn_phase: forbidden transition %s -> %s \
+              (spec_violation=%s)"
+             (packed_turn_phase_label obs.turn_phase)
+             (packed_turn_phase_label turn_phase)
+             (turn_phase_transition_spec_violation_to_tag v))));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 

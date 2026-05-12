@@ -22,15 +22,15 @@
 \*
 \*   spec variable      | OCaml type variant                  | source
 \*   -------------------+-------------------------------------+--------
-\*   turn_phase         | type turn_phase = Turn_idle |       | lib/keeper/keeper_registry.ml:63-68
+\*   turn_phase         | type turn_phase = Turn_idle |       | lib/keeper/keeper_registry.ml — type turn_phase
 \*                      |   Turn_prompting | Turn_executing | |
 \*                      |   Turn_compacting | Turn_finalizing |
-\*   decision_stage     | type decision_stage =               | lib/keeper/keeper_registry.ml:70-74
+\*   decision_stage     | type decision_stage =               | lib/keeper/keeper_registry.ml — type decision_stage
 \*                      |   Decision_undecided |              |
 \*                      |   Decision_guard_ok |               |
 \*                      |   Decision_gate_rejected |          |
 \*                      |   Decision_tool_policy_selected     |
-\*   cascade_state      | type cascade_state = Cascade_idle | | lib/keeper/keeper_registry.ml:76-81
+\*   cascade_state      | type cascade_state = Cascade_idle | | lib/keeper/keeper_registry.ml — type cascade_state
 \*                      |   Cascade_selecting | Cascade_trying|
 \*                      |   Cascade_done | Cascade_exhausted  |
 \*   turn_live          | current_turn_observation = Some _   | record field on keeper_runtime

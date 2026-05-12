@@ -223,12 +223,31 @@ let to_yojson err =
 
 let code = function
   | Auth (Auth_error.Forbidden _) -> 403
-  | Auth _ -> 401
+  | Auth (Auth_error.Unauthorized _
+         | Auth_error.TokenExpired _
+         | Auth_error.InvalidToken _) -> 401
   | Task (Task_error.NotFound _) -> 404
   | Agent (Agent_error.NotFound _) -> 404
-  | Task _ | Agent _ | Portal _ | System _ -> 400
+  | Task (Task_error.AlreadyClaimed _
+         | Task_error.NotClaimed _
+         | Task_error.InvalidState _
+         | Task_error.InvalidId _) -> 400
+  | Agent (Agent_error.NotJoined _
+          | Agent_error.AlreadyJoined _
+          | Agent_error.InvalidName _) -> 400
+  | Portal (Portal_error.NotOpen _
+           | Portal_error.AlreadyOpen _
+           | Portal_error.Closed _) -> 400
+  | System (System_error.NotInitialized
+           | System_error.AlreadyInitialized
+           | System_error.InvalidJson _
+           | System_error.IoError _
+           | System_error.InvalidFilePath _
+           | System_error.StorageError _
+           | System_error.ValidationError _
+           | System_error.WorktreeNotFound _) -> 400
   | RateLimitExceeded _ -> 429
-  | _ -> 500
+  | CacheError _ -> 500
 
 (* [is_retryable] mirrors [Error.is_retryable] in OAS so MASC-side
    callers don't have to fall back on an OAS-only predicate when

@@ -8,7 +8,7 @@ author: yousleepwhen
 supersedes: []
 superseded_by: null
 related: ["0002", "0003", "0006", "0036"]
-implementation_prs: ["14714", "14741", "14821", "14827", "14889", "14899", "14934"]
+implementation_prs: ["14714", "14741", "14821", "14827", "14889", "14899", "14934", "14940", "14947", "14951", "14956"]
 ---
 
 # RFC-0070: Keeper Sandbox Runtime — Pure/Edge Separation
@@ -26,6 +26,7 @@ implementation_prs: ["14714", "14741", "14821", "14827", "14889", "14899", "1493
     - **`Keeper_lifecycle_hooks` is a *sibling* cleanup path, not a consumer of `cleanup_outcome`**. Earlier v2 draft assumed an adapter `cleanup_outcome → unit` would be registered against the lifecycle hook; the actual `Keeper_lifecycle_hooks.event` is `Phase_transition | Tombstone_reaped` (keeper-lifecycle events), distinct from the container-level cleanup outcomes from `Sandbox_cleanup.cleanup_tick`. Both flow in parallel. §3.4 + §3.5 corrected.
   - No v1 code is invalidated — all merged work remains, only the `keeper_sandbox_plan` filename is renamed in Phase 3d. Phase 3e absorbs *all four* v2-discovered gaps in a single batch so Phase 4 cutover (4.1/4.2/4.3) can land without further `Docker_client.S` extension PRs. Phase 3c.2 is now independently schedulable.
 - **v2.1 (2026-05-12, doc sync)**: Phase 3d shipped (#14934 — pure rename, 14 files, +51/-51); §4 status flipped to ✅; §3.1.1 / naming-convention / §3.5 / §5 Phase 2 references updated from `Keeper_sandbox_plan` to the shipped `Keeper_sandbox_oneshot_plan`. §1 F6 corrected: iter-1-2 counted 8 `try ... with _ -> None` sites in `keeper_sandbox_control.ml`; the `Masc_exec.Exec_gate` migration (#14329/#14359) since resolved ~7, leaving 1 `Cancelled`-guarded residual at `git_string_opt:306-308` — §4 Phase 5 re-scoped accordingly; §5 Phase 5 validation note clarified (single-line `rg` misses the multi-line catch-all). §3.5 `Keeper_sandbox.t`/`of_request` relationship corrected (`of_request` takes `~meta_name:string`, not `Keeper_sandbox.t`). Sources: PR #14899 review comments (iter 39/40 audits), PR #14934.
+- **v2.2 (2026-05-12, Phase 3e sync + §3.1.2 design resolution)**: Phase 3e fragmented — the three self-contained edge primitives shipped one PR each rather than the single batch v2 envisaged (safe: none exposes a new layer): (b) `Docker_client.S.exec` gains `?user`/`?workdir` + pure `Docker_client_real.exec_argv` (#14947); (c) `info_security_options` + pure `parse_security_options` (#14951); (d) `image_present` — **narrowed** from the earlier `image_inspect → image_info` sketch (§3.0.3 corrected: nothing consumes inspect data, so it's a presence check `(unit, _) result`; no new `Image_not_found` variant) (#14956). §3.2.1 surface block updated to the current shape; §4 Phase 3e split into 3e-b/c/d (✅) + 3e-aef (⏳ — `run_detached` (a) + `Keeper_sandbox_session_plan` (e) + `Sandbox_session_executor.Make` (f), one PR). §3.1.2's 4 paper-design questions (iter 37 audit) resolved: `labels` is a derived field (`of_request` composes it from `~meta_name`/`~base_path`/`~container_kind`/`~network_mode`/`~turn_id`); `mounts` is unified (`of_request` composes workspace + identity mounts from `~host_root`/`~uid`/`~gid`); `env_passthrough` renamed `env_overrides` (4 hardcoded defaults + `?extra_env`, not a host-env passthrough); `ulimits : ulimit list` with `type ulimit = {name;soft;hard}` (default `nofile=N:N` unchanged). `of_request` takes `~meta_name:string` not `~meta:keeper_meta` (cross-module-dep-free, matching `Oneshot_plan`). §3.2.3 `Sandbox_session_executor.exec` now threads the plan's `user`/`workdir` through `D.exec`. Sources: PRs #14947/#14951/#14956, PR #14899 iter 37 comment.
 
 - **Depends on**: RFC-0036 Phase A (cleanup hook plumbing — foundation)
 - **Extends**: RFC-0006 Phase B-2 (Read/Edit/Grep docker exec routing)
@@ -98,23 +99,37 @@ Phase 4.1 prep audit (2026-05-12, iter 34 of cron `7493fe21`) enumerated **all 1
 These are **read-only queries against docker state, not container lifecycle**. v1 `Docker_client.S` has no surface for them. Phase 3e introduces:
 
 ```ocaml
-(* lib/keeper/docker_client.mli — added in Phase 3e *)
+(* lib/keeper/docker_client.mli — Phase 3e additions
+   (c) info_security_options — SHIPPED #14951
+   (d) image_present         — SHIPPED #14956 *)
 module type S = sig
   (* ...existing v1 surface... *)
 
   val info_security_options : unit -> (string list, sandbox_error) result
   (** [docker info --format '{{json .SecurityOptions}}'] parsed into the
-      enabled security profiles ("name=seccomp", "name=no-new-privileges",
-      etc.). Empty list when docker daemon reports no profiles. Used at
-      server boot to gate [run]'s [--security-opt] choices. *)
+      lowercased security-profile list ("name=seccomp",
+      "name=no-new-privileges", etc.). [Ok []] when the daemon reports
+      none ([null] / [] payload). Daemon-level failure ⇒
+      [Daemon_unreachable]; a payload that is neither a JSON array nor
+      [null] (a docker output-format change) ⇒ [Probe_format_drift] —
+      not a silent [Ok []]. Used at server boot to gate [run]'s
+      [--security-opt] choices. *)
 
-  val image_inspect : image:string -> (image_info, sandbox_error) result
-  (** [docker image inspect <image>]. Returns minimal typed info
-      (digest, created_at, size_bytes); full inspect output is
-      out of scope. The "no such image locally" case maps to
-      [Image_not_found] — a dedicated variant added in Phase 3e
-      alongside this primitive. (Reusing [Image_pull_failed] would be
-      misleading: [image_inspect] never attempts a pull.) *)
+  val image_present : image:string -> (unit, sandbox_error) result
+  (** [docker image inspect <image>] — [Ok ()] when the image exists
+      locally. A non-zero exit conflates "not found locally" (exit 1 —
+      common; the caller may then pull) with "daemon down" (also exit
+      1) ⇒ [Image_pull_failed] (the single "image unavailable for this
+      run" signal). A synthesized [WEXITED 127] (docker CLI missing) is
+      the one disambiguated case ⇒ [Daemon_unreachable].
+
+      Scope narrowing vs the earlier v2 sketch: this is a *presence
+      check* ([(unit, _) result]), not the [image_inspect → image_info]
+      proposed before — nothing consumes inspect data (the keeper only
+      checks presence), so an [image_info] type would be over-specced.
+      No new [Image_not_found] variant either; a future RFC may split
+      [Image_pull_failed] into [Image_not_found | Daemon_unreachable]
+      if a preflight ever needs to distinguish. *)
 end
 ```
 
@@ -190,42 +205,60 @@ Covers `keeper_sandbox_runtime` site 838 (anonymous one-shot, even though the Pl
 
 Phase 3b-iv.2.* shipped this; Phase 3d (#14934) renamed the module — no shape change.
 
-#### 3.1.2 `Keeper_sandbox_session_plan` (new — Phase 4 dependency)
+#### 3.1.2 `Keeper_sandbox_session_plan` (new — Phase 3e (e); Phase 4.1 dependency)
+
+The 16 fields below were measured byte-for-byte against `keeper_turn_sandbox_runtime.start_container`'s argv (iter 37 audit). 13 fields mapped cleanly; 4 needed a design decision (labels, mounts, env, ulimits). Those are resolved here so Phase 3e (e) implements against a concrete spec:
+
+| Field | Issue (iter 37) | Resolution |
+|-------|-----------------|------------|
+| `labels` | argv builds them via a 5-arg composer (`docker_label_args ~base_path ~keeper_name ~container_kind ~network_label ~turn_id`), not a flat list the caller supplies | `labels : (string * string) list` stays as a **derived output** field. `of_request` takes the *inputs* (`~meta_name` for the keeper key, `~base_path`, `~container_kind`, `~network_mode` — which drives both `network_args` and `network_label`, `~turn_id`/`~attempt`) and composes the label list internally, mirroring `docker_label_args`. |
+| `mounts` | argv has a workspace volume (`-v host_root:container_root:rw`) *and* identity mounts (uid/gid passwd entries from `docker_user_identity_mount_args`) — 2-3 mounts total | `mounts : mount list` stays **unified**. `of_request` takes `~host_root ~uid ~gid` and composes the workspace mount + the identity mounts internally; the caller never hand-builds the list. |
+| `env_passthrough` | misleading name — `docker_user_env_args` emits a *hardcoded* 4-var set (`HOME=/tmp`, `USER=keeper`, `LOGNAME=keeper`, `SHELL=/bin/sh`), not a passthrough of the caller's environment | renamed to `env_overrides`. `of_request` composes the 4 hardcoded defaults internally and takes `?extra_env:(string * string) list` (default `[]`) for *opt-in* caller additions. The container never inherits the host environment implicitly. |
+| `ulimits` | `(string * int) list` cannot express docker's `name=soft:hard` syntax — `docker_nofile_args` currently emits `nofile=N:N` (soft = hard), but that is an accident of the current default, not a constraint | `ulimits : ulimit list` where `type ulimit = { name : string; soft : int; hard : int }`. The shipped default stays `[ { name = "nofile"; soft = N; hard = N } ]` (backwards-compatible argv); future ulimits with `soft ≠ hard` are now representable. |
 
 ```ocaml
-(* lib/keeper/keeper_sandbox_session_plan.mli — NEW in v2 *)
-type t = private {
-  container_name      : Container_name.t;
-  image               : string;
-  mounts              : mount list;         (* host:container:mode *)
-  env_passthrough     : (string * string) list;
-  network_mode        : network;            (* None | Bridge | Custom of string *)
-  user                : (int * int) option; (* uid:gid *)
-  ulimits             : (string * int) list;
-  read_only_rootfs    : bool;
-  tmpfs               : string option;
-  workdir             : string option;
-  startup_command     : string;             (* default: idle-sleep loop *)
-  labels              : (string * string) list;
-  cap_drop_all        : bool;
-  no_new_privileges   : bool;
-  seccomp_profile     : seccomp_choice;     (* Default | Unconfined | File of path *)
-  pids_limit          : int;
-  memory_limit        : string;             (* "2g", etc. *)
-}
+(* lib/keeper/keeper_sandbox_session_plan.mli — Phase 3e (e) *)
+type ulimit = { name : string; soft : int; hard : int }
+
+type t  (** abstract — like Oneshot_plan; accessors below, no exposed record *)
+
+(* Accessors (the 16 conceptual fields):
+     container_name : t -> Container_name.t
+     image          : t -> string
+     mounts         : t -> mount list          (* workspace + identity, composed *)
+     env_overrides  : t -> (string * string) list   (* 4 defaults + ?extra_env *)
+     network_mode   : t -> network             (* None | Bridge | Custom of string *)
+     user           : t -> (int * int) option  (* uid:gid → --user *)
+     ulimits        : t -> ulimit list
+     read_only_rootfs : t -> bool
+     tmpfs          : t -> string option
+     workdir        : t -> string option
+     startup_command : t -> string             (* default: trap-and-sleep idle loop *)
+     labels         : t -> (string * string) list   (* composed, not caller-supplied *)
+     cap_drop_all   : t -> bool
+     no_new_privileges : t -> bool
+     seccomp_profile : t -> seccomp_choice      (* Default | Unconfined | File of path *)
+     pids_limit     : t -> int
+     memory_limit   : t -> string               (* "2g", etc. *) *)
 
 val of_request
-  : turn_id:int
-    -> attempt:int
-    -> meta:Keeper_types.keeper_meta
-    -> host_root:string
-    -> uid:int
-    -> gid:int
-    -> network_mode:network
-    -> (t, plan_error) result
+  :  turn_id:int
+  -> attempt:int
+  -> meta_name:string            (* keeper key for label derivation; NOT keeper_meta — stays cross-module-dep-free, like Oneshot_plan *)
+  -> base_path:string            (* for label derivation *)
+  -> container_kind:string       (* "turn" | "shell" | ... — for the container_kind label *)
+  -> network_mode:network        (* drives network_args AND network_label *)
+  -> host_root:string            (* workspace mount source *)
+  -> uid:int
+  -> gid:int
+  -> ?extra_env:(string * string) list   (* opt-in caller env additions; default [] *)
+  -> unit                        (* trailing unit so OCaml can erase ?extra_env *)
+  -> (t, plan_error) result
 ```
 
-Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup_command default is the existing trap-and-sleep idiom. The `Plan` represents *one container's lifetime*, NOT a single command — commands are issued via `Session.exec` (§3.2.2) against an already-started container.
+Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup_command default is the existing trap-and-sleep idiom. The `Plan` represents *one container's lifetime*, NOT a single command — commands are issued via `Session.exec` (§3.2.3) against an already-started container.
+
+Not yet covered by the 16 fields: the `docker_command_argv ()` prefix (the docker binary path + any global flags). `Sandbox_session_executor` (§3.2.3) prepends it when building the `docker run -d` argv — the Plan models the *container spec*, the executor owns the *invocation envelope*.
 
 #### 3.1.3 Named one-shot — represented via Oneshot_plan extension
 
@@ -239,22 +272,33 @@ Covers `keeper_turn_sandbox_runtime:184` (persistent session). The startup_comma
 
 ### 3.2 Edge layer (Docker_client + executors)
 
-#### 3.2.1 `Docker_client.S` (v1 surface — kept as base capability layer; post-Phase-3d naming)
+#### 3.2.1 `Docker_client.S` (capability layer — current shape after Phase 3e b/c/d)
 
 ```ocaml
-(* lib/keeper/docker_client.mli — v1 surface, post-Phase-3d names
-   (v1 shipped today: takes Keeper_sandbox_plan.t / Keeper_container_name.t) *)
+(* lib/keeper/docker_client.mli — current (Phase 3d names + Phase 3e b/c/d) *)
 module type S = sig
-  val run         : Keeper_sandbox_oneshot_plan.t -> (Docker_response.exec_result, sandbox_error) result
-  val exec        : container:Container_name.t -> cmd:string -> (Docker_response.exec_result, sandbox_error) result
-  val ps_query    : labels:(string * string) list -> (Docker_response.ps_record list, sandbox_error) result
-  val rm          : Container_name.t -> (unit, sandbox_error) result
+  val run  : Keeper_sandbox_oneshot_plan.t -> (Docker_response.exec_result, sandbox_error) result
+
+  (* (b) #14947 — ?user (uid,gid)→--user, ?workdir→-w; trailing unit so
+     OCaml can erase the leading optionals (all params labeled). *)
+  val exec
+    :  ?user:int * int -> ?workdir:string
+    -> container:Container_name.t -> cmd:string -> unit
+    -> (Docker_response.exec_result, sandbox_error) result
+
+  val ps_query : labels:(string * string) list -> (Docker_response.ps_record list, sandbox_error) result
+  val rm       : Container_name.t -> (unit, sandbox_error) result
+
+  (* (c) #14951 *)
+  val info_security_options : unit -> (string list, sandbox_error) result
+  (* (d) #14956 — presence check; see §3.0.3 for the image_inspect→image_present narrowing *)
+  val image_present : image:string -> (unit, sandbox_error) result
 end
 ```
 
 `run` is *one-shot only*. Session lifecycle is built on top via `start` + multiple `exec` + `rm` rather than extending `S` with a `start_session` primitive (kept compositional — `Sandbox_session_executor` orchestrates).
 
-The signature block above is the **pre-Phase-3e shipped shape**. Phase 3e (see §4) extends `S` with: `run_detached`, optional `?user` + `?workdir` on `exec`, `info_security_options`, and `image_inspect`. Until Phase 3e lands, `S` is exactly the four functions shown.
+Phase 3e items (b)/(c)/(d) above have landed. The one remaining `Docker_client.S` extension is **(a) `run_detached : Keeper_sandbox_session_plan.t -> (Container_name.t, sandbox_error) result`** (see §3.2.3) — added together with `Keeper_sandbox_session_plan` (e) and `Sandbox_session_executor.Make` (f) so the session caller cutover (Phase 4.1) needs no further `S` extension PR.
 
 #### 3.2.2 `Sandbox_executor` (v1 — for `Oneshot_plan`)
 
@@ -291,7 +335,10 @@ module Make (D : Docker_client.S) : sig
     :  t
     -> cmd:string
     -> (Docker_response.exec_result, sandbox_error) result
-  (** Delegates to [D.exec] against the held container_name. *)
+  (** Delegates to [D.exec] against the held container_name, threading
+      the session plan's [user] / [workdir] through as [D.exec]'s
+      [?user] / [?workdir] (Phase 3e (b), #14947) so a session command
+      runs as the same uid:gid / cwd the container was created with. *)
 
   val cleanup
     :  t
@@ -305,7 +352,7 @@ end
 
 Determinism contract: same `Keeper_sandbox_session_plan.t` ⇒ identical inner one-shot plan ⇒ identical `Container_name.t`. The session handle `t` carries non-determinism (start time, state) but is opaque to callers.
 
-`-d` (detach) is the only `S.run` invocation that produces a session-shaped output (PID instead of exec_result). v2 §3.2.3 keeps `D.run` returning `exec_result` and treats the `-d` *flag* as a session-runtime concern: `Sandbox_session_executor.start` composes the `-d` argv internally by *not* using `D.run` directly. The cleanest factoring is: extend `Docker_client.S` with `run_detached : Keeper_sandbox_session_plan.t -> (Container_name.t, sandbox_error) result` (separate from `run`). Phase 3e (v2 amend) implements both `Mock` and `Real` variants of `run_detached`.
+`-d` (detach) is the only `S.run` invocation that produces a session-shaped output (a container id, not an `exec_result`). `D.run` keeps returning `exec_result` and the `-d` *flag* is a session-runtime concern: `Sandbox_session_executor.start` does not use `D.run` directly — instead `Docker_client.S` gets a separate `run_detached : Keeper_sandbox_session_plan.t -> (Container_name.t, sandbox_error) result` (Phase 3e item (a), still ⏳ pending — to land with (e) `Keeper_sandbox_session_plan` and (f) `Sandbox_session_executor.Make` in one PR so Phase 4.1 needs no further `S` extension). The executor prepends `docker_command_argv ()` (the binary path + global flags) when assembling the `docker run -d ...` argv; the Plan models the container spec, the executor owns the invocation envelope (§3.1.2 tail note). Both `Mock` and `Real` variants of `run_detached` ship together.
 
 #### 3.2.4 Composition diagram
 
@@ -400,16 +447,19 @@ v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0
 | **2** | Plan + Real Docker_client implementations, existing callers unchanged | Phase 1 | LOW | ✅ Phase 3b-iv.2.0–2.4 #14838/14844/14854/14862/14871 |
 | **3** | `Sandbox_executor` (oneshot) + `Docker_client.Mock` + parser unit tests | Phase 2 | MEDIUM | ✅ Phase 3c.0/3c.1 #14821/14827, Phase 3b-iv.2.5 #14889 |
 | **3d** *(v2)* | Rename `keeper_sandbox_plan` → `keeper_sandbox_oneshot_plan` (file + caller renames; no behavior change). Frees the unqualified name for the Session/Oneshot split. | Phase 3 | LOW — pure rename refactor | ✅ #14934 (2026-05-12) — 14 files, +51/-51, no shape change |
-| **3e** *(v2)* | `Docker_client.S` extensions: (a) `run_detached`, (b) `exec` adds `?user` + `?workdir`, (c) `info_security_options`, (d) `image_inspect`. Plus `Keeper_sandbox_session_plan` + `Sandbox_session_executor.Make` + unit tests. Mock + Real both updated. | Phase 3d | MEDIUM — new edge primitives + signature extension | ⏳ pending |
+| **3e-b** *(v2)* | `Docker_client.S.exec` gains `?user` + `?workdir` (+ pure `Docker_client_real.exec_argv`) | Phase 3d | LOW | ✅ #14947 (2026-05-12) |
+| **3e-c** *(v2)* | `Docker_client.S.info_security_options` (+ pure `Docker_client_real.parse_security_options`) | Phase 3d | LOW | ✅ #14951 (2026-05-12) |
+| **3e-d** *(v2)* | `Docker_client.S.image_present` (presence check — narrowed from the earlier `image_inspect → image_info` sketch, §3.0.3) | Phase 3d | LOW | ✅ #14956 (2026-05-12) |
+| **3e-aef** *(v2)* | `Docker_client.S.run_detached` (a) + `Keeper_sandbox_session_plan` (e) + `Sandbox_session_executor.Make` (f), Mock + Real, unit tests. §3.1.2's 4 design questions resolved (labels derived / mounts unified / `env_overrides` + `?extra_env` / `ulimit` record). One PR so Phase 4.1 needs no further `S` extension. | Phase 3e-b/c/d | MEDIUM — new edge primitive + new plan type + new executor functor | ⏳ pending |
 | **3c.2** | Cleanup quarantine state machine (`Quarantine.t` + alert path; no `Keeper_lifecycle_hooks` adapter — sibling path per §2 / §3.4) | Phase 3 | MEDIUM | ⏳ pending — Phase 3 is the sole prerequisite (no cross-RFC dependency) |
-| **4.1** *(v2)* | Caller cutover `keeper_turn_sandbox_runtime` → `Sandbox_session_executor` (one PR) | Phase 3e | MEDIUM | ⏳ pending |
+| **4.1** *(v2)* | Caller cutover `keeper_turn_sandbox_runtime` → `Sandbox_session_executor` (one PR) | Phase 3e-aef | MEDIUM | ⏳ pending |
 | **4.2** *(v2)* | Caller cutover `keeper_shell_docker:820` → `Sandbox_executor` w/ named one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |
 | **4.3** *(v2)* | Caller cutover `keeper_sandbox_runtime:838` → `Sandbox_executor` w/ anonymous one-shot semantics (one PR) | Phase 3 | MEDIUM | ⏳ pending |
 | **5** | Catch-all removal: remove or justify the 1 residual `try ... with _ -> None` site in `keeper_sandbox_control.ml` (`git_string_opt:306-308`; the 7 git/probe siblings were resolved by the exec_gate migration #14329/#14359 — see §1 F6). Where Phase 4 cutover touches the area, the compiler enforces the migration. | Phase 4.1+4.2+4.3 all merged | LOW — mostly resolved; 1 residual site | ⏳ pending |
 
 **v2 ordering rationale**:
 - Phase 4.2 + 4.3 (one-shot caller cutovers) do NOT depend on Phase 3e — they can land in parallel with Session API work. Originally v1 implied a serial order; v2 makes the parallelism explicit.
-- Phase 4.1 (session caller) is the only branch that *requires* Phase 3e.
+- Phase 4.1 (session caller) is the only branch that *requires* Phase 3e (specifically 3e-aef — `run_detached` + `Keeper_sandbox_session_plan` + `Sandbox_session_executor`; the 3e-b/c/d edge primitives shipped separately #14947/#14951/#14956 and were safe to fragment since none exposed a new layer).
 - Phase 5 still gates on all 3 cutovers (compiler exhaustiveness across the subsystem).
 - Phase 3c.2 (cleanup quarantine) is independent of Phase 4 — it owns container-level cleanup orthogonal to `Keeper_lifecycle_hooks` keeper-level cleanup. As of iter 35 (2026-05-12) the RFC-0036 cleanup_hook is on main and the dependency is satisfied; Phase 3c.2 is now schedulable independently of Phase 4.
 

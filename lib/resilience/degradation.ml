@@ -87,18 +87,20 @@ let apply_level_to_strategy : type a.
   | L1 -> Recovery.default_strategy mode
   | L2 -> (
       (* Reduced capability: a Retry that would otherwise drive
-         the same failing path becomes a Fallback substitution.
+         the same failing path becomes a Fallback substitution; the
+         other three strategies pass through unchanged.
 
-         [@warning "-4"]: [Recovery.strategy] is a GADT whose
-         constructors carry phantom polymorphic-variant indices; the
-         [other -> other] passthrough cannot be enumerated as explicit
-         arms without losing GADT index unification. RFC-0071 §3.4.1
-         GADT-existential exemption. *)
-      (match Recovery.default_strategy mode with
-       | Recovery.Retry _ ->
-           Recovery.Fallback
-             { fallback_value = "<degraded:L2>"; degrade_confidence_by = 0.3 }
-       | other -> other) [@warning "-4"])
+         [Recovery.default_strategy] is typed at the closed union
+         [ `Retry | `Fallback | `Handoff | `Abort ] strategy, so the
+         non-Retry constructors are enumerated explicitly here (the
+         convention in keeper_bridge.ml:strategy_class_of_strategy) —
+         no [@warning "-4"] suppression, the warning-4 ratchet stays on. *)
+      match Recovery.default_strategy mode with
+      | Recovery.Retry _ ->
+          Recovery.Fallback
+            { fallback_value = "<degraded:L2>"; degrade_confidence_by = 0.3 }
+      | (Recovery.Fallback _ | Recovery.Handoff _ | Recovery.Abort _) as other ->
+          other)
   | L3 ->
       Recovery.Handoff
         {

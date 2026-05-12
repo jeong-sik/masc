@@ -4,6 +4,8 @@
  (name masc_ide)
  (public_name masc_mcp.ide)
  (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ (flags (:standard -w +4))
  (modules
   ide_annotation_types
   ide_annotations

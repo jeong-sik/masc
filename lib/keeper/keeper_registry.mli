@@ -228,11 +228,20 @@ val decision_stage_active_to_packed
   -> packed_decision_stage
 
 (** Diagnostic label using the constructor name (e.g.
-    ["Decision_guard_ok"]).  Used by [validate_decision_transition] for
-    [Invalid_argument] messages. *)
+    ["Decision_guard_ok"]).  Used by [validate_cascade_transition] /
+    [validate_turn_phase_transition] for [Invalid_argument] messages. *)
 val packed_decision_stage_label : packed_decision_stage -> string
 
-val validate_decision_transition : from:decision_stage -> to_:decision_stage -> unit
+(** Living-matrix documentation of the decision-stage transition relation.
+    Forbidden [<active>_to_undecided] pairs are unrepresentable through the
+    [decision_stage_active] target type, so this validator no longer raises;
+    it exists as a compile-time fixture that enumerates every admitted pair.
+    Adding a new variant to either side will trigger Warning 8 here, forcing
+    the maintainer to classify the new pair. *)
+val validate_decision_transition
+  :  from:decision_stage
+  -> to_:decision_stage_active
+  -> unit
 
 module Decision_transition : sig
   type ('from, 'to_) t =

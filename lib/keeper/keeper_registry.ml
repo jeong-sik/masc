@@ -395,11 +395,21 @@ module Decision_transition = struct
   ;;
 end
 
-let validate_decision_transition ~from ~to_ =
+(* Living-matrix documentation of the decision-stage transition relation.
+   Forbidden [<active>_to_undecided] pairs are unrepresentable through the
+   [decision_stage_active] target type (PR #14887 made [set_turn_decision_stage]
+   reject them at compile time; this validator now mirrors that invariant
+   at the test surface).  Each branch is the explicit type-level acknowledgement
+   that the pair is admitted by the spec — adding a new [decision_stage] or
+   [decision_stage_active] constructor will fail Warning 8 here, forcing
+   the maintainer to decide whether the new variant participates. *)
+let validate_decision_transition
+    ~(from : decision_stage)
+    ~(to_ : decision_stage_active)
+  =
   let from_packed = stage_to_witness from in
-  let to_packed = stage_to_witness to_ in
+  let to_packed = decision_stage_active_to_packed to_ in
   match from_packed, to_packed with
-  | Packed Decision_undecided, Packed Decision_undecided -> ()
   | Packed Decision_undecided, Packed Decision_guard_ok -> ()
   | Packed Decision_undecided, Packed Decision_gate_rejected -> ()
   | Packed Decision_undecided, Packed Decision_tool_policy_selected -> ()
@@ -412,14 +422,6 @@ let validate_decision_transition ~from ~to_ =
   | Packed Decision_tool_policy_selected, Packed Decision_tool_policy_selected -> ()
   | Packed Decision_tool_policy_selected, Packed Decision_guard_ok -> ()
   | Packed Decision_tool_policy_selected, Packed Decision_gate_rejected -> ()
-  | Packed Decision_guard_ok, Packed Decision_undecided
-  | Packed Decision_gate_rejected, Packed Decision_undecided
-  | Packed Decision_tool_policy_selected, Packed Decision_undecided ->
-    invalid_arg
-      (Printf.sprintf
-         "validate_decision_transition: invalid transition %s -> %s"
-         (packed_decision_stage_label from_packed)
-         (packed_decision_stage_label to_packed))
 ;;
 
 type cascade_state =

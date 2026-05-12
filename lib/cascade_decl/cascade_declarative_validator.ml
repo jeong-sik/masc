@@ -285,22 +285,31 @@ let validate_strategy_fields (cfg : cascade_config) : validation_error list =
               (show_cascade_strategy t.strategy))
        in
        let cycle_errs =
-         match t.cycle_policy, t.strategy with
-         | Some _, Circuit_breaker_cycling -> []
-         | Some _, _ -> mismatch_errors "cycle-policy" "circuit_breaker_cycling"
-         | None, _ -> []
+         match t.cycle_policy with
+         | None -> []
+         | Some _ ->
+           (match t.strategy with
+            | Circuit_breaker_cycling -> []
+            | Failover | Capacity_aware | Weighted_random | Priority_tier | Sticky
+            | Round_robin -> mismatch_errors "cycle-policy" "circuit_breaker_cycling")
        in
        let sticky_errs =
-         match t.sticky_ttl_ms, t.strategy with
-         | Some _, Sticky -> []
-         | Some _, _ -> mismatch_errors "sticky-ttl-ms" "sticky"
-         | None, _ -> []
+         match t.sticky_ttl_ms with
+         | None -> []
+         | Some _ ->
+           (match t.strategy with
+            | Sticky -> []
+            | Failover | Capacity_aware | Weighted_random | Circuit_breaker_cycling
+            | Priority_tier | Round_robin -> mismatch_errors "sticky-ttl-ms" "sticky")
        in
        let scoring_errs =
-         match t.scoring_params, t.strategy with
-         | Some _, Weighted_random -> []
-         | Some _, _ -> mismatch_errors "scoring-params" "weighted_random"
-         | None, _ -> []
+         match t.scoring_params with
+         | None -> []
+         | Some _ ->
+           (match t.strategy with
+            | Weighted_random -> []
+            | Failover | Capacity_aware | Circuit_breaker_cycling | Priority_tier
+            | Sticky | Round_robin -> mismatch_errors "scoring-params" "weighted_random")
        in
        cycle_errs @ sticky_errs @ scoring_errs)
     cfg.tiers

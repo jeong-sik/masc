@@ -1,0 +1,24 @@
+# OCaml "Spec navigation" line-ref baseline — transient grandfather list
+# for scripts/audit-ocaml-spec-nav-line-refs.sh.  Each non-comment line:
+# "<repo-relative-path>:<symbol>".
+#
+# These are the `[symbol] (~line N)` citations in lib/keeper/*.{ml,mli}
+# header docstrings whose line numbers had already drifted when the
+# validator was introduced (iter 72 R-1.a).  Survey + drift figures:
+# docs/tla-audit/ocaml-docstring-lineref-drift-class-2026-05-12.md (iter 71).
+#
+# Drain a line when its fix-PR merges (same convention as the
+# ocaml-phase-count baseline):
+#   - keeper_approval_queue.ml:*           — drained by N-2.e (#14943)
+#   - keeper_execution_receipt.ml:append   — drained by N-2.g (TBD)
+#   - keeper_memory_policy.ml:*            — drained by N-2.f (TBD)
+# Once all are drained the validator enforces zero OCaml-docstring
+# line-ref drift; the `--baseline` flag stays for future transients.
+
+lib/keeper/keeper_approval_queue.ml:submit_and_await
+lib/keeper/keeper_approval_queue.ml:submit_pending
+lib/keeper/keeper_approval_queue.ml:expire_stale
+lib/keeper/keeper_execution_receipt.ml:append
+lib/keeper/keeper_memory_policy.ml:short_term_horizon
+lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind_opt
+lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind

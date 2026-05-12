@@ -26,27 +26,34 @@
 \*               DwellNonNegative MUST be violated.  If it passes, the
 \*               invariant is too weak and must be strengthened.
 \*
-\* Implementation mapping (spec ↔ runtime, see #8642 family):
+\* Implementation mapping (spec ↔ runtime, see #8642 family).
+\* Cited by symbol/file anchor, not line number — line numbers drift
+\* (iter 64 N-2.a convention; the producer ref below had drifted +1658 and
+\* the dashboard consumer had been split across three new files by iter 77,
+\* see docs/tla-audit/kdm-r4-dwell-monotone-phaseset-and-mapping-drift-2026-05-12.md):
 \*
 \*   Producer side — phase transition stamps entry timestamp:
-\*     lib/keeper/keeper_registry.ml:919
-\*       Keeper_transition_audit.record_transition {
-\*         ...; wall_clock_at_decision = now; ... }
-\*     The OCaml side stamps [wall_clock_at_decision = now] at the moment
-\*     of each transition apply, satisfying the spec discipline that
-\*     entry_at := now (not future, not stale).  [now] comes from
-\*     [Time_compat.now ()] which is wall-clock monotonic in practice
-\*     (system clock).
+\*     lib/keeper/keeper_registry.ml — the
+\*       Keeper_transition_audit.record_transition { ...;
+\*         wall_clock_at_decision = now; ... }
+\*     record built at each transition apply.  The OCaml side stamps
+\*     [wall_clock_at_decision = now] at the moment of the apply,
+\*     satisfying the spec discipline that entry_at := now (not future,
+\*     not stale).  [now] comes from [Time_compat.now ()] which is
+\*     wall-clock monotonic in practice (system clock).
 \*
 \*   Consumer side — dashboard derives dwell from the latest transition:
-\*     dashboard/src/components/keeper-detail.ts:1167-1168
-\*       const [phaseEnteredAtSec, ...] = useState<number | null>(null)
-\*       // sourced from fetchKeeperTransitions(...).transitions[0]
-\*       //   .wall_clock_at_decision
+\*     dashboard/src/components/keeper-detail-page.ts holds
+\*       const [phaseEnteredAtSec, setPhaseEnteredAtSec] = useState<number | null>(null)
+\*     sourced from fetchKeeperTransitions(...) (dashboard/src/api/keeper.ts) —
+\*     the latest KeeperTransition's wall_clock_at_decision — and threads it
+\*     through keeper-detail-shell.ts into KeeperPhaseAndStage.
 \*
 \*   Defense in depth — frontend clamp guards a misbehaving clock:
-\*     dashboard/src/components/keeper-phase-indicator.ts:113
-\*       formatDuration(Math.max(0, Date.now()/1000 - phaseEnteredAtSec))
+\*     dashboard/src/components/keeper-phase-indicator.ts computes
+\*       const dwellText = (typeof phaseEnteredAtSec === 'number' && Number.isFinite(phaseEnteredAtSec))
+\*         ? formatDuration(Math.max(0, Date.now() / 1000 - phaseEnteredAtSec))
+\*         : null
 \*     Even if [phaseEnteredAtSec > Date.now()/1000] (clock skew between
 \*     server and client, or a missed clamp on the producer), the dwell
 \*     UI never shows a negative duration.  This is independent of the
@@ -69,7 +76,12 @@ VARIABLES
 vars == << phase, entered_at, now >>
 
 \* RFC-0002 13-phase FSM (keeper_state_machine.ml: type phase, 13 constructors;
-\* Zombie added iter 4 #14707, terminal-terminal — see PhaseSet below).
+\* Zombie added iter 4 #14707, terminal-terminal).  The set below is the full
+\* 13 — iter 77 R-4 added the missing "Zombie" (the comment had claimed it was
+\* present but the literal set listed only 12); the dwell invariant is phase-
+\* agnostic so adding it is structurally transparent, but keeping the set in
+\* sync with [type phase] prevents the spec from silently under-modelling a
+\* terminal phase.
 PhaseSet == {
     "Offline",
     "Running",
@@ -82,7 +94,8 @@ PhaseSet == {
     "Stopped",
     "Crashed",
     "Restarting",
-    "Dead"
+    "Dead",
+    "Zombie"
 }
 
 TypeOK ==

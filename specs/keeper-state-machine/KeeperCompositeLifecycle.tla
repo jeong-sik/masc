@@ -22,11 +22,12 @@
 \*
 \* Design intent
 \*   1. shared_measurement is the coordination hub (Context_measured event,
-\*      Keeper_state_machine.mli:139-144 [type event / Context_measured],
-\*      auto_rules_summary). Verified 2026-04-20: lines 131-136 reference
-\*      a NoDrainTransition / GhostDispatch *.mli docstring callout, not
-\*      the event type. Anchor here is the [type event] declaration that
-\*      starts at line 139 with [Context_measured] at line 144.
+\*      Keeper_state_machine.mli — [Context_measured] constructor of
+\*      [type event], auto_rules_summary). Cite by symbol — iter 64 N-2.a
+\*      (line numbers drift on every edit; [type event] / [Context_measured]
+\*      are stable identifiers, the OCaml compiler keeps them honest).
+\*      Adjacent NoDrainTransition / GhostDispatch *.mli docstring callouts
+\*      are anchored similarly by name, not by line number.
 \*   2. The 13-state parent phase from RFC-0002 is projected to the
 \*      7-element set
 \*      {Running, Failing, Overflowed, Compacting, HandingOff, Draining,

@@ -150,6 +150,10 @@ Implemented in this branch:
   of collapsing to `internal_error`. The runtime manifest also records a
   `pre_dispatch_blocked` row with the configured labels, required tool names,
   provider rejections, and MASC/OAS cascade-boundary fields.
+- `masc-mcp doctor config` now checks the live validated
+  `keeper_turn`/`tool_required` routes for forced required-tool capability.
+  Routes that resolve only to providers without inline `tool_choice` or runtime
+  MCP are reported as `error` before a keeper turn reaches runtime failure.
 - OAS pin is bumped to `v0.193.8` /
   `7885ff316cfd64a3ed7d7550186b64141214b801`, with `dune-project`,
   `masc_mcp.opam`, docs, and `scripts/oas-api-surface.json` regenerated from
@@ -168,6 +172,15 @@ Latest verification:
 - `./_build/default/test/test_keeper_terminal_reason.exe` (34 tests)
 - `./_build/default/test/test_keeper_sdk_error_typed_bridge.exe` (2 tests)
 - `./_build/default/test/test_keeper_unified.exe` (359 tests)
+- `scripts/dune-local.sh build test/test_config_doctor.exe bin/main_eio.exe`
+- `./_build/default/test/test_config_doctor.exe` (9 tests)
+- `scripts/dune-local.sh build test/test_cascade_catalog_runtime.exe`
+- `./_build/default/test/test_cascade_catalog_runtime.exe` (23 tests)
+- `opam exec -- ocamlformat --check lib/config_doctor.ml lib/config_doctor.mli test/test_config_doctor.ml`
+- `MASC_CONFIG_DIR=/Users/dancer/me/.masc/config MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false ./_build/default/bin/main_eio.exe doctor config --base-path /Users/dancer/me --json`
+  (expected exit 1: live `keeper_turn` and `tool_required` both target
+  `tier-group.coding_plan`, whose only candidate is `glm:glm-5.1`; doctor now
+  reports `no_tool_capable_provider` risk before runtime dispatch)
 - `scripts/keeper-runtime-truth-gate.sh --self-test` (success fixture plus
   timeout/error fixture)
 - `env RUN_ID=keeper-runtime-truth-live-20260512-codex5 RUN_DIR=/private/tmp/keeper-runtime-truth-live-20260512-codex5 KEEP_ARTIFACTS=1 TARGET_PHASES=bootstrap,liveness MAX_TURNS=1 TURN_TIMEOUT_SEC=120 HEALTH_TIMEOUT_SEC=45 HEARTBEAT_WAIT_SEC=20 PRESSURE_BYTES=1000 MASC_CONFIG_DIR=/Users/dancer/me/.masc/config scripts/harness_keeper_continuity_validation.sh`
@@ -222,6 +235,11 @@ Latest-main live evidence:
   `require_tool_support = true`, and `original_candidate_count = 1`.
 - The codex9 receipt and `turn_finished` rows both carry
   `terminal_reason_code = no_tool_capable_provider`.
+- Current live `masc-mcp doctor config --base-path /Users/dancer/me --json`
+  also reports `status = error` for the same route capability gap:
+  both `keeper_turn` and `tool_required` target `tier-group.coding_plan`, and
+  its only candidate `glm:glm-5.1` is rejected for forced required-tool use
+  with `runtime_mcp_caps_missing`.
 
 ## Goal
 
@@ -306,7 +324,8 @@ Fragile parts:
   complete a keeper turn under production-like config. The latest failure is
   now earlier and more precise: `no_tool_capable_provider` because the active
   route has `glm:glm-5.1` while the turn requires materialized keeper tool
-  support.
+  support. `masc-mcp doctor config` now catches this same route-capability
+  gap without starting a keeper turn.
 - Live config drift is real: the current config root exposes `coding_plan` as
   the only active catalog profile, while older scripts assumed `big_three`.
   The harness now avoids that hardcoded default, but operator docs/config still
@@ -334,9 +353,11 @@ Highest-risk gaps:
    `/private/tmp/keeper-runtime-truth-live-20260513-codex9` fails with
    `no_tool_capable_provider`. The manifest now records
    `pre_dispatch_blocked`, and the receipt/turn terminal reason stays
-   structured. Still open: configure `tier-group.coding_plan` with a concrete
-   tool-capable provider for keeper-internal tools, or route these keeper turns
-   to a provider lane that can materialize runtime MCP/inline tools.
+   structured. `masc-mcp doctor config` now fails with the same diagnosis
+   before dispatch. Still open: configure `tier-group.coding_plan` with a
+   concrete tool-capable provider for keeper-internal tools, or route these
+   keeper turns to a provider lane that can materialize runtime MCP/inline
+   tools.
 2. Real-turn evidence gap: closed for focused fixture coverage. The successful
    provider/OAS fixture proves the manifest, checkpoint, state sidecar,
    tool-call log, and receipt chain together. Remaining risk is live

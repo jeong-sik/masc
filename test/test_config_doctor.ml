@@ -99,6 +99,16 @@ let contains_substring ~needle s =
 let list_contains_substring ~needle values =
   List.exists (contains_substring ~needle) values
 
+let with_config_dir config_root f =
+  let reset () =
+    Config_dir_resolver.reset ();
+    Cascade_catalog_runtime.reset_cache_for_tests ()
+  in
+  with_env "MASC_BASE_PATH" "" @@ fun () ->
+  with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
+  reset ();
+  Fun.protect ~finally:reset f
+
 let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
   Config_doctor.
     {
@@ -303,7 +313,49 @@ let test_analyze_live_surfaces_sandbox_preflight_failure () =
   with_temp_dir "config-doctor-sandbox-preflight" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
   let config_root = Filename.concat base_path ".masc/config" in
-  initialize_config_root config_root;
+  initialize_config_root
+    ~cascade_toml:{|[providers.codex_cli]
+display-name = "OpenAI Codex CLI"
+protocol = "openai-http"
+command = "codex"
+is-non-interactive = true
+
+[providers.codex_cli.credentials]
+type = "env"
+key = "OPENAI_API_KEY"
+
+[models.codex-spark]
+api-name = "gpt-5.3-codex-spark"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.codex-spark.capabilities]
+supports-native-streaming = true
+supports-response-format-json = true
+
+[codex_cli.codex-spark]
+is-default = true
+max-concurrent = 1
+
+[tier.coding_plan_primary]
+members = ["codex_cli.codex-spark"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["coding_plan_primary"]
+strategy = "priority_tier"
+fallback = false
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+
+[routes.tool_required]
+target = "tier-group.coding_plan"
+|}
+    config_root;
+  with_config_dir config_root @@ fun () ->
+  with_env "OPENAI_API_KEY" "test" @@ fun () ->
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
@@ -340,6 +392,83 @@ let test_analyze_live_surfaces_sandbox_preflight_failure () =
          | `Null -> false
          | _ -> true)
 
+let test_analyze_live_errors_on_tool_required_route_without_forced_tool_provider () =
+  with_temp_dir "config-doctor-tool-route" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  initialize_config_root
+    ~cascade_toml:{|[providers.glm-coding]
+display-name = "Zhipu GLM Coding"
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+[models.glm-5-1]
+api-name = "glm-5.1"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-5-1.capabilities]
+supports-native-streaming = true
+supports-response-format-json = true
+
+[glm-coding.glm-5-1]
+is-default = true
+max-concurrent = 1
+
+[tier.coding_plan_primary]
+members = ["glm-coding.glm-5-1"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["coding_plan_primary"]
+strategy = "priority_tier"
+fallback = false
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+
+[routes.tool_required]
+target = "tier-group.coding_plan"
+|}
+    config_root;
+  with_config_dir config_root @@ fun () ->
+  with_env "ZAI_API_KEY" "test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs ~proc_mgr ->
+  let report =
+    Config_doctor.analyze_live
+      ~sw ~net ~clock ~fs ~proc_mgr
+      ~base_path_input:base_path
+      ~default_base_path:base_path
+      ()
+  in
+  check string "status escalates to error" "error" (status report.status);
+  check bool "keeper route tool warning present" true
+    (list_contains_substring
+       ~needle:"Tool-required cascade route keeper_turn targets tier-group.coding_plan"
+       report.warnings);
+  check bool "tool route tool warning present" true
+    (list_contains_substring
+       ~needle:"Tool-required cascade route tool_required targets tier-group.coding_plan"
+       report.warnings);
+  check bool "forced tool-use reason present" true
+    (list_contains_substring
+       ~needle:"needs inline tool_choice or runtime MCP"
+       report.warnings);
+  check bool "no-tool terminal hint present" true
+    (list_contains_substring
+       ~needle:"no_tool_capable_provider"
+       report.warnings);
+  check bool "next action points at tool-capable route" true
+    (list_contains_substring
+       ~needle:"Route keeper_turn/tool_required to at least one provider"
+       report.next_actions)
+
 let () =
   run "config_doctor"
     [
@@ -360,5 +489,8 @@ let () =
              `Quick test_legacy_json_without_toml_next_action_migrates;
            test_case "analyze_live surfaces sandbox preflight failure"
              `Quick test_analyze_live_surfaces_sandbox_preflight_failure;
+           test_case "analyze_live errors on tool-required route without forced tool provider"
+             `Quick
+             test_analyze_live_errors_on_tool_required_route_without_forced_tool_provider;
          ]);
     ]

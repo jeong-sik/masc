@@ -87,12 +87,18 @@ let apply_level_to_strategy : type a.
   | L1 -> Recovery.default_strategy mode
   | L2 -> (
       (* Reduced capability: a Retry that would otherwise drive
-         the same failing path becomes a Fallback substitution. *)
-      match Recovery.default_strategy mode with
-      | Recovery.Retry _ ->
-          Recovery.Fallback
-            { fallback_value = "<degraded:L2>"; degrade_confidence_by = 0.3 }
-      | other -> other)
+         the same failing path becomes a Fallback substitution.
+
+         [@warning "-4"]: [Recovery.strategy] is a GADT whose
+         constructors carry phantom polymorphic-variant indices; the
+         [other -> other] passthrough cannot be enumerated as explicit
+         arms without losing GADT index unification. RFC-0071 §3.4.1
+         GADT-existential exemption. *)
+      (match Recovery.default_strategy mode with
+       | Recovery.Retry _ ->
+           Recovery.Fallback
+             { fallback_value = "<degraded:L2>"; degrade_confidence_by = 0.3 }
+       | other -> other) [@warning "-4"])
   | L3 ->
       Recovery.Handoff
         {
@@ -121,7 +127,11 @@ let of_recovery_recommended_level (mode : Recovery.error_mode) :
   match mode with
   | Recovery.DegradationRequired { recommended_level; _ } ->
       of_int_opt recommended_level
-  | _ -> None
+  | Recovery.TransientError _
+  | Recovery.PermanentError _
+  | Recovery.ResourceExhausted _
+  | Recovery.AmbiguityError _
+  | Recovery.ConsensusError _ -> None
 
 let strategy_for_error_mode (mode : Recovery.error_mode) :
     [ `Retry | `Fallback | `Handoff | `Abort ] Recovery.strategy =

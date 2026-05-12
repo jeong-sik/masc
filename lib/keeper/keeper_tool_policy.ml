@@ -492,6 +492,9 @@ let keeper_default_model_tools (_meta : keeper_meta) : Masc_domain.tool_schema l
   keeper_model_tools @ keeper_voice_tool_schemas
   @ [ keeper_tool_search_schema ]
 
+let is_autoresearch_tool_name name =
+  String.starts_with ~prefix:"masc_autoresearch_" name
+
 (** Recovery minimum tools: non-removable shards only.
     Used in Failing phase to guarantee minimum tool availability.
     Phase B2: TLA+ RecoveryFloorMaintained invariant.
@@ -585,13 +588,20 @@ let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
   in
   dedupe_tool_names (from_preset @ from_core)
 
+let autoresearch_keeper_tools_for_meta (meta : keeper_meta) =
+  let scoped = keeper_preset_universe_tool_names meta in
+  if List.exists is_autoresearch_tool_name scoped then
+    Tool_shard.autoresearch_keeper_tools
+  else
+    []
+
 (** Shared schema assembly: computes the full tool schema list once.
     [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas
     depending on the caller's access scope. *)
 let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schema list)
     (meta : keeper_meta) : Masc_domain.tool_schema list =
   (keeper_default_model_tools meta)
-  @ Tool_shard.autoresearch_keeper_tools
+  @ autoresearch_keeper_tools_for_meta meta
   @ Tool_shard.coding_tools
   @ Tool_code_write.schemas
   @ Tool_shard.keeper_preflight_tools

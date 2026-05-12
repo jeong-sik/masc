@@ -18,6 +18,7 @@ let make_test_meta
       ?(name = "test-keeper")
       ?(preset = Keeper_types.Full)
       ?(also_allow = [])
+      ?(allowed_paths = [ "*" ])
       ?tool_access
       ()
   : Keeper_types.keeper_meta
@@ -33,7 +34,7 @@ let make_test_meta
           [ "name", `String name
           ; "agent_name", `String name
           ; "trace_id", `String "test-trace-001"
-          ; "allowed_paths", `List [ `String "*" ]
+          ; "allowed_paths", `List (List.map (fun path -> `String path) allowed_paths)
           ; "tool_access", Keeper_types.tool_access_to_json tool_access
           ])
   with
@@ -154,6 +155,27 @@ let find_tool name tools =
   List.find (fun (tool : Tool.t) -> String.equal tool.schema.name name) tools
 ;;
 
+let find_read_tool tools = find_tool "Read" tools
+
+let read_repo_dir meta =
+  Filename.concat "repos" meta.Keeper_types.name
+;;
+
+let read_path meta path = Filename.concat (read_repo_dir meta) path
+
+let read_args meta path = `Assoc [ "file_path", `String (read_path meta path) ]
+
+let ensure_read_repo_dir config meta =
+  let root = Keeper_alerting_path.project_root_of_config config in
+  Fs_compat.mkdir_p (Filename.concat root (read_repo_dir meta))
+;;
+
+let make_registered_tools ~config ~meta ~ctx_snapshot () =
+  let keeper_name = meta.Keeper_types.name in
+  ignore (Keeper_registry.register ~base_path:config.Coord.base_path keeper_name meta);
+  Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot ()
+;;
+
 let dummy_schedule : Agent_sdk.Hooks.tool_schedule =
   { planned_index = 0
   ; batch_index = 0
@@ -188,7 +210,9 @@ let rec rm_rf path =
 ;;
 
 let test_tool_side_effect_failures_are_observed () =
-  let meta = make_test_meta ~name:"test-keeper-side-effects" () in
+  let meta =
+    make_test_meta ~name:"test-keeper-side-effects" ~allowed_paths:[ "repos" ] ()
+  in
   let ctx_snapshot = make_test_ctx () in
   let dir = Filename.temp_file "test_keeper_tools_side_effects_" "" in
   Sys.remove dir;
@@ -200,13 +224,14 @@ let test_tool_side_effect_failures_are_observed () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
+       ensure_read_repo_dir config meta;
        let decision_path =
          Keeper_types_support.keeper_decision_log_path config meta.name
        in
        Fs_compat.mkdir_p (Filename.dirname decision_path);
        Unix.mkdir decision_path 0o755;
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
-       let tool = find_tool "keeper_fs_read" tools in
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
        let keeper_labels = [ "keeper", meta.name ] in
        let sse_before =
          Prometheus.metric_value_or_zero
@@ -230,7 +255,7 @@ let test_tool_side_effect_failures_are_observed () =
             match
               Tool.execute
                 tool
-                (`Assoc [ "path", `String "missing-side-effect-file.txt" ])
+                (read_args meta "missing-side-effect-file.txt")
             with
             | Error _ -> ()
             | Ok _ -> fail "missing file should be surfaced as tool error");
@@ -382,7 +407,9 @@ let is_guardrail_message message =
 ;;
 
 let test_error_json_is_returned_as_tool_error () =
-  let meta = make_test_meta () in
+  let meta =
+    make_test_meta ~name:"test-keeper-error-json" ~allowed_paths:[ "repos" ] ()
+  in
   let ctx_snapshot = make_test_ctx () in
   let dir =
     Filename.concat
@@ -403,12 +430,13 @@ let test_error_json_is_returned_as_tool_error () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
-       let tool = find_tool "keeper_fs_read" tools in
+       ensure_read_repo_dir config meta;
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
        match
          Tool.execute
            tool
-           (`Assoc [ "path", `String "missing-file-for-keeper-tools-oas.txt" ])
+           (read_args meta "missing-file-for-keeper-tools-oas.txt")
        with
        | Error { Agent_sdk.Types.message; _ } ->
          let json = Yojson.Safe.from_string message in
@@ -429,7 +457,9 @@ let test_error_json_is_returned_as_tool_error () =
 ;;
 
 let test_oas_handler_rejects_missing_required_args () =
-  let meta = make_test_meta () in
+  let meta =
+    make_test_meta ~name:"test-keeper-validation" ~allowed_paths:[ "repos" ] ()
+  in
   let ctx_snapshot = make_test_ctx () in
   let dir =
     Filename.concat
@@ -450,8 +480,9 @@ let test_oas_handler_rejects_missing_required_args () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
-       let tool = find_tool "keeper_fs_read" tools in
+       ensure_read_repo_dir config meta;
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
        match Tool.execute tool (`Assoc []) with
        | Error { Agent_sdk.Types.message; _ } ->
          let json = Yojson.Safe.from_string message in
@@ -477,7 +508,9 @@ let latest_log_seq () =
 ;;
 
 let test_error_result_logs_at_error_level () =
-  let meta = make_test_meta () in
+  let meta =
+    make_test_meta ~name:"test-keeper-log-level" ~allowed_paths:[ "repos" ] ()
+  in
   let ctx_snapshot = make_test_ctx () in
   let dir =
     Filename.concat
@@ -498,13 +531,14 @@ let test_error_result_logs_at_error_level () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
-       let tool = find_tool "keeper_fs_read" tools in
+       ensure_read_repo_dir config meta;
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
        let baseline = latest_log_seq () in
        (match
-          Tool.execute
-            tool
-            (`Assoc [ "path", `String "missing-file-for-keeper-tools-oas.txt" ])
+         Tool.execute
+           tool
+            (read_args meta "missing-file-for-keeper-tools-oas.txt")
         with
         | Error _ -> ()
         | Ok _ -> fail "missing file should be surfaced as tool error");
@@ -519,8 +553,10 @@ let test_error_result_logs_at_error_level () =
          check string "failing tool result logs at ERROR" "ERROR" entry.normalized_level)
 ;;
 
-let test_missing_file_error_includes_directory_suggestions () =
-  let meta = make_test_meta () in
+let test_missing_file_error_redacts_directory_suggestions () =
+  let meta =
+    make_test_meta ~name:"test-keeper-suggestions" ~allowed_paths:[ "repos" ] ()
+  in
   let ctx_snapshot = make_test_ctx () in
   let dir =
     Filename.concat
@@ -541,37 +577,39 @@ let test_missing_file_error_includes_directory_suggestions () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let pg_dir =
-         Filename.concat
-           (Keeper_alerting_path.project_root_of_config config)
-           (Keeper_alerting_path.playground_path_of_keeper meta.name)
+       let read_dir =
+         Filename.concat (Keeper_alerting_path.project_root_of_config config)
+           (read_repo_dir meta)
        in
-       Fs_compat.mkdir_p pg_dir;
-       let existing = Filename.concat pg_dir "known.txt" in
+       Fs_compat.mkdir_p read_dir;
+       let existing = Filename.concat read_dir "known.txt" in
        Out_channel.with_open_text existing (fun oc ->
          Out_channel.output_string oc "known");
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
-       let tool = find_tool "keeper_fs_read" tools in
-       match Tool.execute tool (`Assoc [ "path", `String "missing.txt" ]) with
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
+       match Tool.execute tool (read_args meta "missing.txt") with
        | Error { Agent_sdk.Types.message; _ } ->
          let json = Yojson.Safe.from_string message in
          let detail = Yojson.Safe.Util.member "detail" json in
-         let suggestions =
-           match Yojson.Safe.Util.member "suggested_entries" detail with
-           | `List entries ->
-             List.filter_map
-               (function
-                 | `String value -> Some value
-                 | _ -> None)
-               entries
-           | _ -> []
-         in
-         check bool "known file suggested" true (List.mem "known.txt" suggestions)
+         check
+           bool
+           "detail preserves path"
+           true
+           (Option.is_some (Safe_ops.json_string_opt "path" detail));
+         check
+           bool
+           "directory entries are not leaked"
+           true
+           (match Yojson.Safe.Util.member "suggested_entries" detail with
+            | `Null | `List [] -> true
+            | _ -> false)
        | Ok _ -> fail "missing file should be surfaced as tool error")
 ;;
 
 let test_repeated_error_results_are_blocked () =
-  let meta = make_test_meta () in
+  let meta =
+    make_test_meta ~name:"test-keeper-guardrail" ~allowed_paths:[ "repos" ] ()
+  in
   let ctx_snapshot = make_test_ctx () in
   let dir =
     Filename.concat
@@ -592,9 +630,10 @@ let test_repeated_error_results_are_blocked () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
-       let tool = find_tool "keeper_fs_read" tools in
-       let args = `Assoc [ "path", `String "missing-file-for-keeper-tools-oas.txt" ] in
+       ensure_read_repo_dir config meta;
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
+       let args = read_args meta "missing-file-for-keeper-tools-oas.txt" in
        for _ = 1 to Keeper_tools_oas.max_consecutive_failures do
          match Tool.execute tool args with
          | Error _ -> ()
@@ -611,7 +650,9 @@ let test_repeated_error_results_are_blocked () =
 ;;
 
 let test_failure_count_resets_after_success () =
-  let meta = make_test_meta () in
+  let meta =
+    make_test_meta ~name:"test-keeper-reset" ~allowed_paths:[ "repos" ] ()
+  in
   let ctx_snapshot = make_test_ctx () in
   let dir =
     Filename.concat
@@ -635,22 +676,21 @@ let test_failure_count_resets_after_success () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let pg_dir =
-         Filename.concat
-           (Keeper_alerting_path.project_root_of_config config)
-           (Keeper_alerting_path.playground_path_of_keeper meta.name)
+       let read_dir =
+         Filename.concat (Keeper_alerting_path.project_root_of_config config)
+           (read_repo_dir meta)
        in
-       Fs_compat.mkdir_p pg_dir;
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
-       let tool = find_tool "keeper_fs_read" tools in
+       Fs_compat.mkdir_p read_dir;
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
        let path = "reset-after-success.txt" in
-       let args = `Assoc [ "path", `String path ] in
+       let args = read_args meta path in
        for _ = 1 to Keeper_tools_oas.max_consecutive_failures - 1 do
          match Tool.execute tool args with
          | Error _ -> ()
          | Ok _ -> fail "missing file should fail before reset"
        done;
-       let abs_path = Filename.concat pg_dir path in
+       let abs_path = Filename.concat read_dir path in
        Out_channel.with_open_text abs_path (fun oc -> Out_channel.output_string oc "ok");
        (match Tool.execute tool args with
         | Ok _ -> ()
@@ -674,7 +714,9 @@ let test_failure_count_resets_after_success () =
 ;;
 
 let test_failure_tracking_is_independent_per_args () =
-  let meta = make_test_meta () in
+  let meta =
+    make_test_meta ~name:"test-keeper-independent" ~allowed_paths:[ "repos" ] ()
+  in
   let ctx_snapshot = make_test_ctx () in
   let dir =
     Filename.concat
@@ -695,10 +737,11 @@ let test_failure_tracking_is_independent_per_args () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
-       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
-       let tool = find_tool "keeper_fs_read" tools in
-       let args_a = `Assoc [ "path", `String "missing-a.txt" ] in
-       let args_b = `Assoc [ "path", `String "missing-b.txt" ] in
+       ensure_read_repo_dir config meta;
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
+       let args_a = read_args meta "missing-a.txt" in
+       let args_b = read_args meta "missing-b.txt" in
        for _ = 1 to Keeper_tools_oas.max_consecutive_failures do
          match Tool.execute tool args_a with
          | Error _ -> ()
@@ -760,6 +803,18 @@ let test_non_research_keeper_has_autoresearch () =
       allowed
   in
   check bool "has autoresearch tools" true has_any
+;;
+
+let test_minimal_model_tools_hide_autoresearch_by_default () =
+  let meta = make_test_meta ~preset:Keeper_types.Minimal () in
+  let tools = Keeper_exec_tools.keeper_allowed_model_tools meta in
+  let has_any =
+    List.exists
+      (fun (t : Types_core.tool_schema) ->
+         String.starts_with ~prefix:"masc_autoresearch_" t.name)
+      tools
+  in
+  check bool "minimal model tools hide autoresearch" false has_any
 ;;
 
 let test_research_model_tools_include_autoresearch () =
@@ -1150,9 +1205,9 @@ let () =
             `Quick
             test_error_result_logs_at_error_level
         ; test_case
-            "missing file error includes suggestions"
+            "missing file error redacts suggestions"
             `Quick
-            test_missing_file_error_includes_directory_suggestions
+            test_missing_file_error_redacts_directory_suggestions
         ; test_case
             "repeated errors are blocked"
             `Quick
@@ -1248,6 +1303,10 @@ let () =
             "allowlisted non-research has autoresearch"
             `Quick
             test_non_research_keeper_has_autoresearch
+        ; test_case
+            "minimal model tools hide autoresearch"
+            `Quick
+            test_minimal_model_tools_hide_autoresearch_by_default
         ; test_case
             "allowlisted model tools include autoresearch"
             `Quick

@@ -79,6 +79,8 @@ let dedupe_tool_search_schemas schemas =
 let default_tool_search_schemas () =
   Tool_shard.all_keeper_tool_schemas @ [ keeper_tool_search_schema ]
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
+    not (String.starts_with ~prefix:"masc_autoresearch_" schema.name))
+  |> List.filter (fun (schema : Masc_domain.tool_schema) ->
     not (is_keeper_denied schema.name))
   |> dedupe_tool_search_schemas
 ;;

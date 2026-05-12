@@ -80,6 +80,22 @@ let test_all_tool_names_omit_removed_mode_tools () =
     [ "masc_switch_mode"; "masc_get_config"; "masc_tool_enable";
       "masc_tool_disable" ]
 
+let test_front_door_omits_autoresearch_tools () =
+  let has_autoresearch schemas =
+    List.exists
+      (fun (schema : Masc_domain.tool_schema) ->
+         String.starts_with ~prefix:"masc_autoresearch_" schema.name)
+      schemas
+  in
+  check bool "raw registry keeps autoresearch dispatchable" true
+    (has_autoresearch Config.raw_all_tool_schemas);
+  check bool "public front door hides autoresearch" false
+    (has_autoresearch Config.all_tool_schemas);
+  check bool "visible discovery hides autoresearch" false
+    (has_autoresearch
+       (Config.visible_tool_schemas ~include_hidden:true
+          ~include_deprecated:true ()))
+
 let test_visible_tool_schemas_subset_of_all () =
   let visible = Config.visible_tool_schemas () in
   check bool "visible <= all" true
@@ -114,6 +130,8 @@ let () =
             test_approval_get_requires_admin_permission;
           test_case "removed mode tools omitted" `Quick
             test_all_tool_names_omit_removed_mode_tools;
+          test_case "front door omits autoresearch" `Quick
+            test_front_door_omits_autoresearch_tools;
           test_case "visible is subset of all" `Quick
             test_visible_tool_schemas_subset_of_all;
           test_case "pause visible" `Quick test_is_tool_visible_pause;

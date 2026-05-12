@@ -535,6 +535,8 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         let new_until = now +. cooldown_dur in
         if new_until > state.cooldown_until then begin
           state.cooldown_until <- new_until;
+          Cascade_metrics.on_provider_cooldown
+            ~provider:provider_key ~reason:"failure_threshold";
           Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
             ~labels:[("provider", provider_key)] cooldown_dur
         end
@@ -560,6 +562,8 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. cooldown_dur in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
+        Cascade_metrics.on_provider_cooldown
+          ~provider:provider_key ~reason:"soft_rate_limit";
         Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
           ~labels:[("provider", provider_key)] cooldown_dur
       end
@@ -575,6 +579,8 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. hard_quota_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
+        Cascade_metrics.on_provider_cooldown
+          ~provider:provider_key ~reason:"hard_quota";
         Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
           ~labels:[("provider", provider_key)] hard_quota_cooldown_sec
       end
@@ -591,6 +597,8 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       let new_until = now +. terminal_failure_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
+        Cascade_metrics.on_provider_cooldown
+          ~provider:provider_key ~reason:"terminal_failure";
         Prometheus.observe_histogram Keeper_metrics.metric_keeper_provider_block_duration_sec
           ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec
       end)

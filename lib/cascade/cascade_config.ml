@@ -377,28 +377,25 @@ let parse_model_string
                   ?keep_alive ?num_ctx
                   ~provider_name ~model_id entry)
 
-(** Parse a {!Cascade_config_loader.weighted_entry} into a
-    {!Llm_provider.Provider_config.t}, forwarding the entry's
-    [supports_tool_choice] override. The [weight] is not part of the
-    Provider_config; it drives cascade ordering separately. *)
-let parse_weighted_entry
-    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
-    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
-    ?system_prompt ?(api_key_env_overrides = [])
-    ?keep_alive ?num_ctx
-    (entry : Cascade_config_loader.weighted_entry)
-  : Llm_provider.Provider_config.t option =
-  parse_model_string ~temperature ~max_tokens ?system_prompt
-    ~api_key_env_overrides
-    ?supports_tool_choice_override:entry.supports_tool_choice
-    ?keep_alive ?num_ctx
-    entry.model
+(* RFC-0058 iter 21 cleanup: the plain [parse_weighted_entry] that
+   returned a silent [None] was removed.  All callers migrated to
+   [parse_weighted_entry_with_drop_metric] in iter 14 — the wrapper
+   that delegates to [parse_weighted_entry_diag] and ticks the iter-6
+   candidate-drop counter on rejection.  The plain function was
+   external-API-exported with zero external callers (audit at iter 14).
+   Removed in iter 21 to prevent regression to silent-None paths in
+   future code. *)
 
 (** Categorised diagnostic for a failed weighted-entry parse. *)
 type weighted_entry_drop =
   | Drop_unregistered_scheme of { model : string; scheme : string }
   | Drop_unavailable_scheme of { model : string; scheme : string }
   | Drop_invalid_syntax of string
+
+let weighted_entry_drop_reason_label = function
+  | Drop_unregistered_scheme _ -> "unregistered_scheme"
+  | Drop_unavailable_scheme _ -> "unavailable_scheme"
+  | Drop_invalid_syntax _ -> "invalid_syntax"
 
 (** Parse a weighted entry, distinguishing why it was rejected (unregistered
     scheme, unavailable scheme, invalid syntax). Used by
@@ -442,6 +439,37 @@ let parse_weighted_entry_diag
             ?supports_tool_choice_override:entry.supports_tool_choice
             ?keep_alive ?num_ctx
             ~provider_name ~model_id reg_entry)
+
+(** Resolve-path wrapper around {!parse_weighted_entry_diag} that
+    returns an [option] AND ticks the iter-6
+    [Cascade_metrics.on_profile_candidate_drop] counter on drop.
+    Replaces the iter-21-removed [parse_weighted_entry] which
+    silently swallowed the drop reason: the resolve path surfaced
+    drops only as [providers = []] downstream with no WHY.  Use
+    when a [cascade] context exists, so the drop rate is observable
+    per cascade alongside the validation-time
+    [profile_candidate_drop] counter. *)
+let parse_weighted_entry_with_drop_metric
+    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
+    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
+    ?system_prompt ?(api_key_env_overrides = [])
+    ?keep_alive ?num_ctx
+    ~cascade
+    (entry : Cascade_config_loader.weighted_entry)
+  : Llm_provider.Provider_config.t option =
+  match
+    parse_weighted_entry_diag
+      ~temperature ~max_tokens ?system_prompt
+      ~api_key_env_overrides
+      ?keep_alive ?num_ctx
+      entry
+  with
+  | Ok cfg -> Some cfg
+  | Error drop ->
+    Cascade_metrics.on_profile_candidate_drop
+      ~cascade
+      ~reason:(weighted_entry_drop_reason_label drop);
+    None
 
 (** Expand provider:auto specs that map to multiple models.
     "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
@@ -657,7 +685,12 @@ let resolve_label_context (label : string) : int option =
     (match Llm_provider.Discovery.context_for_model model_id with
      | Some (_url, ctx) -> Some ctx
      | None ->
-       (* Fallback: round-robin endpoint (backward compat for "auto" etc.) *)
+       (* Fallback: round-robin endpoint (backward compat for "auto" etc.).
+          Iter 29 telemetry: requested model_id was not located on any
+          registered endpoint — silently routing to whatever
+          [current_llama_endpoint] happens to be.  Tick a counter so
+          operators can alert on the silent intent loss. *)
+       Cascade_metrics.on_llama_model_not_discovered ();
        let url = Llm_provider.Provider_registry.current_llama_endpoint () in
        if url = "" then None
        else Llm_provider.Discovery.discovered_context_for_url url)
@@ -788,6 +821,7 @@ let provider_key_of_model_string s =
 let order_weighted_entries
     ?(rand_int = weighted_random_int)
     ?rotation_scope
+    ?cascade
     (entries : Cascade_config_loader.weighted_entry list) =
   let entries = maybe_rotate_weighted_entries ?rotation_scope entries in
   let entries = expand_weighted_auto_entries ?rotation_scope entries in
@@ -811,7 +845,23 @@ let order_weighted_entries
         (fun (e : Cascade_config_loader.weighted_entry) -> e.weight > 0)
         health_adjusted
     in
-    let effective = if active = [] then entries else active in
+    let effective =
+      if active = [] then (
+        (* Fail-open: every provider has been cooled by the health
+           tracker, but we still serve on the unfiltered list rather
+           than failing closed.  Emit a counter so operators can
+           alert on this state — see iter 18 commit + iter 12's
+           [on_provider_filter_widening] for the structural parallel.
+           Counter only ticks when the caller supplied [~cascade];
+           internal cascade_config callers without a cascade context
+           stay silent until they're audited individually. *)
+        Option.iter
+          (fun cascade ->
+            Cascade_metrics.on_ordering_health_widening ~cascade)
+          cascade;
+        entries)
+      else active
+    in
     weighted_shuffle ~rand_int effective
 
 let resolve_model_strings_traced_with
@@ -829,7 +879,9 @@ let resolve_model_strings_traced_with
     let from_file_weighted =
       Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
     if from_file_weighted <> [] then
-      let ordered = order_weighted_entries ~rand_int from_file_weighted in
+      let ordered =
+        order_weighted_entries ~rand_int ~cascade:name from_file_weighted
+      in
       let models = List.map
           (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
       (models, Named)
@@ -843,7 +895,10 @@ let resolve_model_strings_traced_with
         Cascade_config_loader.load_profile_weighted
           ~config_path:path ~name:fallback_profile in
       if fallback_weighted <> [] then
-        let ordered = order_weighted_entries ~rand_int fallback_weighted in
+        let ordered =
+          order_weighted_entries
+            ~rand_int ~cascade:fallback_profile fallback_weighted
+        in
         let models = List.map
             (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
             ordered in
@@ -986,7 +1041,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
     let from_file_weighted =
       Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
     if from_file_weighted <> [] then
-      let ordered = order_weighted_entries from_file_weighted in
+      let ordered = order_weighted_entries ~cascade:name from_file_weighted in
       let models = List.map
           (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
       let candidates = List.map candidate_info_of_weighted ordered in
@@ -1001,7 +1056,9 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
         Cascade_config_loader.load_profile_weighted
           ~config_path:path ~name:fallback_profile in
       if fallback_weighted <> [] then
-        let ordered = order_weighted_entries fallback_weighted in
+        let ordered =
+          order_weighted_entries ~cascade:fallback_profile fallback_weighted
+        in
         let models = List.map
             (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
         let candidates = List.map candidate_info_of_weighted ordered in
@@ -1071,6 +1128,7 @@ let apply_provider_filter ~provider_filter ~label providers =
     in
     let filtered = List.filter matches providers in
     if filtered = [] then (
+      Cascade_metrics.on_provider_filter_widening ~cascade:label;
       Log.warn ~ctx:"CascadeConfig"
         "provider_filter matched no providers (%s); \
          falling back to unfiltered (filter=[%s] providers=[%s])"

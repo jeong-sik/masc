@@ -60,30 +60,24 @@ val parse_model_string :
     @since 0.122.0 api_key_env_overrides parameter added
     @since 0.150.0 supports_tool_choice_override parameter added *)
 
-(** Parse a {!Cascade_config_loader.weighted_entry} into a
-    {!Llm_provider.Provider_config.t}. Forwards
-    [entry.supports_tool_choice] as the
-    [supports_tool_choice_override]. The [weight] is not part of
-    Provider_config; it drives cascade ordering separately.
-
-    @since 0.150.0 *)
-val parse_weighted_entry :
-  ?temperature:float ->
-  ?max_tokens:int ->
-  ?system_prompt:string ->
-  ?api_key_env_overrides:(string * string) list ->
-  ?keep_alive:string ->
-  ?num_ctx:int ->
-  Cascade_config_loader.weighted_entry ->
-  Llm_provider.Provider_config.t option
+(* RFC-0058 iter 21: [val parse_weighted_entry] removed.  All
+   callers migrated to [parse_weighted_entry_with_drop_metric]
+   (iter 14).  Audit at iter 14 confirmed zero external callers.
+   See {!parse_weighted_entry_with_drop_metric} and
+   {!parse_weighted_entry_diag}. *)
 
 type weighted_entry_drop =
   | Drop_unregistered_scheme of { model : string; scheme : string }
   | Drop_unavailable_scheme of { model : string; scheme : string }
   | Drop_invalid_syntax of string
 
-(** Like {!parse_weighted_entry}, but preserves the reason a candidate was
-    rejected so callers can surface actionable validation errors.
+
+(** Parse a {!Cascade_config_loader.weighted_entry} into a
+    {!Llm_provider.Provider_config.t}, preserving the reason a
+    candidate was rejected ({!weighted_entry_drop}) so callers can
+    surface actionable validation errors.  Used by
+    {!parse_weighted_entries} and by
+    {!parse_weighted_entry_with_drop_metric}.
 
     @since 0.150.0 *)
 val parse_weighted_entry_diag :
@@ -95,6 +89,23 @@ val parse_weighted_entry_diag :
   ?num_ctx:int ->
   Cascade_config_loader.weighted_entry ->
   (Llm_provider.Provider_config.t, weighted_entry_drop) result
+
+(** Resolve-path wrapper around {!parse_weighted_entry_diag} that
+    returns an [option] AND ticks
+    [Cascade_metrics.on_profile_candidate_drop ~cascade ~reason] on
+    drop.  Replaces the iter-21-removed [parse_weighted_entry] which
+    silently swallowed the drop reason; the resolve path surfaced
+    drops only as [providers = []] downstream with no WHY. *)
+val parse_weighted_entry_with_drop_metric :
+  ?temperature:float ->
+  ?max_tokens:int ->
+  ?system_prompt:string ->
+  ?api_key_env_overrides:(string * string) list ->
+  ?keep_alive:string ->
+  ?num_ctx:int ->
+  cascade:string ->
+  Cascade_config_loader.weighted_entry ->
+  Llm_provider.Provider_config.t option
 
 (** Parse a list of weighted entries, dropping ones that cannot produce a
     provider config. Preserves input order.
@@ -124,6 +135,7 @@ val parse_weighted_entries :
 val order_weighted_entries :
   ?rand_int:(int -> int) ->
   ?rotation_scope:string ->
+  ?cascade:string ->
   Cascade_config_loader.weighted_entry list ->
   Cascade_config_loader.weighted_entry list
 (** Order weighted entries using the same health-adjusted runtime logic as

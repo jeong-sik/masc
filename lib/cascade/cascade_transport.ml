@@ -439,7 +439,12 @@ let runtime_mcp_policy_for_provider
          pre-approve runtime MCP tools without leaking tokens through argv. *)
     Some (codex_runtime_mcp_policy_for_agent ~agent_name policy)
   | Some policy, true, None ->
-    (* No agent_name to inject — preserve the legacy strip-all behavior. *)
+    (* No agent_name to inject — preserve the legacy strip-all behavior.
+       Iter 38: tick a counter so a non-zero rate flags caller paths
+       that should be threading [agent_name] but aren't.  Strip-all
+       means auth-bearing headers (e.g. Authorization: Bearer ...)
+       disappear and runtime MCP tools run unauthenticated. *)
+    Cascade_metrics.on_runtime_mcp_legacy_strip ();
     Some (runtime_mcp_policy_without_http_headers policy)
   | Some policy, false, Some agent_name ->
     Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)

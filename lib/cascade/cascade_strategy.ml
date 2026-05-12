@@ -543,9 +543,16 @@ let priority_tier_order adapter ctx ~tiers ~cycle cands =
        through with the unfiltered tier list so at least one call is
        attempted and the real upstream error (rate limit, auth) surfaces
        instead of silently exhausting the cascade.  Mirrors
-       weighted_shuffle's guard at [weighted_shuffle]:140-145. *)
+       weighted_shuffle guard at [weighted_shuffle]:140-145.  Iter 22
+       telemetry: ticks [Cascade_metrics.on_strategy_starvation_guard]
+       so the fail-open rate is observable per cascade. *)
     let with_capacity = filter_capacity adapter ctx tier_cands in
-    if with_capacity = [] then tier_cands else with_capacity
+    if with_capacity = [] then (
+      Cascade_metrics.on_strategy_starvation_guard
+        ~cascade:(signal_cascade_name ctx)
+        ~strategy:"priority_tier";
+      tier_cands)
+    else with_capacity
 
 (* ── Sticky ─────────────────────────────────────────────────────── *)
 
@@ -566,7 +573,12 @@ let sticky_order adapter ctx cands =
      | Some c -> [c]
      | None ->
        (* Pinned provider no longer in candidate list (config drift,
-          cascade.json reload).  Fall back to plain Failover. *)
+          cascade.toml reload, provider deprecation).  Fall back to
+          plain Failover.  Iter 23 telemetry: ticks
+          [Cascade_metrics.on_sticky_drift] so the drift rate is
+          observable per cascade rather than living only in this
+          comment. *)
+       Cascade_metrics.on_sticky_drift ~cascade;
        cands)
 
 (* ── Round-robin ────────────────────────────────────────────────── *)
@@ -609,9 +621,16 @@ let order_candidates t ~adapter ~ctx ~cycle cands =
     (* Starvation guard: same pattern as priority_tier_order.  When all
        candidates report capacity=0 the cascade would otherwise exit
        with no real call attempt — prefer to try once and let the real
-       error surface. *)
+       error surface.  Iter 22 telemetry: ticks
+       [Cascade_metrics.on_strategy_starvation_guard] so the fail-open
+       rate is observable per cascade. *)
     let with_capacity = filter_capacity adapter ctx cooled in
-    if with_capacity = [] then cooled else with_capacity
+    if with_capacity = [] then (
+      Cascade_metrics.on_strategy_starvation_guard
+        ~cascade:(signal_cascade_name ctx)
+        ~strategy:"circuit_breaker_cycling";
+      cooled)
+    else with_capacity
   | Priority_tier ->
     priority_tier_order adapter ctx ~tiers:t.tiers ~cycle cands
   | Sticky ->

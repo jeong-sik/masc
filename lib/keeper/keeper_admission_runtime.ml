@@ -137,17 +137,27 @@ let init_once_from_base_path ~base_path =
     (* I/O outside the critical section.
        [Cascade_config_loader.load_catalog_source] can call [Eio.traceln]
        and may block on disk — holding [init_mutex] across that risks
-       domain-wide stalls of any other fiber that hits this code. *)
-    let cascade_json_path =
-      Filename.concat (Filename.concat base_path ".masc/config") "cascade.json"
+       domain-wide stalls of any other fiber that hits this code.
+
+       Iter 17 cleanup of iter-1 deferred housekeeping: the previous
+       code constructed [<base_path>/.masc/config/cascade.json] and
+       named the variable [cascade_json_path].  The loader still
+       worked (the materializer redirects [.json] to the sibling
+       [.toml]) but the name + literal lied about the post-RFC-0058
+       §9.3 reality — no on-disk JSON is read.  Resolved via the
+       [Config_dir_resolver.cascade_toml_filename] SSOT. *)
+    let cascade_source_path =
+      Filename.concat
+        (Filename.concat base_path ".masc/config")
+        Config_dir_resolver.cascade_toml_filename
     in
-    match Cascade_config_loader.load_catalog_source cascade_json_path with
+    match Cascade_config_loader.load_catalog_source cascade_source_path with
     | Error msg ->
       (* Transient or permanent read failure — leave registry empty,
            revert to Idle so the next heartbeat tick can retry. *)
       revert_init_to_idle ();
       Log.Keeper.warn
-        "RFC-0026 PR-E-1.6: cascade.json load failed (%s); admission registry stays \
+        "RFC-0026 PR-E-1.6: cascade.toml load failed (%s); admission registry stays \
          empty, observe will return Legacy_path (will retry on next tick)"
         msg
     | Ok json ->

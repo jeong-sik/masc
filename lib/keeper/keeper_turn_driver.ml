@@ -531,7 +531,12 @@ let run_named
                      reason;
                    }))
          | Cascade_fsm.Accept resp ->
-           (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully *)
+           (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully.
+              Iter 42: tick an invariant-violation counter so this
+              never-supposed-to-fire arm becomes a hard alert if it
+              ever does.  Steady-state value is ZERO; non-zero is a
+              real FSM contract violation, not a tunable. *)
+           Cascade_metrics.on_cascade_invariant_violation ();
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name resp.model;
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics

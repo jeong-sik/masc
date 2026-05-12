@@ -44,12 +44,24 @@ let default_model_strings ~cascade_name =
     | Ok label -> [ label ]
     | Error _ -> (
         match Provider_adapter.preferred_execution_model_labels () with
-        | [] -> [ Provider_adapter.default_local_fallback_label () ]
+        | [] ->
+          (* Neither explicit llama label nor any preferred execution
+             label is configured.  Iter 25: surface so dashboards can
+             alert on missing execution-lane config. *)
+          Cascade_metrics.on_default_label_fallback
+            ~cascade:cascade_name ~reason:"no_execution_labels";
+          [ Provider_adapter.default_local_fallback_label () ]
         | labels -> labels)
   in
   if is_local_only_cascade cascade_name then
     match List.filter is_local_label all_labels with
-    | [] -> [ Provider_adapter.default_local_fallback_label () ]
+    | [] ->
+      (* Local-only cascade but the resolved label set has no local
+         scheme — operator routed local traffic at a cascade with
+         only remote providers.  Iter 25 counter. *)
+      Cascade_metrics.on_default_label_fallback
+        ~cascade:cascade_name ~reason:"local_cascade_no_local";
+      [ Provider_adapter.default_local_fallback_label () ]
     | local -> local
   else
     all_labels
@@ -74,6 +86,11 @@ let labels_require_local_discovery (labels : string list) : bool =
 let local_discovery_warned = Atomic.make false
 
 let warn_partial_eio_context_once ~sw_some ~net_some =
+  (* Iter 39: counter ticks on EVERY hit (independent of the
+     WARN-once dedup), so a caller-side regression that keeps
+     hitting this path after the first log line stays observable
+     via the metric. *)
+  Cascade_metrics.on_partial_eio_context ();
   if not (Atomic.exchange local_discovery_warned true) then
     Log.warn ~ctx:"CascadeRuntime"
       "Local discovery skipped: Eio_context partial (sw=%b net=%b). \
@@ -111,6 +128,12 @@ let refresh_local_discovery_if_possible ?sw ?net (labels : string list) : bool =
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
+             (* Iter 40: counter ticks alongside the WARN log so the
+                swallow rate is alertable.  Previously the exception
+                arm logged once per occurrence (no dedup) but had no
+                Prometheus surface — operators could only spot
+                regressions by tailing logs. *)
+             Cascade_metrics.on_discovery_refresh_exception ();
              Log.warn ~ctx:"CascadeRuntime"
                "local runtime discovery refresh failed: %s"
                (Printexc.to_string exn);
@@ -126,22 +149,40 @@ let context_floor = 4_096
 let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
   match discovered with
   | Some ctx when ctx >= context_floor -> ctx
-  | _ -> static_ctx
+  | Some _below_floor ->
+    (* Discovered value present but below the safety floor — likely
+       discovery-API misbehavior or corrupted response.  Fall back to
+       the static registry value and tick the counter so operators
+       can alert on suspicious discovery readings (iter 27). *)
+    Cascade_metrics.on_discovered_context_below_floor ();
+    static_ctx
+  | None -> static_ctx
 
 let static_context_of_entry
     (entry : Llm_provider.Provider_registry.entry) : int =
   match entry.capabilities.Llm_provider.Capabilities.max_context_tokens with
-  | Some caps_ctx when caps_ctx > entry.max_context -> caps_ctx
+  | Some caps_ctx when caps_ctx > entry.max_context ->
+    (* Capability table reports a larger context than the legacy
+       [max_context] field.  Pick [caps_ctx] (newer, more accurate)
+       but tick the drift counter — the disagreement means operator
+       updated one of two ground truths and forgot the other.
+       Iter 28 telemetry. *)
+    Cascade_metrics.on_context_capability_drift ~provider:entry.name;
+    caps_ctx
   | _ -> entry.max_context
 
 let max_context_of_label (label : string) : int =
   let static_ctx =
     match provider_name_of_label label with
-    | None -> fallback_context_window
+    | None ->
+      Cascade_metrics.on_max_context_fallback ~site:"label_no_provider_name";
+      fallback_context_window
     | Some pname -> (
         match Llm_provider.Provider_registry.find default_registry pname with
         | Some entry -> static_context_of_entry entry
-        | None -> fallback_context_window)
+        | None ->
+          Cascade_metrics.on_max_context_fallback ~site:"label_unregistered_scheme";
+          fallback_context_window)
   in
   match Cascade_config.resolve_label_context label with
   | Some ctx -> effective_discovered_ctx ~static_ctx ~discovered:(Some ctx)
@@ -169,11 +210,15 @@ let context_if_available (label : string) : int option =
 let resolve_primary_max_context (labels : string list) : int =
   match List.find_map context_if_available labels with
   | Some ctx -> ctx
-  | None -> fallback_context_window
+  | None ->
+    Cascade_metrics.on_max_context_fallback ~site:"primary_no_available";
+    fallback_context_window
 
 let resolve_max_cascade_context (labels : string list) : int =
   match List.filter_map context_if_available labels with
-  | [] -> fallback_context_window
+  | [] ->
+    Cascade_metrics.on_max_context_fallback ~site:"cascade_max_no_available";
+    fallback_context_window
   | ctxs -> List.fold_left max 0 ctxs
 
 let labels_are_pure_local (labels : string list) : bool =
@@ -189,7 +234,18 @@ let labels_are_pure_local (labels : string list) : bool =
 let clamp_context_for_pure_local_labels ~(labels : string list) ~(max_context : int)
     : int =
   if labels_are_pure_local labels
-  then min max_context Env_config.ContextCompact.small_local_floor
+  then begin
+    let clamped = min max_context Env_config.ContextCompact.small_local_floor in
+    (* Iter 49: tick a counter when the clamp actually reduces the
+       window (max_context > floor).  Same shape as iter 46
+       max_tokens_clamped — the policy stays (local providers
+       have tiny context windows) but the rate is observable so
+       operators can spot cascade.toml settings being silently
+       clipped on local-only cascades. *)
+    if clamped < max_context then
+      Cascade_metrics.on_local_context_clamped ();
+    clamped
+  end
   else max_context
 
 let model_id_of_label label =

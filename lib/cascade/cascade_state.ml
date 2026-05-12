@@ -33,9 +33,40 @@ let record_sticky_choice ~keeper ~cascade ~provider ~ttl_ms ~now =
     loop ()
 
 let lookup_sticky ~keeper ~cascade ~now =
-  match Sticky_map.find_opt (keeper, cascade) (Atomic.get sticky_table) with
+  let key = (keeper, cascade) in
+  match Sticky_map.find_opt key (Atomic.get sticky_table) with
   | Some entry when now < entry.expires_at -> Some entry.provider
-  | _ -> None
+  | Some _expired_entry ->
+    (* Entry existed but TTL expired.  Distinct from "no entry"
+       case below — surface separately so operators can tell
+       too-short-TTL invalidations from first-lookup misses.
+       See iter 24 commit + iter 23 sticky_drift for the related
+       candidate-list-invalidation counter.
+       Also CAS-evict the stale slot so the map doesn't accumulate
+       expired keys and subsequent lookups don't re-tick the
+       counter (event-once semantics).  Only the winner increments
+       the metric: a concurrent reader that finds the slot already
+       evicted or refreshed has nothing new to report. *)
+    let rec evict () =
+      let cur = Atomic.get sticky_table in
+      match Sticky_map.find_opt key cur with
+      | Some refreshed when now < refreshed.expires_at ->
+        (* Refreshed under us via [record_sticky_choice] — leave
+           the live entry alone and don't count this lookup as an
+           expiry event. *)
+        false
+      | Some _still_expired ->
+        let next = Sticky_map.remove key cur in
+        if Atomic.compare_and_set sticky_table cur next then true
+        else evict ()
+      | None ->
+        (* Another concurrent lookup already evicted — don't
+           double-count. *)
+        false
+    in
+    if evict () then Cascade_metrics.on_sticky_expiry ~cascade;
+    None
+  | None -> None
 
 let clear_sticky () = Atomic.set sticky_table Sticky_map.empty
 

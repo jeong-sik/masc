@@ -157,7 +157,24 @@ let route_bindings_from_json = function
                  | Some target
                    when not (String.equal key "" || String.equal target "") ->
                      Some (key, target)
-                 | _ -> None)
+                 | Some _ ->
+                     (* Iter 33: target produced but key or target
+                        trimmed to empty string.  Silent drop without
+                        this counter — operators saw routes 'work' in
+                        cascade.toml but the catalog had nothing for
+                        the bad entry. *)
+                     Cascade_metrics.on_route_binding_dropped
+                       ~reason:"empty_key_or_target";
+                     None
+                 | None ->
+                     (* Iter 33: value matches neither legacy-string
+                        nor declarative-table encoding, or the
+                        [Assoc] has no [target] subfield.  Most
+                        common cause: operator typoed the [target]
+                        key. *)
+                     Cascade_metrics.on_route_binding_dropped
+                       ~reason:"invalid_value";
+                     None)
       | _ -> [])
   | _ -> []
 
@@ -262,10 +279,12 @@ let cascade_name_for_use ?config_path use =
   let fallback = fallback_from_entries use entries in
   match route_target with
   | Some target when catalog_names = [] ->
+      Cascade_metrics.on_route_resolve_fallback ~reason:"catalog_unvalidated";
       warn_unvalidated_route_target_once ~route_key ~target ~fallback;
       fallback
   | Some target when List.mem target catalog_names -> target
   | Some target ->
+      Cascade_metrics.on_route_resolve_fallback ~reason:"target_not_in_catalog";
       warn_invalid_route_target_once ~route_key ~target ~fallback;
       fallback
   | None -> fallback

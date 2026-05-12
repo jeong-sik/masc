@@ -554,6 +554,692 @@ models = [
          in
          loop 0)
 
+(* Smoke guard for [Cascade_metrics.on_profile_candidate_drop]: the
+   call site in [validate_profile_static] is only exercised when an
+   invalid candidate entry slips past the 5-layer typed parser, which
+   is hard to provoke from a TOML fixture (the parser typically
+   rejects shape errors first).  This smoke test exercises the three
+   reasons directly so a future refactor that drops the call site
+   loses a reference (mli check) rather than silently dead-coding the
+   counter.  Prometheus state is process-global and not asserted. *)
+let test_profile_candidate_drop_helpers_do_not_throw () =
+  Masc_mcp.Cascade_metrics.on_profile_candidate_drop
+    ~cascade:"smoke_test_cascade" ~reason:"unregistered_scheme";
+  Masc_mcp.Cascade_metrics.on_profile_candidate_drop
+    ~cascade:"smoke_test_cascade" ~reason:"unavailable_scheme";
+  Masc_mcp.Cascade_metrics.on_profile_candidate_drop
+    ~cascade:"smoke_test_cascade" ~reason:"invalid_syntax";
+  check bool "all three reasons callable without raising" true true
+
+(* Smoke + contract guard for [Cascade_metrics.on_resolve_provider_leak].
+   The contract is documented as: [leak_count=0] is a no-op (callers
+   can call unconditionally), [leak_count>0] bumps the counter by that
+   amount.  This test exercises both arms.  As with the candidate-drop
+   smoke test, Prometheus state is process-global and not asserted —
+   the goal is to lock the signature + no-op contract so a future
+   refactor that breaks the unconditional-call invariant trips a
+   compile or runtime failure here. *)
+let test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable () =
+  (* leak_count=0 must be a no-op (no exception, no metric tick that
+     could pollute neighboring tests). *)
+  Masc_mcp.Cascade_metrics.on_resolve_provider_leak
+    ~cascade:"smoke_test_cascade" ~leak_count:0;
+  Masc_mcp.Cascade_metrics.on_resolve_provider_leak
+    ~cascade:"smoke_test_cascade" ~leak_count:3;
+  check bool "zero and positive leak_count both callable without raising"
+    true true
+
+(* Smoke + name-stability guard for [metric_provider_health_probe_error].
+   The probe-error counter is owned by Prometheus.ml (alongside the
+   sibling [_skipped] / [_actual_health_status] probe metrics) rather
+   than [Cascade_metrics] because all probe-namespace metrics share
+   the same labels and a single SSOT.  A future rename of the name
+   constant — or removal of the .mli export — trips a compile
+   failure here, which preserves dashboard alert continuity. *)
+(* Smoke + contract guard for [Cascade_metrics.on_route_config_error].
+   Same shape as on_resolve_provider_leak: zero is a no-op (callers
+   call unconditionally) and positive is callable with both
+   documented error_type label values. *)
+(* Smoke + label-stability guard for [Cascade_metrics.on_resolve_failure].
+   The five call sites (non-strict 2 + strict 3) in
+   [Cascade_catalog_runtime] must all use one of three documented
+   reason labels: [lookup_failed], [provider_filter_rejected],
+   [no_callable_providers].  A typo at any call site would emit an
+   undocumented label and pollute Prometheus cardinality.  This test
+   exercises each label string explicitly so a future refactor that
+   introduces a fourth reason — or renames an existing one — has to
+   update this test, keeping the documented set in lockstep with the
+   call sites. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_validated_with_rejections].  Mirrors the LKG
+   counter's documented-reason pinning (iter 5): the two reasons
+   [fresh_partial_rejection] and [stale_partial_rejection_cached]
+   must stay in lockstep with the two call sites in
+   [inspect_active].  A future refactor that introduces a third
+   reason — or renames an existing one — must update this test. *)
+(* Smoke + name-stability guard for
+   [Cascade_metrics.on_provider_filter_widening].  The non-strict
+   [apply_provider_filter] fall-OPEN arm is hit only when the
+   operator-supplied filter expresses an intent the cascade can't
+   satisfy — a hard scenario to provoke from a unit test without
+   constructing a full Provider_config.t list with mismatched
+   kinds.  This smoke test exercises the call surface directly so
+   the [cascade] label name and helper signature are pinned. *)
+(* Regression for iter 13: the wrapper
+   [resolve_named_providers_strict_with_secondary_resolver] has three
+   Error returns (lookup_failed / provider_filter_rejected /
+   no_callable_providers) that were silent before this iteration —
+   iter 10 covered the base [resolve_named_providers_strict] but
+   keeper_turn_driver actually calls the wrapper, so the silent
+   Error paths were the most common cause of keeper turn failures
+   going unobserved.  Two of the three Error paths are reachable via
+   [install_snapshot_for_tests] (lookup_failed and
+   no_callable_providers); the provider_filter_rejected arm requires
+   a non-empty provider_filter against a non-empty candidate set,
+   which is harder to set up via the test helper and stays covered
+   by the smoke test of [on_resolve_failure] at iter 10. *)
+let test_secondary_resolver_unknown_cascade_returns_error () =
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
+    ~source_path:"/tmp/test-cascade-iter13-unknown.toml"
+    ~profile_names:[ "known_cascade_iter13" ];
+  match
+    Masc_mcp.Cascade_catalog_runtime
+    .resolve_named_providers_strict_with_secondary_resolver
+      ~cascade_name:"unknown_cascade_iter13"
+      ()
+  with
+  | Ok _ ->
+    fail
+      "expected Error for unknown cascade name; lookup_failed metric \
+       call site was not exercised"
+  | Error _ ->
+    check bool "Error returned as expected (lookup_failed path)" true true
+
+let test_secondary_resolver_empty_cascade_returns_error () =
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
+    ~source_path:"/tmp/test-cascade-iter13-empty.toml"
+    ~profile_names:[ "empty_cascade_iter13" ];
+  match
+    Masc_mcp.Cascade_catalog_runtime
+    .resolve_named_providers_strict_with_secondary_resolver
+      ~cascade_name:"empty_cascade_iter13"
+      ()
+  with
+  | Ok _ ->
+    fail
+      "expected Error for cascade with no callable providers; \
+       no_callable_providers metric call site was not exercised"
+  | Error _ ->
+    check bool
+      "Error returned as expected (no_callable_providers path)" true true
+
+(* Smoke + behavior guard for the iter-14 wrapper
+   [Cascade_config.parse_weighted_entry_with_drop_metric].
+
+   Ok path: a valid provider:model entry returns [Some _] like the
+   iter-21-removed plain [parse_weighted_entry] used to.
+
+   Drop path: an invalid-syntax entry returns [None] (matching the
+   removed plain contract) AND ticks the iter-6 candidate-drop
+   counter via the typed [Drop_invalid_syntax] reason from
+   [parse_weighted_entry_diag].
+
+   Prometheus state is process-global and not asserted; the goal is
+   to pin the option-preserving contract so a future refactor that
+   widens the return shape — or drops the wrapper entirely — fails
+   here rather than silently regressing the resolve-path drop
+   visibility this iteration introduced. *)
+(* Smoke + contract guard for [Cascade_metrics.on_auto_expansion_fanout].
+   The fanout=0 arm (all plain entries, no provider:auto in the
+   cascade) must be a no-op so callers in
+   [expand_weighted_entries] can emit unconditionally without
+   polluting Prometheus state on every cascade load.  fanout>0
+   exercises the inc_counter call site. *)
+(* Smoke + cardinality guard for
+   [Cascade_metrics.on_ordering_health_widening].  The widening arm
+   in [order_weighted_entries] is hit only when [Cascade_health_tracker]
+   has cooled every provider in a cascade — a hard scenario to provoke
+   from a unit test (the global health tracker has long-lived state
+   shared across the suite).  Smoke test pins the cascade label name
+   + helper signature so a future refactor that breaks the call shape
+   trips here rather than silently dead-coding the counter. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_provider_cooldown].  Four reasons map to the
+   four cooldown-entry branches in [Cascade_health_tracker.record]
+   (failure_threshold, soft_rate_limit, hard_quota, terminal_failure).
+   A typo at any call site would produce an undocumented label and
+   pollute Prometheus cardinality; pinning the four strings here
+   keeps the documented set canonical. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_strategy_starvation_guard].  Two documented
+   strategy labels map 1:1 to the two ordering branches in
+   [Cascade_strategy.order_candidates] that fall open on
+   capacity=0 (Circuit_breaker_cycling and Priority_tier).  A typo
+   at either call site would emit an undocumented strategy label;
+   pinning the two strings here keeps the canonical set in lockstep
+   with the code.  The fail-open branches themselves require an
+   adapter that always reports capacity=0, which is hard to
+   provoke from a unit test without rewriting half the strategy
+   harness — smoke is signature-only. *)
+(* Smoke + cardinality guard for [Cascade_metrics.on_sticky_drift].
+   Drift path in [sticky_order] is reachable only via a
+   [Cascade_state] mutation between two strategy calls
+   (cascade.toml reload + pin loss), which is harder to provoke
+   from the cascade-toml-materialization suite than from the
+   dedicated [test_cascade_strategy] suite that drives sticky
+   pinning under harness.  Smoke test pins the cascade label name
+   + helper signature. *)
+(* Smoke for [Cascade_metrics.on_sticky_expiry].  The expiry arm in
+   [Cascade_state.lookup_sticky] only fires after a TTL window has
+   passed since [record_sticky_choice], which is awkward to drive
+   from a unit test without mock clocks.  Smoke pins the helper
+   signature; the natural code path is exercised by the existing
+   [test_cascade_strategy] / [test_cascade_state] suites. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_default_label_fallback].  Two documented
+   reasons map 1:1 to the two fallback arms in
+   [Cascade_runtime.default_model_strings].  A typo at either call
+   site would emit an undocumented label and pollute Prometheus
+   cardinality; pinning both strings here keeps the canonical set
+   canonical. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_max_context_fallback].  Four documented site
+   labels map 1:1 to the four [fallback_context_window] arms in
+   [Cascade_runtime].  A typo at any call site would emit an
+   undocumented label and pollute Prometheus cardinality.  Pinning
+   all four strings here keeps the canonical set in lockstep with
+   the implementation. *)
+(* Smoke for [Cascade_metrics.on_discovered_context_below_floor].
+   No-arg helper — pin the call shape so a future refactor that
+   adds a parameter trips here.  The natural code path requires a
+   discovery API that returns a value below 4_096, which is awkward
+   to provoke from a unit test without mocking
+   [Cascade_config.resolve_label_context]. *)
+(* Smoke for [Cascade_metrics.on_context_capability_drift].  The
+   natural code path requires a registered provider whose
+   [Capabilities.max_context_tokens] exceeds [entry.max_context],
+   which is brittle to provoke from a unit test (registration
+   shape changes with each adapter).  Smoke pins the provider
+   label name + helper signature. *)
+(* Smoke for [Cascade_metrics.on_llama_model_not_discovered].  The
+   natural code path requires a registered llama endpoint whose
+   [Discovery.context_for_model] returns None for a queried model_id
+   — driving that from a unit test would need a live discovery
+   fixture.  Smoke pins the no-arg helper signature. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_route_resolve_fallback].  Two documented
+   reasons map 1:1 to the two fallback arms in
+   [Cascade_routes.cascade_name_for_use].  A typo at either call
+   site would emit an undocumented label; pinning both strings
+   here keeps the canonical set in lockstep with the code. *)
+(* Smoke for [Cascade_metrics.on_deprecated_profile_name_filter].
+   The closed deprecated-name set is bounded (~28 names) so the
+   label cardinality stays safe.  Smoke test pins two
+   representative names from the canonical list — exhaustive
+   per-name coverage would just enumerate a constant list and add
+   noise; the call-site coverage in catalog_runtime and
+   config_loader exercises the actual emission paths. *)
+(* Smoke + contract guard for
+   [Cascade_metrics.on_capability_mismatch].  Same shape as iter
+   7 / 9 / 15 [count=0 is no-op]: callers tick unconditionally and
+   the helper guards against zero so neighboring tests stay
+   unaffected.  Counter has no label dimensions (cardinality 1). *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_route_binding_dropped].  Two documented
+   reasons map 1:1 to the two filter arms in
+   [Cascade_routes.route_bindings_from_json].  Pinning both
+   strings here keeps the canonical set in lockstep with the
+   call sites. *)
+(* Smoke + label-stability guard for
+   [Cascade_metrics.on_weighted_item_dropped].  Two documented
+   reasons map 1:1 to the two silent-drop arms in
+   [parse_weighted_item].  Same shape as iter 33
+   route_binding_dropped — value-shape faults in legacy
+   JSON-shape entries. *)
+(* Smoke for [Cascade_metrics.on_resolve_live_fallback].  The
+   natural code path requires a raw cascade name that isn't in
+   the live catalog and isn't a known logical use string — driving
+   that from a unit test would need a fixture catalog plus a
+   carefully chosen miss name.  Smoke pins the no-arg helper
+   signature. *)
+(* Smoke for [Cascade_metrics.on_fallback_hint_invalid].  The
+   natural code path requires a catalog with a profile that
+   declares a [fallback_cascade] pointing at a missing target,
+   which is best exercised end-to-end via cascade.toml fixtures
+   in the catalog-builder suite.  Smoke pins the no-arg helper
+   signature so a future refactor that changes the call shape
+   trips here. *)
+(* Smoke for [Cascade_metrics.on_runtime_mcp_legacy_strip].  The
+   natural code path requires a provider that needs per-keeper
+   bridging plus a caller that does not supply [agent_name] — best
+   exercised end-to-end via the cascade-transport regression
+   harness rather than from this suite.  Smoke pins the no-arg
+   helper signature. *)
+(* Smoke for [Cascade_metrics.on_partial_eio_context].  The
+   natural code path requires a caller that supplies only one of
+   [Eio.Switch.t] / [Eio.Net.t] — easier to set up in the
+   cascade-runtime regression suite than from this materialization
+   suite.  Smoke pins the no-arg helper signature so a future
+   refactor that changes the call shape trips here. *)
+(* Smoke for [Cascade_metrics.on_discovery_refresh_exception].
+   Natural code path requires [refresh_llama_endpoints] to raise
+   a non-cancellation exception — best exercised in the
+   provider_registry harness.  Smoke pins the no-arg helper
+   signature so a future refactor that changes the call shape
+   trips here. *)
+(* Smoke for [Cascade_metrics.on_profile_registration_failure].
+   Natural code path requires a cascade.toml [profiles] section
+   that triggers [register_declared_profiles_from_json] Error —
+   exercised end-to-end via catalog_runtime tests with the right
+   fixture.  Smoke pins the no-arg helper signature. *)
+(* Smoke for [Cascade_metrics.on_cascade_invariant_violation].
+   Natural code path is reachable only if [Cascade_fsm] violates
+   its [accept_on_exhaustion:false] contract — by design it
+   should never fire in production.  Smoke pins the no-arg helper
+   signature so the defensive call-site never silently
+   dead-codes. *)
+(* Smoke for [Cascade_metrics.on_cascade_metrics_eviction].  The
+   natural code path requires a cascade-counter LRU eviction —
+   exercised end-to-end via cascade_legacy_runner regression
+   harness with > cascade_max_keys distinct cascade names.  Smoke
+   pins the no-arg helper signature. *)
+(* Smoke for [Cascade_metrics.on_max_tokens_clamped].  Natural
+   code path requires a provider with a non-None ceiling lower
+   than the operator's [max_tokens] — exercised end-to-end in
+   the inference suite.  Smoke pins the no-arg helper signature. *)
+(* Smoke + label-stability for
+   [Cascade_metrics.on_cascade_audit_failure].  Two documented
+   stage labels match the two exception arms in
+   [Cascade_legacy_runner].  Pinning both keeps the canonical set
+   in lockstep with the call sites. *)
+(* Smoke for [Cascade_metrics.on_local_context_clamped].  Natural
+   code path requires a cascade with pure-local labels and
+   max_context > small_local_floor — best exercised end-to-end in
+   the cascade_runtime regression harness.  Smoke pins the no-arg
+   helper signature. *)
+(* Iter 50 coverage guard, iter 51 SSOT refactor: every cascade
+   counter in [Cascade_metrics.all_cascade_counters] must be
+   registered at process startup (iter 43 infrastructure policy).
+
+   With iter 51, the list lives in [Cascade_metrics] itself
+   ([val all_cascade_counters : (string * string) list]) and
+   [register_all] iterates over it.  This test imports the same
+   list, so a forgotten step is structurally impossible:
+   to add a counter, you append one entry to the SSOT list and
+   both [register_all] and this test pick it up. *)
+let test_register_all_covers_every_cascade_counter () =
+  List.iter
+    (fun (name, _help) ->
+      match Masc_mcp.Prometheus.get_metric_value name () with
+      | Some _ -> ()
+      | None ->
+        failf
+          "iter-43 register_all coverage gap: metric %S not \
+           registered at startup. The [Cascade_metrics] SSOT \
+           list iteration should have caught this; check the \
+           Prometheus init order." name)
+    Masc_mcp.Cascade_metrics.all_cascade_counters;
+  (* Sanity floor: at least the iter 2-49 set must be present.
+     The exact count grows with future iters; raise this floor
+     when intentional. *)
+  let n = List.length Masc_mcp.Cascade_metrics.all_cascade_counters in
+  check bool
+    (Printf.sprintf "all_cascade_counters has >= 43 entries (got %d)" n)
+    true
+    (n >= 43)
+
+let test_local_context_clamped_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_local_context_clamped ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_cascade_audit_failure_documented_stages_are_callable () =
+  Masc_mcp.Cascade_metrics.on_cascade_audit_failure
+    ~stage:"store_creation";
+  Masc_mcp.Cascade_metrics.on_cascade_audit_failure
+    ~stage:"append";
+  check bool "both documented stages callable without raising"
+    true true
+
+let test_max_tokens_clamped_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_max_tokens_clamped ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_cascade_metrics_eviction_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_cascade_metrics_eviction ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_cascade_invariant_violation_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_cascade_invariant_violation ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_profile_registration_failure_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_profile_registration_failure ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_discovery_refresh_exception_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_discovery_refresh_exception ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_partial_eio_context_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_partial_eio_context ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_runtime_mcp_legacy_strip_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_runtime_mcp_legacy_strip ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_fallback_hint_invalid_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_fallback_hint_invalid ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_resolve_live_fallback_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_resolve_live_fallback ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_weighted_item_dropped_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_weighted_item_dropped
+    ~reason:"missing_or_empty_model";
+  Masc_mcp.Cascade_metrics.on_weighted_item_dropped
+    ~reason:"invalid_value_type";
+  check bool "both documented reasons callable without raising"
+    true true
+
+let test_route_binding_dropped_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_route_binding_dropped
+    ~reason:"invalid_value";
+  Masc_mcp.Cascade_metrics.on_route_binding_dropped
+    ~reason:"empty_key_or_target";
+  check bool "both documented reasons callable without raising"
+    true true
+
+let test_capability_mismatch_zero_is_no_op_and_positive_callable () =
+  Masc_mcp.Cascade_metrics.on_capability_mismatch ~count:0;
+  Masc_mcp.Cascade_metrics.on_capability_mismatch ~count:2;
+  check bool "zero is no-op and positive is callable without raising"
+    true true
+
+let test_deprecated_profile_name_filter_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_deprecated_profile_name_filter
+    ~name:"default";
+  Masc_mcp.Cascade_metrics.on_deprecated_profile_name_filter
+    ~name:"keeper_unified";
+  check bool "representative deprecated names callable without raising"
+    true true
+
+let test_route_resolve_fallback_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_route_resolve_fallback
+    ~reason:"catalog_unvalidated";
+  Masc_mcp.Cascade_metrics.on_route_resolve_fallback
+    ~reason:"target_not_in_catalog";
+  check bool "both documented reasons callable without raising"
+    true true
+
+let test_llama_model_not_discovered_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_llama_model_not_discovered ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_context_capability_drift_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_context_capability_drift
+    ~provider:"smoke_test_provider_iter28";
+  check bool "single-label provider helper callable" true true
+
+let test_discovered_context_below_floor_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_discovered_context_below_floor ();
+  check bool "no-arg helper callable without raising" true true
+
+let test_max_context_fallback_documented_sites_are_callable () =
+  Masc_mcp.Cascade_metrics.on_max_context_fallback
+    ~site:"label_no_provider_name";
+  Masc_mcp.Cascade_metrics.on_max_context_fallback
+    ~site:"label_unregistered_scheme";
+  Masc_mcp.Cascade_metrics.on_max_context_fallback
+    ~site:"primary_no_available";
+  Masc_mcp.Cascade_metrics.on_max_context_fallback
+    ~site:"cascade_max_no_available";
+  check bool "all four documented site labels callable without raising"
+    true true
+
+let test_default_label_fallback_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_default_label_fallback
+    ~cascade:"smoke_test_cascade_iter25" ~reason:"no_execution_labels";
+  Masc_mcp.Cascade_metrics.on_default_label_fallback
+    ~cascade:"smoke_test_cascade_iter25" ~reason:"local_cascade_no_local";
+  check bool "both documented reasons callable without raising"
+    true true
+
+let test_sticky_expiry_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_sticky_expiry
+    ~cascade:"smoke_test_cascade_iter24";
+  check bool "single-label cascade helper callable" true true
+
+let test_sticky_drift_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_sticky_drift
+    ~cascade:"smoke_test_cascade_iter23";
+  check bool "single-label cascade helper callable" true true
+
+let test_strategy_starvation_guard_documented_strategies_are_callable () =
+  Masc_mcp.Cascade_metrics.on_strategy_starvation_guard
+    ~cascade:"smoke_test_cascade_iter22" ~strategy:"circuit_breaker_cycling";
+  Masc_mcp.Cascade_metrics.on_strategy_starvation_guard
+    ~cascade:"smoke_test_cascade_iter22" ~strategy:"priority_tier";
+  check bool "both documented strategy labels callable without raising"
+    true true
+
+let test_provider_cooldown_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_provider_cooldown
+    ~provider:"smoke_test_provider_iter20" ~reason:"failure_threshold";
+  Masc_mcp.Cascade_metrics.on_provider_cooldown
+    ~provider:"smoke_test_provider_iter20" ~reason:"soft_rate_limit";
+  Masc_mcp.Cascade_metrics.on_provider_cooldown
+    ~provider:"smoke_test_provider_iter20" ~reason:"hard_quota";
+  Masc_mcp.Cascade_metrics.on_provider_cooldown
+    ~provider:"smoke_test_provider_iter20" ~reason:"terminal_failure";
+  check bool "all four documented reasons callable without raising"
+    true true
+
+let test_ordering_health_widening_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_ordering_health_widening
+    ~cascade:"smoke_test_cascade_iter18";
+  check bool "single-label cascade helper callable" true true
+
+let test_auto_expansion_fanout_zero_is_no_op_and_positive_callable () =
+  Masc_mcp.Cascade_metrics.on_auto_expansion_fanout
+    ~cascade:"smoke_test_cascade_iter15" ~fanout:0;
+  Masc_mcp.Cascade_metrics.on_auto_expansion_fanout
+    ~cascade:"smoke_test_cascade_iter15" ~fanout:4;
+  check bool "zero and positive fanout both callable without raising"
+    true true
+
+let test_parse_weighted_entry_with_drop_metric_contract () =
+  let ok_entry : Masc_mcp.Cascade_config_loader.weighted_entry =
+    { model = "ollama:qwen3.5:35b-a3b-nvfp4"
+    ; weight = 1
+    ; supports_tool_choice = None
+    ; secondary = None
+    ; secondary_supports_tool_choice = None
+    }
+  in
+  let drop_entry : Masc_mcp.Cascade_config_loader.weighted_entry =
+    { ok_entry with model = "no-colon-syntax-iter14" }
+  in
+  let ok_result =
+    Masc_mcp.Cascade_config.parse_weighted_entry_with_drop_metric
+      ~cascade:"smoke_test_cascade_iter14"
+      ok_entry
+  in
+  let drop_result =
+    Masc_mcp.Cascade_config.parse_weighted_entry_with_drop_metric
+      ~cascade:"smoke_test_cascade_iter14"
+      drop_entry
+  in
+  check bool "valid entry returns Some _" true (Option.is_some ok_result);
+  check bool "invalid-syntax entry returns None" true (Option.is_none drop_result)
+
+let test_provider_filter_widening_helper_callable () =
+  Masc_mcp.Cascade_metrics.on_provider_filter_widening
+    ~cascade:"smoke_test_cascade";
+  check bool "single-label cascade helper callable" true true
+
+let test_validated_with_rejections_helper_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_validated_with_rejections
+    ~reason:"fresh_partial_rejection";
+  Masc_mcp.Cascade_metrics.on_validated_with_rejections
+    ~reason:"stale_partial_rejection_cached";
+  check bool "both documented reasons callable without raising"
+    true true
+
+let test_resolve_failure_helper_documented_reasons_are_callable () =
+  Masc_mcp.Cascade_metrics.on_resolve_failure
+    ~cascade:"smoke_test_cascade" ~reason:"lookup_failed";
+  Masc_mcp.Cascade_metrics.on_resolve_failure
+    ~cascade:"smoke_test_cascade" ~reason:"provider_filter_rejected";
+  Masc_mcp.Cascade_metrics.on_resolve_failure
+    ~cascade:"smoke_test_cascade" ~reason:"no_callable_providers";
+  check bool "all three documented reasons callable without raising"
+    true true
+
+let test_route_config_error_helper_zero_is_no_op_and_positive_callable () =
+  Masc_mcp.Cascade_metrics.on_route_config_error
+    ~error_type:"missing_target_profile" ~count:0;
+  Masc_mcp.Cascade_metrics.on_route_config_error
+    ~error_type:"missing_target_profile" ~count:2;
+  Masc_mcp.Cascade_metrics.on_route_config_error
+    ~error_type:"unknown_route_key" ~count:0;
+  Masc_mcp.Cascade_metrics.on_route_config_error
+    ~error_type:"unknown_route_key" ~count:1;
+  check bool "both error_type labels callable with zero and positive"
+    true true
+
+let test_provider_health_probe_error_metric_name_is_exported () =
+  let name = Masc_mcp.Prometheus.metric_provider_health_probe_error in
+  check string "metric name is the documented total"
+    "masc_provider_health_probe_error_total"
+    name;
+  (* And the call site shape used in record_probe_metrics is callable
+     without raising. *)
+  Masc_mcp.Prometheus.inc_counter
+    name
+    ~labels:
+      [ ("provider_name", "smoke_probe_kind")
+      ; ("profile_name", "smoke_probe_profile")
+      ]
+    ();
+  check bool "inc_counter callable with both labels" true true
+
+(* Regression guard for [Serving_last_known_good] entry + recovery
+   transitions.  Previously these transitions happened silently:
+   [inspect_active] would flip a Validated cache into LKG (or back)
+   without log or Prometheus signal, leaving operators unaware that
+   the catalog had drifted into a degraded state.
+
+   The catalog runtime now ticks
+   [masc_cascade_serving_last_known_good_total{reason}] on every LKG
+   entry and [masc_cascade_degraded_recovery_total] on every
+   recovery (the latter renamed from [lkg_recovery] in iter 16 after
+   iter 11 broadened the detection to include partial recovery) —
+   plus a single WARN at entry transition and INFO at recovery
+   transition (not on steady-state replays).
+
+   This test pins the state-machine itself: valid -> invalid (LKG)
+   -> valid (recovery).  The metric counters themselves aren't
+   asserted (they're process-global and shared across the suite);
+   we rely on coverage from the state transitions to exercise the
+   counter call sites. *)
+let test_serving_last_known_good_entry_and_recovery () =
+  with_temp_dir "cascade-lkg" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path minimal_toml;
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  with_config_dir config_dir @@ fun () ->
+  (* Step 1: valid TOML -> Validated, primes the cache. *)
+  (match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+   | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) -> ()
+   | Ok _ -> fail "step 1: expected Validated state"
+   | Error rejection ->
+     failf "step 1: unexpected Error: %s"
+       (Yojson.Safe.to_string
+          (Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection)));
+  (* Step 2: replace TOML with a syntactically invalid file and
+     advance mtime so the catalog/loader caches miss.  Should land
+     on Serving_last_known_good with the cached snapshot. *)
+  write_file toml_path "[broken\nthis is not valid toml syntax";
+  Masc_mcp.Cascade_config_loader.invalidate_cache_entry toml_path;
+  let t1 = Unix.gettimeofday () +. 2.0 in
+  Unix.utimes toml_path t1 t1;
+  (match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+   | Ok (Masc_mcp.Cascade_catalog_runtime.Serving_last_known_good _) -> ()
+   | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) ->
+     fail "step 2: expected LKG, got Validated"
+   | Ok (Validated_with_rejections _) ->
+     fail "step 2: expected LKG, got Validated_with_rejections"
+   | Error _ -> fail "step 2: expected LKG, got Error");
+  (* Step 3: restore valid TOML, advance mtime, expect recovery
+     transition LKG -> Validated. *)
+  write_file toml_path minimal_toml;
+  Masc_mcp.Cascade_config_loader.invalidate_cache_entry toml_path;
+  let t2 = Unix.gettimeofday () +. 4.0 in
+  Unix.utimes toml_path t2 t2;
+  match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+  | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) -> ()
+  | _ -> fail "step 3: expected Validated after recovery"
+
+(* Regression guard for the [load_toml_in_memory] race-aware rewrite.
+   The previous implementation rendered TOML first and stat'd second,
+   which meant a cache-hit path still paid the full parse cost.  The
+   new pre-stat fast path returns the cached JSON without re-rendering
+   when the mtime is unchanged, and produces fresh content (with cache
+   refresh) when the mtime advances.  Pin both behaviors here. *)
+let test_loader_cache_hits_when_mtime_unchanged () =
+  with_temp_dir "cascade-loader-cache" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path minimal_toml;
+  match Masc_mcp.Cascade_config_loader.load_catalog_source toml_path with
+  | Error msg -> failf "first load failed: %s" msg
+  | Ok first ->
+    (match Masc_mcp.Cascade_config_loader.load_catalog_source toml_path with
+     | Error msg -> failf "second load failed: %s" msg
+     | Ok second ->
+       (* Cache hit must return the same in-memory JSON value (physical
+          equality is the strongest possible signal that no re-parse
+          happened; we accept structural equality to stay tolerant if
+          the loader ever swaps in a deep copy). *)
+       check string "cache hit returns identical content"
+         (Yojson.Safe.to_string first)
+         (Yojson.Safe.to_string second))
+
+let test_loader_refreshes_when_mtime_advances () =
+  with_temp_dir "cascade-loader-refresh" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path minimal_toml;
+  (match Masc_mcp.Cascade_config_loader.load_catalog_source toml_path with
+   | Error msg -> failf "first load failed: %s" msg
+   | Ok _ -> ());
+  (* Replace content and advance mtime past the cache entry. *)
+  write_file
+    toml_path
+    {|
+[other_profile]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|};
+  let now = Unix.gettimeofday () +. 2.0 in
+  Unix.utimes toml_path now now;
+  match Masc_mcp.Cascade_config_loader.load_catalog_source toml_path with
+  | Error msg -> failf "post-update load failed: %s" msg
+  | Ok refreshed ->
+    let json_str = Yojson.Safe.to_string refreshed in
+    check bool "fresh content reflects new profile" true
+      (contains_substring json_str "other_profile");
+    check bool "stale profile name is gone" false
+      (contains_substring json_str "big_three_models")
+
 let () =
   run "cascade_toml_materialization"
     [
@@ -603,5 +1289,146 @@ let () =
             test_runtime_rewrites_drifted_json_from_toml;
           test_case "invalid toml blocks runtime without stale json fallback"
             `Quick test_invalid_toml_blocks_runtime_without_using_stale_json;
+        ] );
+      ( "loader_cache",
+        [
+          test_case "cache hits when mtime unchanged" `Quick
+            test_loader_cache_hits_when_mtime_unchanged;
+          test_case "refreshes when mtime advances" `Quick
+            test_loader_refreshes_when_mtime_advances;
+        ] );
+      ( "lkg_transitions",
+        [
+          test_case "valid -> invalid (LKG) -> valid (recovery)" `Quick
+            test_serving_last_known_good_entry_and_recovery;
+        ] );
+      ( "metrics_smoke",
+        [
+          test_case "profile_candidate_drop helpers do not throw" `Quick
+            test_profile_candidate_drop_helpers_do_not_throw;
+          test_case
+            "resolve_provider_leak: zero is no-op, positive callable"
+            `Quick
+            test_resolve_provider_leak_helper_zero_is_no_op_and_positive_callable;
+          test_case
+            "provider_health_probe_error metric name + call shape" `Quick
+            test_provider_health_probe_error_metric_name_is_exported;
+          test_case
+            "route_config_error: zero is no-op, both labels callable" `Quick
+            test_route_config_error_helper_zero_is_no_op_and_positive_callable;
+          test_case
+            "resolve_failure: all three documented reasons callable" `Quick
+            test_resolve_failure_helper_documented_reasons_are_callable;
+          test_case
+            "validated_with_rejections: both documented reasons callable"
+            `Quick
+            test_validated_with_rejections_helper_documented_reasons_are_callable;
+          test_case
+            "provider_filter_widening: cascade label helper callable" `Quick
+            test_provider_filter_widening_helper_callable;
+          test_case
+            "parse_weighted_entry_with_drop_metric: option contract preserved"
+            `Quick
+            test_parse_weighted_entry_with_drop_metric_contract;
+          test_case
+            "auto_expansion_fanout: zero is no-op, positive callable" `Quick
+            test_auto_expansion_fanout_zero_is_no_op_and_positive_callable;
+          test_case
+            "ordering_health_widening: cascade label helper callable" `Quick
+            test_ordering_health_widening_helper_callable;
+          test_case
+            "provider_cooldown: all four documented reasons callable" `Quick
+            test_provider_cooldown_documented_reasons_are_callable;
+          test_case
+            "strategy_starvation_guard: both documented strategies callable"
+            `Quick
+            test_strategy_starvation_guard_documented_strategies_are_callable;
+          test_case
+            "sticky_drift: cascade label helper callable" `Quick
+            test_sticky_drift_helper_callable;
+          test_case
+            "sticky_expiry: cascade label helper callable" `Quick
+            test_sticky_expiry_helper_callable;
+          test_case
+            "default_label_fallback: both documented reasons callable"
+            `Quick
+            test_default_label_fallback_documented_reasons_are_callable;
+          test_case
+            "max_context_fallback: all four documented sites callable"
+            `Quick
+            test_max_context_fallback_documented_sites_are_callable;
+          test_case
+            "discovered_context_below_floor: helper callable" `Quick
+            test_discovered_context_below_floor_helper_callable;
+          test_case
+            "context_capability_drift: provider label helper callable" `Quick
+            test_context_capability_drift_helper_callable;
+          test_case
+            "llama_model_not_discovered: helper callable" `Quick
+            test_llama_model_not_discovered_helper_callable;
+          test_case
+            "route_resolve_fallback: both documented reasons callable"
+            `Quick
+            test_route_resolve_fallback_documented_reasons_are_callable;
+          test_case
+            "deprecated_profile_name_filter: representative names callable"
+            `Quick
+            test_deprecated_profile_name_filter_helper_callable;
+          test_case
+            "capability_mismatch: zero is no-op, positive callable" `Quick
+            test_capability_mismatch_zero_is_no_op_and_positive_callable;
+          test_case
+            "route_binding_dropped: both documented reasons callable" `Quick
+            test_route_binding_dropped_documented_reasons_are_callable;
+          test_case
+            "weighted_item_dropped: both documented reasons callable" `Quick
+            test_weighted_item_dropped_documented_reasons_are_callable;
+          test_case
+            "resolve_live_fallback: helper callable" `Quick
+            test_resolve_live_fallback_helper_callable;
+          test_case
+            "fallback_hint_invalid: helper callable" `Quick
+            test_fallback_hint_invalid_helper_callable;
+          test_case
+            "runtime_mcp_legacy_strip: helper callable" `Quick
+            test_runtime_mcp_legacy_strip_helper_callable;
+          test_case
+            "partial_eio_context: helper callable" `Quick
+            test_partial_eio_context_helper_callable;
+          test_case
+            "discovery_refresh_exception: helper callable" `Quick
+            test_discovery_refresh_exception_helper_callable;
+          test_case
+            "profile_registration_failure: helper callable" `Quick
+            test_profile_registration_failure_helper_callable;
+          test_case
+            "cascade_invariant_violation: helper callable" `Quick
+            test_cascade_invariant_violation_helper_callable;
+          test_case
+            "cascade_metrics_eviction: helper callable" `Quick
+            test_cascade_metrics_eviction_helper_callable;
+          test_case
+            "max_tokens_clamped: helper callable" `Quick
+            test_max_tokens_clamped_helper_callable;
+          test_case
+            "cascade_audit_failure: both documented stages callable"
+            `Quick
+            test_cascade_audit_failure_documented_stages_are_callable;
+          test_case
+            "local_context_clamped: helper callable" `Quick
+            test_local_context_clamped_helper_callable;
+          test_case
+            "register_all covers every iter-2-49 counter"
+            `Quick
+            test_register_all_covers_every_cascade_counter;
+        ] );
+      ( "secondary_resolver_error_paths",
+        [
+          test_case
+            "unknown cascade name -> Error (lookup_failed path)" `Quick
+            test_secondary_resolver_unknown_cascade_returns_error;
+          test_case
+            "empty cascade -> Error (no_callable_providers path)" `Quick
+            test_secondary_resolver_empty_cascade_returns_error;
         ] );
     ]

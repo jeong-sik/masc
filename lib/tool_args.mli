@@ -2,8 +2,11 @@
 (** Tool_args — tool-convention argument extraction wrappers over
     {!Safe_ops} plus canonical error/OK response helpers.
 
-    All [tool_*.ml] files should [open Tool_args] instead of defining
-    local helpers.
+    All [tool_*.ml] files must [open Tool_args] and call
+    {!error_response} / {!ok_response} / {!error_response_typed} instead
+    of defining local [json_error]/[json_ok] helpers — those local
+    helpers drift in error_code presence, status spelling, and field
+    ordering, and are forbidden.
 
     {b Signature convention}: [get_TYPE args key default] (positional,
     args first) — bridges tool-file convention to the labeled

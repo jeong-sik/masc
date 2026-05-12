@@ -43,12 +43,8 @@ type bench_sample = {
   error : string option;
 }
 
-let json_error message =
-  Yojson.Safe.to_string
-    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
-
-let json_ok fields =
-  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
+let json_error = Tool_args.error_response
+let json_ok = Tool_args.ok_response
 
 let int_opt_to_json = Json_util.int_opt_to_json
 let string_opt_to_json = Json_util.string_opt_to_json

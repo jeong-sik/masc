@@ -34,8 +34,7 @@ let result_of_json ~tool_name ~start_time = function
   | Ok json ->
       Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
   | Error message ->
-      Tool_result.error ~tool_name ~start_time
-        (Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
+      Tool_result.error ~tool_name ~start_time (Tool_args.error_response message)
 
 let schema_properties entries = `Assoc entries
 

@@ -153,7 +153,31 @@ for ml in "${KEEPER_DIR}"/*.ml "${KEEPER_DIR}"/*.mli; do
     fi
     drift_count=$((drift_count + 1))
 
-  done < <(grep -oE '\[(type )?[a-z_]+\][^][]*line[s ]+[0-9]+' "${ml}" || true)
+    # Multi-line scan (iter 95 R-1.c): a citation like
+    #   "[run_keeper_cycle]
+    #    (line 1042+)"
+    # where the bracketed symbol and the `line N` mention sit on adjacent
+    # lines was previously invisible — `grep -oE` is single-line.  This awk
+    # pass reads the whole file and walks all matches of the same shape
+    # bounded to AT MOST ONE intervening newline (no over-spanning across
+    # paragraphs).  Newlines inside the match are collapsed to spaces
+    # before sed extracts `sym` / `cited_line`, so the existing extractors
+    # keep working.  Same regex; awk operates on the whole file via RS.
+  done < <(awk 'BEGIN{RS="\0"} {
+    s = $0
+    while (match(s, /\[(type )?[a-z_]+\][^][\n]*(\n[[:space:]]*[^][\n]*)?line[s ]+[0-9]+/)) {
+      hit = substr(s, RSTART, RLENGTH)
+      # Reject matches that span OCaml comment boundaries `*) ... (*`
+      # (e.g. `[source]` in one comment followed by an unrelated
+      # `KeeperTurnCycle.tla lines 189` in the next comment).
+      if (hit !~ /\*\)/ && hit !~ /\(\*/) {
+        gsub(/\n/, " ", hit)
+        gsub(/[[:space:]]+/, " ", hit)
+        print hit
+      }
+      s = substr(s, RSTART + RLENGTH)
+    }
+  }' "${ml}")
 done
 
 if [[ "${drift_count}" -gt 0 ]]; then

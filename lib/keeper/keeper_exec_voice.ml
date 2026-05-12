@@ -40,12 +40,10 @@ let handle_keeper_voice_tool
          with
          | Ok json -> Yojson.Safe.to_string json
          | Error err ->
-           Yojson.Safe.to_string
-             (`Assoc
-                 [ "status", `String "error"
-                 ; "agent_id", `String meta.name
-                 ; "message", `String err
-                 ]))
+           Tool_args.error_response_with
+             [ "agent_id", `String meta.name
+             ; "message", `String err
+             ])
       | _ ->
         Yojson.Safe.to_string (keeper_text_fallback_json ~agent_id:meta.name ~message))
   | "keeper_voice_listen" ->
@@ -60,22 +58,18 @@ let handle_keeper_voice_tool
      with
      | Ok json -> Yojson.Safe.to_string json
      | Error err ->
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "status", `String "error"
-             ; "error", `String err
-             ; "agent_id", `String meta.name
-             ]))
+       Tool_args.error_response_with
+         [ "error", `String err
+         ; "agent_id", `String meta.name
+         ])
   | "keeper_voice_agent" ->
     (match Voice_bridge.get_agent_voice ~agent_id:meta.name with
      | Ok json -> Yojson.Safe.to_string json
      | Error err ->
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "status", `String "error"
-             ; "agent_id", `String meta.name
-             ; "message", `String err
-             ]))
+       Tool_args.error_response_with
+         [ "agent_id", `String meta.name
+         ; "message", `String err
+         ])
   | "keeper_voice_sessions" ->
     let mgr = Keeper_voice_local.get_session_manager () in
     let sessions = Voice_session_manager.list_sessions mgr in

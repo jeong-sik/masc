@@ -52,6 +52,14 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-inline-ok-envelope.sh
 
+  no-inline-error-envelope:
+    name: No inline error-envelope literals (T30)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/no-inline-error-envelope.sh
+
   godfile-size-regression:
     name: Godfile size
     runs-on: ubuntu-latest

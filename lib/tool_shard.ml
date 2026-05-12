@@ -2102,13 +2102,12 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : bool * Yojson.Saf
               ; "shard", `String shard_name
               ; "active_shards", `List (List.map (fun s -> `String s) next_shards)
               ] )
-        | Error msg -> false, `Assoc [ "status", `String "error"; "message", `String msg ])
+        | Error msg ->
+          false, Tool_args.error_assoc [ "message", `String msg ])
      | _ ->
        ( false
-       , `Assoc
-           [ "status", `String "error"
-           ; "message", `String "agent_name and shard_name are required"
-           ] ))
+       , Tool_args.error_assoc
+           [ "message", `String "agent_name and shard_name are required" ] ))
   | _ -> false, `String "Unknown tool"
 ;;
 

@@ -108,8 +108,14 @@ let option_field name = function
   | None -> (name, `Null)
 
 let diagnose_cascade_catalog ~active_config_root =
+  (* RFC-0058 §9: the on-disk cascade source is [cascade.toml]; the
+     legacy [cascade.json] sibling is no longer read.  Probing for
+     [cascade.json] here made the catalog diagnostic a no-op in every
+     post-§9 config root (the file is absent), so the dashboard's
+     cascade-health panel showed green without ever validating the
+     catalog. *)
   let config_path =
-    Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
+    Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
   in
   if not (Env_config_core.existing_file config_path) then
     []
@@ -159,7 +165,7 @@ let cascade_catalog_next_actions ~config_path issues =
     in
     [
       primary_action;
-      "Rerun `masc-mcp doctor config` after editing cascade.json.";
+      "Rerun `masc-mcp doctor config` after editing cascade.toml.";
     ]
 
 let current_inputs ~base_path_input ~default_base_path () =
@@ -293,7 +299,7 @@ let analyze_with (inputs : inputs) =
     diagnose_cascade_catalog ~active_config_root
   in
   let cascade_config_path =
-    Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
+    Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
   in
   let warnings =
     [

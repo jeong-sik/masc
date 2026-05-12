@@ -112,8 +112,12 @@ let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
       repo_config_fallback_enabled = false;
     }
 
-let initialize_config_root ?(cascade_json="{}") root =
-  write_file (Filename.concat root "cascade.json") cascade_json;
+(* RFC-0058 §9: cascade.toml is the only on-disk cascade source.  The
+   default [""] is the smallest valid TOML document (an empty table),
+   which the materializer renders to an empty catalog — the "no presets
+   configured" baseline. *)
+let initialize_config_root ?(cascade_toml="") root =
+  write_file (Filename.concat root "cascade.toml") cascade_toml;
   mkdir_p (Filename.concat root "personas")
 
 let test_invalid_explicit_config_dir () =
@@ -186,18 +190,14 @@ let test_broken_cascade_catalog_surfaces_errors () =
   let base_path = Filename.concat dir "base" in
   let config_root = Filename.concat base_path ".masc/config" in
   initialize_config_root
-    ~cascade_json:{|{
-  "bad_provider_models": [
-    "__nonexistent_provider_sentinel__:fake-model"
-  ],
-  "bad_strategy_models": [
-    "claude_code:claude-haiku-4-5-20251001"
-  ],
-  "bad_strategy_strategy": "priority_tier",
-  "bad_strategy_tiers": [
-    ["codex_cli:auto"]
-  ]
-}|}
+    ~cascade_toml:{|[bad_provider]
+models = ["__nonexistent_provider_sentinel__:fake-model"]
+
+[bad_strategy]
+models = ["claude_code:claude-haiku-4-5-20251001"]
+strategy = "priority_tier"
+tiers = [["codex_cli:auto"]]
+|}
     config_root;
   let report =
     Config_doctor.analyze_with
@@ -219,7 +219,7 @@ let test_broken_cascade_catalog_surfaces_errors () =
        report.warnings);
   check bool "next action mentions doctor rerun" true
     (list_contains_substring
-       ~needle:"Rerun `masc-mcp doctor config` after editing cascade.json."
+       ~needle:"Rerun `masc-mcp doctor config` after editing cascade.toml."
        report.next_actions)
 
 let test_non_runtime_required_cascade_catalog_warns () =
@@ -227,19 +227,17 @@ let test_non_runtime_required_cascade_catalog_warns () =
   let base_path = Filename.concat dir "base" in
   let config_root = Filename.concat base_path ".masc/config" in
   initialize_config_root
-    ~cascade_json:{|{
-  "default_models": [
-    "claude_code:claude-haiku-4-5-20251001"
-  ],
-  "default_strategy": "priority_tier",
-  "default_tiers": [
-    ["claude_code:claude-haiku-4-5-20251001"],
-    ["gemini_cli:not-configured-here"]
-  ],
-  "manual_trial_models": [
-    "claude_code:claude-haiku-4-5-20251001"
-  ]
-}|}
+    ~cascade_toml:{|[default]
+models = ["claude_code:claude-haiku-4-5-20251001"]
+strategy = "priority_tier"
+tiers = [
+  ["claude_code:claude-haiku-4-5-20251001"],
+  ["gemini_cli:not-configured-here"],
+]
+
+[manual_trial]
+models = ["claude_code:claude-haiku-4-5-20251001"]
+|}
     config_root;
   let report =
     Config_doctor.analyze_with

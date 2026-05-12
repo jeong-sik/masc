@@ -6,7 +6,7 @@
 
 ## Discovery
 
-KOAS models the OAS Bridge timeout/error boundary with eight state variables, eleven actions, and a *paired and verified* bug model fixture.  It is the strongest spec discipline encountered in the loop so far (`Bug Model` invariant pattern from `instructions/software-development.md`).  But the spec's distinctive runtime concepts — `external_side_effect_committed`, `continue_gate_required`, `context_polluted` — appear *zero times* anywhere in the codebase.
+KOAS models the OAS Bridge timeout/error boundary with eight state variables, eleven actions, and a *paired and verified* bug model fixture.  It is the strongest spec discipline encountered in the loop so far (`Bug Model` invariant pattern from the operator-local `~/me/instructions/software-development.md` — not an in-repo file).  But the spec's distinctive runtime concepts — `external_side_effect_committed`, `continue_gate_required`, `context_polluted` — appear *zero times* anywhere in the codebase.
 
 | Spec concept | OCaml runtime location | Coverage |
 |--------------|------------------------|----------|
@@ -20,7 +20,7 @@ KOAS models the OAS Bridge timeout/error boundary with eight state variables, el
 
 Cross-checked: `rg` across all `lib/` returns zero matches for any of the four "Missing" concepts.
 
-Two OCaml modules touch the OAS surface:
+Three OCaml modules touch the OAS surface:
 
 | Module | LOC | Role |
 |--------|-----|------|
@@ -38,7 +38,7 @@ iter 58 KRL was *design-ground without runtime*.  KOAS is the same gap shape, bu
 |--------|-------------------|--------------------|
 | Spec LOC | 327 | 252 |
 | Runtime LOC matching | 91 (event queue) + 3037 (unified turn), 0 spec-concept hits | ~30 (error_phase enum) + small compat/checkpoint, 0 spec-concept hits |
-| Bug-Model fixture | one buggy cfg, no verified counter-example documented | **paired and verified**: `KeeperOASAdvanced-buggy.cfg` with `CancelledNeverAbsorbed` invariant; memory `reference_masc_mcp_integrated_improvement_design_audit.md` records "Clean 56 states/no error. Buggy: invariant violated in 3 steps" |
+| Bug-Model fixture | one buggy cfg, no verified counter-example documented | **paired and verified**: `KeeperOASAdvanced-buggy.cfg` with `CancelledNeverAbsorbed` invariant; operator-local memory note `reference_masc_mcp_integrated_improvement_design_audit.md` (not in-repo) records "Clean 56 states/no error. Buggy: invariant violated in 3 steps" |
 | Spec discipline | leads-to properties only | bug-model + safety + liveness all paired |
 | Implementation tracking | MASC task-134 (explicit) | none cited |
 
@@ -71,7 +71,7 @@ These are call-outs, **not fixes in this audit**.
 |-----|------|-------------|
 | **M-2.a** | LOW doc | iter 57 K-2.d / iter 59 L-2.a shape — KOAS preamble Runtime status block stating "spec is production-ready but runtime is missing the `external_side_effect_committed` / `continue_gate_required` distinction".  12th honest-doc datapoint candidate. |
 | **M-2.b** | MED runtime | introduce `Oas_bridge.external_commit_witness` type and threading: a token a tool emits when it has committed an outside-world mutation, carried through the cancellation/error handlers so the bridge can choose between AutonomyFallback and NeedsContinueGate.  Maps spec actions 6b/8b to OCaml.  Needs RFC. |
-| **M-2.c** | MED runtime | linter / test fixture mirroring `CancelledNeverAbsorbed`: a unit test that wraps a fake bridge with try/with-Cancelled→Error, asserts the parent switch sees Cancelled propagation.  Closes the bug-model loop on the OCaml side. |
+| **M-2.c** | MED test | linter / test fixture mirroring `CancelledNeverAbsorbed`: a unit test that wraps a fake bridge with try/with-Cancelled→Error, asserts the parent switch sees Cancelled propagation. No production behavior change — test/lint only.  Closes the bug-model loop on the OCaml side. |
 | **M-2.d** | LOW TLC refresh | re-run `KeeperOASAdvanced.cfg` and `-buggy.cfg` inside the loop to confirm the "56 states / no error, buggy violates in 3 steps" numbers cited in memory still hold (memory snapshot is 2026-05-05). |
 
 ## Pattern catalog update
@@ -99,7 +99,7 @@ KOAS is *the same shape* as KRL on the runtime axis (no matching code) but *the 
 | `rg -l 'external_side_effect_committed\|continue_gate_required\|context_polluted' lib/` | 0 matches |
 | `find lib/ -name 'oas_*' -o -name 'keeper_oas_*'` | `oas_compat/`, `oas_execution_error_phase.ml`, `keeper_oas_checkpoint.ml` |
 
-No spec, OCaml, or .cfg mutation by this PR.  +95 LOC docs/.
+No spec, OCaml, or .cfg mutation by this PR — new audit memo under `docs/tla-audit/` only.
 
 ## RFC trail
 

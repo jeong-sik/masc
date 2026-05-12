@@ -59,12 +59,12 @@ let test_run_returns_typed_result () =
   match Docker_client_real.run (sample_plan ()) with
   | Ok _ -> ()                                     (* daemon present *)
   | Error Docker_client.Daemon_unreachable -> ()   (* daemon / CLI missing *)
+  | Error Docker_client.Exec_timeout -> ()         (* WEXITED 124 — Process_eio timeout *)
   | Error Docker_client.Cleanup_failed
   | Error Docker_client.Image_pull_failed
   | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
   | Error Docker_client.Probe_format_drift ->
-    fail "run should only surface Ok exec_result or Error Daemon_unreachable"
+    fail "run should only surface Ok | Daemon_unreachable | Exec_timeout"
 
 (* Phase 3b-iv.2.2 — exec is no longer a placeholder. It spawns
    [docker exec <container> sh -lc <cmd>]. The test environment may
@@ -79,12 +79,12 @@ let test_exec_returns_typed_result () =
   with
   | Ok _ -> ()                                    (* daemon present *)
   | Error Docker_client.Daemon_unreachable -> ()  (* daemon / CLI missing *)
+  | Error Docker_client.Exec_timeout -> ()        (* WEXITED 124 — Process_eio timeout *)
   | Error Docker_client.Cleanup_failed
   | Error Docker_client.Image_pull_failed
   | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
   | Error Docker_client.Probe_format_drift ->
-    fail "exec should only surface Ok exec_result or Error Daemon_unreachable"
+    fail "exec should only surface Ok | Daemon_unreachable | Exec_timeout"
 
 (* Phase 3b-iv.2.4 — ps_query is no longer a placeholder. It spawns
    [docker ps -a --format '{{json .}}' --filter ...] and parses each
@@ -100,11 +100,11 @@ let test_ps_query_returns_typed_result () =
   | Ok _ -> ()
   | Error Docker_client.Daemon_unreachable -> ()
   | Error Docker_client.Probe_format_drift -> ()
+  | Error Docker_client.Exec_timeout -> ()  (* WEXITED 124 — Process_eio timeout *)
   | Error Docker_client.Cleanup_failed
   | Error Docker_client.Image_pull_failed
-  | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout ->
-    fail "ps_query should only surface Ok | Daemon_unreachable | Probe_format_drift"
+  | Error Docker_client.Container_oom ->
+    fail "ps_query should only surface Ok | Daemon_unreachable | Probe_format_drift | Exec_timeout"
 
 (* Phase 3b-iv.2.1 — rm is no longer a placeholder; it spawns
    [docker rm -f <name>]. The test environment may or may not have a
@@ -114,12 +114,12 @@ let test_rm_returns_typed_error () =
   match Docker_client_real.rm (sample_container ()) with
   | Error Docker_client.Daemon_unreachable
   | Error Docker_client.Cleanup_failed -> ()  (* env-dependent path *)
+  | Error Docker_client.Exec_timeout -> ()    (* WEXITED 124 — Process_eio timeout *)
   | Ok () -> fail "unexpected Ok — derived container name should not exist on host"
   | Error Docker_client.Image_pull_failed
   | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
   | Error Docker_client.Probe_format_drift ->
-    fail "rm should only surface Daemon_unreachable or Cleanup_failed"
+    fail "rm should only surface Daemon_unreachable | Cleanup_failed | Exec_timeout"
 
 (* ── Functor instantiation works with Real ───────────────────── *)
 
@@ -129,28 +129,28 @@ let test_executor_with_real_returns_typed_result () =
   match Real_executor.execute_plan (sample_plan ()) with
   | Ok _ -> ()
   | Error Docker_client.Daemon_unreachable -> ()
+  | Error Docker_client.Exec_timeout -> ()
   | Error Docker_client.Cleanup_failed
   | Error Docker_client.Image_pull_failed
   | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
   | Error Docker_client.Probe_format_drift ->
-    fail "executor with Real should only surface Ok or Daemon_unreachable"
+    fail "executor with Real should only surface Ok | Daemon_unreachable | Exec_timeout"
 
 let () =
   run "Docker_client_real (Phase 3b-iv.2.4 — all 4 functions wired)"
     [
       ( "S placeholder",
         [
-          test_case "run → Ok exec_result | Error Daemon_unreachable"
+          test_case "run → Ok | Daemon_unreachable | Exec_timeout"
             `Quick
             test_run_returns_typed_result;
-          test_case "exec → Ok exec_result | Error Daemon_unreachable"
+          test_case "exec → Ok | Daemon_unreachable | Exec_timeout"
             `Quick
             test_exec_returns_typed_result;
-          test_case "ps_query → Ok records | Daemon_unreachable | Probe_format_drift"
+          test_case "ps_query → Ok | Daemon_unreachable | Probe_format_drift | Exec_timeout"
             `Quick
             test_ps_query_returns_typed_result;
-          test_case "rm → typed error (Daemon_unreachable | Cleanup_failed)"
+          test_case "rm → Daemon_unreachable | Cleanup_failed | Exec_timeout"
             `Quick
             test_rm_returns_typed_error;
         ] );

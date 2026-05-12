@@ -18,6 +18,9 @@
       [Process_eio.run_argv_with_status]. Exit-status mapping:
       {ul
         {- [WEXITED 0] → [Ok ()]}
+        {- [WEXITED 124] (synthesised by [Process_eio] when
+           [?timeout_sec] elapses before the child exits) →
+           [Error Exec_timeout]}
         {- [WEXITED 127] (spawn failure: docker CLI missing or exec
            error) → [Error Daemon_unreachable]}
         {- any other [WEXITED n] → [Error Cleanup_failed]}
@@ -32,12 +35,16 @@
       distinction vs [rm] matters: a non-zero exit *inside the
       container* is the *command's* result, returned as
       [Ok exec_result { exit_code = n; stdout; stderr }] — not a
-      daemon error. Only daemon-level statuses become
+      daemon error. Daemon-level statuses become
       [Error Daemon_unreachable]:
       {ul
         {- [WEXITED 125] (daemon error)}
         {- [WEXITED 127] (docker CLI missing / spawn failure)}
         {- [WSIGNALED _] / [WSTOPPED _]}}
+      [WEXITED 124] (synthesised by [Process_eio] on timeout) surfaces
+      as [Error Exec_timeout] — it would be misleading to return
+      [Ok exec_result { exit_code = 124 }] for a request that never
+      actually ran to completion inside the container.
       All other [WEXITED n] values surface as
       [Ok { exit_code = n; stdout; stderr }].
     - [run] — wired: spawns
@@ -59,6 +66,7 @@
            list — unparseable lines are dropped silently; see the
            [parse_ps_line] inline comment for the operational
            rationale)}
+        {- [WEXITED 124] (Process_eio timeout) → [Error Exec_timeout]}
         {- [WEXITED 125] / [WEXITED 127] / signal / stopped →
            [Error Daemon_unreachable]}
         {- any other [WEXITED n] → [Error Probe_format_drift]

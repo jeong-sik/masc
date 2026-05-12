@@ -19,6 +19,7 @@
 let map_exit_status_for_rm (status : Unix.process_status) =
   match status with
   | Unix.WEXITED 0 -> Ok ()
+  | Unix.WEXITED 124 -> Error Docker_client.Exec_timeout
   | Unix.WEXITED 127 -> Error Docker_client.Daemon_unreachable
   | Unix.WEXITED _ -> Error Docker_client.Cleanup_failed
   | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error Docker_client.Daemon_unreachable
@@ -33,6 +34,7 @@ let map_status_to_exec_result
       Unix.process_status * string * string)
   =
   match status with
+  | Unix.WEXITED 124 -> Error Docker_client.Exec_timeout
   | Unix.WEXITED 125 | Unix.WEXITED 127 ->
     Error Docker_client.Daemon_unreachable
   | Unix.WEXITED code ->
@@ -131,6 +133,7 @@ let ps_query ~labels =
   in
   match status with
   | Unix.WEXITED 0 -> Ok (parse_ps_output stdout)
+  | Unix.WEXITED 124 -> Error Docker_client.Exec_timeout
   | Unix.WEXITED 125 | Unix.WEXITED 127 ->
     Error Docker_client.Daemon_unreachable
   | Unix.WEXITED _ -> Error Docker_client.Probe_format_drift

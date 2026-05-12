@@ -33,7 +33,7 @@
 \* near the turn-loop head).  See
 \* docs/tla-audit/kpto-r10-post-turn-lineref-symbol-anchor-2026-05-12.md
 \*
-\*   spec variable / action          | OCaml location (path.ml:symbol)                                         | semantic
+\*   spec variable / action          | OCaml location (path.ml:symbol; or a control-flow position when there's no single symbol) | semantic
 \*   --------------------------------+-------------------------------------------------------------------------+---------
 \*   phase                           | implicit (control-flow position inside apply_post_turn_lifecycle_with_resilience_handles)        | lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — (post-compaction → rollover → wirein-chain tail)
 \*   compaction_decision             | post_turn_lifecycle.compaction.applied/failure_reason/trigger           | lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the post_turn_lifecycle record's `compaction = { attempted; applied; failure_reason; trigger; ... }` construction
@@ -42,7 +42,7 @@
 \*   rollover_decision               | Keeper_rollover.maybe_rollover_oas_handoff outcome                      | lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the Keeper_rollover.maybe_rollover_oas_handoff call
 \*   wirein_order                    | Seq of atoms appended at each apply_*_wirein call                       | lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the apply_*_wirein chain (apply_autonomous_wirein → apply_resilience_wirein → apply_tool_emission_wirein → apply_multimodal_wirein) at the tail
 \*   lineage_appended_before_persist | structural — implied by the rollover-handoff handler ordering           | lib/keeper/keeper_rollover.ml:maybe_rollover_oas_handoff (handoff write path)
-\*   checkpoint_persisted            | downstream caller (autonomous_runner) post-checkpoint write              | lib/keeper/keeper_unified_turn.ml — consumer of post_turn_lifecycle (not a single symbol — control-flow position after the call)
+\*   checkpoint_persisted            | downstream post-checkpoint write (in the autonomous-runner path)         | lib/keeper/keeper_unified_turn.ml:dispatch_post_turn_lifecycle_events — the post_turn_lifecycle consumer right after the apply_post_turn_lifecycle_with_resilience_handles call; the checkpoint write itself is further downstream (control-flow position, no single symbol)
 \*
 \* Provider opacity (G3 acceptance gate):
 \*   blocker_klass is modeled as an abstract symbol set ({"none",
@@ -85,7 +85,7 @@ BlockerKlassSet ==
 ASSUME
     /\ MaxSteps \in Nat /\ MaxSteps >= 1
 
-\* The canonical wirein order pinned at keeper_post_turn.ml — the apply_*_wirein chain (apply_autonomous_wirein → apply_resilience_wirein → apply_tool_emission_wirein → apply_multimodal_wirein) at the tail of apply_post_turn_lifecycle_with_resilience_handles.
+\* The canonical wirein order is pinned at lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the apply_*_wirein chain (apply_autonomous_wirein → apply_resilience_wirein → apply_tool_emission_wirein → apply_multimodal_wirein) at its tail.
 \* Reordering this constant is itself a regression — the spec must
 \* observe THIS order, not a configurable one.
 CanonicalWireinOrder == <<"A5", "A6", "K4b", "K1">>
@@ -192,7 +192,7 @@ StampBlocker ==
                    lineage_appended_before_persist, checkpoint_persisted>>
 
 \* Rollover decision.  Mirrors the dispatch at
-\* keeper_post_turn.ml — the Keeper_rollover.maybe_rollover_oas_handoff call in apply_post_turn_lifecycle_with_resilience_handles → Keeper_rollover.maybe_rollover_oas_handoff.
+\* lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the Keeper_rollover.maybe_rollover_oas_handoff call inside it (callee: lib/keeper/keeper_rollover.ml:maybe_rollover_oas_handoff).
 \* Go fires only when a non-"none" klass was stamped (the rollover gate
 \* consults blocker_class_indicates_overflow on the typed enum, which
 \* requires klass /= "none" by construction — see Track A PR #14613).
@@ -300,7 +300,7 @@ Spec == Init /\ [][Next]_vars
 \* ── Bug actions (each models a class of regression) ─────
 
 \* BugAction #1: A6 fires before A5 — the pinned order at
-\* keeper_post_turn.ml — the apply_*_wirein chain (apply_autonomous_wirein → apply_resilience_wirein → apply_tool_emission_wirein → apply_multimodal_wirein) at the tail of apply_post_turn_lifecycle_with_resilience_handles is removed and the wireins are
+\* lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the apply_*_wirein chain (apply_autonomous_wirein → apply_resilience_wirein → apply_tool_emission_wirein → apply_multimodal_wirein) at its tail is removed and the wireins are
 \* permuted.
 BugWireinOutOfOrder ==
     /\ phase = "rolled_over"
@@ -374,7 +374,7 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \* ── Invariants ──────────────────────────────────────────
 
 \* I1: every prefix of wirein_order matches the canonical sequence.
-\* Pinned by comment at keeper_post_turn.ml — the "Strict ordering ... Do not reorder" comment above the apply_*_wirein chain ("Do not reorder").
+\* Pinned by the "Strict ordering ... Do not reorder" comment in lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles, above the apply_*_wirein chain.
 WireinOrderPinned ==
     \A i \in 1..Len(wirein_order):
         wirein_order[i] = CanonicalWireinOrder[i]

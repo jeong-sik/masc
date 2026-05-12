@@ -221,10 +221,13 @@ let classify_shell_command cmd =
     (fun entry ->
        if Util.string_contains ~needle:entry.pattern cmd
        then (
-         match entry.effect_class, !max_effect with
-         | External_effect, _ -> max_effect := External_effect
-         | Local_mutation, Read_only -> max_effect := Local_mutation
-         | _ -> ()))
+         match entry.effect_class with
+         | External_effect -> max_effect := External_effect
+         | Local_mutation ->
+           (match !max_effect with
+            | Read_only -> max_effect := Local_mutation
+            | Local_mutation | External_effect | Shell_dynamic -> ())
+         | Read_only | Shell_dynamic -> ()))
     shell_pattern_entries;
   if has_redirect && !max_effect = Read_only then max_effect := Local_mutation;
   !max_effect
@@ -346,11 +349,16 @@ let evidence_effect_class_of_tool_class = function
 ;;
 
 let violation_kind_for_class st cls =
-  match st.effective_mode, cls with
-  | Execution_mode.Diagnose, (Local_mutation | External_effect) ->
-    Some Mutating_in_diagnose
-  | Execution_mode.Draft, External_effect -> Some External_in_draft
-  | _ ->
+  match st.effective_mode with
+  | Execution_mode.Diagnose ->
+    (match cls with
+     | Local_mutation | External_effect -> Some Mutating_in_diagnose
+     | Read_only | Shell_dynamic -> None)
+  | Execution_mode.Draft ->
+    (match cls with
+     | External_effect -> Some External_in_draft
+     | Read_only | Local_mutation | Shell_dynamic -> None)
+  | Execution_mode.Execute ->
     if List.mem "workspace_only" st.allowed_mutations && cls = External_effect
     then Some Scope_violation
     else None
@@ -442,6 +450,15 @@ let check_violation st ~tool_use_id ~tool_name ~input ~turn =
 
 (* ── Hooks ───────────────────────────────────────────────────────── *)
 
+(* Each handler below receives the framework's shared [Hooks.hook_event]
+   variant (14 constructors) but the runtime only ever invokes a given
+   closure with its corresponding constructor (the [before_turn] closure
+   with [BeforeTurn], etc.). The trailing [| _ -> ()] / [| _ -> Continue]
+   is defensive dead-code for that contract; enumerating all 14
+   [hook_event] constructors in every handler would add churn on each
+   agent_sdk hook addition for zero behaviour change, so warning 4 is
+   suppressed at each match per RFC-0071 §3.4.1 (skip-rest is semantically
+   future-proof). *)
 let hooks st =
   let open Hooks in
   { empty with
@@ -450,31 +467,36 @@ let hooks st =
         (fun event ->
           (match event with
            | BeforeTurn { turn = 1; _ } ->
-             (match st.review_requirement, st.effective_mode with
-              | Some req, Execution_mode.Execute ->
-                st.review_warning
-                <- Some
-                     (Printf.sprintf
-                        "review_requirement '%s' active but running in Execute mode"
-                        req)
-              | _ -> ())
-           | _ -> ());
+             (match st.review_requirement with
+              | None -> ()
+              | Some req ->
+                (match st.effective_mode with
+                 | Execution_mode.Execute ->
+                   st.review_warning
+                   <- Some
+                        (Printf.sprintf
+                           "review_requirement '%s' active but running in Execute mode"
+                           req)
+                 | Execution_mode.Diagnose | Execution_mode.Draft -> ()))
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   ; pre_tool_use =
       Some
         (fun event ->
-          match event with
-          | PreToolUse { tool_use_id; tool_name; input; turn; _ } ->
-            (match check_violation st ~tool_use_id ~tool_name ~input ~turn with
-             | Some v ->
-               Format.eprintf
-                 "[mode_enforcer] SKIP tool=%s kind=%s mode=%s@."
-                 tool_name
-                 (violation_kind_to_string v.violation_kind)
-                 (Execution_mode.to_string v.effective_mode);
-               Skip
-             | None -> Continue)
-          | _ -> Continue)
+          (match event with
+           | PreToolUse { tool_use_id; tool_name; input; turn; _ } ->
+             (match check_violation st ~tool_use_id ~tool_name ~input ~turn with
+              | Some v ->
+                Format.eprintf
+                  "[mode_enforcer] SKIP tool=%s kind=%s mode=%s@."
+                  tool_name
+                  (violation_kind_to_string v.violation_kind)
+                  (Execution_mode.to_string v.effective_mode);
+                Skip
+              | None -> Continue)
+           | _ -> Continue)
+          [@warning "-4"])
   ; after_turn =
       Some
         (fun event ->
@@ -491,7 +513,8 @@ let hooks st =
                 in
                 st.token_snapshots <- snap :: st.token_snapshots
               | None -> ())
-           | _ -> ());
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   }
 ;;

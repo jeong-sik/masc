@@ -159,7 +159,17 @@ let participant_and_detail_of_event = function
   | Session_failed detail -> None, detail.outcome
 ;;
 
-let anomaly_fields_of_event = function
+(* WORKAROUND: this extractor scrutinises the framework's
+   [Runtime.event_kind] outer variant and two of its anomaly sub-variants
+   ([Runtime.completion_anomaly], [Runtime.persistence_failure_cause]).
+   Only [Agent_completed] / [Agent_failed] events carry anomaly fields and
+   only the [Dropped_output_deltas] / [Persistence_failure] sub-shapes are
+   typed here; all other event kinds and anomaly sub-shapes legitimately
+   fall back to the text heuristic. Enumerating the full external variant
+   surface in three places would add churn on every agent_sdk runtime
+   release for zero coverage gain, so warning 4 is suppressed at the
+   binding per RFC-0071 §3.4.1 (skip-rest is semantically future-proof). *)
+let[@warning "-4"] anomaly_fields_of_event = function
   | Agent_completed detail ->
     let dropped_output_deltas =
       match detail.completion_anomaly with

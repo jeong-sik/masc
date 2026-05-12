@@ -84,7 +84,8 @@ let text (out : verified output) =
   out.response.content
   |> List.filter_map (function
     | Types.Text s -> Some s
-    | _ -> None)
+    | Types.Thinking _ | Types.RedactedThinking _ | Types.ToolUse _ | Types.ToolResult _
+    | Types.Image _ | Types.Document _ | Types.Audio _ -> None)
   |> String.concat "\n"
 ;;
 
@@ -97,7 +98,8 @@ let raw_json (type s) (out : s output) =
     out.response.content
     |> List.filter_map (function
       | Types.Text s -> Some s
-      | _ -> None)
+      | Types.Thinking _ | Types.RedactedThinking _ | Types.ToolUse _ | Types.ToolResult _
+    | Types.Image _ | Types.Document _ | Types.Audio _ -> None)
     |> String.concat "\n"
   in
   `Assoc

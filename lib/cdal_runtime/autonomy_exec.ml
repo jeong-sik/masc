@@ -87,7 +87,7 @@ let validate_config config argv =
     (match config.backend with
      | Argv_prefix [] ->
        Error (invalid_config "backend" "Argv_prefix wrapper must not be empty")
-     | _ -> Ok ())
+     | Argv_prefix (_ :: _) | Direct -> Ok ())
 ;;
 
 let effective_argv ~config ~argv =
@@ -350,10 +350,17 @@ let%test "effective_argv adds cwd wrapper and backend prefix" =
 ;;
 
 let%test "effective_argv rejects process group without wrapper" =
+  (* WORKAROUND: [Error.t] is a deep variant tree; this assertion only
+     cares about one InvalidConfig shape and "any other error" is a test
+     failure, so warning 4 is suppressed on the match rather than
+     enumerating the whole error hierarchy. Root fix: keep using arm-level
+     suppression per RFC-0071 §3.4.1 — error hierarchy enumeration here
+     would add churn on every Error.t change for zero coverage gain. *)
   let config = { default_config with kill_scope = Process_group } in
-  match effective_argv ~config ~argv:[ "cmd" ] with
-  | Error (Error.Config (Error.InvalidConfig { field = "kill_scope"; _ })) -> true
-  | _ -> false
+  (match effective_argv ~config ~argv:[ "cmd" ] with
+   | Error (Error.Config (Error.InvalidConfig { field = "kill_scope"; _ })) -> true
+   | _ -> false)
+  [@warning "-4"]
 ;;
 
 let%test "build_env keeps allowlisted variables and overrides" =
@@ -416,7 +423,8 @@ let%test_unit "run times out and returns Timed_out" =
   | Ok output ->
     (match output.status with
      | Timed_out _ -> ()
-     | status -> failwith ("expected timeout, got " ^ status_to_string status))
+     | (Exit_code _ | Exit_signal _) as status ->
+       failwith ("expected timeout, got " ^ status_to_string status))
   | Error err -> failwith (Error.to_string err)
 ;;
 

@@ -254,7 +254,7 @@ let%test "validate_patch rejects outside allowlist" =
   && List.exists
        (function
          | Outside_allowed_paths "lib/foo.ml" -> true
-         | _ -> false)
+         | Outside_allowed_paths _ | Unsafe_path _ | Banned_addition _ | Empty_patch -> false)
        report.issues
 ;;
 
@@ -274,7 +274,7 @@ let%test "validate_patch rejects parent traversal" =
   && List.exists
        (function
          | Unsafe_path _ -> true
-         | _ -> false)
+         | Outside_allowed_paths _ | Banned_addition _ | Empty_patch -> false)
        report.issues
 ;;
 
@@ -294,7 +294,7 @@ let%test "validate_patch rejects banned addition" =
   && List.exists
        (function
          | Banned_addition { pattern = "ptrace"; _ } -> true
-         | _ -> false)
+         | Banned_addition _ | Unsafe_path _ | Outside_allowed_paths _ | Empty_patch -> false)
        report.issues
 ;;
 
@@ -319,7 +319,7 @@ let%test "validate_patch rejects empty patch" =
   && List.exists
        (function
          | Empty_patch -> true
-         | _ -> false)
+         | Unsafe_path _ | Outside_allowed_paths _ | Banned_addition _ -> false)
        report.issues
 ;;
 
@@ -344,7 +344,7 @@ let has_banned_rm_rf report =
   List.exists
     (function
       | Banned_addition { pattern = "rm -rf /"; _ } -> true
-      | _ -> false)
+      | Banned_addition _ | Unsafe_path _ | Outside_allowed_paths _ | Empty_patch -> false)
     report.issues
 ;;
 
@@ -399,7 +399,7 @@ let%test "normalize still flags mount(" =
   List.exists
     (function
       | Banned_addition { pattern = "mount("; _ } -> true
-      | _ -> false)
+      | Banned_addition _ | Unsafe_path _ | Outside_allowed_paths _ | Empty_patch -> false)
     report.issues
 ;;
 

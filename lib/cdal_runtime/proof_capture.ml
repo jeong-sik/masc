@@ -119,6 +119,14 @@ let complete_pending_tool st ~output ~error =
     st.pending_tool <- None
 ;;
 
+(* Each handler below receives the framework's shared [Hooks.hook_event]
+   variant (14 constructors) but the runtime only ever invokes a given
+   closure with its corresponding constructor (the [before_turn] closure
+   with [BeforeTurn], etc.). The trailing [| _ -> ()] is defensive
+   dead-code for that contract; enumerating all 14 [hook_event]
+   constructors in every handler would add churn on each agent_sdk hook
+   addition for zero behaviour change, so warning 4 is suppressed at each
+   match per RFC-0071 §3.4.1 (skip-rest is semantically future-proof). *)
 let hooks st =
   let open Hooks in
   { before_turn =
@@ -127,7 +135,8 @@ let hooks st =
           (match event with
            | BeforeTurn { turn = 1; _ } -> st.started_at <- Unix.gettimeofday ()
            | BeforeTurn _ -> ()
-           | _ -> ());
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   ; before_turn_params = None
   ; after_turn =
@@ -143,7 +152,8 @@ let hooks st =
                 ; model_id = response.Types.model
                 ; api_version = None
                 }
-           | _ -> ());
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   ; pre_tool_use =
       Some
@@ -162,7 +172,8 @@ let hooks st =
                   ; batch_size = schedule.batch_size
                   ; concurrency_class = schedule.concurrency_class
                   }
-           | _ -> ());
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   ; post_tool_use =
       Some
@@ -175,7 +186,8 @@ let hooks st =
                | Error { Types.message; _ } -> None, Some message
              in
              complete_pending_tool st ~output:output_str ~error:error_str
-           | _ -> ());
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   ; post_tool_use_failure =
       Some
@@ -183,14 +195,16 @@ let hooks st =
           (match event with
            | PostToolUseFailure { error; _ } ->
              complete_pending_tool st ~output:None ~error:(Some error)
-           | _ -> ());
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   ; on_stop =
       Some
         (fun event ->
           (match event with
            | OnStop _ -> st.ended_at <- Unix.gettimeofday ()
-           | _ -> ());
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   ; on_idle = None
   ; on_idle_escalated = None
@@ -199,7 +213,8 @@ let hooks st =
         (fun event ->
           (match event with
            | OnError _ -> st.ended_at <- Unix.gettimeofday ()
-           | _ -> ());
+           | _ -> ())
+          [@warning "-4"];
           Continue)
   ; on_tool_error = None
   ; pre_compact = None

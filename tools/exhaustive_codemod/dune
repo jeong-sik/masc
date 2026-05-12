@@ -8,10 +8,11 @@
 ; triage / rewriter land in subsequent PRs (RFC-0071 §3.2 WS-3, PR-2..5).
 ;
 ; Dependencies:
-;   - compiler-libs.common: Cmt_format.read_cmt, Typedtree (stdlib distribution)
+;   - compiler-libs.common: Cmt_format.read, Typedtree (stdlib distribution)
 ;   - str: regex for path filters
 ; PR-2 adds ppxlib (already in masc_mcp.opam as transitive dep).
 
 (executable
- (name main)
+ (name exhaustive_codemod)
+ (public_name exhaustive_codemod)
  (libraries compiler-libs.common str unix))

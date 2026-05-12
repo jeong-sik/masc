@@ -6,7 +6,7 @@
 
    Scope of THIS scaffold:
    - CLI: --root <dir> --out <diff-dir> [--check]
-   - .cmt discovery + load (Cmt_format.read_cmt)
+   - .cmt discovery + load (Cmt_format.read)
    - Smoke pass: count loaded .cmt files, no AST walk yet.
 
    Subsequent PRs (RFC-0071 §3.2 WS-3 plan):
@@ -40,11 +40,24 @@ let parse_args () =
     prerr_endline usage;
     exit 2
   ) usage;
-  if !root = "" then begin
-    prerr_endline "error: --root is required";
-    prerr_endline usage;
-    exit 2
-  end;
+  (match !mode with
+   | Generate_diffs ->
+     if !root = "" then begin
+       prerr_endline "error: --root is required (generate mode)";
+       prerr_endline usage;
+       exit 2
+     end;
+     if !out = "" then begin
+       prerr_endline "error: --out is required (generate mode)";
+       prerr_endline usage;
+       exit 2
+     end
+   | Check_idempotent ->
+     if !root = "" then begin
+       prerr_endline "error: --root is required";
+       prerr_endline usage;
+       exit 2
+     end);
   (!root, !out, !mode)
 
 (* .cmt discovery — walk root/_build/default/lib/ recursively. *)
@@ -71,12 +84,23 @@ let is_excluded path =
   contains "/lib/exec/parser/" || contains "/test/"
 
 (* Load one .cmt; return None on parse failure (e.g. non-cmt file or
-   corrupt). PR-2 will surface this list to the scanner. *)
+   corrupt). Emits a warning on unexpected errors so silent failures
+   are visible. PR-2 will surface this list to the scanner. *)
 let load_cmt path : Cmt_format.cmt_infos option =
   try
     let _, cmt = Cmt_format.read path in
     cmt
-  with _ -> None
+  with
+  | Sys_error msg ->
+    Printf.eprintf "warning: cannot read %s: %s\n" path msg;
+    None
+  | Failure msg ->
+    Printf.eprintf "warning: parse failed for %s: %s\n" path msg;
+    None
+  | exn ->
+    Printf.eprintf "warning: unexpected error loading %s: %s\n"
+      path (Printexc.to_string exn);
+    None
 
 let run_generate root out =
   let lib_build = Filename.concat root "_build/default/lib" in

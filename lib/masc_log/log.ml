@@ -345,21 +345,20 @@ module Ring = struct
        loaded a file 9 hours skewed from the today computation. *)
     let yesterday = format_utc_date_of (Time_compat.now () -. 86400.0) in
     let load_file path =
-      if Sys.file_exists path then begin
-        let ic = open_in path in
-        let entries = ref [] in
-        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-          (try while true do
-             let line = input_line ic in
-             if String.length line > 0 then
-               (match entry_of_json (Yojson.Safe.from_string line) with
-                | Some e -> entries := e :: !entries
-                | None -> ()
-                | exception Yojson.Json_error _ -> ())
-           done with End_of_file -> ());
-          List.rev !entries
-        )
-      end else []
+      (* Stream the JSONL log via [Fs_compat.fold_jsonl_lines] so a
+         large rotated log does not load fully into a [String] before
+         per-line parsing.  The fold returns [init] for missing files
+         (parity with the old [Sys.file_exists] check), JSON parse
+         errors are skipped with a stderr line, and the resulting
+         accumulator is built in reverse and flipped once at the end. *)
+      Fs_compat.fold_jsonl_lines
+        ~init:[]
+        ~f:(fun acc ~line_no:_ json ->
+          match entry_of_json json with
+          | Some e -> e :: acc
+          | None -> acc)
+        path
+      |> List.rev
     in
     let yesterday_entries = load_file (log_file_path dir yesterday) in
     let today_entries = load_file (log_file_path dir today) in

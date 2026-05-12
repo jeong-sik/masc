@@ -8,6 +8,33 @@
 \* duplicate the safety invariants in KeeperTurnFSM / KeeperEventQueue /
 \* KeeperTaskAcquisition — those remain the authoritative safety SSOT.
 \*
+\* Runtime status (2026-05-12, iter 59 L-2.a):
+\*   This spec is a DESIGN GROUND, not a description of running code.
+\*   iter 58 #14898 audit confirmed via rg across lib/keeper/*.ml that
+\*   the KRL reaction/receipt FSM (L1-L5 leads-to claims) has NO
+\*   matching runtime: verifier_reaction, receipt_issued, task_state
+\*   are truly absent everywhere; goal_phase appears as data shape
+\*   in lib/goal/ + adjacent modules but not as the per-stimulus FSM
+\*   the spec models; board_cursor exists as opaque cursor state in
+\*   lib/keeper/keeper_registry.{ml,mli} (get_board_cursor /
+\*   set_board_cursor) + lib/keeper/keeper_world_observation.ml, but
+\*   without the cursor-ack semantics L5 models (no ack tracking).
+\*   Of the five OCaml "mirror" entry points cited below, two exist
+\*   as generic plumbing without matching the spec's per-stimulus FSM,
+\*   and three do not exist at the cited path (see citation table
+\*   below — TBD entries).  Of L1-L5 only L1 has partial coverage
+\*   (queue exists, no receipt FSM).
+\*
+\*   Implementation tracking owner: MASC task
+\*   `goal-world-reaction-liveness/task-134`.  Until that work lands,
+\*   the invariants below describe the intended contract, not the
+\*   running behaviour.  Reader should not assume any L1-L5 claim is
+\*   currently enforced in production.
+\*
+\*   Full implementation gap matrix + L-2.{a..d} fix-PR candidates:
+\*   docs/tla-audit/krl-l1-reaction-spec-implementation-gap-2026-05-12.md
+\*   (iter 58 #14898).
+\*
 \* MASC tracking: goal-world-reaction-liveness / task-134
 \*
 \* Five liveness claims (L1–L5):
@@ -42,12 +69,26 @@
 \*                                                       violated.
 \* Both must hold.
 \*
-\* Mirrors (OCaml runtime entry points):
-\*   stimulus / board queue   — lib/keeper/keeper_event_queue.ml
-\*   verification FSM         — lib/keeper/keeper_unified_turn.ml (verification gate)
-\*   goal phase               — lib/keeper/goal_store.ml
-\*   task FSM                 — lib/keeper/keeper_task_dispatch.ml
-\*   board cursor             — lib/keeper/keeper_board_observer.ml
+\* Mirrors (OCaml runtime entry points; ✓ = present, TBD = not yet
+\* implemented per iter 58 #14898 audit):
+\*   stimulus / board queue   — ✓ lib/keeper/keeper_event_queue.ml (queue
+\*                              plumbing only; no per-stimulus receipt FSM
+\*                              as the spec models)
+\*   verification FSM         — ✓ lib/keeper/keeper_unified_turn.ml
+\*                              (terminal_reason machinery; no
+\*                              verification_state / approve / reject
+\*                              concepts as the spec models)
+\*   goal phase               — TBD: lib/keeper/goal_store.ml not yet
+\*                              implemented (MASC task-134 owns this)
+\*   task FSM                 — TBD: lib/keeper/keeper_task_dispatch.ml
+\*                              not yet implemented (MASC task-134)
+\*   board cursor             — PARTIAL: lib/keeper/keeper_registry.{ml,mli}
+\*                              (get_board_cursor / set_board_cursor /
+\*                              board_cursor_ts) + keeper_world_observation.ml
+\*                              track opaque cursor state, but without the
+\*                              cursor-ack token L5 models.  Per-stimulus
+\*                              board observer (keeper_board_observer.ml)
+\*                              not yet implemented (MASC task-134).
 
 EXTENDS TLC
 

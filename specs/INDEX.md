@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-12T00:16:59Z (HEAD: f3e4a5e1e)
+Generated: 2026-05-12T01:35:13Z (HEAD: 62be39f)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -117,7 +117,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| KeeperAdmissionLiveness.tla | KeeperAdmissionLiveness | manual | 3 | 2 | clean={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} buggy-2={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} buggy={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} | d0de975d7f83 |
+| KeeperAdmissionLiveness.tla | KeeperAdmissionLiveness | manual | 3 | 2 | clean={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} buggy-2={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} buggy={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} | 318ebc8ebd0f |
 | KeeperApprovalQueue.tla | KeeperApprovalQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | a18102f83db7 |
 | KeeperCascadeAttemptFSM.tla | KeeperCascadeAttemptFSM | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | a6708aff38f9 |
 | KeeperCascadeLifecycle.tla | KeeperCascadeLifecycle | manual | 2 | 1 | clean={inv:Safety, prop:TryingEventuallyTerminates, prop:FinalizingEventuallyClears} buggy={inv:CascadeSelectionRequiresMeasurement} | 9134dad5df91 |
@@ -139,7 +139,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperOASAdvanced.tla | KeeperOASAdvanced | manual | 2 | 1 | clean={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:CommittedSideEffectsRequireContinueGate, prop:StrictStopPreemption, prop:EventualTermination} buggy={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:StrictStopPreemption, prop:EventualTermination} | f8cc8eaeef07 |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | c53dded69dc1 |
 | KeeperPostTurnOrchestration.tla | KeeperPostTurnOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 0c26d77292b4 |
-| KeeperReactionLiveness.tla | KeeperReactionLiveness | manual | 2 | 1 | clean={inv:Safety, prop:BoardEnqueueLeadsToReceipt, prop:VerificationLeadsToReaction, prop:GoalVerificationLeadsToResolution, prop:TaskTransitionLeadsToReceipt, prop:CursorAdvancementRequiresAck} buggy={inv:TypeOK, prop:BoardEnqueueLeadsToReceipt} | 6d49d1fb3824 |
+| KeeperReactionLiveness.tla | KeeperReactionLiveness | manual | 2 | 1 | clean={inv:Safety, prop:BoardEnqueueLeadsToReceipt, prop:VerificationLeadsToReaction, prop:GoalVerificationLeadsToResolution, prop:TaskTransitionLeadsToReceipt, prop:CursorAdvancementRequiresAck} buggy={inv:TypeOK, prop:BoardEnqueueLeadsToReceipt} | 353fe806cd4a |
 | KeeperReconcileLiveness.tla | KeeperReconcileLiveness | manual | 2 | 1 | clean={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness, prop:CompactingResolves, prop:HandoffResolves, prop:DrainingResolves} buggy={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness} | 62638a411215 |
 | KeeperRolloverDecision.tla | KeeperRolloverDecision | manual | 2 | 1 | clean={inv:SignalGateOverflowOnly} buggy={inv:SignalGateOverflowOnly} | 71d1c2f76746 |
 | KeeperSocialModelMagenticLedger.tla | KeeperSocialModelMagenticLedger | manual | 2 | 1 | clean={inv:TypeOK, inv:ClassifyTypeOK, inv:StalledNeedsGoalOrFailure, prop:ProgressDominates, prop:ReactiveDominatesIdleTimeout, prop:StalledStickyWithGoal, prop:QuietWhenNoDrivers} buggy={inv:StalledNeedsGoalOrFailureMustHold} | 4adca73b6508 |

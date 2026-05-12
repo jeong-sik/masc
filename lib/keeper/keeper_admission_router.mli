@@ -32,7 +32,7 @@
       module's [type decision] is the result of one [schedule] call,
       not an FSM — three discrete outcomes, not five.  The mapping
       is therefore "spec transition" ↔ "OCaml call result", spread
-      across one [schedule] call and one paired [release_bucket]
+      across one [schedule] call and one paired [Keeper_admission_runtime.release_bucket]
       callback.  Reader who expects 5↔5 will be confused; the
       correspondence is:
 
@@ -44,7 +44,7 @@
         Waiting -> Waiting     | [schedule] returns [Wait] (caller enqueues)
         Waiting -> Surface     | [schedule] returns [Surface _] (operator alert)
         Dispatched -> Working  | (caller's LLM call; opaque to this module)
-        Working -> Done        | caller invokes [release_bucket]
+        Working -> Done        | caller invokes [Keeper_admission_runtime.release_bucket]
 
       The five spec states are the caller's *external* FSM; this
       module is a stateless oracle that drives one transition per

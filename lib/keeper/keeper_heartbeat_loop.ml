@@ -1556,18 +1556,19 @@ let record_keepalive_stage_timing
    specs/keeper-state-machine/KeeperHeartbeat.tla (Cycle 7 / Tier B1,
    PR #11408).
 
-   Spec line 4 cites this function "at line 1815"; the actual current
-   line is 1828 (drift of +13 since spec was authored, due to upstream
-   changes in this module).  Future spec PRs may re-anchor; until
-   then this comment is the authoritative reverse-direction citation.
+   The spec preamble cites this module by function name
+   ([run_heartbeat_loop]); it used to carry a line number but iter 64
+   N-2.c removed it (function names are stable, line numbers drift —
+   guarded by scripts/audit-ocaml-spec-nav-line-refs.sh, iter 72 R-1.a).
+   This comment is the authoritative reverse-direction citation.
 
    Action mapping (TLA+ -> OCaml):
      WakeupSignal     external code sets [wakeup] Atomic to true
                       (e.g., wakeup_keeper / operator_resume).
-     HeartbeatTick    [interruptible_sleep] consumes the wakeup via
-                      [Atomic.compare_and_set wakeup true false] at
-                      this file line 589, then the loop body services
-                      the pending event.
+     HeartbeatTick    [Keeper_keepalive_signal.interruptible_sleep]
+                      consumes the wakeup via
+                      [Atomic.compare_and_set wakeup true false], then
+                      the loop body services the pending event.
      TurnComplete     turn body finishes; loop returns to next sleep
                       cycle.
      MissedWakeup     bug action — the wakeup is observed and cleared

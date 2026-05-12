@@ -2,23 +2,16 @@
 # for scripts/audit-ocaml-spec-nav-line-refs.sh.  Each non-comment line:
 # "<repo-relative-path>:<symbol>".
 #
-# These are the `[symbol] (~line N)` citations in lib/keeper/*.{ml,mli}
-# header docstrings whose line numbers had already drifted when the
-# validator was introduced (iter 72 R-1.a).  Survey + drift figures:
-# docs/tla-audit/ocaml-docstring-lineref-drift-class-2026-05-12.md (iter 71).
-#
-# Drain a line when its fix-PR merges (same convention as the
-# ocaml-phase-count baseline):
-#   - keeper_approval_queue.ml:*           — drained by N-2.e (#14943)
-#   - keeper_execution_receipt.ml:append   — drained by N-2.g (TBD)
-#   - keeper_memory_policy.ml:*            — drained by N-2.f (TBD)
-# Once all are drained the validator enforces zero OCaml-docstring
-# line-ref drift; the `--baseline` flag stays for future transients.
-
-lib/keeper/keeper_approval_queue.ml:submit_and_await
-lib/keeper/keeper_approval_queue.ml:submit_pending
-lib/keeper/keeper_approval_queue.ml:expire_stale
-lib/keeper/keeper_execution_receipt.ml:append
-lib/keeper/keeper_memory_policy.ml:short_term_horizon
-lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind_opt
-lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind
+# STATUS: empty.  iter 72 R-1.a (#14944) introduced the validator with
+# seven grandfathered `[symbol] (~line N)` citations whose line numbers
+# had drifted +29 .. +424; their fix-PRs merged:
+#   keeper_failure_circuit_breaker.ml  — iter 70 #14939 (predates this file)
+#   keeper_approval_queue.ml ×3        — iter 71 N-2.e #14943
+#   keeper_execution_receipt.ml:append — iter 73 N-2.g #14946
+#   keeper_memory_policy.ml ×3         — iter 73 N-2.f #14946
+# iter 74 R-1.b drained the lines, so the validator now enforces zero
+# OCaml-docstring line-ref drift.  Keep this file: the CI step still
+# passes `--baseline <this file>` and the `--baseline` flag works for
+# any future transient grandfathering — add a "<path>:<symbol>" line
+# here, reference the fix-PR in this comment, and remove it once that
+# PR merges (same convention as the ocaml-phase-count baseline).

@@ -1,2 +1,8 @@
 version = 0.29.0
 profile = janestreet
+# RFC-0010: ~85% of .ml/.mli is not ocamlformat-clean under any profile.
+# `profile = janestreet` entered main accidentally in #10633 (2026-04-26)
+# with no migration. `disable` neutralizes formatting repo-wide until a
+# future RFC decides on a big-bang reformat. Remove this line to re-arm
+# ocamlformat (the migration RFC then applies).
+disable = true

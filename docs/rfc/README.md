@@ -55,6 +55,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0007 | Pragmatic `keeper_shell op=gh` Hardening | Draft | f86daea20 2026-04-30 | - |
 | 0008 | `CredentialProvider` Trait (Minimum Viable) | Draft | f86daea20 2026-04-30 | - |
 | 0009 | Cascade Trust Phase 2: Operator Recommendations + Opt-in Persist | Draft | 9faabfadf 2026-04-26 | - |
+| 0010 | ocamlformat config reconciliation | Draft | (this PR) | - |
 | 0012 | Mid-Turn Progress Probe | Draft | 1dd75fd6b 2026-05-06 | - |
 | 0013 | IO-wait Sampler (PR-0.2.E, deferred) | Draft | 5aeb2aab4 2026-04-29 | - |
 | 0017 | OCaml↔CRDT Boundary | Draft | 6aef5b884 2026-04-29 | - |

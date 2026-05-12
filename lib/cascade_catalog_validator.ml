@@ -52,10 +52,21 @@ let discover_profiles_in_json = function
       |> List.sort_uniq String.compare
   | _ -> []
 
-let discover_profiles ~config_path =
-  match Cascade_config_loader.load_catalog_source config_path with
+let discover_profiles_impl ~emit_telemetry ~config_path =
+  let load_catalog_source =
+    if emit_telemetry
+    then Cascade_config_loader.load_catalog_source
+    else Cascade_config_loader.load_catalog_source_for_diagnostics
+  in
+  match load_catalog_source config_path with
   | Ok json -> discover_profiles_in_json json
   | Error _ -> []
+
+let discover_profiles ~config_path =
+  discover_profiles_impl ~emit_telemetry:true ~config_path
+
+let discover_profiles_for_diagnostics ~config_path =
+  discover_profiles_impl ~emit_telemetry:false ~config_path
 
 let model_ids_of_specs (specs : string list) : string list =
   specs
@@ -251,7 +262,7 @@ let snapshot_profile_for ~config_path ~profile =
          snapshot.profiles
      | _ -> None)
 
-let diagnose_profile ~config_path ~profile =
+let diagnose_profile ~emit_telemetry ~config_path ~profile =
   let snapshot_profile = snapshot_profile_for ~config_path ~profile in
   let model_specs =
     match snapshot_profile with
@@ -260,7 +271,12 @@ let diagnose_profile ~config_path ~profile =
         (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
         p.weighted_entries
     | None ->
-      Cascade_config_loader.load_profile_weighted ~config_path ~name:profile
+      (if emit_telemetry
+       then Cascade_config_loader.load_profile_weighted ~config_path ~name:profile
+       else
+         Cascade_config_loader.load_profile_weighted_for_diagnostics
+           ~config_path
+           ~name:profile)
       |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
              entry.model)
   in
@@ -269,7 +285,11 @@ let diagnose_profile ~config_path ~profile =
     | Some (p : Cascade_catalog_runtime.profile_build) ->
       p.required_capability_profile
     | None ->
-      (match Cascade_config_loader.load_catalog ~config_path with
+      (match
+         if emit_telemetry
+         then Cascade_config_loader.load_catalog ~config_path
+         else Cascade_config_loader.load_catalog_for_diagnostics ~config_path
+       with
        | Error _ -> None
        | Ok entries ->
            List.find_map
@@ -312,7 +332,12 @@ let diagnose_profile ~config_path ~profile =
         }
   in
   let strategy_cfg =
-    Cascade_config_loader.resolve_strategy_config ~config_path ~name:profile
+    (if emit_telemetry
+     then Cascade_config_loader.resolve_strategy_config ~config_path ~name:profile
+     else
+       Cascade_config_loader.resolve_strategy_config_for_diagnostics
+         ~config_path
+         ~name:profile)
   in
   let strategy_issue =
     match strategy_cfg.kind with
@@ -355,8 +380,13 @@ let diagnose_profile ~config_path ~profile =
   in
   issues @ capability_issues
 
-let diagnose_catalog ~config_path =
-  match Cascade_config_loader.load_catalog_source config_path with
+let diagnose_catalog_impl ~emit_telemetry ~config_path =
+  let load_catalog_source =
+    if emit_telemetry
+    then Cascade_config_loader.load_catalog_source
+    else Cascade_config_loader.load_catalog_source_for_diagnostics
+  in
+  match load_catalog_source config_path with
   | Error msg ->
       [
         {
@@ -370,7 +400,14 @@ let diagnose_catalog ~config_path =
       ]
   | Ok json ->
       discover_profiles_in_json json
-      |> List.concat_map (fun profile -> diagnose_profile ~config_path ~profile)
+      |> List.concat_map (fun profile ->
+        diagnose_profile ~emit_telemetry ~config_path ~profile)
+
+let diagnose_catalog ~config_path =
+  diagnose_catalog_impl ~emit_telemetry:true ~config_path
+
+let diagnose_catalog_for_diagnostics ~config_path =
+  diagnose_catalog_impl ~emit_telemetry:false ~config_path
 
 let dedupe_keep_order values =
   let seen = Hashtbl.create (List.length values) in

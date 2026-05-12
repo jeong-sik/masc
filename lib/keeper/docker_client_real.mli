@@ -112,3 +112,24 @@ val run_detached_argv
     Mirrors [keeper_turn_sandbox_runtime]'s long-standing EINTR loop
     (the Phase 4.1 cutover deletes that copy in favour of this one). *)
 val is_eintr_127 : Unix.process_status -> string -> bool
+
+(** [is_exec_gate_blocked status out] detects the Exec_gate deny/ask
+    sentinel. The real Docker client maps that host-side gate result to
+    [Daemon_unreachable] rather than treating exit 126 as an
+    in-container command result. *)
+val is_exec_gate_blocked : Unix.process_status -> string -> bool
+
+(** Timeout used by short Docker daemon probes such as [rm],
+    [image_present], and [info_security_options]. *)
+val docker_probe_timeout_sec : unit -> float
+
+(** Timeout used by [exec] session commands. Preserves the 60s shell
+    command budget instead of the short sandbox-preflight budget. *)
+val session_exec_timeout_sec : unit -> float
+
+(** Timeout used by the actual [docker run -d] session start. *)
+val session_start_timeout_sec : unit -> float
+
+(** Timeout used by the short seccomp/runtime preflight before detached
+    session start. *)
+val session_preflight_timeout_sec : unit -> float

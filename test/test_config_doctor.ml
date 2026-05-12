@@ -120,6 +120,10 @@ let initialize_config_root ?(cascade_toml="") root =
   write_file (Filename.concat root "cascade.toml") cascade_toml;
   mkdir_p (Filename.concat root "personas")
 
+let initialize_legacy_json_only_config_root root =
+  write_file (Filename.concat root "cascade.json") "{}";
+  mkdir_p (Filename.concat root "personas")
+
 let test_invalid_explicit_config_dir () =
   with_temp_dir "config-doctor-invalid" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -253,6 +257,29 @@ models = ["claude_code:claude-haiku-4-5-20251001"]
        ~needle:"uses priority_tier, but 1/2 tier(s) collapse after model-id normalization"
        report.warnings)
 
+let test_legacy_json_without_toml_next_action_migrates () =
+  with_temp_dir "config-doctor-legacy-json" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  initialize_legacy_json_only_config_root config_root;
+  let report =
+    Config_doctor.analyze_with
+      (make_inputs ~cwd:dir ~base_path_input:base_path ())
+  in
+  check string "status downgrades to warn" "warn" (status report.status);
+  check bool "legacy json warning present" true
+    (list_contains_substring
+       ~needle:"cascade.json but no cascade.toml"
+       report.warnings);
+  check bool "next action points at migration" true
+    (list_contains_substring
+       ~needle:"Migrate or rename"
+       report.next_actions);
+  check bool "next action names cascade.toml" true
+    (list_contains_substring
+       ~needle:"cascade.toml"
+       report.next_actions)
+
 let fake_docker_missing_image_script =
   "#!/bin/sh\n\
 case \"$1\" in\n\
@@ -329,6 +356,8 @@ let () =
              test_broken_cascade_catalog_surfaces_errors;
            test_case "non-runtime-required cascade catalog warns" `Quick
              test_non_runtime_required_cascade_catalog_warns;
+           test_case "legacy cascade.json without toml gets migration action"
+             `Quick test_legacy_json_without_toml_next_action_migrates;
            test_case "analyze_live surfaces sandbox preflight failure"
              `Quick test_analyze_live_surfaces_sandbox_preflight_failure;
          ]);

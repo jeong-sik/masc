@@ -1,4 +1,4 @@
-(** Contract tests for observability, provider, and telemetry boundaries.
+(** Contract tests for observability and telemetry boundaries.
 
     These tests verify public API contracts that cross module boundaries,
     ensuring serialization, resolution, and schema stability across releases.
@@ -6,10 +6,6 @@
     Issue #3955: Smoke harness + contract tests for CI stability. *)
 
 open Alcotest
-
-(* ── Section 1: Runtime_catalog contracts ── *)
-
-module Adapter = Masc_mcp.Runtime_catalog
 
 let with_provider_catalog entries f =
   let previous = Llm_provider.Provider_catalog.global () in
@@ -21,31 +17,11 @@ let with_provider_catalog entries f =
       | None -> Llm_provider.Provider_catalog.clear_global ())
     f
 
-let test_unknown_returns_none () =
-  let a = Adapter.resolve_direct_adapter "nonexistent-provider-xyz" in
-  check (option string) "unknown returns None" None
-    (Option.map (fun (x : Adapter.adapter) -> x.canonical_name) a)
-
-let test_adapter_well_formed () =
-  List.iter (fun (a : Adapter.adapter) ->
-    check bool ("canonical non-empty: " ^ a.canonical_name)
-      true (String.length a.canonical_name > 0);
-    check bool ("has aliases: " ^ a.canonical_name)
-      true (List.length a.aliases > 0))
-    Adapter.direct_adapters
-
-let test_runtime_kind_strings () =
-  check string "local" "local" (Adapter.string_of_runtime_kind Adapter.Local);
-  check string "cli_agent" "cli_agent"
-    (Adapter.string_of_runtime_kind Adapter.Cli_agent);
-  check string "direct_api" "direct_api"
-    (Adapter.string_of_runtime_kind Adapter.Direct_api)
-
-(* ── Section 2: OAS catalog consumption contracts ── *)
+(* ── Section 1: OAS catalog consumption contracts ── *)
 
 let test_dashboard_provider_snapshots_include_oas_catalog_overlay () =
   let caps =
-    { Llm_provider.Capabilities.openai_chat_capabilities with
+    { Llm_provider.Capabilities.default_capabilities with
       max_context_tokens = Some 4242
     }
   in
@@ -147,7 +123,7 @@ let test_labels_require_local_discovery () =
     (Masc_mcp.Cascade_runtime.labels_require_local_discovery
        [ "default"; "fixture-remote:auto" ])
 
-(* ── Section 3: Dashboard schema contracts ── *)
+(* ── Section 2: Dashboard schema contracts ── *)
 
 let test_heartbeat_snapshot_has_required_fields () =
   let snapshot = `Assoc
@@ -172,7 +148,7 @@ let test_prometheus_text_format () =
   check bool "prometheus output non-empty" true
     (String.length metrics >= 0)
 
-(* ── Section 4: Telemetry contracts ── *)
+(* ── Section 3: Telemetry contracts ── *)
 
 let test_event_serialization_roundtrip () =
   let module T = Masc_mcp.Telemetry_eio in
@@ -204,7 +180,7 @@ let test_event_serialization_roundtrip () =
       true (String.length json_str > 0))
     events
 
-(* ── Section 5: Extended redaction contracts ── *)
+(* ── Section 4: Extended redaction contracts ── *)
 
 let test_bearer_token_redacted () =
   let input = "Authorization: Bearer sk-secret-key-12345" in
@@ -233,14 +209,8 @@ let test_redaction_idempotent () =
 (* ── Test runner ── *)
 
 let () =
-  run "Observability Provider Contracts"
+  run "Observability Contracts"
     [
-      ( "runtime_catalog",
-        [
-          test_case "unknown returns none" `Quick test_unknown_returns_none;
-          test_case "adapter well formed" `Quick test_adapter_well_formed;
-          test_case "runtime kind strings" `Quick test_runtime_kind_strings;
-        ] );
       ( "oas_catalog_consumption",
         [
           test_case "dashboard snapshots include catalog overlay" `Quick

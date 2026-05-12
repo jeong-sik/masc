@@ -1325,7 +1325,7 @@ let auto_label_for_adapter (adapter : adapter) =
     match default_model_label_for_adapter adapter with
     | Ok label -> Some label
     | Error msg ->
-      Log.Misc.warn "[ProviderAdapter] default_model_label_for_adapter failed: %s" msg;
+      Log.Misc.warn "[RuntimeCatalog] default_model_label_for_adapter failed: %s" msg;
       None)
 ;;
 

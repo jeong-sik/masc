@@ -91,7 +91,7 @@ val run_status_json :
 
 (** {1 Provider snapshot inspection (test-visible)}
     Pinned for behaviour-tests under
-    {!test/test_observability_provider_contracts}. *)
+    {!test/test_observability_contracts}. *)
 
 type discovery_info = {
   discovered_model : string option;

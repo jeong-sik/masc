@@ -217,7 +217,7 @@
         test_tool_surface_ssot
         test_keeper_retrieval_quality
         test_observability_redact
-        test_observability_provider_contracts
+        test_observability_contracts
         test_config_doctor
         test_cascade_toml_materialization
         test_cascade_routes_decoder
@@ -464,7 +464,7 @@
           test_tool_surface_ssot
           test_keeper_retrieval_quality
           test_observability_redact
-          test_observability_provider_contracts
+          test_observability_contracts
           test_config_doctor
           test_cascade_toml_materialization
           test_cascade_routes_decoder

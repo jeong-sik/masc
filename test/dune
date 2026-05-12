@@ -595,6 +595,7 @@
         test_keeper_hash_algo
         test_keeper_container_name
         test_keeper_sandbox_oneshot_plan
+        test_keeper_sandbox_session_plan
         test_docker_response
         test_docker_client_mock
         test_docker_client_real
@@ -813,6 +814,7 @@
         test_keeper_hash_algo
         test_keeper_container_name
         test_keeper_sandbox_oneshot_plan
+        test_keeper_sandbox_session_plan
         test_docker_response
         test_docker_client_mock
         test_docker_client_real

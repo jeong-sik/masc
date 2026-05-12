@@ -907,6 +907,67 @@ let witness_to_compaction_stage : packed_compaction_stage -> compaction_stage = 
   | Packed Compaction_done -> Compaction_done
 ;;
 
+(* Diagnostic label using the constructor name (e.g. ["Compaction_done"]).
+   Used by the [Compaction_transition_violation] [Printexc] printer.
+   Distinct from [Keeper_composite_observer.compaction_stage_to_string]
+   which emits a snake_case form for dashboards. *)
+let packed_compaction_stage_label : packed_compaction_stage -> string = function
+  | Packed Compaction_accumulating -> "Compaction_accumulating"
+  | Packed Compaction_compacting -> "Compaction_compacting"
+  | Packed Compaction_done -> "Compaction_done"
+;;
+
+(* RFC-0072 Phase 6: typed error for forbidden compaction-stage transitions.
+   One constructor per of the 3 forbidden pairs in the compaction matrix
+   (3 idempotent + 3 valid cross-state + 3 forbidden = 9 = 3×3).  Mirrors
+   [cascade_transition_spec_violation] / [turn_phase_transition_spec_violation];
+   smaller because the compaction axis has only 3 states. *)
+type compaction_transition_spec_violation =
+  | Accumulating_to_done
+  | Done_to_accumulating
+  | Done_to_compacting
+
+let compaction_transition_spec_violation_to_tag = function
+  | Accumulating_to_done -> "accumulating->done"
+  | Done_to_accumulating -> "done->accumulating"
+  | Done_to_compacting -> "done->compacting"
+;;
+
+(* RFC-0072 Phase 6: typed exception for forbidden compaction transitions.
+   Replaces the prior bare [assert (match ... -> bool)] inside
+   [validate_compaction_transition], whose [Assert_failure] carried only a
+   file/line — not the rejected (from, to) pair.  Mirrors
+   [Cascade_transition_violation] / [Turn_phase_transition_violation]:
+   the typed [compaction_transition_spec_violation] payload travels on the
+   exception, and a [Printexc] printer renders the labelled message. *)
+exception
+  Compaction_transition_violation of
+    { where : string
+    ; from : packed_compaction_stage
+    ; to_ : packed_compaction_stage
+    ; violation : compaction_transition_spec_violation
+    }
+
+let compaction_transition_violation_message ~where ~from ~to_ ~violation =
+  Printf.sprintf
+    "%s: invalid compaction transition %s -> %s (spec_violation=%s)"
+    where
+    (packed_compaction_stage_label from)
+    (packed_compaction_stage_label to_)
+    (compaction_transition_spec_violation_to_tag violation)
+;;
+
+let raise_compaction_transition_violation ~where ~from ~to_ ~violation =
+  raise (Compaction_transition_violation { where; from; to_; violation })
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Compaction_transition_violation { where; from; to_; violation } ->
+      Some (compaction_transition_violation_message ~where ~from ~to_ ~violation)
+    | _ -> None)
+;;
+
 type turn_measurement =
   { tm_captured_at : float
   ; tm_auto_rules : Keeper_state_machine.auto_rule_summary
@@ -2393,29 +2454,53 @@ let compaction_stage_of_event entry event =
   | _ -> entry.compaction_stage
 ;;
 
+(* RFC-0072 Phase 6: the 3×3 compaction matrix dispatched as an exhaustive
+   match — the 3 valid pairs (incl. idempotent self-loops) return [()], the
+   3 forbidden pairs raise the typed [Compaction_transition_violation]
+   (replacing the prior bare [assert], whose [Assert_failure] carried no
+   labels).  Still wrapped in [Keeper_fsm_guard_runtime.wrap_unit] so
+   [metric_fsm_guard_violation] (action=compaction_transition, stage=guard)
+   fires on a forbidden pair; the match stays exhaustive so adding a
+   [compaction_stage] variant triggers Warning 8 here.  No
+   [Compaction_transition] GADT / [resolve_*] helper: with 3 states and a
+   single consumer the resolver indirection would be premature. *)
 let validate_compaction_transition ~from ~to_ =
   Keeper_fsm_guard_runtime.wrap_unit
     ~action:"compaction_transition"
     ~stage:"guard"
     (fun () ->
-       assert (
-         match from, to_ with
-         (* from Compaction_accumulating *)
-         | Packed Compaction_accumulating, Packed Compaction_accumulating -> true
-         | Packed Compaction_accumulating, Packed Compaction_compacting ->
-           true (* via set_compaction_stage *)
-         | Packed Compaction_accumulating, Packed Compaction_done -> false
-         (* from Compaction_compacting *)
-         | Packed Compaction_compacting, Packed Compaction_accumulating ->
-           true (* via set_compaction_stage: retry *)
-         | Packed Compaction_compacting, Packed Compaction_compacting -> true
-         | Packed Compaction_compacting, Packed Compaction_done ->
-           true (* via set_compaction_stage *)
-         (* from Compaction_done — terminal *)
-         | Packed Compaction_done, Packed Compaction_accumulating ->
-           false (* terminal; new compaction is reset *)
-         | Packed Compaction_done, Packed Compaction_compacting -> false (* terminal *)
-         | Packed Compaction_done, Packed Compaction_done -> true))
+       match from, to_ with
+       (* Idempotent self-loops + valid cross-state transitions (6). *)
+       | Packed Compaction_accumulating, Packed Compaction_accumulating
+       | Packed Compaction_accumulating, Packed Compaction_compacting
+       (* via set_compaction_stage *)
+       | Packed Compaction_compacting, Packed Compaction_accumulating
+       (* via set_compaction_stage: retry after a failed compaction *)
+       | Packed Compaction_compacting, Packed Compaction_compacting
+       | Packed Compaction_compacting, Packed Compaction_done
+       (* via set_compaction_stage *)
+       | Packed Compaction_done, Packed Compaction_done -> ()
+       (* Forbidden transitions (3). *)
+       | Packed Compaction_accumulating, Packed Compaction_done ->
+         raise_compaction_transition_violation
+           ~where:"validate_compaction_transition"
+           ~from
+           ~to_
+           ~violation:Accumulating_to_done
+       | Packed Compaction_done, Packed Compaction_accumulating ->
+         (* terminal; a fresh compaction is a reset, not a transition *)
+         raise_compaction_transition_violation
+           ~where:"validate_compaction_transition"
+           ~from
+           ~to_
+           ~violation:Done_to_accumulating
+       | Packed Compaction_done, Packed Compaction_compacting ->
+         (* terminal *)
+         raise_compaction_transition_violation
+           ~where:"validate_compaction_transition"
+           ~from
+           ~to_
+           ~violation:Done_to_compacting)
 ;;
 
 let compaction_stage_after_event entry event =

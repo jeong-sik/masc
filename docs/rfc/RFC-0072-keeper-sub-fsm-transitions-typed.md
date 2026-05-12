@@ -221,9 +221,18 @@ exception Turn_phase_transition_violation of
 - Tests (`test_keeper_sub_fsm_guards.ml`): `capture_invalid_arg` + substring-needle assertions replaced by pattern-matching the typed `violation` payload + a single `Printexc.to_string` render check per axis. (Bonus: this rewrite also fixes a latent broken test — `test_turn_phase_message_includes_labels` asserted `Turn_routing -> Turn_exhausted` is rejected, but PR #14395 made that pair *valid*; the heavy `dune test` CI step skips on most PRs so it went unnoticed.)
 - LOC: ~+130 / -55. Risk: low (typed payload + printer; no behaviour change on the success path; failure path message text preserved).
 
-### Phase 6 — Compaction axis audit (separate amendment)
+### Phase 6 — Compaction axis: typed exception, no GADT/resolver
 
-Inventory `compaction_stage` variants + transition matrix (currently an `assert`-based `@@fsm_guard` shim raising `Assert_failure`). Decide whether the resolver + typed-exception pattern applies.
+Inventory: `compaction_stage` has **3 states** (`accumulating`, `compacting`, `done`) → a 3×3 matrix = 3 idempotent + 3 valid cross-state + 3 forbidden. The pre-Phase-6 `validate_compaction_transition` was a bare `assert (match (from, to) with … -> true | … -> false)` inside `wrap_unit` — exhaustive (Warning-8 tripwire intact) but its `Assert_failure` carried only a file/line, not the rejected pair.
+
+Decision: apply the **typed-exception + diagnostic-label** half of the pattern (mirroring what #14389 gave the other axes' messages, going straight to typed since this axis never had an `invalid_arg` string phase), but **not** the GADT/resolver half — with 3 states and a single consumer (`validate_compaction_transition` ← `compaction_stage_after_event`), a `Compaction_transition` GADT (3 cross-state constructors) and a `resolve_compaction_transition` indirection would be premature abstraction.
+
+What ships:
+- `compaction_transition_spec_violation` (3 constructors: `Accumulating_to_done` / `Done_to_accumulating` / `Done_to_compacting`) + `_to_tag`.
+- `exception Compaction_transition_violation of { where; from; to_; violation }` + `Printexc.register_printer` + `raise_*` helper + `packed_compaction_stage_label` (constructor-name label, mirrors `packed_cascade_state_label`).
+- `validate_compaction_transition` body: `assert (match … -> bool)` → `match … with <6 valid> -> () | <3 forbidden> -> raise_compaction_transition_violation …`, still inside `wrap_unit` (`metric_fsm_guard_violation` action=`compaction_transition`, stage=`guard` still fires). Match stays exhaustive.
+- Tests: `test_invalid_compaction_transitions` catches `Compaction_transition_violation _` (was `Assert_failure _`) + checks payload endpoints; new `test_compaction_violation_payload` (typed `violation` tag + `Printexc.to_string` render).
+- LOC: ~+95 / -25. Risk: low (success path unchanged; failure path gains labels).
 
 ## 6. Risks
 
@@ -249,8 +258,10 @@ The audit in §2.4 counted explicit `set_turn_cascade_state` calls. There may be
 - **R-2**: `turn_phase` axis has 0 `invalid_arg` sites in `lib/` — **met by Phase 5** (the 2 turn_phase sites raise `Turn_phase_transition_violation` instead).
 - **R-3**: All `cascade_state` valid transitions are first-class GADT constructors — met by Phase 1.
 - **R-4**: Adding a new `cascade_state` (or `turn_phase`) variant requires editing the resolver and triggers Warning 8 at all match sites — met by Phase 1 / Phase 4a.
-- **R-5**: Existing test coverage is preserved or replaced by compile-time / typed-payload enforcement (no behavior regression) — met by Phase 3 / 4b / 5.
-- **R-6**: Phase 1, 2, 3, 4 (a/b), and 5 each ship in independent PRs, each <150 LOC impl.
+- **R-5**: Existing test coverage is preserved or replaced by compile-time / typed-payload enforcement (no behavior regression) — met by Phase 3 / 4b / 5 / 6.
+- **R-6**: Phase 1, 2, 3, 4 (a/b), 5, and 6 each ship in independent PRs, each <150 LOC impl.
+- **R-7**: `compaction_stage` forbidden transitions raise a typed exception (not `Assert_failure`), carrying the rejected pair + violation tag — met by Phase 6. (No GADT for this axis: deliberate, see §5 Phase 6.)
+- **R-8**: All 4 keeper sub-FSM axes (decision / cascade / turn_phase / compaction) are closed — decision via input refinement (#14887/#14893), cascade + turn_phase via resolver + typed exception (#14903→#14935), compaction via typed exception (Phase 6). No `_ -> false` catch-all and no untyped runtime rejection (`invalid_arg` / bare `Assert_failure`) remains on any axis's validator.
 
 ## 8. Open questions
 

@@ -152,41 +152,79 @@ val packed_turn_phase_label : packed_turn_phase -> string
 
 val validate_turn_phase_transition : from:packed_turn_phase -> to_:packed_turn_phase -> unit
 
+(** RFC-0072 Phase 4: GADT-encoded turn_phase transitions, aligned with
+    [Cascade_transition].  Enumerates the 23 valid cross-state transitions
+    of the 7-variant [turn_phase] FSM.  The 19 forbidden pairs have no
+    constructor and are therefore type-unrepresentable.  Idempotent
+    self-loops are not represented (mutator-boundary no-ops). *)
 module Turn_phase_transition : sig
   type ('from, 'to_) t =
-    | Idle_to_idle : (turn_idle, turn_idle) t
     | Idle_to_prompting : (turn_idle, turn_prompting) t
-    | Prompting_to_prompting : (turn_prompting, turn_prompting) t
     | Prompting_to_routing : (turn_prompting, turn_routing) t
     | Prompting_to_executing : (turn_prompting, turn_executing) t
     | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
     | Prompting_to_exhausted : (turn_prompting, turn_exhausted) t
     | Routing_to_prompting : (turn_routing, turn_prompting) t
-    | Routing_to_routing : (turn_routing, turn_routing) t
     | Routing_to_executing : (turn_routing, turn_executing) t
     | Routing_to_exhausted : (turn_routing, turn_exhausted) t
     | Executing_to_prompting : (turn_executing, turn_prompting) t
     | Executing_to_routing : (turn_executing, turn_routing) t
-    | Executing_to_executing : (turn_executing, turn_executing) t
     | Executing_to_compacting : (turn_executing, turn_compacting) t
     | Executing_to_finalizing : (turn_executing, turn_finalizing) t
     | Executing_to_exhausted : (turn_executing, turn_exhausted) t
     | Compacting_to_prompting : (turn_compacting, turn_prompting) t
-    | Compacting_to_compacting : (turn_compacting, turn_compacting) t
     | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
     | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
     | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
     | Finalizing_to_routing : (turn_finalizing, turn_routing) t
     | Finalizing_to_executing : (turn_finalizing, turn_executing) t
-    | Finalizing_to_finalizing : (turn_finalizing, turn_finalizing) t
     | Finalizing_to_exhausted : (turn_finalizing, turn_exhausted) t
     | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
     | Exhausted_to_routing : (turn_exhausted, turn_routing) t
     | Exhausted_to_executing : (turn_exhausted, turn_executing) t
-    | Exhausted_to_exhausted : (turn_exhausted, turn_exhausted) t
+
+  type packed = Packed_transition : ('a, 'b) t -> packed
 
   val to_tag : ('from, 'to_) t -> string
 end
+
+(** RFC-0072 Phase 4: typed error for turn_phase transition spec violations. *)
+type turn_phase_transition_spec_violation =
+  | Idle_to_routing
+  | Idle_to_executing
+  | Idle_to_compacting
+  | Idle_to_finalizing
+  | Idle_to_exhausted
+  | Prompting_to_idle
+  | Prompting_to_compacting
+  | Routing_to_idle
+  | Routing_to_compacting
+  | Routing_to_finalizing
+  | Executing_to_idle
+  | Compacting_to_idle
+  | Compacting_to_routing
+  | Compacting_to_executing
+  | Finalizing_to_idle
+  | Finalizing_to_compacting
+  | Exhausted_to_idle
+  | Exhausted_to_compacting
+  | Exhausted_to_finalizing
+
+val turn_phase_transition_spec_violation_to_tag
+  :  turn_phase_transition_spec_violation
+  -> string
+
+(** RFC-0072 Phase 4: resolve a (from, target) packed pair to one of three
+    outcomes.  Mirrors [resolve_cascade_transition]. *)
+type turn_phase_resolve_outcome =
+  | Resolved_turn_transition of Turn_phase_transition.packed
+  | Resolved_turn_idempotent
+  | Resolved_turn_violation of turn_phase_transition_spec_violation
+
+val resolve_turn_phase_transition
+  :  from:packed_turn_phase
+  -> target:packed_turn_phase
+  -> turn_phase_resolve_outcome
 
 type decision_stage =
   | Decision_undecided [@tla.idle]

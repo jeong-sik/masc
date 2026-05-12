@@ -231,6 +231,7 @@
         test_tool_prefilter
         test_keeper_state_machine
         test_keeper_state_machine_correspondence
+        test_keeper_state_machine_tla_correspondence
         test_keeper_lifecycle_hooks
         test_keeper_subprocess_registry
         test_keeper_bg_task_cleanup
@@ -475,6 +476,7 @@
           test_tool_prefilter
           test_keeper_state_machine
           test_keeper_state_machine_correspondence
+          test_keeper_state_machine_tla_correspondence
           test_keeper_lifecycle_hooks
           test_keeper_sub_fsm_guards
           test_keeper_cascade_tla_mirror

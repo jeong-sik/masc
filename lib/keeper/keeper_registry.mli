@@ -144,8 +144,8 @@ val witness_to_turn_phase : packed_turn_phase -> turn_phase
 val turn_phase_to_witness : turn_phase -> packed_turn_phase
 
 (** Diagnostic label using the constructor name (e.g. ["Turn_routing"]).
-    Used by [validate_turn_phase_transition] to embed the rejected pair
-    in [Invalid_argument] messages.  Distinct from
+    Used by the [Turn_phase_transition_violation] [Printexc] printer to
+    render the rejected pair.  Distinct from
     [Keeper_composite_observer.turn_phase_to_string] which emits a
     snake_case form for dashboards. *)
 val packed_turn_phase_label : packed_turn_phase -> string
@@ -213,6 +213,20 @@ type turn_phase_transition_spec_violation =
 val turn_phase_transition_spec_violation_to_tag
   :  turn_phase_transition_spec_violation
   -> string
+
+(** RFC-0072 Phase 5: raised by [validate_turn_phase_transition] and
+    [set_turn_phase] on a forbidden turn_phase transition, carrying the
+    typed [turn_phase_transition_spec_violation] payload (replaces the
+    prior string-formatted [Invalid_argument]).  [where] is a diagnostic
+    label naming the raising function.  A [Printexc] printer is registered
+    so [Printexc.to_string] reproduces the original message text. *)
+exception
+  Turn_phase_transition_violation of
+    { where : string
+    ; from : packed_turn_phase
+    ; to_ : packed_turn_phase
+    ; violation : turn_phase_transition_spec_violation
+    }
 
 (** RFC-0072 Phase 4: resolve a (from, target) packed pair to one of three
     outcomes.  Mirrors [resolve_cascade_transition]. *)
@@ -326,8 +340,8 @@ val cascade_state_to_witness : cascade_state -> packed_cascade_state
 val witness_to_cascade_state : packed_cascade_state -> cascade_state
 
 (** Diagnostic label using the constructor name (e.g.
-    ["Cascade_exhausted"]).  Used by [validate_cascade_transition] for
-    [Invalid_argument] messages. *)
+    ["Cascade_exhausted"]).  Used by the [Cascade_transition_violation]
+    [Printexc] printer to render the rejected pair. *)
 val packed_cascade_state_label : packed_cascade_state -> string
 
 val validate_cascade_transition : from:packed_cascade_state -> to_:packed_cascade_state -> unit
@@ -375,6 +389,20 @@ type cascade_transition_spec_violation =
 val cascade_transition_spec_violation_to_tag
   :  cascade_transition_spec_violation
   -> string
+
+(** RFC-0072 Phase 5: raised by [validate_cascade_transition] and
+    [set_turn_cascade_state] on a forbidden cascade transition, carrying
+    the typed [cascade_transition_spec_violation] payload (replaces the
+    prior string-formatted [Invalid_argument]).  [where] is a diagnostic
+    label naming the raising function.  A [Printexc] printer is registered
+    so [Printexc.to_string] reproduces the original message text. *)
+exception
+  Cascade_transition_violation of
+    { where : string
+    ; from : packed_cascade_state
+    ; to_ : packed_cascade_state
+    ; violation : cascade_transition_spec_violation
+    }
 
 (** RFC-0072 Phase 1: resolve a (from, target) packed pair to one of
     three outcomes: a typed transition value, an idempotent no-op, or a
@@ -617,7 +645,8 @@ val mark_turn_started : base_path:string -> string -> unit
     Without this boundary signal, the second-and-later SDK turn writes
     transition from the previous SDK turn's terminal phase
     ([Turn_finalizing] after [Cascade_done]/[Cascade_exhausted]), which
-    [validate_turn_phase_transition] rejects with [Invalid_argument].
+    [validate_turn_phase_transition] rejects with
+    [Turn_phase_transition_violation].
 
     This function resets the in-turn FSM fields ([turn_phase],
     [cascade_state], [decision_stage]) on the existing observation, the
@@ -653,11 +682,15 @@ val set_turn_cascade_state :
 val set_turn_phase :
   base_path:string -> string -> packed_turn_phase -> unit
 
-(** Runtime transition guards for the 4 sub-FSM axes.
-    Each validates a (from, to) pair against the TLA+ transition matrix.
-    Invalid transitions raise [Invalid_argument] with a message of the
-    form ["<validator>: invalid transition <from> -> <to>"] and bump
-    [Prometheus.metric_fsm_guard_violation]. *)
+(** Runtime transition guards against the TLA+ transition matrix.
+    [validate_turn_phase_transition] dispatches through
+    [resolve_turn_phase_transition] and raises the typed
+    [Turn_phase_transition_violation] on a forbidden pair (RFC-0072
+    Phase 4b + 5).  [validate_compaction_transition] is still the
+    [@@fsm_guard]-style [assert]-based shim (raises [Assert_failure]);
+    extending the resolver pattern to the compaction axis is a future
+    RFC-0072 phase.  Both bump [Prometheus.metric_fsm_guard_violation]
+    via [Keeper_fsm_guard_runtime.wrap_unit]. *)
 val validate_turn_phase_transition :
   from:packed_turn_phase -> to_:packed_turn_phase -> unit
 

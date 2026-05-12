@@ -347,6 +347,41 @@ let turn_phase_transition_spec_violation_to_tag = function
   | Exhausted_to_finalizing -> "exhausted->finalizing"
 ;;
 
+(* RFC-0072 Phase 5: typed exception for forbidden turn_phase transitions.
+   Mirrors [Cascade_transition_violation] — the typed
+   [turn_phase_transition_spec_violation] payload travels on the exception
+   instead of through a string message. Raised by
+   [validate_turn_phase_transition] / [set_turn_phase]. The registered
+   [Printexc] printer reproduces the original message for generic catchers
+   and log output. *)
+exception
+  Turn_phase_transition_violation of
+    { where : string
+    ; from : packed_turn_phase
+    ; to_ : packed_turn_phase
+    ; violation : turn_phase_transition_spec_violation
+    }
+
+let turn_phase_transition_violation_message ~where ~from ~to_ ~violation =
+  Printf.sprintf
+    "%s: invalid turn_phase transition %s -> %s (spec_violation=%s)"
+    where
+    (packed_turn_phase_label from)
+    (packed_turn_phase_label to_)
+    (turn_phase_transition_spec_violation_to_tag violation)
+;;
+
+let raise_turn_phase_transition_violation ~where ~from ~to_ ~violation =
+  raise (Turn_phase_transition_violation { where; from; to_; violation })
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Turn_phase_transition_violation { where; from; to_; violation } ->
+      Some (turn_phase_transition_violation_message ~where ~from ~to_ ~violation)
+    | _ -> None)
+;;
+
 (* RFC-0072 Phase 4: resolver mirroring [resolve_cascade_transition]. *)
 type turn_phase_resolve_outcome =
   | Resolved_turn_transition of Turn_phase_transition.packed
@@ -709,6 +744,43 @@ let cascade_transition_spec_violation_to_tag = function
   | Selecting_to_exhausted -> "selecting->exhausted"
   | Done_to_exhausted -> "done->exhausted"
   | Exhausted_to_done -> "exhausted->done"
+;;
+
+(* RFC-0072 Phase 5: typed exception for forbidden cascade transitions.
+   Replaces the prior [invalid_arg (Printf.sprintf ...)] at
+   [validate_cascade_transition] / [set_turn_cascade_state] — the typed
+   [cascade_transition_spec_violation] payload now travels on the exception
+   instead of being projected through a string, so callers (and the test
+   surface) can pattern-match on the violation directly. The [where] field
+   is a diagnostic-only label naming the raising function for parity with
+   the prior message. A [Printexc] printer is registered below so logging
+   that catches a generic [exn] still produces the original message text. *)
+exception
+  Cascade_transition_violation of
+    { where : string
+    ; from : packed_cascade_state
+    ; to_ : packed_cascade_state
+    ; violation : cascade_transition_spec_violation
+    }
+
+let cascade_transition_violation_message ~where ~from ~to_ ~violation =
+  Printf.sprintf
+    "%s: invalid cascade transition %s -> %s (spec_violation=%s)"
+    where
+    (packed_cascade_state_label from)
+    (packed_cascade_state_label to_)
+    (cascade_transition_spec_violation_to_tag violation)
+;;
+
+let raise_cascade_transition_violation ~where ~from ~to_ ~violation =
+  raise (Cascade_transition_violation { where; from; to_; violation })
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Cascade_transition_violation { where; from; to_; violation } ->
+      Some (cascade_transition_violation_message ~where ~from ~to_ ~violation)
+    | _ -> None)
 ;;
 
 (* RFC-0072 Phase 1: resolve a (from, target) packed pair to a typed
@@ -1515,41 +1587,33 @@ let mark_turn_measurement ~base_path name =
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-(* RFC-0072 Phase 3: collapse 25-pair matrix onto [resolve_cascade_transition]
-   (PR #14903).  The transition matrix is now a single source of truth in the
-   resolver — this validator becomes a thin compatibility shim that preserves
-   the prior [Invalid_argument]-raising contract for the test surface
-   ([test_keeper_sub_fsm_guards.ml] uses [capture_invalid_arg]).  Adding a new
-   [cascade_state] variant only requires updating [resolve_cascade_transition];
-   this function reflects the change automatically.
-
-   The typed [cascade_transition_spec_violation] tag is included in the error
-   message for diagnostic clarity, matching the pattern adopted by
-   [set_turn_cascade_state] in Phase 2. *)
+(* RFC-0072 Phase 3 + Phase 5: collapse 25-pair matrix onto
+   [resolve_cascade_transition] (PR #14903) and raise the typed
+   [Cascade_transition_violation] (Phase 5) on the 7 forbidden pairs
+   instead of a string-formatted [Invalid_argument].  The transition matrix
+   is now a single source of truth in the resolver — this validator becomes
+   a thin compatibility shim.  Adding a new [cascade_state] variant only
+   requires updating [resolve_cascade_transition]; this function reflects
+   the change automatically. *)
 let validate_cascade_transition ~from ~to_ =
   match resolve_cascade_transition ~from ~target:to_ with
   | Resolved_idempotent | Resolved_transition _ -> ()
-  | Resolved_violation v ->
-    invalid_arg
-      (Printf.sprintf
-         "validate_cascade_transition: invalid transition %s -> %s \
-          (spec_violation=%s)"
-         (packed_cascade_state_label from)
-         (packed_cascade_state_label to_)
-         (cascade_transition_spec_violation_to_tag v))
+  | Resolved_violation violation ->
+    raise_cascade_transition_violation
+      ~where:"validate_cascade_transition"
+      ~from
+      ~to_
+      ~violation
 ;;
 
-(* RFC-0072 Phase 4b: collapse the 49-pair turn_phase matrix onto
-   [resolve_turn_phase_transition] (PR #14912).  The transition matrix is
-   now a single source of truth in the resolver — this validator becomes a
-   thin compatibility shim wrapped in [Keeper_fsm_guard_runtime.wrap_unit]
-   so the existing metric / observability instrumentation
-   ([metric_fsm_guard_violation], etc.) keeps firing on forbidden pairs.
-   The typed [turn_phase_transition_spec_violation] tag is folded into the
-   [Invalid_argument] message for diagnostic clarity.  Test surface
-   ([test_keeper_sub_fsm_guards.ml] uses [capture_invalid_arg] +
-   [packed_turn_phase_label] needles) is preserved by keeping the function
-   name and label keywords in the message. *)
+(* RFC-0072 Phase 4b + Phase 5: collapse the 49-pair turn_phase matrix onto
+   [resolve_turn_phase_transition] (PR #14912) and raise the typed
+   [Turn_phase_transition_violation] (Phase 5) on the 19 forbidden pairs.
+   Wrapped in [Keeper_fsm_guard_runtime.wrap_unit] so the existing metric /
+   observability instrumentation ([metric_fsm_guard_violation], etc.) keeps
+   firing on forbidden pairs.  The typed
+   [turn_phase_transition_spec_violation] payload travels on the exception;
+   a [Printexc] printer reproduces the prior message text for log output. *)
 let validate_turn_phase_transition ~from ~to_ =
   Keeper_fsm_guard_runtime.wrap_unit
     ~action:"turn_phase_transition"
@@ -1557,14 +1621,12 @@ let validate_turn_phase_transition ~from ~to_ =
     (fun () ->
       match resolve_turn_phase_transition ~from ~target:to_ with
       | Resolved_turn_idempotent | Resolved_turn_transition _ -> ()
-      | Resolved_turn_violation v ->
-        invalid_arg
-          (Printf.sprintf
-             "validate_turn_phase_transition: invalid transition %s -> %s \
-              (spec_violation=%s)"
-             (packed_turn_phase_label from)
-             (packed_turn_phase_label to_)
-             (turn_phase_transition_spec_violation_to_tag v)))
+      | Resolved_turn_violation violation ->
+        raise_turn_phase_transition_violation
+          ~where:"validate_turn_phase_transition"
+          ~from
+          ~to_
+          ~violation)
 ;;
 
 let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_active) =
@@ -1603,14 +1665,13 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
        [broadcast_composite_changed] events.  This is a small efficiency
        fix bundled with the Phase-2 wiring.
 
-     - Forbidden transitions (7 pairs) still raise [Invalid_argument] —
-       the typed [cascade_transition_spec_violation] tag is folded into
-       the message for diagnostic clarity.  A future RFC-0072 phase may
-       swap to a typed exception variant.
+     - Forbidden transitions (7 pairs) raise the typed
+       [Cascade_transition_violation] (RFC-0072 Phase 5), carrying the
+       [cascade_transition_spec_violation] payload directly instead of a
+       string-formatted [Invalid_argument].
 
-     [validate_turn_phase_transition] is preserved here because the
-     turn_phase axis remains runtime-validated; Phase 4 of RFC-0072 will
-     extend the resolver pattern to that axis. *)
+     [validate_turn_phase_transition] is invoked here for the turn_phase
+     axis (which also dispatches through its resolver as of Phase 4b). *)
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
@@ -1622,24 +1683,22 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
         validate_turn_phase_transition ~from:obs.turn_phase ~to_:new_turn_phase;
         changed := true;
         { obs with cascade_state; turn_phase = new_turn_phase }
-      | Resolved_violation v ->
-        invalid_arg
-          (Printf.sprintf
-             "set_turn_cascade_state: forbidden transition %s -> %s \
-              (spec_violation=%s)"
-             (packed_cascade_state_label obs.cascade_state)
-             (packed_cascade_state_label cascade_state)
-             (cascade_transition_spec_violation_to_tag v))));
+      | Resolved_violation violation ->
+        raise_cascade_transition_violation
+          ~where:"set_turn_cascade_state"
+          ~from:obs.cascade_state
+          ~to_:cascade_state
+          ~violation));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
-  (* RFC-0072 Phase 4b: dispatch via [resolve_turn_phase_transition] (PR #14912)
-     instead of the [validate_turn_phase_transition] call.  Mirrors the
-     cascade-side wiring (PR #14908) — idempotent self-loops no longer flip
-     [changed] or emit a broadcast, and forbidden transitions carry the
-     typed [turn_phase_transition_spec_violation] tag in the
-     [Invalid_argument] message. *)
+  (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
+     (PR #14912) instead of the [validate_turn_phase_transition] call.
+     Mirrors the cascade-side wiring (PR #14908) — idempotent self-loops no
+     longer flip [changed] or emit a broadcast, and forbidden transitions
+     raise the typed [Turn_phase_transition_violation] (Phase 5) carrying
+     the [turn_phase_transition_spec_violation] payload directly. *)
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
@@ -1649,14 +1708,12 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
       | Resolved_turn_transition _ ->
         changed := true;
         { obs with turn_phase }
-      | Resolved_turn_violation v ->
-        invalid_arg
-          (Printf.sprintf
-             "set_turn_phase: forbidden transition %s -> %s \
-              (spec_violation=%s)"
-             (packed_turn_phase_label obs.turn_phase)
-             (packed_turn_phase_label turn_phase)
-             (turn_phase_transition_spec_violation_to_tag v))));
+      | Resolved_turn_violation violation ->
+        raise_turn_phase_transition_violation
+          ~where:"set_turn_phase"
+          ~from:obs.turn_phase
+          ~to_:turn_phase
+          ~violation));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 

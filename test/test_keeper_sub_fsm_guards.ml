@@ -1,10 +1,13 @@
 (** Tests for sub-FSM runtime transition guards (PR #14153).
     Mirrors the TLA+ transition matrix in executable form.
-    Valid transitions must pass; invalid transitions for turn_phase,
-    decision_stage and cascade_state must raise [Invalid_argument] with
-    a message that names both endpoints, and bump
-    [masc_fsm_guard_violation_total].  [compaction_stage] still raises
-    [Assert_failure] (untouched by the diagnostic-message PR). *)
+    Valid transitions must pass; forbidden transitions for [cascade_state]
+    and [turn_phase] raise the typed [Cascade_transition_violation] /
+    [Turn_phase_transition_violation] (RFC-0072 Phase 5) carrying the
+    spec-violation payload, and bump [masc_fsm_guard_violation_total].
+    [decision_stage] forbidden transitions are unrepresentable at the
+    call site ([decision_stage_active] [to_] type) — a compile-time
+    invariant, not a runtime check.  [compaction_stage] still raises
+    [Assert_failure] (the resolver pattern has not reached that axis). *)
 
 open Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
@@ -55,7 +58,7 @@ let test_valid_turn_phase_transitions () =
   List.iter
     (fun (from, to_) ->
        try validate_turn_phase_transition ~from ~to_ with
-       | (Assert_failure _ | Invalid_argument _) ->
+       | Assert_failure _ | Turn_phase_transition_violation _ ->
          Alcotest.fail
            (Printf.sprintf
               "valid turn_phase %s -> %s rejected"
@@ -104,7 +107,18 @@ let test_invalid_turn_phase_transitions () =
               (Obs.turn_phase_to_string from)
               (Obs.turn_phase_to_string to_))
        with
-       | Invalid_argument _ -> ())
+       (* RFC-0072 Phase 5: forbidden pairs raise the typed exception, not
+          a generic [Invalid_argument].  The payload's endpoints must match
+          the pair under test. *)
+       | Turn_phase_transition_violation { from = ef; to_ = et; _ } ->
+         Alcotest.(check string)
+           "violation.from matches"
+           (packed_turn_phase_label from)
+           (packed_turn_phase_label ef);
+         Alcotest.(check string)
+           "violation.to_ matches"
+           (packed_turn_phase_label to_)
+           (packed_turn_phase_label et))
     cases
 ;;
 
@@ -182,7 +196,7 @@ let test_valid_cascade_transitions () =
   List.iter
     (fun (from, to_) ->
        try validate_cascade_transition ~from ~to_ with
-       | (Assert_failure _ | Invalid_argument _) ->
+       | Assert_failure _ | Cascade_transition_violation _ ->
          Alcotest.fail
            (Printf.sprintf
               "valid cascade %s -> %s rejected"
@@ -222,7 +236,16 @@ let test_invalid_cascade_transitions () =
               (Obs.cascade_state_to_string from)
               (Obs.cascade_state_to_string to_))
        with
-       | Invalid_argument _ -> ())
+       (* RFC-0072 Phase 5: forbidden pairs raise the typed exception. *)
+       | Cascade_transition_violation { from = ef; to_ = et; _ } ->
+         Alcotest.(check string)
+           "violation.from matches"
+           (packed_cascade_state_label from)
+           (packed_cascade_state_label ef);
+         Alcotest.(check string)
+           "violation.to_ matches"
+           (packed_cascade_state_label to_)
+           (packed_cascade_state_label et))
     cases
 ;;
 
@@ -244,8 +267,8 @@ let test_invalid_cascade_transitions () =
 let walk_cascade_sequence label seq =
   List.iter
     (fun (from, to_) ->
-       try validate_cascade_transition ~from ~to_
-       with (Assert_failure _ | Invalid_argument _) ->
+       try validate_cascade_transition ~from ~to_ with
+       | Assert_failure _ | Cascade_transition_violation _ ->
          Alcotest.fail
            (Printf.sprintf
               "%s step %s -> %s should pass"
@@ -323,7 +346,7 @@ let test_invalid_compaction_transitions () =
     cases
 ;;
 
-(* ── Diagnostic message format ──────────────────────────── *)
+(* ── Typed violation payload + Printexc rendering ────────── *)
 
 let contains haystack needle =
   let h_len = String.length haystack in
@@ -339,53 +362,69 @@ let contains haystack needle =
     loop 0
 ;;
 
-let capture_invalid_arg thunk =
-  try thunk (); None
-  with Invalid_argument msg -> Some msg
-;;
-
-let assert_msg_contains ~msg ~needle =
+let assert_str_contains ~haystack ~needle =
   Alcotest.(check bool)
-    (Printf.sprintf "message %S contains %S" msg needle)
+    (Printf.sprintf "%S contains %S" haystack needle)
     true
-    (contains msg needle)
+    (contains haystack needle)
 ;;
 
-let test_turn_phase_message_includes_labels () =
-  (* Turn_routing -> Turn_exhausted is the rejected pair from the
-     2026-05-09 qa-king crash (cascade-fallback exhausted from the
-     selecting/routing slice). Future occurrences of the same crash
-     class will surface from/to labels in the message instead of a
-     bare line:character anchor. *)
+let test_turn_phase_violation_payload () =
+  (* Turn_routing -> Turn_compacting is a forbidden pair (you cannot
+     compact while still routing).  The handler can pattern-match the
+     typed [violation] constructor directly; the [Printexc] printer
+     still renders a human-readable line for log output. *)
   let from : packed_turn_phase = Packed Turn_routing in
-  let to_ : packed_turn_phase = Packed Turn_exhausted in
-  match
-    capture_invalid_arg (fun () -> validate_turn_phase_transition ~from ~to_)
-  with
-  | None -> Alcotest.fail "validator should have raised Invalid_argument"
-  | Some msg ->
-    assert_msg_contains ~msg ~needle:"validate_turn_phase_transition";
-    assert_msg_contains ~msg ~needle:(packed_turn_phase_label from);
-    assert_msg_contains ~msg ~needle:(packed_turn_phase_label to_)
+  let to_ : packed_turn_phase = Packed Turn_compacting in
+  match validate_turn_phase_transition ~from ~to_ with
+  | () -> Alcotest.fail "validator should have raised Turn_phase_transition_violation"
+  | exception Turn_phase_transition_violation { where; from = ef; to_ = et; violation } ->
+    Alcotest.(check string) "where names the validator" "validate_turn_phase_transition" where;
+    Alcotest.(check string)
+      "violation.from"
+      (packed_turn_phase_label from)
+      (packed_turn_phase_label ef);
+    Alcotest.(check string)
+      "violation.to_"
+      (packed_turn_phase_label to_)
+      (packed_turn_phase_label et);
+    Alcotest.(check string)
+      "violation tag"
+      "routing->compacting"
+      (turn_phase_transition_spec_violation_to_tag violation);
+    let rendered = Printexc.to_string (Turn_phase_transition_violation { where; from = ef; to_ = et; violation }) in
+    assert_str_contains ~haystack:rendered ~needle:"validate_turn_phase_transition";
+    assert_str_contains ~haystack:rendered ~needle:(packed_turn_phase_label from);
+    assert_str_contains ~haystack:rendered ~needle:(packed_turn_phase_label to_)
 ;;
 
 (* test_decision_message_includes_labels removed: validate_decision_transition
-   no longer raises Invalid_argument (the forbidden [<active>_to_undecided]
-   pairs are unrepresentable through the [decision_stage_active] [to_] type).
-   The contract that "rejection messages include the typed labels" is now a
-   compile-time absence-of-rejection — there is no message to assert on. *)
+   no longer raises (the forbidden [<active>_to_undecided] pairs are
+   unrepresentable through the [decision_stage_active] [to_] type). *)
 
-let test_cascade_message_includes_labels () =
+let test_cascade_violation_payload () =
   let from : packed_cascade_state = Packed Cascade_idle in
   let to_ : packed_cascade_state = Packed Cascade_exhausted in
-  match
-    capture_invalid_arg (fun () -> validate_cascade_transition ~from ~to_)
-  with
-  | None -> Alcotest.fail "validator should have raised Invalid_argument"
-  | Some msg ->
-    assert_msg_contains ~msg ~needle:"validate_cascade_transition";
-    assert_msg_contains ~msg ~needle:(packed_cascade_state_label from);
-    assert_msg_contains ~msg ~needle:(packed_cascade_state_label to_)
+  match validate_cascade_transition ~from ~to_ with
+  | () -> Alcotest.fail "validator should have raised Cascade_transition_violation"
+  | exception Cascade_transition_violation { where; from = ef; to_ = et; violation } ->
+    Alcotest.(check string) "where names the validator" "validate_cascade_transition" where;
+    Alcotest.(check string)
+      "violation.from"
+      (packed_cascade_state_label from)
+      (packed_cascade_state_label ef);
+    Alcotest.(check string)
+      "violation.to_"
+      (packed_cascade_state_label to_)
+      (packed_cascade_state_label et);
+    Alcotest.(check string)
+      "violation tag"
+      "idle->exhausted"
+      (cascade_transition_spec_violation_to_tag violation);
+    let rendered = Printexc.to_string (Cascade_transition_violation { where; from = ef; to_ = et; violation }) in
+    assert_str_contains ~haystack:rendered ~needle:"validate_cascade_transition";
+    assert_str_contains ~haystack:rendered ~needle:(packed_cascade_state_label from);
+    assert_str_contains ~haystack:rendered ~needle:(packed_cascade_state_label to_)
 ;;
 
 (* ── Test runner ────────────────────────────────────────── *)
@@ -443,18 +482,18 @@ let () =
             `Quick
             test_invalid_compaction_transitions
         ] )
-    ; ( "diagnostic_messages"
+    ; ( "typed_violation_payload"
       , [ Alcotest.test_case
-            "turn_phase rejection includes from/to labels"
+            "turn_phase violation carries typed payload + Printexc text"
             `Quick
-            test_turn_phase_message_includes_labels
-          (* "decision rejection includes from/to labels" removed:
-             validate_decision_transition no longer raises (the forbidden
-             pairs are unrepresentable, see runner note above). *)
+            test_turn_phase_violation_payload
+          (* "decision rejection" removed: validate_decision_transition no
+             longer raises (the forbidden pairs are unrepresentable, see
+             runner note above). *)
         ; Alcotest.test_case
-            "cascade rejection includes from/to labels"
+            "cascade violation carries typed payload + Printexc text"
             `Quick
-            test_cascade_message_includes_labels
+            test_cascade_violation_payload
         ] )
     ]
 ;;

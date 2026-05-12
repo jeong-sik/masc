@@ -32,7 +32,7 @@ cd "$repo_root"
 
 package_version="$(sed -n 's/^(version \([^)]*\)).*/\1/p' dune-project | head -n1)"
 roadmap_package_version="$(sed -n 's/^> Current package version: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
-roadmap_latest_release="$(sed -n 's/^> Latest release: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
+roadmap_changelog_entry="$(sed -n 's/^> Latest changelog entry: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
 changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
 
 fail() {
@@ -82,18 +82,18 @@ opam_version="${opam_version:-$(sed -n 's/^version: "\([^"]*\)"/\1/p' masc_mcp.o
 [[ -n "$package_version" ]] || fail "missing package version in dune-project"
 [[ -n "$opam_version" ]] || fail "missing version in masc_mcp.opam"
 [[ -n "$roadmap_package_version" ]] || fail "missing current package version in ROADMAP.md"
-[[ -n "$roadmap_latest_release" ]] || fail "missing latest release in ROADMAP.md"
+[[ -n "$roadmap_changelog_entry" ]] || fail "missing latest changelog entry in ROADMAP.md"
 [[ -n "$changelog_latest_release" ]] || fail "missing released version header in CHANGELOG.md"
 
 require_changelog_body_filled "$changelog_latest_release"
 
 [[ "$package_version" == "$opam_version" ]] || fail "dune-project ($package_version) != masc_mcp.opam ($opam_version)"
 [[ "$package_version" == "$roadmap_package_version" ]] || fail "dune-project ($package_version) != ROADMAP current package version ($roadmap_package_version)"
-[[ "$roadmap_latest_release" == "$changelog_latest_release" ]] || fail "ROADMAP latest release ($roadmap_latest_release) != CHANGELOG latest release ($changelog_latest_release)"
+[[ "$roadmap_changelog_entry" == "$changelog_latest_release" ]] || fail "ROADMAP latest changelog entry ($roadmap_changelog_entry) != CHANGELOG latest release ($changelog_latest_release)"
 
 if [[ -n "$tag_name" ]]; then
   [[ "$package_version" == "$tag_name" ]] || fail "tag v$tag_name != package version $package_version"
   grep -q "^## \[$tag_name\]" CHANGELOG.md || fail "CHANGELOG.md has no release heading for $tag_name"
 fi
 
-printf 'Version truth OK: package=%s latest_release=%s\n' "$package_version" "$changelog_latest_release"
+printf 'Version truth OK: package=%s changelog_entry=%s\n' "$package_version" "$changelog_latest_release"

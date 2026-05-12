@@ -6,7 +6,7 @@ code_refs:
   - lib/exec/exec_buffer.ml
   - lib/exec/exec_run.ml
   - lib/exec_core.ml
-  - lib/cdal_judge.ml
+  - lib/cdal/cdal_judge.ml
   - lib/worker_dev_tools.ml
   - lib/keeper/keeper_exec_shell.ml
 ---

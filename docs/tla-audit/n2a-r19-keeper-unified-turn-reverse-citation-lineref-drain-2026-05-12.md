@@ -60,9 +60,9 @@ Both sites switch to symbol-anchor (iter 64 N-2.a):
 
 ## Why N-2.c's existing scripts didn't catch it
 
-`scripts/audit-tla-ml-line-refs.sh` (iter 92 Rule 1 + 2) scans `specs/keeper-state-machine/*.tla`, not OCaml. The *spec → OCaml* citation guard exists; the *OCaml → spec* reverse-direction is what `scripts/audit-ocaml-spec-nav-line-refs.sh` is meant to cover. That script lives in `scripts/` but **has no baseline file** (`ls scripts/audit-ocaml-spec-nav-line-refs-baseline.txt` → no such file) and is not currently wired to any workflow path (no hits in `.github/workflows/*`). It exists as a tool but isn't enforcing anything yet — that's the structural gap behind why iter 91's catalogued follow-up survived until iter 94.
+`scripts/audit-tla-ml-line-refs.sh` (iter 92 Rule 1 + 2) scans `specs/keeper-state-machine/*.tla`, not OCaml. The *spec → OCaml* citation guard exists; the *OCaml → spec* reverse-direction is `scripts/audit-ocaml-spec-nav-line-refs.sh`. **Correction (Copilot review)**: that script IS wired into CI — `.github/workflows/tla-annotation-drift.yml` runs `bash scripts/audit-ocaml-spec-nav-line-refs.sh --baseline scripts/ocaml-spec-nav-line-refs-baseline.txt` on PRs that touch `lib/keeper/**/*.ml` or the script/baseline themselves; the baseline file exists (currently empty, since iter 74 R-1.b drained the seven grandfathered sites). The actual gap is in the regex shape: the validator's pattern `\[(type )?[a-z_]+\][^][]*line[s ]+[0-9]+` is `grep -oE` (single-line), so a *multi-line* citation like `[run_keeper_cycle]\n     (line 1042+)` — exactly the shape this PR drains — falls outside its window. The validator catches `[symbol] (line N)` only when both halves sit on the same physical line.
 
-Wiring `audit-ocaml-spec-nav-line-refs.sh` into CI (with a baseline file capturing whatever already-stale sites exist beyond `keeper_unified_turn.ml`) is a separate, structural PR — not bundled here because the baseline could legitimately include dozens of sites across `lib/keeper/`, and admitting them under `BASELINE` while draining `keeper_unified_turn.ml` is the iter-74 baseline-drain pattern. Out of this PR's scope; flagged as the natural next R-B-1.c-style chain.
+Wiring isn't the issue; widening the regex (or extending the script to coalesce a 2-3 line span before matching) is the structural follow-up. Out of this PR's scope; flagged below.
 
 ## Verification
 
@@ -78,5 +78,5 @@ Wiring `audit-ocaml-spec-nav-line-refs.sh` into CI (with a baseline file capturi
 
 ## Follow-up
 
-- **Wire `scripts/audit-ocaml-spec-nav-line-refs.sh` into CI with a baseline file**. This is the OCaml-side twin of N-2.c (iter 92 Rule 2). The baseline could be substantial — `git grep -nE '\(line [0-9]+\+?\)|at line [0-9]+|~line [0-9]+' lib/keeper/` to enumerate. Treat similarly to `audit-tla-annotation-drift.sh --baseline` precedent (iter 21 #14772).
+- **Widen `scripts/audit-ocaml-spec-nav-line-refs.sh` to span multi-line citations**. The validator is already wired (`.github/workflows/tla-annotation-drift.yml`) with a (currently empty) baseline file — but its `grep -oE '\[(type )?[a-z_]+\][^][]*line[s ]+[0-9]+'` is single-line and misses `[run_keeper_cycle]\n     (line 1042+)`-shaped citations. Two-line coalescing (`paste - -` style, or read the file once into awk and look across consecutive non-blank lines) would close this. The follow-up may want to baseline any sites that surface across `lib/keeper/` once the regex widens.
 - `keeper_unified_turn.ml` is large (3000+ LOC) and known-godfile. Further reverse-citation drift here would be caught by the baselined CI guard above. Outside this single-file drain.

@@ -1,28 +1,36 @@
 ---- MODULE KeeperLaunchPending ----
-\* Pre-launch lifecycle for `lib/keeper/keeper_state_machine.ml` priority 2
-\* (Offline branch).  This spec closes Note A drift identified during
-\* Cycle 24 / Tier C1 Phase 0:
+\* Pre-launch lifecycle for `lib/keeper/keeper_state_machine.ml`'s Offline
+\* branch.  This spec closes Note A drift identified during Cycle 24 /
+\* Tier C1 Phase 0:
 \*
-\*   keeper_state_machine.ml:393-394
+\*   keeper_state_machine.ml — derive_phase's
 \*     `else if c.launch_pending && not c.fiber_alive then Offline`
+\*     branch (the Offline branch, low priority — it only fires when
+\*     no higher-priority condition holds)
 \*
 \*   was the only `derive_phase` branch lacking a phase-derivation
-\*   spec.  Sibling specs (KeeperReconcileLiveness:88-101,
+\*   spec.  Sibling specs (KeeperReconcileLiveness's DerivePhase,
 \*   KeeperConditionsGovernPhase, KeeperCompactionLifecycle, ...)
 \*   together cover every other priority.  This spec fills that gap.
 \*
+\* All OCaml refs below are cited by function/arm name, not line number
+\* — iter 64 N-2.a convention; the preamble's previous line anchors had
+\* drifted by +100..+1000 lines (keeper_registry.ml had grown ~1k lines).
+\* See docs/tla-audit/klp-r7-launch-pending-lineref-drift-2026-05-12.md
+\*
 \* Runtime entities modelled (lifecycle of `launch_pending : bool`):
 \*
-\*   Set TRUE  : keeper_registry.ml:340 (register_offline)
-\*               — invoked at keeper registration *before* the fiber
-\*                 has been spawned.  Pairs with
-\*                 restart_budget_remaining = TRUE.
+\*   Set TRUE  : keeper_registry.ml — register_offline (the
+\*               default_conditions record with launch_pending = true).
+\*               Invoked at keeper registration *before* the fiber has
+\*               been spawned.  Pairs with restart_budget_remaining = TRUE.
 \*   Clear FALSE
-\*     in FSM  : keeper_state_machine.ml:520 (Fiber_started event)
-\*               — fiber has actually started; pre-launch is no longer
-\*                 pending.
-\*     on death: keeper_registry.ml:407 (Dead transition)
-\*               — keeper is permanently dead, all flags reset.
+\*     in FSM  : keeper_state_machine.ml — update_conditions' Fiber_started
+\*               arm (`{ c with launch_pending = false; fiber_alive = true; ... }`).
+\*               Fiber has actually started; pre-launch is no longer pending.
+\*     on death: keeper_registry.ml — mark_dead (resets
+\*               launch_pending = false; fiber_alive = false).  Keeper is
+\*               permanently dead, all flags reset.
 \*
 \* Scope projection: this spec models only the launch_pending /
 \* fiber_alive / phase relationship for the 3-phase fragment
@@ -37,10 +45,11 @@
 \*   `update_conditions` for the `Fiber_started` event omits the
 \*   `launch_pending = false` field.  The visible symptom is a
 \*   keeper that runs *and* reports launch_pending=true in JSON,
-\*   confusing supervisors (per keeper_registry.ml polls).  Phase
-\*   would still resolve to Running because priority 2 only fires
-\*   when fiber_alive=FALSE — so the drift is silent unless caught
-\*   here.
+\*   confusing supervisors (per keeper_registry.ml polls; the
+\*   conditions json export `"launch_pending", \`Bool c.launch_pending`
+\*   in keeper_state_machine.ml surfaces it).  Phase would still
+\*   resolve to Running because the Offline branch only fires when
+\*   fiber_alive=FALSE — so the drift is silent unless caught here.
 \*
 \* Bug-Model contract (CLAUDE.md software-development.md):
 \*   Spec      under KeeperLaunchPending.cfg       => TLC: no error.
@@ -64,7 +73,7 @@ TypeOK ==
     /\ fiber_alive    \in BOOLEAN
     /\ phase          \in PhaseSet
 
-\* Init mirrors keeper_registry.ml:337-344 register_offline:
+\* Init mirrors keeper_registry.ml's register_offline:
 \*   default_conditions {launch_pending = true; restart_budget_remaining = true}
 \*   derive_phase -> Offline.
 Init ==
@@ -74,10 +83,10 @@ Init ==
 
 \* ── Honest actions ─────────────────────────────────────────────
 
-\* keeper_state_machine.ml:518-532 Fiber_started event handler.
+\* keeper_state_machine.ml's update_conditions Fiber_started arm.
 \* Resets launch_pending and sets fiber_alive simultaneously.
-\* derive_phase priority 9 (Running) fires once both flags are
-\* updated.
+\* derive_phase's `fiber_alive` branch (Running) fires once both
+\* flags are updated.
 FiberStart ==
     /\ launch_pending = TRUE
     /\ fiber_alive    = FALSE
@@ -85,8 +94,8 @@ FiberStart ==
     /\ fiber_alive'    = TRUE
     /\ phase'          = "Running"
 
-\* keeper_registry.ml:400-413 Dead transition.  Resets both flags
-\* and lands phase on Dead.  Modelled from any non-terminal state.
+\* keeper_registry.ml's mark_dead.  Resets both flags and lands
+\* phase on Dead.  Modelled from any non-terminal state.
 MarkDead ==
     /\ phase /= "Dead"
     /\ launch_pending' = FALSE
@@ -104,11 +113,12 @@ Done ==
 
 \* The fiber starts but the launch_pending flag is forgotten.
 \* Keeper would now report fiber_alive=TRUE *and* launch_pending=TRUE
-\* — a drift the json export at keeper_state_machine.ml:709 would
-\* surface as a confusing observability signal.  Critically,
-\* derive_phase still routes to Running (priority 9) because
-\* priority 2 demands ~fiber_alive — so the drift is invisible to
-\* phase consumers but visible to anyone reading conditions.
+\* — a drift the conditions json export
+\* (`"launch_pending", \`Bool c.launch_pending` in keeper_state_machine.ml)
+\* would surface as a confusing observability signal.  Critically,
+\* derive_phase still routes to Running (its `fiber_alive` branch)
+\* because the Offline branch demands ~fiber_alive — so the drift is
+\* invisible to phase consumers but visible to anyone reading conditions.
 FiberStartedWithoutClearing ==
     /\ launch_pending = TRUE
     /\ fiber_alive    = FALSE

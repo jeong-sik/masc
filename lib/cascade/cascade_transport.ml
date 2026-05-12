@@ -398,7 +398,44 @@ let codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
   && Option.is_some (per_keeper_authorization_header ~agent_name)
 ;;
 
-let codex_runtime_mcp_policy_for_agent ~agent_name policy =
+(* RFC-0058 §2.4 capability-driven projection.
+
+   Header lifecycle (in this order, no early exits):
+   1. [runtime_mcp_policy_without_http_headers] strips ALL HTTP headers
+      from every [Http_server] in the policy. This step is
+      unconditional — any inbound [Authorization] is gone before any
+      decision below.
+   2. [runtime_mcp_policy_with_masc_agent_name] re-injects only the
+      non-secret MASC identity headers.
+   3. The [Authorization] header is then sourced from one of two
+      branches:
+        - if [runtime_mcp_policy_uses_bound_actor_tools policy = true],
+          from [Auth.load_raw_token] via
+          [per_keeper_authorization_header ~agent_name];
+        - else, read from the *inbound* policy's [name = "masc"]
+          [Http_server] entry via [authorization_header_from_policy]
+          (which reads [policy.servers], not [stripped.servers], so it
+          recovers the MASC bearer that the caller provided).
+      When either branch yields [None], the returned policy carries no
+      [Authorization] header — there is no fall-through to the inbound
+      policy's non-masc headers, which were removed in step 1.
+
+   Invariant: this function is only reached from the dispatch site when
+   [Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_
+   for_config = true], i.e. the adapter cannot carry arbitrary per-
+   request HTTP headers.  Body is intentionally identical in semantics
+   to the prior [codex_runtime_mcp_policy_for_agent] — the rename
+   removes the provider-name leak from the dispatch site without
+   altering behavior.
+
+   A future adapter with [requires_per_keeper_bridging = true] but
+   different transport semantics (e.g. native per-keeper header
+   injection) should be handled by an explicit dispatch arm at the
+   call site, not by adding a new flag parameter here — adding such
+   a flag now would introduce a code path no current provider exercises
+   and risks a silent header-preservation regression (see Copilot
+   review of PR #14885). *)
+let bridged_runtime_mcp_policy_for_agent ~agent_name policy =
   let stripped =
     runtime_mcp_policy_without_http_headers policy
     |> runtime_mcp_policy_with_masc_agent_name ~include_internal_token:false ~agent_name
@@ -422,10 +459,10 @@ let runtime_mcp_policy_for_provider
     let trimmed = String.trim agent_name in
     if String.equal trimmed "" then None else Some trimmed
   in
-  (* Codex CLI's [requires_per_keeper_bridging_for_bound_actor_tools = true]
-     is the capability flag that gates the legacy strip-and-bridge path; see
-     [Provider_adapter.codex_cli_tool_policy].  Other providers either carry
-     headers natively or do not need bridging. *)
+  (* Dispatch by capability flag from [Provider_adapter.tool_policy], not
+     by provider name (RFC-0058 §2.4).  [requires_per_keeper_bridging]
+     gates the strip-and-bridge path; Codex CLI is currently the only
+     adapter that returns [true]. *)
   let requires_per_keeper_bridging =
     Provider_adapter
     .requires_per_keeper_bridging_for_bound_actor_tools_for_config
@@ -433,11 +470,10 @@ let runtime_mcp_policy_for_provider
   in
   match policy_opt, requires_per_keeper_bridging, agent_name with
   | Some policy, true, Some agent_name ->
-    (* Codex CLI still cannot carry arbitrary per-request headers, but OAS
-         routes [Authorization: Bearer ...] through [bearer_token_env_var].
-         Keep only that auth path plus non-secret identity headers so Codex can
-         pre-approve runtime MCP tools without leaking tokens through argv. *)
-    Some (codex_runtime_mcp_policy_for_agent ~agent_name policy)
+    (* Per-request HTTP headers are stripped and only MASC identity headers
+         plus the per-keeper [Authorization] header survive — so runtime MCP
+         tools still authenticate without leaking secrets via argv. *)
+    Some (bridged_runtime_mcp_policy_for_agent ~agent_name policy)
   | Some policy, true, None ->
     (* No agent_name to inject — preserve the legacy strip-all behavior.
        Iter 38: tick a counter so a non-zero rate flags caller paths

@@ -64,8 +64,11 @@ vars ==
 \*
 \* Unmodeled here (covered in companion specs):
 \*   Failing, Overflowed, Compacting, Draining, Paused,
-\*   Stopped, Crashed, Restarting, Dead — see
+\*   Stopped, Crashed, Restarting, Dead, Zombie — see
 \*   KeeperReconcileLiveness.tla and KeeperContextLifecycle.tla.
+\*   Zombie is terminal-terminal (post-Dead, no generation events
+\*   reachable); safety surface lives in KeeperStateMachine.tla
+\*   (ZombieIsForever / ZombieRequiresTerminalFailureLatched).
 Phases == {"idle", "running", "handing_off"}
 
 SeqElems(seq) == {seq[i] : i \in 1..Len(seq)}

@@ -51,8 +51,8 @@
 \*     must lead to a phase that acknowledges the signal.
 \*
 \* Wire path to the dashboard banner consumer (also symbol-anchored — the
-\* previous "line 634" / "line 620" anchors had both drifted; the json
-\* serializer is now near line 1209, but symbol anchors don't rot):
+\* previous "line 634" / "line 620" anchors had both drifted; symbol
+\* anchors don't rot):
 \*   lib/keeper/keeper_state_machine.ml — update_conditions stamps
 \*     `context_handoff_needed = auto_rules.handoff`, and the conditions
 \*     json export carries the

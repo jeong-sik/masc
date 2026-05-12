@@ -40,11 +40,10 @@ let strip_frontmatter (content : string) : string =
 
 let read_file path =
   try
-    let raw = In_channel.with_open_text path In_channel.input_all in
+    let raw = Fs_compat.load_file path in
     Some (strip_frontmatter raw)
   with
   | Sys_error _ -> None
-  | End_of_file -> None
 
 let load_uncached name =
   let path = behavior_path name in

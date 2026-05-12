@@ -112,7 +112,7 @@ let handle_keeper_masc_code_read
                Tool_code.max_file_size)
         else (
           try
-            let content = In_channel.with_open_text target In_channel.input_all in
+            let content = Fs_compat.load_file target in
             let lines = String.split_on_char '\n' content in
             let total_lines = List.length lines in
             let safe_offset = max 0 (min offset total_lines) in

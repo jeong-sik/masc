@@ -3,8 +3,11 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import tseslint from 'typescript-eslint'
 
 const TARGET_FILES = [
+  'src/api/dashboard-cascade.ts',
   'src/api/gate.ts',
   'src/api/goal-loop.ts',
+  'src/api/schemas/cascade.ts',
+  'src/api/schemas/dashboard-config.ts',
   'src/api/transport-health.ts',
   'src/components/common/async-container.ts',
   'src/components/common/empty-state.ts',
@@ -27,6 +30,8 @@ const TARGET_FILES = [
 ]
 
 const TEST_FILES = [
+  'src/api/schemas/cascade.test.ts',
+  'src/api/schemas/dashboard-config.test.ts',
   'src/cb-shared-telemetry-source.test.ts',
   'src/components/common/markdown.test.ts',
   'src/components/connector-status.test.ts',

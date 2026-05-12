@@ -21,6 +21,10 @@ import {
   type AgentTimelineEvent,
   type AgentTimelineResponse,
 } from './schemas/agent-timeline'
+import {
+  parseDashboardConfigResponse,
+  type DashboardConfigResponse,
+} from './schemas/dashboard-config'
 import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type {
@@ -62,6 +66,13 @@ import type {
   DashboardConfigResolution,
   DashboardRuntimeResolution,
 } from '../types'
+export { DashboardConfigSchemaDriftError } from './schemas/dashboard-config'
+export type {
+  ConfigEntry,
+  ConfigEntryProvenance,
+  ConfigEntrySource,
+  DashboardConfigResponse,
+} from './schemas/dashboard-config'
 export {
   fetchCascadeAuditRuns,
   fetchCascadeClientCapacity,
@@ -166,39 +177,8 @@ export async function fetchAgentRelations(agentName: string): Promise<AgentRelat
   return parseAgentRelationsResponse(raw)
 }
 
-export type ConfigEntrySource = 'env' | 'default' | 'derived' | 'runtime'
-
-export interface ConfigEntryProvenance {
-  kind: ConfigEntrySource
-  detail: string
-  derived_from?: string[]
-}
-
-export interface ConfigEntry {
-  env: string
-  description: string
-  value: string | null
-  default: string
-  source: ConfigEntrySource
-  source_detail?: string
-  provenance?: ConfigEntryProvenance
-  sensitive: boolean
-}
-
-export interface DashboardConfigResponse {
-  generated_at: string
-  server: {
-    version: string
-    git_commit: string | null
-    ocaml_version: string
-    uptime_seconds: number
-    pid: number
-  }
-  categories: Record<string, ConfigEntry[]>
-}
-
 export function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
-  return get('/api/v1/dashboard/config')
+  return get<unknown>('/api/v1/dashboard/config').then(parseDashboardConfigResponse)
 }
 
 /** Parse runtime context-ratio thresholds from the dashboard config response.

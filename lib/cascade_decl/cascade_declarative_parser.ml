@@ -260,7 +260,7 @@ let parse_providers (toml : Otoml.t) : (cascade_provider list, parse_error list)
         (List.filter_map
            (function
              | Ok p -> Some p
-             | _ -> None)
+             | Error _ -> None)
            results)
 ;;
 
@@ -419,7 +419,7 @@ let parse_models (toml : Otoml.t) : (cascade_model_spec list, parse_error list) 
         (List.filter_map
            (function
              | Ok m -> Some m
-             | _ -> None)
+             | Error _ -> None)
            results)
 ;;
 
@@ -436,6 +436,19 @@ let is_reserved (name : string) : bool = List.mem name reserved_namespaces
 type provider_table_entry =
   | Binding_entry of cascade_binding
   | Alias_entry of cascade_alias
+
+(* [Otoml.t] is a 3rd-party closed variant with 12 value constructors;
+   this parser only ever distinguishes "table-shaped" (TomlTable /
+   TomlInlineTable) from everything else. Enumerating the other 10 once
+   here satisfies warning 4 and means an [otoml] version bump that adds a
+   value constructor breaks exactly this site rather than a dozen call
+   sites. *)
+let is_toml_table : Otoml.t -> bool = function
+  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> true
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ -> false
 
 let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml.t)
   : cascade_binding
@@ -495,22 +508,8 @@ let parse_provider_alias_table (provider_id : string) (tbl : Otoml.t)
     (fun (model_id_or_alias, sub) ->
        match sub with
        | Otoml.TomlTable fields | Otoml.TomlInlineTable fields ->
-         let leaf_fields =
-           List.filter
-             (fun (_, v) ->
-                match v with
-                | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> false
-                | _ -> true)
-             fields
-         in
-         let sub_tables =
-           List.filter
-             (fun (_, v) ->
-                match v with
-                | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> true
-                | _ -> false)
-             fields
-         in
+         let leaf_fields = List.filter (fun (_, v) -> not (is_toml_table v)) fields in
+         let sub_tables = List.filter (fun (_, v) -> is_toml_table v) fields in
          let binding =
            let synthetic_tbl = Otoml.TomlTable leaf_fields in
            parse_binding_fields provider_id model_id_or_alias synthetic_tbl
@@ -523,7 +522,11 @@ let parse_provider_alias_table (provider_id : string) (tbl : Otoml.t)
              sub_tables
          in
          Binding_entry binding :: aliases
-       | _ -> [ Binding_entry (parse_binding_fields provider_id model_id_or_alias sub) ])
+       | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+       | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+       | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+       | Otoml.TomlTableArray _ ->
+         [ Binding_entry (parse_binding_fields provider_id model_id_or_alias sub) ])
     entries
 ;;
 
@@ -536,12 +539,7 @@ let parse_bindings_and_aliases (toml : Otoml.t)
      [Otoml.get_table] in [parse_provider_alias_table]. *)
   let provider_aliases =
     List.filter
-      (fun (name, value) ->
-         (not (is_reserved name))
-         &&
-         match value with
-         | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> true
-         | _ -> false)
+      (fun (name, value) -> (not (is_reserved name)) && is_toml_table value)
       top_entries
   in
   let all_entries =
@@ -553,14 +551,14 @@ let parse_bindings_and_aliases (toml : Otoml.t)
     List.filter_map
       (function
         | Binding_entry b -> Some b
-        | _ -> None)
+        | Alias_entry _ -> None)
       all_entries
   in
   let aliases =
     List.filter_map
       (function
         | Alias_entry a -> Some a
-        | _ -> None)
+        | Binding_entry _ -> None)
       all_entries
   in
   bindings, aliases
@@ -667,7 +665,7 @@ let parse_tiers (toml : Otoml.t) : (cascade_tier list, parse_error list) result 
         (List.filter_map
            (function
              | Ok t -> Some t
-             | _ -> None)
+             | Error _ -> None)
            results)
 ;;
 
@@ -716,7 +714,7 @@ let parse_tier_groups (toml : Otoml.t)
         (List.filter_map
            (function
              | Ok g -> Some g
-             | _ -> None)
+             | Error _ -> None)
            results)
 ;;
 
@@ -729,12 +727,11 @@ let parse_routes (toml : Otoml.t) : cascade_route list =
     let entries = Otoml.get_table routes_tbl in
     List.filter_map
       (fun (name, tbl) ->
-         match tbl with
-         | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+         if is_toml_table tbl then
            (match Otoml.find_opt tbl Otoml.get_string [ "target" ] with
             | Some target -> Some { name; target }
             | None -> None)
-         | _ -> None)
+         else None)
       entries
 ;;
 
@@ -747,15 +744,14 @@ let parse_system_targets (toml : Otoml.t) : cascade_route list =
     let entries = Otoml.get_table sys_tbl in
     List.filter_map
       (fun (name, tbl) ->
-         match tbl with
-         | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+         if is_toml_table tbl then
            (match Otoml.find_opt tbl Otoml.get_string [ "target" ] with
             | Some target -> Some { name; target }
             | None ->
               (match Otoml.find_opt tbl Otoml.get_string [ "binding" ] with
                | Some target -> Some { name; target }
                | None -> None))
-         | _ -> None)
+         else None)
       entries
 ;;
 

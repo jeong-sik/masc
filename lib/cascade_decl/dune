@@ -16,6 +16,8 @@
  (name masc_mcp_cascade_decl)
  (public_name masc_mcp.cascade_decl)
  (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ (flags (:standard -w +4))
  (libraries
   otoml
   ppx_deriving.runtime

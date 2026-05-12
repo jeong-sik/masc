@@ -118,7 +118,26 @@ let diagnose_cascade_catalog ~active_config_root =
     Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
   in
   if not (Env_config_core.existing_file config_path) then
-    []
+    (* No cascade.toml — but if a legacy cascade.json is still lying
+       around, the operator forgot to migrate.  Config_dir_resolver
+       already emits this exact warning at startup (see its
+       [degraded_legacy_json_warnings]); mirroring it here makes the
+       same diagnostic visible on the Config Doctor panel so it isn't
+       silent green when the catalog can't be validated. *)
+    let legacy_json =
+      Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
+    in
+    if Env_config_core.existing_file legacy_json then
+      [ { profile = None
+        ; severity = Catalog_warn
+        ; message =
+            "Found cascade.json but no cascade.toml; cascade.json is no longer \
+             read (RFC-0058 §9). Migrate to cascade.toml so catalog \
+             diagnostics can run."
+        }
+      ]
+    else
+      []
   else
     let profiles = Cascade_catalog_validator.discover_profiles ~config_path in
     let validator_issues = Cascade_catalog_validator.diagnose_catalog ~config_path in

@@ -281,9 +281,14 @@ let launch_supervised_fiber
     let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
     let pool_for_keeper = if domain_pool_flag then Executor_pool_ref.get () else None in
     let bump_fork_outcome outcome =
+      (* Label order mirrors the other [keeper_supervisor.ml] inc_counter
+         call sites ([keeper] first, then the discriminator).  Prometheus
+         label-set keys are order-sensitive, so a single per-metric
+         convention prevents accidental time-series splitting when new
+         call sites add the same labels in a different order. *)
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_domain_pool_fork
-        ~labels:[ "outcome", outcome; "keeper", meta.name ]
+        ~labels:[ "keeper", meta.name; "outcome", outcome ]
         ()
     in
     (* IO-bound weight: 0.05 mirrors [Domain_pool.weight_io] (the

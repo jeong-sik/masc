@@ -229,9 +229,17 @@ val metric_keeper_turn_queue_depth : string
 val metric_keeper_supervisor_sweep_starts : string
 val metric_keeper_supervisor_last_sweep_unixtime : string
 
-(** RFC-0059 PR-7 soak observability counter; labels: [outcome]
-    in {"pool" | "inline_no_pool" | "inline_disabled" | "submit_failed"},
-    [keeper] = keeper name. *)
+(** RFC-0059 PR-7 soak observability counter.
+
+    Labels: [keeper] (keeper name, first), [outcome] in
+    {"pool" | "inline_no_pool" | "inline_disabled" | "submit_failed"}.
+
+    [outcome=submit_failed] is emitted in addition to a prior
+    [outcome=pool] increment on the same launch when the worker-Domain
+    submit raises a non-cancellation exception; the total counter can
+    therefore exceed the number of supervised launches.  Aggregations
+    that need launch counts should sum over [pool | inline_no_pool |
+    inline_disabled] only. *)
 val metric_keeper_domain_pool_fork : string
 
 val metric_keeper_semaphore_wait_timeout : string

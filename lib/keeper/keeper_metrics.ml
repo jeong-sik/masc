@@ -460,14 +460,23 @@ let metric_keeper_supervisor_last_sweep_unixtime =
 ;;
 
 (* RFC-0059 PR-7 soak observability.  Each per-keeper supervised launch
-   increments this counter with one of four outcome labels:
+   emits at least one increment of this counter, tagged with one of:
    - "pool"            flag ON + [Executor_pool_ref] returned a pool,
                        body submitted to a worker Domain.
    - "inline_no_pool"  flag ON but [Executor_pool_ref] was [None]
                        (boot-order or misconfig); body ran inline.
    - "inline_disabled" flag OFF (default); body ran inline on [ctx.sw].
    - "submit_failed"   pool submit raised a non-cancellation exception;
-                       body ran inline via the fallback path. *)
+                       body ran inline via the fallback path.
+
+   The launch path is **not** mutually exclusive over a single launch:
+   when an [outcome=pool] increment is followed by a worker-Domain
+   submit failure, the fallback path emits an additional
+   [outcome=submit_failed] increment for the same launch.  Aggregation
+   queries that count "supervised launches" should therefore sum only
+   over the launch-attempt outcomes [pool | inline_no_pool |
+   inline_disabled] and treat [submit_failed] as a failure-ratio
+   numerator over [outcome=pool] only. *)
 let metric_keeper_domain_pool_fork = to_string DomainPoolFork
 let metric_keeper_semaphore_wait_timeout = "masc_keeper_semaphore_wait_timeout_total"
 

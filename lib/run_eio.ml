@@ -209,12 +209,26 @@ let set_deliverable config ~task_id ~content : (run_record, string) result =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
-(** Read logs (optionally tail N) *)
+(** Read logs (optionally tail N).
+
+    When [limit] is given the fold drives a bounded [Queue.t] sized to
+    [n] (drop-oldest on overflow), so peak live memory is O(n) instead
+    of O(file_line_count) and the post-fold [List.length] / [mapi] /
+    [filter] / [map snd] trim chain is gone.
+
+    Same ring-buffer pattern as
+    [institution_eio.load_recent_episodes_jsonl] (PR #14873) and
+    [Log.Ring.load_from_file] (PR #14904 after Copilot review): for
+    tail-N over an unbounded append-only JSONL the streaming fold
+    should *also* be the trim, otherwise the win from
+    [Fs_compat.fold_jsonl_lines] is canceled by a downstream list
+    materialisation. *)
 let read_logs config ~task_id ?limit () : log_entry list =
   let file = log_path config task_id in
   if not (Sys.file_exists file) then []
   else
-    let entries =
+    match limit with
+    | None ->
       Fs_compat.fold_jsonl_lines
         ~init:[]
         ~f:(fun acc ~line_no:_ j ->
@@ -223,15 +237,19 @@ let read_logs config ~task_id ?limit () : log_entry list =
           | None -> acc)
         file
       |> List.rev
-    in
-    match limit with
-    | None -> entries
+    | Some n when n <= 0 -> []
     | Some n ->
-        let total = List.length entries in
-        if total <= n then entries else
-          let start = total - n in
-          entries |> List.mapi (fun i e -> (i, e)) |> List.filter (fun (i, _) -> i >= start)
-          |> List.map snd
+      let ring : log_entry Queue.t = Queue.create () in
+      Fs_compat.fold_jsonl_lines
+        ~init:()
+        ~f:(fun () ~line_no:_ j ->
+          match log_entry_of_json j with
+          | None -> ()
+          | Some e ->
+            Queue.add e ring;
+            if Queue.length ring > n then ignore (Queue.pop ring))
+        file;
+      List.of_seq (Queue.to_seq ring)
 
 (** Get run details *)
 let get config ~task_id : (Yojson.Safe.t, string) result =

@@ -67,10 +67,12 @@ val error_code_to_string : error_code -> string
     These produce plain JSON strings without [Tool_result.t] wrapping.
     Used by [get_string_required] error paths and other low-level callers. *)
 
-(** [{"status":"error", <fields>}] as a [`Assoc] node.  Counterpart to
-    {!ok_response} / {!ok_result} on the success side, but returns the
-    *unserialized* [Yojson.Safe.t] for embedding in a larger response
-    or returning via [(Yojson.Safe.t, _) result]. *)
+(** [{"status":"error", <fields>}] as a [`Assoc] node.  Caller-supplied
+    [status] fields are discarded so duplicate JSON keys cannot override
+    the canonical envelope status.  Counterpart to {!ok_response} /
+    {!ok_result} on the success side, but returns the *unserialized*
+    [Yojson.Safe.t] for embedding in a larger response or returning via
+    [(Yojson.Safe.t, _) result]. *)
 val error_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 
 (** [{"status":"error","message":"…"}] as a serialized JSON string. *)
@@ -78,7 +80,8 @@ val error_response : string -> string
 
 (** [{"status":"error", <fields>}] as a serialized JSON string with
     caller-supplied fields.  Use when the payload needs more than just
-    [message] (e.g. [error]/[agent_id]/[config_path] context). *)
+    [message] (e.g. [error]/[agent_id]/[config_path] context).  Any
+    caller-supplied [status] field is discarded. *)
 val error_response_with : (string * Yojson.Safe.t) list -> string
 
 (** [{"status":"error","error_code":"…","message":"…"}] *)
@@ -91,7 +94,8 @@ val ok_response : (string * Yojson.Safe.t) list -> string
     Use when embedding the envelope in a larger composed response — HTTP
     body builders, [(Yojson.Safe.t, string) result] pipelines, etc.
     Identical field-order semantics to {!ok_response}: [status] is
-    prepended to the [`Assoc] head. *)
+    prepended to the [`Assoc] head and caller-supplied [status] fields are
+    discarded. *)
 val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 
 (** {1 Tool_result.t Helpers}

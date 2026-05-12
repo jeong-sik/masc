@@ -95,8 +95,11 @@ let error_code_to_string = function
     but returning the unserialized [Yojson.Safe.t] node so it can be
     composed into a larger structure or returned as
     [(Yojson.Safe.t, _) result]. *)
+let without_status_field fields =
+  List.filter (fun (key, _) -> not (String.equal key "status")) fields
+
 let error_assoc fields : Yojson.Safe.t =
-  `Assoc (("status", `String "error") :: fields)
+  `Assoc (("status", `String "error") :: without_status_field fields)
 
 (** Build a JSON error response string: [\{"status":"error","message":"..."\}] *)
 let error_response message =
@@ -105,7 +108,9 @@ let error_response message =
 (** Build a JSON error response string with caller-supplied fields.
     Use when the error payload needs more than just [message] (e.g.
     [error]/[agent_id]/[config_path] context).  Field-order semantics:
-    [status] is prepended to the head of the [`Assoc]. *)
+    [status] is prepended to the head of the [`Assoc].  Caller-supplied
+    [status] fields are discarded so the canonical envelope cannot be
+    overridden by duplicate JSON keys. *)
 let error_response_with fields =
   Yojson.Safe.to_string (error_assoc fields)
 
@@ -118,10 +123,6 @@ let error_response_typed ~code message =
       ("message", `String message);
     ]
 
-(** Build a JSON OK response string with additional fields. *)
-let ok_response fields =
-  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
-
 (** Build a JSON OK envelope as a [Yojson.Safe.t] (unserialized).  Use
     when the caller needs the envelope as part of a larger composed
     response — for example HTTP body builders that wrap multiple
@@ -129,7 +130,11 @@ let ok_response fields =
     serialize at a later stage.  Same field-order guarantee as
     [ok_response]: status is prepended to the head of the [`Assoc]. *)
 let ok_assoc fields : Yojson.Safe.t =
-  `Assoc (("status", `String "ok") :: fields)
+  `Assoc (("status", `String "ok") :: without_status_field fields)
+
+(** Build a JSON OK response string with additional fields. *)
+let ok_response fields =
+  Yojson.Safe.to_string (ok_assoc fields)
 
 (** {1 Tool_result.t Helpers}
 

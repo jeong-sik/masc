@@ -5,6 +5,20 @@
 (private_modules
  plan_action_outcome
  error_event_type
+ alert_persist_kind
+ metrics_sse_failure_kind
+ paused_state_persist_phase
+ bookkeeping_failure_kind
+ checkpoint_failure_operation
+ profile_load_failure_site
+ turn_cleanup_failure_site
+ cascade_sync_failure_site
+ event_bus_drain_site
+ turn_metrics_snapshot_failure_site
+ metric_emit_dropped_site
+ post_turn_wirein_failure_site
+ atomic_orphan_size_class
+ silent_dashboard_actor_outcome
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
  dashboard_http_tool_quality

@@ -23,6 +23,21 @@ ALLOWLIST=(
 )
 
 count=0
+matches_file="$(mktemp)"
+errors_file="$(mktemp)"
+cleanup() {
+  rm -f "$matches_file" "$errors_file"
+}
+trap cleanup EXIT
+
+rg_status=0
+rg -nP '"status",\s*`String\s+"error"' lib/ -g '*.ml' >"$matches_file" 2>"$errors_file" || rg_status=$?
+if [[ $rg_status -gt 1 ]]; then
+  echo "ERROR: ripgrep failed while scanning error-envelope literals" >&2
+  cat "$errors_file" >&2
+  exit "$rg_status"
+fi
+
 while IFS= read -r match; do
   file=${match%%:*}
 
@@ -41,7 +56,7 @@ while IFS= read -r match; do
 
   echo "ERROR: inline error-envelope literal (use Tool_args.error_response / error_response_with / error_assoc / error_result): $match"
   count=$((count + 1))
-done < <(rg -nP '"status",\s*`String\s+"error"' lib/ --type-add 'ocaml:*.ml' -tocaml 2>/dev/null || true)
+done < "$matches_file"
 
 if [[ $count -gt 0 ]]; then
   echo ""

@@ -1471,6 +1471,32 @@ let test_two_sdk_turn_boundaries_no_assert () =
        && obs.R.turn_phase = R.Packed R.Turn_routing)
   | _ -> fail "obs missing after second SDK boundary"
 
+let fsm_guard_count () =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_fsm_guard_violation
+    ~labels:[ ("action", "turn_phase_transition"); ("stage", "guard") ]
+    ()
+
+let test_set_turn_phase_rejection_bumps_guard_metric () =
+  R.clear ();
+  let keeper_name = "k-turn-phase-guard-metric" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  let before = fsm_guard_count () in
+  let raised =
+    try
+      R.set_turn_phase ~base_path:bp keeper_name R.(Packed Turn_compacting);
+      false
+    with
+    | R.Turn_phase_transition_violation { where; _ } ->
+      String.equal where "set_turn_phase"
+  in
+  let after = fsm_guard_count () in
+  check bool
+    "forbidden set_turn_phase raises Turn_phase_transition_violation from the setter"
+    true raised;
+  check (float 0.0001) "guard metric increments" (before +. 1.0) after
+
 let test_effective_keepalive_meta_prefers_disk_when_present () =
   R.clear ();
   let stale = make_meta "loop-meta-disk" in
@@ -1639,5 +1665,7 @@ let () =
             test_mark_sdk_turn_started_no_op_without_obs;
           eio_test "two SDK-turn boundaries inside one keeper-turn"
             test_two_sdk_turn_boundaries_no_assert;
+          eio_test "set_turn_phase rejection bumps guard metric"
+            test_set_turn_phase_rejection_bumps_guard_metric;
         ] );
     ]

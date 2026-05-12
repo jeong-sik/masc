@@ -1796,7 +1796,11 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
      Mirrors the cascade-side wiring (PR #14908) — idempotent self-loops no
      longer flip [changed] or emit a broadcast, and forbidden transitions
      raise the typed [Turn_phase_transition_violation] (Phase 5) carrying
-     the [turn_phase_transition_spec_violation] payload directly. *)
+     the [turn_phase_transition_spec_violation] payload directly.  The
+     violation branch stays wrapped by [Keeper_fsm_guard_runtime.wrap_unit]
+     (PR #14926 pattern) so direct setter rejections keep incrementing
+     [masc_fsm_guard_violation_total] — see the [Resolved_turn_violation]
+     arm below. *)
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->

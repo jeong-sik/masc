@@ -40,20 +40,26 @@
 \*   handoff_needed (boolean)     | lib/keeper/keeper_state_machine.ml:context_handoff_needed | conditions.context_handoff_needed : bool
 \*                                | lib/keeper/keeper_state_machine.ml:update_conditions | set from auto_rules.handoff at update_conditions
 \*
-\* Producer side (where conditions are stamped):
-\*   lib/keeper/keeper_state_machine.ml:351
-\*     `else if c.handoff_active then HandingOff` — derive_phase routes
-\*     into HandingOff when handoff_active is set, satisfying the spec
-\*     liveness obligation that handoff_needed must lead to a phase that
-\*     acknowledges the signal.
+\* Producer side (where conditions are stamped).  Cited by function name,
+\* not line number — iter 64 N-2.a convention; the previous "line 351"
+\* anchor had drifted +172 and pointed into the valid_transition matrix
+\* instead.  See docs/tla-audit/kcgp-r5-conditions-govern-phase-lineref-drift-2026-05-12.md
+\*   lib/keeper/keeper_state_machine.ml — derive_phase has the
+\*     `else if c.handoff_active then HandingOff` branch (in its
+\*     buffer-states block) that routes into HandingOff when handoff_active
+\*     is set, satisfying the spec liveness obligation that handoff_needed
+\*     must lead to a phase that acknowledges the signal.
 \*
-\* Wire path to the dashboard banner consumer:
-\*   lib/keeper/keeper_state_machine.ml:634
-\*     `"context_handoff_needed", \`Bool c.context_handoff_needed`
-\*     (json export — read by dashboard/src/components/keeper-conditions-divergent.ts).
-\*     Verified 2026-04-20: line 620 was a stale anchor; the json
-\*     serializer body shifted ~14 lines down as adjacent serializer
-\*     fields were inserted above it.
+\* Wire path to the dashboard banner consumer (also symbol-anchored — the
+\* previous "line 634" / "line 620" anchors had both drifted; symbol
+\* anchors don't rot):
+\*   lib/keeper/keeper_state_machine.ml — update_conditions stamps
+\*     `context_handoff_needed = auto_rules.handoff`, and the conditions
+\*     json export carries the
+\*     `"context_handoff_needed", \`Bool c.context_handoff_needed` field,
+\*     read by dashboard/src/components/keeper-conditions-divergent.ts
+\*     (which lists `context_handoff_needed: (v, p) => ...` among the
+\*     divergent conditions it surfaces).
 \*
 \* Scope projection: spec models the 2-phase fragment (Running / HandingOff).
 \* The full 13-phase variant is out of scope here; sibling specs

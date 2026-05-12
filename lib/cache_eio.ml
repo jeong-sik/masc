@@ -160,15 +160,12 @@ let cached_entry_count = Atomic.make (-1)
 let reset_cached_entry_count () = Atomic.set cached_entry_count (-1)
 
 let decrement_cached_entry_count () =
-  let rec loop () =
-    let current = Atomic.get cached_entry_count in
-    if current < 0
-    then ()
-    else (
-      let next = max 0 (current - 1) in
-      if not (Atomic.compare_and_set cached_entry_count current next) then loop ())
-  in
-  loop ()
+  (* Hand-rolled CAS loop replaced by [Lockfree_atomic.update].  The
+     transform is intentionally a no-op when the counter sits at the
+     "unknown" sentinel (-1) so a stale decrement during cache reset
+     does not push the cached count into bogus negative territory. *)
+  Lockfree_atomic.update cached_entry_count (fun current ->
+    if current < 0 then current else max 0 (current - 1))
 ;;
 
 let maybe_migrate_legacy_entry config ~key entry =

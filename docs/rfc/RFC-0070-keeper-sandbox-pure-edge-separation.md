@@ -56,7 +56,7 @@ F1, F3, F6 are direct instances of CLAUDE.md §AI 코드 생성 안티패턴: ha
 
 **Goals**
 - **G1** *Deterministic ID*: `container_name = pure_fn(turn_id, attempt, suffix)`. Same input → same output. Wall-clock removed from the construction path.
-- **G2** *Typed daemon errors*: every docker daemon call returns `(_, sandbox_error) result` where `sandbox_error` is a closed sum (`Daemon_unreachable | Image_pull_failed | Container_oom | Exec_timeout | Probe_format_drift | Cleanup_failed`). No catch-all.
+- **G2** *Typed daemon errors*: every docker daemon call returns `(_, sandbox_error) result` where `sandbox_error` is a closed sum (`Daemon_unreachable | Image_pull_failed | Container_oom | Exec_timeout | Probe_format_drift | Cleanup_failed`; Phase 3e adds `| Image_not_found` for the `docker image inspect` "no such image" case — distinct from `Image_pull_failed`, which is for a pull that was *attempted* and failed). No catch-all.
 - **G3** *JSON-format docker probe*: `docker ps --format '{{json .}}'` + `ppx_deriving_yojson` typed schema replaces substring parsing. Docker version detected once and recorded as a `Docker_version.t` variant.
 - **G4** *Cleanup as state machine, not counter*: replace counter-as-fix with `cleanup_outcome = Clean_success | Clean_partial | Clean_quarantine` and quarantine retry+alert path.
 - **G5** *Mock-able executor*: introduce `Docker_client.t` module type, with real and mock implementations, enabling property-seeded replay tests.
@@ -110,8 +110,10 @@ module type S = sig
   val image_inspect : image:string -> (image_info, sandbox_error) result
   (** [docker image inspect <image>]. Returns minimal typed info
       (digest, created_at, size_bytes); full inspect output is
-      out of scope. Error variant [Image_pull_failed] (already in
-      [sandbox_error]) covers "image not locally cached". *)
+      out of scope. The "no such image locally" case maps to
+      [Image_not_found] — a dedicated variant added in Phase 3e
+      alongside this primitive. (Reusing [Image_pull_failed] would be
+      misleading: [image_inspect] never attempts a pull.) *)
 end
 ```
 
@@ -252,6 +254,8 @@ end
 
 `run` is *one-shot only*. Session lifecycle is built on top via `start` + multiple `exec` + `rm` rather than extending `S` with a `start_session` primitive (kept compositional — `Sandbox_session_executor` orchestrates).
 
+The signature block above is the **pre-Phase-3e shipped shape**. Phase 3e (see §4) extends `S` with: `run_detached`, optional `?user` + `?workdir` on `exec`, `info_security_options`, and `image_inspect`. Until Phase 3e lands, `S` is exactly the four functions shown.
+
 #### 3.2.2 `Sandbox_executor` (v1 — for `Oneshot_plan`)
 
 ```ocaml
@@ -344,7 +348,7 @@ type ps_record = {
 - Add `created_at : Mtime.t` to `ps_record` (today the cleanup tick reads `first_seen` from `Quarantine.t`, not from the ps row).
 - Strengthen `id : string` to a typed `Container_id.t`.
 
-These are explicitly **out of scope for v2**; v2 ships against the shipped surface above. The intent block is preserved as a forward marker for the post-Phase-4 cleanup hardening RFC. Underlying call: `docker ps --format '{{json .}}' --filter label=...`. JSON line-delimited, parsed via `ppx_deriving_yojson`. `Probe_format_drift` error fired if a record fails to parse — caller sees a typed alert, not a silent miss.
+These are explicitly **out of scope for v2**; v2 ships against the shipped surface above. The intent block is preserved as a forward marker for the post-Phase-4 cleanup hardening RFC. Underlying call: `docker ps --format '{{json .}}' --filter label=...`. JSON line-delimited. The public `ps_record` above derives only `show`/`eq`; decoding goes through a private `raw_ps_record [@@deriving yojson { strict = false }]` (the `{ strict = false }` tolerates unknown docker fields like `CreatedAt`/`Status`/`Ports`) which is then mapped to `ps_record`. A line that fails to decode is dropped with a stderr warning rather than collapsing the whole listing; a record that decodes but carries an unrecognized `State` token (or, at the `ps_query` level, a non-zero docker exit) surfaces as `Probe_format_drift` — caller sees a typed alert, not a silent miss.
 
 ### 3.4 Cleanup quarantine state machine
 
@@ -386,6 +390,8 @@ val cleanup_tick
 ## 4. Migration
 
 v2 re-orders Phase 3-5 to gate Phase 4 cutover on Session API delivery. Phases 0-3 shipped before v2 and retain their v1 numbering.
+
+> **Two phase taxonomies appear in this table, deliberately.** The **Phase** column uses *this RFC's* numbering (`0 / 1 / 2 / 3 / 3d / 3e / 3c.2 / 4.x / 5`). The **Status** column references the *PR-series sub-phase tags* used while implementing (`3a`, `3b-iv.2.0–2.5`, `3c.0`, `3c.1`) — those are the labels on PRs #14741…#14889, not RFC phases. Mapping: RFC Phase 1 ↔ PR-tag `3a`; RFC Phase 2 ↔ PR-tags `3b-iv.2.0–2.4`; RFC Phase 3 ↔ PR-tags `3c.0`/`3c.1` (+ `3b-iv.2.5` parser tests). The mismatch is historical, not a contradiction — the PR tags predate this RFC's renumbering.
 
 | Phase | Deliverable | RFC dependency | Risk | Status |
 |-------|-------------|----------------|------|--------|

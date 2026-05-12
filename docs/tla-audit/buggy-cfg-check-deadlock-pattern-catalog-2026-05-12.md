@@ -4,13 +4,13 @@
 
 ## What this is
 
-iter 97 #15008 fixed `OperatorPauseBroadcast-buggy.cfg`'s deadlock-masking-property quirk by adding `CHECK_DEADLOCK FALSE`. The iter 87 OPB R-12 audit (#14977) had described this as one instance of a family ("KMC-buggy `TypeOK`-first 같은 family"). Question: how many *other* instances are there in `specs/keeper-state-machine/`, and are any silently failing to surface their intended property violation?
+iter 97 #15008 fixed `OperatorPauseBroadcast-buggy.cfg`'s deadlock-masking-property quirk by adding `CHECK_DEADLOCK FALSE`. The iter 87 OPB R-12 audit (#14977) had described this as one instance of a family ("KMC-buggy `TypeOK`-first 같은 family"). Question: how many *other active canonical* instances are there in `specs/keeper-state-machine/`, and are any silently failing to surface their intended property violation?
 
-This memo enumerates all 31 `*-buggy.cfg` files in the keeper-state-machine spec directory, classifies each one's `NextBuggy` *shape*, cross-checks the `CHECK_DEADLOCK` setting in its cfg, and identifies the residual risk surface. It is comments-only / docs-only — no spec or cfg edits.
+This memo enumerates 31 active canonical `*-buggy.cfg` files in the keeper-state-machine spec directory, classifies each one's `NextBuggy` *shape*, cross-checks the `CHECK_DEADLOCK` setting in its cfg, and identifies the residual risk surface. It is comments-only / docs-only — no spec or cfg edits. The raw directory contains 35 `*-buggy.cfg` files; this active inventory excludes the already-closed `OperatorPauseBroadcast-buggy.cfg` case plus three non-canonical entries: `KeeperCampaignLifecycle-buggy.cfg` (orphan cfg without a matching `.tla`), `KeeperContextLifecycle-ci-buggy.cfg` (CI variant), and `KeeperStateMachine-overflow-buggy.cfg` (overflow variant).
 
 ## Method
 
-For each `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
+For each active canonical `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
 1. Read the cfg, look for a `CHECK_DEADLOCK` directive (any value, any line shape).
 2. Read the matching `<Spec>.tla`, find the `NextBuggy` definition.
 3. Classify `NextBuggy` shape:
@@ -48,7 +48,7 @@ Eight specs. The `CHECK_DEADLOCK FALSE` is *defensive belt-and-braces* here — 
 | `KeeperStateMachine` | `HeartbeatOk \/ HeartbeatFailed \/ TurnSucceeded \/ TurnFailed` (4 of 18 actions) |
 | `KeeperTurnSlot` | `AcquireProductive \/ ProductiveTick` (drops Yield, Idle) |
 
-Nine specs. Here `CHECK_DEADLOCK FALSE` is *load-bearing*: if the redefined `NextBuggy` ever leaves the system in a state with no enabled action (and that state is *not* the intended end of the trace), TLC would otherwise report "Deadlock reached" before evaluating temporal properties — masking the intended `<liveness/safety>` violation. The OPB R-12.a fix (iter 97) was a member of this class promoted from Class D below.
+Nine specs. Here `CHECK_DEADLOCK FALSE` is *load-bearing*: if the redefined `NextBuggy` ever leaves the system in a state with no enabled action (and that state is *not* the intended end of the trace), TLC would otherwise report "Deadlock reached" before evaluating temporal properties — masking the intended `<liveness/safety>` violation. The OPB R-12.a fix (iter 97) had this same load-bearing shape, but is tracked below as a historical closure rather than counted in the 31 active canonical entries.
 
 ### Class C — `CHECK_DEADLOCK FALSE` + (no `NextBuggy` in `.tla`)
 
@@ -82,9 +82,9 @@ Six specs. Each adds a single bug action to the clean `Next`. *Provided* the cle
 
 | Spec | Status |
 |---|---|
-| `OperatorPauseBroadcast` | **CLOSED** by iter 97 #15008 (promoted to Class B) |
+| `OperatorPauseBroadcast` | **CLOSED** by iter 97 #15008; historical closure, not counted in active inventory |
 
-One spec. The R-12.a fix moved this entry into Class B. **At the time this memo is written, Class E is empty.**
+One historical spec. The R-12.a fix added `CHECK_DEADLOCK FALSE`, so the active Class E count is now zero.
 
 ## Summary table
 

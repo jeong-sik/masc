@@ -1,18 +1,50 @@
 ---- MODULE KeeperTaskAcquisition ----
 \* Task acquisition control flow for [lib/keeper/keeper_unified_turn.ml]
-\* [run_keeper_cycle] (iter 64 N-2.a removed the line number — function
-\* name is stable, line numbers drift; N-2.c adds a structural guard at
-\* scripts/audit-tla-ml-line-refs.sh).
+\* [run_keeper_cycle].  That function carries the reverse-direction
+\* citation: a "Spec navigation (OCaml -> TLA+)" block names this module
+\* and maps each action (SubmitTask / AssignTask / EmptyQueueSleep /
+\* TurnComplete / TaskRejected) onto the corresponding code path — the
+\* AssignTask -> "turn" channel decision is the
+\* [observation.pending_mentions <> [] \/ observation.pending_board_events <> [] \/
+\* observation.pending_scope_messages <> []] guard inside that function
+\* (the literal payload is in [keeper_world_observation.ml], where the
+\* [observation.pending_*] record fields are dereferenced).  The OCaml
+\* side also carries a runtime guard for one producer path:
+\* [keeper_keepalive_signal.ml]'s [post_submit_task] has
+\* [@@fsm_guard "meta.Keeper_types.current_task_id = Some task_id"], invoked from
+\* [keeper_keepalive.ml]'s [assign_keeper_task_from_directive] (the
+\* operator "claim:<task_id>" directive) after [persist_directive_meta_update]
+\* — see "Producer paths" below for why that path is a fused
+\* SubmitTask+AssignTask in spec terms.
+\*
+\* iter 64 N-2.a removed line numbers — function names are stable, line
+\* numbers drift; N-2.c adds a structural guard at
+\* scripts/audit-tla-ml-line-refs.sh.  Re-verified iter 91, 2026-05-12.
 \*
 \* The OCaml runtime composes task acquisition out of three pieces:
-\*   1. Producers (operator, supervisor, autoresearch, board posts)
-\*      append tasks to the backlog observable from
-\*      [Keeper_world_observation].
+\*   1. Producers append tasks to the backlog observable from
+\*      [Keeper_world_observation] ([Coord.read_backlog] ->
+\*      [observation.pending_*]).
 \*   2. The keepalive fiber synthesises a [world_observation] for the
 \*      next cycle and hands it to [run_keeper_cycle].
 \*   3. [run_keeper_cycle] picks an actionable item from that
 \*      observation, transitions the keeper to "running", drives the
 \*      turn, and returns the keeper to idle.
+\*
+\* Producer paths.  There are two ways a task enters the system, and
+\* this spec's SubmitTask abstracts the common effect of both:
+\*   (a) backlog producer (supervisor / autoresearch / board posts) —
+\*       a task lands in [Coord.read_backlog] and shows up as a
+\*       [pending_*] item on the next [world_observation]; the keeper
+\*       claims it via the "turn" channel (= spec's AssignTask).
+\*   (b) operator "claim:<task_id>" directive — bypasses the backlog,
+\*       writes [current_task_id] directly via
+\*       [assign_keeper_task_from_directive] and wakes the keeper.  In
+\*       spec terms this is a fused SubmitTask+AssignTask in one step
+\*       (the [post_submit_task] [@@fsm_guard] enforces the
+\*       [current_task_id] write half).  The spec does not track
+\*       [current_task_id] — it only models the queue/turn-state/counter
+\*       effect, which is the same for both paths.
 \*
 \* This spec collapses that pipeline into the abstract claim-and-finish
 \* behaviour relevant to safety: every task that is *claimed* must
@@ -58,9 +90,13 @@ Init ==
 
 \* ── Honest actions ─────────────────────────────────────────────
 
-\* External producer (operator / supervisor / autoresearch / board)
-\* appends a task to the backlog. Bounded by MaxTasks so TLC has a
-\* finite reachable state space.
+\* A task enters the system. Covers both producer paths (see "Producer
+\* paths" in the header): the backlog-producer append
+\* ([Coord.read_backlog] -> next [world_observation.pending_*]) and the
+\* operator "claim:<task_id>" directive ([assign_keeper_task_from_directive],
+\* whose [post_submit_task] [@@fsm_guard] pins the [current_task_id]
+\* write). The spec tracks only the queue-depth effect, which is common
+\* to both. Bounded by MaxTasks so TLC has a finite reachable state space.
 SubmitTask ==
     /\ queue_depth < MaxTasks
     /\ queue_depth' = queue_depth + 1

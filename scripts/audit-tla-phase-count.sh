@@ -31,7 +31,7 @@
 # script), 6th drift class structural closure.
 set -euo pipefail
 
-for tool in rg awk grep sed; do
+for tool in rg awk grep; do
   command -v "${tool}" >/dev/null 2>&1 || {
     echo "error: required tool '${tool}' not found in PATH" >&2
     exit 2
@@ -79,9 +79,21 @@ trap 'rm -f "${tmpfile}"' EXIT
 # rg without -o emits the full line; we parse number out per match.
 # We filter to comment lines (`\* `) only — body actions referencing
 # N are not the drift class this guard targets.
+#
+# rg exit codes: 0 = matches, 1 = no matches, 2+ = real error.  We
+# accept 0/1 silently (no-match is a legitimate clean run) but bubble
+# up 2+ as a script failure — otherwise a missing SPEC_DIR or an
+# invalid regex would produce a false-clean run.
+set +e
 rg -n --no-heading --glob '*.tla' \
   -e '\\\*[^\n]*\b([0-9]{1,2})[ -]phase(s)?\b' \
-  "${SPEC_DIR}" 2>/dev/null > "${tmpfile}" || true
+  "${SPEC_DIR}" 2>/dev/null > "${tmpfile}"
+rg_rc=$?
+set -e
+if [[ ${rg_rc} -ne 0 && ${rg_rc} -ne 1 ]]; then
+  echo "error: rg failed with exit code ${rg_rc} scanning ${SPEC_DIR}" >&2
+  exit 2
+fi
 
 while IFS= read -r entry; do
   [[ -z "${entry}" ]] && continue

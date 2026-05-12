@@ -66,7 +66,7 @@ let run_git ~cwd ?(env = []) args : (string list, string) result =
   in
   match status with
   | Unix.WEXITED 0 -> Ok (split_lines stdout)
-  | _ ->
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
       let status_text =
         match status with
         | Unix.WEXITED code -> Printf.sprintf "exit %d" code

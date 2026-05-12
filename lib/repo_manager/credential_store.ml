@@ -159,20 +159,23 @@ let load_all ~base_path =
         | Ok (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
             let rec loop acc = function
               | [] -> Ok (List.rev acc)
-              | (id, value) :: rest -> (
-                  match value with
-                  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
-                      let cred_toml =
-                        Otoml.TomlTable [("credential", Otoml.TomlTable [(id, value)])]
-                      in
-                      (match credential_of_toml cred_toml id with
-                      | Ok cred -> loop (cred :: acc) rest
-                      | Error msg -> Error msg)
-                  | _ ->
-                      Error (Printf.sprintf "credential.%s must be a table" id))
+              | (id, value) :: rest ->
+                  if is_toml_table value then
+                    let cred_toml =
+                      Otoml.TomlTable [("credential", Otoml.TomlTable [(id, value)])]
+                    in
+                    (match credential_of_toml cred_toml id with
+                    | Ok cred -> loop (cred :: acc) rest
+                    | Error msg -> Error msg)
+                  else
+                    Error (Printf.sprintf "credential.%s must be a table" id)
             in
             loop [] fields
-        | Ok _ -> Ok [])
+        | Ok (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
+            Ok [])
 
 let save_all ~base_path (creds : credential list) =
   let path = creds_toml_path base_path in

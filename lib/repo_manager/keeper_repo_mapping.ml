@@ -29,7 +29,10 @@ let mapping_of_toml toml keeper_id =
     | Ok (Otoml.TomlString id) ->
         let id = String.trim id in
         Ok (if id = "" then None else Some id)
-    | Ok _ ->
+    | Ok (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+         | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+         | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+         | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) ->
         Error
           (Printf.sprintf
              "mapping.%s.credential_id must be a string when present" keeper_id)
@@ -71,21 +74,23 @@ let load_all ~base_path =
         | Ok (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
             let rec loop acc = function
               | [] -> Ok (List.rev acc)
-              | (keeper_id, value) :: rest -> (
-                  match value with
-                  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
-                      let mapping_toml =
-                        Otoml.TomlTable [("mapping", Otoml.TomlTable [(keeper_id, value)])]
-                      in
-                      (match mapping_of_toml mapping_toml keeper_id with
-                      | Ok mapping -> loop (mapping :: acc) rest
-                      | Error msg -> Error msg)
-                  | _ ->
-                      Error
-                        (Printf.sprintf "mapping.%s must be a table" keeper_id))
+              | (keeper_id, value) :: rest ->
+                  if is_toml_table value then
+                    let mapping_toml =
+                      Otoml.TomlTable [("mapping", Otoml.TomlTable [(keeper_id, value)])]
+                    in
+                    (match mapping_of_toml mapping_toml keeper_id with
+                    | Ok mapping -> loop (mapping :: acc) rest
+                    | Error msg -> Error msg)
+                  else
+                    Error (Printf.sprintf "mapping.%s must be a table" keeper_id)
             in
             loop [] fields
-        | Ok _ -> Ok [])
+        | Ok (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
+            Ok [])
 
 type mapping_lookup =
   | Mapping_found of keeper_repo_mapping
@@ -350,12 +355,18 @@ let safe_file_exists path = Option.is_some (safe_lstat path)
 let safe_is_directory path =
   match safe_lstat path with
   | Some { Unix.st_kind = Unix.S_DIR; _ } -> true
-  | _ -> false
+  | Some { Unix.st_kind =
+             ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+             | Unix.S_SOCK ); _ } -> false
+  | None -> false
 
 let safe_is_symlink path =
   match safe_lstat path with
   | Some { Unix.st_kind = Unix.S_LNK; _ } -> true
-  | _ -> false
+  | Some { Unix.st_kind =
+             ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+             | Unix.S_SOCK ); _ } -> false
+  | None -> false
 
 let safe_realpath path =
   try Some (Unix.realpath path)
@@ -370,7 +381,10 @@ let read_file_opt path =
           (In_channel.with_open_bin path (fun ic ->
                really_input_string ic st_size))
       with Sys_error _ | End_of_file -> None)
-  | _ -> None
+  | Some { Unix.st_kind =
+             ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+             | Unix.S_FIFO | Unix.S_SOCK ); _ } -> None
+  | None -> None
 
 let normalize_lexical_path path =
   let absolute = String.starts_with ~prefix:"/" path in

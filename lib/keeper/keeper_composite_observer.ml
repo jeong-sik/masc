@@ -254,9 +254,10 @@ let invariant_key_of_string = function
 
 (* Derivation from registry entry *)
 
-(* Exhaustive on [Keeper_state_machine.phase]: maps the raw 12-state
-   keeper phase to the turn phase projection when no live turn
-   observation exists.  Spelling each branch out turns a future phase
+(* Exhaustive on [Keeper_state_machine.phase]: maps the raw 13-state
+   keeper phase (post-Zombie #14707) to the turn phase projection when
+   no live turn observation exists.  Spelling each branch out turns a
+   future phase
    addition into a compile error. *)
 let live_turn_phase (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with

@@ -589,8 +589,8 @@ let keeper_diagnostic_json
       ("next_eligible_at_s", keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts);
     ]
 
-(** Derive pipeline stage directly from the 12-state phase (RFC-0002).
-    Deterministic mapping — no 30s recency heuristic. *)
+(** Derive pipeline stage directly from the 13-state phase (RFC-0002,
+    post-Zombie #14707).  Deterministic mapping — no 30s recency heuristic. *)
 let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   match phase with
   | Keeper_state_machine.Offline -> "offline"

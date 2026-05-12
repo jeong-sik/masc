@@ -2,6 +2,9 @@
 (library
  (name dated_jsonl)
  (public_name masc_mcp.dated_jsonl)
- (ocamlopt_flags (:standard -w -32))
- (ocamlc_flags (:standard -w -32))
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on;
+ ; warning 32 (unused value declaration) stays off (pre-existing). Both
+ ; live in the single (flags ...) stanza so the effective warning mask is
+ ; not split across (flags)/(ocamlc_flags)/(ocamlopt_flags).
+ (flags (:standard -w -32 -w +4))
  (libraries fs_compat eio unix yojson))

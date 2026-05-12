@@ -1558,9 +1558,12 @@ let record_keepalive_stage_timing
 
    The spec preamble cites this module by function name
    ([run_heartbeat_loop]); it used to carry a line number but iter 64
-   N-2.c removed it (function names are stable, line numbers drift —
-   guarded by scripts/audit-ocaml-spec-nav-line-refs.sh, iter 72 R-1.a).
-   This comment is the authoritative reverse-direction citation.
+   N-2.a removed it — function names are stable, line numbers drift, and
+   spec-preamble line refs are now guarded by
+   scripts/audit-tla-ml-line-refs.sh (iter 64 N-2.c).  This comment is
+   the authoritative reverse-direction citation; the OCaml-docstring
+   side is guarded by scripts/audit-ocaml-spec-nav-line-refs.sh
+   (iter 72 R-1.a).
 
    Action mapping (TLA+ -> OCaml):
      WakeupSignal     external code sets [wakeup] Atomic to true

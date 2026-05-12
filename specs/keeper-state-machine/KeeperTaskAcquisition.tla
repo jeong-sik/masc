@@ -5,11 +5,13 @@
 \* and maps each action (SubmitTask / AssignTask / EmptyQueueSleep /
 \* TurnComplete / TaskRejected) onto the corresponding code path — the
 \* AssignTask -> "turn" channel decision is the
-\* [pending_mentions <> [] \/ pending_board_events <> [] \/
-\* pending_scope_messages <> []] guard inside that function.  The OCaml
+\* [observation.pending_mentions <> [] \/ observation.pending_board_events <> [] \/
+\* observation.pending_scope_messages <> []] guard inside that function
+\* (the literal payload is in [keeper_world_observation.ml], where the
+\* [observation.pending_*] record fields are dereferenced).  The OCaml
 \* side also carries a runtime guard for one producer path:
 \* [keeper_keepalive_signal.ml]'s [post_submit_task] has
-\* [@@fsm_guard "meta.current_task_id = Some task_id"], invoked from
+\* [@@fsm_guard "meta.Keeper_types.current_task_id = Some task_id"], invoked from
 \* [keeper_keepalive.ml]'s [assign_keeper_task_from_directive] (the
 \* operator "claim:<task_id>" directive) after [persist_directive_meta_update]
 \* — see "Producer paths" below for why that path is a fused

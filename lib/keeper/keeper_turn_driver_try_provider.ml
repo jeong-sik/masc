@@ -187,7 +187,7 @@ let run_try_provider
       | Cascade_attempt_liveness_config.Observe | Cascade_attempt_liveness_config.Enforce
         ->
         let budget =
-          Cascade_attempt_liveness_config.budget_for_provider_id ~provider_id
+          Cascade_attempt_liveness_config.budget_for_provider_id ~provider_id ()
         in
         let obs =
           Cascade_attempt_liveness_observer.create

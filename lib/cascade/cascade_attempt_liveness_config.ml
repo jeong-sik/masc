@@ -1,6 +1,11 @@
 (* See cascade_attempt_liveness_config.mli for documentation.
 
-   RFC-0022 PR-2/4 §2 — tri-state env flag + per-label budget map. *)
+   RFC-0022 PR-2/4 §2 — tri-state env flag + per-label budget map.
+   RFC-0058 Phase 5.2b — provider→budget routing reads
+   [Cascade_declarative_types.cascade_provider.liveness_class] declared
+   in [config/cascade.toml]. The hardcoded
+   [match provider_id with "codex_cli" | "claude_code" | …] block is
+   deleted (RFC-0058 §4 Phase 5.2b acceptance). *)
 
 type mode =
   | Off
@@ -11,6 +16,7 @@ let mode_label = function
   | Off -> "off"
   | Observe -> "observe"
   | Enforce -> "enforce"
+;;
 
 let env_var_name = "MASC_CASCADE_ATTEMPT_LIVENESS"
 
@@ -20,6 +26,7 @@ let parse_mode raw =
   | "enforce" | "kill" | "on_kill" -> Enforce
   | "" | "observe" | "default" | "1" | "true" | "shadow" -> Observe
   | _ -> Observe (* unknown values default to Observe — never silently Off *)
+;;
 
 (* Cached after first read. Mirrors Keeper_admission_glue.use_new_admission. *)
 let mode_cache : mode option ref = ref None
@@ -28,51 +35,113 @@ let current_mode () =
   match !mode_cache with
   | Some m -> m
   | None ->
-      let m =
-        match Sys.getenv_opt env_var_name with
-        | None -> Enforce
-        | Some raw -> parse_mode raw
-      in
-      mode_cache := Some m;
-      m
+    let m =
+      match Sys.getenv_opt env_var_name with
+      | None -> Enforce
+      | Some raw -> parse_mode raw
+    in
+    mode_cache := Some m;
+    m
+;;
 
-let reset_cache_for_test () = mode_cache := None
+(* RFC-0058 Phase 5.2b — lazy declarative-config cache.
 
-(* Per-label budget catalog — RFC-0022 PR-2 §2.
+   The active cascade_config is read once from
+   [Config_dir_resolver.cascade_path_candidate], cached, and reused for
+   every subsequent provider→budget lookup. A failed parse (missing
+   file, pre-5-layer schema, invalid TOML) caches as [None] — callers
+   fall back to [cloud_fast], the same conservative default the
+   deleted hardcoded match used for unknown ids. *)
+let cfg_cache : Cascade_declarative_types.cascade_config option ref = ref None
+let cfg_loaded : bool ref = ref false
 
-   Cloud streaming providers (codex_cli, claude_code, gemini_cli) use
-   [cloud_fast] as a TTFT-strict budget that matches their typical short
-   answer latency. Adaptive-reasoning models (glm-coding which streams
-   thinking deltas, kimi-for-coding) get [cloud_thinking].
+let load_active_cfg () : Cascade_declarative_types.cascade_config option =
+  if !cfg_loaded
+  then !cfg_cache
+  else (
+    let path = Config_dir_resolver.cascade_path_candidate () in
+    let parsed =
+      match Cascade_declarative_parser.parse_file path with
+      | Error _ -> None
+      | Ok cfg -> Some cfg
+    in
+    cfg_cache := parsed;
+    cfg_loaded := true;
+    parsed)
+;;
 
-   Local providers stay on the larger [local_27b] / [local_70b_plus]
-   budgets to avoid killing slow local models. *)
+let reset_cache_for_test () =
+  mode_cache := None;
+  cfg_cache := None;
+  cfg_loaded := false
+;;
 
-let budget_for_provider_id ~(provider_id : string) :
-    Cascade_attempt_liveness.budget =
+let budget_of_class
+  : Cascade_declarative_types.cascade_liveness_class -> Cascade_attempt_liveness.budget
+  = function
+  | Cloud_fast -> Cascade_attempt_liveness.cloud_fast
+  | Cloud_thinking -> Cascade_attempt_liveness.cloud_thinking
+  | Local_27b -> Cascade_attempt_liveness.local_27b
+  | Local_70b_plus -> Cascade_attempt_liveness.local_70b_plus
+;;
+
+let liveness_class_for_provider_id
+      ~(cfg : Cascade_declarative_types.cascade_config option)
+      ~(provider_id : string)
+  : Cascade_declarative_types.cascade_liveness_class option
+  =
   let canon = String.lowercase_ascii (String.trim provider_id) in
-  match canon with
-  | "codex_cli" | "claude_code" | "claude" | "gemini_cli" | "gemini" ->
-      Cascade_attempt_liveness.cloud_fast
-  | "glm-coding" | "glm_coding" | "glm" | "kimi_cli" | "kimi-for-coding"
-  | "kimi" ->
-      Cascade_attempt_liveness.cloud_thinking
-  | "ollama_only" | "llama-server" | "llama_server" ->
-      Cascade_attempt_liveness.local_27b
-  | "local_70b" | "local_70b_plus" | "ollama_70b" ->
-      Cascade_attempt_liveness.local_70b_plus
-  | _ -> Cascade_attempt_liveness.cloud_fast
+  let active_cfg =
+    match cfg with
+    | Some _ as explicit -> explicit
+    | None -> load_active_cfg ()
+  in
+  match active_cfg with
+  | None -> None
+  | Some c ->
+    (* Try exact match first; fall back to case-folded scan so a
+         caller passing an upper-cased provider_id still resolves
+         against the lower-cased TOML keys. *)
+    (match Cascade_declarative_types.provider_of_id c provider_id with
+     | Some p -> p.liveness_class
+     | None ->
+       let normalized =
+         List.find_opt
+           (fun (p : Cascade_declarative_types.cascade_provider) ->
+              String.lowercase_ascii p.id = canon)
+           c.providers
+       in
+       Option.bind normalized (fun p -> p.liveness_class))
+;;
+
+let budget_for_provider_id
+      ?(cfg : Cascade_declarative_types.cascade_config option)
+      ~(provider_id : string)
+      ()
+  : Cascade_attempt_liveness.budget
+  =
+  match liveness_class_for_provider_id ~cfg ~provider_id with
+  | Some c -> budget_of_class c
+  | None ->
+    (* RFC-0058 Phase 5.2b: cascade.toml is the SSOT. An unknown
+         provider_id (not declared, or the cascade config failed to
+         parse) falls back to [cloud_fast] — the conservative default
+         the deleted hardcoded match used. The validator R-rule for
+         [liveness.class] (Phase 5.2b) ensures every shipped provider
+         in [config/cascade.toml] declares its class, so this fallback
+         only fires for ad-hoc / custom integrations, not for the
+         in-tree provider set. *)
+    Cascade_attempt_liveness.cloud_fast
+;;
 
 (* RFC-0022 §1 — see .mli for contract. *)
-let outer_wall_for_attempt
-    ~mode ~observer_attached ~per_provider_timeout_s ~provider_id =
+let outer_wall_for_attempt ~mode ~observer_attached ~per_provider_timeout_s ~provider_id =
   match mode, observer_attached with
   | Enforce, true -> None
   | _, true ->
-      let budget_wall =
-        (budget_for_provider_id ~provider_id).Cascade_attempt_liveness.attempt_wall_max
-      in
-      Option.map
-        (fun t -> Float.max t budget_wall)
-        per_provider_timeout_s
+    let budget_wall =
+      (budget_for_provider_id ~provider_id ()).Cascade_attempt_liveness.attempt_wall_max
+    in
+    Option.map (fun t -> Float.max t budget_wall) per_provider_timeout_s
   | _, false -> per_provider_timeout_s
+;;

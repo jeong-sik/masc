@@ -12,7 +12,8 @@
     R9: At most one is-default=true per provider
     R10: Strategy-specific fields match the declared strategy
     R11: Binding max-concurrent required and positive (RFC-0058 §3.4)
-    R12: Protocol ↔ transport consistency (RFC-0058 §2.1) *)
+    R12: Protocol ↔ transport consistency (RFC-0058 §2.1)
+    R13: Every provider declares liveness.class (RFC-0058 §4 Phase 5.2b) *)
 
 open Cascade_declarative_types
 
@@ -69,6 +70,7 @@ let name_set (names : string list) : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length names) in
   List.iter (fun name -> Hashtbl.replace tbl name ()) names;
   tbl
+;;
 
 let err (rule : string) (path : string) (message : string) : validation_error list =
   [ { rule; path; message } ]
@@ -203,9 +205,7 @@ let validate_tier_group_refs (cfg : cascade_config) : validation_error list =
 
 let validate_route_targets (cfg : cascade_config) : validation_error list =
   let all_targets_set =
-    name_set
-      (tier_group_names cfg @ tier_names cfg
-      @ binding_keys cfg @ alias_keys cfg)
+    name_set (tier_group_names cfg @ tier_names cfg @ binding_keys cfg @ alias_keys cfg)
   in
   List.filter_map
     (fun (r : cascade_route) ->
@@ -331,11 +331,13 @@ let validate_protocol_transport (cfg : cascade_config) : validation_error list =
     (fun (p : cascade_provider) ->
        let path = Printf.sprintf "providers.%s.protocol" p.id in
        let expected_transport =
-         if String.length p.protocol >= 4
-            && String.sub p.protocol (String.length p.protocol - 4) 4 = "-cli"
+         if
+           String.length p.protocol >= 4
+           && String.sub p.protocol (String.length p.protocol - 4) 4 = "-cli"
          then Some "Cli"
-         else if String.length p.protocol >= 5
-                 && String.sub p.protocol (String.length p.protocol - 5) 5 = "-http"
+         else if
+           String.length p.protocol >= 5
+           && String.sub p.protocol (String.length p.protocol - 5) 5 = "-http"
          then Some "Http"
          else None
        in
@@ -363,6 +365,38 @@ let validate_protocol_transport (cfg : cascade_config) : validation_error list =
                     "protocol %S implies Cli transport, but transport is Http"
                     p.protocol
               }))
+    cfg.providers
+;;
+
+(* --- R13: Every provider declares [liveness.class] (RFC-0058 Phase 5.2b)
+
+   The parser tolerates a missing [\[providers.<id>.liveness\] class]
+   sub-table for backward compatibility (Phase 5.2a, schema-only). The
+   caller-cutover in Phase 5.2b makes
+   [Cascade_attempt_liveness_config.budget_for_provider_id] read the
+   class via [Cascade_declarative_types.provider_of_id]; an absent
+   class silently falls back to [cloud_fast].
+
+   Promoting the missing-class tolerance into a validator R-rule is the
+   only thing that prevents a future provider entry from regressing to
+   that silent fallback (RFC-0058 §4 Phase 5.2b "validator R-rule"). *)
+
+let validate_provider_liveness_class (cfg : cascade_config) : validation_error list =
+  List.filter_map
+    (fun (p : cascade_provider) ->
+       match p.liveness_class with
+       | Some _ -> None
+       | None ->
+         Some
+           { rule = "R13"
+           ; path = Printf.sprintf "providers.%s.liveness.class" p.id
+           ; message =
+               "every shipped provider must declare a `liveness.class` (one of \
+                `cloud_fast`, `cloud_thinking`, `local_27b`, `local_70b_plus`); RFC-0058 \
+                Phase 5.2b promotes the parser's missing-class tolerance to a validator \
+                rule so the `budget_for_provider_id` cloud_fast fallback only fires for \
+                ad-hoc integrations, not for `config/cascade.toml` entries"
+           })
     cfg.providers
 ;;
 
@@ -397,4 +431,5 @@ let validate (cfg : cascade_config) : validation_error list =
   @ validate_strategy_fields cfg
   @ validate_binding_capacity cfg
   @ validate_protocol_transport cfg
+  @ validate_provider_liveness_class cfg
 ;;

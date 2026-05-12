@@ -596,6 +596,7 @@
         test_docker_response
         test_docker_client_mock
         test_docker_client_real
+        test_docker_ps_parser
         test_sandbox_executor
         test_keeper_backoff_policy
         test_worker_runtime
@@ -813,6 +814,7 @@
         test_docker_response
         test_docker_client_mock
         test_docker_client_real
+        test_docker_ps_parser
         test_sandbox_executor
         test_keeper_backoff_policy
         test_worker_runtime

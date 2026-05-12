@@ -10,14 +10,20 @@
 \*
 \* Runtime status (2026-05-12, iter 59 L-2.a):
 \*   This spec is a DESIGN GROUND, not a description of running code.
-\*   iter 58 #14898 audit confirmed via rg across all 251 lib/keeper/*.ml
-\*   files that NONE of the modeled concepts (goal_phase, task_state,
-\*   board_cursor, verifier_reaction, receipt_issued) appear anywhere
-\*   in the codebase.  Of the five OCaml "mirror" entry points cited
-\*   below, two exist as generic plumbing without matching the spec's
-\*   per-stimulus FSM, and three do not exist at all (see citation
-\*   table below — TBD entries).  Of L1-L5 only L1 has partial
-\*   coverage (queue exists, no receipt FSM).
+\*   iter 58 #14898 audit confirmed via rg across lib/keeper/*.ml that
+\*   the KRL reaction/receipt FSM (L1-L5 leads-to claims) has NO
+\*   matching runtime: verifier_reaction, receipt_issued, task_state
+\*   are truly absent everywhere; goal_phase appears as data shape
+\*   in lib/goal/ + adjacent modules but not as the per-stimulus FSM
+\*   the spec models; board_cursor exists as opaque cursor state in
+\*   lib/keeper/keeper_registry.{ml,mli} (get_board_cursor /
+\*   set_board_cursor) + lib/keeper/keeper_world_observation.ml, but
+\*   without the cursor-ack semantics L5 models (no ack tracking).
+\*   Of the five OCaml "mirror" entry points cited below, two exist
+\*   as generic plumbing without matching the spec's per-stimulus FSM,
+\*   and three do not exist at the cited path (see citation table
+\*   below — TBD entries).  Of L1-L5 only L1 has partial coverage
+\*   (queue exists, no receipt FSM).
 \*
 \*   Implementation tracking owner: MASC task
 \*   `goal-world-reaction-liveness/task-134`.  Until that work lands,
@@ -76,8 +82,13 @@
 \*                              implemented (MASC task-134 owns this)
 \*   task FSM                 — TBD: lib/keeper/keeper_task_dispatch.ml
 \*                              not yet implemented (MASC task-134)
-\*   board cursor             — TBD: lib/keeper/keeper_board_observer.ml
-\*                              not yet implemented (MASC task-134)
+\*   board cursor             — PARTIAL: lib/keeper/keeper_registry.{ml,mli}
+\*                              (get_board_cursor / set_board_cursor /
+\*                              board_cursor_ts) + keeper_world_observation.ml
+\*                              track opaque cursor state, but without the
+\*                              cursor-ack token L5 models.  Per-stimulus
+\*                              board observer (keeper_board_observer.ml)
+\*                              not yet implemented (MASC task-134).
 
 EXTENDS TLC
 

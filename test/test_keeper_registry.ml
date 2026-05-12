@@ -1488,11 +1488,13 @@ let test_set_turn_phase_rejection_bumps_guard_metric () =
       R.set_turn_phase ~base_path:bp keeper_name R.(Packed Turn_compacting);
       false
     with
-    | Invalid_argument msg ->
-      String.starts_with ~prefix:"set_turn_phase" msg
+    | R.Turn_phase_transition_violation { where; _ } ->
+      String.equal where "set_turn_phase"
   in
   let after = fsm_guard_count () in
-  check bool "forbidden set_turn_phase raises Invalid_argument" true raised;
+  check bool
+    "forbidden set_turn_phase raises Turn_phase_transition_violation from the setter"
+    true raised;
   check (float 0.0001) "guard metric increments" (before +. 1.0) after
 
 let test_effective_keepalive_meta_prefers_disk_when_present () =

@@ -12,6 +12,15 @@ module R = Masc_mcp.Cascade_model_resolve
 module C = Masc_mcp.Cascade_config
 module State = Masc_mcp.Cascade_state
 module H = Masc_mcp.Cascade_health_tracker
+module PA = Masc_mcp.Provider_adapter
+
+(* RFC-0058 Phase 5.3a — the per-provider thin wrappers
+   ([gemini_cli_auto_models], etc.) were deleted because they were unused
+   in production. Tests now exercise the generic
+   [Provider_adapter.auto_models_for_cascade_prefix] entry point directly;
+   the provider id is the test's pin, not a production literal. *)
+let auto_models_for pid =
+  PA.auto_models_for_cascade_prefix pid |> Option.value ~default:[]
 
 let unset_env k =
   try Unix.putenv k "" with _ -> ()
@@ -88,12 +97,12 @@ let test_gemini_cli_auto_models_default_rotation_order () =
         "gemini-3.1-flash-lite-preview";
         "gemini-3.1-pro-preview";
       ]
-      (R.gemini_cli_auto_models ()))
+      (auto_models_for "gemini_cli"))
 
 let test_gemini_cli_auto_models_env_override () =
   Unix.putenv "MASC_GEMINI_CLI_AUTO_MODELS"
     "gemini-a, gemini-b,, gemini-c ";
-  let models = R.gemini_cli_auto_models () in
+  let models = auto_models_for "gemini_cli" in
   Unix.putenv "MASC_GEMINI_CLI_AUTO_MODELS" "";
   check (list string) "operator override trims blanks"
     [ "gemini-a"; "gemini-b"; "gemini-c" ] models
@@ -109,13 +118,13 @@ let test_codex_and_claude_cli_auto_models_env_override () =
         "gpt-5.4";
         "gpt-5.5";
       ]
-      (R.codex_cli_auto_models ());
+      (auto_models_for "codex_cli");
     check (list string) "claude default delegates to CLI"
-      [ "auto" ] (R.claude_code_auto_models ());
+      [ "auto" ] (auto_models_for "claude_code");
     Unix.putenv "MASC_CODEX_CLI_AUTO_MODELS" "gpt-a,gpt-b";
     Unix.putenv "MASC_CLAUDE_CODE_AUTO_MODELS" "sonnet,opus";
-    let codex = R.codex_cli_auto_models () in
-    let claude = R.claude_code_auto_models () in
+    let codex = auto_models_for "codex_cli" in
+    let claude = auto_models_for "claude_code" in
     Unix.putenv "MASC_CODEX_CLI_AUTO_MODELS" "";
     Unix.putenv "MASC_CLAUDE_CODE_AUTO_MODELS" "";
     check (list string) "codex operator rotation"
@@ -130,9 +139,9 @@ let test_kimi_cli_auto_model_policy () =
       (R.resolve_auto_model_id "kimi_cli" "auto");
     check (list string) "kimi_cli:auto expands to declared default"
       [ "kimi-for-coding" ]
-      (R.kimi_cli_auto_models ());
+      (auto_models_for "kimi_cli");
     Unix.putenv "MASC_KIMI_CLI_AUTO_MODELS" "kimi-a,kimi-b";
-    let models = R.kimi_cli_auto_models () in
+    let models = auto_models_for "kimi_cli" in
     Unix.putenv "MASC_KIMI_CLI_AUTO_MODELS" "";
     check (list string) "kimi cli operator rotation"
       [ "kimi-a"; "kimi-b" ] models)

@@ -22,8 +22,8 @@
 \*
 \* Design intent
 \*   1. shared_measurement is the coordination hub (Context_measured event,
-\*      Keeper_state_machine.mli -- [Context_measured] constructor of
-\*      [type event], auto_rules_summary). Cite by symbol -- iter 64 N-2.a
+\*      Keeper_state_machine.mli — [Context_measured] constructor of
+\*      [type event], auto_rules_summary). Cite by symbol — iter 64 N-2.a
 \*      (line numbers drift on every edit; [type event] / [Context_measured]
 \*      are stable identifiers, the OCaml compiler keeps them honest).
 \*      Adjacent NoDrainTransition / GhostDispatch *.mli docstring callouts

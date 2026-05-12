@@ -50,7 +50,8 @@ Two files, **comments-only**, no `VARIABLES` / `Action` / `Invariant` / `Init` t
 (* Cite by symbol -- iter 64 N-2.a (`*.ml` files grow; line refs drift on  *)
 (* every edit while function names are stable identifiers). Verified       *)
 (* against main as of 2026-05-12 (iter 93 line-ref drain; #11641 sibling   *)
-(* refresh; iter 92 #14996 closed the `\.ml:NNN` colon-form guard).        *)
+(* refresh; iter 92 #14996 added the `\.ml:NNN` colon-form Rule-2 guard    *)
+(* — landed on main in this same sprint as #14996).                        *)
 (*   - mark_turn_started                       -- Decision_undecided          *)
 (*   - mark_turn_measurement                   -- sets measurement_bound      *)
 (*   - set_turn_decision_stage                 -- Decision_guard_ok | _selected *)
@@ -76,7 +77,7 @@ Lines 24-29 — six lines covering `Keeper_state_machine.mli:139-144` and three 
 ## Verification
 
 - `grep -nE '\.mli?:[0-9]|line [0-9]' specs/keeper-state-machine/KeeperDecisionPipeline.tla specs/keeper-state-machine/KeeperCompositeLifecycle.tla` → empty.
-- `bash scripts/audit-tla-ml-line-refs.sh` → `line-ref audit clean: 0 citation(s) verified across 34 spec(s).` (Rule 1 still the only active rule on origin/main; Rule 2 is in flight on PR #14996 and would also pass — these `.mli:NNN` sites were the two known exemptions Rule 2 doesn't currently catch.)
+- `bash scripts/audit-tla-ml-line-refs.sh` → `line-ref audit clean: 0 citation(s) verified across 34 spec(s).` (Rule 1 + Rule 2 both active on origin/main as of #14996 merge this sprint — these `.mli:NNN` sites were the two known exemptions Rule 2 doesn't currently catch; this PR drains them by symbol-anchoring rather than widening the regex.)
 - `bash scripts/gen-tla-index.sh > specs/INDEX.md` — two hash deltas (`49e687b83457 → 7863e87c2acd` for KCL; `41557f9e0eb0 → 5a68dbb60588` for KDP), both from header-comment text change. Model body byte-identical.
 - TLC KDP clean: 14 states generated, 7 distinct, depth 6 — unchanged.
 - Comments-only edits — no behavioural verification needed for the other 4 KCL cfgs or the 1 KDP buggy cfg; bytes between `==== MODULE` and `====` unchanged.

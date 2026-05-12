@@ -167,66 +167,71 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
        Capability_registry.surface_snapshot_json Config.raw_all_tool_schemas);
     ]
 
-let enforcement_summary_json () =
-  `List
+(** Single row in the surface-enforcement inventory. *)
+type enforcement_row = {
+  surface : string;
+  status : Enforcement_status.t;
+  reason : string;
+}
+
+let enforcement_row_to_yojson (r : enforcement_row) : Yojson.Safe.t =
+  `Assoc
     [
-      `Assoc
-        [
-          ("surface", `String "room.auth.permission_map");
-          ("status", `String "conditional");
-          ("reason",
-           `String
-             "Auth permission checks are enforced only when room auth is enabled.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "tool_catalog.visibility");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Hidden tools are removed from default discovery and may be direct-call blocked.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "keeper.eval_gate.allowed_tools");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Keeper uses Eval_gate allow/deny lists at tool-call time.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "unit.policy.kill_switch");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Command-plane assignment blocks operations targeting units with kill-switch enabled.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "unit.policy.frozen");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Command-plane assignment blocks operations targeting frozen units.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "unit.policy.tool_allowlist");
-          ("status", `String "advisory_only");
-          ("reason",
-           `String
-             "Stored in CPv2 topology/policy JSON but not wired into runtime tool dispatch on main.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "unit.policy.model_allowlist");
-          ("status", `String "advisory_only");
-          ("reason",
-           `String
-             "Stored in CPv2 topology/policy JSON but not wired into runtime model selection on main.");
-        ];
+      ("surface", `String r.surface);
+      ("status", `String (Enforcement_status.to_label r.status));
+      ("reason", `String r.reason);
     ]
+;;
+
+let enforcement_summary_rows : enforcement_row list =
+  [
+    {
+      surface = "room.auth.permission_map";
+      status = Conditional;
+      reason =
+        "Auth permission checks are enforced only when room auth is enabled.";
+    };
+    {
+      surface = "tool_catalog.visibility";
+      status = Enforced;
+      reason =
+        "Hidden tools are removed from default discovery and may be direct-call blocked.";
+    };
+    {
+      surface = "keeper.eval_gate.allowed_tools";
+      status = Enforced;
+      reason = "Keeper uses Eval_gate allow/deny lists at tool-call time.";
+    };
+    {
+      surface = "unit.policy.kill_switch";
+      status = Enforced;
+      reason =
+        "Command-plane assignment blocks operations targeting units with kill-switch enabled.";
+    };
+    {
+      surface = "unit.policy.frozen";
+      status = Enforced;
+      reason =
+        "Command-plane assignment blocks operations targeting frozen units.";
+    };
+    {
+      surface = "unit.policy.tool_allowlist";
+      status = Advisory_only;
+      reason =
+        "Stored in CPv2 topology/policy JSON but not wired into runtime tool dispatch on main.";
+    };
+    {
+      surface = "unit.policy.model_allowlist";
+      status = Advisory_only;
+      reason =
+        "Stored in CPv2 topology/policy JSON but not wired into runtime model selection on main.";
+    };
+  ]
+;;
+
+let enforcement_summary_json () =
+  `List (List.map enforcement_row_to_yojson enforcement_summary_rows)
+;;
 
 (* ================================================================ *)
 (* Handlers                                                         *)

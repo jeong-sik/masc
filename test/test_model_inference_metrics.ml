@@ -513,7 +513,7 @@ let test_coverage_diagnostics_survive_aggregation () =
     let path = make_keeper_dir base "coverage_diag" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_usage ~model:"glm-coding-plan:glm-5"
+      success_entry_without_usage ~model:"glm-coding:glm-5"
         ~ts:(ts -. 5.0)
         ~provider:"glm-coding"
         ~turn_lane:"text_only"

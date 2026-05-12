@@ -213,7 +213,7 @@ let cn_gemini_api = "gemini-api"
 let cn_kimi_api = "kimi-api"
 let cn_kimi_coding = "kimi-coding"
 let cn_glm = "glm-api"
-let cn_glm_coding_plan = "glm-coding-plan"
+let cn_glm_coding = "glm-coding"
 let cn_openrouter = "openrouter"
 let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
 let kimi_coding_key_envs = [ "KIMI_CODING_API_KEY"; "KIMI_API_KEY_SB" ]
@@ -221,7 +221,7 @@ let kimi_coding_key_envs = [ "KIMI_CODING_API_KEY"; "KIMI_API_KEY_SB" ]
 let display_provider_name label =
   match normalize_label label with
   | "glm" | "glm-api" -> cn_glm
-  | "glm-coding" | "glm-coding-plan" -> cn_glm_coding_plan
+  | "glm-coding" -> cn_glm_coding
   | "kimi-api" -> cn_kimi
   | "kimi-coding" | "kimi_coding" -> cn_kimi_coding
   | _ -> String.trim label
@@ -553,10 +553,10 @@ let direct_adapters =
     ; tool_policy = no_tool_http_headers
     ; telemetry_policy = telemetry_reported
     }
-  ; { canonical_name = cn_glm_coding_plan
+  ; { canonical_name = cn_glm_coding
     ; runtime_kind = Direct_api
     ; auth_mode = Api_key "ZAI_API_KEY"
-    ; aliases = [ cn_glm_coding_plan; "glm-coding" ]
+    ; aliases = [ cn_glm_coding ]
     ; spawn_key = None
     ; cascade_prefix = "glm-coding"
     ; default_voice = None

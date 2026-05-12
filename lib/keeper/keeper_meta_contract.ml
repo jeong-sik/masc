@@ -128,6 +128,7 @@ type blocker_class =
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded
+  | Sdk_cost_budget_unenforceable
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
   | Sdk_tool_retry_exhausted
@@ -154,6 +155,7 @@ let blocker_class_to_string = function
   | Sdk_max_turns_exceeded -> "sdk_max_turns_exceeded"
   | Sdk_token_budget_exceeded -> "sdk_token_budget_exceeded"
   | Sdk_cost_budget_exceeded -> "sdk_cost_budget_exceeded"
+  | Sdk_cost_budget_unenforceable -> "sdk_cost_budget_unenforceable"
   | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
   | Sdk_idle_detected -> "sdk_idle_detected"
   | Sdk_tool_retry_exhausted -> "sdk_tool_retry_exhausted"
@@ -181,6 +183,7 @@ let blocker_class_of_serialized_string = function
   | "sdk_max_turns_exceeded" -> Some Sdk_max_turns_exceeded
   | "sdk_token_budget_exceeded" -> Some Sdk_token_budget_exceeded
   | "sdk_cost_budget_exceeded" -> Some Sdk_cost_budget_exceeded
+  | "sdk_cost_budget_unenforceable" -> Some Sdk_cost_budget_unenforceable
   | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
   | "sdk_idle_detected" -> Some Sdk_idle_detected
   | "sdk_tool_retry_exhausted" -> Some Sdk_tool_retry_exhausted

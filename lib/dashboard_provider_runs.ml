@@ -265,7 +265,76 @@ let provider_snapshot_of_adapter (adapter : Runtime_catalog.adapter) =
     discovery = None;
   }
 
+let catalog_auth_kind = function
+  | Llm_provider.Provider_catalog.No_auth -> "none"
+  | Llm_provider.Provider_catalog.Api_key_env _ -> "api_key"
+  | Llm_provider.Provider_catalog.Cli_cached_login -> "cli_cached_login"
+  | Llm_provider.Provider_catalog.Oauth_cached_login -> "oauth_cached_login"
+  | Llm_provider.Provider_catalog.Setup_token_env _ -> "setup_token"
+  | Llm_provider.Provider_catalog.File _ -> "file"
+  | Llm_provider.Provider_catalog.Exec _ -> "exec"
+
+let catalog_auth_available = function
+  | Llm_provider.Provider_catalog.No_auth -> true
+  | Llm_provider.Provider_catalog.Api_key_env env
+  | Llm_provider.Provider_catalog.Setup_token_env env ->
+    (match trim_nonempty env with
+     | None -> false
+     | Some env_name ->
+       (match Sys.getenv_opt env_name with
+        | Some value -> Option.is_some (trim_nonempty value)
+        | None -> false))
+  | Llm_provider.Provider_catalog.Cli_cached_login
+  | Llm_provider.Provider_catalog.Oauth_cached_login ->
+    true
+  | Llm_provider.Provider_catalog.File path ->
+    (match trim_nonempty path with
+     | None -> false
+     | Some path -> Sys.file_exists path)
+  | Llm_provider.Provider_catalog.Exec cmd -> Option.is_some (trim_nonempty cmd)
+
+let provider_snapshot_of_catalog_entry
+    (entry : Llm_provider.Provider_catalog.entry) =
+  let runtime_kind, kind =
+    match entry.transport with
+    | Llm_provider.Provider_catalog.Cli -> "cli_agent", "cli"
+    | Llm_provider.Provider_catalog.Http
+    | Llm_provider.Provider_catalog.Managed
+    | Llm_provider.Provider_catalog.Custom_openai_compat ->
+      "direct_api", "cloud"
+  in
+  let auth_available = catalog_auth_available entry.auth in
+  let transport_available =
+    match entry.transport, entry.command with
+    | Llm_provider.Provider_catalog.Cli, Some cmd ->
+      Llm_provider.Provider_registry.command_in_path cmd
+    | Llm_provider.Provider_catalog.Cli, None -> false
+    | Llm_provider.Provider_catalog.Http, _
+    | Llm_provider.Provider_catalog.Managed, _
+    | Llm_provider.Provider_catalog.Custom_openai_compat, _ ->
+      true
+  in
+  let available = auth_available && transport_available in
+  let models = entry.default_model |> Option.to_list |> dedupe_keep_order in
+  {
+    provider = entry.id;
+    kind;
+    runtime_kind;
+    auth_kind = catalog_auth_kind entry.auth;
+    status = if available then "available" else "unavailable";
+    available;
+    supports_single_agent_run =
+      available && (not entry.interactive_required) && models <> [];
+    default_model = entry.default_model;
+    models;
+    source = "oas/provider-catalog";
+    endpoint_url = trim_nonempty entry.base_url;
+    note = entry.credential_scope;
+    discovery = None;
+  }
+
 let provider_snapshots () : provider_snapshot list =
+  let llama = llama_snapshot () in
   let managed =
     Runtime_catalog.direct_adapters
     |> List.filter (fun (a : Runtime_catalog.adapter) ->
@@ -273,7 +342,19 @@ let provider_snapshots () : provider_snapshot list =
          && Option.is_some a.default_model_id)
     |> List.map provider_snapshot_of_adapter
   in
-  llama_snapshot () :: managed
+  let existing =
+    (llama :: managed) |> List.map (fun (snapshot : provider_snapshot) -> snapshot.provider)
+  in
+  let catalog =
+    match Llm_provider.Provider_catalog.global () with
+    | None -> []
+    | Some entries ->
+      entries
+      |> List.filter (fun (entry : Llm_provider.Provider_catalog.entry) ->
+           not (List.mem entry.id existing))
+      |> List.map provider_snapshot_of_catalog_entry
+  in
+  llama :: (managed @ catalog)
 
 let provider_snapshot_by_name name =
   provider_snapshots ()

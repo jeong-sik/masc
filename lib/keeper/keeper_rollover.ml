@@ -85,6 +85,7 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Stale_fleet_batch
   | Sdk_max_turns_exceeded
   | Sdk_cost_budget_exceeded
+  | Sdk_cost_budget_unenforceable
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
   | Sdk_tool_retry_exhausted

@@ -152,6 +152,7 @@ type blocker_class =
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded
+  | Sdk_cost_budget_unenforceable
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
   | Sdk_tool_retry_exhausted

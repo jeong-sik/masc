@@ -92,7 +92,7 @@ type tool_policy =
 
           Currently set to [true] for CLI agents with native per-keeper
           MCP support: Claude Code, Gemini CLI, Kimi CLI, and the local
-          Ollama runtime. HTTP-only adapters (glm-api, glm-coding-plan,
+          Ollama runtime. HTTP-only adapters (glm-api, glm-coding,
           openrouter, *-api variants) currently default to [false]; the
           legacy whitelist treated PK.Glm as tolerant but that mapping
           is unreachable via [adapter_of_provider_kind] (PK.Glm has no
@@ -177,7 +177,7 @@ val cn_codex_api : string
 val cn_gemini_api : string
 val cn_kimi_api : string
 val cn_glm : string
-val cn_glm_coding_plan : string
+val cn_glm_coding : string
 val cn_openrouter : string
 val cn_custom : string
 

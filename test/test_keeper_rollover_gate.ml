@@ -57,6 +57,7 @@ let non_overflow_classes_are_not_matched () =
     KT.Stale_fleet_batch;
     KT.Sdk_max_turns_exceeded;
     KT.Sdk_cost_budget_exceeded;
+    KT.Sdk_cost_budget_unenforceable;
     KT.Sdk_unrecognized_stop_reason;
     KT.Sdk_idle_detected;
     KT.Sdk_tool_retry_exhausted;

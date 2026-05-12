@@ -469,7 +469,6 @@ let metric_keeper_supervisor_last_sweep_unixtime =
    - "submit_failed"   pool submit raised a non-cancellation exception;
                        body ran inline via the fallback path. *)
 let metric_keeper_domain_pool_fork = to_string DomainPoolFork
-
 let metric_keeper_semaphore_wait_timeout = "masc_keeper_semaphore_wait_timeout_total"
 
 let metric_keeper_turn_slot_bookkeeping_failures =

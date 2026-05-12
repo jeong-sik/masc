@@ -243,7 +243,10 @@ let launch_supervised_fiber
        (Keeper_state_machine.transition_error_to_string err);
      Prometheus.inc_counter
        Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-       ~labels:[ "keeper", meta.name; "site", Supervisor_cleanup_failure_site.(to_label Fiber_start_rejected) ]
+       ~labels:
+         [ "keeper", meta.name
+         ; ("site", Supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
+         ]
        ());
   if restart_launch_noop_enabled_for_test ()
   then ()
@@ -276,9 +279,7 @@ let launch_supervised_fiber
        [run_heartbeat_loop] is the open architectural question this
        pilot exists to validate; see RFC-0059 §10 risks. *)
     let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
-    let pool_for_keeper =
-      if domain_pool_flag then Executor_pool_ref.get () else None
-    in
+    let pool_for_keeper = if domain_pool_flag then Executor_pool_ref.get () else None in
     let bump_fork_outcome outcome =
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_domain_pool_fork
@@ -313,8 +314,7 @@ let launch_supervised_fiber
                the original "pool" launch attempt. *)
             bump_fork_outcome "submit_failed";
             Log.Keeper.warn
-              "keeper supervise pool submit failed, running inline: \
-               keeper=%s err=%s"
+              "keeper supervise pool submit failed, running inline: keeper=%s err=%s"
               meta.name
               (Printexc.to_string exn);
             body ())
@@ -859,7 +859,11 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
             reason;
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-            ~labels:[ "keeper", meta.name; "site", Supervisor_cleanup_failure_site.(to_label Reconcile_gate_rejected) ]
+            ~labels:
+              [ "keeper", meta.name
+              ; ( "site"
+                , Supervisor_cleanup_failure_site.(to_label Reconcile_gate_rejected) )
+              ]
             ())
       ()
   in
@@ -927,7 +931,9 @@ let reconcile_keepalive_keepers (ctx : _ context) =
         | Error err ->
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_observation_query_failures
-            ~labels:[ "operation", Observation_query_operation.(to_label Reconcile_read_meta) ]
+            ~labels:
+              [ ("operation", Observation_query_operation.(to_label Reconcile_read_meta))
+              ]
             ();
           Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err);
        Eio_guard.yield_step reconcile_ym)
@@ -1004,7 +1010,10 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
         entry.name;
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-        ~labels:[ "keeper", entry.name; "site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_write) ]
+        ~labels:
+          [ "keeper", entry.name
+          ; ("site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_write))
+          ]
         ())
   | Ok None ->
     Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
@@ -1019,7 +1028,10 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
     Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-      ~labels:[ "keeper", entry.name; "site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing) ]
+      ~labels:
+        [ "keeper", entry.name
+        ; ("site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing))
+        ]
       ()
   | Error err ->
     Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
@@ -1034,7 +1046,10 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
     Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)" entry.name err;
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-      ~labels:[ "keeper", entry.name; "site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error) ]
+      ~labels:
+        [ "keeper", entry.name
+        ; ("site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error))
+        ]
       ()
 ;;
 
@@ -1506,8 +1521,7 @@ let sweep_and_recover (ctx : _ context) =
        List.iter
          (fun (v : Keeper_invariant_check.violation) ->
             Log.Keeper.warn
-              "keeper_invariant_violation: keeper=%s phase=%s property=%s \
-               detail=%s"
+              "keeper_invariant_violation: keeper=%s phase=%s property=%s detail=%s"
               entry.name
               (Keeper_state_machine.phase_to_string entry.phase)
               v.property
@@ -1647,7 +1661,10 @@ let sweep_and_recover (ctx : _ context) =
       msg;
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-      ~labels:[ "keeper", entry.name; "site", Supervisor_cleanup_failure_site.(to_label Force_watchdog_crash) ]
+      ~labels:
+        [ "keeper", entry.name
+        ; ("site", Supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
+        ]
       ();
     (* 2026-05-05 fleet-stuck cycle: when a keeper fiber is stuck inside
        an LLM subprocess that does not honour [Eio.Cancel.Cancelled],
@@ -1826,9 +1843,7 @@ let sweep_and_recover (ctx : _ context) =
             exhausted keepers to [to_mark_dead], not [to_restart].  A
             refusal here means some out-of-band path cleared the budget
             (one of the three vectors documented in iter 14 audit memo). *)
-         (match
-            Keeper_registry.register_restarting ~base_path old_entry.name meta
-          with
+         (match Keeper_registry.register_restarting ~base_path old_entry.name meta with
           | Error (Keeper_registry.Budget_already_exhausted _) ->
             (* Route to mark_dead instead of merely skipping: a keeper that
                trips the BudgetNeverRevives guard should reach a stable
@@ -1942,7 +1957,10 @@ let sweep_and_recover (ctx : _ context) =
              (Printexc.to_string exn);
            Prometheus.inc_counter
              Keeper_metrics.metric_keeper_supervisor_cleanup_failures
-             ~labels:[ "keeper", name; "site", Supervisor_cleanup_failure_site.(to_label Paused_meta_prune) ]
+             ~labels:
+               [ "keeper", name
+               ; ("site", Supervisor_cleanup_failure_site.(to_label Paused_meta_prune))
+               ]
              ())
       | _ -> ());
     Eio_guard.yield_step sweep_names_ym);

@@ -21,7 +21,7 @@ This memo is the snapshot before any activation. It does two things:
 |---------|-------|-------|
 | State enum | 5 | `keeper_state ∈ {"Idle", "Waiting", "Dispatched", "Working", "Done"}` |
 | Actions | 7 | `StartTurn`, `TryDispatch(k,p)`, `EnqueueOverflow`, `RefillToken(p)`, `WakeFromQueue`, `StartWork`, `CompleteWork` |
-| Safety invariants | 4 | `TypeOK`, `RateRespect` (I3), `TokensInRange`, `QueueWellFormed`, `WorkConserving` (I2 step form) |
+| Safety invariants | 5 | `TypeOK`, `RateRespect` (I3), `TokensInRange`, `QueueWellFormed`, `WorkConserving` (I2 step form) |
 | Liveness | 1 | `LivenessInvariant` (I1) under strong fairness on `TryDispatch` |
 | Bug models | 2 | `KeeperAdmissionLiveness-buggy.cfg`, `…-buggy-2.cfg` (counter-example fixtures) |
 
@@ -48,7 +48,7 @@ External callers (5 sites): `keeper_heartbeat_loop.ml` (primary integration), `p
 | `StartTurn(k)` | heartbeat tick that produces an admission request | yes (heartbeat loop always calls) |
 | `TryDispatch(k, p)` | `Keeper_admission_runtime.run_admission_*` → `Keeper_admission_policy.choose` → `Keeper_provider_token_bucket.try_acquire` | shadow only unless `MASC_ADMISSION_USE_NEW=1` |
 | `EnqueueOverflow(k)` | `Keeper_wfq_overflow.enqueue` (via runtime) | dormant (flag-gated) |
-| `RefillToken(p)` | `Keeper_provider_token_bucket.refill_tokens` (timer-driven) | dormant (timer not started when flag off) |
+| `RefillToken(p)` | `Keeper_provider_token_bucket.refill_locked` (lazy — called inside `try_acquire`/`tokens_available` when `elapsed_sec > 0`; no separate timer). `add_on_refill` registers post-refill callbacks; `fire_on_refill_callbacks` drains them. | dormant (refill computation runs but admission flow disabled when flag off) |
 | `WakeFromQueue` | `Keeper_wfq_overflow.wake_one` invoked on refill | dormant |
 | `StartWork(k)` | (implicit; not a distinct OCaml function — the heartbeat-loop hands off to the cascade dispatch which the spec abstracts as `Working`) | always wired (cascade dispatch) |
 | `CompleteWork(k)` | `Keeper_provider_token_bucket.release` in the cascade completion callback | dormant (release call only on `USE_NEW` path) |

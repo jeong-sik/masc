@@ -256,7 +256,15 @@ let current_worker_run ~(agent : Agent.t) ~raw_trace ~options () =
   Ok (worker_run_of_agent ~agent ~options ~snapshot raw_details)
 ;;
 
-let extract_prompt (records : Raw_trace.record list) =
+(* WORKAROUND: [Raw_trace.record_type] is the framework's record-kind
+   variant; these two extractors only care about specific shapes
+   ([Run_started] for prompts, [Assistant_block] + "text" + `Assoc for
+   text deltas) and treat all other record kinds as "no match". Listing
+   every [Raw_trace.record_type] constructor here would add churn on
+   every agent_sdk raw-trace schema change for zero coverage gain, so
+   warning 4 is suppressed at the binding per RFC-0071 §3.4.1
+   (skip-rest is semantically future-proof). *)
+let[@warning "-4"] extract_prompt (records : Raw_trace.record list) =
   records
   |> List.find_map (fun (record : Raw_trace.record) ->
     match record.record_type, record.prompt with
@@ -265,7 +273,7 @@ let extract_prompt (records : Raw_trace.record list) =
   |> Option.value ~default:""
 ;;
 
-let extract_text_deltas (records : Raw_trace.record list) =
+let[@warning "-4"] extract_text_deltas (records : Raw_trace.record list) =
   records
   |> List.filter_map (fun (record : Raw_trace.record) ->
     match record.record_type, record.block_kind, record.assistant_block with
@@ -729,9 +737,15 @@ let%test "empty_raw_details has expected defaults" =
 ;;
 
 let%test "validation_error creates Io error" =
-  match validation_error "test detail" with
-  | Error.Io (ValidationFailed { detail }) -> detail = "test detail"
-  | _ -> false
+  (* WORKAROUND: [Error.t] is a deep variant tree; this assertion only
+     cares about the specific Io.ValidationFailed shape and "any other
+     error" is a test failure, so warning 4 is suppressed rather than
+     enumerating the whole error hierarchy. Root fix: keep using
+     arm-level suppression per RFC-0071 §3.4.1. *)
+  (match validation_error "test detail" with
+   | Error.Io (ValidationFailed { detail }) -> detail = "test detail"
+   | _ -> false)
+  [@warning "-4"]
 ;;
 
 let%test "workdir_policy_to_json Required" =

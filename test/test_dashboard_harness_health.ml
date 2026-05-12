@@ -359,18 +359,18 @@ let test_outcomes_rollup_counts_gate_rejected_from_completed_turns () =
   ignore (Reg.register ~base_path:config.base_path keeper_name meta);
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
-    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+    ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
   Reg.mark_turn_gate_rejected_by_name keeper_name;
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
-    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+    ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state
     ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_done);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
-    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+    ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state
     ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_exhausted);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;

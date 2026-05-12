@@ -339,7 +339,7 @@ let test_mark_turn_finished_records_completed_turn_outcome_once () =
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
   R.set_turn_decision_stage
-    ~base_path:bp keeper_name R.Decision_tool_policy_selected;
+    ~base_path:bp keeper_name R.Decision_active_tool_policy_selected;
   R.mark_turn_gate_rejected_by_name keeper_name;
   R.mark_turn_finished ~base_path:bp keeper_name;
   R.mark_turn_finished ~base_path:bp keeper_name;
@@ -1392,7 +1392,7 @@ let test_effective_keepalive_meta_prefers_registry_when_disk_unchanged () =
 let drive_turn_to_finalizing keeper_name =
   R.mark_turn_started ~base_path:bp keeper_name;
   R.set_turn_decision_stage
-    ~base_path:bp keeper_name R.Decision_tool_policy_selected;
+    ~base_path:bp keeper_name R.Decision_active_tool_policy_selected;
   R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
   R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_trying);
   R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_done)
@@ -1462,7 +1462,7 @@ let test_two_sdk_turn_boundaries_no_assert () =
   (* Second SDK turn arrives via before_turn_params hook. *)
   R.mark_sdk_turn_started ~base_path:bp keeper_name;
   R.set_turn_decision_stage
-    ~base_path:bp keeper_name R.Decision_tool_policy_selected;
+    ~base_path:bp keeper_name R.Decision_active_tool_policy_selected;
   R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
   match R.get ~base_path:bp keeper_name with
   | Some { current_turn_observation = Some obs; _ } ->

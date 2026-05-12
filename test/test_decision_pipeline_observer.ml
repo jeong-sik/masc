@@ -203,7 +203,7 @@ let test_observer_gate_rejected_finalizes_turn () =
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
   Reg.mark_turn_started ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
-    ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
+    ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
   Reg.mark_turn_gate_rejected_by_name name;
   match Reg.get ~base_path:test_obs_bp name with
@@ -261,7 +261,7 @@ let test_observer_last_outcome_populated_after_turn () =
   dispatch_obs_measurement name;
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
-    ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
+    ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_done);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
@@ -312,7 +312,7 @@ let test_observer_json_includes_terminal_fields () =
   dispatch_obs_measurement name;
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
-    ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
+    ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_done);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
@@ -355,7 +355,7 @@ let test_turn_retry_after_compaction_resets_cascade_attempt () =
   dispatch_obs_measurement name;
   Reg.mark_turn_measurement ~base_path:test_obs_bp name;
   Reg.set_turn_decision_stage
-    ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
+    ~base_path:test_obs_bp name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state ~base_path:test_obs_bp name (Reg.Packed Reg.Cascade_trying);
   Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
   Reg.set_turn_phase ~base_path:test_obs_bp name Reg.(Packed Turn_compacting);

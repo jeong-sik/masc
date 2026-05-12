@@ -1650,13 +1650,30 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
         changed := true;
         { obs with turn_phase }
       | Resolved_turn_violation v ->
-        invalid_arg
-          (Printf.sprintf
-             "set_turn_phase: forbidden transition %s -> %s \
-              (spec_violation=%s)"
-             (packed_turn_phase_label obs.turn_phase)
-             (packed_turn_phase_label turn_phase)
-             (turn_phase_transition_spec_violation_to_tag v))));
+        (* Route the [invalid_arg] through [wrap_unit] so the guard's
+           Prometheus counter [metric_fsm_guard_violation]
+           (action=turn_phase_transition, stage=guard) keeps firing for
+           forbidden transitions reached via this setter.  Prior to
+           RFC-0072 Phase 4b (#14918), [set_turn_phase] called
+           [validate_turn_phase_transition] — itself wrapped — so the
+           instrumentation was transitive; the resolver swap dropped it.
+           wrap_unit bumps the counter and re-raises the same
+           [Invalid_argument], preserving the
+           [packed_turn_phase_label] / [spec_violation] message format.
+           The trailing [obs] is unreachable (and a no-op transition is
+           the correct fallback should wrap_unit ever return). *)
+        Keeper_fsm_guard_runtime.wrap_unit
+          ~action:"turn_phase_transition"
+          ~stage:"guard"
+          (fun () ->
+            invalid_arg
+              (Printf.sprintf
+                 "set_turn_phase: forbidden transition %s -> %s \
+                  (spec_violation=%s)"
+                 (packed_turn_phase_label obs.turn_phase)
+                 (packed_turn_phase_label turn_phase)
+                 (turn_phase_transition_spec_violation_to_tag v)));
+        obs));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 

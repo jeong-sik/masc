@@ -1,0 +1,17 @@
+# OCaml phase-count baseline — pre-existing drifts grandfathered while
+# their fix PR is in flight.  Each line: "<repo-relative-path>:<lineno>".
+#
+# Iter 54 R-H-1.e (#14886) fixes the four "12-state" sites below.
+# Once that PR merges, remove the corresponding lines in a follow-up.
+# The CI step that runs this validator will then enforce zero drift.
+#
+# Why baseline rather than fix-in-place: iter 55 R-H-1.f (this PR) is
+# strictly the *validator* + the two NEW sites the validator surfaced
+# (keeper_registry.{ml,mli} "11-state" mentions predating both
+# Overflowed (MASC-1) and Zombie (#14707) additions).  Folding iter 54's
+# already-reviewed fixes here would create a stack with #14886.
+
+lib/keeper/keeper_state_machine.mli:3
+lib/keeper/keeper_composite_observer.mli:181
+lib/keeper/keeper_composite_observer.ml:257
+lib/keeper/keeper_exec_status.ml:592

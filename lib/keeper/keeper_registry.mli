@@ -423,7 +423,8 @@ type registry_entry = {
   name : string;
   meta : keeper_meta;
   phase : Keeper_state_machine.phase;
-      (** Keeper lifecycle phase (RFC-0002 11-state machine). *)
+      (** Keeper lifecycle phase (RFC-0002 13-state machine; 11 at #5229
+          → 12 with Overflowed (MASC-1) → 13 with Zombie #14707). *)
   conditions : Keeper_state_machine.conditions;
       (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;

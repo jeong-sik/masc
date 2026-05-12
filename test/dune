@@ -1228,6 +1228,7 @@
 (include stanzas/test_governance_cases_snapshot.inc)
 (include stanzas/test_governance_response_model_empty_9880.inc)
 (include stanzas/test_heartbeat_integration.inc)
+(include stanzas/test_http_pages_asset_read.inc)
 (include stanzas/test_heuristic_metrics_diagnostics.inc)
 (include stanzas/test_cascade_toml_materializer_admission.inc)
 (include stanzas/test_heuristic_metrics_scrub.inc)

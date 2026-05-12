@@ -182,8 +182,11 @@ let asset_content_type name =
   else
     "application/octet-stream"
 
+(* Static asset bodies (GraphiQL / Playground) served on the HTTP handler
+   fiber.  [Fs_compat.load_file] is Eio-native when the global fs is wired
+   (prod boot), so the file read no longer blocks the whole domain. *)
 let read_file path =
-  try Ok (In_channel.with_open_bin path In_channel.input_all)
+  try Ok (Fs_compat.load_file path)
   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let serve_graphiql_asset name _request reqd =

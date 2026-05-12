@@ -67,15 +67,23 @@ EOF
 START_MARK='<!-- COMMIT-LINEAGE:START -->'
 END_MARK='<!-- COMMIT-LINEAGE:END -->'
 
-if printf '%s' "$OLD_BODY" | grep -qF "$START_MARK"; then
-  # Replace the existing managed block. Use awk so multi-line bodies survive.
+# Match the markers on a whole line only — `index()`/`grep -F` substring
+# matching would trip on body prose that merely *mentions* the marker
+# (e.g. inside backticks), duplicating the block and deleting real content.
+if printf '%s\n' "$OLD_BODY" | grep -qxF -- "$START_MARK"; then
+  # Replace the existing managed block. The block is passed via a temp file,
+  # not `awk -v`, because BSD awk (macOS) rejects newlines in -v assignments.
+  TMPBLOCK="$(mktemp)"
+  trap 'rm -f "$TMPBLOCK"' EXIT
+  printf '%s\n' "$BLOCK" > "$TMPBLOCK"
   NEW_BODY="$(
-    awk -v start="$START_MARK" -v end="$END_MARK" -v block="$BLOCK" '
-      index($0, start) { print block; skip=1; next }
-      skip && index($0, end) { skip=0; next }
+    awk -v start="$START_MARK" -v end="$END_MARK" -v blockfile="$TMPBLOCK" '
+      $0 == start { while ((getline line < blockfile) > 0) print line; close(blockfile); skip=1; next }
+      skip && $0 == end { skip=0; next }
       !skip { print }
     ' <<<"$OLD_BODY"
   )"
+  rm -f "$TMPBLOCK"; trap - EXIT
 else
   # Append, separated by a blank line.
   NEW_BODY="$(printf '%s\n\n%s\n' "$OLD_BODY" "$BLOCK")"

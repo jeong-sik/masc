@@ -118,10 +118,30 @@ val is_deprecated_logical_profile_name : string -> bool
 
     On a successful load this also walks the fallback graph and emits
     [masc_cascade_fallback_cycle_detected_total] + a WARN log for each
-    cycle discovered (see {!detect_fallback_cycles}).
+    cycle discovered (see {!detect_fallback_cycles}), plus deprecated-
+    profile-name filter / capability-mismatch / profile-registration
+    counters when those conditions apply.
 
     Returns [Error _] when the file cannot be read or parsed. *)
 val load_catalog :
+  config_path:string ->
+  (catalog_entry list, string) result
+
+(** Same as {!load_catalog} but suppresses every Prometheus / log
+    side-effect — the cycle counter, the cycle WARN, the deprecated-
+    profile-name counter, the capability-mismatch counter, and the
+    profile-registration-failure counter and WARN. The returned
+    [catalog_entry list] is identical to {!load_catalog}.
+
+    Intended for read-only diagnostic callers (e.g.
+    [Config_doctor.diagnose_cascade_catalog]) that re-walk the catalog
+    on every dashboard / doctor poll. Without this, persistent
+    fallback-cycle / capability-mismatch / deprecated-name conditions
+    in a stable catalog would inflate the cycle / mismatch /
+    deprecated-name counters on every poll and re-emit the WARN log
+    even though [load_catalog]'s own [cycle_warn_seen] dedup table
+    already covered the producer side. *)
+val load_catalog_for_diagnostics :
   config_path:string ->
   (catalog_entry list, string) result
 

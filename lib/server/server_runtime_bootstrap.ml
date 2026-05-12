@@ -234,11 +234,12 @@ let bootstrap_base_path_config_root ~base_path =
        | None ->
            ensure_config_root_scaffold config_root;
            (* RFC-0058 §9.3: cascade.toml is the only cascade source.
-              [""] is the smallest valid TOML document (an empty table);
-              the materializer parses it and renders an empty in-memory
-              catalog.  Previously this wrote [cascade.json] with ["{}"]
-              — JSON-shaped, never read post-§9, and a present-but-unread
-              [cascade.json] trips the stale-json warning emitted by
+              [""] is the smallest valid TOML document — a document
+              with no tables and no keys; the materializer parses it
+              and renders an empty in-memory catalog.  Previously this
+              wrote [cascade.json] with ["{}"] — JSON-shaped, never
+              read post-§9, and a present-but-unread [cascade.json]
+              trips the stale-json warning emitted by
               [Config_dir_resolver]. *)
            let cascade_path =
              Filename.concat config_root Config_dir_resolver.cascade_toml_filename

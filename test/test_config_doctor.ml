@@ -113,9 +113,9 @@ let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
     }
 
 (* RFC-0058 §9: cascade.toml is the only on-disk cascade source.  The
-   default [""] is the smallest valid TOML document (an empty table),
-   which the materializer renders to an empty catalog — the "no presets
-   configured" baseline. *)
+   default [""] is the smallest valid TOML document — a document with
+   no tables or keys — which the materializer renders to an empty
+   catalog ("no presets configured" baseline). *)
 let initialize_config_root ?(cascade_toml="") root =
   write_file (Filename.concat root "cascade.toml") cascade_toml;
   mkdir_p (Filename.concat root "personas")

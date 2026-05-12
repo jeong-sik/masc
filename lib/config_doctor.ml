@@ -107,6 +107,26 @@ let option_field name = function
   | Some value -> (name, `String value)
   | None -> (name, `Null)
 
+type cascade_diagnosis = {
+  issues : catalog_issue list;
+  fallback_cycles : string list list;
+  (** Cycles surface as warning issues inside [issues] for the
+      flat warnings list, but we keep the raw list here so
+      {!cascade_catalog_next_actions} can emit a cycle-specific
+      operator action distinct from the degraded-metadata one. *)
+}
+
+let format_fallback_cycle cycle =
+  (* Display the loop with its closing edge so an operator who sees
+     [A -> B -> A] reads "cycle" rather than [A -> B], which looks
+     like a non-cycling chain.  Empty cycles cannot occur here
+     ({!Cascade_config_loader.detect_fallback_cycles} only emits
+     non-empty cycles), so guard defensively with [match] rather
+     than a partial [List.hd]. *)
+  match cycle with
+  | [] -> "(empty cycle)"
+  | first :: _ -> String.concat " -> " (cycle @ [ first ])
+
 let diagnose_cascade_catalog ~active_config_root =
   (* RFC-0058 §9: the on-disk cascade source is [cascade.toml]; the
      legacy [cascade.json] sibling is no longer read.  Probing for
@@ -120,24 +140,29 @@ let diagnose_cascade_catalog ~active_config_root =
   if not (Env_config_core.existing_file config_path) then
     (* No cascade.toml — but if a legacy cascade.json is still lying
        around, the operator forgot to migrate.  Config_dir_resolver
-       already emits this exact warning at startup (see its
-       [degraded_legacy_json_warnings]); mirroring it here makes the
-       same diagnostic visible on the Config Doctor panel so it isn't
-       silent green when the catalog can't be validated. *)
+       already emits a warning at startup (see its
+       [degraded_legacy_json_warnings] using the same
+       [legacy_cascade_json_warning_prefix] SSOT below).  We share
+       the prefix so the two surfaces stay aligned on what they
+       identify; the appended operator action differs by context
+       (startup says "Rename or convert it", doctor says "Migrate ...
+       so catalog diagnostics can run"). *)
     let legacy_json =
       Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
     in
     if Env_config_core.existing_file legacy_json then
-      [ { profile = None
-        ; severity = Catalog_warn
-        ; message =
-            "Found cascade.json but no cascade.toml; cascade.json is no longer \
-             read (RFC-0058 §9). Migrate to cascade.toml so catalog \
-             diagnostics can run."
-        }
-      ]
+      { issues =
+          [ { profile = None
+            ; severity = Catalog_warn
+            ; message =
+                Config_dir_resolver.legacy_cascade_json_warning_prefix
+                ^ " Migrate to cascade.toml so catalog diagnostics can run."
+            }
+          ]
+      ; fallback_cycles = []
+      }
     else
-      []
+      { issues = []; fallback_cycles = [] }
   else
     let profiles = Cascade_catalog_validator.discover_profiles ~config_path in
     let validator_issues = Cascade_catalog_validator.diagnose_catalog ~config_path in
@@ -150,26 +175,37 @@ let diagnose_cascade_catalog ~active_config_root =
        list through the doctor's [issues] makes it land in the same
        warnings/next-actions surface the dashboard renders, so a
        misconfigured [fallback_cascade] chain is visible in the
-       Config Doctor panel without leaving the page. *)
-    let cycle_issues =
-      match Cascade_config_loader.load_catalog ~config_path with
-      | Ok entries ->
-          Cascade_config_loader.detect_fallback_cycles entries
-          |> List.map (fun cycle ->
-            {
-              profile = None;
-              severity = Catalog_warn;
-              message =
-                Printf.sprintf
-                  "Cascade fallback_cascade cycle detected: %s. Rotation cannot \
-                   escape this loop; break the chain or remove the hint."
-                  (String.concat " -> " cycle);
-            })
+       Config Doctor panel without leaving the page.
+
+       Use the diagnostics-only loader variant so the doctor's poll
+       cycle (every dashboard refresh / `masc-mcp doctor config` run)
+       does not re-fire the cycle / mismatch / deprecated-name
+       counters or re-emit the WARN log for the same stable
+       misconfiguration. *)
+    let fallback_cycles =
+      match
+        Cascade_config_loader.load_catalog_for_diagnostics ~config_path
+      with
+      | Ok entries -> Cascade_config_loader.detect_fallback_cycles entries
       | Error _ -> []
+    in
+    let cycle_issues =
+      List.map
+        (fun cycle ->
+          {
+            profile = None;
+            severity = Catalog_warn;
+            message =
+              Printf.sprintf
+                "Cascade fallback_cascade cycle detected: %s. Rotation cannot \
+                 escape this loop; break the chain or remove the hint."
+                (format_fallback_cycle cycle);
+          })
+        fallback_cycles
     in
     let issues = validator_issues @ cycle_issues in
     if issues = [] then
-      []
+      { issues = []; fallback_cycles }
     else
       let error_count =
         issues
@@ -177,7 +213,7 @@ let diagnose_cascade_catalog ~active_config_root =
         |> List.length
       in
       let warn_count = List.length issues - error_count in
-      {
+      let summary = {
         profile = None;
         severity = if error_count > 0 then Catalog_error else Catalog_warn;
         message =
@@ -187,10 +223,11 @@ let diagnose_cascade_catalog ~active_config_root =
             (List.length profiles)
             error_count
             warn_count;
-      }
-      :: issues
+      } in
+      { issues = summary :: issues; fallback_cycles }
 
-let cascade_catalog_next_actions ~config_path issues =
+let cascade_catalog_next_actions ~config_path
+    { issues; fallback_cycles } =
   if issues = [] then
     []
   else
@@ -203,6 +240,19 @@ let cascade_catalog_next_actions ~config_path issues =
           "Fix or disable the broken cascade preset entries in %s before \
            assigning keepers to them."
           config_path
+      else if fallback_cycles <> [] then
+        (* Cycle warnings are a runtime-stalling loop, not degraded
+           metadata.  Give them a distinct primary action so the
+           operator is pointed at the actual hazard (cycle break)
+           rather than at a generic metadata cleanup. *)
+        Printf.sprintf
+          "Break the fallback_cascade cycle(s) in %s: %s. Rotation cannot \
+           escape these loops, so every participant inherits any single \
+           provider stall."
+          config_path
+          (fallback_cycles
+           |> List.map format_fallback_cycle
+           |> String.concat "; ")
       else
         Printf.sprintf
           "Clean up the degraded cascade preset metadata in %s so doctor \
@@ -341,9 +391,10 @@ let analyze_with (inputs : inputs) =
       ~effective_masc_root:runtime_data_root
       ()
   in
-  let cascade_catalog_issues =
+  let cascade_diagnosis =
     diagnose_cascade_catalog ~active_config_root
   in
+  let cascade_catalog_issues = cascade_diagnosis.issues in
   let cascade_config_path =
     Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
   in
@@ -407,7 +458,7 @@ let analyze_with (inputs : inputs) =
   let cascade_actions =
     cascade_catalog_next_actions
       ~config_path:cascade_config_path
-      cascade_catalog_issues
+      cascade_diagnosis
   in
   let next_actions =
     match init_state with

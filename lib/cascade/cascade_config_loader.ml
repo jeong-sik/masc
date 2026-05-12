@@ -551,7 +551,7 @@ let detect_capability_mismatches (entries : catalog_entry list)
     entries
 ;;
 
-let load_catalog ~config_path =
+let load_catalog_impl ~emit_telemetry ~config_path =
   match load_catalog_source config_path with
   | Error _ as err -> err
   | Ok (`Assoc fields) ->
@@ -568,9 +568,13 @@ let load_catalog ~config_path =
              without the declared profiles registered.  Counter ticks
              so the silent registration gap is observable — downstream
              [resolve_required_capabilities] returns None for these
-             profiles and capability filtering falls back to defaults. *)
-          Cascade_metrics.on_profile_registration_failure ();
-          Log.warn ~ctx:"CascadeConfig" "profiles registration error: %s" msg
+             profiles and capability filtering falls back to defaults.
+             [emit_telemetry] gates both so diagnostic callers do not
+             re-fire the counter every dashboard / doctor poll. *)
+          if emit_telemetry then begin
+            Cascade_metrics.on_profile_registration_failure ();
+            Log.warn ~ctx:"CascadeConfig" "profiles registration error: %s" msg
+          end
         | Ok () -> ())
      | None -> ());
     let builders =
@@ -598,7 +602,8 @@ let load_catalog ~config_path =
            filtered, surface so RFC-0066 Phase 4 migration progress
            is observable.  Only ticks when [has_schema_field] is true
            — empty placeholder builders are not interesting. *)
-        if builder.has_schema_field
+        if emit_telemetry
+           && builder.has_schema_field
            && is_deprecated_logical_profile_name name
         then
           Cascade_metrics.on_deprecated_profile_name_filter ~name;
@@ -641,44 +646,54 @@ let load_catalog ~config_path =
           active_builders
       in
       let cycles = detect_fallback_cycles entries in
-      let key = cycle_set_key cycles in
-      let should_warn =
-        with_cycle_warn_lock (fun () ->
-          match Hashtbl.find_opt cycle_warn_seen config_path with
-          | Some k when String.equal k key -> false
-          | _ ->
-            Hashtbl.replace cycle_warn_seen config_path key;
-            true)
-      in
-      List.iter
-        (fun cycle ->
-           let entry =
-             match cycle with
-             | x :: _ -> x
-             | [] -> "?"
-           in
-           Prometheus.inc_counter
-             Prometheus.metric_cascade_fallback_cycle_detected_total
-             ~labels:[ "cascade", entry ]
-             ();
-           if should_warn
-           then
-             Log.warn
-               ~ctx:"CascadeConfig"
-               "fallback_cascade cycle detected at [%s]: %s — provider stalls in any \
-                participant will silently propagate through the entire loop (no \
-                escape).  Break the cycle by setting at least one fallback_cascade to a \
-                non-participating cascade (e.g. local_recovery) or removing the field."
-               entry
-               (String.concat " → " (cycle @ [ entry ])))
-        cycles;
+      (* Compute the dedup token only inside the telemetry-emitting
+         branch.  Otherwise a diagnostic call would consume the
+         [cycle_warn_seen] token and suppress the next real
+         [load_catalog]'s WARN. *)
+      (if emit_telemetry
+       then (
+         let key = cycle_set_key cycles in
+         let should_warn =
+           with_cycle_warn_lock (fun () ->
+             match Hashtbl.find_opt cycle_warn_seen config_path with
+             | Some k when String.equal k key -> false
+             | _ ->
+               Hashtbl.replace cycle_warn_seen config_path key;
+               true)
+         in
+         List.iter
+           (fun cycle ->
+              let entry =
+                match cycle with
+                | x :: _ -> x
+                | [] -> "?"
+              in
+              Prometheus.inc_counter
+                Prometheus.metric_cascade_fallback_cycle_detected_total
+                ~labels:[ "cascade", entry ]
+                ();
+              if should_warn
+              then
+                Log.warn
+                  ~ctx:"CascadeConfig"
+                  "fallback_cascade cycle detected at [%s]: %s — provider stalls in any \
+                   participant will silently propagate through the entire loop (no \
+                   escape).  Break the cycle by setting at least one fallback_cascade \
+                   to a non-participating cascade (e.g. local_recovery) or removing \
+                   the field."
+                  entry
+                  (String.concat " → " (cycle @ [ entry ])))
+           cycles));
       let mismatches = detect_capability_mismatches entries in
       (* Iter 32: counter complement to the [fallback_cycle_detected]
          counter the cycle detector already emits.  Bumped by the
          number of mismatches in a single load_catalog invocation
          so the iter-5 generic [validation_failed] reason can be
-         attributed to "capability subset violation" vs other faults. *)
-      Cascade_metrics.on_capability_mismatch ~count:(List.length mismatches);
+         attributed to "capability subset violation" vs other faults.
+         [emit_telemetry] gates this so diagnostic callers do not
+         re-fire on every poll for a stable misconfiguration. *)
+      if emit_telemetry then
+        Cascade_metrics.on_capability_mismatch ~count:(List.length mismatches);
       if mismatches <> []
       then
         Error
@@ -690,6 +705,14 @@ let load_catalog ~config_path =
               |> String.concat "; "))
       else Ok entries)
   | Ok _ -> Ok []
+;;
+
+let load_catalog ~config_path =
+  load_catalog_impl ~emit_telemetry:true ~config_path
+;;
+
+let load_catalog_for_diagnostics ~config_path =
+  load_catalog_impl ~emit_telemetry:false ~config_path
 ;;
 
 let load_profile_weighted ~config_path ~name =

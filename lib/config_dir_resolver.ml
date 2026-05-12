@@ -8,6 +8,12 @@ let cascade_toml_filename = "cascade.toml"
 let tool_policy_toml_filename = "tool_policy.toml"
 let keeper_runtime_toml_filename = "keeper_runtime.toml"
 
+(* SSOT first sentence — see Config_dir_resolver.mli docstring.
+   Callers append their context-specific operator action. *)
+let legacy_cascade_json_warning_prefix =
+  "Found cascade.json but no cascade.toml; cascade.json is no longer \
+   read (RFC-0058 §9)."
+
 type source =
   | Env
   | Local_masc
@@ -403,8 +409,8 @@ let resolve_with inputs =
     if (not cascade_authoring.exists)
        && existing_file (Filename.concat config_root.path cascade_json_filename)
     then
-      [ "Found cascade.json but no cascade.toml; cascade.json is no longer \
-         read (RFC-0058 §9). Rename or convert it to cascade.toml." ]
+      [ legacy_cascade_json_warning_prefix
+        ^ " Rename or convert it to cascade.toml." ]
     else []
   in
   let warnings =

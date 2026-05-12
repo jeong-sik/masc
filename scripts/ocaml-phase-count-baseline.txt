@@ -1,17 +1,13 @@
-# OCaml phase-count baseline — pre-existing drifts grandfathered while
-# their fix PR is in flight.  Each line: "<repo-relative-path>:<lineno>".
+# OCaml phase-count baseline — transient grandfather list for the
+# audit-ocaml-phase-count.sh validator.  Each non-comment line:
+# "<repo-relative-path>:<lineno>".
 #
-# Iter 54 R-H-1.e (#14886) fixes the four "12-state" sites below.
-# Once that PR merges, remove the corresponding lines in a follow-up.
-# The CI step that runs this validator will then enforce zero drift.
+# STATUS: empty.  iter 55 R-H-1.f (#14891) introduced the validator with
+# four grandfathered "12-state" sites pending fix via iter 54 R-H-1.e
+# (#14886).  That PR merged (all four now say "13-state"), so iter 65
+# R-H-1.g drained the four lines — the CI step now enforces zero drift.
 #
-# Why baseline rather than fix-in-place: iter 55 R-H-1.f (this PR) is
-# strictly the *validator* + the two NEW sites the validator surfaced
-# (keeper_registry.{ml,mli} "11-state" mentions predating both
-# Overflowed (MASC-1) and Zombie (#14707) additions).  Folding iter 54's
-# already-reviewed fixes here would create a stack with #14886.
-
-lib/keeper/keeper_state_machine.mli:3
-lib/keeper/keeper_composite_observer.mli:181
-lib/keeper/keeper_composite_observer.ml:257
-lib/keeper/keeper_exec_status.ml:592
+# Keep this file: the CI step still passes `--baseline <this file>`.  If a
+# future change introduces a phase-count mention that cannot be fixed in
+# the same PR, add its "<path>:<lineno>" here, reference the fix-PR in
+# this comment, and remove it once that PR merges.

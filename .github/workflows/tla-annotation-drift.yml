@@ -89,11 +89,13 @@ jobs:
         # OCaml-side twin of R-H-1.c.  Iter 54 (#14886) discovered the
         # same 12→13 stale-count drift class in lib/keeper/*.{ml,mli}
         # docstrings — six sites, two of them ("11-state" in
-        # keeper_registry) predating even Zombie addition.  Baseline
-        # file grandfathers the four sites still pending fix from PR
-        # #14886; once that PR merges, the corresponding baseline lines
-        # must be removed in a follow-up so future regressions are
-        # caught.
+        # keeper_registry) predating even Zombie addition.  iter 55
+        # (#14891) added the validator with a temporary baseline
+        # grandfathering the four sites in flight via #14886; iter 65
+        # R-H-1.g drained that baseline after #14886 merged, so this
+        # step now enforces zero drift.  The baseline file is kept
+        # (empty) and the `--baseline` flag still works for any future
+        # transient grandfathering — see its header comment.
         run: |
           bash scripts/audit-ocaml-phase-count.sh \
             --baseline scripts/ocaml-phase-count-baseline.txt

@@ -40,6 +40,21 @@ val derive
     to [docker run --name <to_string t> ...]. *)
 val to_string : t -> string
 
+(** [of_external_string s] wraps an arbitrary [string] as a
+    {!t} *without validation*. Intended for parsing output emitted by
+    an external source (e.g. [docker ps] [Names] field) where the
+    consumer treats the value as opaque and never decomposes the
+    format. **Not** suitable for callers that construct names — they
+    must use {!derive} so the format invariant is enforced.
+
+    The unchecked wrap is acceptable here because:
+    - Phase 3b-iv.2.4 reads docker's container [Names] field and the
+      caller (cleanup / quarantine) only round-trips the value back
+      into [docker rm <name>] without parsing.
+    - Wrapping at the type-system level still segregates "name from
+      docker" from "arbitrary string" in caller code. *)
+val of_external_string : string -> t
+
 (** [equal] / [pp] for property tests and dashboards. *)
 val equal : t -> t -> bool
 

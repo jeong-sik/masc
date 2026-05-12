@@ -24,6 +24,8 @@ let derive ~algo ~turn_id ~attempt ~suffix =
 
 let to_string t = t
 
+let of_external_string s = s
+
 let equal = String.equal
 
 let pp ppf t = Format.pp_print_string ppf t

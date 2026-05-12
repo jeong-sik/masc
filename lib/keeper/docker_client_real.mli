@@ -1,11 +1,15 @@
-(** RFC-0070 Phase 3b-iv.2.3 — Real {!Docker_client.S}
-    ([rm] + [exec] + [run] wired).
+(** RFC-0070 Phase 3b-iv.2.4 — Real {!Docker_client.S} (all 4 functions wired).
 
     Phase 3a's stub kept [Docker_client.S] as a *signature only*. Phase
-    3b-iv.1b added [Docker_client_mock] for tests. Phase 3b-iv.2.0
-    added the *production* skeleton. Phase 3b-iv.2.1 (#14844) wired
-    [rm]; 3b-iv.2.2 (#14854) wired [exec]; 3b-iv.2.3 (this) wires
-    [run]. Only [ps_query] remains a placeholder pending 3b-iv.2.4.
+    3b-iv.1b added [Docker_client_mock] for tests. Phase 3b-iv.2.0 added
+    the *production* skeleton. Phase 3b-iv.2.1 (#14844) wired [rm];
+    3b-iv.2.2 (#14854) wired [exec]; 3b-iv.2.3 (#14862) wired [run];
+    Phase 3b-iv.2.4 (this) wires [ps_query] + the JSON parser.
+
+    **Phase 3b-iv.2 series closes here**: all four [S] functions are
+    real spawns. Production callers parameterising on
+    [(module Docker_client.S)] can now swap in this module without
+    placeholder branches.
 
     Reference: docs/rfc/RFC-0070-keeper-sandbox-pure-edge-separation.md §3.2
 
@@ -46,15 +50,31 @@
       flag removes the container after exit (RFC §3.1's interim
       default cleanup; a typed cleanup-policy field on
       {!Keeper_sandbox_plan.t} is deferred to a follow-up RFC).
-    - [ps_query] — still [Error Cleanup_failed] placeholder pending
-      3b-iv.2.4 (JSON parser for
-      [docker ps --format '\{\{json .\}\}']).
+    - [ps_query] — wired: spawns
+      [docker ps -a --format '\{\{json .\}\}' --filter label=k=v ...]
+      via [Process_eio.run_argv_with_status_split], then parses each
+      stdout line as one {!Docker_response.ps_record}. Status mapping:
+      {ul
+        {- [WEXITED 0] → [Ok records] (records is a possibly-empty
+           list — unparseable lines are dropped silently; see the
+           [parse_ps_line] inline comment for the operational
+           rationale)}
+        {- [WEXITED 125] / [WEXITED 127] / signal / stopped →
+           [Error Daemon_unreachable]}
+        {- any other [WEXITED n] → [Error Probe_format_drift]
+           (docker ps reported a non-zero exit without daemon signals
+           — usually an argv-shape mismatch with the installed docker
+           version)}}
+      The unparseable-line silent drop is the documented compromise
+      between RFC §3.3 "no permissive default" and operational
+      reality: a single stray output line should NOT collapse fleet
+      listing for the cleanup loop.
 
-    **Why a placeholder skeleton and not [failwith]**: returning
-    [Error Cleanup_failed] keeps the signature in {!result}; a caller
-    that wires Real before Phase 3b-iv.2.{1,2,3,4} land will receive a
-    typed failure they can pattern-match on, not an exception that
+    **Why the original placeholder skeleton mattered**: returning
+    [Error Cleanup_failed] kept the signature in {!result}; callers
+    wiring Real *before* the impl sub-phases landed received a typed
+    failure they could pattern-match on, not an exception that
     surfaces as a crash. RFC-0070's "no silent failure, no exception
-    leak" contract is preserved. *)
+    leak" contract preserved across the whole series. *)
 
 include Docker_client.S

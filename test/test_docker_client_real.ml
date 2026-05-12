@@ -86,10 +86,25 @@ let test_exec_returns_typed_result () =
   | Error Docker_client.Probe_format_drift ->
     fail "exec should only surface Ok exec_result or Error Daemon_unreachable"
 
-let test_ps_query_placeholder () =
-  match Docker_client_real.ps_query ~labels:[] with
-  | Error Docker_client.Cleanup_failed -> ()
-  | _ -> fail "expected Cleanup_failed placeholder"
+(* Phase 3b-iv.2.4 — ps_query is no longer a placeholder. It spawns
+   [docker ps -a --format '{{json .}}' --filter ...] and parses each
+   line. The test environment may or may not have a docker daemon, so
+   we only assert the *typed* contract:
+   - Ok records (daemon present; list may be empty)
+   - Error Daemon_unreachable (daemon / CLI missing)
+   - Error Probe_format_drift (docker ps exit non-zero without daemon
+     signal — unusual but defined)
+   Other sandbox_error variants must NOT surface. *)
+let test_ps_query_returns_typed_result () =
+  match Docker_client_real.ps_query ~labels:[ "masc.keeper.test", "alice" ] with
+  | Ok _ -> ()
+  | Error Docker_client.Daemon_unreachable -> ()
+  | Error Docker_client.Probe_format_drift -> ()
+  | Error Docker_client.Cleanup_failed
+  | Error Docker_client.Image_pull_failed
+  | Error Docker_client.Container_oom
+  | Error Docker_client.Exec_timeout ->
+    fail "ps_query should only surface Ok | Daemon_unreachable | Probe_format_drift"
 
 (* Phase 3b-iv.2.1 — rm is no longer a placeholder; it spawns
    [docker rm -f <name>]. The test environment may or may not have a
@@ -122,7 +137,7 @@ let test_executor_with_real_returns_typed_result () =
     fail "executor with Real should only surface Ok or Daemon_unreachable"
 
 let () =
-  run "Docker_client_real (Phase 3b-iv.2.3)"
+  run "Docker_client_real (Phase 3b-iv.2.4 — all 4 functions wired)"
     [
       ( "S placeholder",
         [
@@ -132,7 +147,9 @@ let () =
           test_case "exec → Ok exec_result | Error Daemon_unreachable"
             `Quick
             test_exec_returns_typed_result;
-          test_case "ps_query → Cleanup_failed" `Quick test_ps_query_placeholder;
+          test_case "ps_query → Ok records | Daemon_unreachable | Probe_format_drift"
+            `Quick
+            test_ps_query_returns_typed_result;
           test_case "rm → typed error (Daemon_unreachable | Cleanup_failed)"
             `Quick
             test_rm_returns_typed_error;

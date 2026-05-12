@@ -26,4 +26,6 @@ module type S = sig
     -> (Docker_response.ps_record list, sandbox_error) result
 
   val rm : Keeper_container_name.t -> (unit, sandbox_error) result
+
+  val info_security_options : unit -> (string list, sandbox_error) result
 end

@@ -71,3 +71,13 @@ val exec_argv
   -> cmd:string
   -> unit
   -> string list
+
+(** [parse_security_options raw] is the pure parser behind
+    {!info_security_options}: it interprets the stdout of
+    [docker info --format '\{\{json .SecurityOptions\}\}'] — a JSON
+    array of strings (or [null] / [] for none), lowercased; non-string
+    elements dropped; anything else ⇒ [Probe_format_drift]. Exposed
+    so the parse is unit-testable without a daemon. *)
+val parse_security_options
+  :  string
+  -> (string list, Docker_client.sandbox_error) result

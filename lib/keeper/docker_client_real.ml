@@ -106,3 +106,38 @@ let rm container =
   let status, _stdout = Process_eio.run_argv_with_status argv in
   map_exit_status_for_rm status
 ;;
+
+(* Pure: parses the stdout of [docker info --format
+   '{{json .SecurityOptions}}'] — a JSON array of strings (or [null] /
+   [] when the daemon reports none). Items are lowercased so callers
+   can match case-insensitively against tokens like ["seccomp"] /
+   ["apparmor"] / ["no-new-privileges"]. Non-string array elements are
+   dropped (they cannot be a security option). Anything that is
+   neither a JSON array nor [null], or that fails to parse, is
+   [Probe_format_drift] — a docker-version output change must surface,
+   not be silently treated as "no options". *)
+let parse_security_options (raw : string)
+  : (string list, Docker_client.sandbox_error) result
+  =
+  match Yojson.Safe.from_string (String.trim raw) with
+  | `List items ->
+    Ok
+      (List.filter_map (function `String s -> Some s | _ -> None) items
+       |> List.map String.lowercase_ascii)
+  | `Null -> Ok []
+  | _ -> Error Docker_client.Probe_format_drift
+  | exception Yojson.Json_error _ -> Error Docker_client.Probe_format_drift
+;;
+
+let info_security_options () =
+  let argv = [ "docker"; "info"; "--format"; "{{json .SecurityOptions}}" ] in
+  match Process_eio.run_argv_with_status_split argv with
+  | Unix.WEXITED 0, out, _ -> parse_security_options out
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ ->
+    (* Any non-zero exit means the daemon could not answer (not
+       running, permission denied, CLI missing → synthesized
+       WEXITED 127). The probe itself is a preflight, not a
+       container command, so there is no in-container exit code to
+       surface as [Ok]. *)
+    Error Docker_client.Daemon_unreachable
+;;

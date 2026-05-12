@@ -28,6 +28,12 @@ let rm_queue
   : (Keeper_container_name.t * (unit, Docker_client.sandbox_error) result) Queue.t
   = Queue.create ()
 
+(* [info_security_options] takes no input, so the queue holds bare
+   responses (no input key to match on) — strict FIFO consume. *)
+let info_security_options_queue
+  : (string list, Docker_client.sandbox_error) result Queue.t
+  = Queue.create ()
+
 (* ── Injection API ──────────────────────────────────────────── *)
 
 let inject_run plan response = Queue.add (plan, response) run_queue
@@ -41,6 +47,10 @@ let inject_ps_query ~labels response =
 ;;
 
 let inject_rm container response = Queue.add (container, response) rm_queue
+
+let inject_info_security_options response =
+  Queue.add response info_security_options_queue
+;;
 
 (* ── Docker_client.S implementation ─────────────────────────── *)
 
@@ -93,16 +103,27 @@ let rm container =
     response
   | _ -> Error Docker_client.Daemon_unreachable
 
+let info_security_options () =
+  (* No input key — just consume the head. An empty queue fails closed
+     with [Daemon_unreachable], same as an unexpected/out-of-order call
+     on the keyed queues. *)
+  match Queue.take_opt info_security_options_queue with
+  | Some response -> response
+  | None -> Error Docker_client.Daemon_unreachable
+;;
+
 (* ── Fixture lifecycle ──────────────────────────────────────── *)
 
 let reset () =
   Queue.clear run_queue;
   Queue.clear exec_queue;
   Queue.clear ps_query_queue;
-  Queue.clear rm_queue
+  Queue.clear rm_queue;
+  Queue.clear info_security_options_queue
 
 let pending_calls () =
   Queue.length run_queue
   + Queue.length exec_queue
   + Queue.length ps_query_queue
   + Queue.length rm_queue
+  + Queue.length info_security_options_queue

@@ -87,12 +87,20 @@ let apply_level_to_strategy : type a.
   | L1 -> Recovery.default_strategy mode
   | L2 -> (
       (* Reduced capability: a Retry that would otherwise drive
-         the same failing path becomes a Fallback substitution. *)
+         the same failing path becomes a Fallback substitution; the
+         other three strategies pass through unchanged.
+
+         [Recovery.default_strategy] is typed at the closed union
+         [ `Retry | `Fallback | `Handoff | `Abort ] strategy, so the
+         non-Retry constructors are enumerated explicitly here (the
+         convention in keeper_bridge.ml:strategy_class_of_strategy) —
+         no [@warning "-4"] suppression, the warning-4 ratchet stays on. *)
       match Recovery.default_strategy mode with
       | Recovery.Retry _ ->
           Recovery.Fallback
             { fallback_value = "<degraded:L2>"; degrade_confidence_by = 0.3 }
-      | other -> other)
+      | (Recovery.Fallback _ | Recovery.Handoff _ | Recovery.Abort _) as other ->
+          other)
   | L3 ->
       Recovery.Handoff
         {
@@ -121,7 +129,11 @@ let of_recovery_recommended_level (mode : Recovery.error_mode) :
   match mode with
   | Recovery.DegradationRequired { recommended_level; _ } ->
       of_int_opt recommended_level
-  | _ -> None
+  | Recovery.TransientError _
+  | Recovery.PermanentError _
+  | Recovery.ResourceExhausted _
+  | Recovery.AmbiguityError _
+  | Recovery.ConsensusError _ -> None
 
 let strategy_for_error_mode (mode : Recovery.error_mode) :
     [ `Retry | `Fallback | `Handoff | `Abort ] Recovery.strategy =

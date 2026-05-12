@@ -91,9 +91,9 @@ val parse_admission_json :
     weight = 1
     min_tier = "Acceptable"
     candidates = [
-      { provider = "anthropic", model = "claude-sonnet-4-6", tier = "Preferred" },
-      { provider = "glm-coding", model = "auto",             tier = "Acceptable" },
-      { provider = "ollama",     model = "qwen3.6:27b-coding-nvfp4", tier = "Survival" },
+      { provider = "<preferred-provider>", model = "<preferred-model>", tier = "Preferred" },
+      { provider = "<fallback-provider>",  model = "<fallback-model>",  tier = "Acceptable" },
+      { provider = "<survival-provider>",  model = "<survival-model>",  tier = "Survival" },
     ]
     v}
 
@@ -104,7 +104,7 @@ val parse_admission_json :
       "weight": 1,
       "min_tier": "Acceptable",
       "candidates": [
-        {"provider":"anthropic","model":"claude-sonnet-4-6","tier":"Preferred"},
+        {"provider":"<preferred-provider>","model":"<preferred-model>","tier":"Preferred"},
         ...
       ]
     }

@@ -100,6 +100,11 @@ let agent_error_terminal_reason_code = function
       "agent_error_cost_budget_exceeded:spent_usd=%.2f,limit_usd=%.2f"
       spent_usd
       limit_usd
+  | Agent_sdk.Error.CostBudgetUnenforceable { model_id; limit_usd } ->
+    Printf.sprintf
+      "agent_error_cost_budget_unenforceable:model_id=%s,limit_usd=%.2f"
+      model_id
+      limit_usd
   | Agent_sdk.Error.IdleDetected { consecutive_idle_turns } ->
     Printf.sprintf
       "agent_error_idle_detected:consecutive_idle_turns=%d"
@@ -146,6 +151,7 @@ let receipt_outcome_kind_of_sdk_error = function
   | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) -> `Cancelled
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TokenBudgetExceeded _) -> `Error
   | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetExceeded _) -> `Error
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetUnenforceable _) -> `Error
   | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> `Error
   | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolRetryExhausted _) -> `Error
   | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) -> `Error

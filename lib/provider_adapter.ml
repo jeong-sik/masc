@@ -225,7 +225,7 @@ let cn_gemini_api = "gemini-api"
 let cn_kimi_api = "kimi-api"
 let cn_kimi_coding = "kimi-coding"
 let cn_glm = "glm-api"
-let cn_glm_coding_plan = "glm-coding-plan"
+let cn_glm_coding = "glm-coding"
 let cn_openrouter = "openrouter"
 let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
 let kimi_coding_key_envs = [ "KIMI_CODING_API_KEY"; "KIMI_API_KEY_SB" ]
@@ -233,7 +233,7 @@ let kimi_coding_key_envs = [ "KIMI_CODING_API_KEY"; "KIMI_API_KEY_SB" ]
 let display_provider_name label =
   match normalize_label label with
   | "glm" | "glm-api" -> cn_glm
-  | "glm-coding" | "glm-coding-plan" -> cn_glm_coding_plan
+  | "glm-coding" -> cn_glm_coding
   | "kimi-api" -> cn_kimi
   | "kimi-coding" | "kimi_coding" -> cn_kimi_coding
   | _ -> String.trim label
@@ -610,7 +610,7 @@ let direct_adapters =
     ; default_model_id = Some "auto"
     ; model_policy =
         { default_model_env = Some "ZAI_DEFAULT_MODEL"
-        ; default_model_fallback = Some "glm-5.1"
+        ; default_model_fallback = None
         ; auto_models = Zai_general_auto_models
         ; expand_auto = true
         ; family = Glm_general
@@ -618,10 +618,10 @@ let direct_adapters =
     ; tool_policy = no_tool_http_headers
     ; telemetry_policy = telemetry_reported
     }
-  ; { canonical_name = cn_glm_coding_plan
+  ; { canonical_name = cn_glm_coding
     ; runtime_kind = Direct_api
     ; auth_mode = Api_key "ZAI_API_KEY"
-    ; aliases = [ cn_glm_coding_plan; "glm-coding" ]
+    ; aliases = [ cn_glm_coding ]
     ; spawn_key = None
     ; cascade_prefix = "glm-coding"
     ; default_voice = None
@@ -629,7 +629,7 @@ let direct_adapters =
     ; default_model_id = Some "auto"
     ; model_policy =
         { default_model_env = Some "ZAI_CODING_DEFAULT_MODEL"
-        ; default_model_fallback = Some "glm-5.1"
+        ; default_model_fallback = None
         ; auto_models = Zai_coding_auto_models
         ; expand_auto = true
         ; family = Glm_coding
@@ -674,15 +674,6 @@ let resolve_adapter_by_cascade_prefix label =
     direct_adapters
 ;;
 
-let resolve_model_policy_default ?getenv (policy : model_policy) =
-  match policy.default_model_env with
-  | Some env_name ->
-    (match env_value_opt ?getenv env_name with
-     | Some _ as value -> value
-     | None -> policy.default_model_fallback)
-  | None -> policy.default_model_fallback
-;;
-
 let resolve_auto_models ?getenv (policy : model_policy) =
   match policy.auto_models with
   | No_auto_models -> None
@@ -702,6 +693,26 @@ let resolve_auto_models ?getenv (policy : model_policy) =
            | None -> Some defaults)
         | None -> Some defaults)
      | None -> Some defaults)
+;;
+
+let first_auto_model_default ?getenv policy =
+  match resolve_auto_models ?getenv policy with
+  | Some (first :: _) -> Some first
+  | Some [] | None -> None
+;;
+
+let resolve_model_policy_default ?getenv (policy : model_policy) =
+  let fallback_default () =
+    match policy.default_model_fallback with
+    | Some _ as value -> value
+    | None -> first_auto_model_default ?getenv policy
+  in
+  match policy.default_model_env with
+  | Some env_name ->
+    (match env_value_opt ?getenv env_name with
+     | Some _ as value -> value
+     | None -> fallback_default ())
+  | None -> fallback_default ()
 ;;
 
 let default_model_id_for_cascade_prefix ?getenv provider_name =

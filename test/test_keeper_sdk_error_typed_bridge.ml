@@ -10,7 +10,7 @@
     - all 9 [api_error] variants (RateLimited / Overloaded / ServerError /
       AuthError / InvalidRequest / NotFound / ContextOverflow /
       NetworkError / Timeout)
-    - all 9 [agent_error] variants reached via [SdkE.Agent _] routing
+    - representative [agent_error] variants reached via [SdkE.Agent _] routing
     - all 7 top-level non-Agent / non-Api wrappers (Mcp / Config /
       Serialization / Io / Orchestration / A2a / Internal) *)
 
@@ -62,6 +62,9 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
   ; ( "Agent/CostBudgetExceeded"
     , SdkE.Agent (SdkE.CostBudgetExceeded { spent_usd = 0.42; limit_usd = 0.40 })
     , "agent_error_cost_budget_exceeded:spent_usd=0.42,limit_usd=0.40" )
+  ; ( "Agent/CostBudgetUnenforceable"
+    , SdkE.Agent (SdkE.CostBudgetUnenforceable { model_id = "glm-5.1"; limit_usd = 0.40 })
+    , "agent_error_cost_budget_unenforceable:model_id=glm-5.1,limit_usd=0.40" )
   ; ( "Agent/IdleDetected"
     , SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 })
     , "agent_error_idle_detected:consecutive_idle_turns=3" )

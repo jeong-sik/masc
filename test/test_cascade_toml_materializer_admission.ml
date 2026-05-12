@@ -9,7 +9,7 @@
 
     Live regression observed 2026-05-05 02:55 UTC: appending RFC-0026
     [admission.*] blocks to live cascade.toml triggered fleet-wide
-    materialize failure → all 5 watchdog-killed keepers (glm-coding-plan,
+    materialize failure → all 5 watchdog-killed keepers (glm-coding,
     qa-king, sangsu, scholar, velvet-hammer) had idle stalls 302-314s. *)
 
 open Masc_mcp

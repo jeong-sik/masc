@@ -259,6 +259,12 @@ let write_cascade_json config_dir content =
      snapshot's [source_path] (also .toml, RFC-0058 §9.4) match. *)
   toml_path
 
+let write_cascade_toml config_dir content =
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  write_file toml_path content;
+  bump_mtime toml_path;
+  toml_path
+
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -453,6 +459,67 @@ let test_keeper_turn_route_is_required_default_profile () =
     "custom_default"
     (require_ok
        (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ()))
+
+let test_declarative_catalog_validation_uses_declarative_candidates () =
+  with_temp_dir "cascade-declarative-validation" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  ignore
+    (write_cascade_toml config_dir
+       {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[tier.local_only]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["local_only"]
+strategy = "failover"
+fallback = false
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+|});
+  let snapshot =
+    match Cascade_catalog_runtime.inspect_active () with
+    | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
+    | Ok state ->
+        failf "expected declarative catalog to validate, got %s"
+          (Yojson.Safe.to_string (Cascade_catalog_runtime.state_to_yojson state))
+    | Error rejection ->
+        failf "unexpected declarative rejection: %s"
+          (Yojson.Safe.to_string
+             (Cascade_catalog_runtime.rejection_to_yojson rejection))
+  in
+  check string "default profile follows declarative route"
+    "tier-group.coding_plan" snapshot.default_profile_name;
+  let profile =
+    match
+      List.find_opt
+        (fun profile ->
+          String.equal
+            profile.Cascade_catalog_runtime.name
+            "tier-group.coding_plan")
+        snapshot.profiles
+    with
+    | Some profile -> profile
+    | None -> fail "missing declarative tier-group profile"
+  in
+  check int "declarative candidate count" 1
+    (List.length profile.Cascade_catalog_runtime.candidates)
 
 let test_valid_catalog_records_probe_error_without_eio_caps () =
   with_temp_dir "cascade-catalog-runtime" @@ fun dir ->
@@ -1370,6 +1437,10 @@ let () =
             "routes.keeper_turn is the required default profile"
             `Quick
             test_keeper_turn_route_is_required_default_profile;
+          test_case
+            "declarative catalog validation uses declarative candidates"
+            `Quick
+            test_declarative_catalog_validation_uses_declarative_candidates;
           test_case
             "invalid hot reload preserves last-known-good"
             `Quick

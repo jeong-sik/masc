@@ -41,22 +41,6 @@ PROMPT_CHECKLIST_PR_REF_RE = re.compile(
     r"^https://github\.com/jeong-sik/masc-mcp/pull/\d+$"
 )
 AUTOBOOT_WARMUP_FAIRNESS_ALGORITHM = "int32_djb2_bounded_jitter"
-AUTOBOOT_WARMUP_REQUIRED_KEEPERS = (
-    "analyst",
-    "executor",
-    "glm-coding-plan",
-    "issue_king",
-    "janitor",
-    "masc-improver",
-    "nick0cave",
-    "qa-king",
-    "ramarama",
-    "sangsu",
-    "scholar",
-    "taskmaster",
-    "velvet-hammer",
-    "verifier",
-)
 PROMPT_SOURCE_PATH_PREFIX = "prompt_corpus/GOAL_LOOP/"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_VERIFY_GATE_IDS = frozenset(
@@ -1201,6 +1185,7 @@ def autoboot_warmup_fairness_evidence(
     algorithm = as_nonempty_str(scheduler.get("algorithm"))
     rows_raw = warmup_fairness.get("keeper_rows", [])
     rows = rows_raw if isinstance(rows_raw, list) else []
+    required_keeper_names = string_list(warmup_fairness.get("required_keeper_names"))
 
     invalid_reasons: list[str] = []
 
@@ -1273,17 +1258,18 @@ def autoboot_warmup_fairness_evidence(
         if row.get("within_bound") is not True:
             row_errors.append(f"{keeper_name}: within_bound")
 
-    required_names = set(AUTOBOOT_WARMUP_REQUIRED_KEEPERS)
+    required_names = set(required_keeper_names)
     present_names = set(by_name)
     missing_keeper_names = sorted(required_names - present_names)
     unexpected_keeper_names = sorted(present_names - required_names)
+    require(bool(required_keeper_names), "required_keeper_names")
     require(not duplicate_keeper_names, "duplicate_keeper_names")
     require(not missing_keeper_names, "missing_keeper_names")
     require(not unexpected_keeper_names, "unexpected_keeper_names")
-    require(len(rows) == len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS), "keeper_rows_total")
+    require(len(rows) == len(required_keeper_names), "keeper_rows_total")
     require(not row_errors, "keeper_rows")
     require(
-        sorted(boot_positions) == list(range(len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS))),
+        sorted(boot_positions) == list(range(len(required_keeper_names))),
         "boot_positions",
     )
 
@@ -1309,11 +1295,11 @@ def autoboot_warmup_fairness_evidence(
     if (
         base_warmup is not None
         and stagger_window is not None
-        and len(observed_by_position) == len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS)
+        and len(observed_by_position) == len(required_keeper_names)
     ):
         linear_sequence_detected = observed_by_position == [
             base_warmup + (index * stagger_window)
-            for index in range(len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS))
+            for index in range(len(required_keeper_names))
         ]
     require(not linear_sequence_detected, "linear_sequence_detected")
 
@@ -1327,13 +1313,21 @@ def autoboot_warmup_fairness_evidence(
         else None
     )
     claimed_linear_warmup = as_strict_int(late.get("claimed_linear_warmup_sec"))
-    expected_linear_warmup = (
-        base_warmup + 13 * stagger_window
-        if base_warmup is not None and stagger_window is not None
+    late_boot_position = as_strict_int(late.get("boot_position"))
+    late_row_position = (
+        as_strict_int(late_row.get("boot_position"))
+        if isinstance(late_row, dict)
         else None
     )
-    require(late_keeper_name == "verifier", "late_keeper_check.keeper_name")
-    require(as_strict_int(late.get("boot_position")) == 13, "late_keeper_position")
+    expected_linear_warmup = (
+        base_warmup + late_boot_position * stagger_window
+        if base_warmup is not None
+        and stagger_window is not None
+        and late_boot_position is not None
+        else None
+    )
+    require(late_keeper_name in present_names, "late_keeper_check.keeper_name")
+    require(late_boot_position == late_row_position, "late_keeper_position")
     require(
         as_strict_int(late.get("warmup_sec")) == late_warmup,
         "late_keeper_warmup_sec",
@@ -1405,7 +1399,8 @@ def autoboot_warmup_fairness_evidence(
         "stagger_window_sec": stagger_window,
         "max_delay_sec": max_delay,
         "keeper_rows_total": len(rows),
-        "required_keeper_rows_total": len(AUTOBOOT_WARMUP_REQUIRED_KEEPERS),
+        "required_keeper_rows_total": len(required_keeper_names),
+        "required_keeper_names": required_keeper_names,
         "missing_keeper_names": missing_keeper_names,
         "unexpected_keeper_names": unexpected_keeper_names,
         "duplicate_keeper_names": sorted(duplicate_keeper_names),

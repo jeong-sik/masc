@@ -711,6 +711,39 @@ let validate_profile_static ~config_path ~required_capability_profile name
               required_capability_profile;
             }
 
+let validate_profile_declarative
+    ~(required_capability_profile : string option)
+    (profile : Cascade_declarative_hotpath.profile)
+    : (profile_build, profile_rejection) result =
+  if profile.weighted_entries = [] || profile.candidates = [] then
+    Error
+      {
+        name = profile.name;
+        errors = [ "profile has no non-empty configured candidates" ];
+        probes = [];
+      }
+  else
+    Ok
+      {
+        name = profile.name;
+        weighted_entries = profile.weighted_entries;
+        inference_params = profile.inference_params;
+        api_key_env_overrides = [];
+        strategy = profile.strategy;
+        ollama_max_concurrent = profile.ollama_max_concurrent;
+        cli_max_concurrent = profile.cli_max_concurrent;
+        candidates =
+          List.map
+            (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+              {
+                model_string = candidate.model_string;
+                provider_cfg = candidate.provider_cfg;
+              })
+            profile.candidates;
+        probes = [];
+        required_capability_profile;
+      }
+
 let runtime_required_profiles ~config_path =
   let keepers_from_catalog =
     match Cascade_config_loader.load_catalog ~config_path with
@@ -760,6 +793,11 @@ let validate_path_result ?sw ?net ~config_path () =
                ]
              ~profiles:[])
     | Ok json ->
+        let declarative_snapshot =
+          match Cascade_declarative_hotpath.try_load_declarative config_path with
+          | Some (Ok snapshot) -> Some snapshot
+          | Some (Error _) | None -> None
+        in
         let profiles = discover_profile_names ~config_path ~json in
         if profiles = [] then
           Error
@@ -769,9 +807,25 @@ let validate_path_result ?sw ?net ~config_path () =
                ~profiles:[])
         else
           let required_default_profile =
-            Cascade_routes.cascade_name_for_use
-              ~config_path
-              Cascade_routes.Keeper_turn
+            match declarative_snapshot with
+            | Some _ -> (
+                let keeper_turn_key =
+                  Cascade_routes.logical_use_key Cascade_routes.Keeper_turn
+                in
+                match
+                  Cascade_routes.route_bindings_from_json json
+                  |> List.find_map (fun (key, target) ->
+                    if String.equal key keeper_turn_key then Some target else None)
+                with
+                | Some target -> target
+                | None ->
+                    Cascade_routes.fallback_name_for_catalog
+                      Cascade_routes.Keeper_turn
+                      ~catalog:profiles)
+            | None ->
+                Cascade_routes.cascade_name_for_use
+                  ~config_path
+                  Cascade_routes.Keeper_turn
           in
           let route_target_errors =
           Cascade_routes.configured_route_targets ~config_path ()
@@ -840,10 +894,27 @@ let validate_path_result ?sw ?net ~config_path () =
                 List.assoc_opt name required_capability_profile_lookup
                 |> Option.value ~default:None
               in
-              match
-                validate_profile_static ~config_path
-                  ~required_capability_profile name
-              with
+              let result =
+                match declarative_snapshot with
+                | Some snapshot -> (
+                    match
+                      List.find_opt
+                        (fun (profile : Cascade_declarative_hotpath.profile) ->
+                          String.equal profile.name name)
+                        snapshot.profiles
+                    with
+                    | Some profile ->
+                        validate_profile_declarative
+                          ~required_capability_profile
+                          profile
+                    | None ->
+                        validate_profile_static ~config_path
+                          ~required_capability_profile name)
+                | None ->
+                    validate_profile_static ~config_path
+                      ~required_capability_profile name
+              in
+              match result with
               | Ok profile -> (profile :: ok_acc, err_acc)
               | Error rejection -> (ok_acc, rejection :: err_acc))
             ([], [])

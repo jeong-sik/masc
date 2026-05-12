@@ -66,9 +66,16 @@ let unresolved_auto requested_model_id =
 
 let default_resolution_from_policy
       ?getenv
+      ~provider_name
       (policy : Provider_adapter.model_policy)
       ~requested_model_id
   =
+  let catalog_default () =
+    match Provider_adapter.auto_models_for_cascade_prefix ?getenv provider_name with
+    | Some (resolved_model_id :: _) ->
+      { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
+    | Some [] | None -> unresolved_auto requested_model_id
+  in
   match policy.default_model_env with
   | Some env_var ->
     (match env_value_opt ?getenv env_var with
@@ -78,18 +85,22 @@ let default_resolution_from_policy
        (match policy.default_model_fallback with
         | Some resolved_model_id ->
           { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
-        | None -> unresolved_auto requested_model_id))
+        | None -> catalog_default ()))
   | None ->
     (match policy.default_model_fallback with
      | Some resolved_model_id ->
        { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
-     | None -> unresolved_auto requested_model_id)
+     | None -> catalog_default ())
 ;;
 
 let default_resolution ?getenv provider_name ~requested_model_id =
   match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
   | Some adapter ->
-    default_resolution_from_policy ?getenv adapter.model_policy ~requested_model_id
+    default_resolution_from_policy
+      ?getenv
+      ~provider_name
+      adapter.model_policy
+      ~requested_model_id
   | None -> unresolved_auto requested_model_id
 ;;
 

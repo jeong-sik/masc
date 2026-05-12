@@ -27,8 +27,8 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
 
 (* #10404: pre-fix this record stored only the head of [e.models] in
    [model_id], silently discarding 6 of 7 loaded ollama models.  Across
-   2026-04-22..25 every one of 164 probes recorded "qwen3:8b" while
-   four cascades reference "qwen3.6:27b-coding-nvfp4".  Add a [models]
+   2026-04-22..25 every probe recorded only the first local model while
+   cascades referenced later local coding models.  Add a [models]
    list that preserves the full probe payload, and keep [model_id]
    populated with the head for any external reader that already
    indexes by it. *)

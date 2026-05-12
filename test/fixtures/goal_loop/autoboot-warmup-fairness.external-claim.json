@@ -5,6 +5,22 @@
   "status": "PASS",
   "claim_ref": "NF-5",
   "checked_at": "2026-05-06T00:00:00Z",
+  "required_keeper_names": [
+    "analyst",
+    "executor",
+    "glm-coding",
+    "issue_king",
+    "janitor",
+    "masc-improver",
+    "nick0cave",
+    "qa-king",
+    "ramarama",
+    "sangsu",
+    "scholar",
+    "taskmaster",
+    "velvet-hammer",
+    "verifier"
+  ],
   "scheduler_decision": {
     "algorithm": "int32_djb2_bounded_jitter",
     "base_warmup_sec": 60,
@@ -35,11 +51,11 @@
       "within_bound": true
     },
     {
-      "keeper_name": "glm-coding-plan",
+      "keeper_name": "glm-coding",
       "boot_position": 2,
-      "name_hash": 846962750,
-      "jitter_bucket": 14,
-      "warmup_sec": 74,
+      "name_hash": 158481158,
+      "jitter_bucket": 6,
+      "warmup_sec": 66,
       "within_bound": true
     },
     {

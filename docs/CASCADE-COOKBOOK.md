@@ -25,16 +25,16 @@ can execute when selected.
 - `[profile.api_key_env]` maps provider ids to env var names.
 - `kimi_cli:auto` is the preferred Kimi lane for current live configs when you
   want the CLI/runtime-MCP tool path.
-- `glm-coding-plan:auto` is the preferred GLM coding-plan lane for current live
+- `glm-coding:auto` is the preferred GLM coding lane for current live
   configs.
 - Direct `kimi:` still exists for Moonshot/OpenAI-compatible routing, but keep
   it as an explicit choice rather than the default cookbook path.
 
-## Example 1: GLM Coding Plan + Kimi CLI + Local Ollama Fallback
+## Example 1: GLM Coding + Kimi CLI + Local Ollama Fallback
 
 Use this when your keepers are primarily coding/text agents and you want:
 
-- `glm-coding-plan` as the main tool-using cloud path
+- `glm-coding` as the main tool-using cloud path
 - `kimi_cli` as the secondary coding cloud path
 - local `ollama` as the cheap fallback/recovery lane
 
@@ -45,14 +45,14 @@ comment = "Local/private live config example. Requires valid GLM/Kimi credential
 temperature = 0.2
 max_tokens = 8192
 models = [
-  { model = "glm-coding-plan:auto", weight = 45 },
+  { model = "glm-coding:auto", weight = 45 },
   { model = "kimi_cli:auto", weight = 35 },
   { model = "ollama:qwen3.5:35b-a3b-nvfp4", weight = 20, supports_tool_choice = true },
 ]
 
 [default.api_key_env]
 glm = "ZAI_API_KEY_SB"
-"glm-coding-plan" = "ZAI_API_KEY_SB"
+"glm-coding" = "ZAI_API_KEY_SB"
 kimi_cli = "KIMI_API_KEY_SB"
 
 [keeper_unified]
@@ -64,7 +64,7 @@ backoff_base_ms = 250
 backoff_cap_ms = 2000
 ollama_max_concurrent = 1
 models = [
-  { model = "glm-coding-plan:auto", weight = 45 },
+  { model = "glm-coding:auto", weight = 45 },
   { model = "kimi_cli:auto", weight = 35 },
   { model = "ollama:qwen3.5:35b-a3b-nvfp4", weight = 20, supports_tool_choice = true },
 ]
@@ -82,13 +82,13 @@ keeper_assignable = false
 
 Operational notes:
 
-- Keep `glm-coding-plan` first if you want reliable cloud tool use.
+- Keep `glm-coding` first if you want reliable cloud tool use.
 - Keep `ollama` in `local_recovery_*` even if the main cascade already contains
   it; recovery profiles should stay deterministic and cheap.
 - `supports_tool_choice` on the local candidate is only a hint for known local
   models that do obey tool-choice overrides.
 
-## Example 2: GLM Coding Plan + Kimi CLI + Local MLX-VLM Fallback
+## Example 2: GLM Coding + Kimi CLI + Local MLX-VLM Fallback
 
 Use this when the local lane is an OpenAI-compatible MLX-VLM endpoint instead
 of `ollama`.
@@ -100,14 +100,14 @@ comment = "Local/private live config example. Requires valid GLM/Kimi credential
 temperature = 0.2
 max_tokens = 8192
 models = [
-  { model = "glm-coding-plan:auto", weight = 45 },
+  { model = "glm-coding:auto", weight = 45 },
   { model = "kimi_cli:auto", weight = 35 },
   { model = "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1", weight = 20 },
 ]
 
 [default.api_key_env]
 glm = "ZAI_API_KEY_SB"
-"glm-coding-plan" = "ZAI_API_KEY_SB"
+"glm-coding" = "ZAI_API_KEY_SB"
 kimi_cli = "KIMI_API_KEY_SB"
 
 [keeper_unified]
@@ -118,7 +118,7 @@ max_cycles = 2
 backoff_base_ms = 250
 backoff_cap_ms = 2000
 models = [
-  { model = "glm-coding-plan:auto", weight = 45 },
+  { model = "glm-coding:auto", weight = 45 },
   { model = "kimi_cli:auto", weight = 35 },
   { model = "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1", weight = 20 },
 ]
@@ -150,7 +150,7 @@ Operational notes:
   most boring operational path.
 - Choose `mlx-vlm` when the local fallback must accept image-heavy or multimodal
   turns through an OpenAI-compatible endpoint.
-- Keep `glm-coding-plan` first unless you explicitly want local-first
+- Keep `glm-coding` first unless you explicitly want local-first
   economics and are comfortable with tool-call fallback behavior.
 
 ## Where This Connects

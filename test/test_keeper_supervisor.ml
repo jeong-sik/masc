@@ -2042,7 +2042,7 @@ let () =
                   (Masc_mcp.Keeper_event_queue.length queue2)));
         test_case "never_started + autonomous + old started_at → Some" `Quick
           (fun () ->
-            (* Mirrors production case: glm-coding-plan with
+            (* Mirrors production case: glm-coding with
                proactive.last_outcome=never_started but autonomous_turn_count>0. *)
             let entry = make_test_entry
                 ~name:"abs-never-started"

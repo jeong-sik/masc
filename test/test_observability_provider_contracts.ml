@@ -33,7 +33,7 @@ let test_alias_roundtrip () =
       ("openai", "codex-api"); ("OpenAI", "codex-api");
       ("llama", "llama"); ("llamacpp", "llama");
       ("glm", "glm-api"); ("zai", "glm-api");
-      ("glm-coding", "glm-coding-plan");
+      ("glm-coding", "glm-coding");
       ("openrouter", "openrouter") ]
   in
   List.iter (fun (input, expected) ->
@@ -97,12 +97,12 @@ let test_dashboard_provider_snapshots_include_cli_and_api () =
     let claude_api = provider_snapshot_by_name "claude-api" in
     let gemini_cli = provider_snapshot_by_name "gemini" in
     let glm_api = provider_snapshot_by_name "glm-api" in
-    let glm_coding_plan = provider_snapshot_by_name "glm-coding-plan" in
+    let glm_coding = provider_snapshot_by_name "glm-coding" in
     check bool "cli snapshot present" true (Option.is_some claude_cli);
     check bool "api snapshot present" true (Option.is_some claude_api);
     check bool "gemini cli snapshot present" true (Option.is_some gemini_cli);
     check bool "glm api snapshot present" true (Option.is_some glm_api);
-    check bool "glm coding snapshot present" true (Option.is_some glm_coding_plan);
+    check bool "glm coding snapshot present" true (Option.is_some glm_coding);
     check string "cli runtime kind" "cli_agent"
       (Option.get claude_cli).runtime_kind;
     check string "api runtime kind" "direct_api"
@@ -110,7 +110,7 @@ let test_dashboard_provider_snapshots_include_cli_and_api () =
     check string "glm api runtime kind" "direct_api"
       (Option.get glm_api).runtime_kind;
     check string "glm coding runtime kind" "direct_api"
-      (Option.get glm_coding_plan).runtime_kind;
+      (Option.get glm_coding).runtime_kind;
     check bool "gemini cli expands concrete models" true
       ((Option.get gemini_cli).models <> []);
     check bool "gemini cli does not expose bare auto" false

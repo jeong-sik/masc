@@ -34,15 +34,20 @@
 \* *syntactically* independent matches — `match entry.resolver with
 \* Some r -> Eio.Promise.resolve r (Reject ...) | None -> ()` and,
 \* separately, `match entry.on_resolution with Some f -> f (Reject ...)
-\* | None -> ()`.  The two arms don't reference each other, so
-\* [expire_stale] would still terminate cleanly for any combination of
-\* the four (Some/None × Some/None) cases.  Under the *current* runtime
-\* invariant exactly one field is populated (submit_and_await sets
-\* resolver=Some, on_resolution=None; submit_pending sets the reverse),
-\* so [resolver = None] does imply [on_resolution = Some]; the
-\* independent-match shape is defensive against a future refactor that
-\* might relax the producer invariant.  The model abstracts only the
-\* effect on the suspended-fiber population.
+\* | None -> ()`.  The two matches are *control-flow independent* —
+\* neither references the other's field, so the choice on one side
+\* doesn't constrain the other; the four (Some/None x Some/None)
+\* combinations each have a defined branch (we do not promise clean
+\* termination, only structural independence: `Eio.Promise.resolve` and
+\* the `on_resolution` callback are unwrapped here and can still raise
+\* `Eio.Cancel.Cancelled` etc., which the surrounding runtime re-raises
+\* per its own policy).  Under the *current* runtime invariant exactly
+\* one field is populated (submit_and_await sets resolver=Some,
+\* on_resolution=None; submit_pending sets the reverse), so [resolver =
+\* None] does imply [on_resolution = Some]; the independent-match shape
+\* is defensive against a future refactor that might relax the producer
+\* invariant.  The model abstracts only the effect on the
+\* suspended-fiber population.
 \*
 \* The boundary critique flagged this as a black-box area: a tool call
 \* submits an approval request and gets suspended on

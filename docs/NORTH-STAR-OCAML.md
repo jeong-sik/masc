@@ -16,7 +16,7 @@
 | 축 | masc-mcp | OAS | 평가 |
 |----|----------|-----|------|
 | `.mli` 커버리지 | 1005/1033 (97%, 2026-05-12) | 216/218 (99%) | Tier 1-A 사실상 완료 |
-| `Obj.magic` (실사용) | 0건 (2026-05-12; `cdal/adversarial_eval.ml` 의 1건은 금지패턴 문자열 리터럴) | 0건 | 깨끗함 |
+| `Obj.magic` (실사용) | 0건 (2026-05-12; `lib/cdal/adversarial_eval.ml` 의 1건은 금지패턴 문자열 리터럴) | 0건 | 깨끗함 |
 | `Stdlib.Mutex` 생성 | `Stdlib.Mutex.create` 39 호출 / `module Mutex = Stdlib.Mutex` 105 파일 (2026-05-12) — 다수는 의도된 컨벤션 (`prometheus.ml` 등 짧은 critical section, Eio 의존 회피 주석 명시) | 2군데 | 무분별 신규 추가만 경계 |
 | `Eio.Mutex` 사용 | 112 파일 (2026-05-12) | 19군데 | 과잉 여부 재평가 필요 |
 | 와일드카드 `_` (Top 파일) | (2026-04, 재측정 필요) keeper_status_detail: 35, verification: 28 | runtime_server: 25 | RFC-0071 §3.4 (warning 4 활성화) 이 진행 중 — §2-B/§3 참조 |
@@ -47,12 +47,12 @@
 
 **근거**: OCaml 매뉴얼 2장 "The module system" — `.mli`는 계약(contract)이고 `.ml`은 구현. 계약 없는 구현은 구조적 부채.
 
-**실행**: 남은 파일 — `for f in lib/**/*.ml; do [ ! -f "${f%.ml}.mli" ] && echo "$f"; done`
+**실행**: 남은 파일 — `find lib -name '*.ml' | while read -r f; do [ ! -f "${f%.ml}.mli" ] && echo "$f"; done` (`lib/**/*.ml` 글롭은 `shopt -s globstar` 가 켜져 있어야 동작하므로 `find` 사용)
 
 #### B. 와일드카드 `_` 패턴 — 정밀 분류 후 위험 건만 교체
 
 > ⚠️ 아래 Cat 1/2/3 수치와 `keeper_unified_turn.ml:NNN` 라인 번호는 2026-04
-> 측정 기준이다 (해당 파일은 현재 3037 줄). 그 후:
+> 측정 기준이다 (해당 파일은 현재 약 3k 줄). 그 후:
 > - `keeper_unified_turn.ml` 의 `_ -> Post_commit_failure` / `_ -> "text_turn"`
 >   fallback 은 현재 코드에 부재 — `turn_mode_of_result` 는 `Keeper_unified_metrics`
 >   로 이동, `work_kind` 는 dashboard/timeline projection 에서만 계산 (RFC-0070/0072
@@ -157,7 +157,7 @@ OCaml 5.4 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 
 > `_ -> "text_turn"` / `_ -> Post_commit_failure` fallback 부재, `turn_mode_of_result`
 > 는 `Keeper_unified_metrics` 모듈, `work_kind` 는 dashboard/timeline projection 에서만
 > 계산 (RFC-0070/0072 turn_phase typed dispatch). 인용된 line 번호 (220 / 750-761 / 1519)
-> 는 2026-04 기준이며 현재 파일은 3037 줄 — **라인 번호 신뢰 금지, 심볼명으로 찾을 것**.
+> 는 2026-04 기준이며 현재 파일은 약 3k 줄 — **라인 번호 신뢰 금지, 심볼명으로 찾을 것**.
 > 아래 내용은 당시 분석 기록으로 남긴다. 3C / 3D 는 미확인.
 
 ### 3A. String-typed enum → variant 타입 (keeper_unified_metrics.ml) — ✅ 적용된 것으로 판단

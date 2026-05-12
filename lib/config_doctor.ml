@@ -121,7 +121,34 @@ let diagnose_cascade_catalog ~active_config_root =
     []
   else
     let profiles = Cascade_catalog_validator.discover_profiles ~config_path in
-    let issues = Cascade_catalog_validator.diagnose_catalog ~config_path in
+    let validator_issues = Cascade_catalog_validator.diagnose_catalog ~config_path in
+    (* Surface fallback-cycle detection alongside the per-profile
+       validator output.  [Cascade_config_loader.load_catalog]
+       already detects cycles and bumps
+       [masc_cascade_fallback_cycle_detected_total] internally, but a
+       counter only registers a rate — the operator still needs to
+       open Grafana to learn the cycle exists.  Threading the cycle
+       list through the doctor's [issues] makes it land in the same
+       warnings/next-actions surface the dashboard renders, so a
+       misconfigured [fallback_cascade] chain is visible in the
+       Config Doctor panel without leaving the page. *)
+    let cycle_issues =
+      match Cascade_config_loader.load_catalog ~config_path with
+      | Ok entries ->
+          Cascade_config_loader.detect_fallback_cycles entries
+          |> List.map (fun cycle ->
+            {
+              profile = None;
+              severity = Catalog_warn;
+              message =
+                Printf.sprintf
+                  "Cascade fallback_cascade cycle detected: %s. Rotation cannot \
+                   escape this loop; break the chain or remove the hint."
+                  (String.concat " -> " cycle);
+            })
+      | Error _ -> []
+    in
+    let issues = validator_issues @ cycle_issues in
     if issues = [] then
       []
     else

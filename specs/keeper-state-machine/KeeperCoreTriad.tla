@@ -26,15 +26,22 @@
 \*   phase              <-> Keeper_state_machine.phase (13-phase OCaml type
 \*                          projected to a 7-symbol triad alphabet; see the
 \*                          canonical mapping in the TypeOK preamble below.
-\*                          Zombie added iter 4 #14707 is terminal-terminal
-\*                          and intentionally collapsed into "Terminal".)
+\*                          Zombie added iter 4 #14707 is terminal post-Dead
+\*                          (outside the turn cycle) and collapses into the
+\*                          7-phase projection's "Stable" symbol — same arm
+\*                          as Offline / Paused / Stopped / Crashed /
+\*                          Restarting / Dead.  See KeeperCompositeLifecycle
+\*                          Comment A for the canonical 13->7 mapping
+\*                          (referred to as "Terminal" shorthand earlier in
+\*                          some prose; the projection symbol is "Stable").)
 \*   effective_cascade  <-> Keeper_cascade_routing.select_cascade result
 \*   provider_ceiling   <-> Oas_model_resolve.resolve_max_cascade_context
 \*   requested_max_tokens <-> Cascade_inference.resolve_max_tokens
 \*
-\* (The canonical 13->7 phase mapping lives next to TypeOK on line ~89.
-\*  Pre-Zombie this was "12->7"; iter 4 #14707 added Zombie which folds
-\*  into the "Terminal" symbol via the iter 51 #14865 mapping update.
+\* (The canonical 13->7 phase mapping lives next to PhaseSet in this file
+\*  (KeeperCompositeLifecycle Comment A is the SSOT).  Pre-Zombie this
+\*  was "12->7"; iter 4 #14707 added Zombie which folds into the "Stable"
+\*  symbol via the iter 51 #14865 mapping update.
 \*  An earlier version of this preamble carried a separate "Phase
 \*  simplification (12 -> 7)" mapping that classified HandingOff / Paused /
 \*  Restarting differently from the canonical one.  Removed in #8970 to

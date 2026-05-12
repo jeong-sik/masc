@@ -119,7 +119,8 @@ vars == <<ksm_phase, ktc_turn_phase, kdp_decision, kcl_cascade_state,
 
 \* ── Enumerated value sets ───────────────────────────────
 
-\* Comment A — 13->7 phase projection (from RFC-0002 Transition Matrix):
+\* Comment A — 13->7 phase projection (from RFC-0002 Transition Matrix
+\* + Zombie extension added iter 4 #14707):
 \*   Running     -> Running
 \*   Failing     -> Failing
 \*   Overflowed  -> Overflowed     (added 2026-04, MASC-1)
@@ -128,10 +129,10 @@ vars == <<ksm_phase, ktc_turn_phase, kdp_decision, kcl_cascade_state,
 \*   Draining    -> Draining
 \*   Offline, Paused, Stopped, Crashed, Restarting, Dead, Zombie -> Stable
 \*                                                       (Zombie added iter 4
-\*                                                        #14707, terminal-
-\*                                                        terminal post-Dead,
-\*                                                        outside turn cycle
-\*                                                        ⇒ structurally Stable)
+\*                                                        #14707 — terminal
+\*                                                        post-Dead, outside
+\*                                                        the turn cycle ⇒
+\*                                                        structurally Stable)
 \* This is a LOSSY projection; the joint invariants here hold for all
 \* states that collapse to Stable by construction (they are outside the
 \* turn cycle). Overflowed is tracked as its own phase because it couples

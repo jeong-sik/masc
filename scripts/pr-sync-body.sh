@@ -71,6 +71,13 @@ END_MARK='<!-- COMMIT-LINEAGE:END -->'
 # matching would trip on body prose that merely *mentions* the marker
 # (e.g. inside backticks), duplicating the block and deleting real content.
 if printf '%s\n' "$OLD_BODY" | grep -qxF -- "$START_MARK"; then
+  # A START without a matching END line would make awk drop everything after
+  # START (skip stays 1 forever). Bail rather than truncate someone's body —
+  # this only happens if the markers were hand-mangled.
+  if ! printf '%s\n' "$OLD_BODY" | grep -qxF -- "$END_MARK"; then
+    echo "pr-sync-body: PR body has '$START_MARK' but no matching '$END_MARK' line — refusing to rewrite (fix the body by hand first)" >&2
+    exit 1
+  fi
   # Replace the existing managed block. The block is passed via a temp file,
   # not `awk -v`, because BSD awk (macOS) rejects newlines in -v assignments.
   TMPBLOCK="$(mktemp)"

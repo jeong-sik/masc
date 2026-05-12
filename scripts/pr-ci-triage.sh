@@ -46,8 +46,11 @@ CHECKS_JSON="$(gh pr checks "$PR" --repo "$REPO" --json name,state,bucket,link 2
   || die "gh pr checks failed (no checks yet, or bad PR number?)"
 
 summary() {
+  # `group_by` only groups *adjacent* equal keys, so sort by .bucket first —
+  # otherwise a bucket appearing non-contiguously would be split into multiple
+  # groups and double-counted.
   echo "$CHECKS_JSON" | jq -r '
-    group_by(.bucket) | map({bucket: .[0].bucket, n: length}) | sort_by(.bucket)
+    sort_by(.bucket) | group_by(.bucket) | map({bucket: .[0].bucket, n: length})
     | map("\(.n) \(.bucket)") | join(" · ")'
 }
 

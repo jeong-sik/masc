@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# pr-resolve-thread.sh — reply to a GitHub PR review thread AND resolve it atomically.
+# pr-resolve-thread.sh — reply to a GitHub PR review thread, then resolve it (one command).
+#
+# NOTE: not transactionally atomic — the reply (REST) and the resolve (GraphQL)
+# are two API calls. If the resolve fails after a successful reply the thread
+# stays unresolved; the script exits 2 in that case so the caller can retry.
 #
 # Why this exists: GitHub PR review threads have a 3-tier comment surface —
 # (1) PR-level issue comment, (2) review-level summary comment, (3) review
@@ -44,11 +48,16 @@ OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
 [ -n "$OWNER" ] && [ -n "$NAME" ] && [ "$OWNER" != "$NAME" ] || die "repo must be owner/name, got: $REPO"
 
 fetch_threads() {
-  gh api graphql -f query='
-    query($owner:String!, $name:String!, $pr:Int!) {
+  # `--paginate` walks every page (busy PRs can exceed 100 threads): gh
+  # injects the $endCursor variable and follows pageInfo.endCursor until
+  # hasNextPage is false. The per-page documents are then slurped (`jq -s`)
+  # back into the single-document shape the callers below expect.
+  gh api graphql --paginate -f query='
+    query($owner:String!, $name:String!, $pr:Int!, $endCursor:String) {
       repository(owner:$owner, name:$name) {
         pullRequest(number:$pr) {
-          reviewThreads(first:100) {
+          reviewThreads(first:100, after:$endCursor) {
+            pageInfo { hasNextPage endCursor }
             nodes {
               id isResolved path line
               comments(first:1) { nodes { databaseId author { login } body } }
@@ -56,7 +65,9 @@ fetch_threads() {
           }
         }
       }
-    }' -F owner="$OWNER" -F name="$NAME" -F pr="$PR"
+    }' -F owner="$OWNER" -F name="$NAME" -F pr="$PR" \
+    | jq -s '{data:{repository:{pullRequest:{reviewThreads:{nodes:
+        [ .[].data.repository.pullRequest.reviewThreads.nodes[] ]}}}}}'
 }
 
 THREAD_ID="${3:-}"; REPLY_BODY="${4-}"

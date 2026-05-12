@@ -22,6 +22,10 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: issue-taxonomy-${{ github.event.issue.number || github.event.inputs.issue_number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   issue-taxonomy:
     name: Mirror issue form taxonomy labels
@@ -107,12 +111,23 @@ jobs:
               },
               'triage-required': {
                 color: 'bfdadc',
-                description: 'Issue is missing exactly one planning type/area/target label.',
+                description: 'Issue is missing or has an invalid planning type/area/target label set.',
               },
             };
 
             function labelName(label) {
               return typeof label === 'string' ? label : label?.name;
+            }
+
+            if (
+              ['labeled', 'unlabeled'].includes(context.payload.action) &&
+              context.actor === 'github-actions[bot]'
+            ) {
+              core.info(
+                `Skipping ${context.payload.action} event from github-actions[bot] ` +
+                `for label ${labelName(context.payload.label) || '(unknown)'}`,
+              );
+              return;
             }
 
             function escapeRegex(text) {
@@ -142,7 +157,10 @@ jobs:
               return /-\s*\[[xX]\]/.test(answer);
             }
 
+            const ensuredLabels = new Set();
+
             async function ensureLabel(name) {
+              if (ensuredLabels.has(name)) return;
               const definition = LABEL_DEFINITIONS[name] || {
                 color: 'ededed',
                 description: 'Managed by issue taxonomy triage',
@@ -151,14 +169,20 @@ jobs:
                 await github.rest.issues.getLabel({ owner, repo, name });
               } catch (error) {
                 if (error.status !== 404) throw error;
-                await github.rest.issues.createLabel({
-                  owner,
-                  repo,
-                  name,
-                  color: definition.color,
-                  description: definition.description,
-                });
+                try {
+                  await github.rest.issues.createLabel({
+                    owner,
+                    repo,
+                    name,
+                    color: definition.color,
+                    description: definition.description,
+                  });
+                } catch (createError) {
+                  if (createError.status !== 422) throw createError;
+                  core.info(`Label already exists after concurrent creation: ${name}`);
+                }
               }
+              ensuredLabels.add(name);
             }
 
             async function addLabels(issue_number, labels) {

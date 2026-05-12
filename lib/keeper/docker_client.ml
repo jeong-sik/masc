@@ -10,7 +10,7 @@ type sandbox_error =
 
 module type S = sig
   val run
-    :  Keeper_sandbox_plan.t
+    :  Keeper_sandbox_oneshot_plan.t
     -> (Docker_response.exec_result, sandbox_error) result
 
   val exec

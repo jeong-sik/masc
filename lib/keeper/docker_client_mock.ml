@@ -7,7 +7,7 @@
    is identical from the caller's perspective. *)
 
 let run_queue
-  : (Keeper_sandbox_plan.t
+  : (Keeper_sandbox_oneshot_plan.t
      * (Docker_response.exec_result, Docker_client.sandbox_error) result)
       Queue.t
   = Queue.create ()
@@ -50,7 +50,7 @@ let inject_rm container response = Queue.add (container, response) rm_queue
 
 let run plan =
   match Queue.peek_opt run_queue with
-  | Some (expected, response) when Keeper_sandbox_plan.equal plan expected ->
+  | Some (expected, response) when Keeper_sandbox_oneshot_plan.equal plan expected ->
     ignore (Queue.pop run_queue);
     response
   | _ -> Error Docker_client.Daemon_unreachable

@@ -2,7 +2,7 @@
 
     Phase 3a stub kept the four payload types abstract; Phase 3b-iv.1a
     closes them to the concrete shared types now that
-    {!Keeper_sandbox_plan}, {!Keeper_container_name}, and
+    {!Keeper_sandbox_oneshot_plan}, {!Keeper_container_name}, and
     {!Docker_response} are on main. With the signature concrete, the
     upcoming [Mock] and [Real] implementations are *interchangeable*
     at any call site that takes [(module Docker_client.S)].
@@ -40,7 +40,7 @@ type sandbox_error =
     branches. *)
 module type S = sig
   val run
-    :  Keeper_sandbox_plan.t
+    :  Keeper_sandbox_oneshot_plan.t
     -> (Docker_response.exec_result, sandbox_error) result
 
   val exec

@@ -64,11 +64,11 @@ let exec ~container ~cmd =
 
 let run plan =
   let container_name =
-    Keeper_container_name.to_string (Keeper_sandbox_plan.container_name plan)
+    Keeper_container_name.to_string (Keeper_sandbox_oneshot_plan.container_name plan)
   in
-  let image = Keeper_sandbox_plan.image plan in
-  let command = Keeper_sandbox_plan.command plan in
-  let timeout_sec = Keeper_sandbox_plan.timeout_budget_sec plan in
+  let image = Keeper_sandbox_oneshot_plan.image plan in
+  let command = Keeper_sandbox_oneshot_plan.command plan in
+  let timeout_sec = Keeper_sandbox_oneshot_plan.timeout_budget_sec plan in
   (* [docker run --rm --name <name> <image> sh -lc <cmd>].
      [--rm] removes the container after exit (Phase 3b-iii default
      cleanup strategy — RFC §3.1's spec deferred a typed cleanup

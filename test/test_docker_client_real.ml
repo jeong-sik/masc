@@ -391,6 +391,58 @@ let test_executor_with_real_returns_typed_result () =
     fail "executor with Real should only surface Ok or Daemon_unreachable"
 ;;
 
+(* ── is_eintr_127 (pure, Phase 4.1-g) ─────────────────────────── *)
+
+let test_is_eintr_127_true_on_127_with_marker () =
+  (* The marker is matched case-insensitively and as a substring of the
+     combined stdout/stderr the spawn produced. *)
+  check
+    bool
+    "WEXITED 127 + \"interrupted system call\" ⇒ retry"
+    true
+    (Docker_client_real.is_eintr_127
+       (Unix.WEXITED 127)
+       "docker: fork/exec /usr/bin/docker: interrupted system call");
+  check
+    bool
+    "marker is case-insensitive"
+    true
+    (Docker_client_real.is_eintr_127 (Unix.WEXITED 127) "Interrupted System Call")
+;;
+
+let test_is_eintr_127_false_on_127_without_marker () =
+  check
+    bool
+    "WEXITED 127 without the marker (genuine missing CLI) ⇒ no retry"
+    false
+    (Docker_client_real.is_eintr_127
+       (Unix.WEXITED 127)
+       "docker: command not found")
+;;
+
+let test_is_eintr_127_false_on_other_exit_codes () =
+  (* Only 127 — a 125 ("daemon error") that happens to mention the
+     phrase is still a daemon error, not an EINTR. *)
+  check
+    bool
+    "WEXITED 125 + marker ⇒ no retry (only 127 is the EINTR sentinel)"
+    false
+    (Docker_client_real.is_eintr_127 (Unix.WEXITED 125) "interrupted system call");
+  check
+    bool
+    "WEXITED 0 ⇒ no retry"
+    false
+    (Docker_client_real.is_eintr_127 (Unix.WEXITED 0) "interrupted system call")
+;;
+
+let test_is_eintr_127_false_on_signal () =
+  check
+    bool
+    "WSIGNALED ⇒ no retry"
+    false
+    (Docker_client_real.is_eintr_127 (Unix.WSIGNALED 9) "interrupted system call")
+;;
+
 let () =
   run
     "Docker_client_real (Phase 3b-iv.2.3)"
@@ -458,6 +510,21 @@ let () =
             "Sandbox_executor.Make (Real) instantiates + forwards placeholder"
             `Quick
             test_executor_with_real_returns_typed_result
+        ] )
+    ; ( "is_eintr_127 (pure, Phase 4.1-g)"
+      , [ test_case
+            "127 + marker (any case) ⇒ true"
+            `Quick
+            test_is_eintr_127_true_on_127_with_marker
+        ; test_case
+            "127 without marker ⇒ false"
+            `Quick
+            test_is_eintr_127_false_on_127_without_marker
+        ; test_case
+            "non-127 exit codes ⇒ false"
+            `Quick
+            test_is_eintr_127_false_on_other_exit_codes
+        ; test_case "signal ⇒ false" `Quick test_is_eintr_127_false_on_signal
         ] )
     ]
 ;;

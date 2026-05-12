@@ -13,8 +13,9 @@
 \*   - each tier stays within its configured bound.
 \*
 \* OCaml <-> TLA+ mapping (see #8642 family).  Cited by symbol name, not
-\* line number — iter 64 N-2.a convention; the "lib/keeper/keeper_memory_policy.ml:155-157"
-\* anchors had drifted +46 (the horizon constants are now ~line 201-203).
+\* line number — iter 64 N-2.a convention; the previous keeper_memory_policy.ml
+\* line-number anchors had drifted +46 (the horizon constants are now
+\* near the top of keeper_memory_policy.ml; see the kml-r8 memo below).
 \* See docs/tla-audit/kml-r8-memory-lifecycle-lineref-drift-2026-05-12.md
 \*
 \*   spec variable    | OCaml field / source                              | location

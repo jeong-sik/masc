@@ -15,10 +15,13 @@
 \*
 \*   spec phase  | OCaml Keeper_state_machine.phase  | source of truth
 \*   ------------+-----------------------------------+----------------
-\*   "Running"   | Running                           | lib/keeper/keeper_state_machine.ml:8
-\*   "Overflowed"| Overflowed                        | lib/keeper/keeper_state_machine.ml:10
-\*   "Compacting"| Compacting                        | lib/keeper/keeper_state_machine.ml:11
-\*   "Paused"    | Paused                            | lib/keeper/keeper_state_machine.ml:14
+\*   "Running"   | Running                           | keeper_state_machine.ml — type phase, the `Running` constructor
+\*   "Overflowed"| Overflowed                        | keeper_state_machine.ml — type phase, the `Overflowed` constructor
+\*   "Compacting"| Compacting                        | keeper_state_machine.ml — type phase, the `Compacting` constructor
+\*   "Paused"    | Paused                            | keeper_state_machine.ml — type phase, the `Paused` constructor
+\*   (cited by symbol, not line — iter 64 N-2.a; the `keeper_state_machine.ml:N`
+\*    anchors were accurate (top-of-file `type phase`) but converted for
+\*    consistency in the iter 85 scattered-singles line-ref sweep)
 \*
 \* Out-of-scope OCaml phases (intentional projection — not modelled here):
 \*   Offline, Failing, HandingOff, Draining, Crashed

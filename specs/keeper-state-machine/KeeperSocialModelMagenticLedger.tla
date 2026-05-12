@@ -17,11 +17,14 @@
 \*   1. Normal path: [classify_event] (no failure parameter)
 \*      handles progress / signals / idle / quiet.
 \*   2. Failure path: [derive_failure_state] in
-\*      [keeper_social_model_magentic_ledger_v1.ml:204] constructs the
-\*      [Failure_observed] event directly and bypasses [classify_event].
-\*      (Function name is the stable identifier; line number verified
-\*      against main 2026-04-28 in sibling refresh #11641 / #11645 /
-\*      #11647 / Cycle 43.)
+\*      [keeper_social_model.ml] (which dispatches to
+\*      [Keeper_social_model_registry.derive_failure_state]) constructs
+\*      the [Failure_observed] event directly and bypasses
+\*      [classify_event].
+\*      (Cited by symbol, not line — iter 64 N-2.a; converted in the
+\*      iter 85 scattered-singles line-ref sweep, which also picked up
+\*      the rename of keeper_social_model_magentic_ledger_v1.ml →
+\*      keeper_social_model.ml + keeper_social_model_registry.ml.)
 \*
 \* Both topologies reach [Stalled] on failure, so end-state behaviour
 \* matches.  However, the spec's "failure dominates progress" property is

@@ -487,7 +487,11 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 \* I1 — PhaseTurnAlignment
 \* When the parent phase is Compacting, the turn phase and memory phase
 \* must also be in their compacting states. Encodes the post-turn
-\* lifecycle atomicity in keeper_post_turn.ml:45-232.
+\* lifecycle atomicity in keeper_post_turn.ml — the post-turn lifecycle
+\* orchestration (apply_post_turn_lifecycle_with_resilience_handles and
+\* the compaction/rollover/wirein steps it sequences; cited by symbol,
+\* not line — iter 64 N-2.a, converted in the iter 85 scattered-singles
+\* line-ref sweep).
 PhaseTurnAlignment ==
     (ksm_phase = "Compacting") =>
         (ktc_turn_phase = "compacting" /\ kmc_compaction = "compacting")

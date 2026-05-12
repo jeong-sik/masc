@@ -535,9 +535,12 @@ StoppedIsForever == [](Phase = "Stopped" => [](Phase = "Stopped"))
 \*   Structural absorption already enforced (every Next-action requires
 \*   NotTerminal); this property makes the temporal invariant explicit
 \*   so TLC catches a future regression that drops NotTerminal from any
-\*   action.  Parity with S1/S2 — OCaml apply_event (lib/keeper/
-\*   keeper_state_machine.ml:754-758) rejects all events on the same
-\*   three terminal phases (Stopped, Dead, Zombie).
+\*   action.  Parity with S1/S2 — OCaml apply_event's terminal-state
+\*   reject arm (keeper_state_machine.ml — `apply_event`'s
+\*   `| Stopped | Dead | Zombie -> ... Error (Terminal_state {...})`
+\*   branch; cited by symbol, not line — iter 64 N-2.a, converted in the
+\*   iter 85 scattered-singles line-ref sweep) rejects all events on the
+\*   same three terminal phases.
 ZombieIsForever == [](Phase = "Zombie" => [](Phase = "Zombie"))
 
 \* S3: Budget never revives once exhausted
@@ -572,7 +575,8 @@ OfflineRequiresLaunchPending ==
 \*   Zombie is entered the latch cannot clear (no action sets it
 \*   false) so the invariant survives forever — combined with S2b
 \*   this guarantees the absorbing semantics matches OCaml's
-\*   apply_event reject (keeper_state_machine.ml:754-758).
+\*   apply_event terminal-state reject arm (keeper_state_machine.ml —
+\*   `apply_event`'s `| Stopped | Dead | Zombie ->` branch).
 ZombieRequiresTerminalFailureLatched ==
     [](Phase = "Zombie" => terminal_failure_latched)
 

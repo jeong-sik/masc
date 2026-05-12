@@ -91,7 +91,8 @@ let error_code_to_string = function
     Used by [get_string_required] error paths and legacy callers. *)
 
 (** Build a JSON error envelope as a [Yojson.Safe.t] node (unserialized).
-    Mirrors [ok_assoc] for the error variant.  Use when the envelope is
+    Counterpart to {!ok_response} / {!ok_result} on the success side,
+    but returning the unserialized [Yojson.Safe.t] node so it can be
     composed into a larger structure or returned as
     [(Yojson.Safe.t, _) result]. *)
 let error_assoc fields : Yojson.Safe.t =

@@ -37,15 +37,26 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 | 19 | lib/keeper/keeper_agent_run.ml | 1,690 | Move into keeper sub-lib |
 | 20 | lib/server/server_dashboard_http_core.ml | 1,684 | Extract into server sub-lib |
 
+## Progress (PR #14941)
+
+- **tool_board.ml**: 2162 → 1706 lines (-456)
+- **tool_shard.ml**: 2152 → 2094 lines (-58)
+- **lib/ide/**: extracted as `masc_mcp.ide` sub-library
+- **Total lines removed from god files**: ~530
+- **Build status**: dune build lib/masc_mcp.cma passes
+
 ## Phase Plan
 
 ### Phase 1: Root-level god files (highest impact)
+- [x] lib/tool_board.ml → tool_board_schemas extracted (469 lines, 2162→1706)
+- [x] lib/tool_shard.ml → tool_shard_schemas extracted (61 lines, 2152→2094)
 - [ ] lib/prometheus.ml → lib/prometheus/ sub-lib
 - [ ] lib/tool_board.ml → lib/tool_board/ sub-lib
 - [ ] lib/tool_shard.ml → lib/tool_shard/ sub-lib
 - [ ] lib/provider_adapter.ml → follow RFC-0072
 
 ### Phase 2: Directory extraction (directories without dune files)
+- [x] lib/ide/ (7 files) → masc_mcp.ide sub-lib (zero flat-namespace deps)
 - [ ] lib/keeper/ (500 files) → masc_mcp.keeper sub-lib
 - [ ] lib/server/ (142 files) → masc_mcp.server sub-lib
 - [ ] lib/dashboard/ (104 files) → masc_mcp.dashboard sub-lib

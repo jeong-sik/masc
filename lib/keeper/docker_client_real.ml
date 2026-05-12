@@ -76,14 +76,30 @@ let is_eintr_127 (status : Unix.process_status) (out : string) =
   | _ -> false
 ;;
 
+(* Sandbox subprocess timeout default.  [Exec_gate.run_argv_with_status*]
+   all carry a hard-coded [?(timeout_sec = 60.0)] default that bypasses
+   the per-caller env override ([MASC_EXEC_TIMEOUT_TURN_SANDBOX_SEC]);
+   routing through [Env_config_exec_timeout] keeps the SSOT live for
+   sites that omit a caller-specific timeout. *)
+let default_timeout_sec () =
+  Env_config_exec_timeout.timeout_sec
+    ~caller:Env_config_exec_timeout.Turn_sandbox
+    ()
+;;
+
 let gated_argv_with_status ?timeout_sec ~(summary : string) argv =
+  let timeout_sec =
+    match timeout_sec with
+    | Some t -> t
+    | None -> default_timeout_sec ()
+  in
   let rec loop attempts_left =
     let status, out =
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:`System_task_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary
-        ?timeout_sec
+        ~timeout_sec
         argv
     in
     if attempts_left > 0 && is_eintr_127 status out
@@ -94,16 +110,24 @@ let gated_argv_with_status ?timeout_sec ~(summary : string) argv =
 ;;
 
 let gated_argv_with_status_split ?timeout_sec ~(summary : string) argv =
+  let timeout_sec =
+    match timeout_sec with
+    | Some t -> t
+    | None -> default_timeout_sec ()
+  in
   let rec loop attempts_left =
     let status, stdout, stderr =
       Masc_exec.Exec_gate.run_argv_with_status_split
         ~actor:`System_task_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary
-        ?timeout_sec
+        ~timeout_sec
         argv
     in
-    if attempts_left > 0 && is_eintr_127 status (stdout ^ stderr)
+    (* Join with a newline so a marker spanning the stream boundary
+       (stdout ends with "interrupted", stderr begins with "system
+       call") still matches [is_eintr_127]. *)
+    if attempts_left > 0 && is_eintr_127 status (stdout ^ "\n" ^ stderr)
     then loop (attempts_left - 1)
     else status, stdout, stderr
   in
@@ -337,7 +361,10 @@ let run_detached (plan : Keeper_sandbox_session_plan.t) =
            ~started_at:(Unix.gettimeofday ())
        in
        (match
-          gated_argv_with_status_split ~summary:"keeper docker run -d (session)" argv
+          gated_argv_with_status_split
+            ~timeout_sec:ensure_timeout
+            ~summary:"keeper docker run -d (session)"
+            argv
         with
         | Unix.WEXITED 0, _, _ -> Ok (Keeper_sandbox_session_plan.container_name plan)
         | Unix.WEXITED 125, _, _ ->

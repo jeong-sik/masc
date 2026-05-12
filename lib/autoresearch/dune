@@ -3,6 +3,8 @@
  (name masc_autoresearch)
  (public_name masc_mcp.masc_autoresearch)
  (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ (flags (:standard -w +4))
  (modules
    autoresearch_types
    autoresearch_serde

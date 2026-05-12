@@ -306,16 +306,16 @@ Determinism contract: same `Session_plan.t` ⇒ identical inner one-shot plan �
 #### 3.2.4 Composition diagram
 
 ```text
-Oneshot_plan ─→ Sandbox_executor.Make(D).execute_plan ─→ D.run
-                                                          ↑
-                                                  same D underneath
-                                                          ↓
-Session_plan ─→ Sandbox_session_executor.Make(D).start ─→ D.run_detached
-                                                  ↑
-                                                  ↓
-                                                  D.exec (N times)
-                                                  ↓
-                                                  D.rm
+Keeper_sandbox_oneshot_plan ─→ Sandbox_executor.Make(D).execute_plan ─→ D.run
+                                                                       ↑
+                                                               same D underneath
+                                                                       ↓
+Keeper_sandbox_session_plan ─→ Sandbox_session_executor.Make(D).start ─→ D.run_detached
+                                                                       ↑
+                                                                       ↓
+                                                               D.exec (N times)
+                                                                       ↓
+                                                               D.rm
 ```
 
 Both `Sandbox_executor` and `Sandbox_session_executor` are functors on the same `Docker_client.S` capability layer. `D.run` and `D.run_detached` are sibling primitives.

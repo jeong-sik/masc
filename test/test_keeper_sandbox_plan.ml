@@ -25,41 +25,41 @@ let plan_error_t = testable plan_error_pp plan_error_eq
 (* ── Validation: empty inputs rejected ────────────────────────── *)
 
 let test_empty_meta_rejected () =
-  let actual =
+  let res =
     Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"" ~cmd:"ls"
   in
   check
     (result plan_t plan_error_t)
     "empty meta → Invalid_meta"
     (Error (Keeper_sandbox_plan.Invalid_meta ""))
-    actual
+    res
 
 let test_empty_cmd_rejected () =
-  let actual =
+  let res =
     Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"k" ~cmd:""
   in
   check
     (result plan_t plan_error_t)
     "empty cmd → Invalid_command"
     (Error (Keeper_sandbox_plan.Invalid_command ""))
-    actual
+    res
 
 (* ── Payload semantics: error carries offending value (Phase 3b-iii contract) ── *)
 
 let test_invalid_meta_payload_is_offending () =
-  let result =
+  let res =
     Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"" ~cmd:"x"
   in
-  match result with
+  match res with
   | Error (Keeper_sandbox_plan.Invalid_meta payload) ->
       check string "Invalid_meta payload = offending meta_name (\"\")" "" payload
   | _ -> fail "expected Invalid_meta"
 
 let test_invalid_command_payload_is_offending () =
-  let result =
+  let res =
     Keeper_sandbox_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"k" ~cmd:""
   in
-  match result with
+  match res with
   | Error (Keeper_sandbox_plan.Invalid_command payload) ->
       check string "Invalid_command payload = offending cmd (\"\")" "" payload
   | _ -> fail "expected Invalid_command"
@@ -67,10 +67,10 @@ let test_invalid_command_payload_is_offending () =
 (* ── Happy path: returns Ok with populated fields ─────────────── *)
 
 let test_happy_returns_ok () =
-  let result =
+  let res =
     Keeper_sandbox_plan.of_request ~turn_id:5 ~attempt:0 ~meta_name:"alice" ~cmd:"echo hi"
   in
-  match result with
+  match res with
   | Ok _ -> ()
   | Error _ -> fail "well-formed inputs should yield Ok"
 

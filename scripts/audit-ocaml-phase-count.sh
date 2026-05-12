@@ -103,11 +103,13 @@ fi
 
 [[ "${VERBOSE}" -eq 1 ]] && echo "SSOT phase count: ${SSOT_COUNT}" >&2
 
-# Qualifier whitelist.  Adds `must skip`, `excludes`, `other` on top of
-# the TLA+ variant: these idioms appear in OCaml exhaustive-match
-# comments like "the other N phases must skip ..." where N = SSOT - 1
-# (e.g. keeper_runtime.ml:779 with N=12 when SSOT=13).
-QUALIFIERS='(non-|fragment|projection|subset|relevant|out of scope|models|collapse|symbol|triad|mapping|excluding|abstract|sibling|companion|must skip|excludes|other)'
+# Qualifier whitelist.  Adds `must skip`, `excludes`, "other N phases"
+# / "the other N phases" on top of the TLA+ variant: these idioms appear
+# in OCaml exhaustive-match comments like "the other N phases must
+# skip ..." where N = SSOT - 1 (e.g. keeper_runtime.ml:779 with N=12 when
+# SSOT=13).  `other` is anchored to "other N phases" so bare uses of the
+# word "other" do not silently exempt real drifts.
+QUALIFIERS='(non-|fragment|projection|subset|relevant|out of scope|models|collapse|symbol|triad|mapping|excluding|abstract|sibling|companion|must skip|excludes|(the )?other [0-9]+ phases?)'
 
 drift_count=0
 tmpfile="$(mktemp)"
@@ -116,9 +118,15 @@ trap 'rm -f "${tmpfile}"' EXIT
 # rg over OCaml comment-bearing lines.  We match both `N-state` and
 # `N[ -]phase(s)?` patterns since OCaml docstrings use both
 # ("13-state keeper lifecycle", "13-phase enum", "13 phases").
+rg_exit=0
 rg -n --no-heading --glob '*.ml' --glob '*.mli' \
   -e '\b([0-9]{1,2})[ -](state|phase(s)?)\b' \
-  "${KEEPER_DIR}" 2>/dev/null > "${tmpfile}" || true
+  "${KEEPER_DIR}" > "${tmpfile}" 2>/dev/null || rg_exit=$?
+# rg exit 1 = no matches (treat as clean); exit 2+ = error (regex / I/O / glob).
+if [[ "${rg_exit}" -ge 2 ]]; then
+  echo "ERROR: ripgrep failed with exit ${rg_exit} while scanning ${KEEPER_DIR}" >&2
+  exit "${rg_exit}"
+fi
 
 while IFS= read -r entry; do
   [[ -z "${entry}" ]] && continue
@@ -127,23 +135,26 @@ while IFS= read -r entry; do
   lineno="${rest%%:*}"
   content="${rest#*:}"
 
-  # Restrict to lines that are inside a comment.  OCaml has two
-  # comment syntaxes: `(* ... *)` and `(** ... *)`.  Continuation
-  # lines of a comment block do not start with `(*` so we use a more
-  # permissive rule: a line is treated as "comment context" if it does
-  # NOT contain `let`, `type`, `match`, `function` keywords at column 0
-  # (rough proxy for code vs prose).  This avoids flagging variant
-  # names or pattern-match arms that happen to contain the pattern.
-  if printf '%s' "${content}" | grep -qE '^(let|type|match|function|val|and|in|module)[[:space:]]'; then
-    continue
-  fi
-  # Additionally skip lines that look like type signatures with phase
-  # arity (e.g. `phase : Keeper_state_machine.phase`) by requiring the
-  # surrounding context to look like prose.  The simplest filter: the
-  # numeric pattern must be preceded by something looking like prose
-  # (letter or space), not by `=` or `;`.
-  case "${content}" in
-    *"="*|*";"*[0-9]*"-state"*|*";"*[0-9]*"-phase"*) :;;
+  # Restrict to lines that look like OCaml comment / docstring context.
+  # OCaml comment syntaxes: `(* ... *)` and `(** ... *)`.  Heuristic
+  # (the script intentionally avoids a full OCaml comment-span parser):
+  # require the line, after stripping leading whitespace, to either
+  # (a) start with `(*` / `(**` / `*` (in-comment continuation) — i.e.
+  # clearly inside a comment block, or (b) contain `*)` (comment closer
+  # on the same line).  Code lines like `let foo = ...`, `type t = ...`,
+  # variant arms etc. are rejected because they neither start with
+  # `(*` / `*` nor contain `*)`.  This is more reliable than the prior
+  # left-anchored keyword filter, which let prefixed-whitespace code
+  # through and could flag string literals.
+  stripped="${content#"${content%%[![:space:]]*}"}"
+  case "${stripped}" in
+    '(*'*|'(**'*|'*'*) : ;;          # comment open or continuation
+    *)
+      case "${content}" in
+        *'*)'*) : ;;                 # contains comment closer
+        *) continue ;;
+      esac
+      ;;
   esac
 
   matched_n="$(printf '%s' "${content}" \

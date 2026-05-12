@@ -74,7 +74,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          LIVE_PR_GATE_SETTLE_SEC: 15
         run: |
           set -euo pipefail
 
@@ -86,14 +85,19 @@ jobs:
             exit 0
           fi
 
-          # Give pull_request_target draft automation a short window to restore
-          # draft state before this workflow decides whether to spend runners on
-          # the heavy matrix. This avoids stale ready_for_review payloads running
-          # full CI after the PR has already been converted back to draft.
-          sleep "${LIVE_PR_GATE_SETTLE_SEC}"
+          # Retry-based PR state resolution: instead of a fixed sleep, poll
+          # gh pr view with short intervals. This catches draft restoration
+          # within ~3s on fast APIs while avoiding unnecessary delay on
+          # non-PR events or already-settled states.
+          for _attempt in 1 2 3; do
+            if live_fields="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,isDraft --jq '.state + " " + (.isDraft | tostring)' 2>/dev/null)"; then
+              break
+            fi
+            sleep 1
+          done
 
-          if ! live_fields="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,isDraft --jq '.state + " " + (.isDraft | tostring)' 2>&1)"; then
-            echo "::error::Could not resolve live PR state for #${PR_NUMBER}: ${live_fields}"
+          if [ -z "${live_fields:-}" ]; then
+            echo "::error::Could not resolve live PR state for #${PR_NUMBER} after 3 attempts"
             exit 1
           fi
           live_state="${live_fields%% *}"

@@ -897,9 +897,16 @@ let mark_dead ~base_path name ~at =
   Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
   update_entry ~base_path name (fun entry ->
     if entry.phase <> Dead then begin
+      (* Enumerate every phase so the compiler flags any new variant.
+         Only the Running phase contributes to [running_count_atomic];
+         all other phases were never counted, so transitioning to
+         Dead from them must not decrement. Same FSM Sparse Match
+         anti-pattern as PR #14857 (this file's [is_running]). *)
       (match entry.phase with
        | Running -> decr_running_count_clamped ()
-       | _ -> ());
+       | Offline | Failing | Overflowed | Compacting | HandingOff
+       | Draining | Paused | Stopped | Crashed | Restarting | Dead
+       | Zombie -> ());
       let conditions =
         { Keeper_state_machine.default_conditions with
           launch_pending = false;

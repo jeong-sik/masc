@@ -422,6 +422,17 @@ let validate_decision_transition
   | Packed Decision_tool_policy_selected, Packed Decision_tool_policy_selected -> ()
   | Packed Decision_tool_policy_selected, Packed Decision_guard_ok -> ()
   | Packed Decision_tool_policy_selected, Packed Decision_gate_rejected -> ()
+  (* GADT existential erasure: [to_packed] is built from
+     [decision_stage_active_to_packed to_] where [to_ : decision_stage_active]
+     excludes [Decision_undecided] at the type level. After packing the
+     witness type is erased, so the compiler must see the
+     [<x>, Decision_undecided] arms explicitly. Reaching any of these is
+     a type-system violation, not a runtime case. *)
+  | Packed Decision_undecided, Packed Decision_undecided
+  | Packed Decision_guard_ok, Packed Decision_undecided
+  | Packed Decision_gate_rejected, Packed Decision_undecided
+  | Packed Decision_tool_policy_selected, Packed Decision_undecided ->
+      assert false
 ;;
 
 type cascade_state =

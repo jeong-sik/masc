@@ -317,7 +317,7 @@ function IdeBreadcrumb() {
   }, [])
 
   const segments = filePath.split('/')
-  const fileName = segments[segments.length - 1]
+  const fileName = segments.at(-1) ?? ""
   const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : ''
   const icon = FILE_ICONS[ext] ?? '📄'
 

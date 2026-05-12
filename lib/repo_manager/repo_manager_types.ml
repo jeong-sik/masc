@@ -73,3 +73,16 @@ type keeper_repo_mapping = {
   github_credential_id : string option [@default None];
 }
 [@@deriving yojson, show, eq]
+
+(* [Otoml.t] is a 3rd-party closed variant with 12 value constructors;
+   the on-disk config loaders in this library only ever distinguish
+   "table-shaped" (TomlTable / TomlInlineTable) from everything else.
+   Enumerating the other 10 once here satisfies warning 4 and means an
+   [otoml] version bump that adds a value constructor breaks exactly this
+   site instead of several config loaders. *)
+let is_toml_table : Otoml.t -> bool = function
+  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> true
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ -> false

@@ -73,7 +73,7 @@ let repository_of_toml toml id =
         match Otoml.find_result toml Otoml.get_string (path "status_error") with
         | Ok msg -> Error msg
         | Error _ -> Error "")
-    | other -> other
+    | Active | Paused | Cloning -> status
   in
   let* auto_sync = find_bool_default "auto_sync" false in
   let* sync_interval = find_int64_default "sync_interval" (Int64.of_int 300) in
@@ -117,7 +117,7 @@ let toml_of_repository repo =
     match repo.status with
     | Error msg when String.trim msg <> "" ->
         ("status_error", Otoml.string msg) :: fields
-    | _ -> fields
+    | Error _ | Active | Paused | Cloning -> fields
   in
   Otoml.TomlTable fields
 
@@ -152,22 +152,24 @@ let load_all ~base_path =
         | Ok (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
             let rec loop acc = function
               | [] -> Ok (List.rev acc)
-              | (id, value) :: rest -> (
-                  match value with
-                  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
-                      let repo_toml =
-                        Otoml.TomlTable
-                          [("repository", Otoml.TomlTable [(id, value)])]
-                      in
-                      (match repository_of_toml repo_toml id with
-                      | Ok repo -> loop (repo :: acc) rest
-                      | Error msg -> Error msg)
-                  | _ ->
-                      Error
-                        (Printf.sprintf "repository.%s must be a table" id))
+              | (id, value) :: rest ->
+                  if is_toml_table value then
+                    let repo_toml =
+                      Otoml.TomlTable
+                        [("repository", Otoml.TomlTable [(id, value)])]
+                    in
+                    (match repository_of_toml repo_toml id with
+                    | Ok repo -> loop (repo :: acc) rest
+                    | Error msg -> Error msg)
+                  else
+                    Error (Printf.sprintf "repository.%s must be a table" id)
             in
             loop [] fields
-        | Ok _ -> Ok [])
+        | Ok (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
+            Ok [])
 
 let save_all ~base_path (repos : repository list) =
   let path = repos_toml_path base_path in

@@ -87,7 +87,7 @@ let gh_command_ok ~gh_config_dir argv =
   | Some pid -> (
       match snd (waitpid_no_intr [] pid) with
       | Unix.WEXITED 0 -> true
-      | _ -> false)
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false)
 
 let hosts_yml_has_oauth_token ~gh_config_dir =
   let path = Filename.concat gh_config_dir gh_hosts_yml in
@@ -257,7 +257,7 @@ let read_operator_ambient_token () : string option =
        | Unix.WEXITED 0 ->
            let token = String.trim (Buffer.contents buf) in
            if String.equal token "" then None else Some token
-       | _ -> None)
+       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None)
 
 (** RFC-0019 PR-C §3.2 P1 — F-1 gate (permissive).
 
@@ -306,7 +306,7 @@ let ensure (cred : credential) : credential =
         let p =
           match s with
           | Materialized _ -> compute_token_sha256_prefix ~gh_config_dir:dir
-          | _ -> None
+          | Unmaterialized | Stale _ -> None
         in
         s, p
   in

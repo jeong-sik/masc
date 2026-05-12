@@ -244,7 +244,44 @@ scripts/lint/exhaustive-guard.fsm-types.txt
 
 manifest 갱신은 RFC-0071 의 inventory regeneration step (§4 Phase 5) 에서 자동.
 
-### 3.4 Containment
+### 3.4 Compiler-builtin enforcement — OCaml warning 4 (fragile-match)
+
+본 RFC 의 lint (`scripts/lint/exhaustive-guard.sh`) 는 **OCaml compiler 의 warning 4 (fragile pattern match)** 가 이미 수행하는 분석을 shell-level 로 재구현한 것이 아니다 — *보완* 한다.
+
+| 도구 | 무엇을 잡나 | 한계 |
+|------|------------|------|
+| **OCaml `-w +4`** | `match expr with ... | _ -> ...` 에서 `expr` 의 타입이 *closed concrete variant* 일 때, `_` arm 이 *새 ctor 가 추가되면 silent 하게 흡수* 한다는 사실을 warning. 컴파일러가 typed AST 에서 직접 검출. | open variant, polymorphic variant, GADT existential, abstract type 은 warning 안 함 (의도된 lookup 일 수 있어서). |
+| 본 RFC `exhaustive-guard.sh` | net-new `_ -> (false\|None\|())` 변경을 *git diff* 수준에서 차단. 타입 시스템 외부에서도 동작 (allowlist + symbol 매칭). | 의미 분석 없음 — false-positive 가능. |
+
+결론: **`-w +4` 가 일급 enforcement, shell lint 는 백업.** 단, `-w +4` 를 *지금* 켜면 1044 사이트 전부가 즉시 빌드 오류 (`-w +4 -w +a-...` warning-as-error in dune dev profile). 그래서 활성화 순서가 중요:
+
+1. Phase 3/4 codemod 완료 → catch-all 잔여 사이트 = (a) Intentional 만.
+2. (a) 사이트 각각에 `[@warning "-4"]` 명시적 suppression 부여 + `(* WORKAROUND: <이유>. 근본 해결: <방법> *)` 주석 (CLAUDE.md §software-development.md "임시 조치 주석 필수" 준수).
+3. **Phase 5 의 핵심 액션**: `lib/dune` 의 `library` stanza 에 `(flags (:standard -w +4))` 추가. dune dev profile 의 warning-as-error 와 결합하여 net-new fragile match 는 *컴파일 실패*.
+
+#### 3.4.1 `[@warning "-4"]` 의 정당한 사용 범위
+
+(a) Intentional 사이트의 패턴:
+
+```ocaml
+(* WORKAROUND: open polymorphic variant — provider 별 새 cap 추가가
+   런타임에 추가됨. closed 화 불가. 근본 해결: capability registry 도입.
+   *)
+match cap with
+| `Tool_use -> ...
+| `Web_search -> ...
+| _ [@warning "-4"] -> default_unsupported ()
+```
+
+`[@warning "-4"]` attribute 가 *그 arm 한 줄* 에만 적용. 파일/모듈 단위 suppression 금지.
+
+#### 3.4.2 검출 도구 우선순위
+
+1. **`-w +4`** — typed AST 기반, false-positive ~0, 컴파일러가 강제. 일급.
+2. **`exhaustive-guard.sh`** — pre-commit hook 으로 빠른 피드백 + `[@warning "-4"]` 잘못된 위치 (파일 단위 suppression) 검출. 보조.
+3. **codemod (§3.2)** — 1회성 cleanup. Phase 3/4 후 폐기 (`tools/codemod/exhaustive_match_sweep` 는 archive).
+
+### 3.5 Containment
 
 | 기존 도구 | 본 RFC 와의 관계 |
 |-----------|------------------|
@@ -262,7 +299,7 @@ manifest 갱신은 RFC-0071 의 inventory regeneration step (§4 Phase 5) 에서
 | **2** | `tools/codemod/exhaustive_match_sweep` 구현 (§3.2 sketch 의 실체) | Phase 0 | MEDIUM — ppxlib + .cmt 의존 |
 | **3** | codemod 1차 적용: 단일 PR per `scrutinee_type`. *큰 도메인부터*: `Goal_phase`, `keeper_phase`, `epoch_status`, `Resilience_outcome`. 한 PR 안에 같은 타입의 sibling site 전부. | Phase 2 | MEDIUM — large diff, but compiler-verified |
 | **4** | codemod 2차: 나머지 closed-variant 사이트 일괄 | Phase 3 | MEDIUM — 동일 패턴 |
-| **5** | allowlist 의 (b)/(c) 항목 제거 → `exhaustive-guard.sh` 를 *blocking* CI 로 승격. 동시에 `fsm-types.txt` manifest 첫 commit. | Phase 4 | LOW — compiler 가 이미 enforce |
+| **5** | allowlist 의 (b)/(c) 항목 제거 → `exhaustive-guard.sh` 를 *blocking* CI 로 승격. `fsm-types.txt` manifest 첫 commit. **그리고 `lib/dune` 에 `(flags (:standard -w +4))` 추가** — 컴파일러 빌트인 fragile-match warning 을 일급 enforcement 로 활성화 (§3.4). 잔여 (a) 사이트는 `[@warning "-4"]` 와 `WORKAROUND` 주석으로 명시. | Phase 4 | LOW — codemod 후 잔여 사이트 ≪ 100, compiler 가 직접 검증 |
 
 각 Phase 는 독립적으로 revertable. **Phase 3 는 한 PR 안에 같은 type 의 sibling site 전부를 묶는 것이 핵심** — 이게 정확히 N-of-M 의 반대.
 

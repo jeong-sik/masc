@@ -21,10 +21,12 @@
 #     comment lines starting with `\*`), find every match of
 #     `\[([a-z_]+)\][^,]*line[s ]+(\d+)` — i.e. a bracketed function
 #     name and a nearby `line N` mention.
-#   - Find the corresponding OCaml file: the first `lib/keeper/.*\.ml`
-#     mention in the preamble (or `lib/keeper/.*\.mli` if no `.ml`).
-#     Skip the cite if no file is referenced.
-#   - Verify: `^let <funcname>` appears in the .ml file within
+#   - Find the corresponding OCaml file: the first `lib/keeper/*.ml`
+#     mention in the preamble (a `lib/keeper/*.mli` is used only if the
+#     preamble cites no `.ml` at all).  Skip the cite if no file is
+#     referenced.
+#   - Verify: a binding of `<funcname>` (`let`, `let rec`, or `and`,
+#     optionally indented) appears in that file within
 #     [N - tolerance .. N + tolerance] inclusive (default tolerance 5).
 #   - Emit drift if the function does not appear in that window.
 #
@@ -39,7 +41,7 @@
 # (this script), 8th drift class structural closure.
 set -euo pipefail
 
-for tool in rg awk grep sed; do
+for tool in awk grep sed; do
   command -v "${tool}" >/dev/null 2>&1 || {
     echo "error: required tool '${tool}' not found in PATH" >&2
     exit 2
@@ -72,12 +74,15 @@ for spec in "${SPEC_DIR}"/*.tla; do
   preamble="$(head -60 "${spec}" | grep -E '^\\\*' || true)"
   [[ -z "${preamble}" ]] && continue
 
-  # First .ml or .mli file reference in the preamble.  Strip everything
-  # after the path so a trailing word like "(verification gate)" doesn't
-  # break the match.
-  ml_file="$(printf '%s' "${preamble}" \
-    | { grep -oE 'lib/keeper/[a-z_]+\.mli?' || true; } \
-    | head -1)"
+  # File reference in the preamble.  Rule: the first `.ml` mention wins;
+  # a `.mli` is used only if the preamble cites no `.ml` at all.  Collect
+  # every `.ml`/`.mli` ref first, then prefer the `.ml` ones — a plain
+  # `head -1` over the mixed list would pick a `.mli` that merely appears
+  # earlier than a later `.ml`.
+  ml_refs="$(printf '%s' "${preamble}" \
+    | { grep -oE 'lib/keeper/[a-z_]+\.mli?' || true; })"
+  ml_file="$(printf '%s\n' "${ml_refs}" | { grep -E '\.ml$' || true; } | head -1)"
+  [[ -z "${ml_file}" ]] && ml_file="$(printf '%s\n' "${ml_refs}" | head -1)"
   if [[ -z "${ml_file}" ]]; then
     continue
   fi
@@ -117,13 +122,13 @@ for spec in "${SPEC_DIR}"/*.tla; do
     [[ ${lo} -lt 1 ]] && lo=1
     hi=$((cited_line + TOLERANCE))
 
-    # Capture `let func` declarations in the window.  `^let <name>`
-    # is the canonical form; allow leading whitespace because of the
-    # rare `and <name>` continuation, but that case is uncommon in
-    # this corpus.
+    # Capture `func`'s binding in the window.  Accept `let <name>`,
+    # `let rec <name>`, and `and <name>` (the `let ... and ...` chain
+    # continuation), with optional leading whitespace — top-level binds
+    # sit at column 1 but a stray indent shouldn't make the check miss.
     if awk -v lo="${lo}" -v hi="${hi}" -v fn="${func}" '
       NR >= lo && NR <= hi {
-        if ($0 ~ "^(let|and)[[:space:]]+" fn "($|[[:space:](])") {
+        if ($0 ~ "^[[:space:]]*(let([[:space:]]+rec)?|and)[[:space:]]+" fn "($|[[:space:](])") {
           found = 1
         }
       }
@@ -134,8 +139,8 @@ for spec in "${SPEC_DIR}"/*.tla; do
       continue
     fi
 
-    # Find the actual current line, if any.
-    actual_line="$(awk -v fn="${func}" '$0 ~ "^let[[:space:]]+" fn "($|[[:space:](])" { print NR; exit }' "${ml_path}")"
+    # Find the actual current line, if any (same binding forms as above).
+    actual_line="$(awk -v fn="${func}" '$0 ~ "^[[:space:]]*(let([[:space:]]+rec)?|and)[[:space:]]+" fn "($|[[:space:](])" { print NR; exit }' "${ml_path}")"
     if [[ -n "${actual_line}" ]]; then
       drift=$((actual_line - cited_line))
       sign='+'; (( drift < 0 )) && sign=''

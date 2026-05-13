@@ -165,8 +165,132 @@ let entity_of_yojson (json : Yojson.Safe.t) : entity_ref option =
   | Some kind, Some id -> Some { kind; id }
   | _ -> None
 
+let non_empty_string_opt = function
+  | Some value ->
+    let trimmed = String.trim value in
+    if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let json_string_non_empty_opt name json =
+  Safe_ops.json_string_opt name json |> non_empty_string_opt
+
+let json_positive_int_opt name json =
+  match Safe_ops.json_int_opt name json with
+  | Some value when value >= 1 -> Some value
+  | _ -> None
+
+let json_int_as_string_opt name json =
+  match Safe_ops.json_int_opt name json with
+  | Some value -> Some (string_of_int value)
+  | None -> None
+
+let assoc_replace name value fields =
+  (name, value) :: List.filter (fun (key, _) -> key <> name) fields
+
+let assoc_replace_string_opt name value fields =
+  match non_empty_string_opt value with
+  | Some value -> assoc_replace name (`String value) fields
+  | None -> fields
+
+let assoc_replace_int_opt name value fields =
+  match value with
+  | Some value when value >= 1 -> assoc_replace name (`Int value) fields
+  | _ -> fields
+
+let first_some left right =
+  match left with
+  | Some _ -> left
+  | None -> right
+
+let tag_context_pair raw =
+  match String.index_opt raw ':' with
+  | None -> None
+  | Some 0 -> None
+  | Some index ->
+    let key = String.sub raw 0 index |> String.trim |> String.lowercase_ascii in
+    let value =
+      String.sub raw (index + 1) (String.length raw - index - 1)
+      |> String.trim
+    in
+    if value = "" then None else Some (key, value)
+
+let tag_file_value value =
+  match String.rindex_opt value ':' with
+  | Some index when index > 0 && index < String.length value - 1 ->
+    let suffix =
+      String.sub value (index + 1) (String.length value - index - 1)
+    in
+    (match int_of_string_opt suffix with
+     | Some line when line >= 1 ->
+       let file_path = String.sub value 0 index |> String.trim in
+       if file_path = "" then (None, Some line)
+       else (Some file_path, Some line)
+     | _ -> (Some value, None))
+  | _ -> (Some value, None)
+
+let derive_context_from_payload payload fields =
+  let file_path =
+    json_string_non_empty_opt "file_path" payload
+    |> fun value -> first_some value (json_string_non_empty_opt "path" payload)
+    |> fun value -> first_some value (json_string_non_empty_opt "file" payload)
+  in
+  let line =
+    json_positive_int_opt "line" payload
+    |> fun value -> first_some value (json_positive_int_opt "line_start" payload)
+    |> fun value -> first_some value (json_positive_int_opt "lineno" payload)
+  in
+  fields
+  |> assoc_replace_string_opt "file_path" file_path
+  |> assoc_replace_int_opt "line" line
+  |> assoc_replace_string_opt "goal_id" (json_string_non_empty_opt "goal_id" payload)
+  |> assoc_replace_string_opt "task_id" (json_string_non_empty_opt "task_id" payload)
+  |> assoc_replace_string_opt "board_post_id"
+       (json_string_non_empty_opt "board_post_id" payload
+        |> fun value -> first_some value (json_string_non_empty_opt "post_id" payload))
+  |> assoc_replace_string_opt "pr_id"
+       (json_string_non_empty_opt "pr_id" payload
+        |> fun value -> first_some value (json_string_non_empty_opt "pull_request" payload)
+        |> fun value -> first_some value (json_int_as_string_opt "pr_number" payload))
+  |> assoc_replace_string_opt "git_ref"
+       (json_string_non_empty_opt "git_ref" payload
+        |> fun value -> first_some value (json_string_non_empty_opt "commit" payload)
+        |> fun value -> first_some value (json_string_non_empty_opt "branch" payload))
+  |> assoc_replace_string_opt "log_id" (json_string_non_empty_opt "log_id" payload)
+
+let derive_context_from_tag fields raw =
+  match tag_context_pair raw with
+  | None -> fields
+  | Some ("file", value) ->
+    let file_path, line = tag_file_value value in
+    fields
+    |> assoc_replace_string_opt "file_path" file_path
+    |> assoc_replace_int_opt "line" line
+  | Some ("line", value) ->
+    (match int_of_string_opt value with
+     | Some line when line >= 1 -> assoc_replace "line" (`Int line) fields
+     | _ -> fields)
+  | Some ("goal", value) -> assoc_replace "goal_id" (`String value) fields
+  | Some ("task", value) -> assoc_replace "task_id" (`String value) fields
+  | Some ("board", value) | Some ("post", value) ->
+    assoc_replace "board_post_id" (`String value) fields
+  | Some ("pr", value) | Some ("pull_request", value) | Some ("review", value) ->
+    assoc_replace "pr_id" (`String value) fields
+  | Some ("git", value) | Some ("commit", value) | Some ("branch", value) ->
+    assoc_replace "git_ref" (`String value) fields
+  | Some ("log", value) | Some ("telemetry", value) ->
+    assoc_replace "log_id" (`String value) fields
+  | Some _ -> fields
+
+let event_context_to_yojson (value : event) =
+  let fields =
+    derive_context_from_payload value.payload []
+    |> fun fields -> List.fold_left derive_context_from_tag fields value.tags
+  in
+  `Assoc (List.rev fields)
+
 let event_to_yojson (value : event) =
-  `Assoc
+  let context = event_context_to_yojson value in
+  let fields =
     [
       ("seq", `Int value.seq);
       ("ts_ms", `Int value.ts_ms);
@@ -184,6 +308,10 @@ let event_to_yojson (value : event) =
       ("payload", value.payload);
       ("tags", `List (List.map (fun tag -> `String tag) value.tags));
     ]
+  in
+  match context with
+  | `Assoc [] -> `Assoc fields
+  | _ -> `Assoc (fields @ [ ("context", context) ])
 
 let event_of_yojson (json : Yojson.Safe.t) : event option =
   match Safe_ops.json_int_opt "seq" json,

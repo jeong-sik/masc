@@ -32,6 +32,7 @@ interface ApiActivityEvent {
   readonly subject?: { readonly kind: string; readonly id: string } | null
   readonly payload?: unknown
   readonly tags?: ReadonlyArray<string>
+  readonly context?: RunActivityContext
 }
 
 interface ApiActivityResponse {
@@ -88,7 +89,7 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
     detail: detailFromPayload(event.payload, event.kind),
     kind: event.kind,
     tags: event.tags ?? [],
-    context: contextFromPayloadAndTags(event.payload, event.tags ?? []),
+    context: event.context ?? contextFromPayloadAndTags(event.payload, event.tags ?? []),
   }
 }
 

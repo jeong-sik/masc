@@ -56,6 +56,51 @@ let test_emit_and_list_events () =
       in
       check int "task filter" 1 (List.length task_only))
 
+let test_events_json_derives_ide_context () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-9")
+           ~tags:[
+             "file:lib/keeper/keeper_exec_ide.ml:27";
+             "task:task-42";
+             "board:post-1";
+             "git:main";
+             "log:turn-9";
+           ]
+           ~payload:
+             (`Assoc
+                [
+                  ("goal_id", `String "goal-ide");
+                  ("pr_number", `Int 15035);
+                ])
+           ());
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let open Yojson.Safe.Util in
+      let event =
+        match json |> member "events" |> to_list with
+        | [ event ] -> event
+        | events ->
+          fail (Printf.sprintf "expected one event, got %d" (List.length events))
+      in
+      let context = event |> member "context" in
+      check string "context file path" "lib/keeper/keeper_exec_ide.ml"
+        (context |> member "file_path" |> to_string);
+      check int "context line" 27 (context |> member "line" |> to_int);
+      check string "context goal" "goal-ide"
+        (context |> member "goal_id" |> to_string);
+      check string "context task" "task-42"
+        (context |> member "task_id" |> to_string);
+      check string "context board" "post-1"
+        (context |> member "board_post_id" |> to_string);
+      check string "context pr" "15035"
+        (context |> member "pr_id" |> to_string);
+      check string "context git" "main"
+        (context |> member "git_ref" |> to_string);
+      check string "context log" "turn-9"
+        (context |> member "log_id" |> to_string))
+
 let test_emit_sanitizes_invalid_utf8_before_persisting () =
   with_config (fun config ->
       Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
@@ -341,6 +386,8 @@ let () =
       ( "core",
         [
           test_case "emit and list events" `Quick test_emit_and_list_events;
+          test_case "events json derives IDE context" `Quick
+            test_events_json_derives_ide_context;
           test_case "emit sanitizes invalid utf8 before persisting" `Quick
             test_emit_sanitizes_invalid_utf8_before_persisting;
           test_case "filtered client receives matching events" `Quick

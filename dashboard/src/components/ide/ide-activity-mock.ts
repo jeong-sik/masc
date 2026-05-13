@@ -307,10 +307,11 @@ export function deriveIdeRunProgressSummary(
     ? 0
     : events.filter(event => event.context?.file_path === activeFile).length
   const linkedEvents = events.filter(event => event.context !== undefined).length
-  const surfaceCounts = PROGRESS_SURFACES.map(([key, label]) => ({
+  const surfaceCounts: Array<{ readonly label: string; readonly count: number }> = PROGRESS_SURFACES.map(([key, label]) => ({
     label,
     count: events.filter(event => event.context?.[key]).length,
   }))
+  surfaceCounts.push({ label: 'Telemetry', count: events.length })
   const keeperEntries = [...events.reduce((acc, event) => {
     acc.set(event.keeper_id, (acc.get(event.keeper_id) ?? 0) + 1)
     return acc

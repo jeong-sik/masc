@@ -88,7 +88,7 @@ describe('IdeActivityMock', () => {
 
     const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
       .map(node => node.textContent)
-    expect(surfaces).toEqual(['Goal1', 'Task1', 'Board1', 'Comment1', 'PR1', 'Git1', 'Log1'])
+    expect(surfaces).toEqual(['Goal1', 'Task1', 'Board1', 'Comment1', 'PR1', 'Git1', 'Log1', 'Telemetry1'])
 
     const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
     expect(jump?.textContent).toContain('runtime.ml:4')
@@ -133,7 +133,7 @@ describe('IdeActivityMock', () => {
     await waitFor(() => {
       const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
         .map(node => node.textContent)
-      expect(surfaces).toEqual(['Goal0', 'Task0', 'Board0', 'Comment0', 'PR0', 'Git0', 'Log1'])
+      expect(surfaces).toEqual(['Goal0', 'Task0', 'Board0', 'Comment0', 'PR0', 'Git0', 'Log1', 'Telemetry1'])
     })
   })
 
@@ -198,6 +198,7 @@ describe('IdeActivityMock', () => {
       ['PR', 1],
       ['Git', 1],
       ['Log', 1],
+      ['Telemetry', 3],
     ])
     expect(summary.keeperCounts).toEqual([
       { keeper_id: 'sangsu', count: 2 },

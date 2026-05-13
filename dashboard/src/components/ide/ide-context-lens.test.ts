@@ -301,6 +301,7 @@ describe('IdeContextLens', () => {
       'PR',
       'Git',
       'Log',
+      'Telemetry',
       'Keeper',
     ])
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Comment')).toMatchObject({
@@ -310,6 +311,10 @@ describe('IdeContextLens', () => {
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Log')).toMatchObject({
       tab: 'monitoring',
       params: { section: 'runtime', view: 'audit' },
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Telemetry')).toMatchObject({
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'event-log' },
     })
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Keeper')).toMatchObject({
       tab: 'monitoring',

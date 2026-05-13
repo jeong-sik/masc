@@ -102,7 +102,7 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
   'log',
   'telemetry',
 ]
-const MAX_CONTEXT_ROUTE_LINKS = 8
+const MAX_CONTEXT_ROUTE_LINKS = 9
 
 export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLensModel {
   const fileAnnotations = input.annotations.filter(annotation =>
@@ -521,6 +521,7 @@ function buildAnchors(
         gitRef: event.context?.git_ref,
         logId: event.context?.log_id,
         keeperId: event.keeper_id,
+        telemetry: true,
       }),
     })
   }
@@ -634,6 +635,7 @@ function routeLinksForContext(context: {
   readonly gitRef?: string
   readonly logId?: string
   readonly keeperId?: string
+  readonly telemetry?: boolean
 }): ReadonlyArray<IdeContextRouteLink> {
   const links: IdeContextRouteLink[] = []
   const add = (link: IdeContextRouteLink): void => {
@@ -712,6 +714,15 @@ function routeLinksForContext(context: {
       tab: 'monitoring',
       params: { section: 'runtime', view: 'audit' },
       evidence: `Log ${logId}`,
+    })
+  }
+  if (context.telemetry) {
+    add({
+      id: 'telemetry:event-log',
+      label: 'Telemetry',
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'event-log' },
+      evidence: 'Fleet telemetry event log',
     })
   }
   const keeperId = cleanId(context.keeperId)

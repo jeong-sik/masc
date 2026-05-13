@@ -332,8 +332,8 @@ let split_model_spec spec =
   | None -> after_scheme, "http://127.0.0.1:9/v1"
 ;;
 
-let cascade_toml ?(route_target = "default") ?(invalid_profiles = []) valid_model
-    profiles =
+let cascade_toml ?(route_target = "default") ?(extra_route_targets = [])
+    ?(invalid_profiles = []) valid_model profiles =
   let model_id, endpoint = split_model_spec valid_model in
   let profile_toml ~valid name =
     Printf.sprintf
@@ -349,6 +349,16 @@ tiers = [%S]
       name
       name
   in
+  let routes_toml =
+    ("keeper_turn", route_target)
+    :: List.mapi
+         (fun index target ->
+            (Printf.sprintf "assignable_%d" (index + 1), target))
+         extra_route_targets
+    |> List.map (fun (route_name, target) ->
+           Printf.sprintf "[routes.%s]\ntarget = \"tier-group.%s\"\n" route_name target)
+    |> String.concat "\n"
+  in
   Printf.sprintf
     {|[providers.custom]
 protocol = "openai-http"
@@ -363,14 +373,13 @@ tools-support = true
 %s
 %s
 
-[routes.keeper_turn]
-target = "tier-group.%s"
+%s
 |}
     endpoint
     model_id
     (profiles |> List.map (profile_toml ~valid:true) |> String.concat "\n")
     (invalid_profiles |> List.map (profile_toml ~valid:false) |> String.concat "\n")
-    route_target
+    routes_toml
 ;;
 
 let with_temp_config_root cascade_toml f =
@@ -874,7 +883,18 @@ let test_keeper_post_route_classification () =
 
 let require_status label expected result =
   match result.status with
-  | Some code -> check int label expected code
+  | Some code ->
+    if code <> expected
+    then
+      fail
+        (Printf.sprintf
+           "%s expected HTTP %d but got %d (curl_exit=%d stderr=%s body=%s)"
+           label
+           expected
+           code
+           result.curl_exit
+           result.stderr
+           result.body)
   | None ->
     fail
       (Printf.sprintf
@@ -1201,7 +1221,7 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
 let test_keeper_cascade_assignment_updates_dashboard_projection () =
   with_mock_model @@ fun valid_model ->
   with_temp_config_root
-    (cascade_toml ~route_target:"primary" valid_model
+    (cascade_toml ~route_target:"primary" ~extra_route_targets:[ "alternate" ] valid_model
        [ "primary"; "alternate" ])
   @@ fun config_root ->
   let seeded_keeper_name = "route_shadow_demo" in

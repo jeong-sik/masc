@@ -45,15 +45,25 @@ let declarative_snapshot_for_config_path config_path =
   | Some (Ok snapshot) -> Some snapshot
   | Some (Error _) | None -> None
 
-let discover_profiles_declarative config_path =
-  match Cascade_declarative_parser.parse_file config_path with
-  | Error _ -> []
-  | Ok cfg ->
-    let catalog = Cascade_declarative_adapter.adapt_config cfg in
-    catalog.profiles
-    |> List.map (fun (profile : Cascade_declarative_adapter.adapted_profile) ->
-           profile.name)
-    |> List.sort_uniq String.compare
+let assoc_opt key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let profile_names_from_namespace ~prefix = function
+  | Some (`Assoc fields) ->
+    fields
+    |> List.filter_map (fun (name, _value) ->
+           let name = String.trim name in
+           if String.equal name ""
+           then None
+           else Some (Printf.sprintf "%s.%s" prefix name))
+  | _ -> []
+
+let discover_profiles_from_materialized_json json =
+  profile_names_from_namespace ~prefix:"tier" (assoc_opt "tier" json)
+  @ profile_names_from_namespace ~prefix:"tier-group"
+      (assoc_opt "tier-group" json)
+  |> List.sort_uniq String.compare
 
 let discover_profiles_impl ~emit_telemetry ~config_path =
   let load_catalog_source =
@@ -62,7 +72,7 @@ let discover_profiles_impl ~emit_telemetry ~config_path =
     else Cascade_config_loader.load_catalog_source_for_diagnostics
   in
   match load_catalog_source config_path with
-  | Ok _ -> discover_profiles_declarative config_path
+  | Ok json -> discover_profiles_from_materialized_json json
   | Error _ -> []
 
 let discover_profiles ~config_path =
@@ -369,8 +379,7 @@ let diagnose_catalog_impl ~emit_telemetry ~config_path =
         };
       ]
   | Ok json ->
-      ignore json;
-      discover_profiles_declarative config_path
+      discover_profiles_from_materialized_json json
       |> List.concat_map (fun profile ->
         diagnose_profile ~emit_telemetry ~config_path ~profile)
 

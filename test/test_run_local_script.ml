@@ -261,7 +261,7 @@ let test_existing_target_config_is_not_overwritten () =
       let target_config = Filename.concat target ".masc/config" in
       mkdir_p target_config;
       write_file (Filename.concat target_config "cascade.toml")
-        "{\"seed\":\"target\"}";
+        "# preserved target cascade.toml\n";
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
@@ -273,7 +273,7 @@ let test_existing_target_config_is_not_overwritten () =
       if code <> 0 then
         failf "run-local failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       let cascade = read_file (Filename.concat target_config "cascade.toml") in
-      check string "target config preserved" "{\"seed\":\"target\"}" cascade)
+      check string "target config preserved" "# preserved target cascade.toml\n" cascade)
 
 let test_explicit_config_env_is_preserved_without_bootstrap () =
   with_temp_dir "run-local-script" (fun dir ->

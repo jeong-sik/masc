@@ -1,5 +1,5 @@
 ---
-rfc: "0073"
+rfc: "0077"
 title: "Write-side silent failure — typed propagation"
 status: Draft
 created: 2026-05-14
@@ -11,7 +11,11 @@ related: ["0042", "0044", "0062", "0063", "0071"]
 implementation_prs: []
 ---
 
-# RFC-0073 — Write-side silent failure: typed propagation
+# RFC-0077 — Write-side silent failure: typed propagation
+
+(Originally drafted as RFC-0073; renumbered to 0077 on 2026-05-14 after
+detecting collision with #15064 RFC-0073~0076 tool readiness package
+that reserved 0073-0076 in the same window.)
 
 Status: Draft
 Author: jeong-sik (vincent)
@@ -65,7 +69,7 @@ This is the **silent-write** variant of telemetry-as-fix that `instructions/soft
 ## 2. Non-goals
 
 - **Removing existing counters.** Where Prometheus counters already exist for write failures (e.g., `metric_keeper_write_meta_failures`, `metric_keeper_episode_create_failures`), this RFC does not remove them. Counter + typed result coexist until each caller chain migrates.
-- **Append-only journal / WAL.** A true recovery story for `write_meta` requires a journal (commit-then-emit, version-tagged records). Out of scope. This RFC restricts to **typing the failure visibility surface** so that `21st-site` PRs can be rejected with `RFC-0073 §X`.
+- **Append-only journal / WAL.** A true recovery story for `write_meta` requires a journal (commit-then-emit, version-tagged records). Out of scope. This RFC restricts to **typing the failure visibility surface** so that `21st-site` PRs can be rejected with `RFC-0077 §X`.
 - **Migrating all 20 sites in one PR.** Migration is per-call-chain. PR-1 introduces the typed module; subsequent PRs migrate one chain at a time.
 - **Read-side surfaces.** Covered by RFC-0044. Sites that mix read+write (e.g., `keeper_context_core.ml:1456, 1484` checkpoint read error-discarded) belong to RFC-0044.
 
@@ -144,7 +148,7 @@ This is *behavior change at migration boundaries only*. PR-1 alone is byte-compa
 ## 5. Drift guards
 
 - **Lint** (`scripts/lint/write-side-typed-reason.sh`): `rg "Log\.\w+\.\(warn\|error\) .*\(write\|create\|persist\|save\) .* failed" lib/ | wc -l` baseline at RFC merge time. CI fails if the count grows without a matching `Write_failure_reason.t` migration in the same PR.
-- **Reject-bar test** (`test/test_write_side_telemetry_as_fix_drift.ml`): structural assertion that the 20 currently-grandfathered sites' line numbers are tracked in `RFC-0073-inventory.csv`. A new site introduced *without* `Write_failure_reason.t` is detected by inventory diff in CI.
+- **Reject-bar test** (`test/test_write_side_telemetry_as_fix_drift.ml`): structural assertion that the 20 currently-grandfathered sites' line numbers are tracked in `RFC-0077-inventory.csv`. A new site introduced *without* `Write_failure_reason.t` is detected by inventory diff in CI.
 - **Counter-example preservation**: `keeper_goal_repair.ml:95` (the existing correct pattern) is referenced as the canonical example in `Write_failure_reason.mli` doc comments.
 
 ## 6. Trade-offs

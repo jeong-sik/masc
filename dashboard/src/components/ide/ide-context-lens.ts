@@ -81,6 +81,7 @@ export interface IdeContextLensModel {
   readonly linkedCount: number
   readonly surfaces: ReadonlyArray<IdeContextSurface>
   readonly anchors: ReadonlyArray<IdeContextAnchor>
+  readonly anchorTotalCount: number
   readonly changedLineCount: number
   readonly activeLineCount: number
 }
@@ -129,6 +130,7 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
   'log',
   'telemetry',
 ]
+const MAX_CONTEXT_ANCHORS = 6
 const MAX_CONTEXT_ROUTE_LINKS = 9
 
 export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLensModel {
@@ -201,19 +203,22 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     }
   })
 
+  const anchors = buildAnchors(
+    filePath ?? input.filePath,
+    fileAnnotations,
+    fileDiagnostics,
+    activeCursors,
+    fileThreads,
+    changedRows,
+    fileEvents,
+    eventSearchTextByEvent,
+  )
+
   return {
     linkedCount: surfaces.filter(surface => surface.status === 'linked').length,
     surfaces,
-    anchors: buildAnchors(
-      filePath ?? input.filePath,
-      fileAnnotations,
-      fileDiagnostics,
-      activeCursors,
-      fileThreads,
-      changedRows,
-      fileEvents,
-      eventSearchTextByEvent,
-    ),
+    anchors: anchors.slice(0, MAX_CONTEXT_ANCHORS),
+    anchorTotalCount: anchors.length,
     changedLineCount,
     activeLineCount: activeLines.size,
   }
@@ -239,6 +244,8 @@ export function IdeContextLens({
     <section
       class="ide-context-lens"
       data-testid="ide-context-lens"
+      data-visible-anchors=${model.anchors.length}
+      data-total-anchors=${model.anchorTotalCount}
       aria-label="IDE context lens"
     >
       <div class="ide-context-lens-summary">
@@ -249,6 +256,7 @@ export function IdeContextLens({
         <div class="ide-context-lens-meta">
           <span title=${filePath}>${fileLabel}</span>
           <span>${model.activeLineCount} line anchors</span>
+          <span>${anchorCountLabel(model)}</span>
           <span>${model.changedLineCount} changed rows</span>
         </div>
       </div>
@@ -433,7 +441,7 @@ function surfaceCount(
   if (id === 'log') {
     return state.events.length
   }
-  if (id === 'telemetry') return state.events.length + state.changedLineCount + state.annotations.length + state.diagnostics.length
+  if (id === 'telemetry') return state.events.length
   return 0
 }
 
@@ -454,6 +462,12 @@ function surfaceEvidence(id: IdeContextSurfaceId, count: number): string {
 
 function plural(count: number): string {
   return count === 1 ? '' : 's'
+}
+
+function anchorCountLabel(model: IdeContextLensModel): string {
+  return model.anchorTotalCount > model.anchors.length
+    ? `${model.anchors.length}/${model.anchorTotalCount} anchors`
+    : `${model.anchorTotalCount} anchor${plural(model.anchorTotalCount)}`
 }
 
 function buildAnchors(
@@ -588,7 +602,7 @@ function buildAnchors(
     })
   }
 
-  return anchors.slice(0, 6)
+  return anchors
 }
 
 function eventSearchText(event: RunActivityEvent): string {

@@ -109,7 +109,24 @@ describe('IdeContextLens', () => {
     ]))
     expect(model.activeLineCount).toBe(1)
     expect(model.changedLineCount).toBe(2)
+    expect(model.anchorTotalCount).toBe(4)
     expect(model.anchors.map(anchor => anchor.surface)).toContain('Git')
+  })
+
+  it('does not claim telemetry links from local-only code evidence', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [annotation],
+      diffRows,
+      events: [],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
+    expect(counts.get('lsp')).toBe(1)
+    expect(counts.get('git')).toBe(2)
+    expect(counts.get('log')).toBe(0)
+    expect(counts.get('telemetry')).toBe(0)
   })
 
   it('renders a compact context lens panel', () => {
@@ -130,7 +147,72 @@ describe('IdeContextLens', () => {
     expect(container.textContent).toContain('CONTEXT LENS')
     expect(container.textContent).toContain('11/11 linked')
     expect(container.textContent).toContain('keeper_exec_ide.ml')
+    expect(container.textContent).toContain('4 anchors')
     expect(container.textContent).toContain('goal goal-ide')
+  })
+
+  it('reports when the compact anchor list is truncated', () => {
+    const container = document.createElement('div')
+    const extraAnnotations = [
+      annotation,
+      { ...annotation, id: 'ann-2', line_start: 15, content: 'Second note' },
+      { ...annotation, id: 'ann-3', line_start: 16, content: 'Third note' },
+    ]
+    const secondThread: AnchoredThread = {
+      ...thread,
+      id: 'thread-2',
+      body: 'Second anchored thread',
+      anchor: { ...thread.anchor, line_start: 20, line_end: 20 },
+    }
+    const busyOverlay: KeeperCursorOverlay = {
+      ...overlay,
+      cursors: new Map([
+        ...overlay.cursors,
+        ['analyst', {
+          keeper_id: 'analyst',
+          file_path: 'lib/keeper/keeper_exec_ide.ml',
+          line: 17,
+          column: 2,
+          focus_mode: 'reviewing',
+          last_update: 101,
+          tool_name: 'review',
+          turn: 8,
+        }],
+      ]),
+    }
+
+    render(
+      h(IdeContextLens, {
+        filePath: 'lib/keeper/keeper_exec_ide.ml',
+        annotations: extraAnnotations,
+        diagnostics: [
+          {
+            file_path: 'lib/keeper/keeper_exec_ide.ml',
+            line: 21,
+            severity: 1,
+            source: 'ocamllsp',
+            message: 'First diagnostic',
+          },
+          {
+            file_path: 'lib/keeper/keeper_exec_ide.ml',
+            line: 22,
+            severity: 2,
+            source: 'ocamllsp',
+            message: 'Second diagnostic',
+          },
+        ],
+        diffRows,
+        events: [],
+        threads: [thread, secondThread],
+        overlay: busyOverlay,
+      }),
+      container,
+    )
+
+    const panel = container.querySelector('[data-testid="ide-context-lens"]')
+    expect(panel?.getAttribute('data-visible-anchors')).toBe('6')
+    expect(panel?.getAttribute('data-total-anchors')).toBe('10')
+    expect(container.textContent).toContain('6/10 anchors')
   })
 
   it('publishes focused file and line when an anchor is clicked', () => {

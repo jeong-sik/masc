@@ -29,6 +29,62 @@ let cleanup_dir dir =
   try rm dir with
   | _ -> ()
 
+let write_runtime_fixture_cascade ~base_dir ~cascade_name ~model_id ~endpoint =
+  let config_dir =
+    Filename.concat (Filename.concat base_dir ".masc") "config"
+  in
+  Fs_compat.mkdir_p config_dir;
+  Fs_compat.save_file
+    (Filename.concat config_dir "cascade.toml")
+    (Printf.sprintf
+       {|[providers.runtime_mock]
+protocol = "openai-http"
+endpoint = %S
+
+[models.%s]
+api-name = %S
+max-context = 16000
+tools-support = true
+streaming = false
+
+[runtime_mock.%s]
+max-concurrent = 1
+
+[tier.%s_primary]
+members = ["runtime_mock.%s"]
+
+[tier-group.%s]
+tiers = ["%s_primary"]
+
+[routes.%s]
+target = "tier-group.%s"
+|}
+       endpoint
+       model_id
+       model_id
+       model_id
+       cascade_name
+       model_id
+       cascade_name
+       cascade_name
+       cascade_name
+       cascade_name);
+  config_dir
+
+let with_config_dir config_dir f =
+  let saved = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" config_dir;
+  Masc_mcp.Config_dir_resolver.reset ();
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved with
+       | Some v -> Unix.putenv "MASC_CONFIG_DIR" v
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ();
+      Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ())
+    f
+
 let with_env name value f =
   let saved = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -1111,6 +1167,13 @@ let test_successful_provider_turn_links_runtime_artifacts () =
             openai_text_response "context checked; runtime artifacts should persist.";
           ]
       in
+      let cascade_name = "keeper_turn" in
+      let model_id = "remote-model" in
+      let config_dir =
+        write_runtime_fixture_cascade ~base_dir ~cascade_name ~model_id
+          ~endpoint:base_url
+      in
+      with_config_dir config_dir @@ fun () ->
       let config = Masc_mcp.Coord.default_config base_dir in
       Masc_test_deps.init_keeper_tool_registry ();
       Masc_mcp.Keeper_tool_call_log.reset_for_testing ();
@@ -1122,38 +1185,6 @@ let test_successful_provider_turn_links_runtime_artifacts () =
           let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
           let session_base_dir = Filename.concat base_dir "sessions" in
           Fs_compat.mkdir_p session_base_dir;
-          let model_string =
-            Printf.sprintf "custom:remote-model@%s" base_url
-          in
-          let parsed_providers =
-            Masc_mcp.Cascade_config.parse_model_strings [ model_string ]
-          in
-          let provider_cfg =
-            match parsed_providers with
-            | [ provider_cfg ] -> provider_cfg
-            | [] -> Alcotest.fail "custom model string parsed to no providers"
-            | _ -> Alcotest.fail "custom model string parsed to multiple providers"
-          in
-          Alcotest.(check bool)
-            "custom provider supports inline tools"
-            true
-            (Masc_mcp.Provider_tool_support.provider_supports_inline_tools
-               provider_cfg);
-          let provider_caps =
-            Masc_mcp.Provider_tool_support.capabilities_of_config provider_cfg
-          in
-          Alcotest.(check bool)
-            "custom provider supports inline tool choice"
-            true
-            provider_caps.supports_inline_tool_choice;
-          Alcotest.(check int)
-            "direct model string remains tool-choice capable"
-            1
-            (List.length
-               (Masc_mcp.Cascade_runtime.resolve_providers_from_model_strings
-                  ~require_tool_choice_support:true
-                  ~require_tool_support:true
-                  [ model_string ]));
           let build_turn_prompt ~base_system_prompt ~messages:_ =
             { Masc_mcp.Keeper_agent_run.system_prompt =
                 base_system_prompt ^ "\nReturn a concise final answer."
@@ -1163,12 +1194,14 @@ let test_successful_provider_turn_links_runtime_artifacts () =
           let result =
             Masc_mcp.Keeper_agent_run.run_turn
               ~config
-              ~meta:{ meta with models = [ model_string ] }
+              ~meta
               ~base_dir:session_base_dir
               ~max_context:16_000
               ~build_turn_prompt
               ~user_message:"Call keeper_tool_search once, then answer."
-              ~cascade_name:(Masc_mcp.Keeper_cascade_profile.runtime_name_of_string "fixture")
+              ~cascade_name:
+                (Masc_mcp.Keeper_cascade_profile.runtime_name_of_string
+                   cascade_name)
               ~generation:meta.runtime.generation
               ~max_turns:3
               ~max_idle_turns:2
@@ -1406,6 +1439,13 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
             | Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) ->
                 Alcotest.skip ()
           in
+          let cascade_name = "keeper_turn" in
+          let model_id = "slow-timeout" in
+          let config_dir =
+            write_runtime_fixture_cascade ~base_dir ~cascade_name ~model_id
+              ~endpoint:base_url
+          in
+          with_config_dir config_dir @@ fun () ->
           let config = Masc_mcp.Coord.default_config base_dir in
           Masc_test_deps.init_keeper_tool_registry ();
           Masc_mcp.Keeper_tool_call_log.reset_for_testing ();
@@ -1417,9 +1457,6 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
               let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
               let session_base_dir = Filename.concat base_dir "sessions" in
               Fs_compat.mkdir_p session_base_dir;
-              let model_string =
-                Printf.sprintf "custom:slow-timeout@%s" base_url
-              in
               let build_turn_prompt ~base_system_prompt ~messages:_ =
                 { Masc_mcp.Keeper_agent_run.system_prompt =
                     base_system_prompt ^ "\nReturn a concise final answer."
@@ -1429,14 +1466,14 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
               let result =
                 Masc_mcp.Keeper_agent_run.run_turn
                   ~config
-                  ~meta:{ meta with models = [ model_string ] }
+                  ~meta
                   ~base_dir:session_base_dir
                   ~max_context:16_000
                   ~build_turn_prompt
                   ~user_message:"Say hello slowly."
                   ~cascade_name:
                     (Masc_mcp.Keeper_cascade_profile.runtime_name_of_string
-                       "fixture")
+                       cascade_name)
                   ~generation:meta.runtime.generation
                   ~max_turns:1
                   ~max_idle_turns:1
@@ -1471,24 +1508,24 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                 require_manifest_event M.Provider_attempt_started rows
               in
               Alcotest.(check (option string))
-                "direct model attempt records model source"
-                (Some "direct_model_strings")
+                "declared cascade attempt records model source"
+                (Some "named_cascade")
                 (json_string_member_opt "model_source" started_row.M.decision);
               Alcotest.(check (option string))
-                "direct model attempt records resolved model source"
-                (Some "direct_model_string")
+                "declared cascade attempt records resolved model source"
+                (Some "cascade_catalog_binding")
                 (json_string_member_opt
                    "resolved_model_source"
                    started_row.M.decision);
               Alcotest.(check (option string))
-                "direct model attempt records capability source"
-                (Some "provider_config_from_direct_model_string")
+                "declared cascade attempt records capability source"
+                (Some "provider_config_from_cascade_catalog")
                 (json_string_member_opt
                    "capability_source"
                    started_row.M.decision);
               Alcotest.(check (option string))
-                "direct model attempt records fallback authority"
-                (Some "direct_model_strings")
+                "declared cascade attempt records fallback authority"
+                (Some "declared_cascade")
                 (json_string_member_opt "fallback_authority" started_row.M.decision);
               let finished_row =
                 require_manifest_event M.Provider_attempt_finished rows
@@ -1530,11 +1567,11 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                    provider_attempts);
               Alcotest.(check (option string))
                 "timeout provider attempts summary model source"
-                (Some "direct_model_strings")
+                (Some "named_cascade")
                 (json_string_member_opt "terminal_model_source" provider_attempts);
               Alcotest.(check (option string))
                 "timeout provider attempts summary fallback authority"
-                (Some "direct_model_strings")
+                (Some "declared_cascade")
                 (json_string_member_opt
                    "terminal_fallback_authority"
                    provider_attempts))))
@@ -1990,11 +2027,14 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
       "lib/keeper/keeper_context_core.ml";
       "lib/keeper/keeper_exec_status.ml";
       "lib/keeper/keeper_hooks_oas.ml";
+      "lib/keeper/keeper_turn_driver.ml";
       "lib/keeper/keeper_unified_metrics.ml";
       "lib/dashboard/dashboard_http_keeper.ml";
       "lib/dashboard/dashboard_http_keeper_metrics.ml";
       "lib/dashboard/dashboard_execution_fixture.ml";
     ];
+  check_source_omits "lib/keeper/keeper_turn_driver.ml" "direct_model_strings";
+  check_source_omits "lib/cascade/cascade_runtime.ml" "direct_model_strings";
   check_source_missing "lib/keeper/keeper_agent_context.ml";
   check_source_missing "lib/keeper/keeper_agent_context.mli";
   check_source_omits

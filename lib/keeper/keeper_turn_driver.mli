@@ -141,7 +141,6 @@ val apply_stream_idle_timeout_default : float option -> float option
 val run_named :
   cascade_name:string ->
   ?keeper_name:string ->
-  ?model_strings:string list ->
   goal:string ->
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->

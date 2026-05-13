@@ -361,29 +361,6 @@ let models_of_cascade_name cascade_name =
         normalized detail;
       []
 
-let resolve_providers_from_model_strings ?provider_filter
-    ?(require_tool_choice_support = false)
-    ?(require_tool_support = false)
-    ?runtime_mcp_policy
-    (model_strings : string list)
-    : Llm_provider.Provider_config.t list =
-  let specs = Cascade_config.parse_model_strings model_strings in
-  let filtered =
-    Cascade_config.apply_provider_filter
-      ~provider_filter
-      ~label:"direct_model_strings"
-      specs
-    |> apply_required_tool_choice_filter ?runtime_mcp_policy
-         ~require_tool_choice_support
-         ~require_tool_support
-         ~label:"direct_model_strings"
-  in
-  if filtered <> [] then filtered
-  else (
-    Log.Misc.warn "direct model strings: no callable models from %d entries"
-      (List.length model_strings);
-    [])
-
 let resolve_named_providers_result ?provider_filter
     ?(require_tool_choice_support = false)
     ?(require_tool_support = false)

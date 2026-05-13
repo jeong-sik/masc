@@ -107,12 +107,22 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || typeof observedProviderAttempts === 'number'
     || observedProviderFallback === true
     || (latestCascadeMetric?.fallback_applied === true && Boolean(fallbackReason || fallbackHops > 0))
+  const hasExecutionEvidenceSignal =
+    Boolean(runtimeProofStatus)
+    || requiredTools.length > 0
+    || usedTools.length > 0
+    || missingRequiredTools.length > 0
+    || Boolean(trustSummary)
+    || Boolean(latestTerminalCode)
+    || Boolean(latestNextAction)
+    || shouldShowOperatorDispositionReason
+    || Boolean(trustLatestEvent)
   const renderActivitySignal = () => activity.timestamp
     ? html`${activity.label} <${TimeAgo} timestamp=${activity.timestamp} />`
     : activity.ageSeconds != null
       ? html`${activity.label} ${formatDuration(activity.ageSeconds)} 전`
       : null
-  if (!needsAttention && !hasActivitySignal && !hasRuntimeIdentitySignal) return null
+  if (!needsAttention && !hasActivitySignal && !hasRuntimeIdentitySignal && !hasExecutionEvidenceSignal) return null
 
   const directiveLoading = signal(false)
   const handleDirective = async (action: 'pause' | 'resume' | 'wakeup') => {

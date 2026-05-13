@@ -122,9 +122,39 @@ function countPendingVerification(tasksInput: readonly Task[]): number {
   return tasksInput.filter(task => task.status === 'awaiting_verification').length
 }
 
+function isExecutionAttentionCode(value: string | null | undefined): boolean {
+  const normalized = value?.trim().toLowerCase()
+  if (!normalized || normalized === 'unknown') return false
+  if (
+    normalized === 'ok'
+    || normalized === 'pass'
+    || normalized === 'allowed_in_sandbox'
+    || normalized.startsWith('satisfied')
+  ) return false
+  return normalized.includes('violat')
+    || normalized.includes('missing')
+    || normalized.includes('need')
+    || normalized.includes('fail')
+    || normalized.includes('error')
+    || normalized.includes('passive')
+}
+
+function hasExecutionAttentionEvidence(keeper: Keeper): boolean {
+  const trust = keeper.trust
+  if (trust?.needs_attention === true) return true
+  const terminalSeverity = trust?.latest_terminal_reason?.severity?.trim().toLowerCase()
+  if (terminalSeverity === 'bad' || terminalSeverity === 'warn') return true
+  const execution = trust?.execution_summary
+  if (!execution) return false
+  if ((execution.missing_required_tools ?? []).length > 0) return true
+  return isExecutionAttentionCode(execution.runtime_proof_status)
+    || isExecutionAttentionCode(execution.tool_contract_result)
+}
+
 function countKeeperAttention(keeperInput: readonly Keeper[]): number {
   return keeperInput.filter(keeper => {
     if (keeper.needs_attention) return true
+    if (hasExecutionAttentionEvidence(keeper)) return true
     const status = (keeper.status ?? '').toLowerCase()
     return status.includes('crash') || status === 'dead' || status === 'zombie'
   }).length

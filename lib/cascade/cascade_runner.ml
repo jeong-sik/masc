@@ -558,6 +558,7 @@ let run
             stop_reason;
           }
       | None ->
+        close_agent_for_cleanup ~propagate_cancel:false ~config agent;
         Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in

@@ -623,6 +623,38 @@ let test_runtime_trace_api_bounds_rows_but_counts_full_manifest () =
         1
         (json_int_member "receipt_appended_count" turn_identity))
 
+let test_runtime_trace_api_surfaces_meta_read_error_without_trace_id () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-trace-corrupt-meta" in
+      let meta_path = Masc_mcp.Keeper_types.keeper_meta_path config keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname meta_path);
+      append_raw_line meta_path "{not-json";
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ()
+      in
+      Alcotest.(check string)
+        "corrupt meta status"
+        "not_found"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      Alcotest.(check string)
+        "corrupt meta error kind"
+        "keeper_meta_read_failed"
+        Yojson.Safe.Util.(json |> member "error_kind" |> to_string);
+      let error = Yojson.Safe.Util.(json |> member "error" |> to_string) in
+      Alcotest.(check bool)
+        "corrupt meta error is explicit"
+        true
+        (contains_substring error "metadata read failed");
+      Alcotest.(check bool)
+        "corrupt meta is not collapsed into missing trace_id"
+        false
+        (contains_substring error "trace_id query param was not supplied"))
+
 let test_unfinished_provider_attempt_repair_skips_malformed_manifest_rows () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1469,6 +1501,10 @@ let () =
           Alcotest.test_case
             "runtime trace API bounds rows while counting full manifest"
             `Quick test_runtime_trace_api_bounds_rows_but_counts_full_manifest;
+          Alcotest.test_case
+            "runtime trace API surfaces corrupt meta without trace id"
+            `Quick
+            test_runtime_trace_api_surfaces_meta_read_error_without_trace_id;
           Alcotest.test_case
             "provider attempt repair skips malformed manifest rows"
             `Quick

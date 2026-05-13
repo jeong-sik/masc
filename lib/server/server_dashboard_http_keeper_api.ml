@@ -799,28 +799,45 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
       `Assoc
         [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ] )
   else
-    let meta_result = Keeper_types.read_meta_resolved config name in
-    let effective_trace_id =
+    let trace_id_query =
       match trace_id with
       | Some value when String.trim value <> "" -> Some (String.trim value)
-      | _ -> (
-          match meta_result with
+      | _ -> None
+    in
+    let missing_trace_id_json =
+      `Assoc
+        [
+          ( "error",
+            `String
+              (Printf.sprintf
+                 "keeper %S not found and trace_id query param was not supplied"
+                 name) );
+        ]
+    in
+    let meta_read_failed_json msg =
+      `Assoc
+        [
+          ("error_kind", `String "keeper_meta_read_failed");
+          ( "error",
+            `String
+              (Printf.sprintf
+                 "keeper %S metadata read failed while resolving runtime trace: %s"
+                 name msg) );
+        ]
+    in
+    let effective_trace_id =
+      match trace_id_query with
+      | Some value -> Ok value
+      | None -> (
+          match Keeper_types.read_meta_resolved config name with
           | Ok (Some (_, meta)) ->
-              Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          | _ -> None)
+              Ok (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          | Ok None -> Error missing_trace_id_json
+          | Error msg -> Error (meta_read_failed_json msg))
     in
     match effective_trace_id with
-    | None ->
-        ( `Not_found,
-          `Assoc
-            [
-              ( "error",
-                `String
-                  (Printf.sprintf
-                     "keeper %S not found and trace_id query param was not supplied"
-                     name) );
-            ] )
-    | Some trace_id ->
+    | Error json -> (`Not_found, json)
+    | Ok trace_id ->
         let limit = max 1 (min 500 limit) in
         let manifest_scan =
           read_runtime_manifest_scan ~config ~keeper_name:name ~trace_id

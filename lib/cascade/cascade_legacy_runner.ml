@@ -221,12 +221,23 @@ type cascade_metrics_capture = {
   mutable fallback_events_rev : cascade_fallback_event list;
 }
 
+(* Non-redacted JSON encoders for the internal audit log
+   (cascade_observation_to_json → record_cascade_audit). Sibling fields
+   in the same observation envelope (selected_model, primary_model,
+   candidate_models) are already emitted as real strings; the per-attempt
+   and per-fallback model_id were the only fields collapsed to the
+   [public_runtime] placeholder by #15040. Sibling parity restored.
+
+   The redacted variants for external boundaries (keeper metrics consumed
+   by dashboard/OAS) live in lib/keeper/keeper_unified_metrics.ml as
+   [redacted_cascade_attempt_to_json] etc. and intentionally omit
+   model_id/model_label entirely. Those are not touched here. *)
 let cascade_attempt_to_json (attempt : cascade_attempt) : Yojson.Safe.t =
   `Assoc
     [
       ("attempt_index", `Int attempt.attempt_index);
-      ("model_id", `String public_runtime_model_label);
-      ("model_label", `Null);
+      ("model_id", `String attempt.model_id);
+      ("model_label", Json_util.string_opt_to_json attempt.model_label);
       ("latency_ms", Json_util.int_opt_to_json attempt.latency_ms);
       ("error", Json_util.string_opt_to_json attempt.error);
     ]
@@ -235,10 +246,10 @@ let cascade_fallback_event_to_json (event : cascade_fallback_event) :
     Yojson.Safe.t =
   `Assoc
     [
-      ("from_model_id", `String public_runtime_model_label);
-      ("from_model_label", `Null);
-      ("to_model_id", `String public_runtime_model_label);
-      ("to_model_label", `Null);
+      ("from_model_id", `String event.from_model_id);
+      ("from_model_label", Json_util.string_opt_to_json event.from_model_label);
+      ("to_model_id", `String event.to_model_id);
+      ("to_model_label", Json_util.string_opt_to_json event.to_model_label);
       ("reason", `String event.reason);
     ]
 

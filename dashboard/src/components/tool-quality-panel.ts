@@ -16,7 +16,7 @@ import {
   sharedToolQualityLoading,
 } from './fleet-data-core'
 import { route } from '../router'
-import { sourceHealthClass, freshnessText } from './common/source-health'
+import { sourceHealthClass, freshnessText, coverageGapDisplay } from './common/source-health'
 
 const TOOL_QUALITY_WINDOW_HOURS = 24
 
@@ -301,6 +301,7 @@ export function ToolQualityPanel() {
   if (loading.value && !d) return html`<${LoadingState}>도구 품질 불러오는 중...<//>`
   if (error.value) return html`<${ErrorState} message=${error.value} class="m-4" />`
   if (!d || d.total === 0) return html`<div class="p-4 text-2xs text-[var(--color-fg-disabled)]">도구 호출 데이터 없음</div>`
+  const coverageGap = coverageGapDisplay(d)
 
   return html`
     <div class="flex flex-col gap-4 p-4">
@@ -321,6 +322,12 @@ export function ToolQualityPanel() {
             <span class="mx-1" aria-hidden="true">·</span>
             <span>${(d.entry_count ?? d.total).toLocaleString()} rows</span>
           </div>
+          ${coverageGap ? html`
+            <div class="mt-1 grid gap-0.5 text-3xs text-[var(--color-status-warn)]">
+              <span>${coverageGap.summary}</span>
+              ${coverageGap.details.map(detail => html`<span class="font-mono break-all">${detail}</span>`)}
+            </div>
+          ` : null}
         </div>
         <button
           class="text-3xs px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--bg-subtle)] text-[var(--color-fg-disabled)] hover:text-[var(--text)]"

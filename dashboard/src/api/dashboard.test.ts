@@ -15,6 +15,7 @@ import {
   fetchMemorySubsystems,
   fetchRuntimeProviders,
   fetchRuntimeModelMetrics,
+  fetchTelemetrySummary,
   fetchTlcResults,
   fetchToolQuality,
 } from './dashboard'
@@ -370,6 +371,107 @@ describe('fetchToolQuality', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tool-quality?window_hours=24')
     expect(result.window_hours).toBe(24)
     expect(result.sampling_mode).toBe('window_hours')
+  })
+
+  it('preserves tool-quality coverage gap rows', async () => {
+    const rawResponse = {
+      generated_at: '2026-05-14T00:00:00Z',
+      sampling_mode: 'window_hours',
+      sample_limit: null,
+      window_hours: 24,
+      total: 2,
+      success: 1,
+      failure: 1,
+      success_rate: 50,
+      source: 'tool_call_io',
+      health: 'coverage_gap',
+      stale_reason: 'append_failed',
+      coverage_gap_count: 1,
+      coverage_gaps: [
+        {
+          schema: 'masc.telemetry_coverage_gap.v1',
+          source: 'tool_call_io',
+          producer: 'keeper_tool_call_log.append',
+          durable_store: '.masc/tool_calls',
+          dashboard_surface: '/api/v1/dashboard/tool-quality',
+          stale_reason: 'append_failed',
+          trace_id: 'trace-quality-gap',
+          error: 'disk full',
+        },
+      ],
+      by_tool: [],
+      by_keeper: [],
+      failure_categories: [],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchToolQuality({ windowHours: 24 })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tool-quality?window_hours=24')
+    expect(result.coverage_gap_count).toBe(1)
+    expect(result.coverage_gaps?.[0]).toMatchObject({
+      producer: 'keeper_tool_call_log.append',
+      durable_store: '.masc/tool_calls',
+      dashboard_surface: '/api/v1/dashboard/tool-quality',
+      stale_reason: 'append_failed',
+      trace_id: 'trace-quality-gap',
+      error: 'disk full',
+    })
+  })
+})
+
+describe('fetchTelemetrySummary', () => {
+  it('preserves per-source coverage gap rows', async () => {
+    const rawResponse = {
+      generated_at: '2026-05-14T00:00:00Z',
+      total_entries: 0,
+      sources: [
+        {
+          source: 'agent_event',
+          entry_count: 0,
+          health: 'coverage_gap',
+          stale_reason: 'append_failed',
+          coverage_gaps: [
+            {
+              schema: 'masc.telemetry_coverage_gap.v1',
+              source: 'agent_event',
+              producer: 'telemetry_eio',
+              durable_store: '.masc/telemetry',
+              dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+              stale_reason: 'append_failed',
+              error: 'disk full',
+            },
+          ],
+        },
+      ],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchTelemetrySummary()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/telemetry/summary')
+    expect(result.sources[0]?.coverage_gap_count).toBe(1)
+    expect(result.sources[0]?.coverage_gaps?.[0]).toMatchObject({
+      producer: 'telemetry_eio',
+      durable_store: '.masc/telemetry',
+      dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+      stale_reason: 'append_failed',
+      error: 'disk full',
+    })
   })
 })
 

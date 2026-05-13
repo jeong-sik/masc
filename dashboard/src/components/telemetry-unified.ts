@@ -28,6 +28,7 @@ import { OasHealthChip } from './oas-health-chip'
 import { CopyIdButton } from './common/copy-id-button'
 import { ringFocusClasses } from './common/ring'
 import { StatTile } from './common/stat-tile'
+import { coverageGapDisplay } from './common/source-health'
 
 interface StoreSnapshot {
   keepers: number
@@ -590,10 +591,14 @@ function condensedStats(items: readonly TelemetryDisplayItem[]) {
 
 function telemetrySourceStatusParts(src: TelemetrySourceSummary): string[] {
   const parts: string[] = []
+  const coverageGap = coverageGapDisplay(src)
   if (src.health) {
     parts.push(src.stale_reason ? `${src.health}: ${src.stale_reason}` : src.health)
   } else if (src.stale_reason) {
     parts.push(src.stale_reason)
+  }
+  if (coverageGap) {
+    parts.push(coverageGap.summary)
   }
   if (typeof src.latest_age_s === 'number' && Number.isFinite(src.latest_age_s)) {
     parts.push(`age ${formatElapsedCompact(src.latest_age_s)}`)
@@ -609,6 +614,18 @@ function telemetrySourceProvenanceRows(src: TelemetrySourceSummary): Array<{ lab
   if (src.producer) rows.push({ label: 'producer', value: src.producer })
   if (src.durable_store) rows.push({ label: 'store', value: src.durable_store })
   if (src.dashboard_surface) rows.push({ label: 'surface', value: src.dashboard_surface })
+  const coverageGap = coverageGapDisplay(src)
+  for (const detail of coverageGap?.details ?? []) {
+    const separator = detail.indexOf(' ')
+    if (separator <= 0) {
+      rows.push({ label: 'gap', value: detail })
+    } else {
+      rows.push({
+        label: `gap ${detail.slice(0, separator)}`,
+        value: detail.slice(separator + 1),
+      })
+    }
+  }
   return rows
 }
 

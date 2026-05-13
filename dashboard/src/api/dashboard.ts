@@ -239,19 +239,7 @@ export type ToolQualityHourlyPoint = {
   success_rate: number
 }
 
-export type ToolQualityResponse = {
-  source?: string
-  producer?: string
-  durable_store?: string
-  dashboard_surface?: string
-  freshness_slo_s?: number
-  latest_ts_unix?: number | null
-  latest_ts_iso?: string | null
-  latest_age_s?: number | null
-  health?: string
-  stale_reason?: string | null
-  entry_count?: number
-  exists?: boolean
+export type ToolQualityResponse = TelemetryFreshnessMetadata & {
   generated_at?: string
   sampling_mode?: 'recent_n' | 'window_hours' | string
   sample_limit?: number | null
@@ -2644,22 +2632,12 @@ export type TelemetryResponse = {
   entries: TelemetryEntry[]
 }
 
-export type TelemetrySourceSummary = {
+export type TelemetrySourceSummary = TelemetryFreshnessMetadata & {
   source: string
   path?: string
-  exists?: boolean
   entry_count: number
   keepers?: Array<{ name: string; path: string }>
   keeper_count?: number
-  freshness_slo_s?: number | null
-  producer?: string
-  durable_store?: string
-  dashboard_surface?: string
-  latest_ts_unix?: number | null
-  latest_ts_iso?: string | null
-  latest_age_s?: number | null
-  health?: string
-  stale_reason?: string | null
 }
 
 export type TelemetrySummaryResponse = {
@@ -2719,6 +2697,7 @@ function decodeTelemetrySourceSummary(raw: unknown): TelemetrySourceSummary | nu
   const source = asString(raw.source)
   if (!source) return null
   return {
+    ...decodeTelemetryFreshnessMetadata(raw),
     source,
     path: asString(raw.path),
     exists: asBoolean(raw.exists),
@@ -2731,15 +2710,6 @@ function decodeTelemetrySourceSummary(raw: unknown): TelemetrySourceSummary | nu
       })
       .filter((keeper): keeper is { name: string; path: string } => keeper !== null),
     keeper_count: asNumber(raw.keeper_count),
-    freshness_slo_s: asNumber(raw.freshness_slo_s),
-    producer: asString(raw.producer),
-    durable_store: asString(raw.durable_store),
-    dashboard_surface: asString(raw.dashboard_surface),
-    latest_ts_unix: asNumber(raw.latest_ts_unix),
-    latest_ts_iso: asString(raw.latest_ts_iso),
-    latest_age_s: asNumber(raw.latest_age_s),
-    health: asString(raw.health),
-    stale_reason: asNullableString(raw.stale_reason),
   }
 }
 

@@ -18,42 +18,58 @@ type CockpitPlane = Extract<CockpitMode, 'work' | 'comms' | 'observe' | 'cogniti
 interface PlaneMeta {
   label: string
   summary: string
-  stat: string
 }
 
-const PLANE_ORDER: CockpitPlane[] = ['work', 'comms', 'observe', 'cognition', 'ide']
+const PLANE_ORDER = ['work', 'comms', 'observe', 'cognition', 'ide'] as const satisfies readonly CockpitPlane[]
 
 const PLANE_META: Record<CockpitPlane, PlaneMeta> = {
   work: {
     label: 'Work',
     summary: 'Goals, tasks, and accountability routes',
-    stat: 'planning',
   },
   comms: {
     label: 'Comms',
     summary: 'Board, message, and composer routes',
-    stat: 'board',
   },
   observe: {
     label: 'Observe',
     summary: 'Runtime, safety, audit, and cost routes',
-    stat: 'runtime',
   },
   cognition: {
     label: 'Cognition',
     summary: 'Keeper, decision, memory, and research routes',
-    stat: 'fleet',
   },
   ide: {
     label: 'IDE',
     summary: 'Source, review, diff, graph, and search routes',
-    stat: 'code',
   },
 }
 
+const ENTRIES_PER_PLANE: ReadonlyMap<CockpitPlane, CockpitEntrypoint[]> = (() => {
+  const map = new Map<CockpitPlane, CockpitEntrypoint[]>()
+  for (const plane of PLANE_ORDER) map.set(plane, [])
+  for (const entrypoint of COCKPIT_ENTRYPOINTS) {
+    if (PLANE_ORDER.includes(entrypoint.mode as CockpitPlane)) {
+      map.get(entrypoint.mode as CockpitPlane)?.push(entrypoint)
+    }
+  }
+  return map
+})()
+
 const COCKPIT_COVERED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'covered').length
-const COCKPIT_PARTIAL_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'partial').length
 const COCKPIT_BLOCKED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'backend-blocked').length
+
+const PLANE_WITH_MOST_ENTRIES = PLANE_ORDER.reduce((top, plane) => {
+  const count = ENTRIES_PER_PLANE.get(plane)?.length ?? 0
+  const topCount = ENTRIES_PER_PLANE.get(top)?.length ?? 0
+  return count > topCount ? plane : top
+}, PLANE_ORDER[0])
+
+const PLANE_WITH_MOST_GAPS = PLANE_ORDER.reduce((top, plane) => {
+  const gaps = (ENTRIES_PER_PLANE.get(plane) ?? []).filter(entry => entry.coverage === 'backend-blocked').length
+  const topGaps = (ENTRIES_PER_PLANE.get(top) ?? []).filter(entry => entry.coverage === 'backend-blocked').length
+  return gaps > topGaps ? plane : top
+}, PLANE_ORDER[0])
 
 const COCKPIT_DISCLOSURE_ITEMS: CognitiveDisclosureItem[] = [
   {
@@ -65,22 +81,22 @@ const COCKPIT_DISCLOSURE_ITEMS: CognitiveDisclosureItem[] = [
     detail: html`
       <span class="font-mono text-3xs text-ok">${COCKPIT_COVERED_ROUTES} covered</span>
       <span class="mx-2 text-[var(--color-fg-disabled)]">/</span>
-      <span class="font-mono text-3xs text-warn">${COCKPIT_PARTIAL_ROUTES} partial</span>
-      <span class="mx-2 text-[var(--color-fg-disabled)]">/</span>
       <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${COCKPIT_BLOCKED_ROUTES} backend-blocked</span>
     `,
   },
   {
     level: 'comprehend',
     title: 'Plane grouping',
-    summary: PLANE_ORDER.map(plane => PLANE_META[plane].label).join(', '),
+    summary: `${PLANE_META[PLANE_WITH_MOST_ENTRIES].label} carries the most routes (${ENTRIES_PER_PLANE.get(PLANE_WITH_MOST_ENTRIES)?.length ?? 0})`,
     metric: `${PLANE_ORDER.length} planes`,
   },
   {
     level: 'project',
     title: 'Route gaps',
-    summary: `${COCKPIT_BLOCKED_ROUTES} backend-blocked, ${COCKPIT_PARTIAL_ROUTES} partial`,
-    metric: `${COCKPIT_BLOCKED_ROUTES + COCKPIT_PARTIAL_ROUTES} gaps`,
+    summary: COCKPIT_BLOCKED_ROUTES > 0
+      ? `${COCKPIT_BLOCKED_ROUTES} backend-blocked in ${PLANE_META[PLANE_WITH_MOST_GAPS].label}`
+      : 'No backend-blocked routes',
+    metric: `${COCKPIT_BLOCKED_ROUTES} gaps`,
   },
 ]
 
@@ -122,8 +138,6 @@ function coverageClass(coverage: CockpitEntrypoint['coverage']): string {
   switch (coverage) {
     case 'covered':
       return 'border-ok/30 bg-ok/10 text-ok'
-    case 'partial':
-      return 'border-warn/30 bg-warn/10 text-warn'
     case 'backend-blocked':
       return 'border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
   }
@@ -132,7 +146,6 @@ function coverageClass(coverage: CockpitEntrypoint['coverage']): string {
 function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: CockpitEntrypoint[] }) {
   const meta = PLANE_META[plane]
   const covered = entries.filter(entry => entry.coverage === 'covered').length
-  const partial = entries.filter(entry => entry.coverage === 'partial').length
   const blocked = entries.filter(entry => entry.coverage === 'backend-blocked').length
 
   return html`
@@ -153,7 +166,6 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
         </div>
         <div class="flex shrink-0 flex-wrap justify-end gap-1.5 font-mono text-3xs">
           <span class="rounded-[var(--r-0)] border border-ok/30 bg-ok/10 px-1.5 py-0.5 text-ok">${covered} covered</span>
-          <span class="rounded-[var(--r-0)] border border-warn/30 bg-warn/10 px-1.5 py-0.5 text-warn">${partial} partial</span>
           ${blocked > 0
             ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5 text-[var(--color-fg-muted)]">${blocked} blocked</span>`
             : null}
@@ -181,11 +193,10 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
               </span>
               <${ArrowUpRight} class="mt-0.5 shrink-0 text-[var(--color-fg-muted)] transition-colors group-hover:text-[var(--color-fg-primary)]" size=${14} aria-hidden="true" />
             </span>
-            <span class="flex items-center justify-between gap-2">
+            <span class="flex items-center">
               <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs ${coverageClass(entrypoint.coverage)}`}>
                 ${entrypoint.coverage}
               </span>
-              <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${meta.stat}</span>
             </span>
           <//>
         `)}
@@ -195,14 +206,6 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
 }
 
 export function Cockpit() {
-  const entriesByPlane = new Map<CockpitPlane, CockpitEntrypoint[]>()
-  for (const plane of PLANE_ORDER) entriesByPlane.set(plane, [])
-  for (const entrypoint of COCKPIT_ENTRYPOINTS) {
-    if (PLANE_ORDER.includes(entrypoint.mode as CockpitPlane)) {
-      entriesByPlane.get(entrypoint.mode as CockpitPlane)?.push(entrypoint)
-    }
-  }
-
   return html`
     <div class="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg-page)]">
       <div class="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(18rem,26rem)_minmax(0,1fr)]">
@@ -218,14 +221,9 @@ export function Cockpit() {
                   <p class="font-mono text-3xs text-[var(--color-fg-muted)]">MASC Cockpit</p>
                   <h1 class="mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">Command Map</h1>
                 </div>
-                <div class="flex flex-wrap gap-1.5 font-mono text-3xs text-[var(--color-fg-muted)]">
-                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5">
-                    ${COCKPIT_ENTRYPOINTS.length} routes
-                  </span>
-                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5">
-                    ${PLANE_ORDER.length} planes
-                  </span>
-                </div>
+                <p class="font-mono text-3xs text-[var(--color-fg-muted)]">
+                  ${COCKPIT_ENTRYPOINTS.length} routes across ${PLANE_ORDER.length} planes
+                </p>
               </div>
             </section>
 
@@ -239,7 +237,7 @@ export function Cockpit() {
               <${PlaneSection}
                 key=${plane}
                 plane=${plane}
-                entries=${entriesByPlane.get(plane) ?? []}
+                entries=${ENTRIES_PER_PLANE.get(plane) ?? []}
               />
             `)}
           </div>

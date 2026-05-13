@@ -24,7 +24,7 @@ export interface CockpitEntrypoint {
   mode: CockpitMode
   aliases: string[]
   target: CockpitRouteTarget
-  coverage: 'covered' | 'partial' | 'backend-blocked'
+  coverage: 'covered' | 'backend-blocked'
 }
 
 export interface CognitiveModeState {

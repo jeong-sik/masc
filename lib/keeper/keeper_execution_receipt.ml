@@ -415,6 +415,7 @@ type operator_disposition_reason =
   | Reason_degraded_retry
   | Reason_cascade_fallback
   | Reason_provider_runtime_error
+  | Reason_internal_error
   | Reason_tool_required_unsatisfied
   | Reason_turn_livelock_blocked
   | Reason_cancelled
@@ -428,6 +429,7 @@ let operator_disposition_reason_to_string = function
   | Reason_degraded_retry -> "degraded_retry"
   | Reason_cascade_fallback -> "cascade_fallback"
   | Reason_provider_runtime_error -> "provider_runtime_error"
+  | Reason_internal_error -> "internal_error"
   | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
@@ -503,6 +505,13 @@ let operator_disposition (receipt : t)
     | Some "turn_livelock_blocked" -> true
     | Some _ | None -> false
   then Disp_pause_human, Reason_turn_livelock_blocked
+  else if
+    String.equal terminal_reason "internal_error"
+    ||
+    match error_kind with
+    | Some "internal" -> true
+    | Some _ | None -> false
+  then Disp_pause_human, Reason_internal_error
   else if
     receipt.tool_surface.tool_requirement = Required
     && (List.mem

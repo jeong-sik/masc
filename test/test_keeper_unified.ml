@@ -628,6 +628,69 @@ let test_observe_claimable_backlog_uses_auto_goal_fallback_scope () =
        check int "auto-goal fallback claimable backlog" 1 obs.claimable_task_count)
 ;;
 
+let test_observe_failed_count_ignores_cancelled_tasks () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc_mcp.Coord.default_config base_dir in
+       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+       ignore
+         (Masc_mcp.Coord.add_task
+            config
+            ~title:"Cancelled stale task"
+            ~priority:1
+            ~description:"desc");
+       (match
+          Masc_mcp.Coord.force_cancel_task_r
+            config
+            ~agent_name:"operator"
+            ~task_id:"task-001"
+            ~reason:"terminal cleanup"
+            ()
+        with
+        | Ok _ -> ()
+        | Error err -> fail (Types.masc_error_to_string err));
+       let obs =
+         WO.observe
+           ~allowed_tool_names:(Some [ "keeper_task_claim"; "keeper_tasks_audit" ])
+           ~pending_board_events:(Some [])
+           ~config
+           ~meta:minimal_meta
+       in
+       check int "cancelled tasks are terminal, not failed actionable work" 0
+         obs.failed_task_count)
+;;
+
+let test_observe_failed_count_counts_orphan_active_tasks () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc_mcp.Coord.default_config base_dir in
+       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+       ignore
+         (Masc_mcp.Coord.add_task
+            config
+            ~title:"Orphan active task"
+            ~priority:1
+            ~description:"desc");
+       ignore
+         (Masc_mcp.Coord.claim_task
+            config
+            ~agent_name:"missing-agent"
+            ~task_id:"task-001");
+       let obs =
+         WO.observe
+           ~allowed_tool_names:(Some [ "keeper_task_claim"; "keeper_tasks_audit" ])
+           ~pending_board_events:(Some [])
+           ~config
+           ~meta:minimal_meta
+       in
+       check int "orphan active tasks remain auditable failed work" 1
+         obs.failed_task_count)
+;;
+
 let test_durable_signal_present_sees_claimable_backlog_for_smart_hb_gate () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -10863,6 +10926,14 @@ let () =
             "claimable backlog mirrors auto-goal fallback"
             `Quick
             test_observe_claimable_backlog_uses_auto_goal_fallback_scope
+        ; test_case
+            "failed count ignores cancelled terminal tasks"
+            `Quick
+            test_observe_failed_count_ignores_cancelled_tasks
+        ; test_case
+            "failed count keeps orphan active tasks auditable"
+            `Quick
+            test_observe_failed_count_counts_orphan_active_tasks
         ; test_case
             "durable signal sees claimable backlog"
             `Quick

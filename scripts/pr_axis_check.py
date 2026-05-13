@@ -19,9 +19,12 @@ import json
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+GH_RETRIES = 3
 
 
 @dataclass(frozen=True)
@@ -43,28 +46,64 @@ class AxisRisk:
 
 def _run_gh(args: List[str]) -> Any:
     """Run gh cli and return JSON output."""
-    result = subprocess.run(
-        ["gh", "api"] + args,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"gh api error: {result.stderr}", file=sys.stderr)
-        sys.exit(2)
-    return json.loads(result.stdout)
+    rendered_args = " ".join(args)
+    for attempt in range(1, GH_RETRIES + 1):
+        result = subprocess.run(
+            ["gh", "api"] + args,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            if attempt < GH_RETRIES:
+                time.sleep(attempt)
+                continue
+            print(
+                f"gh api error for {rendered_args}: {result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            if attempt < GH_RETRIES:
+                time.sleep(attempt)
+                continue
+            print(
+                f"gh api invalid JSON for {rendered_args}: {exc}; "
+                f"stdout={result.stdout[:500]!r}; stderr={result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    raise AssertionError("unreachable gh api retry loop")
 
 
 def _run_gh_graphql(query: str) -> dict:
     """Run gh graphql query and return data."""
-    result = subprocess.run(
-        ["gh", "api", "graphql", "-f", f"query={query}"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"gh graphql error: {result.stderr}", file=sys.stderr)
-        sys.exit(2)
-    return json.loads(result.stdout)
+    for attempt in range(1, GH_RETRIES + 1):
+        result = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={query}"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            if attempt < GH_RETRIES:
+                time.sleep(attempt)
+                continue
+            print(f"gh graphql error: {result.stderr.strip()}", file=sys.stderr)
+            sys.exit(2)
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            if attempt < GH_RETRIES:
+                time.sleep(attempt)
+                continue
+            print(
+                f"gh graphql invalid JSON: {exc}; "
+                f"stdout={result.stdout[:500]!r}; stderr={result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    raise AssertionError("unreachable gh graphql retry loop")
 
 
 def get_repo_slug() -> Tuple[str, str]:

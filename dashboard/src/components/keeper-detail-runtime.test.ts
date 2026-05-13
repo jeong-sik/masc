@@ -430,8 +430,8 @@ describe('RuntimeLensSection', () => {
       },
       event_bus: {
         event_bus_correlated_count: 1,
-        correlation_ids: [],
-        run_ids: [],
+        correlation_ids: ['corr-1'],
+        run_ids: ['run-1'],
         context_compact_started_count: 1,
         context_compacted_count: 1,
         last_compaction: null,
@@ -626,6 +626,19 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByTestId('runtime-lens')).toBeInTheDocument()
     expect(screen.getByText('keeper / OAS turn')).toBeInTheDocument()
     expect(screen.getByText('7 / 3')).toBeInTheDocument()
+    expect(screen.getByText('trace id')).toBeInTheDocument()
+    expect(screen.getByText('trace-lens')).toBeInTheDocument()
+    expect(screen.getByText('manifest rows')).toBeInTheDocument()
+    expect(screen.getByText('6/6')).toBeInTheDocument()
+    expect(screen.getByText('receipt rows')).toBeInTheDocument()
+    expect(screen.getByText('provider attempts')).toBeInTheDocument()
+    expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
+    expect(screen.getByText('provider terminal')).toBeInTheDocument()
+    expect(screen.getByText('timeout / outer_oas_timeout')).toBeInTheDocument()
+    expect(screen.getByText('event ids')).toBeInTheDocument()
+    expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
+    expect(screen.getByText('memory evidence')).toBeInTheDocument()
+    expect(screen.getByText('inj 1/1 · flush 1/0 · ep/proc 2/1')).toBeInTheDocument()
     expect(screen.getAllByText('keeper_task_done').length).toBeGreaterThan(0)
     expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()

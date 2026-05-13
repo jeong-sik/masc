@@ -110,10 +110,14 @@ let provider_supports_runtime_mcp_http_header
       (provider_cfg : Llm_provider.Provider_config.t)
       key
   =
-  (* General HTTP-header support OR adapter-specific identity-header
-     carve-out (e.g. Codex CLI carries [Authorization]/[x-masc-*] via
-     [bearer_token_env_var] + non-secret routing labels).  The carve-out
-     set lives on the adapter row, not in this consumer module. *)
+  (* General HTTP-header support OR the adapter identity-header carve-out.
+     The identity carve-out covers `x-masc-*` routing labels and other
+     non-secret headers declared per adapter (see Provider_adapter).
+     [Authorization] is NOT carried here: it is handled separately by
+     [provider_supports_bridged_authorization_header] below, which requires
+     both adapter-level per-keeper bridging and the x-masc-agent-name /
+     x-masc-keeper-name identity headers to be present on the same request.
+     The carve-out set lives on the adapter row, not in this consumer module. *)
   Provider_adapter.accepts_runtime_mcp_http_header_for_config provider_cfg key
 ;;
 

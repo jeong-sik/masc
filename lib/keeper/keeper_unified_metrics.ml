@@ -507,6 +507,48 @@ let observed_triggers_of_observation
   if Option.is_some observation.worktree_change_summary then add "worktree_change";
   List.rev !triggers
 
+let normalized_work_discovery_sources (meta : keeper_meta) =
+  match meta.work_discovery_sources with
+  | None -> None
+  | Some sources ->
+      Some
+        (sources
+         |> List.map (fun source ->
+                source |> String.trim |> String.lowercase_ascii)
+         |> List.filter (fun source -> source <> ""))
+
+let work_discovery_sources_allow ~default_allowed ~matches meta =
+  match normalized_work_discovery_sources meta with
+  | None -> default_allowed
+  | Some [] -> default_allowed
+  | Some sources -> List.exists matches sources
+
+let work_discovery_allows_task_claim meta =
+  work_discovery_sources_allow ~default_allowed:true ~matches:(function
+    | "unclaimed_tasks"
+    | "claimable_tasks"
+    | "task_claim"
+    | "claim" -> true
+    | _ -> false)
+    meta
+
+let work_discovery_allows_task_audit meta =
+  work_discovery_sources_allow ~default_allowed:true ~matches:(function
+    | "stale_tasks"
+    | "failed_tasks"
+    | "task_audit"
+    | "orphan_tasks" -> true
+    | _ -> false)
+    meta
+
+let work_discovery_allows_board_cleanup meta =
+  work_discovery_sources_allow ~default_allowed:false ~matches:(function
+    | "board_cleanup"
+    | "board_curation"
+    | "zombie_board_posts" -> true
+    | _ -> false)
+    meta
+
 let observed_affordances_of_observation
     ?meta
     (observation : Keeper_world_observation.world_observation) : string list =
@@ -514,11 +556,29 @@ let observed_affordances_of_observation
   let add affordance = affordances := affordance :: !affordances in
   if observation.pending_mentions <> [] then add "reply_in_room";
   if observation.pending_board_events <> [] then add "board_post_or_comment";
-  if List.length observation.pending_board_events >= 2 then add "board_curation";
+  let source_allows_board_cleanup =
+    match meta with
+    | Some meta -> work_discovery_allows_board_cleanup meta
+    | None -> false
+  in
+  if List.length observation.pending_board_events >= 2
+     || (observation.work_discovery_due && source_allows_board_cleanup)
+  then add "board_curation";
   if observation.pending_scope_messages <> [] then add "message_sweep";
-  if observation.claimable_task_count > 0 then add "task_claim";
-  if observation.failed_task_count > 0 then add "task_audit";
-  let _ = meta in
+  let source_allows_task_claim =
+    match meta with
+    | Some meta -> work_discovery_allows_task_claim meta
+    | None -> true
+  in
+  let source_allows_task_audit =
+    match meta with
+    | Some meta -> work_discovery_allows_task_audit meta
+    | None -> true
+  in
+  if observation.claimable_task_count > 0 && source_allows_task_claim then
+    add "task_claim";
+  if observation.failed_task_count > 0 && source_allows_task_audit then
+    add "task_audit";
   if observation.pending_verification_count > 0 then
     add "task_verify";
   if observation.work_discovery_due then add "work_discovery";

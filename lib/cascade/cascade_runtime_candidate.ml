@@ -39,27 +39,38 @@ let of_provider_config provider_cfg =
 
 let of_provider_configs provider_cfgs = List.map of_provider_config provider_cfgs
 
+let registry_default_base_url provider_name =
+  let registry = Llm_provider.Provider_registry.default () in
+  match Llm_provider.Provider_registry.find registry provider_name with
+  | Some entry -> entry.defaults.base_url
+  | None -> ""
+
 let runtime_url_of_label label =
-  match Cascade_config.parse_model_string label with
-  | Some cfg when String.trim cfg.base_url <> "" -> Some cfg.base_url
-  | _ -> None
+  match Provider_kind_resolver.resolve label with
+  | Provider_kind_resolver.Custom_url { base_url; _ } ->
+      let base_url = String.trim base_url in
+      if String.equal base_url "" then None else Some base_url
+  | Provider_kind_resolver.Registered { provider_name; _ } ->
+      let base_url = registry_default_base_url provider_name |> String.trim in
+      if String.equal base_url "" then None else Some base_url
+  | Provider_kind_resolver.Unknown _ -> None
+
+let runtime_id_of_label label =
+  match Provider_kind_resolver.resolve label with
+  | Provider_kind_resolver.Registered { model_id; _ }
+  | Provider_kind_resolver.Custom_url { model_id; _ } ->
+      let runtime_id = String.trim model_id in
+      if String.equal runtime_id "" then None else Some runtime_id
+  | Provider_kind_resolver.Unknown _ -> None
 
 let label_matches_runtime_id ~label ~runtime_id =
-  match Cascade_config.parse_model_string label with
-  | Some cfg -> String.equal (String.trim cfg.model_id) (String.trim runtime_id)
+  match runtime_id_of_label label with
+  | Some label_runtime_id ->
+      String.equal (String.trim label_runtime_id) (String.trim runtime_id)
   | None -> false
 
 let has_resolvable_runtime_label labels =
-  List.exists
-    (fun label -> Option.is_some (Cascade_config.parse_model_string label))
-    labels
-
-let runtime_id_of_label label =
-  match Cascade_config.parse_model_string label with
-  | Some cfg ->
-      let runtime_id = String.trim cfg.model_id in
-      if String.equal runtime_id "" then None else Some runtime_id
-  | None -> None
+  List.exists (fun label -> Option.is_some (runtime_id_of_label label)) labels
 
 let runtime_id_of_label_or_raw label =
   match runtime_id_of_label label with

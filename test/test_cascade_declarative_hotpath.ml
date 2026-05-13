@@ -45,7 +45,10 @@ let with_env name value f =
     ~finally:(fun () ->
       match previous with
       | Some v -> Unix.putenv name v
-      | None -> Unix.putenv name "")
+      (* Unix.putenv name "" would leave [name] present-but-empty, so
+         Sys.getenv_opt checks that distinguish unset from empty would
+         see a different shape than before with_env ran. *)
+      | None -> Unix.unsetenv name)
     f
 
 let with_temp_cascade_config toml f =

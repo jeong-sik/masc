@@ -17,6 +17,10 @@ val observed_affordances_of_observation :
   Keeper_world_observation.world_observation ->
   string list
 
+(** Whether a keeper's explicit [work_discovery_sources] allow task claiming.
+    [None] and an empty list preserve the historical broad discovery default. *)
+val work_discovery_allows_task_claim : Keeper_types.keeper_meta -> bool
+
 type turn_mode =
   | Tool_use
   | Text_response

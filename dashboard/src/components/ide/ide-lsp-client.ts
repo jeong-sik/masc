@@ -638,7 +638,7 @@ function publishLspDiagnosticSnapshot(
   lspDiagnosticSnapshot.value = next
 }
 
-function clearLspDiagnosticSnapshot(filePath: string): void {
+export function clearLspDiagnosticSnapshot(filePath: string): void {
   const normalizedFilePath = normalizeIdeContextFilePath(filePath)
   if (normalizedFilePath === null) return
   const next = new Map(lspDiagnosticSnapshot.value)
@@ -727,7 +727,9 @@ const lspViewPlugin = ViewPlugin.fromClass(
       if (update.docChanged) this.hideTooltip()
       const newFilePath = update.state.field(lspConfigField).filePath
       if (newFilePath !== this.filePath) {
-        this.conn.notifyDidClose(this.filePath)
+        const oldFilePath = this.filePath
+        this.conn.notifyDidClose(oldFilePath)
+        clearLspDiagnosticSnapshot(oldFilePath)
         this.filePath = newFilePath
         this.conn.notifyDidOpen(newFilePath, languageIdFromPath(newFilePath) ?? 'text')
         this.scheduleRefresh()
@@ -751,6 +753,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
       ])
 
       if (!view.dom.isConnected) return
+      if (fp !== this.filePath) return
       const effects: StateEffect<unknown>[] = []
       if (lenses.status === 'fulfilled') effects.push(setCodeLenses.of(lenses.value))
       if (hints.status === 'fulfilled') effects.push(setInlayHints.of(hints.value))

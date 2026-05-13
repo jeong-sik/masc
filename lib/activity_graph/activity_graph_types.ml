@@ -299,9 +299,12 @@ let derive_context_from_tag fields raw =
   | None -> fields
   | Some ("file", value) ->
     let file_path, line = tag_file_value value in
-    fields
-    |> assoc_replace_string_opt "file_path" file_path
-    |> assoc_replace_int_opt "line" line
+    (match file_path with
+     | Some file_path ->
+       fields
+       |> assoc_replace "file_path" (`String file_path)
+       |> assoc_replace_int_opt "line" line
+     | None -> fields)
   | Some ("line", value) ->
     (match int_of_string_opt value with
      | Some line when line >= 1 -> assoc_replace "line" (`Int line) fields

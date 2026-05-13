@@ -168,23 +168,43 @@ let test_events_json_omits_unsafe_ide_context_file_paths () =
            ~tags:[ "file:lib/../tag.ml:31" ]
            ~payload:(`Assoc [])
            ());
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-mismatch")
+           ~tags:[ "file:/workspace/lib/tag.ml:99" ]
+           ~payload:
+             (`Assoc
+                [
+                  ("file_path", `String "lib/payload.ml");
+                  ("line", `Int 12);
+                ])
+           ());
       let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
       let open Yojson.Safe.Util in
       match json |> member "events" |> to_list with
-      | [ payload_event; drive_event; traversal_event ] ->
+      | [ payload_event; drive_event; traversal_event; mismatch_event ] ->
+        let file_path_omitted event =
+          match event |> member "context" with
+          | `Null -> true
+          | context -> context |> member "file_path" = `Null
+        in
         List.iter
           (fun event ->
-            check bool "unsafe file path omitted" true
-              (event |> member "context" |> member "file_path" |> fun value ->
-               value = `Null))
+            check bool "unsafe file path omitted" true (file_path_omitted event))
           [ payload_event; drive_event; traversal_event ];
         check int "line survives without unsafe payload file path" 12
           (payload_event |> member "context" |> member "line" |> to_int);
-        check int "line survives without unsafe tag file path" 27
-          (drive_event |> member "context" |> member "line" |> to_int)
+        check bool "unsafe tag file line omitted" true
+          (drive_event |> member "context" = `Null);
+        let mismatch_context = mismatch_event |> member "context" in
+        check string "unsafe tag keeps payload file path" "lib/payload.ml"
+          (mismatch_context |> member "file_path" |> to_string);
+        check int "unsafe tag keeps payload line" 12
+          (mismatch_context |> member "line" |> to_int)
       | events ->
         fail
-          (Printf.sprintf "expected three events, got %d" (List.length events)))
+          (Printf.sprintf "expected four events, got %d" (List.length events)))
 
 let test_events_json_ignores_invalid_derived_pr_number () =
   with_config (fun config ->

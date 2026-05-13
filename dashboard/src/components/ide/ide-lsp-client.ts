@@ -360,7 +360,7 @@ class LspConnection {
   private initialized = false
 
   constructor(
-    private readonly onDiagnostics: (filePath: string | null, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
+    private readonly onDiagnostics: (uri: string | undefined, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
     private readonly onError: (err: unknown) => void,
   ) {}
 
@@ -424,7 +424,7 @@ class LspConnection {
         existing.push(diag)
         diagByLine.set(line, existing)
       }
-      this.onDiagnostics(filePathFromUri(params.uri), diagByLine)
+      this.onDiagnostics(params.uri, diagByLine)
     }
   }
 
@@ -567,13 +567,28 @@ function toFileUri(filePath: string): string {
   return `file://${filePath}`
 }
 
-function filePathFromUri(uri: string | undefined): string | null {
+export function resolveLspDiagnosticFilePath(
+  uri: string | undefined,
+  currentFilePath: string,
+): string | null {
   if (!uri) return null
   const rawPath = uri.startsWith('file://') ? uri.slice('file://'.length) : uri
+  const decodedPath = decodeUriPath(rawPath)
+  const normalized = normalizeIdeContextFilePath(decodedPath)
+  if (normalized !== null) return normalized
+
+  const normalizedCurrent = normalizeIdeContextFilePath(currentFilePath)
+  if (normalizedCurrent === null) return null
+  return decodedPath.endsWith(`/${normalizedCurrent}`) || decodedPath === normalizedCurrent
+    ? normalizedCurrent
+    : null
+}
+
+function decodeUriPath(rawPath: string): string {
   try {
-    return normalizeIdeContextFilePath(decodeURIComponent(rawPath))
+    return decodeURIComponent(rawPath)
   } catch {
-    return normalizeIdeContextFilePath(rawPath)
+    return rawPath
   }
 }
 
@@ -683,8 +698,9 @@ const lspViewPlugin = ViewPlugin.fromClass(
       const filePath = view.state.field(lspConfigField).filePath
       this.filePath = filePath
       this.conn = new LspConnection(
-        (diagnosticFilePath, diags) => {
-          const filePath = diagnosticFilePath ?? this.filePath
+        (diagnosticUri, diags) => {
+          const filePath = resolveLspDiagnosticFilePath(diagnosticUri, this.filePath)
+          if (filePath === null) return
           publishLspDiagnosticSnapshot(filePath, diags)
           const normalizedFilePath = normalizeIdeContextFilePath(filePath)
           const normalizedCurrentFilePath = normalizeIdeContextFilePath(this.filePath)

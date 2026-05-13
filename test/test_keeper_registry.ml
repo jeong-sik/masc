@@ -1049,6 +1049,39 @@ let test_meta_write_sync_updates_registered_only () =
           entry.meta.goal
       | None -> fail "expected registered keeper entry")
 
+let test_missing_turn_observation_updates_are_silent () =
+  R.clear ();
+  let name = "missing-turn-observation-test" in
+  let labels = [ "name", name ] in
+  let dropped_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  R.mark_turn_started ~base_path:bp name;
+  R.mark_sdk_turn_started ~base_path:bp name;
+  R.mark_turn_measurement ~base_path:bp name;
+  R.set_turn_decision_stage
+    ~base_path:bp
+    name
+    R.Decision_active_tool_policy_selected;
+  R.set_turn_cascade_state ~base_path:bp name (R.Packed R.Cascade_selecting);
+  R.set_turn_phase ~base_path:bp name (R.Packed R.Turn_executing);
+  R.set_turn_selected_model ~base_path:bp name (Some "runtime");
+  R.prepare_turn_retry_after_compaction ~base_path:bp name;
+  R.mark_turn_finished ~base_path:bp name;
+  let dropped_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  check
+    (float 0.001)
+    "missing turn-observation writes are documented no-ops, not orphan drops"
+    dropped_before
+    dropped_after
+;;
+
 let test_find_by_agent_name () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fn1" (make_meta "fn1") in
@@ -1703,6 +1736,8 @@ let () =
             test_update_entry_orphan_drop_emits_metrics;
           eio_test "meta write sync skips dormant registry drops"
             test_meta_write_sync_updates_registered_only;
+          eio_test "missing turn observation updates are silent"
+            test_missing_turn_observation_updates_are_silent;
         ] );
       ( "resolve_config",
         [

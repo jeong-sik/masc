@@ -71,6 +71,9 @@ let known_internal_names_tbl : (string, unit) Hashtbl.t =
        | Some public -> Hashtbl.replace t public ()
        | None -> ())
     Tool_catalog_surfaces.keeper_internal_tools;
+  List.iter
+    (fun public_mcp -> Hashtbl.replace t public_mcp ())
+    Tool_catalog_surfaces.public_mcp_surface_tools;
   t
 ;;
 

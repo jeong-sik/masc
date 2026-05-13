@@ -1204,6 +1204,23 @@ let update_entry ~base_path name f =
   loop ()
 ;;
 
+let update_entry_if_registered ~base_path name f =
+  let key = registry_key ~base_path name in
+  let rec loop () =
+    let current = Atomic.get registry in
+    match StringMap.find_opt key current with
+    | None -> false
+    | Some entry ->
+      let updated = StringMap.add key (f entry) current in
+      if Atomic.compare_and_set registry current updated
+      then (
+        clear_orphan_drop ~base_path name;
+        true)
+      else loop ()
+  in
+  loop ()
+;;
+
 let max_crash_log_entries = 5
 
 let register_with_state
@@ -1600,7 +1617,7 @@ let update_current_turn e f =
 let mark_turn_started ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     let turn_id = e.meta.runtime.usage.total_turns + 1 in
     let obs =
       { turn_id
@@ -1617,7 +1634,7 @@ let mark_turn_started ~base_path name =
     { e with
       current_turn_observation = Some obs
     ; compaction_stage = Packed Compaction_accumulating
-    });
+    }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -1633,7 +1650,7 @@ let mark_turn_started ~base_path name =
 let mark_sdk_turn_started ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     match e.current_turn_observation with
     | None -> e
     | Some obs ->
@@ -1651,14 +1668,14 @@ let mark_sdk_turn_started ~base_path name =
           ; decision_stage = Packed Decision_undecided
           }
         in
-        { e with current_turn_observation = Some new_obs }));
+        { e with current_turn_observation = Some new_obs })));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let mark_turn_measurement ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     match e.current_turn_observation, e.pending_turn_measurement with
     | Some obs, Some measurement ->
       changed := true;
@@ -1671,7 +1688,7 @@ let mark_turn_measurement ~base_path name =
             }
       ; pending_turn_measurement = None
       }
-    | _ -> e);
+    | _ -> e));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -1743,13 +1760,13 @@ let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_act
   let target_packed = decision_stage_active_to_packed decision_stage in
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       if obs.decision_stage = target_packed
       then obs
       else (
         changed := true;
-        { obs with decision_stage = target_packed })));
+        { obs with decision_stage = target_packed }))));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -1780,7 +1797,7 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
      axis (which also dispatches through its resolver as of Phase 4b). *)
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       let new_turn_phase = turn_phase_of_cascade_state cascade_state in
       match resolve_cascade_transition ~from:obs.cascade_state ~target:cascade_state with
@@ -1799,7 +1816,7 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
                ~from:obs.cascade_state
                ~to_:cascade_state
                ~violation);
-        obs));
+        obs)));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -1852,7 +1869,7 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
      arm below. *)
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
       | Resolved_turn_idempotent -> obs
@@ -1880,24 +1897,24 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
                ~from:obs.turn_phase
                ~to_:turn_phase
                ~violation);
-        obs));
+        obs)));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let set_turn_selected_model ~base_path name selected_model =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       changed := true;
-      { obs with selected_model }));
+      { obs with selected_model })));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let prepare_turn_retry_after_compaction ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       validate_cascade_transition
         ~from:obs.cascade_state
@@ -1909,7 +1926,7 @@ let prepare_turn_retry_after_compaction ~base_path name =
       ; decision_stage = Packed Decision_guard_ok
       ; cascade_state = Packed Cascade_idle
       ; selected_model = None
-      }));
+      })));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -1943,7 +1960,7 @@ let mark_turn_finished ~base_path name =
   let completed_turn_to_record = ref None in
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
+  ignore (update_entry_if_registered ~base_path name (fun e ->
     let had_live_turn =
       match e.current_turn_observation with
       | Some _ -> true
@@ -1982,7 +1999,7 @@ let mark_turn_finished ~base_path name =
         }
       else e.meta
     in
-    { e with meta; current_turn_observation = None; last_completed_turn });
+    { e with meta; current_turn_observation = None; last_completed_turn }));
   Option.iter
     (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
     !completed_turn_to_record;

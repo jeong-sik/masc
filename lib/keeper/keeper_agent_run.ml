@@ -685,6 +685,8 @@ let run_turn
                      ~max_tokens
                      ?max_cost_usd
                      ?wait_timeout_sec:admission_wait_timeout_sec
+                     ~accept:
+                       Keeper_tool_disclosure.response_has_text_or_tool_progress
                      ?guardrails
                      ?on_event
                      ?on_yield

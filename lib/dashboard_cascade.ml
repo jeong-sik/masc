@@ -25,17 +25,41 @@ module StringSet = Set.Make (String)
 
 let now_iso () = Masc_domain.now_iso ()
 
-let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
-  let string_opt_to_json = function
-    | Some value -> `String value
-    | None -> `Null
+let json_string_option = function
+  | Some value -> `String value
+  | None -> `Null
+;;
+
+let is_ollama_cloud_profile profile_name =
+  String.starts_with ~prefix:"tier.ollama_cloud" profile_name
+  || String.starts_with ~prefix:"ollama_cloud" profile_name
+;;
+
+let is_ollama_cloud_candidate ~profile_name (c : CC.candidate_info) =
+  is_ollama_cloud_profile profile_name
+  ||
+  match c.provider_name with
+  | Some provider_name ->
+    String.equal provider_name "ollama"
+    && (String.ends_with ~suffix:":cloud" c.model_string
+        || List.exists
+             (fun model -> String.ends_with ~suffix:":cloud" model)
+             c.expanded_models)
+  | None -> false
+;;
+
+let candidate_to_json ~profile_name (c : CC.candidate_info) : Yojson.Safe.t =
+  let provider_name, display_provider_name, runtime_kind =
+    if is_ollama_cloud_candidate ~profile_name c
+    then Some "ollama_cloud", Some "Ollama Cloud", Some "direct_api"
+    else c.provider_name, c.display_provider_name, c.runtime_kind
   in
   `Assoc
     [ "model", `String c.model_string
     ; "display_model", `String c.display_model_string
-    ; "provider_name", string_opt_to_json c.provider_name
-    ; "display_provider_name", string_opt_to_json c.display_provider_name
-    ; "runtime_kind", string_opt_to_json c.runtime_kind
+    ; "provider_name", json_string_option provider_name
+    ; "display_provider_name", json_string_option display_provider_name
+    ; "runtime_kind", json_string_option runtime_kind
     ; "expanded_models", `List (List.map (fun value -> `String value) c.expanded_models)
     ; "config_weight", `Int c.config_weight
     ; "effective_weight", `Int c.effective_weight
@@ -188,7 +212,7 @@ let profile_json_of_trace ~keeper_assignable name (trace : CC.selection_trace) =
     [ "name", `String name
     ; "source", `String (source_to_string trace.source)
     ; "keeper_assignable", `Bool keeper_assignable
-    ; "candidates", `List (List.map candidate_to_json trace.candidates)
+    ; "candidates", `List (List.map (candidate_to_json ~profile_name:name) trace.candidates)
     ]
 ;;
 

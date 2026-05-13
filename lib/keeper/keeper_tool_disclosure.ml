@@ -549,6 +549,23 @@ let normalize_response_text ~(text : string) ~(tool_names : string list) ()
            (String.concat ", " tool_names)))
 ;;
 
+let response_has_text_or_tool_progress (response : Agent_sdk.Types.api_response) =
+  let text = Agent_sdk.Types.text_of_content response.content |> String.trim in
+  text <> ""
+  || List.exists
+       (function
+         | Agent_sdk.Types.ToolUse _ -> true
+         | Agent_sdk.Types.Text _
+         | Agent_sdk.Types.Thinking _
+         | Agent_sdk.Types.RedactedThinking _
+         | Agent_sdk.Types.ToolResult _
+         | Agent_sdk.Types.Image _
+         | Agent_sdk.Types.Document _
+         | Agent_sdk.Types.Audio _ -> false)
+       response.content
+  || response.stop_reason <> Agent_sdk.Types.EndTurn
+;;
+
 let tool_query_text_of_user_message (text : string) : string =
   let allowed_sections =
     [ "### Pending Mentions"

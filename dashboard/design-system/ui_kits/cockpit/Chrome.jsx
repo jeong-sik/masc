@@ -306,6 +306,17 @@ function kpiCollect(D) {
 // ============== KPI Strip ==============
 const VISIBLE_KPI_LIMIT = 5;
 
+// Sibling helper for keyboard activation on role="button" divs. Mirrors the
+// definition in Panels.jsx; duplicated locally so KpiStrip does not depend on
+// script load order (Panels.jsx loads after Chrome.jsx in index.html).
+const kpiActivateOnKey = (handler) => (e) => {
+  if (e.target !== e.currentTarget) return;
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    handler();
+  }
+};
+
 function KpiStrip() {
   const [col, toggle] = (window.useCollapsed ? window.useCollapsed("kpi") : [false, () => {}]);
   const stats = kpiCollect(window.MASC_DATA || {});
@@ -337,7 +348,15 @@ function KpiStrip() {
   );
   return (
     <div className={"kpi" + (col ? " wx-collapsed" : "")}>
-      <div className="kpi-collapse-tab" onClick={toggle} title={col ? "expand KPI" : "collapse KPI"}>
+      <div
+        className="kpi-collapse-tab"
+        onClick={toggle}
+        onKeyDown={kpiActivateOnKey(toggle)}
+        role="button"
+        tabIndex={0}
+        aria-label={col ? "expand KPI" : "collapse KPI"}
+        aria-expanded={!col}
+        title={col ? "expand KPI" : "collapse KPI"}>
         {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : visibleMetricCount + "/" + totalMetricCount) : "▾"}
         {!col && (
           <a className="wx-popout"

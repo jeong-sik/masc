@@ -382,7 +382,10 @@ function Drawer() {
     return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
   };
   document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "`") {
+    // Match the physical backquote key, not the produced character. Layouts
+    // with dead keys (e.g. several European keyboards) emit e.key === "Dead"
+    // for the backquote key, which broke the advertised Ctrl/Cmd+` toggle.
+    if ((e.ctrlKey || e.metaKey) && e.code === "Backquote") {
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("masc-drawer-toggle"));

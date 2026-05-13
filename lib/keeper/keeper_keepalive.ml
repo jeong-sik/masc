@@ -121,6 +121,7 @@ let set_keeper_paused_state ~agent_name paused =
           else Keeper_state_machine.Operator_resume);
        if not paused
        then (
+         Keeper_turn_livelock.reset_keeper_livelock ~keeper:entry.name;
          (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;
          (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.

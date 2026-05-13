@@ -221,7 +221,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     Log.Keeper.warn
       "update_keeper resumed paused keeper %s; clearing \
        auto_resume_after_sec=%s last_blocker.klass=%s last_blocker.detail=%S"
-      old.name auto_resume_after_sec blocker_class blocker_detail);
+      old.name auto_resume_after_sec blocker_class blocker_detail;
+    Keeper_turn_livelock.reset_keeper_livelock ~keeper:old.name);
   if old.paused && not resume_paused_keeper then
     Log.Keeper.warn
       "update_keeper kept %s paused because an approval/reconcile gate is pending"

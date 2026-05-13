@@ -479,6 +479,7 @@ let test_playground_repo_status_refreshes_cached_git_metadata () =
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
       Keeper_registry.clear ();
+      Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1377,6 +1378,13 @@ let test_keeper_up_resumes_auto_paused_keeper () =
       (match Keeper_types.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> Alcotest.fail ("paused meta write failed: " ^ err));
+      ignore
+        (Masc_mcp.Keeper_turn_livelock.guard_and_record_turn_start
+           ~keeper:keeper_name
+           ~turn_id:11
+           ~max_attempts:3
+           ~stuck_after_sec:1800.0
+           ());
       let ok, body =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
           ~args:
@@ -1396,7 +1404,10 @@ let test_keeper_up_resumes_auto_paused_keeper () =
       Alcotest.(check bool) "auto resume delay cleared" true
         (Option.is_none resumed.auto_resume_after_sec);
       Alcotest.(check bool) "runtime blocker cleared" true
-        (Option.is_none resumed.runtime.last_blocker))
+        (Option.is_none resumed.runtime.last_blocker);
+      Alcotest.(check bool) "keeper_up resume clears livelock state" true
+        (Option.is_none
+           (Masc_mcp.Keeper_turn_livelock.current_state ~keeper:keeper_name)))
 
 let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
   Eio_main.run @@ fun env ->

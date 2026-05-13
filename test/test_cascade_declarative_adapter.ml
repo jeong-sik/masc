@@ -317,6 +317,55 @@ strategy = "failover"
            (List.length configs)))
 ;;
 
+let test_model_capabilities_tool_choice_reaches_provider_config () =
+  let toml =
+    {|
+[providers.glm-coding]
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[models.glm-5-1]
+max-context = 128000
+api-name = "glm-5.1"
+tools-support = true
+
+[models.glm-5-1.capabilities]
+supports-tool-choice = true
+
+[glm-coding.glm-5-1]
+max-concurrent = 1
+
+[tier.coding_plan_primary]
+members = ["glm-coding.glm-5-1"]
+strategy = "failover"
+|}
+  in
+  let catalog = adapt_toml toml in
+  no_errors catalog.errors;
+  let tier =
+    List.find
+      (fun (p : adapted_profile) -> p.name = "tier.coding_plan_primary")
+      catalog.profiles
+  in
+  match tier.provider_configs with
+  | [ cfg ] ->
+    check
+      (option bool)
+      "supports-tool-choice override is preserved"
+      (Some true)
+      cfg.Llm_provider.Provider_config.supports_tool_choice_override;
+    check bool "tool-choice gate accepts declared model capability" true
+      (Masc_mcp.Provider_tool_support.supports_required_tool_use
+         ~require_tool_choice_support:true
+         ~require_tool_support:true
+         cfg)
+  | configs ->
+    fail
+      (Printf.sprintf
+         "expected one resolved provider config, got %d"
+         (List.length configs))
+;;
+
 let test_declared_http_provider_v1_endpoint_dedupes_request_path () =
   let toml =
     {|
@@ -838,6 +887,10 @@ let () =
             "registered HTTP provider uses registry api_key_env fallback"
             `Quick
             test_registered_http_provider_without_credentials_uses_registry_api_key_env
+        ; test_case
+            "model supports-tool-choice reaches provider config"
+            `Quick
+            test_model_capabilities_tool_choice_reaches_provider_config
         ; test_case
             "declared HTTP provider dedupes request path"
             `Quick

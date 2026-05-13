@@ -100,6 +100,7 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
   'log',
   'telemetry',
 ]
+const MAX_CONTEXT_ROUTE_LINKS = 8
 
 export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLensModel {
   const fileAnnotations = input.annotations.filter(annotation =>
@@ -683,7 +684,7 @@ function routeLinksForContext(context: {
       evidence: `Keeper ${keeperId}`,
     })
   }
-  return links.slice(0, 6)
+  return links.slice(0, MAX_CONTEXT_ROUTE_LINKS)
 }
 
 function cleanId(value: string | undefined): string | null {

@@ -259,10 +259,20 @@ describe('IdeContextLens', () => {
       'Comment',
       'PR',
       'Git',
+      'Log',
+      'Keeper',
     ])
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Comment')).toMatchObject({
       tab: 'workspace',
       params: { section: 'board', post: 'post-1', comment: 'comment-1' },
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Log')).toMatchObject({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'audit' },
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Keeper')).toMatchObject({
+      tab: 'monitoring',
+      params: { section: 'agents', view: 'keepers', keeper: 'sangsu' },
     })
   })
 

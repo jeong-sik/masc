@@ -377,11 +377,8 @@ describe('IdeContextLens', () => {
 
     const lineSurface = model.surfaces.find(surface => surface.id === 'line')
     expect(lineSurface?.count).toBe(0)
-    expect(model.anchors[0]).toMatchObject({
-      surface: 'Goal',
-      file_path: 'lib/keeper/keeper_exec_ide.ml',
-    })
-    expect(model.anchors[0]?.line).toBeUndefined()
+    expect(model.linkedCount).toBe(0)
+    expect(model.anchors).toEqual([])
   })
 
   it('does not advertise delete-only diff rows as editor-focusable lines', () => {

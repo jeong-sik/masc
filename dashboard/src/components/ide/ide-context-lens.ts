@@ -115,6 +115,8 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   )
   const fileEvents = input.events.filter(event => {
     const eventFile = event.context?.file_path
+    const eventLine = event.context?.line
+    if (eventLine !== undefined && eventFile === undefined) return false
     return eventFile === undefined || eventFile === input.filePath
   })
   const eventSearchTextByEvent = new Map<RunActivityEvent, string>(

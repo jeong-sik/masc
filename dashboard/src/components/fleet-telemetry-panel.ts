@@ -47,6 +47,7 @@ import {
   summaryCounts,
   toneForPressure,
   toneForToolSuccess,
+  toolTelemetryCoverageDetail,
   toolSummary,
   type FleetRow,
   type FleetTelemetryState,
@@ -135,7 +136,7 @@ function SummaryCard({
     <div class="rounded-[var(--r-1)] border ${toneClass} p-3">
       <${Eyebrow} tone="disabled">${title}</${Eyebrow}>
       <div class="mt-1 text-xl font-semibold text-[var(--text)]">${value}</div>
-      <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-disabled)]">${detail}</div>
+      <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${detail}</div>
     </div>
   `
 }
@@ -750,7 +751,7 @@ export function FleetTelemetryPanel() {
         <${SummaryCard}
           title="키퍼 가동률"
           value=${`${counts.live}/${value.rows.length || 0}`}
-          detail=${`${counts.toolCovered}/${value.rows.length || 0} 키퍼가 최근 도구 활동을 보였습니다.`}
+          detail=${toolTelemetryCoverageDetail(counts, value.rows.length)}
           tone=${liveTone}
         />
         <${SummaryCard}

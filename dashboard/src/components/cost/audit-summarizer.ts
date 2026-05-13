@@ -82,3 +82,52 @@ export function summarizeAuditKinds(entries: readonly AuditEntry[]): AuditKindSu
     }))
     .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind))
 }
+
+export function auditEntryMatchesLogId(entry: AuditEntry, logId: string | null): boolean {
+  const needle = normalizeLogNeedle(logId)
+  if (!needle) return false
+  return [
+    entry.id,
+    entry.target,
+    entry.summary,
+  ].some(value => stringContainsLogNeedle(value, needle))
+    || payloadContainsLogNeedle(entry.payload, needle)
+}
+
+export function prioritizeAuditEntriesByLogId(entries: readonly AuditEntry[], logId: string | null): AuditEntry[] {
+  const needle = normalizeLogNeedle(logId)
+  if (!needle) return [...entries]
+  const matched: AuditEntry[] = []
+  const rest: AuditEntry[] = []
+  for (const entry of entries) {
+    if (auditEntryMatchesLogId(entry, needle)) matched.push(entry)
+    else rest.push(entry)
+  }
+  return [...matched, ...rest]
+}
+
+function normalizeLogNeedle(value: string | null | undefined): string | null {
+  const trimmed = value?.trim().toLowerCase()
+  return trimmed ? trimmed : null
+}
+
+function stringContainsLogNeedle(value: string | undefined, needle: string): boolean {
+  return typeof value === 'string' && value.toLowerCase().includes(needle)
+}
+
+function payloadContainsLogNeedle(value: unknown, needle: string, depth = 0): boolean {
+  if (depth > 4 || value == null) return false
+  if (typeof value === 'string') return stringContainsLogNeedle(value, needle)
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).toLowerCase() === needle
+  }
+  if (Array.isArray(value)) {
+    return value.some(item => payloadContainsLogNeedle(item, needle, depth + 1))
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value).some(([key, item]) =>
+      stringContainsLogNeedle(key, needle) || payloadContainsLogNeedle(item, needle, depth + 1),
+    )
+  }
+  return false
+}

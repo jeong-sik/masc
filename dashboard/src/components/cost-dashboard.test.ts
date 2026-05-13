@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest"
 import type { AuditEntry } from "../api/dashboard"
 import {
+  auditEntryMatchesLogId,
+  auditLogRouteParams,
   auditRouteParams,
   formatTokens,
   isAuditFocus,
@@ -9,6 +11,7 @@ import {
   isCostView,
   summarizeAuditActors,
   summarizeAuditKinds,
+  prioritizeAuditEntriesByLogId,
   viewModeForCostFocus,
 } from "./cost-dashboard"
 
@@ -91,6 +94,7 @@ describe("audit focus helpers", () => {
     expect(auditRouteParams("ledger")).toEqual({ section: "runtime", view: "audit" })
     expect(auditRouteParams("actor")).toEqual({ section: "runtime", view: "audit", focus: "actor" })
     expect(auditRouteParams("summary")).toEqual({ section: "runtime", view: "audit", focus: "summary" })
+    expect(auditLogRouteParams("turn-9")).toEqual({ section: "runtime", view: "audit", log_id: "turn-9" })
   })
 })
 
@@ -196,6 +200,35 @@ describe("audit summaries", () => {
         info: 0,
         latest: "2026-05-06T00:02:01Z",
       },
+    ])
+  })
+
+  it("detects and pins audit entries related to a focused log id", () => {
+    const logEntries: AuditEntry[] = [
+      {
+        id: "unrelated",
+        ts: "2026-05-06T00:00:01Z",
+        actor: "keeper-alpha",
+        kind: "tool_call",
+        summary: "alpha called a tool",
+        severity: "info",
+      },
+      {
+        id: "audit-turn-9",
+        ts: "2026-05-06T00:00:02Z",
+        actor: "keeper-alpha",
+        kind: "keeper_turn",
+        summary: "keeper turn completed",
+        severity: "info",
+        payload: { refs: [{ log_id: "turn-9" }] },
+      },
+    ]
+
+    expect(auditEntryMatchesLogId(logEntries[0]!, "turn-9")).toBe(false)
+    expect(auditEntryMatchesLogId(logEntries[1]!, "turn-9")).toBe(true)
+    expect(prioritizeAuditEntriesByLogId(logEntries, "turn-9").map(entry => entry.id)).toEqual([
+      "audit-turn-9",
+      "unrelated",
     ])
   })
 })

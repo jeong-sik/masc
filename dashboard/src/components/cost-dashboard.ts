@@ -49,10 +49,13 @@ import {
   viewModeForCostFocus,
   isAuditFocus,
   auditRouteParams,
+  auditLogRouteParams,
 } from './cost/cost-types'
 import { formatTokens, severityClass } from './cost/cost-formatters'
 import {
   severityBuckets,
+  auditEntryMatchesLogId,
+  prioritizeAuditEntriesByLogId,
   summarizeAuditActors,
   summarizeAuditKinds,
 } from './cost/audit-summarizer'
@@ -68,7 +71,10 @@ export {
   viewModeForCostFocus,
   isAuditFocus,
   auditRouteParams,
+  auditLogRouteParams,
   formatTokens,
+  auditEntryMatchesLogId,
+  prioritizeAuditEntriesByLogId,
   summarizeAuditActors,
   summarizeAuditKinds,
 }
@@ -123,6 +129,11 @@ const stressState = signal<StressLoadState>({ status: 'idle' })
 const coverageState = signal<CoverageLoadState>({ status: 'idle' })
 const auditLedgerState = signal<AuditLedgerLoadState>({ status: 'idle' })
 const keeperDecisionsState = signal<KeeperDecisionsLoadState>({ status: 'idle' })
+function cleanRouteParam(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
 const activeCostFocus = computed<CostFocus | null>(() => {
   const focus = route.value.params.focus
   return isCostFocus(focus) ? focus : null
@@ -131,6 +142,7 @@ const activeAuditFocus = computed<AuditFocus | null>(() => {
   const focus = route.value.params.focus
   return isAuditFocus(focus) ? focus : null
 })
+const activeAuditLogId = computed<string | null>(() => cleanRouteParam(route.value.params.log_id))
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -944,7 +956,8 @@ function AuditSummaryBoard({ entries, count }: { entries: AuditEntry[]; count: n
   `
 }
 
-function AuditLedgerTable({ entries }: { entries: AuditEntry[] }) {
+function AuditLedgerTable({ entries, logId }: { entries: AuditEntry[]; logId: string | null }) {
+  const orderedEntries = prioritizeAuditEntriesByLogId(entries, logId)
   return html`
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Audit ledger entries">
@@ -958,34 +971,44 @@ function AuditLedgerTable({ entries }: { entries: AuditEntry[] }) {
             </tr>
           </thead>
           <tbody>
-            ${entries.map((e, i) => html`
-              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+            ${orderedEntries.map((e, i) => {
+              const matched = auditEntryMatchesLogId(e, logId)
+              return html`
+              <tr key=${`${e.id}-${i}`} class=${`border-b text-2xs ${matched ? 'border-[var(--brass-3)] bg-[var(--accent-12)]' : 'border-[var(--color-border-default)]/50'}`}>
                 <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.ts}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${e.actor}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.kind}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-text-muted max-w-[24ch] truncate" title=${e.summary}>${e.summary}</td>
                 <td class="px-2 py-1.5 text-left font-mono ${severityClass(e.severity)}">${e.severity}</td>
               </tr>
-            `)}
+            `})}
           </tbody>
         </table>
       </div>
   `
 }
 
-function AuditLedgerBoard({ entries, count, focus }: { entries: AuditEntry[]; count: number; focus: AuditFocus | null }) {
+function AuditLedgerBoard({ entries, count, focus, logId }: { entries: AuditEntry[]; count: number; focus: AuditFocus | null; logId: string | null }) {
+  const focusedEntries = logId ? entries.filter(entry => auditEntryMatchesLogId(entry, logId)) : []
   return html`
     <section class="flex flex-col gap-4" aria-label="Audit ledger">
       <div class="flex flex-col items-start gap-2 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit ledger · ${count} entries</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit ledger · ${count} entries${logId ? ` · log ${logId}` : ''}</span>
         <${AuditFocusRail} focus=${focus} count=${count} />
       </div>
+      ${logId ? html`
+        <div class=${`rounded-[var(--r-1)] border px-3 py-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] ${focusedEntries.length > 0 ? 'border-[var(--brass-3)] bg-[var(--accent-12)] text-[var(--brass-1)]' : 'border-card-border/60 bg-[var(--backdrop-deep)] text-text-muted'}`} data-testid="audit-log-focus">
+          ${focusedEntries.length > 0
+            ? `log focus · ${logId} · ${focusedEntries.length} matches pinned`
+            : `log focus miss · ${logId} · showing latest entries`}
+        </div>
+      ` : null}
 
       ${focus === 'actor'
         ? html`<${AuditActorBoard} entries=${entries} />`
         : focus === 'summary'
           ? html`<${AuditSummaryBoard} entries=${entries} count=${count} />`
-          : html`<${AuditLedgerTable} entries=${entries} />`}
+          : html`<${AuditLedgerTable} entries=${entries} logId=${logId} />`}
     </section>
   `
 }
@@ -1305,6 +1328,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
               entries=${auditLedgerState.value.data.entries}
               count=${auditLedgerState.value.data.count}
               focus=${activeAuditFocus.value}
+              logId=${activeAuditLogId.value}
             />`
           : auditLedgerState.value.status === 'error'
             ? html`<${ErrorState}

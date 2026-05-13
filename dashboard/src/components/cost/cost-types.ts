@@ -32,3 +32,7 @@ export function auditRouteParams(focus: 'ledger' | AuditFocus): Record<string, s
     ? { section: 'runtime', view: 'audit' }
     : { section: 'runtime', view: 'audit', focus }
 }
+
+export function auditLogRouteParams(logId: string): Record<string, string> {
+  return { section: 'runtime', view: 'audit', log_id: logId }
+}

@@ -336,6 +336,21 @@ describe('IdeActivityMock', () => {
             },
             tags: [],
           },
+          {
+            seq: 4,
+            ts_ms: 70,
+            ts_iso: '2026-05-05T10:00:03Z',
+            room_id: 'run-default',
+            kind: 'telemetry.turn',
+            actor: { kind: 'keeper', id: 'sangsu' },
+            subject: { kind: 'log', id: 'turn-4' },
+            payload: {
+              file_path: 'lib/payload.ml',
+              line: 4,
+              log_id: 'turn-4',
+            },
+            tags: ['file:/workspace/lib/other.ml:99'],
+          },
         ],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -344,11 +359,15 @@ describe('IdeActivityMock', () => {
     render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('3 events')
+      expect(container.textContent).toContain('4 events')
     })
 
     const jumps = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-context-jump')]
-    expect(jumps.map(jump => jump.textContent)).toEqual(['↗ runtime.ml:4', '↗ runtime.ml:7'])
+    expect(jumps.map(jump => jump.textContent)).toEqual([
+      '↗ runtime.ml:4',
+      '↗ runtime.ml:7',
+      '↗ payload.ml:4',
+    ])
 
     fireEvent.click(jumps[0]!)
     expect(activeIdeFile.value).toBe('lib/runtime.ml')

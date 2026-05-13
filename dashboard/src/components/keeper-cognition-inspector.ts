@@ -109,8 +109,8 @@ export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
         : '-',
     },
     {
-      label: 'social model',
-      value: displayValue(keeper.configured_social_model ?? keeper.social_model ?? keeper.social_model_fallback),
+      label: 'social runtime',
+      value: keeper.social_model_recognized === false ? 'needs attention' : 'runtime',
     },
   ]
 }

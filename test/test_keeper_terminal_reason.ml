@@ -230,7 +230,7 @@ let test_agent_cost_budget_unenforceable () =
   check
     string
     "cost_budget_unenforceable"
-    "agent_error_cost_budget_unenforceable:model_id=glm-5.1,limit_usd=10.00"
+    "agent_error_cost_budget_unenforceable:runtime=runtime,limit_usd=10.00"
     (code
        (mk_agent
           (Agent_sdk.Error.CostBudgetUnenforceable

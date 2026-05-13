@@ -85,7 +85,6 @@
    keeper_exec_ide
    keeper_shell_docker
    keeper_egress_audit
-   keeper_mcp_provider_audit
    keeper_shell_gh_context
    keeper_shell_bg_task
    keeper_shell_shared
@@ -128,7 +127,7 @@
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
-  keeper_agent_context
+  cascade_agent_context
   keeper_oas_checkpoint
   keeper_cascade_engine
   keeper_turn_driver

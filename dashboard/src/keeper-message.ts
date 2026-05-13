@@ -62,7 +62,7 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
   return {
     traceId: asString(payload.trace_id) ?? null,
     generation: asNumber(payload.generation) ?? null,
-    modelUsed: asString(payload.model_used) ?? null,
+    modelUsed: null,
     latencyMs: asNumber(payload.latency_ms) ?? null,
     costUsd: asNumber(payload.cost_usd) ?? null,
     usage,

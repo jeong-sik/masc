@@ -15,8 +15,6 @@ let cascade_name_of_string raw = Keeper_cascade_profile.Runtime_name raw
 let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
 
 type provider_rejection = {
-  provider_label : string;
-  provider_kind : string;
   reason : string;
 }
 
@@ -84,14 +82,6 @@ let string_list_of_assoc key = function
       | _ -> [])
   | _ -> []
 
-let provider_rejection_to_json r =
-  `Assoc
-    [
-      ("provider_label", `String r.provider_label);
-      ("provider_kind", `String r.provider_kind);
-      ("reason", `String r.reason);
-    ]
-
 let provider_rejection_of_json = function
   | `Assoc fields ->
       let field name =
@@ -99,9 +89,9 @@ let provider_rejection_of_json = function
         | Some (`String value) -> Some value
         | _ -> None
       in
-      (match field "provider_label", field "provider_kind", field "reason" with
-       | Some provider_label, Some provider_kind, Some reason ->
-           Some { provider_label; provider_kind; reason }
+      (match field "reason" with
+       | Some reason ->
+           Some { reason }
        | _ -> None)
   | _ -> None
 
@@ -111,6 +101,16 @@ let provider_rejections_of_assoc key = function
       | Some (`List values) -> List.filter_map provider_rejection_of_json values
       | _ -> [])
   | _ -> []
+
+let provider_rejection_reasons_of_assoc key json =
+  string_list_of_assoc key json
+  |> List.map (fun reason -> { reason })
+
+let provider_rejection_reasons rejections =
+  rejections
+  |> List.map (fun r -> String.trim r.reason)
+  |> List.filter (fun reason -> reason <> "")
+  |> Json_util.dedupe_keep_order
 
 let string_opt_of_assoc key = function
   | `Assoc fields -> (
@@ -145,14 +145,15 @@ let masc_internal_error_to_json = function
         provider_rejections;
       } ->
     let cascade_name = cascade_name_to_string cascade_name in
+    let rejection_reasons = provider_rejection_reasons provider_rejections in
     `Assoc
       [
         ("kind", `String "no_tool_capable_provider");
         ("cascade_name", `String cascade_name);
-        ("configured_labels", string_list_json configured_labels);
+        ("configured_candidate_count", `Int (List.length configured_labels));
         ("required_tool_names", string_list_json required_tool_names);
-        ( "provider_rejections",
-          `List (List.map provider_rejection_to_json provider_rejections) );
+        ("rejected_candidate_count", `Int (List.length provider_rejections));
+        ("rejection_reasons", string_list_json rejection_reasons);
       ]
   | Accept_rejected { scope; model; reason } ->
     `Assoc
@@ -221,13 +222,9 @@ let summarize_list ?(empty = "none") values =
   | _ -> String.concat ", " values
 
 let summarize_provider_rejections rejections =
-  match rejections with
+  match provider_rejection_reasons rejections with
   | [] -> "none"
-  | _ ->
-      rejections
-      |> List.map (fun r ->
-           Printf.sprintf "%s:%s" r.provider_label r.reason)
-      |> String.concat "; "
+  | reasons -> String.concat "; " reasons
 
 let summary_of_masc_internal_error = function
   | No_tool_capable_provider
@@ -240,11 +237,12 @@ let summary_of_masc_internal_error = function
       let cascade_name = cascade_name_to_string cascade_name in
       Some
         (Printf.sprintf
-           "No tool-capable provider for cascade %s; required_tools=[%s]; rejected_providers=[%s]; configured=[%s]"
+           "No tool-capable provider for cascade %s; required_tools=[%s]; rejected_candidate_count=%d; rejection_reasons=[%s]; configured_candidate_count=%d"
            cascade_name
            (summarize_list required_tool_names)
+           (List.length provider_rejections)
            (summarize_provider_rejections provider_rejections)
-           (summarize_list configured_labels))
+           (List.length configured_labels))
   | Oas_timeout_budget
       {
         budget_sec;
@@ -315,8 +313,7 @@ let () =
        provider in its own cascade and was driven by an upper layer \
        to a different cascade. Labels: from_cascade (cascade the \
        keeper was configured for), to_cascade (cascade that \
-       supplied the working provider), provider (debug label of \
-       the resolved provider)."
+       supplied the working candidate)."
     ()
 
 let kind_of_masc_internal_error = function
@@ -457,8 +454,13 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                    required_tool_names =
                      string_list_of_assoc "required_tool_names" json;
                    provider_rejections =
-                     provider_rejections_of_assoc "provider_rejections"
-                       json;
+                     (match
+                        provider_rejections_of_assoc "provider_rejections" json
+                      with
+                      | [] ->
+                          provider_rejection_reasons_of_assoc
+                            "rejection_reasons" json
+                      | provider_rejections -> provider_rejections);
                  })
           | None -> None)
       | Some (`String "accept_rejected") -> (

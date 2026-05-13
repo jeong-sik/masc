@@ -52,8 +52,6 @@ val guard_and_record_turn_start :
   turn_id:int ->
   max_attempts:int ->
   stuck_after_sec:float ->
-  ?provider:string ->
-  ?model:string ->
   unit ->
   guarded_start_outcome
 (** Atomically enforce a per-turn retry/age budget before recording a start.
@@ -61,9 +59,8 @@ val guard_and_record_turn_start :
     start for the same [(keeper, turn_id)] is [Blocked].  Blocked starts do
     not increment [metric_keeper_turn_starts], because no dispatch occurs.
 
-    If [model] is provided and [Keeper_provider_health] reports that any
-    provider serving the model is unhealthy, [stuck_after_sec] is halved so
-    the gate reacts faster to provider degradation. *)
+    Provider/model health is intentionally not part of this gate; concrete
+    runtime identity belongs to OAS. *)
 
 val gate_reason_kind : gate_reason -> string
 val gate_reason_to_string : gate_reason -> string

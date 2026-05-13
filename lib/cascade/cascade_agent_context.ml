@@ -1,4 +1,4 @@
-(** Keeper_agent_context — Shared config and agent assembly helpers.
+(** Cascade_agent_context — Shared config and agent assembly helpers.
 
     This module owns the shared [config] surface plus the pure/defaulted
     preparation logic used by both [build] and [resume_from_checkpoint].

@@ -659,11 +659,15 @@ export interface DashboardRuntimeModelMetricsResponse {
   models: DashboardRuntimeModelMetric[]
 }
 
+function runtimeLaneLabel(index: number): string {
+  return `runtime_lane_${index + 1}`
+}
+
 function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderDiscovery | null {
   if (!isRecord(raw)) return null
   return {
     healthy: asBoolean(raw.healthy),
-    discovered_model: asNullableString(raw.discovered_model),
+    discovered_model: null,
     ctx_size: asNumber(raw.ctx_size) ?? null,
     total_slots: asNumber(raw.total_slots) ?? null,
     busy_slots: asNumber(raw.busy_slots) ?? null,
@@ -677,17 +681,17 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
   if (!provider) return null
   return {
     provider,
-    kind: asNullableString(raw.kind),
+    kind: 'runtime',
     runtime_kind: asNullableString(raw.runtime_kind),
     auth_kind: asNullableString(raw.auth_kind),
     status: asNullableString(raw.status),
     available: asBoolean(raw.available),
     supports_single_agent_run: asBoolean(raw.supports_single_agent_run),
-    default_model: asNullableString(raw.default_model),
+    default_model: null,
     model_count: asNumber(raw.model_count) ?? null,
-    models: asStringArray(raw.models),
+    models: [],
     source: asNullableString(raw.source),
-    endpoint_url: asNullableString(raw.endpoint_url),
+    endpoint_url: null,
     note: asNullableString(raw.note),
     discovery: decodeRuntimeProviderDiscovery(raw.discovery),
   }
@@ -718,7 +722,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
   if (!modelId) return null
   return {
     model_id: modelId,
-    provider: asNullableString(raw.provider),
+    provider: null,
     entry_count: asNumber(raw.entry_count) ?? null,
     avg_tok_per_sec: asNumber(raw.avg_tok_per_sec) ?? null,
     p50_tok_per_sec: asNumber(raw.p50_tok_per_sec) ?? null,
@@ -825,7 +829,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
           }))
       : null,
     models: asRecordArray(raw.models)
-      .map(decodeRuntimeModelMetric)
+      .map(metric => decodeRuntimeModelMetric(metric))
       .filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),
   }
 }
@@ -871,6 +875,11 @@ function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
   if (!isRecord(raw)) return null
   const keeperName = asString(raw.keeper_name)
   if (!keeperName) return null
+  const runtimeCost = Array.isArray(raw.model_breakdown)
+    ? (raw.model_breakdown as unknown[])
+        .filter(isRecord)
+        .reduce((sum, item) => sum + (asNumber(item.cost_usd) ?? 0), 0)
+    : 0
   return {
     keeper_name: keeperName,
     total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
@@ -880,12 +889,7 @@ function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
     p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
     p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
     sample_count: asNumber(raw.sample_count) ?? 0,
-    model_breakdown: Array.isArray(raw.model_breakdown)
-      ? (raw.model_breakdown as unknown[])
-          .filter(isRecord)
-          .map(b => ({ model: asString(b.model) ?? '', cost_usd: asNumber(b.cost_usd) ?? 0 }))
-          .filter(b => b.model.length > 0)
-      : [],
+    model_breakdown: runtimeCost > 0 ? [{ model: 'runtime', cost_usd: runtimeCost }] : [],
   }
 }
 
@@ -940,7 +944,7 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
     keeper_name: asString(raw.keeper_name) ?? '',
     event_type: asString(raw.event_type) ?? 'turn',
     outcome: asNullableString(raw.outcome),
-    model_used: asNullableString(raw.model_used),
+    model_used: null,
     latency_ms: asNumber(raw.latency_ms) ?? null,
     cost_usd: asNumber(raw.cost_usd) ?? null,
     input_tokens: asNumber(raw.input_tokens) ?? null,
@@ -2080,9 +2084,9 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     execution: {
       models: normalizeStringList(execution.models),
-      active_model: asNullableString(execution.active_model) ?? '',
-      active_model_label: asNullableString(execution.active_model_label),
-      last_model_used_label: asNullableString(execution.last_model_used_label),
+      active_model: '',
+      active_model_label: null,
+      last_model_used_label: null,
       per_provider_timeout_sec: perProviderTimeoutSec,
       per_provider_timeout_mode:
         asNullableString(execution.per_provider_timeout_mode)
@@ -2146,8 +2150,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       presence_keepalive: asLooseBoolean(runtime.presence_keepalive),
       presence_keepalive_sec: asInt(runtime.presence_keepalive_sec) ?? 0,
       runtime_blocker_class: asKeeperRuntimeBlockerClass(runtime.runtime_blocker_class),
-      active_model_label: asNullableString(runtime.active_model_label),
-      last_model_used_label: asNullableString(runtime.last_model_used_label),
+      active_model_label: null,
+      last_model_used_label: null,
       runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),
       runtime_blocker_continue_gate:
         typeof runtime.runtime_blocker_continue_gate === 'boolean'
@@ -2192,7 +2196,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       total_output_tokens: asInt(metrics.total_output_tokens) ?? 0,
       total_tokens: asInt(metrics.total_tokens) ?? 0,
       total_cost_usd: asLooseNumber(metrics.total_cost_usd) ?? 0,
-      last_model_used: asNullableString(metrics.last_model_used) ?? '',
+      last_model_used: '',
       last_input_tokens: asInt(metrics.last_input_tokens) ?? 0,
       last_output_tokens: asInt(metrics.last_output_tokens) ?? 0,
       last_total_tokens: asInt(metrics.last_total_tokens) ?? 0,
@@ -3070,15 +3074,29 @@ function decodeCostPerAgentRow(raw: unknown): CostPerAgentRow | null {
 
 function decodeCostMatrix(raw: unknown): CostMatrix | null {
   if (!isRecord(raw)) return null
-  const providers = asStringArray(raw.providers)
-  const models = asStringArray(raw.models)
-  const grid = Array.isArray(raw.grid)
+  const rawModels = asStringArray(raw.models)
+  const rawGrid = Array.isArray(raw.grid)
     ? (raw.grid as unknown[]).map(row =>
         Array.isArray(row)
           ? (row as unknown[]).map(v => asNumber(v) ?? 0)
           : []
       )
     : []
+  const colCount = Math.max(
+    rawModels.length,
+    rawGrid.reduce((max, row) => Math.max(max, row.length), 0),
+  )
+  const models = Array.from({ length: colCount }, (_, index) =>
+    rawModels[index] ?? runtimeLaneLabel(index),
+  )
+  const providers = colCount > 0 || asStringArray(raw.providers).length > 0 ? ['runtime'] : []
+  const grid = providers.length === 0
+    ? []
+    : [
+        Array.from({ length: colCount }, (_, column) =>
+          rawGrid.reduce((sum, row) => sum + (row[column] ?? 0), 0),
+        ),
+      ]
   return { providers, models, grid }
 }
 
@@ -3088,7 +3106,7 @@ function decodeCostLatencyResponse(raw: unknown): CostLatencyResponse | null {
   if (!matrix) return null
   return {
     perAgent: asRecordArray(raw.perAgent)
-      .map(decodeCostPerAgentRow)
+      .map(row => decodeCostPerAgentRow(row))
       .filter((r): r is CostPerAgentRow => r !== null),
     matrix,
     latencyBuckets: Array.isArray(raw.latencyBuckets)

@@ -1011,11 +1011,6 @@ let execution_summary_json ~meta ~latest_receipt =
     | `Null -> None
     | json -> json_string_opt_member "outcome" json
   in
-  let cascade_selected_model =
-    match cascade_json with
-    | `Null -> None
-    | json -> json_string_opt_member "selected_model" json
-  in
   let mutation_guard_summary =
     match tool_contract_result with
     | Some "violated" -> "mutation_contract_violated"
@@ -1044,7 +1039,7 @@ let execution_summary_json ~meta ~latest_receipt =
         | Some value -> `Bool value
         | None -> `Null );
       ( "provider_selected_model",
-        Json_util.string_opt_to_json cascade_selected_model );
+        `Null );
       ( "cascade_outcome",
         Json_util.string_opt_to_json cascade_outcome );
       ( "sandbox_summary",
@@ -1309,15 +1304,6 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
     | Some entry -> `String (Keeper_state_machine.phase_to_string entry.phase)
     | None -> `Null
   in
-  let selected_model =
-    Option.bind latest_decision (fun json ->
-        match json_member "telemetry" json with
-        | `Assoc _ as telemetry ->
-            (match json_string_opt_member "selected_model" telemetry with
-             | Some _ as value -> value
-             | None -> json_string_opt_member "model_used" telemetry)
-        | _ -> None)
-  in
   let runtime_contract =
     Keeper_runtime_contract.runtime_contract_json ~config meta
   in
@@ -1375,8 +1361,8 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
       ("current_task_id", Json_util.string_opt_to_json (Keeper_runtime_contract.current_task_id_opt meta));
       ("goal_id", Json_util.string_opt_to_json (Keeper_runtime_contract.primary_goal_id_opt meta));
       ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
-      ("active_model", `String (Keeper_exec_status.active_model_label_of_meta meta));
-      ("selected_model", Json_util.string_opt_to_json selected_model);
+      ("active_model", `Null);
+      ("selected_model", `Null);
       ("runtime_contract", runtime_contract);
       ("runtime_blockers", `Assoc runtime_blocker_fields);
       ("disposition", `String disposition);

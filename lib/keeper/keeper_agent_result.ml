@@ -52,50 +52,9 @@ let nonempty_trimmed raw =
   let trimmed = String.trim raw in
   if trimmed = "" then None else Some trimmed
 
-let surface_model_used (result : run_result) : string =
-  let attempt_surface_model (attempt : Cascade_legacy_runner.cascade_attempt) =
-    match Option.bind attempt.model_label nonempty_trimmed with
-    | Some label -> Some label
-    | None -> nonempty_trimmed attempt.model_id
-  in
-  let observation_surface_model (obs : Cascade_legacy_runner.cascade_observation) =
-    match
-      obs.attempts
-      |> List.rev
-      |> List.find_map attempt_surface_model
-    with
-    | Some model -> Some model
-    | None -> (
-        match Option.bind obs.selected_model nonempty_trimmed with
-        | Some model -> Some model
-        | None -> Option.bind obs.primary_model nonempty_trimmed)
-  in
-  match Option.bind result.cascade_observation observation_surface_model with
-  | Some model -> model
-  | None -> Option.value ~default:"" (nonempty_trimmed result.model_used)
+let runtime_lane_label = "runtime"
 
-let surface_resolved_model_id (result : run_result) : string =
-  (* Always prefer the concrete resolved model_id over any cascade label.
-     The final attempt's model_id is authoritative — cascade attempts are
-     recorded in order, so [List.rev |> find_map] picks the last attempt
-     that actually ran. Falls back to selected/primary observation fields
-     when attempts are unavailable, then to the raw provider-reported
-     [model_used]. See #9953. *)
-  let attempt_resolved_id (attempt : Cascade_legacy_runner.cascade_attempt) =
-    nonempty_trimmed attempt.model_id
-  in
-  let observation_resolved_id (obs : Cascade_legacy_runner.cascade_observation) =
-    match
-      obs.attempts
-      |> List.rev
-      |> List.find_map attempt_resolved_id
-    with
-    | Some model -> Some model
-    | None -> (
-        match Option.bind obs.selected_model nonempty_trimmed with
-        | Some model -> Some model
-        | None -> Option.bind obs.primary_model nonempty_trimmed)
-  in
-  match Option.bind result.cascade_observation observation_resolved_id with
-  | Some model -> model
-  | None -> Option.value ~default:"" (nonempty_trimmed result.model_used)
+let surface_model_used (_result : run_result) : string = runtime_lane_label
+
+let surface_resolved_model_id (_result : run_result) : string =
+  runtime_lane_label

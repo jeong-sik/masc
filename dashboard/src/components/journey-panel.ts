@@ -31,7 +31,7 @@ import { StatusChip, keeperStateTone } from './common/status-chip'
 import { Table, type TableColumn } from './common/table'
 import { TimeAgo } from './common/time-ago'
 import { formatTimeAgoEn } from '../lib/format-time'
-import { keeperActivityDisplay, keeperDisplayModel } from '../lib/keeper-runtime-display'
+import { keeperActivityDisplay } from '../lib/keeper-runtime-display'
 
 type JourneyMissionSession = {
   session_id: string
@@ -454,10 +454,6 @@ function filterJourneyRecords(
       record.keeper?.name,
       record.keeper?.agent_name,
       record.keeper?.cascade_name,
-      record.keeper ? keeperDisplayModel(record.keeper)?.value : null,
-      record.keeper?.active_model,
-      record.keeper?.model,
-      record.continuity?.model,
       record.continuity?.skill_reason,
       record.worker?.focus,
       record.sessionId,
@@ -568,7 +564,6 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
     ? `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}`
     : null
   const keeperActivity = keeper ? keeperActivityDisplay(keeper, keeper.agent?.last_seen) : null
-  const keeperModel = keeper ? keeperDisplayModel(keeper) : null
   const showExtended = useSignal(false)
 
   return html`
@@ -789,14 +784,10 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     ? html`
                         <div class="flex flex-wrap items-center gap-2">
                           ${keeper.cascade_name ? html`<${StatusChip} tone="info">${keeper.cascade_name}<//>` : null}
-                          ${keeperModel ? html`<${StatusChip} tone="neutral" uppercase=${false}>${keeperModel.value}<//>` : null}
                         </div>
                         <div class="text-xs text-[var(--color-fg-muted)]">
-                          ${keeperModel ? html`${keeperModel.label} ${keeperModel.value}` : 'No model recorded'}
+                          runtime identity redacted
                         </div>
-                        ${keeper.next_model_hint
-                          ? html`<div class="text-xs text-[var(--color-fg-muted)]">next ${keeper.next_model_hint}</div>`
-                          : null}
                         ${keeper.metrics_window?.fallback_rate != null
                           ? html`<div class="text-xs text-[var(--color-fg-muted)]">fallback ${formatPct(keeper.metrics_window.fallback_rate)}</div>`
                           : null}
@@ -986,7 +977,7 @@ export function JourneyPanel() {
           <${TextInput}
             type="search"
             value=${query.value}
-            placeholder="Search task / keeper / session / operation / model / life"
+            placeholder="Search task / keeper / session / operation / life"
             ariaLabel="Search journeys"
             class="max-w-[460px]"
             onInput=${(event: Event) => {

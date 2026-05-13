@@ -116,6 +116,8 @@ let manifest_json
     ~(trigger_reason : string)
     ~(context_ratio : float)
     ~(model : string) =
+  let _ = model in
+  let model = "runtime" in
   let child_trace_id = Keeper_id.Trace_id.to_string child.runtime.trace_id in
   let parent_generation = parent.runtime.generation in
   let child_generation = child.runtime.generation in
@@ -163,6 +165,8 @@ let index_entry_json
     ~(trigger_reason : string)
     ~(context_ratio : float)
     ~(model : string) =
+  let _ = model in
+  let model = "runtime" in
   let child_trace_id = Keeper_id.Trace_id.to_string child.runtime.trace_id in
   let parent_generation = parent.runtime.generation in
   let child_generation = child.runtime.generation in

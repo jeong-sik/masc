@@ -16,8 +16,6 @@ val cascade_name_of_string : string -> cascade_name
 val cascade_name_to_string : cascade_name -> string
 
 type provider_rejection = {
-  provider_label : string;
-  provider_kind : string;
   reason : string;
 }
 

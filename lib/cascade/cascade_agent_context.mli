@@ -1,4 +1,4 @@
-(** Keeper_agent_context — shared {!config} surface and agent
+(** Cascade_agent_context — shared {!config} surface and agent
     assembly helpers.
 
     Owns the shared per-worker {!config} record + pure / defaulted

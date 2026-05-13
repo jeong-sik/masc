@@ -129,7 +129,7 @@ let outbound_to_json out =
     | None -> `Null
     | Some s ->
         `Assoc [
-          ("model_used", `String s.model_used);
+          ("model_used", `Null);
           ("duration_ms", `Int s.duration_ms);
           ("tokens_used", `Int s.tokens_used);
         ]

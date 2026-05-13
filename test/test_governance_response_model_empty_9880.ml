@@ -50,12 +50,11 @@ let test_telemetry_resolved_branch () =
     (count_for ~source:"telemetry_resolved")
 ;;
 
-(* When neither [response.model] nor telemetry resolves the
-   model, the writer falls back to the [unknown_provider]
-   sentinel and counts under [unknown_sentinel].  Distinct row
-   from telemetry_resolved so dashboards can separate
-   "transport leaked but recovered" from "transport leaked and
-   no recovery available". *)
+(* When neither [response.model] nor telemetry resolves the model, the writer
+   still projects the neutral runtime lane and counts under
+   [unknown_sentinel]. Distinct rows let dashboards separate "transport leaked
+   but recovered" from "transport leaked and no recovery available" without
+   exposing concrete provider/model identity. *)
 let test_unknown_sentinel_branch () =
   let before = count_for ~source:"unknown_sentinel" in
   Prom.inc_counter metric_name ~labels:[ "source", "unknown_sentinel" ] ();
@@ -100,7 +99,7 @@ let test_non_empty_raw_model_wins () =
     ~msg:"raw model"
     ~raw_model:"claude-code:auto"
     ~canonical_model_id:(Some "anthropic:claude-opus-4-7")
-    ~expected_model:"claude-code:auto"
+    ~expected_model:"runtime"
     ~expected_source:"response_model"
 ;;
 
@@ -109,7 +108,7 @@ let test_empty_raw_falls_back_to_telemetry () =
     ~msg:"telemetry fallback"
     ~raw_model:""
     ~canonical_model_id:(Some " anthropic:claude-opus-4-7 ")
-    ~expected_model:"anthropic:claude-opus-4-7"
+    ~expected_model:"runtime"
     ~expected_source:"telemetry_resolved"
 ;;
 
@@ -118,7 +117,7 @@ let test_empty_everywhere_uses_unknown_sentinel () =
     ~msg:"unknown sentinel"
     ~raw_model:""
     ~canonical_model_id:None
-    ~expected_model:"unknown_provider"
+    ~expected_model:"runtime"
     ~expected_source:"unknown_sentinel"
 ;;
 
@@ -127,7 +126,7 @@ let test_empty_canonical_id_uses_unknown_sentinel () =
     ~msg:"empty canonical"
     ~raw_model:""
     ~canonical_model_id:(Some "")
-    ~expected_model:"unknown_provider"
+    ~expected_model:"runtime"
     ~expected_source:"unknown_sentinel"
 ;;
 

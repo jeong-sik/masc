@@ -498,7 +498,7 @@ val provider_label_of_config : Llm_provider.Provider_config.t -> string
     All other shapes pass through unchanged. This is the single
     boundary site that inspects [provider_cfg.kind] alongside the
     SDK's [provider] variant; keeper-layer callers
-    ({!Keeper_agent_context.default_config}) no longer pattern-match on
+    ({!Cascade_agent_context.default_config}) no longer pattern-match on
     either. *)
 val apply_wire_overlay
   :  provider_cfg:Llm_provider.Provider_config.t

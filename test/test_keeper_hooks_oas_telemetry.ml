@@ -16,6 +16,24 @@ let temp_dir () =
 ;;
 
 let read_jsonl_line path =
+  let path =
+    if Sys.file_exists path then path
+    else
+      let root = Filename.dirname path in
+      let rec first_jsonl dir =
+        Sys.readdir dir
+        |> Array.to_list
+        |> List.sort String.compare
+        |> List.find_map (fun name ->
+               let child = Filename.concat dir name in
+               if Sys.is_directory child then first_jsonl child
+               else if Filename.check_suffix child ".jsonl" then Some child
+               else None)
+      in
+      match first_jsonl (Filename.concat root "costs") with
+      | Some dated_path -> dated_path
+      | None -> path
+  in
   let ic = open_in path in
   Fun.protect
     ~finally:(fun () -> close_in_noerr ic)
@@ -29,6 +47,16 @@ let make_usage ?cost_usd ~input_tokens ~output_tokens () : Agent_sdk.Types.api_u
   ; cache_read_input_tokens = 0
   ; cost_usd
   }
+;;
+
+let check_json_absent field json =
+  check
+    bool
+    (field ^ " absent")
+    true
+    (match json |> member field with
+     | `Null -> true
+     | _ -> false)
 ;;
 
 let make_meta name =
@@ -126,7 +154,8 @@ let test_emit_cost_event_writes_inference_telemetry () =
     ~telemetry
     ();
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
-  check string "provider" "glm-coding" (json |> member "provider" |> to_string);
+  check string "provider redacted" "runtime" (json |> member "provider" |> to_string);
+  check string "model redacted" "runtime" (json |> member "model" |> to_string);
   check int "reasoning_tokens" 3 (json |> member "reasoning_tokens" |> to_int);
   check int "cache_n" 7 (json |> member "cache_n" |> to_int);
   check int "request_latency_ms" 42 (json |> member "request_latency_ms" |> to_int);
@@ -153,6 +182,33 @@ let test_emit_cost_event_writes_inference_telemetry () =
   check (float 0.001) "peak_memory_gb" 52.66 (json |> member "peak_memory_gb" |> to_float)
 ;;
 
+let test_inference_telemetry_runtime_json_redacts_identity () =
+  let telemetry : Agent_sdk.Types.inference_telemetry =
+    { system_fingerprint = Some "provider-fingerprint"
+    ; timings = None
+    ; reasoning_tokens = Some 9
+    ; reasoning_tokens_estimated = true
+    ; request_latency_ms = Some 123
+    ; peak_memory_gb = Some 1.5
+    ; provider_kind = Some Llm_provider.Provider_kind.Kimi_cli
+    ; reasoning_effort = Some "medium"
+    ; canonical_model_id = Some "kimi-for-coding"
+    ; effective_context_window = Some 256000
+    ; provider_internal_action_count = Some 2
+    ; ttfrc_ms = Some 4.5
+    ; prefill_ms = Some 6.7
+    }
+  in
+  let json = Hooks.inference_telemetry_to_runtime_json telemetry in
+  check bool "provider_kind redacted" true (json |> member "provider_kind" = `Null);
+  check bool "canonical_model_id redacted" true (json |> member "canonical_model_id" = `Null);
+  check bool "system_fingerprint redacted" true (json |> member "system_fingerprint" = `Null);
+  check int "reasoning_tokens kept" 9 (json |> member "reasoning_tokens" |> to_int);
+  check int "request_latency_ms kept" 123 (json |> member "request_latency_ms" |> to_int);
+  check int "context window kept" 256000 (json |> member "effective_context_window" |> to_int);
+  check int "provider action count kept" 2 (json |> member "provider_internal_action_count" |> to_int)
+;;
+
 let test_emit_cost_event_marks_usage_missing () =
   let root = temp_dir () in
   Hooks.emit_cost_event
@@ -169,7 +225,7 @@ let test_emit_cost_event_marks_usage_missing () =
   check bool "usage_missing" true (json |> member "usage_missing" |> to_bool)
 ;;
 
-let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
+let test_emit_cost_event_redacts_typed_provider_kind_for_bare_model () =
   let root = temp_dir () in
   let telemetry : Agent_sdk.Types.inference_telemetry =
     { system_fingerprint = None
@@ -200,8 +256,8 @@ let test_emit_cost_event_uses_typed_provider_kind_for_bare_model () =
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
   check
     string
-    "provider from provider_kind"
-    "kimi_cli"
+    "provider redacted"
+    "runtime"
     (json |> member "provider" |> to_string);
   check
     bool
@@ -347,23 +403,20 @@ let test_emit_cost_event_marks_unpriced_paid_model () =
     ~telemetry
     ();
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
-  check string "provider" "openai" (json |> member "provider" |> to_string);
-  check string "cost status" "unpriced_model" (json |> member "cost_status" |> to_string);
+  check string "provider redacted" "runtime" (json |> member "provider" |> to_string);
+  check
+    string
+    "cost status"
+    "oas_cost_unreported"
+    (json |> member "cost_status" |> to_string);
   check
     string
     "cost reason"
-    "pricing_catalog_miss"
+    "oas_cost_unreported"
     (json |> member "cost_status_reason" |> to_string);
-  check
-    string
-    "pricing model"
-    "future-openai-model-v9"
-    (json |> member "cost_pricing_model" |> to_string);
-  check
-    string
-    "pricing catalog"
-    "miss"
-    (json |> member "cost_pricing_catalog" |> to_string)
+  check_json_absent "cost_pricing_model" json;
+  check_json_absent "cost_pricing_catalog" json;
+  check_json_absent "model_resolution_source" json
 ;;
 
 let test_emit_cost_event_records_auto_resolution_source () =
@@ -393,21 +446,13 @@ let test_emit_cost_event_records_auto_resolution_source () =
     ~output_tokens:500
     ~cost_usd:0.01
     ~telemetry
-    ();
+  ();
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
-  check string "provider" "openai" (json |> member "provider" |> to_string);
-  check string "pricing model" "gpt-4.1" (json |> member "cost_pricing_model" |> to_string);
-  check
-    string
-    "model resolution source"
-    "telemetry_canonical_alias"
-    (json |> member "model_resolution_source" |> to_string);
-  check
-    string
-    "pricing catalog"
-    "hit_paid"
-    (json |> member "cost_pricing_catalog" |> to_string);
-  check string "cost status" "priced" (json |> member "cost_status" |> to_string)
+  check string "provider redacted" "runtime" (json |> member "provider" |> to_string);
+  check_json_absent "cost_pricing_model" json;
+  check_json_absent "model_resolution_source" json;
+  check_json_absent "cost_pricing_catalog" json;
+  check string "cost status" "reported" (json |> member "cost_status" |> to_string)
 ;;
 
 let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
@@ -437,56 +482,12 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
     ~output_tokens:500
     ~cost_usd:0.0
     ~telemetry
-    ();
+  ();
   let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
-  check string "provider" "kimi_cli" (json |> member "provider" |> to_string);
-  check
-    string
-    "pricing model"
-    "kimi-for-coding"
-    (json |> member "cost_pricing_model" |> to_string);
-  check
-    string
-    "model resolution source"
-    "telemetry_canonical_alias"
-    (json |> member "model_resolution_source" |> to_string);
-  check string "cost status" "known_free" (json |> member "cost_status" |> to_string)
-;;
-
-let test_cost_usd_for_usage_falls_back_for_paid_provider () =
-  let model = "openai:gpt-4.1" in
-  let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
-  let expected = Hooks.estimate_usage_cost_usd ~model usage in
-  check
-    (float 0.000001)
-    "estimated fallback"
-    expected
-    (Hooks.cost_usd_for_usage ~model usage)
-;;
-
-let test_cost_usd_for_usage_preserves_reported_cost () =
-  let model = "openai:gpt-4.1" in
-  let usage = make_usage ~cost_usd:0.42 ~input_tokens:1000 ~output_tokens:500 () in
-  check (float 0.000001) "reported cost" 0.42 (Hooks.cost_usd_for_usage ~model usage)
-;;
-
-let test_cost_usd_for_usage_keeps_cli_provider_zero () =
-  let model = "kimi_cli:kimi-for-coding" in
-  let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
-  check (float 0.000001) "cli cost stays zero" 0.0 (Hooks.cost_usd_for_usage ~model usage)
-;;
-
-let test_cost_usd_for_usage_keeps_typed_cli_provider_zero () =
-  let model = "kimi-for-coding" in
-  let usage = make_usage ~input_tokens:1000 ~output_tokens:500 () in
-  check
-    (float 0.000001)
-    "typed cli cost stays zero"
-    0.0
-    (Hooks.cost_usd_for_usage
-       ~provider_kind:Llm_provider.Provider_kind.Kimi_cli
-       ~model
-       usage)
+  check string "provider redacted" "runtime" (json |> member "provider" |> to_string);
+  check_json_absent "cost_pricing_model" json;
+  check_json_absent "model_resolution_source" json;
+  check string "cost status" "oas_cost_unreported" (json |> member "cost_status" |> to_string)
 ;;
 
 let test_tool_execution_summary_derives_provider_and_outcome () =
@@ -498,7 +499,7 @@ let test_tool_execution_summary_derives_provider_and_outcome () =
       ~duration_ms:12.5
   in
   check string "tool name" "keeper_shell" summary.tool_name;
-  check string "provider" "codex_cli" summary.provider;
+  check string "provider" "runtime" summary.provider;
   check string "outcome" "error" summary.outcome;
   check (float 0.001) "duration" 12.5 summary.duration_ms
 ;;
@@ -525,7 +526,7 @@ let test_record_keeper_tool_duration_metric_tracks_labels () =
   in
   let labels =
     [ "keeper", "telemetry-test"
-    ; "provider", "glm-coding"
+    ; "provider", "runtime"
     ; "tool", "keeper_board_post"
     ; "outcome", "ok"
     ]
@@ -623,9 +624,7 @@ let test_record_llm_tok_s_metrics_both_histograms_observe () =
       ~provider_kind:(Some Llm_provider.Provider_kind.Ollama)
       ()
   in
-  let labels =
-    [ "model", "ollama:qwen3.6"; "provider", "ollama"; "provider_kind", "ollama" ]
-  in
+  let labels = [ "model", "runtime"; "provider", "runtime"; "provider_kind", "runtime" ] in
   let prompt_sum_before, prompt_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
@@ -656,12 +655,7 @@ let test_record_llm_tok_s_metrics_timings_none_is_noop () =
       ~provider_kind:(Some Llm_provider.Provider_kind.Anthropic)
       ()
   in
-  let labels =
-    [ "model", "claude:claude-haiku-4-5-20251001"
-    ; "provider", "claude"
-    ; "provider_kind", "anthropic"
-    ]
-  in
+  let labels = [ "model", "runtime"; "provider", "runtime"; "provider_kind", "runtime" ] in
   let _, prompt_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
@@ -701,9 +695,7 @@ let test_record_llm_tok_s_metrics_zero_value_is_skipped () =
       ~provider_kind:(Some Llm_provider.Provider_kind.OpenAI_compat)
       ()
   in
-  let labels =
-    [ "model", "openai:gpt-5.4"; "provider", "openai"; "provider_kind", "openai_compat" ]
-  in
+  let labels = [ "model", "runtime"; "provider", "runtime"; "provider_kind", "runtime" ] in
   let _, prompt_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
@@ -727,9 +719,7 @@ let test_record_llm_tok_s_metrics_zero_value_is_skipped () =
 
 let test_record_llm_tok_s_metrics_none_telemetry_is_noop () =
   (* Belt and braces: explicitly None telemetry must not raise or emit. *)
-  let labels =
-    [ "model", "unknown:nothing"; "provider", "unknown"; "provider_kind", "unknown" ]
-  in
+  let labels = [ "model", "runtime"; "provider", "runtime"; "provider_kind", "runtime" ] in
   let _, prompt_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
@@ -744,7 +734,7 @@ let test_record_llm_tok_s_metrics_none_telemetry_is_noop () =
     (prompt_count_after -. prompt_count_before)
 ;;
 
-let inference_latency_labels model = [ "model", model ]
+let inference_latency_labels _model = [ "model", "runtime" ]
 
 let test_record_llm_inference_latency_metric_positive_observes () =
   let model = "latency-positive-test-model" in
@@ -1414,9 +1404,13 @@ let () =
             `Quick
             test_emit_cost_event_marks_usage_missing
         ; test_case
-            "emit_cost_event uses typed provider kind for bare model"
+            "emit_cost_event redacts typed provider kind for bare model"
             `Quick
-            test_emit_cost_event_uses_typed_provider_kind_for_bare_model
+            test_emit_cost_event_redacts_typed_provider_kind_for_bare_model
+        ; test_case
+            "inference telemetry runtime JSON redacts identity"
+            `Quick
+            test_inference_telemetry_runtime_json_redacts_identity
         ; test_case
             "emit_cost_event computes wall tok/s without native timings"
             `Quick
@@ -1437,22 +1431,6 @@ let () =
             "emit_cost_event records provider-prefixed auto resolution source"
             `Quick
             test_emit_cost_event_records_provider_prefixed_auto_resolution_source
-        ; test_case
-            "cost fallback estimates paid provider usage"
-            `Quick
-            test_cost_usd_for_usage_falls_back_for_paid_provider
-        ; test_case
-            "cost fallback preserves reported cost"
-            `Quick
-            test_cost_usd_for_usage_preserves_reported_cost
-        ; test_case
-            "cost fallback keeps CLI provider zero"
-            `Quick
-            test_cost_usd_for_usage_keeps_cli_provider_zero
-        ; test_case
-            "cost fallback keeps typed CLI provider zero"
-            `Quick
-            test_cost_usd_for_usage_keeps_typed_cli_provider_zero
         ] )
     ; ( "tool_telemetry"
       , [ test_case

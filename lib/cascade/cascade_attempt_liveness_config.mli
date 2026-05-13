@@ -11,8 +11,7 @@
     When the env var is absent, current production default is [enforce].
     Empty or unparseable values resolve to [observe].
 
-    The mode is read once and cached on first call (mirrors
-    [Keeper_admission_glue.use_new_admission]) so that mid-attempt env
+    The mode is read once and cached on first call so that mid-attempt env
     edits do not split-brain the observer.
 
     @stability Evolving
@@ -37,10 +36,10 @@ type success_sample =
   ; max_inter_chunk_ms : float
   ; wall_ms : float
   }
-(** Successful attempt timing sample for one concrete provider/model
-    candidate. Values are milliseconds and are recorded only after the
-    liveness FSM reaches [Success]. Failed, killed, or rejected attempts do not
-    train future budgets. *)
+(** Successful attempt timing sample for the neutral runtime candidate lane.
+    Values are milliseconds and are recorded only after the liveness FSM
+    reaches [Success]. Failed, killed, or rejected attempts do not train future
+    budgets. *)
 
 type budget_source =
   | Bootstrap
@@ -54,18 +53,21 @@ type resolved_budget =
 val budget_source_label : budget_source -> string
 (** Stable debug/receipt label: [bootstrap] or [observed_success]. *)
 
+val runtime_candidate_key : string
+(** Neutral candidate key used for MASC-side liveness budget storage. Concrete
+    provider/model identities stay on the OAS side and are not retained here. *)
+
 val budget_for_candidate : candidate_key:string -> resolved_budget
-(** Resolve the budget for a concrete provider/model candidate. The key should
-    be derived from [Provider_adapter.provider_model_health_key_of_config] or
-    an equivalent model-scoped runtime key. When no successful samples exist,
-    returns {!Cascade_attempt_liveness.bootstrap} with [source = Bootstrap]. *)
+(** Resolve the budget for the neutral runtime candidate lane. [candidate_key]
+    is accepted for source compatibility, but any non-empty value is normalized
+    to {!runtime_candidate_key}. When no successful samples exist, returns
+    {!Cascade_attempt_liveness.bootstrap} with [source = Bootstrap]. *)
 
 val record_success_sample :
   candidate_key:string -> success_sample -> unit
-(** Append a successful attempt timing sample for [candidate_key]. Invalid
-    negative/non-finite values are ignored. Each candidate keeps at most
-    [MASC_CASCADE_LIVENESS_SUCCESS_HISTORY_SIZE] samples, and the process keeps
-    at most [MASC_CASCADE_LIVENESS_SUCCESS_CANDIDATES] candidate keys. *)
+(** Append a successful attempt timing sample to the neutral runtime candidate
+    lane. Invalid negative/non-finite values are ignored. The runtime lane keeps
+    at most [MASC_CASCADE_LIVENESS_SUCCESS_HISTORY_SIZE] samples. *)
 
 val reset_cache_for_test : unit -> unit
 (** Test-only: reset the cached flag read so a new value of
@@ -76,7 +78,8 @@ val reset_success_history_for_test : unit -> unit
 (** Test-only: clear the in-process success-history budget store. *)
 
 val success_sample_count_for_test : candidate_key:string -> int
-(** Test-only: number of retained samples for [candidate_key]. *)
+(** Test-only: number of retained samples in the neutral runtime lane selected
+    by [candidate_key]. Empty keys return [0]. *)
 
 val outer_wall_for_attempt
   :  mode:mode

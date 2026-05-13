@@ -166,7 +166,7 @@ let parse_keeper_chat_stream_request body_str =
           "channel, channel_user_id, and channel_room_id are required when connector context is supplied"
       else if legacy_models_present then
         Error
-          "legacy keeper model args removed for masc_keeper_msg: models. Keepers now use cascade_name and last_model_used only."
+          "legacy keeper model args removed for masc_keeper_msg: models. Use cascade_name; concrete provider/model identity is OAS-owned."
       else
         match timeout_sec with
         | Ok timeout_sec ->

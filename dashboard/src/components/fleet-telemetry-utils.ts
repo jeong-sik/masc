@@ -5,7 +5,6 @@ import type { Keeper } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
 import {
   keeperActivityDisplay,
-  keeperDisplayModel,
   type KeeperActivitySource,
 } from '../lib/keeper-runtime-display'
 
@@ -137,15 +136,8 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
   return items
 }
 
-function keeperMetricsWindowModel(keeper: Keeper): string | null {
-  const primary = keeper.metrics_window?.primary_model
-  return typeof primary === 'string' ? normalizeModelText(primary) : null
-}
-
-function keeperModel(keeper: Keeper): string {
-  return normalizeModelText(keeperDisplayModel(keeper)?.value)
-    ?? keeperMetricsWindowModel(keeper)
-    ?? 'unknown'
+function keeperModel(_keeper: Keeper): string {
+  return 'runtime'
 }
 
 function latestCascadeMetric(keeper: Keeper) {
@@ -178,15 +170,11 @@ function keeperCascadeLabel(keeper: Keeper): string | null {
 function keeperProviderLabel(keeper: Keeper): string | null {
   const summary = keeper.trust?.execution_summary ?? null
   const latest = latestCascadeMetric(keeper)
-  const selected =
-    normalizeModelText(summary?.provider_selected_model)
-    ?? normalizeModelText(latest?.cascade_selected_model)
-    ?? normalizeModelText(latest?.model_used)
   const outcome = normalizeText(summary?.cascade_outcome) ?? normalizeText(latest?.cascade_outcome)
   const attempts = summary?.provider_attempt_count ?? latest?.cascade_attempt_count ?? null
   const fallback = summary?.provider_fallback_applied ?? latest?.fallback_applied ?? null
   const parts = [
-    selected ?? outcome,
+    outcome,
     typeof attempts === 'number' ? `${attempts} attempts` : null,
     fallback === true ? 'fallback' : null,
   ].filter((part): part is string => part != null && part.trim() !== '')
@@ -196,15 +184,12 @@ function keeperProviderLabel(keeper: Keeper): string | null {
 function keeperFallbackLabel(keeper: Keeper): string | null {
   const latest = latestCascadeMetric(keeper)
   if (!latest || latest.fallback_applied !== true) return null
-  const from = normalizeModelText(latest.fallback_from)
-  const to = normalizeModelText(latest.fallback_to) ?? normalizeModelText(latest.model_used)
   const reason = normalizeText(latest.fallback_reason)
   const hops =
     typeof latest.fallback_hops === 'number' && latest.fallback_hops > 0
       ? `${latest.fallback_hops} hops`
       : null
-  const route = from && to ? `${from} -> ${to}` : to ?? from ?? 'observed'
-  return [route, reason, hops].filter((part): part is string => part != null).join(' · ')
+  return ['fallback', reason, hops].filter((part): part is string => part != null).join(' · ')
 }
 
 function keeperLastLatencyMs(keeper: Keeper): number {
@@ -469,10 +454,8 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
                     ? 'override_invalid'
                     : 'override')
                 : 'env',
-            provider_health_status: keeper.provider_health?.status ?? null,
-            provider_health_label: keeper.provider_health
-              ? `${keeper.provider_health.provider}/${keeper.provider_health.model}`
-              : null,
+            provider_health_status: null,
+            provider_health_label: null,
           }
         })
       : []

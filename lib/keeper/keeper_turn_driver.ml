@@ -76,6 +76,7 @@ let provider_attempt_provenance_fields p =
   | Some source_cascade ->
       ("provider_source_cascade", `String source_cascade) :: base
 
+let runtime_candidate_label = "runtime"
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)
@@ -218,6 +219,9 @@ let run_named
        Error (cascade_catalog_error_to_sdk_error detail)
    | Ok configured_labels, Ok candidate_cfgs ->
   let original_candidate_cfgs = candidate_cfgs in
+  let original_candidates =
+    Cascade_runtime_candidate.of_provider_configs original_candidate_cfgs
+  in
   let candidate_cfgs =
     filter_candidate_providers_for_tool_support
       ~keeper_name
@@ -229,17 +233,18 @@ let run_named
       ~label:cascade_name
       candidate_cfgs
   in
-  let candidate_cfgs =
-    List.filter
-      (fun (provider_cfg : Llm_provider.Provider_config.t) ->
-         match first_health_cooldown provider_cfg with
-         | None -> true
-         | Some (provider_health_key, msg) ->
-             Log.Misc.debug
-               "cascade %s: prefilter skipped %s (provider_key=%s cooldown: %s)"
-               cascade_name provider_cfg.model_id provider_health_key msg;
-             false)
-      candidate_cfgs
+  let candidates =
+    candidate_cfgs
+    |> Cascade_runtime_candidate.of_provider_configs
+    |> List.filter
+         (fun candidate ->
+            match Cascade_runtime_candidate.first_health_cooldown candidate with
+            | None -> true
+            | Some (_provider_health_key, msg) ->
+                Log.Misc.debug
+                  "cascade %s: prefilter skipped %s (provider_key=%s cooldown: %s)"
+                  cascade_name runtime_candidate_label runtime_candidate_label msg;
+                false)
   in
   (* Cross-cascade health-aware fallback: when the current cascade has no
      tool-capable providers after filtering, search all other cascades for
@@ -247,21 +252,19 @@ let run_named
   let base_attempt_provenance =
     base_provider_attempt_provenance ~uses_direct_model_strings
   in
-  let provider_attempt_provenance, candidate_cfgs =
-    match candidate_cfgs with
+  let provider_attempt_provenance, candidates =
+    match candidates with
     | [] ->
-        (match resolve_tool_capable_provider_across_cascades
+        (match Cascade_runtime_candidate.resolve_tool_capable_across_cascades
                 ~sw ~net ~keeper_name ?runtime_mcp_policy ~tools
                 ~require_tool_choice_support ~require_tool_support
                 ~exclude_cascade:cascade_name ()
          with
-         | Some (source_cascade, provider_cfg) ->
+         | Some (source_cascade, candidate) ->
              Prometheus.inc_counter cross_cascade_fallback_metric
                ~labels:[
                  ("from_cascade", cascade_name);
                  ("to_cascade", source_cascade);
-                 ("provider",
-                  Provider_tool_support.provider_debug_label provider_cfg);
                ]
                ();
              (* §7.3.2 Zero Silent Failure: feed the unified fallback
@@ -276,23 +279,22 @@ let run_named
                "cascade %s: cross-cascade fallback to %s from %s \
                 (original had no tool-capable providers)"
                cascade_name
-               (Provider_tool_support.provider_debug_label provider_cfg)
+               "tool-capable candidate"
                source_cascade;
-             ( cross_cascade_provider_attempt_provenance ~source_cascade
-             , [provider_cfg] )
+             (cross_cascade_provider_attempt_provenance ~source_cascade, [ candidate ])
          | None ->
              Log.Misc.error
                "cascade %s: no callable models available (cross-cascade \
-                search also failed) — configured=[%s] \
+                search also failed) — candidate_count=%d \
                 require_tool_choice_support=%b require_tool_support=%b"
                cascade_name
-               (String.concat ", " configured_labels)
+               (List.length configured_labels)
                require_tool_choice_support
                require_tool_support;
              (base_attempt_provenance, []))
-    | _ -> (base_attempt_provenance, candidate_cfgs)
+    | _ -> (base_attempt_provenance, candidates)
   in
-  match candidate_cfgs with
+  match candidates with
   | [] ->
       let required_tool_names =
         required_tool_names_for_no_tool_error ~runtime_mcp_policy ~tools
@@ -301,7 +303,7 @@ let run_named
         provider_rejections_for_no_tool_error
           ~keeper_name ?runtime_mcp_policy ~tools
           ~require_tool_choice_support ~require_tool_support
-          original_candidate_cfgs
+          original_candidates
       in
       let internal_error =
         if require_tool_choice_support || require_tool_support then
@@ -321,15 +323,11 @@ let run_named
       in
       (match runtime_manifest_context, runtime_manifest_append with
        | Some manifest_ctx, Some append ->
-         let provider_rejection_to_json
-             (r : Cascade_error_classify.provider_rejection)
-           =
-           `Assoc
-             [
-               ("provider_label", `String r.provider_label);
-               ("provider_kind", `String r.provider_kind);
-               ("reason", `String r.reason);
-             ]
+         let provider_rejection_reasons =
+           provider_rejections
+           |> List.map (fun (r : Cascade_error_classify.provider_rejection) ->
+                  r.reason)
+           |> Json_util.dedupe_keep_order
          in
          Keeper_runtime_manifest.make_for_context manifest_ctx
            ~event:Keeper_runtime_manifest.Pre_dispatch_blocked
@@ -340,22 +338,22 @@ let run_named
                (Keeper_cascade_engine.manifest_fields cascade_engine
                 @ [
                     ("reason", `String (kind_of_masc_internal_error internal_error));
-                    ( "configured_labels",
-                      `List (List.map (fun label -> `String label) configured_labels)
-                    );
                     ( "required_tool_names",
                       `List
                         (List.map
                            (fun tool_name -> `String tool_name)
                            required_tool_names) );
-                    ( "provider_rejections",
-                      `List (List.map provider_rejection_to_json provider_rejections)
-                    );
+                    ("candidate_count", `Int (List.length original_candidate_cfgs));
+                    ( "rejected_candidate_count",
+                      `Int (List.length provider_rejections) );
+                    ( "rejection_reasons",
+                      `List
+                        (List.map
+                           (fun reason -> `String reason)
+                           provider_rejection_reasons) );
                     ( "require_tool_choice_support",
                       `Bool require_tool_choice_support );
                     ("require_tool_support", `Bool require_tool_support);
-                    ( "original_candidate_count",
-                      `Int (List.length original_candidate_cfgs) );
                   ]))
            ()
          |> append
@@ -363,8 +361,9 @@ let run_named
       Error
         (sdk_error_of_masc_internal_error internal_error)
   | _ ->
+  let candidate_count = List.length candidates in
   let capture, _metrics =
-    Cascade_legacy_runner.cascade_metrics_for_candidates ~candidate_cfgs ()
+    Cascade_legacy_runner.cascade_metrics_for_candidates ~candidate_count ()
   in
   let cascade_strategy_name_ref = ref None in
   let name = Printf.sprintf "oas-%s" cascade_name in
@@ -437,8 +436,7 @@ let run_named
     runtime_manifest_append;
     runtime_manifest_required_tool_names;
   } in
-  let emit_runtime_manifest ?status ?decision ?provider_kind ?model_id
-      ?oas_turn_count event =
+  let emit_runtime_manifest ?status ?decision ?oas_turn_count event =
     match runtime_manifest_context, runtime_manifest_append with
     | Some manifest_ctx, Some append ->
       let decision =
@@ -455,17 +453,16 @@ let run_named
                  @ [ ("decision", other) ]))
       in
       Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-        ?oas_turn_count ~cascade_name ?provider_kind ?model_id ?status
-        ?decision ()
+        ?oas_turn_count ~cascade_name ?status ?decision ()
       |> append
     | _ -> ()
   in
-  let try_provider ?resume_checkpoint ?per_provider_timeout_s provider_cfg =
+  let try_provider ?resume_checkpoint ?per_provider_timeout_s candidate =
     Keeper_turn_driver_try_provider.run_try_provider
       try_provider_ctx
       ?resume_checkpoint
       ?per_provider_timeout_s
-      provider_cfg
+      candidate
   in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
@@ -511,7 +508,7 @@ let run_named
         Cascade_legacy_runner.cascade_observation_with_metrics
           ~cascade_name:error_cascade_name
           ?strategy:!cascade_strategy_name_ref ~configured_labels
-          ~candidate_cfgs ~selected_model_raw:None ~capture ()
+          ~candidate_count ~selected_model_raw:None ~capture ()
       in
       Cascade_legacy_runner.record_cascade ~keeper_name
         ~cascade_name:error_cascade_name
@@ -546,38 +543,27 @@ let run_named
       in
       Error
         terminal_error
-    | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
+    | candidate :: rest ->
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
-      let provider_health_key =
-        Provider_adapter.provider_health_key_of_config provider_cfg
-      in
-      let provider_model_health_key =
-        Provider_adapter.provider_model_health_key_of_config provider_cfg
-      in
-      match first_health_cooldown provider_cfg with
-      | Some (blocked_health_key, msg) ->
+      match Cascade_runtime_candidate.first_health_cooldown candidate with
+      | Some (_blocked_health_key, msg) ->
           Log.Misc.debug
             "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
-            cascade_name provider_cfg.model_id blocked_health_key msg;
+            cascade_name runtime_candidate_label runtime_candidate_label msg;
           try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s rest last_err
       | None ->
       let is_last = rest = [] in
-      Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
+      Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name runtime_candidate_label is_last;
       let pp_timeout =
-        effective_provider_attempt_timeout_s
+        Cascade_runtime_candidate.effective_attempt_timeout_s
           ~is_last
           ~configured_timeout_s:per_provider_timeout_s
-          provider_cfg
+          candidate
       in
       let attempt_started_at = Unix.gettimeofday () in
-      let provider_kind =
-        Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind
-      in
       let started_decision_fields =
         provider_attempt_provenance_fields provider_attempt_provenance
         @ [
-            ("provider_health_key", `String provider_health_key);
-            ("provider_model_health_key", `String provider_model_health_key);
             ("is_last", `Bool is_last);
             ( "per_provider_timeout_s",
               match pp_timeout with
@@ -587,8 +573,6 @@ let run_named
       in
       emit_runtime_manifest
         ~status:"started"
-        ~provider_kind
-        ~model_id:provider_cfg.model_id
         ~decision:(`Assoc started_decision_fields)
         Keeper_runtime_manifest.Provider_attempt_started;
       let provider_attempt_finished_emitted = ref false in
@@ -596,7 +580,7 @@ let run_named
             ~status
             ?oas_turn_count
             ~checkpoint_after_present
-            ~response_model
+            ~response_model:_
             ~error
             ?exception_kind
             attempt_latency_ms
@@ -607,7 +591,6 @@ let run_named
             [
               ("latency_ms", `Float attempt_latency_ms);
               ("checkpoint_after_present", `Bool checkpoint_after_present);
-              ("response_model", response_model);
               ("error", error);
             ]
           in
@@ -622,8 +605,6 @@ let run_named
           in
           emit_runtime_manifest
             ~status
-            ~provider_kind
-            ~model_id:provider_cfg.model_id
             ?oas_turn_count
             ~decision:(`Assoc decision_fields)
             Keeper_runtime_manifest.Provider_attempt_finished)
@@ -650,7 +631,7 @@ let run_named
             try_provider
               ?resume_checkpoint
               ?per_provider_timeout_s:pp_timeout
-              provider_cfg
+              candidate
           with
           | result, checkpoint_after, liveness_success_sample ->
             let attempt_latency_ms =
@@ -665,7 +646,7 @@ let run_named
               ~checkpoint_after_present:(Option.is_some checkpoint_after)
               ~response_model:
                 (match result with
-                 | Ok run_result -> `String run_result.response.model
+                 | Ok _ -> `Null
                  | Error _ -> `Null)
               ~error:
                 (match result with
@@ -719,21 +700,20 @@ let run_named
       (match result with
       | Ok result when accept result.response ->
         record_accepted_liveness_sample ();
-        Cascade_health_tracker.(record_success global ~provider_key:provider_health_key
-          ~latency_ms:attempt_latency_ms ());
+        let _ = attempt_latency_ms in
         (* FSM: Call_ok → Accept *)
         let observation =
           Cascade_legacy_runner.cascade_observation_with_metrics
             ~cascade_name:error_cascade_name
             ?strategy:!cascade_strategy_name_ref ~configured_labels
-            ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
+            ~candidate_count ~selected_model_raw:None
             ~capture ()
         in
         let result = { result with cascade_observation = Some observation } in
         Cascade_legacy_runner.record_cascade ~keeper_name
           ~cascade_name:error_cascade_name
           ~outcome:`Success ~observation:(Some observation) ();
-        on_success ~provider_key:provider_health_key;
+        on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
         Ok result
       | Ok result ->
         (* Response arrived but failed the cascade's [accept] predicate
@@ -744,11 +724,9 @@ let run_named
            [record_rejected] behaves like a failure for cooldown /
            weight but keeps the [Rejected] tag so the dashboard can
            distinguish it from hard errors. *)
-        Cascade_health_tracker.(
-          record_rejected global ~provider_key:provider_health_key
-            ~error_kind:(error_kind_of_string "accept_rejected") ());
+        let () = () in
         (* FSM: Accept_rejected → decide *)
-        let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
+        let reason = "response rejected by accept" in
         let outcome = Cascade_fsm.Accept_rejected
           { response = result.response; reason } in
         (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
@@ -758,22 +736,22 @@ let run_named
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_cfgs ~selected_model_raw:(Some response.model)
+               ~candidate_count ~selected_model_raw:None
                ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
            Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Success ~observation:(Some observation) ();
-           on_success ~provider_key:provider_health_key;
+           on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
            Ok result
          | Cascade_fsm.Try_next { last_err = new_err } ->
            (* Demoted from WARN to INFO (task-239): cascade will retry the
               next tier.  Tagged [cascade-fallback] so dashboard filters
               can distinguish recovery-in-progress from hard failures. *)
-           Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
-           Cascade_legacy_runner.record_fallback_event capture ~candidate_cfgs
-             ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
+           Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next" cascade_name runtime_candidate_label reason;
+           Cascade_legacy_runner.record_fallback_event capture
+             ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label ~reason;
            (* The rejected response is not trusted progress.  Resuming
               from its checkpoint can turn a fallback provider into a
               replay of the rejected empty/schema-invalid turn. *)
@@ -783,42 +761,42 @@ let run_named
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
+               ~candidate_count ~selected_model_raw:None
                ~capture ()
            in
            Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Rejected ~observation:(Some observation) ();
-           Log.Misc.error "cascade %s exhausted: all tiers rejected by accept predicate (last model=%s, reason=%s)"
-             cascade_name result.response.model reason;
+           Log.Misc.error "cascade %s exhausted: all tiers rejected by accept predicate (last runtime=%s, reason=%s)"
+             cascade_name runtime_candidate_label reason;
            Error
              (sdk_error_of_masc_internal_error
                 (Accept_rejected
                    {
                      scope = cascade_name;
-                     model = Some result.response.model;
+                     model = Some runtime_candidate_label;
                      reason;
                    }))
-         | Cascade_fsm.Accept resp ->
+         | Cascade_fsm.Accept _resp ->
            (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully.
               Iter 42: tick an invariant-violation counter so this
               never-supposed-to-fire arm becomes a hard alert if it
               ever does.  Steady-state value is ZERO; non-zero is a
               real FSM contract violation, not a tunable. *)
            Cascade_metrics.on_cascade_invariant_violation ();
-           Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name resp.model;
+           Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (runtime=%s)" cascade_name runtime_candidate_label;
            record_accepted_liveness_sample ();
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_cfgs ~selected_model_raw:(Some resp.model) ~capture ()
+               ~candidate_count ~selected_model_raw:None ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
            Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Success ~observation:(Some observation) ();
-           on_success ~provider_key:provider_health_key;
+           on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
            Ok result)
       | Error sdk_err ->
         let sdk_err =
@@ -839,83 +817,9 @@ let run_named
         let err_str = Agent_sdk.Error.to_string sdk_err in
         let (_ : Provider_error.t option) =
           emit_sdk_provider_error_metric ~cascade_name:error_cascade_name
-            ~provider:provider_cfg.model_id sdk_err
+            ~provider:runtime_candidate_label sdk_err
         in
-        if sdk_error_is_hard_quota sdk_err then
-          Cascade_health_tracker.(
-            record_hard_quota global ~provider_key:provider_health_key
-              ~error_kind:(error_kind_of_string "hard_quota")
-              ~error_reason:err_str ())
-        else if sdk_error_is_model_access_denied sdk_err then
-          Cascade_health_tracker.(
-            record_terminal_failure global ~provider_key:provider_model_health_key
-              ~error_kind:(error_kind_of_string "model_access_denied")
-              ~error_reason:err_str ())
-        else if sdk_error_is_resumable_cli_session sdk_err
-                || sdk_error_is_terminal_provider_runtime_failure sdk_err
-        then
-          Cascade_health_tracker.(
-            record_terminal_failure global ~provider_key:provider_health_key
-              ~error_kind:
-                (error_kind_of_string
-                   (if sdk_error_is_resumable_cli_session sdk_err then
-                      "resumable_cli_session"
-                    else
-                      "terminal_provider_runtime"))
-              ~error_reason:err_str ())
-        else (match sdk_error_soft_rate_limited sdk_err with
-        | Some retry_after_opt ->
-          (* Transient 429 (not a hard quota in disguise).  Trip an
-             immediate short cooldown so the next selection tick falls
-             over to a different provider; honor [retry_after] when the
-             upstream parsed one out of the response body, otherwise let
-             the tracker apply [soft_rate_limit_cooldown_sec] (10s default).
-             Caller is responsible for upgrading sustained 429 bursts to
-             hard_quota; the tracker's max-clamp guards against a
-             misclassified hard quota silently producing a long blackout. *)
-          Cascade_health_tracker.(
-            record_soft_rate_limited global ~provider_key:provider_health_key
-              ?retry_after_s:retry_after_opt
-              ~error_kind:(error_kind_of_string "http_429")
-              ~error_reason:err_str ())
-        | None -> (
-          (* Classify the err_str into named buckets so Cascade_health_tracker
-             fingerprint groups separate codex internal-state corruption
-             (transient_codex_rollout — auto-recovers on next call) from
-             provider-permanent failures (e.g. kimi_cli auth-rejected) and
-             generic CLI exit (network_other).  Without this, every
-             [stop=error] is grouped under a single "failure" kind and
-             dashboards can't tell a known-recoverable bug pattern from a
-             persistent provider outage.  Pattern observed: 89 codex /
-             34 kimi / 13 claude exit-1 events in 3h (#10000-class). *)
-          let error_kind =
-            let contains needle hay =
-              let nl = String.length needle in
-              let hl = String.length hay in
-              let rec loop i =
-                i + nl <= hl
-                && (String.sub hay i nl = needle || loop (i + 1))
-              in
-              loop 0
-            in
-            if contains "thread " err_str
-               && contains " not found" err_str
-               && contains "rollout" err_str
-            then "transient_codex_rollout"
-            else if contains "kimi_cli rejected" err_str then
-              "permanent_kimi_rejected"
-            else if contains "Network error: codex exited" err_str then
-              "network_codex_other"
-            else if contains "Network error: claude exited" err_str then
-              "network_claude_other"
-            else if contains "Network error: gemini exited" err_str then
-              "network_gemini_other"
-            else "failure"
-          in
-          Cascade_health_tracker.(
-            record_failure global ~provider_key:provider_health_key
-              ~error_kind:(error_kind_of_string error_kind)
-              ~error_reason:err_str ())));
+        let _ = err_str in
         (* FSM: Call_err → decide.
            Hard-quota fast-path: a hard quota is permanent for this turn —
            every remaining tier in this cascade (and any cross-cascade
@@ -983,15 +887,15 @@ let run_named
                 Log.Misc.warn
                   "[cascade-fallback] cascade %s: %s failed (%s%s), trying \
                    next [sunk cost; see #10982]"
-                  cascade_name provider_cfg.model_id class_label
+                  cascade_name runtime_candidate_label class_label
                   (Agent_sdk.Error.to_string sdk_err)
               else
                 Log.Misc.info
                   "[cascade-fallback] cascade %s: %s failed (%s%s), trying next"
-                  cascade_name provider_cfg.model_id class_label
+                  cascade_name runtime_candidate_label class_label
                   (Agent_sdk.Error.to_string sdk_err);
-              Cascade_legacy_runner.record_fallback_event capture ~candidate_cfgs
-                ~from_model:provider_cfg.model_id ~to_model:"next"
+              Cascade_legacy_runner.record_fallback_event capture
+                ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label
                 ~reason:(class_label ^ Agent_sdk.Error.to_string sdk_err);
               try_cascade ?resume_checkpoint:next_resume rest new_err
             | Cascade_fsm.Exhausted _ ->
@@ -999,13 +903,13 @@ let run_named
                 Cascade_legacy_runner.cascade_observation_with_metrics
                   ~cascade_name:error_cascade_name
                   ?strategy:!cascade_strategy_name_ref ~configured_labels
-                  ~candidate_cfgs ~selected_model_raw:None ~capture ()
+                  ~candidate_count ~selected_model_raw:None ~capture ()
               in
               Cascade_legacy_runner.record_cascade ~keeper_name
                 ~cascade_name:error_cascade_name
                 ~outcome:`Failure ~observation:(Some observation) ();
-              Log.Misc.error "cascade %s exhausted: all tiers failed (last model=%s, error=%s)"
-                cascade_name provider_cfg.model_id (Agent_sdk.Error.to_string sdk_err);
+              Log.Misc.error "cascade %s exhausted: all tiers failed (last runtime=%s, error=%s)"
+                cascade_name runtime_candidate_label (Agent_sdk.Error.to_string sdk_err);
               Error sdk_err
             (* [Accept] / [Accept_on_exhaustion] are reachable only from
                [Cascade_fsm.Call_ok] / [Accept_rejected] outcomes, but this
@@ -1021,13 +925,13 @@ let run_named
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_cfgs ~selected_model_raw:None ~capture ()
+               ~candidate_count ~selected_model_raw:None ~capture ()
            in
            Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Failure ~observation:(Some observation) ();
            Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
-             cascade_name provider_cfg.model_id (Agent_sdk.Error.to_string sdk_err);
+             cascade_name runtime_candidate_label (Agent_sdk.Error.to_string sdk_err);
            Error sdk_err))
   in
   (* Pluggable strategy + cycle/backoff wrapper (since 0.9.6).
@@ -1057,85 +961,11 @@ let run_named
   in
   let strategy_name = Cascade_strategy.kind_to_string strategy.kind in
   let () = cascade_strategy_name_ref := Some strategy_name in
-  let* ollama_max =
-    profile_knob_or_default ~knob:"ollama_max_concurrent"
-      ~default:None
-      (fun () ->
-         Cascade_catalog_runtime.resolve_ollama_max_concurrent
-           ~name:cascade_name
-           ())
-  in
-  let* cli_max =
-    profile_knob_or_default ~knob:"cli_max_concurrent"
-      ~default:None
-      (fun () ->
-         Cascade_catalog_runtime.resolve_cli_max_concurrent
-           ~name:cascade_name
-           ())
-  in
-  let candidate_base_urls =
-    List.map (fun (c : Llm_provider.Provider_config.t) -> c.base_url) candidate_cfgs
-  in
-  (* CLI providers have an empty [base_url]. Map them to a stable
-     per-kind sentinel so the strategy's capacity probe and the
-     client-capacity registry share the same lookup key. Delegates
-     to the OAS SSOT {!Provider_kind.is_subprocess_cli}: any new CLI
-     kind added to OAS (e.g. future Codex variants) is picked up
-     automatically without touching this site. Sentinel format:
-     ["cli:" ^ canonical-lowercase-name], matching
-     {!Provider_kind.to_string}. *)
-  let cli_sentinel_of_kind kind =
-    if Llm_provider.Provider_config.is_subprocess_cli kind then
-      Some ("cli:" ^ Llm_provider.Provider_config.string_of_provider_kind kind)
-    else
-      None
-  in
-  let capacity_key_of (c : Llm_provider.Provider_config.t) =
-    if c.base_url <> "" then c.base_url
-    else
-      match cli_sentinel_of_kind c.kind with
-      | Some s -> s
-      | None -> ""
-  in
-  let candidate_capacity_keys = List.map capacity_key_of candidate_cfgs in
-  (* Register HTTP-probe-capable provider URLs explicitly.  Capability
-     check goes through [Provider_adapter.is_http_probe_capable_kind] —
-     keeper code does not name a provider variant.  Both registries
-     receive the same URL: [Cascade_client_capacity] for the per-process
-     semaphore, [Cascade_http_probe] for the [/api/ps] probe adapter. *)
-  let http_probe_max_concurrent = Option.value ollama_max ~default:1 in
-  List.iter
-    (fun (cfg : Llm_provider.Provider_config.t) ->
-       if Provider_adapter.is_http_probe_capable_kind cfg.kind
-          && cfg.base_url <> ""
-       then begin
-         if not (Cascade_client_capacity.is_registered cfg.base_url) then
-           Cascade_client_capacity.register
-             ~url:cfg.base_url
-             ~max_concurrent:http_probe_max_concurrent;
-         Cascade_http_probe.register_url ~url:cfg.base_url
-       end)
-    candidate_cfgs;
-  (* Refresh provider [/api/ps] cache for any candidate whose cache
-     entry has expired.  Failures are swallowed inside the probe so
-     a flaky probe never breaks the cascade — it just denies the
-     cache optimisation for this attempt. *)
-  Cascade_capacity_probe.refresh_many ~sw ~net ~urls:candidate_base_urls ();
-  (match cli_max with
-   | None ->
-     Cascade_client_capacity.auto_register_cli_for_candidates
-       ~capacity_keys:candidate_capacity_keys
-   | Some n ->
-     Cascade_client_capacity.auto_register_cli_with_override
-       ~capacity_keys:candidate_capacity_keys ~max_concurrent:n);
-  let adapter : Llm_provider.Provider_config.t Cascade_strategy.adapter = {
-    health_key = Provider_adapter.provider_health_key_of_config;
-    capacity_key = capacity_key_of;
-    weight = (fun _ -> 1);
-  } in
+  let _ = sw, net in
+  let adapter = Cascade_runtime_candidate.strategy_adapter in
   let signal_ctx : Cascade_strategy.signal_ctx = {
-    health = Cascade_health_tracker.global;
-    capacity = Cascade_capacity_probe.capacity;
+    health = Cascade_health_tracker.create ();
+    capacity = (fun _ -> None);
     now = Unix.gettimeofday ();
     rand_int = Random.int;
     keeper_name;
@@ -1161,7 +991,7 @@ let run_named
       Cascade_legacy_runner.cascade_observation_with_metrics
         ~cascade_name:error_cascade_name
         ?strategy:!cascade_strategy_name_ref ~configured_labels
-        ~candidate_cfgs ~selected_model_raw:None ~capture ()
+        ~candidate_count ~selected_model_raw:None ~capture ()
     in
     Cascade_legacy_runner.record_cascade ~keeper_name
       ~cascade_name:error_cascade_name
@@ -1180,7 +1010,7 @@ let run_named
       cascade_name = Keeper_cascade_profile.Runtime_name cascade_name;
       strategy = strategy_name;
       cycle;
-      candidates_in = List.length candidate_cfgs;
+      candidates_in = List.length candidates;
       candidates_out;
       backoff_ms;
       kind;
@@ -1195,7 +1025,7 @@ let run_named
   let rec cycle_loop n =
     let ordered =
       Cascade_strategy.order_candidates strategy
-        ~adapter ~ctx:signal_ctx ~cycle:n candidate_cfgs
+        ~adapter ~ctx:signal_ctx ~cycle:n candidates
     in
     let last_cycle = n + 1 >= strategy.cycle.max_cycles in
     match ordered with

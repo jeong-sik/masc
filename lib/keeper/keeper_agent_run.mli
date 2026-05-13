@@ -150,27 +150,17 @@ val turn_affordances_require_tool_gate_with_allowed
   -> string list
   -> bool
 
-(** Canonical model label for MASC status/metrics surfaces.
-    Prefers the final cascade attempt label when available, then the
-    selected/primary configured cascade label, and finally falls back to the
-    raw provider-reported [model_used]. *)
+(** Legacy MASC-facing model label helper.
+
+    MASC no longer exposes concrete provider/model identity on status,
+    metrics, or dashboard surfaces; OAS owns that resolution. Kept for
+    schema compatibility and returns the neutral runtime lane label. *)
 val surface_model_used : run_result -> string
 
-(** Resolved concrete model id for MASC status/metrics surfaces.
+(** Legacy MASC-facing resolved model helper.
 
-    Unlike {!surface_model_used}, this always returns the resolved provider
-    model id (e.g. ["claude-opus-4-6"]) regardless of whether a cascade
-    label (e.g. ["claude_code:auto"]) was present. Falls back to the raw
-    [model_used] when no cascade observation is available, and to the empty
-    string when neither source has a value.
-
-    Rationale (#9953): the [claude_code:auto] label resolves to different
-    concrete variants per turn (sonnet / opus / haiku) and each variant has
-    a different [max_context_tokens]. Recording only the label hides the
-    drift source — analysts cannot correlate ["context_max"] with the
-    actual resolved variant. Emitting both [model_used] (label) and
-    [resolved_model_id] (concrete id) in the metric line makes the
-    drift observable. *)
+    Kept for schema compatibility and returns the neutral runtime lane label;
+    concrete provider/model identity belongs to OAS telemetry. *)
 val surface_resolved_model_id : run_result -> string
 
 (** {1 Telemetry serialisation} *)

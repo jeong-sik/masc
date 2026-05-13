@@ -463,13 +463,9 @@ let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
    - [kind] = "out_of_roots" (path resolved outside allowed)
               | "not_found_relative" (relative path matched no root) *)
 
-(* RFC-0026 PR-E-1.6 admission router shadow observation
-   (keeper_admission_runtime.ml). Labels:
-     - keeper:  keeper_id
-     - outcome: legacy | dispatch | wait | surface
-
-   "legacy" dominates until PR-E-1.7 wires the registry + bucket
-   lookups via [Keeper_admission_runtime.set_*_lookup]. *)
+(* Retired RFC-0026 admission-router shadow metric name. Kept only for
+   historical Prometheus compatibility; active keeper scheduling uses the
+   runtime lane and semaphore path. *)
 
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
@@ -1411,15 +1407,6 @@ let init () =
   add
     Keeper_metrics.metric_keeper_operator_clear
     "Total operator-invoked masc_keeper_clear calls (labels: preserve_system=true|false)"
-    Counter;
-  (* RFC-0026 PR-E-1.6 admission router shadow observation.
-     Emitted by keeper_admission_runtime.observe before the existing
-     [Keeper_turn_slot.with_keeper_turn_slot] call. *)
-  add
-    Keeper_metrics.metric_keeper_admission_shadow_outcome
-    "RFC-0026 PR-E-1.6 admission router shadow observation (labels: keeper, \
-     outcome=legacy|dispatch|wait|surface). [legacy] dominates until PR-E-1.7 wires \
-     registry+bucket lookups."
     Counter;
   (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)
   add

@@ -286,7 +286,7 @@ describe('normalizeGovernanceJudgment', () => {
       evidence_refs: ['e1', 'e2'],
     })
     expect(result!.judgment_id).toBe('j-1')
-    expect(result!.model_used).toBe('gpt-4')
+    expect(result!.model_used).toBeNull()
     expect(result!.evidence_refs).toEqual(['e1', 'e2'])
   })
 
@@ -425,7 +425,7 @@ describe('normalizeGovernanceJudgeSummary', () => {
     expect(result!.status).toBe('stale_visible')
     expect(result!.degraded_reason).toBe('timeout')
     expect(result!.cached_judgments_visible).toBe(true)
-    expect(result!.model_used).toBe('gpt-4')
+    expect(result!.model_used).toBeNull()
     expect(result!.keeper_name).toBe('janitor')
     expect(result!.last_error).toBeNull()
   })

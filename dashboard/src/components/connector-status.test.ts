@@ -805,14 +805,15 @@ describe('ConnectorStatusPanel', () => {
     expect(novaGroup).not.toBeNull()
     const novaText = novaGroup!.textContent ?? ''
     expect(novaText).toContain('status busy')
-    expect(novaText).toContain('model gemini-3-flash-preview')
+    expect(novaText).not.toContain('gemini-3-flash-preview')
+    expect(novaText).not.toContain('model ')
     expect(novaText).toContain('runtime keeper-nova-agent')
   })
 })
 
 describe('filterKeeperGroups', () => {
   // Shape-compatible sample. `filterKeeperGroups` only reads `name` and
-  // `keeper.{active_model, model, primary_model, agent_name}` so bindings
+  // `keeper.agent_name` so bindings
   // are allowed to be empty and `unknown` never matters.
   type GroupLike = {
     name: string
@@ -865,24 +866,23 @@ describe('filterKeeperGroups', () => {
     expect(filtered[0]!.name).toBe('Nova')
   })
 
-  it('matches on active_model via substring', async () => {
+  it('does not match on active_model via substring', async () => {
     const filterKeeperGroups = await loadFilter()
     const rows = [
       group('nova', { name: 'nova', active_model: 'gemini-3-flash-preview' }),
       group('luna', { name: 'luna', active_model: 'claude-opus-4' }),
     ]
     const filtered = filterKeeperGroups(rows, 'gemini')
-    expect(filtered).toHaveLength(1)
-    expect(filtered[0]!.name).toBe('nova')
+    expect(filtered).toHaveLength(0)
   })
 
-  it('falls back from active_model to model when active_model is empty', async () => {
+  it('does not fall back from active_model to model', async () => {
     const filterKeeperGroups = await loadFilter()
     const rows = [
       group('nova', { name: 'nova', active_model: '   ', model: 'gemini-flash' }),
     ]
     const filtered = filterKeeperGroups(rows, 'gemini')
-    expect(filtered).toHaveLength(1)
+    expect(filtered).toHaveLength(0)
   })
 
   it('matches on agent_name runtime label when distinct from keeper name', async () => {

@@ -156,11 +156,10 @@ function patchConnectorUiState(connectorId: string, patch: Partial<ConnectorUiSt
 /**
  * Pure filter for keeper groups rendered in the "Keeper-first" panel.
  *
- * Case-insensitive substring match on `group.name`, the keeper's
- * resolved model label (active_model / model / primary_model), and
- * the keeper's resolved runtime label (agent_name when distinct from
+ * Case-insensitive substring match on `group.name` and the keeper's
+ * resolved runtime label (agent_name when distinct from
  * name). Operators on a crowded connector can locate a keeper by
- * partial name, by the model it is running, or by its runtime agent.
+ * partial name or by its runtime agent.
  *
  * Empty/whitespace query returns the input reference unchanged (no
  * new array allocation, preserves referential equality).
@@ -177,8 +176,6 @@ export function filterKeeperGroups(
   if (needle === '') return groups
   return groups.filter(group => {
     if (group.name.toLowerCase().includes(needle)) return true
-    const model = modelLabelForKeeper(group.keeper).toLowerCase()
-    if (model !== '' && model.includes(needle)) return true
     const runtime = runtimeLabelForKeeper(group.keeper).toLowerCase()
     if (runtime !== '' && runtime.includes(needle)) return true
     return false
@@ -366,13 +363,6 @@ function uniqueStrings(values: string[]): string[] {
     ordered.push(trimmed)
   })
   return ordered
-}
-
-function modelLabelForKeeper(keeper: GateKeeperInfo | null | undefined): string {
-  return keeper?.active_model?.trim()
-    || keeper?.model?.trim()
-    || keeper?.primary_model?.trim()
-    || ''
 }
 
 function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): string {
@@ -1038,7 +1028,7 @@ function ConnectorLivePanel({
                 <${TextInput}
                   type="search"
                   value=${keeperQuery}
-                  placeholder="keeper / model / runtime 필터"
+                  placeholder="keeper / runtime 필터"
                   ariaLabel="Keeper 필터"
                   testId=${`keeper-filter-${connectorId}`}
                   onInput=${(e: Event) => { patchConnectorUiState(connectorId, { keeperGroupQuery: (e.target as HTMLInputElement).value }) }}
@@ -1069,7 +1059,6 @@ function ConnectorLivePanel({
                         ? html`
                             <div class="text-3xs text-[var(--color-fg-disabled)]">
                               status ${keeper.status || 'unknown'}
-                              ${modelLabelForKeeper(keeper) ? ` · model ${modelLabelForKeeper(keeper)}` : ''}
                               ${runtimeLabelForKeeper(keeper) ? ` · runtime ${runtimeLabelForKeeper(keeper)}` : ''}
                             </div>
                           `

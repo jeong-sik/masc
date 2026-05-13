@@ -68,12 +68,25 @@ let status_to_yojson = function
 let int_opt_to_yojson = function Some value -> `Int value | None -> `Null
 let float_opt_to_yojson = function Some value -> `Float value | None -> `Null
 let bool_opt_to_yojson = function Some value -> `Bool value | None -> `Null
+let public_runtime_provider_label = "runtime"
+let public_runtime_model_label = "runtime"
+
+let normalize_sample (s : sample) =
+  {
+    s with
+    provider_id = public_runtime_provider_label;
+    model_id = public_runtime_model_label;
+  }
+
+let normalize_provider_filter = function
+  | Some _ -> Some public_runtime_provider_label
+  | None -> None
 
 let sample_to_yojson (s : sample) =
   `Assoc
     [
-      ("provider_id", `String s.provider_id);
-      ("model_id", `String s.model_id);
+      ("provider_id", `String public_runtime_provider_label);
+      ("model_id", `String public_runtime_model_label);
       ("ttfb_ms", `Float s.ttfb_ms);
       ("total_duration_ms", `Float s.total_duration_ms);
       ("serialization_ms", `Float s.serialization_ms);
@@ -98,7 +111,7 @@ let sample_entry_to_yojson (s, recorded_at) =
 let provider_error_count_to_yojson (c : provider_error_count) =
   `Assoc
     [
-      ("provider_id", `String c.provider_id);
+      ("provider_id", `String public_runtime_provider_label);
       ("cascade_name", `String c.cascade_name);
       ("kind", `String c.kind);
       ("capacity_scope", `String c.capacity_scope);
@@ -106,7 +119,7 @@ let provider_error_count_to_yojson (c : provider_error_count) =
     ]
 
 let provider_json = function
-  | Some provider -> `String provider
+  | Some _ -> `String public_runtime_provider_label
   | None -> `Null
 
 let broadcast_sample_entry entry =
@@ -116,8 +129,8 @@ let broadcast_sample_entry entry =
       [
         ("type", `String "oas_telemetry_sample");
         ("payload", sample_entry_to_yojson entry);
-        ("provider_id", `String sample.provider_id);
-        ("model_id", `String sample.model_id);
+        ("provider_id", `String public_runtime_provider_label);
+        ("model_id", `String public_runtime_model_label);
         ("ts_unix", `Float recorded_at);
       ]
   in
@@ -129,6 +142,7 @@ let broadcast_sample_entry entry =
         (Printexc.to_string exn)
 
 let record_with_time ~now (s : sample) =
+  let s = normalize_sample s in
   let entry = (s, now) in
   with_lock (fun () ->
       let q =
@@ -207,7 +221,7 @@ let throughput_from_response ~(usage : Agent_sdk.Types.api_usage option)
             Float.of_int usage.output_tokens /. (decode_ms /. 1000.0))
         usage
 
-let sample_of_response ~provider_id ~model_id ?total_duration_ms
+let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
     (response : Agent_sdk.Types.api_response) =
   let usage = Agent_sdk_response.usage response in
@@ -216,8 +230,8 @@ let sample_of_response ~provider_id ~model_id ?total_duration_ms
   in
   let ttfb_ms = ttfb_from_response response in
   {
-    provider_id;
-    model_id;
+    provider_id = public_runtime_provider_label;
+    model_id = public_runtime_model_label;
     ttfb_ms;
     total_duration_ms;
     serialization_ms;
@@ -247,22 +261,23 @@ let record_response ~provider_id ~model_id ?total_duration_ms ?serialization_ms
        ?serialization_ms ?retry_count ~status response)
 
 let provider_error_capacity_scope_label = function
-  | Provider_error.CapacityExhausted { scope; _ } ->
+  | Provider_error.CapacityExhausted { scope } ->
       Provider_error.scope_to_string scope
   | Provider_error.RateLimit _
-  | Provider_error.AuthError _
+  | Provider_error.AuthError
   | Provider_error.ServerError _
   | Provider_error.InvalidRequest _
   | Provider_error.CliWrappedHardQuota _
   | Provider_error.CliWrappedMaxTurns _
   | Provider_error.CliWrappedResumableSession _
   | Provider_error.PermissionDenied _
-  | Provider_error.ModelNotFound _ ->
+  | Provider_error.ModelNotFound ->
       "none"
 
-let record_provider_error ~cascade_name ~provider_id error =
+let record_provider_error ~cascade_name ~provider_id:_ error =
   let kind = Provider_error.to_error_kind error in
   let capacity_scope = provider_error_capacity_scope_label error in
+  let provider_id = public_runtime_provider_label in
   let key = (provider_id, cascade_name, kind, capacity_scope) in
   with_lock (fun () ->
       let count =
@@ -287,6 +302,7 @@ let compare_provider_error_count a b =
   | c -> c
 
 let provider_error_counts ?provider () =
+  let provider = normalize_provider_filter provider in
   let counts =
     with_lock (fun () ->
         Hashtbl.fold
@@ -306,7 +322,8 @@ let provider_error_counts ?provider () =
   in
   List.sort compare_provider_error_count counts
 
-let snapshot_provider provider =
+let snapshot_provider _provider =
+  let provider = public_runtime_provider_label in
   with_lock (fun () ->
       match Hashtbl.find_opt table provider with
       | None -> []
@@ -484,7 +501,7 @@ let summary_json ?provider ?limit () =
 
 let clear ?provider () =
   with_lock (fun () ->
-      match provider with
+      match normalize_provider_filter provider with
       | Some p ->
           Hashtbl.remove table p;
           let keys =

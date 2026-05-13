@@ -94,7 +94,7 @@ function KeeperDecisionsTable({
               <th scope="col" class="px-2 py-1.5 text-left">keeper</th>
               <th scope="col" class="px-2 py-1.5 text-left">event</th>
               <th scope="col" class="px-2 py-1.5 text-left">outcome</th>
-              <th scope="col" class="px-2 py-1.5 text-left">model</th>
+              <th scope="col" class="px-2 py-1.5 text-left">runtime</th>
               <th scope="col" class="px-2 py-1.5 text-right">latency</th>
               <th scope="col" class="px-2 py-1.5 text-right">cost</th>
               <th scope="col" class="px-2 py-1.5 text-left">tool</th>
@@ -109,7 +109,7 @@ function KeeperDecisionsTable({
                 </td>
                 <td class="px-2 py-1.5 text-left font-mono text-[var(--color-fg-primary)]">${event.event_type}</td>
                 <td class="px-2 py-1.5 text-left font-mono ${decisionOutcomeTone(event.outcome)}">${event.outcome ?? '-'}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-[var(--color-fg-muted)]">${event.model_used ?? '-'}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-[var(--color-fg-muted)]">-</td>
                 <td class="px-2 py-1.5 text-right font-mono text-[var(--color-fg-muted)]">
                   ${event.latency_ms == null ? '-' : `${Math.round(event.latency_ms)}ms`}
                 </td>

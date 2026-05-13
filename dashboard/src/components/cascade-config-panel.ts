@@ -1,5 +1,6 @@
 // CascadeConfigPanel — renders cascade.toml profiles + health tracker state
-// side-by-side so operators can see *why* a given provider is picked first.
+// side-by-side so operators can inspect routing order without exposing concrete
+// provider/model identity.
 //
 // Consumes:
 //   GET /api/v1/cascade/config  — profiles + per-candidate weight/health
@@ -133,13 +134,12 @@ function rawConfigModeSummary(
 ): RawConfigModeSummary {
   const sourcePath = raw?.source_path ?? 'cascade.toml'
   return {
-    title: 'Active Cascade Source Editor (TOML SSOT)',
+    title: 'Active Cascade Source',
     primary:
-      `현재 active source는 ${sourcePath} 이고, 이 editor에서 직접 cascade.toml SSOT 를 수정합니다. ` +
-      '저장 시 TOML parse 검증 뒤 cascade snapshot 을 다시 읽습니다.',
+      `현재 active source는 ${sourcePath} 입니다. 원본 cascade.toml 내용은 dashboard API에서 redaction됩니다.`,
     secondary:
-      'semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.',
-    saveLabel: 'cascade.toml 저장',
+      '프로필, weight, health, validation 상태만 노출되고 provider/model 원문은 OAS-owned runtime data로 남깁니다.',
+    saveLabel: '저장 비활성',
   }
 }
 
@@ -436,9 +436,7 @@ function ProfileCard({
         : html`
           <ol class="flex flex-col gap-1 text-xs">
             ${profile.candidates.map((c, idx) => {
-              const expanded = c.expanded_models ?? []
-              const displayModel = c.display_model ?? c.model
-              const displayProvider = c.display_provider_name ?? c.provider_name ?? null
+              const displayModel = 'runtime'
               const runtimeLabel = runtimeKindLabel(c.runtime_kind)
               return html`
               <li class="flex items-start gap-2 py-1 border-b border-[var(--color-border-default)] last:border-b-0">
@@ -449,25 +447,10 @@ function ProfileCard({
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
                     <code class="text-[var(--color-fg-primary)]">${displayModel}</code>
-                    ${displayProvider
-                      ? html`<span class="text-[var(--color-fg-muted)]">${displayProvider}</span>`
-                      : null}
                     ${runtimeLabel
                       ? html`<span class="text-[var(--color-fg-muted)]">${runtimeLabel}</span>`
                       : null}
                   </div>
-                  ${c.model !== displayModel
-                    ? html`<div class="text-[length:var(--fs-11)] text-[var(--color-fg-muted)] mt-0.5">config: <code>${c.model}</code></div>`
-                    : null}
-                  ${expanded.length > 1
-                    ? html`
-                      <ol class="mt-1 flex flex-col gap-0.5 text-[length:var(--fs-11)] text-[var(--color-fg-muted)]">
-                        ${expanded.map((model, expandedIdx) => html`
-                          <li><span class="tabular-nums">${expandedIdx + 1}.</span> <code>${model}</code></li>
-                        `)}
-                      </ol>
-                    `
-                    : null}
                 </div>
                 <span class="tabular-nums text-[var(--color-fg-muted)]">
                   w ${c.config_weight}${c.effective_weight === c.config_weight ? '' : ` → ${c.effective_weight}`}
@@ -581,7 +564,7 @@ function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
  * - `active`: tracker recorded events in the window (ok).
  * - `cooldown`: actively blocked (bad).
  * - `configured`: declared but untouched — neutral. Rendering this
- *   explicitly answers "why is this provider not being used?" in a way
+ *   explicitly answers "why is this runtime lane not being used?" in a way
  *   that the previous "row is absent" encoding could not.
  */
 function providerStatusTone(
@@ -615,7 +598,7 @@ function fmtPerfTokPerSec(
 }
 
 /**
- * Compact rendering of per-provider p50/p95 latency used in the Health
+ * Compact rendering of per-runtime p50/p95 latency used in the Health
  * Tracker table.  Same empty-state rules as `fmtPerfTokPerSec`.
  */
 function NumCell({ children }: { children: unknown }) {
@@ -635,11 +618,10 @@ function fmtPerfLatencyPair(
 }
 
 /**
- * Pure filter for Health Tracker provider rows.
+ * Pure filter for Health Tracker runtime rows.
  *
- * Case-insensitive substring match on `provider_key`. Also matches the
- * literal keyword `cooldown` when `in_cooldown` is true so operators can
- * isolate all providers currently being blocked.
+ * Matches status labels and the literal keyword `cooldown` when
+ * `in_cooldown` is true so operators can isolate all blocked runtimes.
  *
  * Empty/whitespace query returns the input reference unchanged so the
  * non-filter path preserves referential equality (stable render).
@@ -653,7 +635,7 @@ function filterHealthProviders(
   const needle = query.trim().toLowerCase()
   if (needle === '') return providers
   return providers.filter(p => {
-    if (p.provider_key.toLowerCase().includes(needle)) return true
+    if (p.status && p.status.toLowerCase().includes(needle)) return true
     if (p.in_cooldown && 'cooldown'.includes(needle)) return true
     return false
   })
@@ -670,7 +652,7 @@ function HealthTable({
   searchQuery,
 }: { health: CascadeHealthResponse; searchQuery: { value: string } }) {
   if (health.providers.length === 0) {
-    return html`<${EmptyState}>아직 기록된 provider 이벤트가 없습니다.<//>`
+    return html`<${EmptyState}>아직 기록된 runtime 이벤트가 없습니다.<//>`
   }
   const filtered = filterHealthProviders(health.providers, searchQuery.value)
   const isFiltering = searchQuery.value.trim() !== ''
@@ -679,8 +661,8 @@ function HealthTable({
       <${TextInput}
         type="search"
         class="max-w-70"
-        placeholder="provider 필터 (key, cooldown...)"
-        ariaLabel="health provider 검색"
+        placeholder="runtime 필터 (status, cooldown...)"
+        ariaLabel="health runtime 검색"
         value=${searchQuery.value}
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
       />
@@ -689,13 +671,13 @@ function HealthTable({
         : null}
     </div>
     ${isFiltering && filtered.length === 0
-      ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
+      ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${health.providers.length} runtimes)</div>`
       : html`
-        <table class="w-full text-xs" aria-label="cascade provider 상태">
+        <table class="w-full text-xs" aria-label="cascade runtime 상태">
           <thead>
             <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
               <th scope="col" class="text-left py-1 w-4"></th>
-              <th scope="col" class="text-left py-1">제공자</th>
+              <th scope="col" class="text-left py-1">런타임</th>
               <th
                 scope="col"
                 class="text-left py-1"
@@ -712,7 +694,7 @@ function HealthTable({
               <th
                 scope="col"
                 class="text-right py-1"
-                title="프롬프트 prefill 처리량 (이 provider 의 모델 entry-가중 평균)"
+                title="프롬프트 prefill 처리량 (runtime entry-가중 평균)"
               >Prefill tok/s</th>
               <th
                 scope="col"
@@ -722,29 +704,27 @@ function HealthTable({
               <th
                 scope="col"
                 class="text-right py-1"
-                title="Latency p50 / p95 (밀리초, 모델별 퍼센타일의 가중 평균 근사)"
+                title="Latency p50 / p95 (밀리초, 런타임 퍼센타일의 가중 평균 근사)"
               >Latency p50/p95</th>
               <th scope="col" class="text-right py-1">쿨다운</th>
             </tr>
           </thead>
           <tbody>
-            ${filtered.map((p: CascadeHealthProvider) => {
+            ${filtered.map((p: CascadeHealthProvider, index) => {
               const tone = providerTone(p)
               const rejected = p.rejected_in_window ?? 0
               const status: CascadeProviderStatus | undefined = p.status
-              // `declared = false` on a tracker-only row signals config
-              // drift (provider was tracked but is no longer referenced
-              // by cascade.toml). Surface it next to the provider key so
-              // operators can prune it. `undefined` means the server is
-              // too old to carry the field — don't decorate in that case.
+              // `declared = false` on a tracker-only row signals config drift.
+              // Keep the identity redacted while still showing that a stale
+              // runtime lane exists.
               const orphaned = p.declared === false
               return html`
               <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
                 <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
                 <td class="py-1">
-                  <code class="text-[var(--color-fg-primary)]">${p.provider_key}</code>
+                  <code class="text-[var(--color-fg-primary)]">runtime-${index + 1}</code>
                   ${orphaned
-                    ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Provider 가 추적되었지만 cascade.toml 에 더 이상 선언되어 있지 않음">orphan</span>`
+                    ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Runtime lane 이 추적되었지만 cascade.toml 에 더 이상 선언되어 있지 않음">orphan</span>`
                     : null}
                 </td>
                 <td class="py-1">
@@ -979,7 +959,7 @@ function ClientCapacityHistoryTable({
 
 function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResponse }) {
   if (capacity.entries.length === 0) {
-    return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (cascade가 한 번도 호출되지 않았거나 CLI/ollama provider 미사용)<//>`
+    return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (cascade가 한 번도 호출되지 않았거나 runtime lane 미사용)<//>`
   }
   return html`
     <table class="w-full text-xs" aria-label="client capacity 슬롯">

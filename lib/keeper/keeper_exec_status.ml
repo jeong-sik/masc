@@ -5,66 +5,16 @@
 open Keeper_types
 
 let active_model_of_meta (m : keeper_meta) : string =
-  if m.runtime.usage.last_model_used <> "" then m.runtime.usage.last_model_used
-  else
-    match Keeper_model_labels.configured_model_labels_of_meta m with
-    | model :: _ -> model
-    | [] -> ""
-
-let model_id_of_label (label : string) : string =
-  match String.index_opt label ':' with
-  | Some idx when idx < String.length label - 1 ->
-      String.sub label (idx + 1) (String.length label - idx - 1) |> String.trim
-  | _ -> String.trim label
-
-let canonical_provider_of_label (label : string) : string option =
-  match String.index_opt label ':' with
-  | Some idx when idx > 0 ->
-      String.sub label 0 idx
-      |> String.trim
-      |> Provider_adapter.resolve_direct_canonical_name
-  | _ -> Provider_adapter.resolve_direct_canonical_name label
+  let _ = m in
+  ""
 
 let active_model_label_of_meta (m : keeper_meta) : string =
-  let active = String.trim (active_model_of_meta m) in
-  if active = "" then ""
-  else if String.contains active ':' then active
-  else
-    let configured = Keeper_model_labels.configured_model_labels_of_meta m in
-    let active_norm = String.lowercase_ascii active in
-    let matches_model_id label =
-      String.lowercase_ascii (model_id_of_label label) = active_norm
-    in
-    match List.find_opt matches_model_id configured with
-    | Some label -> label
-    | None -> (
-        match Provider_adapter.resolve_direct_adapter active with
-        | Some adapter ->
-            let matches_provider label =
-              canonical_provider_of_label label = Some adapter.canonical_name
-            in
-            (match List.find_opt matches_provider configured with
-             | Some label -> label
-             | None ->
-                 let model_id =
-                   match adapter.default_model_id with
-                   | Some value when String.trim value <> "" -> value
-                   | _ -> "auto"
-                 in
-                 adapter.cascade_prefix ^ ":" ^ model_id)
-        | None -> active)
+  let _ = m in
+  "runtime"
 
 let next_model_hint_of_meta (m : keeper_meta) : string option =
-  let active = active_model_of_meta m in
-  let pool =
-    Keeper_model_labels.configured_model_labels_of_meta m
-  in
-  match List.filter (fun model -> model <> active) pool with
-  | next_model :: _ -> Some next_model
-  | [] -> (
-      match pool with
-      | current :: _ -> Some current
-      | [] -> None)
+  let _ = m in
+  None
 
 let string_of_fiber_health = function
   | Fiber_alive -> "alive"
@@ -265,15 +215,8 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   | None, Some (assistant_ts, preview) ->
       (`String "delivered", `Float assistant_ts, `String preview)
 
-(** Error keyword detection — includes provider names from adapter registry. *)
 let error_keywords =
-  let provider_keywords =
-    List.map (fun (a : Provider_adapter.adapter) -> a.canonical_name)
-      Provider_adapter.direct_adapters
-    @ List.concat_map (fun (a : Provider_adapter.adapter) -> a.aliases)
-        Provider_adapter.direct_adapters
-  in
-  [ "error"; "failed"; "timeout"; "graphql"; "model" ] @ provider_keywords
+  [ "error"; "failed"; "timeout"; "graphql"; "model"; "runtime"; "provider" ]
 
 let looks_error_like text =
   List.exists (string_contains_ci text) error_keywords

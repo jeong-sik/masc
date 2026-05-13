@@ -152,10 +152,15 @@ val aggregate_buckets :
     - A non-positive [bucket_min] is treated as [1]. *)
 
 val to_json : aggregate -> Yojson.Safe.t
-(** Serialize [aggregate] to JSON for API responses. *)
+(** Serialize [aggregate] to JSON for API responses. Compatibility fields
+    named [model_id] and [provider] are public runtime-lens labels only:
+    concrete provider/model identifiers stay internal to the aggregator and
+    are not emitted. *)
 
-val model_stats_to_json : model_stats -> Yojson.Safe.t
-(** Serialize a single [model_stats] entry to JSON. *)
+val model_stats_to_json : ?model_label:string -> model_stats -> Yojson.Safe.t
+(** Serialize a single [model_stats] entry to JSON. [model_label] is the
+    redacted public runtime lane label; [provider] and recent-entry provider
+    fields serialize as [null]. *)
 
 (** Per-provider rollup of {!model_stats} aggregated across every model id
     whose [provider] matches. Feeds {!Dashboard_cascade.health_json}'s
@@ -207,9 +212,9 @@ val provider_stats_to_json : provider_stats -> Yojson.Safe.t
 (** JSON shape consumed by {!Dashboard_cascade}:
     {[
       {
-        "provider": "ollama",
+        "provider": "runtime",
         "entry_count": 42,
-        "model_count": 2,
+        "model_count": 0,
         "avg_tok_per_sec": 52.1,
         "avg_prompt_tok_per_sec": 210.4,
         "avg_decode_tok_per_sec": 61.8,
@@ -233,7 +238,7 @@ val compute_cost_latency_json :
     {[
       {
         "perAgent":      [ { "agent", "in_tok", "out_tok", "cost", "p50_ms", "p95_ms" } ],
-        "matrix":        { "providers": [...], "models": [...], "grid": [[...]] },
+        "matrix":        { "providers": ["runtime"], "models": ["runtime_lane_1", ...], "grid": [[...]] },
         "latencyBuckets": [ { "lo", "hi", "n" } ],
         "p50":           number | null,
         "p95":           number | null,
@@ -243,13 +248,12 @@ val compute_cost_latency_json :
       }
     ]}
 
-    [perAgent] rows are sorted by cost descending and omit models with
+    [perAgent] rows are sorted by cost descending and omit runtime lanes with
     no cost/token signal.  [p50]/[p95] are exact global percentiles
     computed from all raw latency samples in the window (not an average
     of per-model estimates), or [null] when no latency sample
     contributed. Per-agent [p50_ms]/[p95_ms] follow the same null
-    semantics. [matrix.grid] is a [providers × models] 2-D array of
-    cost values in the same order as the [providers] / [models] index
-    arrays.
+    semantics. [matrix.grid] preserves cost shape using redacted runtime
+    lane labels rather than concrete provider/model axes.
 
     @since 2.300.0 *)

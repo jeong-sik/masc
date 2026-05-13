@@ -8,7 +8,10 @@ import {
   fetchDashboardMemory,
   fetchCostLatency,
   fetchKeeperConfig,
+  fetchKeeperCostMetrics,
+  fetchKeeperDecisions,
   fetchMemorySubsystems,
+  fetchRuntimeProviders,
   fetchRuntimeModelMetrics,
   fetchTlcResults,
   fetchToolQuality,
@@ -1066,6 +1069,50 @@ describe('fetchKeeperConfig', () => {
   })
 })
 
+describe('fetchRuntimeProviders', () => {
+  it('preserves stable provider lane IDs emitted by the API', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        updated_at: '2026-05-13T13:00:00Z',
+        summary: {
+          providers: 1,
+          local_models: 0,
+          cloud_models: 1,
+          cli_models: 0,
+        },
+        providers: [
+          {
+            provider: 'runtime_lane_deadbeef1234',
+            kind: 'runtime',
+            runtime_kind: 'cloud',
+            status: 'available',
+            available: true,
+            supports_single_agent_run: true,
+            model_count: 1,
+            source: 'runtime',
+            discovery: {
+              healthy: true,
+              ctx_size: 200000,
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeProviders()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/providers')
+    expect(result.providers[0]?.provider).toBe('runtime_lane_deadbeef1234')
+    expect(result.providers[0]?.kind).toBe('runtime')
+    expect(result.providers[0]?.runtime_kind).toBe('cloud')
+    expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
+  })
+})
+
 describe('fetchRuntimeModelMetrics', () => {
   it('preserves null telemetry fields instead of coercing them to zero', async () => {
     const rawResponse = {
@@ -1075,7 +1122,7 @@ describe('fetchRuntimeModelMetrics', () => {
       total_error_entries: 0,
       models: [
         {
-          model_id: 'kimi_cli:kimi-for-coding',
+          model_id: 'runtime_lane_a1b2c3d4e5f6',
           entry_count: 1,
           success_count: 1,
           usage_sample_count: 0,
@@ -1136,6 +1183,8 @@ describe('fetchRuntimeModelMetrics', () => {
     const result = await fetchRuntimeModelMetrics()
     const metric = result.models[0]!
 
+    expect(metric.model_id).toBe('runtime_lane_a1b2c3d4e5f6')
+    expect(metric.provider).toBeNull()
     expect(metric.usage_sample_count).toBe(0)
     expect(metric.telemetry_sample_count).toBe(0)
     expect(metric.usage_missing_count).toBe(1)
@@ -1162,12 +1211,77 @@ describe('fetchRuntimeModelMetrics', () => {
   })
 })
 
+describe('fetchKeeperCostMetrics', () => {
+  it('redacts legacy model breakdown labels while preserving cost totals', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        window_minutes: 60,
+        keepers: [
+          {
+            keeper_name: 'keeper-alpha',
+            total_cost_usd: 0.5,
+            total_input_tokens: 10,
+            total_output_tokens: 5,
+            total_tokens: 15,
+            p50_latency_ms: 100,
+            p95_latency_ms: 100,
+            sample_count: 2,
+            model_breakdown: [
+              { model: 'private-provider:model-a', cost_usd: 0.2 },
+              { model: 'private-provider:model-b', cost_usd: 0.3 },
+            ],
+          },
+        ],
+        generated_at: 1,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers[0]?.model_breakdown).toEqual([
+      { model: 'runtime', cost_usd: 0.5 },
+    ])
+  })
+})
+
+describe('fetchKeeperDecisions', () => {
+  it('redacts legacy model_used labels from decision rows', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        events: [
+          {
+            ts_unix: 1,
+            keeper_name: 'keeper-alpha',
+            event_type: 'turn',
+            outcome: 'success',
+            model_used: 'private-provider:model-a',
+          },
+        ],
+        limit: 1,
+        generated_at: 1,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperDecisions(1)
+
+    expect(result.events[0]?.model_used).toBeNull()
+  })
+})
+
 describe('fetchCostLatency', () => {
   it('preserves missing latency percentiles as null instead of zero', async () => {
     const rawResponse = {
       perAgent: [
         {
-          agent: 'unlatenced-model',
+          agent: 'runtime_lane_7',
           in_tok: 100,
           out_tok: 50,
           cost: 0.01,
@@ -1177,7 +1291,7 @@ describe('fetchCostLatency', () => {
       ],
       matrix: {
         providers: ['local'],
-        models: ['unlatenced-model'],
+        models: ['runtime_lane_7'],
         grid: [[0.01]],
       },
       latencyBuckets: [],
@@ -1201,7 +1315,10 @@ describe('fetchCostLatency', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/cost-latency?window=60')
     expect(result.p50).toBeNull()
     expect(result.p95).toBeNull()
+    expect(result.perAgent[0]?.agent).toBe('runtime_lane_7')
     expect(result.perAgent[0]?.p50_ms).toBeNull()
     expect(result.perAgent[0]?.p95_ms).toBeNull()
+    expect(result.matrix.providers).toEqual(['runtime'])
+    expect(result.matrix.models).toEqual(['runtime_lane_7'])
   })
 })

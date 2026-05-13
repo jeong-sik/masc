@@ -398,6 +398,7 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     expect(container.textContent).toContain('하트비트 · fleet heartbeat · 2 events')
+    expect(container.textContent).not.toContain('model=glm-5.1')
   })
 
   it('collapses interleaved heartbeat + oas snapshot polling across multiple keepers into one group (#13002)', async () => {

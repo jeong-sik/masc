@@ -132,7 +132,7 @@ let test_record_success_sample_updates_candidate_budget () =
     true
     (resolved.budget.attempt_wall_max > 90.0)
 
-let test_candidate_keys_are_model_scoped () =
+let test_candidate_keys_collapse_to_runtime_lane () =
   Cfg.reset_success_history_for_test ();
   Cfg.record_success_sample
     ~candidate_key:"provider:model-fast"
@@ -142,10 +142,14 @@ let test_candidate_keys_are_model_scoped () =
     { Cfg.ttft_ms = 120_000.0; max_inter_chunk_ms = 40_000.0; wall_ms = 600_000.0 };
   let fast = Cfg.budget_for_candidate ~candidate_key:"provider:model-fast" in
   let slow = Cfg.budget_for_candidate ~candidate_key:"provider:model-slow" in
+  Alcotest.(check int)
+    "non-empty keys share runtime samples"
+    2
+    (Cfg.success_sample_count_for_test ~candidate_key:Cfg.runtime_candidate_key);
   Alcotest.(check bool)
-    "same provider can have different model budgets"
+    "different provider/model keys share one runtime budget"
     true
-    (slow.budget.attempt_wall_max > fast.budget.attempt_wall_max)
+    (budget_eq slow.budget fast.budget)
 
 let test_invalid_success_sample_ignored () =
   Cfg.reset_success_history_for_test ();
@@ -165,12 +169,12 @@ let test_success_history_candidate_count_is_bounded () =
       { Cfg.ttft_ms = 1_000.0; max_inter_chunk_ms = 1_000.0; wall_ms = 2_000.0 }
   done;
   Alcotest.(check int)
-    "oldest candidate evicted"
-    0
+    "concrete keys do not multiply candidate buckets"
+    32
     (Cfg.success_sample_count_for_test ~candidate_key:"provider:model-000");
   Alcotest.(check int)
-    "newest candidate retained"
-    1
+    "newest key aliases same runtime bucket"
+    32
     (Cfg.success_sample_count_for_test ~candidate_key:"provider:model-2049")
 
 let () =
@@ -205,8 +209,8 @@ let () =
             test_budget_bootstrap_when_empty;
           Alcotest.test_case "success sample updates budget" `Quick
             test_record_success_sample_updates_candidate_budget;
-          Alcotest.test_case "candidate keys are model scoped" `Quick
-            test_candidate_keys_are_model_scoped;
+          Alcotest.test_case "candidate keys collapse to runtime lane" `Quick
+            test_candidate_keys_collapse_to_runtime_lane;
           Alcotest.test_case "invalid sample ignored" `Quick
             test_invalid_success_sample_ignored;
           Alcotest.test_case "candidate count bounded" `Quick

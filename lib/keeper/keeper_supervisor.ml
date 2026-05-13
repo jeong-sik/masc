@@ -2558,21 +2558,8 @@ let alive_but_stuck_scan (ctx : _ context) =
     let abs_ym = Eio_guard.create_yield_meter () in
     List.iter
       (fun (entry : Keeper_registry.registry_entry) ->
-         (* Heuristic: if any of the keeper's configured models is known-unhealthy,
-            halve the stall floor so the supervisor reacts faster to provider
-            degradation.  The exact provider is not resolved until turn dispatch,
-            so we use the keeper's model list as a best-effort proxy. *)
          let stall_floor_sec =
-           let base = Env_config.KeeperSupervisor.alive_but_stuck_stall_floor_sec in
-           match entry.meta.models with
-           | [] -> base
-           | models ->
-             let any_unhealthy =
-               List.exists
-                 (fun m -> Keeper_provider_health.is_any_unhealthy_for_model ~model:m)
-                 models
-             in
-             if any_unhealthy then base *. 0.5 else base
+           Env_config.KeeperSupervisor.alive_but_stuck_stall_floor_sec
          in
          let threshold =
            alive_but_stuck_threshold ~stall_multiplier ~stall_floor_sec entry

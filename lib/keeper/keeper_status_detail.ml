@@ -186,169 +186,34 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
       | json :: _ -> Some json
       | [] -> None)
 
-type provider_scope = Local | Unknown | Non_local
-
-let provider_scope_of_model_label model_label =
-  let prefix =
-    Option.bind (Option.bind model_label nonempty_trimmed) (fun label ->
-        match String.index_opt label ':' with
-        | Some idx when idx > 0 ->
-            Some
-              (String.sub label 0 idx |> String.trim
-             |> String.lowercase_ascii)
-        | _ -> None)
-  in
-  match prefix with
-  | None -> Unknown
-  | Some name
-    when String.equal name Provider_adapter.cn_llama
-      || String.equal name Provider_adapter.cn_ollama ->
-      Local
-  | Some _ -> Non_local
-
-let single_string_or_none values =
-  match List.sort_uniq String.compare values with
-  | [ value ] -> Some value
-  | _ -> None
-
-let single_int_or_none values =
-  match List.sort_uniq compare values with
-  | [ value ] -> Some value
-  | _ -> None
-
-let lightweight_runtime_contract_json ~selected_model ~runtime_blocker_class =
-  let provider_scope = provider_scope_of_model_label selected_model in
+let lightweight_runtime_contract_json ~runtime_blocker_class =
   let proof_note =
-    "Lightweight status only. Use masc_runtime_verify for proof."
+    "Provider/model identity is owned by OAS. MASC status exposes only \
+     control-plane signals."
   in
-  match provider_scope with
-  | Unknown ->
-      `Assoc
-        [
-          ("source", `String "none");
-          ("verified", `Bool false);
-          ("provider_scope", `String "unknown");
-          ("provider_reachable", `Null);
-          ("healthy_runtime_count", `Null);
-          ("actual_model_id", `Null);
-          ("actual_slots", `Null);
-          ("actual_ctx", `Null);
-          ("chat_completion_compatible", `Null);
-          ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
-          ("note", `String ("Selected model is unknown. " ^ proof_note));
-        ]
-  | Non_local ->
-      `Assoc
-        [
-          ("source", `String "none");
-          ("verified", `Bool false);
-          ("provider_scope", `String "non_local");
-          ("provider_reachable", `Null);
-          ("healthy_runtime_count", `Null);
-          ("actual_model_id", `Null);
-          ("actual_slots", `Null);
-          ("actual_ctx", `Null);
-          ("chat_completion_compatible", `Null);
-          ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
-          ("note",
-           `String
-             ("Selected model is not a local llama/ollama runtime. "
-              ^ proof_note));
-        ]
-  | Local ->
-    let endpoints_opt =
-      try Some (Discovery_cache.get_cached_or_refresh ())
-      with
-      | Stdlib.Effect.Unhandled _ -> None
-      | _ -> None
-    in
-    let provider_reachable =
-      match endpoints_opt with
-      | Some endpoints when endpoints <> [] ->
-          Some (List.exists (fun (ep : Discovery_cache.endpoint_info) -> ep.healthy) endpoints)
-      | _ -> None
-    in
-    let healthy_runtime_count =
-      match endpoints_opt with
-      | Some endpoints ->
-          Some
-            (List.fold_left
-               (fun acc (ep : Discovery_cache.endpoint_info) ->
-                 if ep.healthy then acc + 1 else acc)
-               0 endpoints)
-      | None -> None
-    in
-    let actual_model_id =
-      match endpoints_opt with
-      | Some endpoints ->
-          endpoints
-          |> List.filter_map (fun (ep : Discovery_cache.endpoint_info) ->
-                 match ep.models with
-                 | model :: _ -> nonempty_trimmed model.id
-                 | [] -> (
-                     match ep.props with
-                     | Some props -> nonempty_trimmed props.model
-                     | None -> None))
-          |> single_string_or_none
-      | None -> None
-    in
-    let actual_slots =
-      match endpoints_opt with
-      | Some endpoints when endpoints <> [] ->
-          Some
-            (List.fold_left
-               (fun acc (ep : Discovery_cache.endpoint_info) ->
-                 let slots =
-                   match ep.slots with
-                   | Some slots when slots.total > 0 -> slots.total
-                   | _ -> (
-                       match ep.props with
-                       | Some props when props.total_slots > 0 -> props.total_slots
-                       | _ -> 0)
-                 in
-                 acc + slots)
-               0 endpoints)
-      | _ -> None
-    in
-    let actual_ctx =
-      match endpoints_opt with
-      | Some endpoints ->
-          endpoints
-          |> List.filter_map (fun (ep : Discovery_cache.endpoint_info) ->
-                 match ep.props with
-                 | Some props when props.ctx_size > 0 -> Some props.ctx_size
-                 | _ -> None)
-          |> single_int_or_none
-      | None -> None
-    in
-    `Assoc
-      [
-        ("source", `String "oas_discovery_cache");
-        ("verified", `Bool false);
-        ("provider_scope", `String "local");
-        ( "provider_reachable",
-          match provider_reachable with
-          | Some value -> `Bool value
-          | None -> `Null );
-        ( "healthy_runtime_count",
-          Json_util.int_opt_to_json healthy_runtime_count );
-        ("actual_model_id", Json_util.string_opt_to_json actual_model_id);
-        ("actual_slots", Json_util.int_opt_to_json actual_slots);
-        ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
-        ("chat_completion_compatible", `Null);
-        ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
-        ("note", `String proof_note);
-      ]
+  `Assoc
+    [
+      ("source", `String "none");
+      ("verified", `Bool false);
+      ("provider_scope", `Null);
+      ("provider_reachable", `Null);
+      ("healthy_runtime_count", `Null);
+      ("actual_model_id", `Null);
+      ("actual_slots", `Null);
+      ("actual_ctx", `Null);
+      ("chat_completion_compatible", `Null);
+      ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker_class);
+      ("note", `String proof_note);
+    ]
 
-let attempt_summary_json ~configured_labels ~resolved_candidates ~selected_model
-    latest_cascade =
+let attempt_summary_json latest_cascade =
   match latest_cascade with
   | None ->
       `Assoc
         [
           ( "summary",
             `String
-              "No recent cascade observation for current keeper config. Showing configured labels only." );
+              "No recent cascade observation for current keeper config." );
           ("attempts_observed", `Null);
           ("selected_index", `Null);
           ("fallback_hops", `Null);
@@ -377,29 +242,26 @@ let attempt_summary_json ~configured_labels ~resolved_candidates ~selected_model
         | `Bool value -> value
         | _ -> false
       in
-      let candidate_count =
-        let count = List.length resolved_candidates in
-        if count > 0 then count else List.length configured_labels
-      in
       let selected_position =
         Option.map (fun idx -> idx + 1) selected_index
       in
       let summary =
-        match fallback_applied, fallback_hops, selected_position, candidate_count with
-        | true, Some hops, Some pos, total when total > 0 ->
-            Printf.sprintf "%d attempt(s); fallback after %d hop(s); selected candidate %d/%d."
-              attempts_observed hops pos total
-        | false, _, Some 1, _ ->
+        match fallback_applied, fallback_hops, selected_position with
+        | true, Some hops, Some pos ->
+            Printf.sprintf
+              "%d attempt(s); fallback after %d hop(s); selected candidate index %d."
+              attempts_observed
+              hops
+              pos
+        | false, _, Some 1 ->
             Printf.sprintf "%d attempt(s); selected first healthy candidate."
               attempts_observed
-        | false, _, Some pos, total when total > 0 ->
-            Printf.sprintf "%d attempt(s); selected candidate %d/%d without fallback."
-              attempts_observed pos total
-        | _, _, _, _ when Option.is_some selected_model ->
-            Printf.sprintf "%d attempt(s) observed; selected model reported without candidate index."
+        | false, _, Some pos ->
+            Printf.sprintf
+              "%d attempt(s); selected candidate index %d without fallback."
               attempts_observed
-        | _ ->
-            "Cascade observation is present but incomplete."
+              pos
+        | _ -> "Cascade observation is present but incomplete."
       in
       `Assoc
         [
@@ -410,8 +272,7 @@ let attempt_summary_json ~configured_labels ~resolved_candidates ~selected_model
           ("fallback_applied", `Bool fallback_applied);
         ]
 
-let latest_cascade_for_current_config ~current_cascade_name ~configured_labels
-    latest_metrics =
+let latest_cascade_for_current_config ~current_cascade_name latest_metrics =
   let latest_cascade =
     match latest_metrics with
     | Some metrics -> (
@@ -428,20 +289,12 @@ let latest_cascade_for_current_config ~current_cascade_name ~configured_labels
         | Some observed_name -> String.equal observed_name current_cascade_name
         | None -> true
       in
-      let _configured_labels = configured_labels in
-      (* Keeper meta currently surfaces resolved provider candidates, while
-         turn metrics keep the raw cascade labels that produced those
-         candidates. Matching the two verbatim drops valid recent
-         observations. Treat cascade_name as the stable identity and use
-         metrics labels only for display when a matching observation exists. *)
       if cascade_name_matches then Some cascade
       else None
 
-let model_observability_json ~current_cascade_name ~configured_labels ~active_model
-    ~runtime_blocker_fields latest_metrics =
+let model_observability_json ~current_cascade_name ~runtime_blocker_fields latest_metrics =
   let latest_cascade =
-    latest_cascade_for_current_config ~current_cascade_name ~configured_labels
-      latest_metrics
+    latest_cascade_for_current_config ~current_cascade_name latest_metrics
   in
   let runtime_blocker_class =
     assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
@@ -449,50 +302,18 @@ let model_observability_json ~current_cascade_name ~configured_labels ~active_mo
   let cascade_name =
     Option.value ~default:"" (nonempty_trimmed current_cascade_name)
   in
-  let configured_labels_surface =
-    match latest_cascade with
-    | Some cascade -> (
-        match json_string_list_member cascade "configured_labels" with
-        | [] -> configured_labels
-        | observed_labels -> observed_labels)
-    | None -> configured_labels
-  in
-  let resolved_candidates =
-    match latest_cascade with
-    | Some cascade ->
-        let labels = json_string_list_member cascade "candidate_models" in
-        if labels <> [] then labels else configured_labels_surface
-    | None -> configured_labels_surface
-  in
-  let fallback_selected_model =
-    match configured_labels_surface with
-    | model :: _ -> Some model
-    | [] -> nonempty_trimmed active_model
-  in
-  let selected_model =
-    match latest_cascade with
-    | Some cascade -> (
-        match json_string_opt_member cascade "selected_model" with
-        | Some _ as model -> model
-        | None -> fallback_selected_model)
-    | None -> fallback_selected_model
-  in
   `Assoc
     [
       ( "cascade_name",
         if cascade_name = "" then `Null else `String cascade_name );
       ( "recent_turn_observation",
         `Bool (Option.is_some latest_cascade) );
-      ( "configured_labels",
-        string_list_to_json configured_labels_surface );
-      ("resolved_candidates", string_list_to_json resolved_candidates);
-      ("selected_model", Json_util.string_opt_to_json selected_model);
-      ( "attempt_summary",
-        attempt_summary_json ~configured_labels:configured_labels_surface
-          ~resolved_candidates ~selected_model latest_cascade );
+      ("configured_labels", `List []);
+      ("resolved_candidates", `List []);
+      ("selected_model", `Null);
+      ("attempt_summary", attempt_summary_json latest_cascade);
       ( "runtime_contract",
-        lightweight_runtime_contract_json ~selected_model
-         ~runtime_blocker_class );
+        lightweight_runtime_contract_json ~runtime_blocker_class );
     ]
 
 let handle_keeper_status ctx args : tool_result =
@@ -585,20 +406,7 @@ let handle_keeper_status ctx args : tool_result =
            else now_ts -. m.runtime.proactive_rt.last_visible_ts
          in
          let trace_history_count = List.length m.runtime.trace_history in
-         let active_model = active_model_of_meta m in
-         let next_model_hint = next_model_hint_of_meta m in
-         let runtime_cascade_metrics =
-           match Cascade_legacy_runner.cascade_metrics_json () with
-           | `List entries ->
-               entries
-               |> List.find_opt (function
-                    | `Assoc fields ->
-                        List.assoc_opt "cascade_name" fields
-                        = Some (`String (cascade_name_of_meta m))
-                    | _ -> false)
-               |> Option.value ~default:`Null
-           | _ -> `Null
-         in
+         let runtime_cascade_metrics = `Null in
          let last_compaction_saved_tokens =
            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
          in
@@ -606,32 +414,7 @@ let handle_keeper_status ctx args : tool_result =
            compaction_policy_of_keeper m
          in
 
-         let models_resolved = `List (List.filter_map (fun label ->
-           match Cascade_config.parse_model_string label with
-           | None -> None
-           | Some cfg ->
-             let pricing = Llm_provider.Pricing.pricing_for_model cfg.model_id in
-             (* Extract provider name from cascade label prefix.
-                Keeper must not reference OAS provider_kind directly. *)
-             let provider_name =
-               match String.index_opt label ':' with
-               | Some idx when idx > 0 ->
-                 String.sub label 0 idx |> String.trim |> String.lowercase_ascii
-               | _ -> "unknown"
-             in
-             Some (`Assoc [
-               ("provider", `String provider_name);
-               ("model_id", `String cfg.model_id);
-               ("max_context", `Int (Cascade_runtime.max_context_of_label label));
-               ( "max_output_tokens",
-                 Option.fold ~none:`Null ~some:(fun tokens -> `Int tokens)
-                   cfg.max_tokens );
-               ("max_output_tokens", match cfg.max_tokens with Some n -> `Int n | None -> `Null);
-               ("api_key_env", if cfg.api_key <> "" then `String "(set)" else `Null);
-               ("cost_per_million_input", `Float pricing.input_per_million);
-               ("cost_per_million_output", `Float pricing.output_per_million);
-             ])
-         ) models) in
+         let models_resolved = `List [] in
 
          let metrics_store = keeper_metrics_store ctx.config m.name in
          let metrics_path = keeper_metrics_path ctx.config m.name in
@@ -997,9 +780,10 @@ let handle_keeper_status ctx args : tool_result =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
          in
          let model_observability =
-           model_observability_json ~current_cascade_name:(cascade_name_of_meta m)
-             ~configured_labels:models
-             ~active_model ~runtime_blocker_fields latest_metrics
+           model_observability_json
+             ~current_cascade_name:(cascade_name_of_meta m)
+             ~runtime_blocker_fields
+             latest_metrics
          in
          let runtime_trust =
            Keeper_runtime_trust_snapshot.snapshot_json
@@ -1056,10 +840,10 @@ let handle_keeper_status ctx args : tool_result =
            ("last_compaction_ago_s", `Float last_compaction_ago_s);
            ("last_proactive_ago_s", `Float last_proactive_ago_s);
            ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
-           ("active_model", `String active_model);
+           ("active_model", `Null);
            ("disposition", Json_util.string_opt_to_json disposition);
            ("disposition_reason", Json_util.string_opt_to_json disposition_reason);
-           ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
+           ("next_model_hint", `Null);
            ("runtime_cascade_metrics", runtime_cascade_metrics);
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);

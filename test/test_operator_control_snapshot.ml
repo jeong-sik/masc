@@ -168,7 +168,7 @@ let test_max_turns_override_source_accepts_raised_ceiling () =
   Alcotest.(check string) "missing override comes from env" "env"
     (Operator_control_snapshot.max_turns_override_source None)
 
-let test_compute_context_ratio_uses_resolved_cli_context_budget () =
+let test_compute_context_ratio_does_not_infer_provider_budget () =
   let base =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -199,13 +199,9 @@ let test_compute_context_ratio_uses_resolved_cli_context_budget () =
         };
     }
   in
-  let ratio =
-    match Operator_control_snapshot.compute_context_ratio meta with
-    | Some value -> value
-    | None -> Alcotest.fail "expected context ratio"
-  in
-  Alcotest.(check (float 0.0001)) "codex bare provider uses 1.05M context"
-    (2106223.0 /. 1050000.0) ratio
+  Alcotest.(check (option (float 0.0001)))
+    "model/provider label does not imply context budget" None
+    (Operator_control_snapshot.compute_context_ratio meta)
 
 let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
   Eio_main.run @@ fun env ->
@@ -319,9 +315,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
         | None -> Alcotest.fail "expected keeper_context_status metrics snapshot"
       in
       let usage_ratio =
-        match Operator_control_snapshot.compute_context_ratio updated_meta with
-        | Some value -> value
-        | None -> Alcotest.fail "expected usage fallback ratio"
+        Operator_control_snapshot.compute_context_ratio updated_meta
       in
       let snapshot_ratio =
         Yojson.Safe.Util.(keeper |> member "context_ratio" |> to_float)
@@ -340,8 +334,8 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
         metrics_max snapshot_max;
       Alcotest.(check string) "metrics source retained" "keeper_context_status"
         Yojson.Safe.Util.(keeper |> member "context_source" |> to_string);
-      Alcotest.(check bool) "metrics ratio differs from usage fallback" true
-        (Float.abs (snapshot_ratio -. usage_ratio) > 0.000001);
+      Alcotest.(check (option (float 0.000001)))
+        "usage fallback does not infer provider context" None usage_ratio;
       Alcotest.(check bool) "metrics tokens differ from usage fallback" true
         (snapshot_tokens <> updated_meta.runtime.usage.last_input_tokens);
       Alcotest.(check bool) "nested context payload omitted" true
@@ -478,7 +472,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
         "tool_required_unsatisfied"
         (trust |> member "operator_disposition_reason" |> to_string);
       Alcotest.(check string) "terminal code preserved"
-        "required_tool_use_unsatisfied"
+        "completion_contract_violation:require_tool_use"
         (trust |> member "latest_terminal_reason" |> member "code"
        |> to_string))
 

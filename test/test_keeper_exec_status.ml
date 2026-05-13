@@ -558,11 +558,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =
           [
-            {
-              OWN.provider_label = "codex_cli:codex";
-              provider_kind = "codex_cli";
-              reason = "codex_keeper_bound_actor_required";
-            };
+            { OWN.reason = "codex_keeper_bound_actor_required" };
           ];
       }
   in
@@ -597,9 +593,11 @@ let test_runtime_surface_names_no_tool_provider_details () =
     (runtime |> member "runtime_blocker_class" |> to_string);
   check bool "summary names required worktree tool" true
     (has_substring surfaced_summary "masc_worktree_create");
-  check bool "summary names rejected provider and reason" true
+  check bool "summary names rejection reason" true
     (has_substring surfaced_summary
-       "codex_cli:codex:codex_keeper_bound_actor_required")
+       "codex_keeper_bound_actor_required");
+  check bool "summary omits rejected provider identity" false
+    (has_substring surfaced_summary "codex_cli:codex")
 
 let test_runtime_surface_routes_oas_timeout_to_timeout_action () =
   KR.clear ();
@@ -708,7 +706,7 @@ let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
   let summary = runtime |> member "runtime_blocker_summary" |> to_string in
   check string "last blocker stays redacted"
     reason
-    (runtime |> member "last_blocker" |> to_string);
+    (runtime |> member "last_blocker" |> member "detail" |> to_string);
   check string "runtime blocker class"
     "cascade_exhausted"
     (runtime |> member "runtime_blocker_class" |> to_string);
@@ -775,7 +773,7 @@ let test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker 
   let runtime = KSB.runtime_surface_json config meta in
   let open Yojson.Safe.Util in
   check string "runtime blocker class"
-    "ambiguous_post_commit_failure"
+    "ambiguous_post_commit_timeout"
     (runtime |> member "runtime_blocker_class" |> to_string);
   check string "runtime blocker summary"
     reason
@@ -1075,13 +1073,12 @@ let test_runtime_surface_exposes_social_model_resolution_fields () =
   check string "transition reason"
     "tool_only:stay_silent"
     (runtime |> member "last_social_transition_reason" |> to_string);
-  check string "last blocker"
-    "waiting_for_delta"
-    (runtime |> member "last_blocker" |> to_string);
+  check bool "last blocker omitted" true
+    (runtime |> member "last_blocker" = `Null);
   check (option string) "blank last_need omitted" None
     (runtime |> member "last_need" |> to_string_option)
 
-let test_runtime_surface_exposes_model_display_labels () =
+let test_runtime_surface_omits_model_display_labels () =
   KR.clear ();
   let base = make_meta ~name:"runtime-model-label-test" () in
   let meta =
@@ -1103,14 +1100,10 @@ let test_runtime_surface_exposes_model_display_labels () =
   in
   let runtime = KSB.runtime_surface_json config meta in
   let open Yojson.Safe.Util in
-  let active_model_label =
-    runtime |> member "active_model_label" |> to_string
-  in
-  check bool "active model provider label" true
-    (String.starts_with ~prefix:"codex_cli:" active_model_label);
-  check string "last model used label"
-    active_model_label
-    (runtime |> member "last_model_used_label" |> to_string)
+  check bool "active model label omitted" true
+    (runtime |> member "active_model_label" = `Null);
+  check bool "last model used label omitted" true
+    (runtime |> member "last_model_used_label" = `Null)
 
 (* Issue #8670: parser must round-trip every constructor and reject
    unknown strings. The previous catch-all silently mapped typos to
@@ -1242,7 +1235,7 @@ let () =
             test_runtime_surface_prefers_typed_blocker_over_progress_narrative;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
-          test_case "runtime surface exposes model display labels" `Quick
-            test_runtime_surface_exposes_model_display_labels;
+          test_case "runtime surface omits model display labels" `Quick
+            test_runtime_surface_omits_model_display_labels;
         ] );
     ]

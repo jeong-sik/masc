@@ -242,7 +242,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         ${providerHealth ? html`
           <span class="ml-auto inline-flex items-center gap-1.5 text-2xs px-2 py-0.5 rounded-full border" style=${`border-color:${healthStatusColor(providerHealth.status)}33;background:${healthStatusColor(providerHealth.status)}11;color:${healthStatusColor(providerHealth.status)}`}>
             <span class="inline-block w-1.5 h-1.5 rounded-full" style=${`background:${healthStatusColor(providerHealth.status)}`}></span>
-            ${providerHealth.provider}/${providerHealth.model} — ${providerHealth.status}
+            runtime — ${providerHealth.status}
           </span>
         ` : null}
       </div>

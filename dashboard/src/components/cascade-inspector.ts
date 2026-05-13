@@ -149,7 +149,7 @@ function CascadeFocusRail({
     <div class="flex flex-col gap-2" aria-label="Cascade inspector focus" data-testid="cascade-focus-rail">
       <${FilterChips}
         chips=${[
-          { key: 'trace', label: 'Trace', count: traceCount, title: 'strategy trace와 provider health' },
+          { key: 'trace', label: 'Trace', count: traceCount, title: 'strategy trace와 runtime health' },
           { key: 'deep-dive', label: 'Deep dive', count: traceCount, title: 'latest cascade decision detail' },
           { key: 'compare', label: 'Compare', count: traceCount, title: 'ordered vs filtered/exhausted decisions' },
         ]}
@@ -355,7 +355,7 @@ function CascadeComparePanel({ events }: { events: CascadeStrategyTraceEvent[] }
 
 function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[] }) {
   if (providers.length === 0) {
-    return html`<${EmptyState} message="프로바이더 건강 데이터가 없습니다" compact />`
+    return html`<${EmptyState} message="런타임 건강 데이터가 없습니다" compact />`
   }
 
   return html`
@@ -363,7 +363,7 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
       <table class="w-full text-left text-xs">
         <thead class="bg-[var(--color-bg-surface)] text-text-muted">
           <tr>
-            <${ThBase}>프로바이더</${ThBase}>
+            <${ThBase}>런타임</${ThBase}>
             <${ThRight}>성공률</${ThRight}>
             <${ThRight}>연속 실패</${ThRight}>
             <${ThBase}>쿨다운</${ThBase}>
@@ -372,9 +372,9 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
           </tr>
         </thead>
         <tbody class="divide-y divide-card-border/40">
-          ${providers.map(p => html`
-            <tr key=${p.provider_key} class="hover:bg-[var(--color-bg-surface)] transition-colors">
-              <td class="px-3 py-2 font-medium text-text-strong">${p.provider_key}</td>
+          ${providers.map((p, index) => html`
+            <tr key=${`runtime-${index}`} class="hover:bg-[var(--color-bg-surface)] transition-colors">
+              <td class="px-3 py-2 font-medium text-text-strong">runtime-${index + 1}</td>
               <td class="px-3 py-2 text-right tabular-nums ${p.success_rate >= 0.9 ? 'text-ok' : p.success_rate >= 0.7 ? 'text-warn' : 'text-bad'}">
                 ${Math.round(p.success_rate * 100)}%
               </td>
@@ -421,7 +421,7 @@ export function CascadeInspector() {
           <div>
             <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">Cascade 검사기</div>
             <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">
-              전략 추적 · 프로바이더 건강도
+              전략 추적 · 런타임 건강도
             </h3>
           </div>
           <${CascadeFocusRail}
@@ -456,9 +456,9 @@ export function CascadeInspector() {
         <${StrategyTraceTable} events=${filteredEvents.value} />
       </section>`}
 
-      <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="프로바이더 건강도">
+      <section class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label="런타임 건강도">
         <div class="mb-3">
-          <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">프로바이더</div>
+          <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">런타임</div>
           <h3 class="mt-1 text-md font-semibold text-text-strong">건강도 스냅숏</h3>
         </div>
         ${healthLoading.value

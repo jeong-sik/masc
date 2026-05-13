@@ -669,8 +669,7 @@ let compact_receipt_cascade_json receipt =
   | `Assoc _ as cascade ->
     `Assoc
       [ "name", Json_util.string_opt_to_json (json_string "name" cascade)
-      ; ( "selected_model"
-        , Json_util.string_opt_to_json (json_string "selected_model" cascade) )
+      ; "selected_model", `Null
       ; "attempt_count", Json_util.int_opt_to_json (json_int "attempt_count" cascade)
       ; ( "fallback_applied"
         , Json_util.bool_opt_to_json (json_bool "fallback_applied" cascade) )
@@ -741,7 +740,7 @@ let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
       ; ( "operator_disposition_reason"
         , Json_util.string_opt_to_json (json_string "operator_disposition_reason" receipt)
         )
-      ; "model_used", Json_util.string_opt_to_json (json_string "model_used" receipt)
+      ; "model_used", `Null
       ; "stop_reason", Json_util.string_opt_to_json (json_string "stop_reason" receipt)
       ; ( "tool_contract_result"
         , Json_util.string_opt_to_json (json_string "tool_contract_result" receipt) )

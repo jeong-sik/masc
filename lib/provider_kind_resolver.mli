@@ -54,6 +54,11 @@ val resolve : string -> resolution
 val kind_of_spec :
   string -> Llm_provider.Provider_config.provider_kind option
 
+val uses_anthropic_caching_for_kind :
+  Llm_provider.Provider_config.provider_kind -> bool
+
+val uses_anthropic_caching_for_spec : string -> bool option
+
 (** [env_var_for_kind kind] returns the conventional environment variable
     name that holds the API key for [kind], delegating to OAS's
     {!Llm_provider.Provider_kind.default_api_key_env}. Centralizing this

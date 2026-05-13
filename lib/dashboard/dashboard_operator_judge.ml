@@ -77,7 +77,7 @@ let runtime_status base_path =
         refreshing = st.refreshing;
         generated_at = st.generated_at;
         expires_at = st.expires_at;
-        model_used = st.model_used;
+        model_used = None;
         keeper_name;
         last_error = st.last_error;
       })
@@ -155,7 +155,7 @@ let prompt_for_facts facts_json =
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt "dashboard.operator_judge"
 
-let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used json =
+let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ json =
   match json with
   | `Assoc _ ->
       let summary =
@@ -176,7 +176,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used jso
         Some
           (Operator_judgment.record config ~surface:"command.namespace"
              ~target_type:Operator_judgment.Coord ~target_id:None ~summary
-             ~confidence ?model_name:(Some model_used)
+             ~confidence ?model_name:None
              ?recommended_action:
                (build_recommended_action ~actor:keeper_name ~target_type:"root"
                   ~target_id:None (json |> member "recommended_action"))
@@ -228,7 +228,9 @@ let compute_judgments
             in
             Log.Governance.warn "%s" msg;
             Error msg
-        | parsed -> Ok (response.model, parsed)
+        | parsed ->
+            let _ = response.model in
+            Ok ("runtime", parsed)
       with
       | Yojson.Json_error msg ->
           Error (Printf.sprintf "Operator judge returned invalid JSON: %s" msg)

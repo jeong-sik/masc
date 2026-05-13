@@ -12,7 +12,6 @@ type t = {
   mode : Cfg.mode;
   budget : L.budget;
   cascade_label : string;
-  provider_label : string;
   candidate_key : string option;
   started_at : float;
   first_chunk_at : float option ref;
@@ -29,14 +28,14 @@ type t = {
 
 let mode (t : t) : Cfg.mode = t.mode
 
-let create ~mode ~budget ~cascade_label ~provider_label ?candidate_key
-    ~started_at () =
+let public_runtime_provider_label = "runtime"
+
+let create ~mode ~budget ~cascade_label ?candidate_key ~started_at () =
   let stop_tick_p, stop_tick_r = Eio.Promise.create () in
   {
     mode;
     budget;
     cascade_label;
-    provider_label;
     candidate_key;
     started_at;
     first_chunk_at = ref None;
@@ -60,13 +59,13 @@ let kill_labels (t : t) (failure : L.failure) =
     ("mode", Cfg.mode_label t.mode);
     ("kind", L.failure_kind_label failure);
     ("cascade", t.cascade_label);
-    ("provider", t.provider_label);
+    ("provider", public_runtime_provider_label);
   ]
 
 let observed_labels (t : t) ~outcome =
   [
     ("cascade", t.cascade_label);
-    ("provider", t.provider_label);
+    ("provider", public_runtime_provider_label);
     ("outcome", outcome);
   ]
 
@@ -141,8 +140,8 @@ let react_to_output (t : t) (output : L.output) : unit =
                   log and degrade to Observe rather than raise. *)
                Log.Misc.warn
                  "cascade_attempt_liveness: enforce mode but no switch \
-                  registered (cascade=%s provider=%s); shadowing kill"
-                 t.cascade_label t.provider_label))
+                  registered (cascade=%s provider=runtime); shadowing kill"
+                 t.cascade_label))
 
 (* -- on_event wrapper --------------------------------------------- *)
 
@@ -161,7 +160,9 @@ let observe_chunk_clock (t : t) ~(at : float) : unit =
   t.last_chunk_at := Some at
 
 let prometheus_recorder (t : t) : L.recorder =
-  let labels = [ ("cascade", t.cascade_label); ("provider", t.provider_label) ] in
+  let labels =
+    [ ("cascade", t.cascade_label); ("provider", public_runtime_provider_label) ]
+  in
   {
     L.record_ttft = (fun seconds ->
         Prometheus.observe_histogram Prometheus.metric_cascade_ttfb_seconds
@@ -219,8 +220,8 @@ let wrap_on_event (t : t)
              | exn ->
                  Log.Misc.warn
                    "cascade_attempt_liveness: original on_event raised \
-                    (cascade=%s provider=%s): %s"
-                   t.cascade_label t.provider_label
+                    (cascade=%s provider=runtime): %s"
+                   t.cascade_label
                    (Printexc.to_string exn)));
         try step_with_event t evt with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -228,8 +229,8 @@ let wrap_on_event (t : t)
         | exn ->
             Log.Misc.warn
               "cascade_attempt_liveness: step raised (cascade=%s \
-               provider=%s): %s"
-              t.cascade_label t.provider_label (Printexc.to_string exn)
+               provider=runtime): %s"
+              t.cascade_label (Printexc.to_string exn)
       in
       Some wrapped
 
@@ -287,8 +288,8 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
           | exn ->
               Log.Misc.warn
                 "cascade_attempt_liveness tick fiber crashed (cascade=%s \
-                 provider=%s): %s"
-                t.cascade_label t.provider_label (Printexc.to_string exn))
+                 provider=runtime): %s"
+                t.cascade_label (Printexc.to_string exn))
 
 (* -- Finalize ----------------------------------------------------- *)
 

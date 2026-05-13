@@ -1252,8 +1252,9 @@ let checkpoint_model_of_meta (meta : keeper_meta) =
     meta.runtime.usage.last_model_used
     :: Keeper_model_labels.configured_model_labels_of_meta meta
   in
-  List.find_opt (fun value -> String.trim value <> "") candidates
-  |> Option.value ~default:(Provider_adapter.default_local_fallback_label ())
+  match List.find_opt (fun value -> String.trim value <> "") candidates with
+  | Some value -> value
+  | None -> Cascade_runtime_candidate.default_local_runtime_label ()
 
 let save_oas_checkpoint
     ~(max_checkpoint_messages : int)

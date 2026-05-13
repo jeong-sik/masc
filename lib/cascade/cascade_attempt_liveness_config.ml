@@ -21,7 +21,8 @@ let parse_mode raw =
   | "" | "observe" | "default" | "1" | "true" | "shadow" -> Observe
   | _ -> Observe (* unknown values default to Observe — never silently Off *)
 
-(* Cached after first read. Mirrors Keeper_admission_glue.use_new_admission. *)
+(* Cached after first read so mid-attempt env edits do not split-brain the
+   observer. *)
 let mode_cache : mode option ref = ref None
 
 let current_mode () =
@@ -88,6 +89,12 @@ let valid_sample (s : success_sample) =
   && finite_non_negative s.max_inter_chunk_ms
   && finite_non_negative s.wall_ms
 
+let runtime_candidate_key = "runtime"
+
+let normalize_candidate_key raw =
+  let key = String.trim raw in
+  if key = "" then None else Some runtime_candidate_key
+
 let take limit values =
   let rec loop n acc = function
     | [] -> List.rev acc
@@ -117,9 +124,10 @@ let remember_candidate_key key =
   List.iter (Hashtbl.remove success_history) evicted
 
 let record_success_sample ~candidate_key (sample : success_sample) =
-  let key = String.trim candidate_key in
-  if key = "" || not (valid_sample sample) then ()
-  else
+  match normalize_candidate_key candidate_key with
+  | None -> ()
+  | Some key when not (valid_sample sample) -> ()
+  | Some key ->
     with_success_history_lock (fun () ->
         remember_candidate_key key;
         let current =
@@ -135,11 +143,13 @@ let reset_success_history_for_test () =
       success_history_order := [])
 
 let success_sample_count_for_test ~candidate_key =
-  let key = String.trim candidate_key in
-  with_success_history_lock (fun () ->
-      match Hashtbl.find_opt success_history key with
-      | Some samples -> List.length samples
-      | None -> 0)
+  match normalize_candidate_key candidate_key with
+  | None -> 0
+  | Some key ->
+    with_success_history_lock (fun () ->
+        match Hashtbl.find_opt success_history key with
+        | Some samples -> List.length samples
+        | None -> 0)
 
 let percentile p values =
   match List.sort Float.compare values with
@@ -197,10 +207,11 @@ let budget_of_samples samples =
   | _ -> Cascade_attempt_liveness.bootstrap
 
 let budget_for_candidate ~candidate_key =
-  let key = String.trim candidate_key in
+  let key = normalize_candidate_key candidate_key in
   let samples =
-    if key = "" then []
-    else
+    match key with
+    | None -> []
+    | Some key ->
       with_success_history_lock (fun () ->
           match Hashtbl.find_opt success_history key with
           | Some samples -> samples

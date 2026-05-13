@@ -44,7 +44,7 @@ let run_model_by_label
   : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
-    config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
+    Cascade_error_classify.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer ?memory
       ?tool_retry_policy
@@ -53,8 +53,8 @@ let run_model_by_label
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
-  match require_eio ?sw ?net () with
-  | Error e -> Error (eio_context_error_to_sdk_error e)
+  match Cascade_oas_runner.require_eio ?sw ?net () with
+  | Error e -> Error (Cascade_oas_runner.eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
@@ -70,7 +70,7 @@ let run_model_by_label
           ~keeper_name:"oas-label-model"
           ~cascade_name:admission_cascade_name
           (fun () ->
-            with_codex_cli_preflight
+            Cascade_error_classify.with_codex_cli_preflight
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
@@ -82,11 +82,11 @@ let run_model_by_label
                          (Accept_rejected
                             {
                               scope = model_label;
-                              model = Some result.response.model;
+                              model = Some "runtime";
                               reason =
                                 Printf.sprintf
-                                  "response rejected by accept (model=%s)"
-                                  result.response.model;
+                                  "response rejected by accept (runtime=%s)"
+                                  "runtime";
                             }))
                 | Error e -> Error e))
       with
@@ -177,15 +177,15 @@ let run_model_with_masc_tools
   : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
-    config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
+    Cascade_error_classify.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ?stream_idle_timeout_s ?guardrails ?hooks ?memory ?tool_retry_policy ?enable_thinking
       ?compact_ratio
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
-  match require_eio ?sw ?net () with
-  | Error e -> Error (eio_context_error_to_sdk_error e)
+  match Cascade_oas_runner.require_eio ?sw ?net () with
+  | Error e -> Error (Cascade_oas_runner.eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
@@ -201,7 +201,7 @@ let run_model_with_masc_tools
           ~keeper_name:"oas-explicit-model"
           ~cascade_name:admission_cascade_name
           (fun () ->
-            with_codex_cli_preflight
+            Cascade_error_classify.with_codex_cli_preflight
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->
@@ -213,4 +213,3 @@ let run_model_with_masc_tools
           Error
             (sdk_error_of_masc_internal_error
                (Admission_queue_rejected { keeper_name = "oas-explicit-model"; reason }))
-

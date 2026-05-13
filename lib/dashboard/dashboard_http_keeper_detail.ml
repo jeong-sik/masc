@@ -122,6 +122,7 @@ let compute_metrics_window
     ~(primary_model_norm : string)
     ~(primary_model : string)
   : Yojson.Safe.t list * Yojson.Safe.t * Yojson.Safe.t option * Yojson.Safe.t option =
+  let _primary_model = primary_model in
   let open Yojson.Safe.Util in
   let work_kind_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let model_counts_window : (string, int) Hashtbl.t = Hashtbl.create 16 in
@@ -157,7 +158,6 @@ let compute_metrics_window
         in
         let handoff_obj = j |> member "handoff" in
         let handoff_performed = Safe_ops.json_bool ~default:false "performed" handoff_obj in
-        let handoff_to_model = Safe_ops.json_string_opt "to_model" handoff_obj in
         let handoff_prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff_obj in
         let handoff_new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff_obj in
         let handoff_new_generation =
@@ -174,7 +174,10 @@ let compute_metrics_window
         let model_used = Safe_ops.json_string ~default:"" "model_used" j in
         let message_count = Safe_ops.json_int ~default:0 "message_count" j in
         let model_used_norm = normalize_model_name model_used in
-        let model_bucket = if model_used_norm <> "" then model_used_norm else model_used in
+        let model_bucket =
+          if String.trim model_used <> "" || model_used_norm <> "" then "runtime"
+          else ""
+        in
         let work_kind_raw =
           Keeper_unified_metrics.work_kind_of_json j
           |> Option.value ~default:""
@@ -267,7 +270,7 @@ let compute_metrics_window
                 ("ts_unix", `Float ts_unix);
                 ("trace_id", `String trace_id);
                 ("generation", `Int gen);
-                ("to_model", Json_util.string_opt_to_json (match handoff_to_model with Some s when s <> "" -> Some s | _ -> None));
+                ("to_model", `Null);
                 ("prev_trace_id", Json_util.string_opt_to_json (match handoff_prev_trace_id with Some s when s <> "" -> Some s | _ -> None));
                 ("new_trace_id", Json_util.string_opt_to_json (match handoff_new_trace_id with Some s when s <> "" -> Some s | _ -> None));
                 ("new_generation", Json_util.int_opt_to_json handoff_new_generation);
@@ -348,7 +351,7 @@ let compute_metrics_window
               end else acc
             in
             count_table_incr work_kind_counts work_kind;
-            count_table_incr model_counts_window model_bucket;
+            if model_bucket <> "" then count_table_incr model_counts_window model_bucket;
             List.iter (count_table_incr tool_counts_window) tools_used;
             let acc = { acc with
               ma_tool_call_count = acc.ma_tool_call_count + tool_call_count_now;
@@ -414,7 +417,7 @@ let compute_metrics_window
             gen_stats.memory_notes <- gen_stats.memory_notes + memory_notes_added_now;
             if gen_stats.first_ts <= 0.0 || ts_unix < gen_stats.first_ts then gen_stats.first_ts <- ts_unix;
             if ts_unix > gen_stats.last_ts then gen_stats.last_ts <- ts_unix;
-            count_table_incr gen_stats.models model_bucket;
+            if model_bucket <> "" then count_table_incr gen_stats.models model_bucket;
             List.iter (count_table_incr gen_stats.tools) tools_used;
 
             acc
@@ -529,14 +532,14 @@ let compute_metrics_window
                 if handoff_performed then
                   `Assoc [
                     ("performed", `Bool true);
-                    ("to_model", match handoff_to_model with Some s when s <> "" -> `String s | _ -> `Null);
+                    ("to_model", `Null);
                     ("prev_trace_id", match handoff_prev_trace_id with Some s when s <> "" -> `String s | _ -> `Null);
                     ("new_trace_id", match handoff_new_trace_id with Some s when s <> "" -> `String s | _ -> `Null);
                     ("new_generation", match handoff_new_generation with Some g -> `Int g | None -> `Null);
                     ("to_generation", match handoff_new_generation with Some g -> `Int g | None -> `Null);
                   ]
                 else `Null);
-              ("handoff_to_model", Json_util.string_opt_to_json (match handoff_to_model with Some s when s <> "" -> Some s | _ -> None));
+              ("handoff_to_model", `Null);
               ("handoff_prev_trace_id", Json_util.string_opt_to_json (match handoff_prev_trace_id with Some s when s <> "" -> Some s | _ -> None));
               ("handoff_new_trace_id", Json_util.string_opt_to_json (match handoff_new_trace_id with Some s when s <> "" -> Some s | _ -> None));
               ("handoff_new_generation", Json_util.int_opt_to_json handoff_new_generation);
@@ -546,7 +549,7 @@ let compute_metrics_window
               ("total_tokens", Json_util.int_opt_to_json total_tokens);
               ("latency_ms", `Int latency_ms);
               ("cost_usd", Json_util.float_opt_to_json cost_usd);
-              ("model_used", `String model_used);
+              ("model_used", `Null);
               ("prompt_fingerprint", j |> member "prompt_fingerprint");
               ("prompt", j |> member "prompt");
               ("compaction_before_tokens", `Int before_tokens);
@@ -590,9 +593,12 @@ let compute_metrics_window
 	              ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);
 	              ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
 	              ("memory_expected_topic", Json_util.string_opt_to_json memory_expected_topic);
-	              ("timeout_budget", j |> member "timeout_budget");
-	              ("inference_telemetry", j |> member "inference_telemetry");
-	            ])
+              ("timeout_budget", j |> member "timeout_budget");
+              ( "inference_telemetry",
+                j
+                |> member "inference_telemetry"
+                |> Keeper_hooks_oas.redact_inference_telemetry_json );
+            ])
         in
         match output_item with
         | Some i -> (acc, i :: items)
@@ -799,7 +805,7 @@ let compute_metrics_window
     ("window_turns", `Int turn_points_int);
     ("window_series_max_lines", `Int series_points);
     ("window_series_max_bytes", `Int metrics_window_max_bytes);
-    ("primary_model", `String primary_model);
+    ("primary_model", `Null);
     ("handoff_count", `Int acc.ma_handoff_count);
     ("compaction_events", `Int acc.ma_compaction_events);
     ("compaction_before_tokens", `Int acc.ma_compaction_before_tokens);

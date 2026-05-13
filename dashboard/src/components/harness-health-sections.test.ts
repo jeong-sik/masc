@@ -479,9 +479,9 @@ describe('filterPreCompactEvents', () => {
     expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
   })
 
-  it('matches by model_family substring', () => {
+  it('does not match by concrete model_family substring', () => {
     const result = filterPreCompactEvents(items, 'glm')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
+    expect(result).toHaveLength(0)
   })
 
   it('matches by strategies entry substring', () => {
@@ -547,9 +547,9 @@ describe('filterHandoffEvents', () => {
     expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
   })
 
-  it('matches by to_model substring', () => {
+  it('does not match by concrete to_model substring', () => {
     const result = filterHandoffEvents(items, 'glm')
-    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
+    expect(result).toHaveLength(0)
   })
 
   it('matches by trace_id substring', () => {

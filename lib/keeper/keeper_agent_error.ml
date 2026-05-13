@@ -100,10 +100,9 @@ let agent_error_terminal_reason_code = function
       "agent_error_cost_budget_exceeded:spent_usd=%.2f,limit_usd=%.2f"
       spent_usd
       limit_usd
-  | Agent_sdk.Error.CostBudgetUnenforceable { model_id; limit_usd } ->
+  | Agent_sdk.Error.CostBudgetUnenforceable { model_id = _; limit_usd } ->
     Printf.sprintf
-      "agent_error_cost_budget_unenforceable:model_id=%s,limit_usd=%.2f"
-      model_id
+      "agent_error_cost_budget_unenforceable:runtime=runtime,limit_usd=%.2f"
       limit_usd
   | Agent_sdk.Error.IdleDetected { consecutive_idle_turns } ->
     Printf.sprintf

@@ -318,14 +318,12 @@ let run_dashboard_runtime_probe () =
   match Atomic.get dashboard_runtime_probe_runner_hook with
   | Some hook -> hook ()
   | None ->
-    Tool_local_runtime.runtime_ollama_probe_json
-      ~probe_runs:2
-      ~max_tokens:8
-      ~timeout_sec:dashboard_runtime_probe_timeout_sec
-      ~ps_timeout_sec:2
-      ~generate_when_unloaded:false
-      ~run_generate:false
-      ()
+    `Assoc
+      [ "source", `String "runtime"
+      ; "probe_ok", `Null
+      ; "status", `String "oas_owned"
+      ; "detail", `String "Concrete provider probes are owned by OAS."
+      ]
 ;;
 
 let dashboard_runtime_probe_cached_value () =

@@ -37,8 +37,6 @@ type t = {
   oas_turn_count : int option;
   event : event_kind;
   cascade_name : string option;
-  provider_kind : string option;
-  model_id : string option;
   status : string;
   decision : Yojson.Safe.t;
   links : links;
@@ -132,8 +130,8 @@ let safe_segment value =
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     ?generation ?keeper_turn_id ?oas_turn_count ~event ?cascade_name
-    ?provider_kind ?model_id ?(status = "ok") ?(decision = `Assoc [])
-    ?receipt_path ?checkpoint_path ?tool_call_log_path () =
+    ?(status = "ok") ?(decision = `Assoc []) ?receipt_path ?checkpoint_path
+    ?tool_call_log_path () =
   {
     schema_version;
     ts;
@@ -145,22 +143,19 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     oas_turn_count;
     event;
     cascade_name;
-    provider_kind;
-    model_id;
     status;
     decision;
     links = { receipt_path; checkpoint_path; tool_call_log_path };
   }
 
-let make_for_context ctx ~event ?oas_turn_count ?cascade_name ?provider_kind
-    ?model_id ?status ?decision ?receipt_path ?checkpoint_path
-    ?tool_call_log_path () =
+let make_for_context ctx ~event ?oas_turn_count ?cascade_name ?status ?decision
+    ?receipt_path ?checkpoint_path ?tool_call_log_path () =
   make ~keeper_name:ctx.manifest_keeper_name
     ?agent_name:ctx.manifest_agent_name ~trace_id:ctx.manifest_trace_id
     ?generation:ctx.manifest_generation
     ?keeper_turn_id:ctx.manifest_keeper_turn_id ?oas_turn_count ~event
-    ?cascade_name ?provider_kind ?model_id ?status ?decision ?receipt_path
-    ?checkpoint_path ?tool_call_log_path ()
+    ?cascade_name ?status ?decision ?receipt_path ?checkpoint_path
+    ?tool_call_log_path ()
 
 let json_of_string_opt = function
   | None -> `Null
@@ -178,6 +173,47 @@ let links_to_json links =
       ("tool_call_log_path", json_of_string_opt links.tool_call_log_path);
     ]
 
+let string_contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop idx =
+      if idx + needle_len > haystack_len then false
+      else if String.sub haystack idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+
+let is_provider_attempt_provenance_key = function
+  | "model_source"
+  | "resolved_model_source"
+  | "capability_source"
+  | "fallback_authority"
+  | "provider_source_cascade" ->
+    true
+  | _ -> false
+
+let redacts_provider_model_key key =
+  let key = String.lowercase_ascii key in
+  (not (is_provider_attempt_provenance_key key))
+  &&
+  (string_contains_substring key "provider"
+   || string_contains_substring key "model"
+   || String.equal key "configured_labels")
+
+let rec redact_provider_model_json = function
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> List.filter_map (fun (key, value) ->
+               if redacts_provider_model_key key then None
+               else Some (key, redact_provider_model_json value)))
+  | `List values -> `List (List.map redact_provider_model_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      value
+
 let to_json manifest =
   `Assoc
     [
@@ -191,10 +227,8 @@ let to_json manifest =
       ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
       ("event", `String (event_kind_to_string manifest.event));
       ("cascade_name", json_of_string_opt manifest.cascade_name);
-      ("provider_kind", json_of_string_opt manifest.provider_kind);
-      ("model_id", json_of_string_opt manifest.model_id);
       ("status", `String manifest.status);
-      ("decision", manifest.decision);
+      ("decision", redact_provider_model_json manifest.decision);
       ("links", links_to_json manifest.links);
     ]
 
@@ -265,8 +299,6 @@ let of_json = function
             | Some event -> Ok event)
             >>= fun event ->
             optional_string "cascade_name" fields >>= fun cascade_name ->
-            optional_string "provider_kind" fields >>= fun provider_kind ->
-            optional_string "model_id" fields >>= fun model_id ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
             field "links" fields >>= fun links_json ->
@@ -283,8 +315,6 @@ let of_json = function
                 oas_turn_count;
                 event;
                 cascade_name;
-                provider_kind;
-                model_id;
                 status;
                 decision;
                 links;
@@ -443,8 +473,6 @@ let append_unfinished_provider_attempt_finished_best_effort
     in
     make_for_context ctx ~event:Provider_attempt_finished
       ?cascade_name:started.cascade_name
-      ?provider_kind:started.provider_kind
-      ?model_id:started.model_id
       ~status
       ~decision:(`Assoc (inherited_fields @ terminal_fields))
       ()

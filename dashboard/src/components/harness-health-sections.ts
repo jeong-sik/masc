@@ -59,8 +59,8 @@ export function filterVerdicts(
 /**
  * Pure filter for pre-compact events.
  *
- * Case-insensitive substring match on `keeper_name`, `trigger`, `model_family`,
- * and any entry of `strategies`. Empty/whitespace query returns the input
+ * Case-insensitive substring match on `keeper_name`, `trigger`, and any entry
+ * of `strategies`. Empty/whitespace query returns the input
  * reference unchanged so `useMemo` keeps referential equality. Input is
  * never mutated.
  */
@@ -73,7 +73,6 @@ export function filterPreCompactEvents(
   return items.filter(item => {
     if (item.keeper_name && item.keeper_name.toLowerCase().includes(needle)) return true
     if (item.trigger && item.trigger.toLowerCase().includes(needle)) return true
-    if (item.model_family && item.model_family.toLowerCase().includes(needle)) return true
     if (item.strategies.some(s => s.toLowerCase().includes(needle))) return true
     return false
   })
@@ -82,7 +81,7 @@ export function filterPreCompactEvents(
 /**
  * Pure filter for handoff events.
  *
- * Case-insensitive substring match on `keeper_name`, `to_model`, `trace_id`,
+ * Case-insensitive substring match on `keeper_name`, `trace_id`,
  * `prev_trace_id`, and `new_trace_id`. Empty/whitespace query returns the
  * input reference unchanged. Input is never mutated.
  */
@@ -94,7 +93,6 @@ export function filterHandoffEvents(
   if (needle === '') return items
   return items.filter(item => {
     if (item.keeper_name && item.keeper_name.toLowerCase().includes(needle)) return true
-    if (item.to_model && item.to_model.toLowerCase().includes(needle)) return true
     if (item.trace_id && item.trace_id.toLowerCase().includes(needle)) return true
     if (item.prev_trace_id && item.prev_trace_id.toLowerCase().includes(needle)) return true
     if (item.new_trace_id && item.new_trace_id.toLowerCase().includes(needle)) return true
@@ -421,7 +419,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
           type="search"
           class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
           value=${query.value}
-          placeholder="keeper / trigger / model / strategy 필터"
+          placeholder="keeper / trigger / strategy 필터"
           ariaLabel="압축 이벤트 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
         />
@@ -438,7 +436,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
               <span>컨텍스트 ${Math.round(item.context_ratio * 100)}%</span>
               <span>메시지 ${item.message_count}건</span>
               <span>토큰 ${item.token_count.toLocaleString()}</span>
-              <span>${item.model_family || '모델 미확인'}</span>
+              <span>runtime</span>
             </div>
             <div class="mt-2 text-xs text-[var(--color-fg-muted)]">${item.trigger}</div>
             ${item.strategies.length > 0 ? html`
@@ -473,7 +471,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
           type="search"
           class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
           value=${query.value}
-          placeholder="keeper / model / trace_id 필터"
+          placeholder="keeper / trace_id 필터"
           ariaLabel="세대 교체 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
         />
@@ -493,7 +491,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
                 <span class="font-mono" title=${item.trace_id}>${item.trace_id.slice(0, 8)}</span>
                 <${CopyIdButton} value=${item.trace_id} label="trace_id" size=${10} />
               </span>
-              <span>${item.to_model ?? '모델 미확인'}</span>
+              <span>runtime</span>
             </div>
             ${item.prev_trace_id ? html`
               <div class="mt-2 text-xs text-[var(--color-fg-muted)]">이전 ${item.prev_trace_id.slice(0, 8)} → 새 ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>

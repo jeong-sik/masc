@@ -52,7 +52,6 @@ type t =
   | ToolUnderusedAllowed
   | PathRejection
   | PathResolverIdentityMismatch
-  | AdmissionShadowOutcome
   | HeartbeatSuccesses
   | HeartbeatFailures
   | CleanupTrackingFailures
@@ -259,7 +258,6 @@ val metric_keeper_tool_underused_allowed_count : string
 val metric_keeper_tool_underused_allowed : string
 val metric_keeper_path_rejection : string
 val metric_keeper_path_resolver_identity_mismatch : string
-val metric_keeper_admission_shadow_outcome : string
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
 val metric_keeper_cleanup_tracking_failures : string

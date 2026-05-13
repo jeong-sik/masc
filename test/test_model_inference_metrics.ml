@@ -69,6 +69,9 @@ let write_costs base entries =
 
 let now_unix () = Unix.gettimeofday ()
 
+let runtime_lane_label_for_test model_key =
+  "runtime_lane_" ^ String.sub (Digest.to_hex (Digest.string model_key)) 0 12
+
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
     ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
@@ -230,7 +233,7 @@ let test_single_model_success () =
     check int "models" 1 (List.length agg.models);
     let s = List.hd agg.models in
     check string "model_id" "claude-sonnet" s.model_id;
-    check (option string) "provider" (Some "claude") s.provider;
+    check (option string) "provider" None s.provider;
     check int "entry_count" 2 s.entry_count;
     check int "success_count" 2 s.success_count;
     check int "error_count" 0 s.error_count;
@@ -247,15 +250,12 @@ let test_single_model_success () =
     check bool "tok/s > 0" true
       (Option.value ~default:0.0 s.avg_tok_per_sec > 0.0))
 
-let test_provider_kind_classifies_bare_model_provider () =
+let test_provider_kind_is_not_reconstructed_from_legacy_fields () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "kinded" in
     let ts = now_unix () in
-    let provider_kind =
-      Llm_provider.Provider_config.string_of_provider_kind
-        Llm_provider.Provider_config.Kimi_cli
-    in
+    let provider_kind = "kimi_cli" in
     write_decisions path [
       success_entry ~model:"kimi-k2.5" ~ts:(ts -. 5.0)
         ~provider_kind ();
@@ -264,15 +264,11 @@ let test_provider_kind_classifies_bare_model_provider () =
     check int "total_entries" 1 agg.total_entries;
     let s = List.hd agg.models in
     check string "model stays bare" "kimi-k2.5" s.model_id;
-    check (option string) "provider from provider_kind"
-      (Some "kimi_cli") s.provider;
+    check (option string) "provider not reconstructed" None s.provider;
     let recent = List.hd s.recent_entries in
-    check (option string) "recent provider from provider_kind"
-      (Some "kimi_cli") recent.re_provider;
+    check (option string) "recent provider not reconstructed" None recent.re_provider;
     let rollup = M.provider_rollup agg in
-    check int "provider rollup keeps entry" 1 (List.length rollup);
-    check string "rollup provider" "kimi_cli"
-      (List.hd rollup).M.ps_provider)
+    check int "provider rollup stays empty" 0 (List.length rollup))
 
 let test_untrusted_usage_excluded_from_aggregates () =
   let base = test_dir () in
@@ -418,7 +414,9 @@ let test_json_roundtrip () =
     let models = json |> member "models" |> to_list in
     check bool "has models" true (List.length models > 0);
     let m = List.hd models in
-    check bool "provider unresolved -> null" true
+    check string "model id redacted" (runtime_lane_label_for_test "test-model")
+      (m |> member "model_id" |> to_string);
+    check bool "provider redacted -> null" true
       (match m |> member "provider" with `Null -> true | _ -> false);
     check int "success_count" 1 (m |> member "success_count" |> to_int);
     check int "usage_sample_count" 1
@@ -586,13 +584,42 @@ let test_costs_jsonl_backfills_wall_tok_per_sec () =
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
-    check string "cost model"
-      "ollama:qwen3.6:27b-coding-nvfp4" s.model_id;
+    check string "cost model" "ollama:qwen3.6:27b-coding-nvfp4" s.model_id;
     check int "one cost entry" 1 s.entry_count;
     check (option (float 0.001)) "wall tok/sec from cost latency"
       (Some 200.0) s.avg_tok_per_sec;
     check int "usage sample" 1 s.usage_sample_count;
     check int "telemetry sample" 1 s.telemetry_sample_count)
+
+let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let ts = now_unix () in
+    write_costs base [
+      cost_entry ~model:"shared-model" ~provider_kind:"ollama" ~ts
+        ~input_tokens:10 ~output_tokens:5 ();
+      cost_entry ~model:"shared-model" ~provider_kind:"anthropic" ~ts:(ts -. 1.0)
+        ~input_tokens:20 ~output_tokens:10 ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "provider-qualified model buckets" 2 (List.length agg.models);
+    let ids = List.map (fun (s : M.model_stats) -> s.model_id) agg.models |> List.sort compare in
+    check
+      (list string)
+      "private provider keys stay distinct"
+      ["anthropic:shared-model"; "ollama:shared-model"]
+      ids;
+    let token_totals =
+      agg.models
+      |> List.map (fun (s : M.model_stats) ->
+        s.model_id, Option.value ~default:0 s.total_input_tokens)
+      |> List.sort (fun (left, _) (right, _) -> compare left right)
+    in
+    check
+      (list (pair string int))
+      "tokens are not merged across provider lanes"
+      ["anthropic:shared-model", 20; "ollama:shared-model", 10]
+      token_totals)
 
 let test_costs_jsonl_zero_latency_is_missing () =
   let base = test_dir () in
@@ -666,7 +693,8 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
     let per_agent = json |> member "perAgent" |> to_list in
     check int "perAgent row count" 2 (List.length per_agent);
     let first = List.hd per_agent in
-    check string "highest cost first" "claude-sonnet"
+    check string "highest cost first redacted"
+      (runtime_lane_label_for_test "claude-sonnet")
       (first |> member "agent" |> to_string);
     check int "input tokens summed" 110
       (first |> member "in_tok" |> to_int);
@@ -676,17 +704,18 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
       (first |> member "cost" |> to_float);
 
     let matrix = json |> member "matrix" in
-    check (list string) "provider axis sorted"
-      ["anthropic"; "openai"]
+    check (list string) "provider axis redacted"
+      ["runtime"]
       (matrix |> member "providers" |> to_list |> List.map to_string);
-    check (list string) "model axis follows model aggregate order"
-      ["claude-sonnet"; "gpt-4o"]
+    check (list string) "model axis redacted"
+      [
+        runtime_lane_label_for_test "claude-sonnet";
+        runtime_lane_label_for_test "gpt-4o";
+      ]
       (matrix |> member "models" |> to_list |> List.map to_string);
     let grid = matrix |> member "grid" |> to_list in
     let row0 = List.nth grid 0 |> to_list |> List.map to_float in
-    let row1 = List.nth grid 1 |> to_list |> List.map to_float in
-    check (list (float 0.001)) "anthropic row costs" [0.05; 0.0] row0;
-    check (list (float 0.001)) "openai row costs" [0.0; 0.01] row1;
+    check (list (float 0.001)) "runtime row costs" [0.05; 0.01] row0;
 
     check (float 0.001) "global p50" 200.0
       (json |> member "p50" |> to_float);
@@ -702,6 +731,42 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
       (List.hd buckets |> member "n" |> to_int);
     check int "1s-4s bucket count" 1
       (List.nth buckets 1 |> member "n" |> to_int))
+
+let test_public_runtime_lane_label_is_stable_across_windows () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "stable_lane" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry ~model:"old-busier-model" ~ts:(ts -. 120.0)
+        ~input_tokens:10 ();
+      success_entry ~model:"old-busier-model" ~ts:(ts -. 130.0)
+        ~input_tokens:10 ();
+      success_entry ~model:"stable-model" ~ts:(ts -. 10.0)
+        ~input_tokens:300 ();
+    ];
+    let label_with_input expected_input json =
+      let open Yojson.Safe.Util in
+      json
+      |> member "models"
+      |> to_list
+      |> List.find_map (fun model_json ->
+        if model_json |> member "total_input_tokens" |> to_int = expected_input then
+          Some (model_json |> member "model_id" |> to_string)
+        else
+          None)
+    in
+    let full =
+      M.compute ~base_path:base ~window_minutes:60 |> M.to_json
+      |> label_with_input 300
+    in
+    let short =
+      M.compute ~base_path:base ~window_minutes:1 |> M.to_json
+      |> label_with_input 300
+    in
+    let expected = Some (runtime_lane_label_for_test "stable-model") in
+    check (option string) "full window label" expected full;
+    check (option string) "short window label" expected short)
 
 let test_cost_latency_json_preserves_missing_latency_as_null () =
   let base = test_dir () in
@@ -1065,9 +1130,12 @@ let test_provider_rollup_json_shape () =
   let json = M.provider_stats_to_json (List.hd (M.provider_rollup agg)) in
   match json with
   | `Assoc fields ->
-    check string "provider"
+    check string "provider redacted"
       (match List.assoc "provider" fields with `String s -> s | _ -> "!")
-      "kimi_cli";
+      "runtime";
+    check int "model_count redacted"
+      0
+      (match List.assoc "model_count" fields with `Int n -> n | _ -> -1);
     check int "request_count surfaces entry_count"
       42
       (match List.assoc "entry_count" fields with `Int n -> n | _ -> -1);
@@ -1083,8 +1151,8 @@ let () =
     "basics", [
       test_case "empty dir" `Quick test_empty_dir;
       test_case "single model success" `Quick test_single_model_success;
-      test_case "provider_kind classifies bare model provider" `Quick
-        test_provider_kind_classifies_bare_model_provider;
+      test_case "provider_kind is not reconstructed" `Quick
+        test_provider_kind_is_not_reconstructed_from_legacy_fields;
       test_case "untrusted usage excluded from aggregates" `Quick
         test_untrusted_usage_excluded_from_aggregates;
       test_case "error turns counted" `Quick test_error_turns_counted;
@@ -1098,9 +1166,13 @@ let () =
       test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
+      test_case "costs.jsonl disambiguates matching model names by provider" `Quick
+        test_costs_jsonl_disambiguates_matching_model_names_by_provider;
       test_case "costs.jsonl zero latency stays missing" `Quick test_costs_jsonl_zero_latency_is_missing;
       test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
       test_case "cost latency json composes axes and percentiles" `Quick test_cost_latency_json_composes_axes_and_percentiles;
+      test_case "public runtime lane label is stable across windows" `Quick
+        test_public_runtime_lane_label_is_stable_across_windows;
       test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;
       test_case "json roundtrip" `Quick test_json_roundtrip;
     ];

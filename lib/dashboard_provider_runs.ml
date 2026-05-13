@@ -86,8 +86,8 @@ let run_record_to_json (run : run_record) =
     [
       ("run_id", `String run.run_id);
       ("status", `String (string_of_run_status run.status));
-      ("provider", `String run.provider);
-      ("model", `String run.model);
+      ("provider", `String "runtime");
+      ("model", `String "runtime");
       ("created_at", `String run.created_at);
       ("started_at", Json_util.string_opt_to_json run.started_at);
       ("finished_at", Json_util.string_opt_to_json run.finished_at);
@@ -282,10 +282,9 @@ let provider_snapshot_by_name name =
 
 let discovery_info_to_json (d : discovery_info) : (string * Yojson.Safe.t) list =
   let opt_int k = function Some n -> [(k, `Int n)] | None -> [] in
-  let opt_str k = function Some s -> [(k, `String s)] | None -> [] in
   [("discovery", `Assoc (
     [("healthy", `Bool d.healthy)]
-    @ opt_str "discovered_model" d.discovered_model
+    @ [ "discovered_model", `Null ]
     @ opt_int "ctx_size" d.ctx_size
     @ opt_int "total_slots" d.total_slots
     @ opt_int "busy_slots" d.busy_slots
@@ -293,19 +292,24 @@ let discovery_info_to_json (d : discovery_info) : (string * Yojson.Safe.t) list 
   ))]
 
 let provider_snapshot_to_json (snapshot : provider_snapshot) =
+  let runtime_lane =
+    "runtime_lane_"
+    ^ string_of_int
+        (abs (Hashtbl.hash snapshot.provider mod 1_000_000) + 1)
+  in
   let base = [
-    ("provider", `String snapshot.provider);
-    ("kind", `String snapshot.kind);
-    ("runtime_kind", `String snapshot.runtime_kind);
+    ("provider", `String runtime_lane);
+    ("kind", `String "runtime");
+    ("runtime_kind", `String "runtime");
     ("auth_kind", `String snapshot.auth_kind);
     ("status", `String snapshot.status);
     ("available", `Bool snapshot.available);
     ("supports_single_agent_run", `Bool snapshot.supports_single_agent_run);
-    ("default_model", Json_util.string_opt_to_json snapshot.default_model);
-    ("model_count", `Int (List.length snapshot.models));
-    ("models", `List (List.map (fun model -> `String model) snapshot.models));
+    ("default_model", `Null);
+    ("model_count", `Int 0);
+    ("models", `List []);
     ("source", `String snapshot.source);
-    ("endpoint_url", Json_util.string_opt_to_json snapshot.endpoint_url);
+    ("endpoint_url", `Null);
     ("note", Json_util.string_opt_to_json snapshot.note);
   ] in
   let disc = match snapshot.discovery with
@@ -533,8 +537,8 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
           [
             ("run_id", `String run.run_id);
             ("status", `String (string_of_run_status run.status));
-            ("provider", `String run.provider);
-            ("model", `String run.model);
+            ("provider", `String "runtime");
+            ("model", `String "runtime");
           ])
 
 let run_status_json run_id =

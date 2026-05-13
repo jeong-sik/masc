@@ -49,16 +49,16 @@ val create :
   mode:Cascade_attempt_liveness_config.mode ->
   budget:Cascade_attempt_liveness.budget ->
   cascade_label:string ->
-  provider_label:string ->
   ?candidate_key:string ->
   started_at:float ->
   unit ->
   t
 (** Build an observer for one cascade attempt.
 
-    [candidate_key], when supplied, is the concrete provider/model key that
-    identifies any successful timing sample exposed by
-    {!success_sample_for_candidate}.
+    [candidate_key], when supplied, is the OAS/provider-runtime candidate key
+    used only for internal budget history and any successful timing sample
+    exposed by {!success_sample_for_candidate}. It is not emitted as a public
+    Prometheus label; public observer metrics use a neutral runtime lane.
 
     [started_at] is the monotonic wall-clock the caller already captured for
     the attempt start.

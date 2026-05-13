@@ -103,7 +103,7 @@ function normalizeOperatorJudgeRuntime(raw: unknown): OperatorJudgeRuntime | nul
     refreshing: asBoolean(raw.refreshing),
     generated_at: asString(raw.generated_at) ?? null,
     expires_at: asString(raw.expires_at) ?? null,
-    model_used: asString(raw.model_used) ?? null,
+    model_used: null,
     keeper_name: asString(raw.keeper_name) ?? null,
     last_error: asString(raw.last_error) ?? null,
   }
@@ -172,8 +172,8 @@ function normalizeOperatorJudgment(raw: unknown): OperatorJudgment | null {
     generated_at: asString(raw.generated_at) ?? null,
     fresh_until: asString(raw.fresh_until) ?? null,
     keeper_name: asString(raw.keeper_name) ?? null,
-    model_name: asString(raw.model_name) ?? null,
-    runtime_name: asString(raw.runtime_name) ?? null,
+    model_name: null,
+    runtime_name: asString(raw.runtime_name) ? 'runtime' : null,
     evidence_refs: asStringArray(raw.evidence_refs),
     recommended_action: normalizeRecommendedAction(raw.recommended_action),
     supersedes: asStringArray(raw.supersedes),
@@ -286,6 +286,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   const name = asString(raw.name)
   if (!name) return null
   const contextRaw = isRecord(raw.context) ? raw.context : undefined
+  const hasModelLabel = Boolean(asString(raw.model) ?? asString(raw.active_model) ?? asString(raw.primary_model))
   return {
     name,
     runtime_class: 'keeper' as const,
@@ -300,7 +301,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     active_goal_ids: asStringArray(raw.active_goal_ids),
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
-    model: asString(raw.model) ?? asString(raw.active_model) ?? asString(raw.primary_model),
+    model: hasModelLabel ? 'runtime' : undefined,
     needs_attention: typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
     attention_reason: asString(raw.attention_reason) ?? null,
     next_human_action: asString(raw.next_human_action) ?? null,

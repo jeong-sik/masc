@@ -89,7 +89,7 @@ function GovernanceSummaryStrip() {
       : `judge-only / ${judgmentCount} recent judgments`
   const status = judgeRuntimeStatus(judge, summary)
   const liveJudgeState = judgeStatusLabel(status, judge)
-  const liveJudgeModel = judge?.model_used?.trim() || judge?.keeper_name?.trim() || '-'
+  const liveJudgeRuntime = judge?.keeper_name?.trim() || '-'
   const judgeHealthy = status === 'online' || status === 'refreshing'
   const judgeUnhealthy = status === 'offline' || status === 'stale_visible' || status === 'backoff'
 
@@ -139,9 +139,9 @@ function GovernanceSummaryStrip() {
           },
           {
             variant: 'stacked',
-            label: 'Judge Model',
-            value: liveJudgeModel,
-            caption: judge?.model_used?.trim() ? 'runtime report' : 'unknown',
+            label: 'Judge Runtime',
+            value: liveJudgeRuntime,
+            caption: 'keeper',
           },
           {
             variant: 'stacked',
@@ -182,9 +182,8 @@ function JudgeStatusBar() {
     <div class="mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
-        <span class="font-medium text-text-muted">Judge model ${label}</span>
+        <span class="font-medium text-text-muted">Judge runtime ${label}</span>
       </span>
-      ${judge.model_used ? html`<span class="text-text-dim">${judge.model_used}</span>` : null}
       ${judge.generated_at || judge.last_error
         ? html`
             <span class="ml-auto flex items-center gap-3 min-w-0">
@@ -236,7 +235,7 @@ function JudgmentsSection() {
     const { message, tone } = judgmentsEmptyStateMessage()
     const judge = governanceData.value?.judge
     const lastSeen = judge?.generated_at ?? governanceData.value?.summary?.judge_last_seen_at
-    const meta = [judge?.keeper_name, judge?.model_used].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ')
+    const meta = [judge?.keeper_name].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ')
     const chipClass = tone === 'warn'
       ? 'border-warn/30 bg-warn/10 text-warn'
       : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
@@ -402,7 +401,7 @@ function KeeperApprovalAlertBanner() {
 function KeeperApprovalEmptyState() {
   const ctx = keeperHitlEmptyContext()
   const judge = governanceData.value?.judge
-  const meta = [judge?.keeper_name, judge?.model_used]
+  const meta = [judge?.keeper_name]
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
     .join(' · ')
   const chipClass = ctx.tone === 'warn'
@@ -562,9 +561,6 @@ function KeeperApprovalQueueSection() {
                       ${item.goal_id ? html`<${MetaTag}>goal ${item.goal_id}</${MetaTag}>` : null}
                       ${item.runtime_contract?.sandbox_profile
                         ? html`<${MetaTag}>sandbox ${item.runtime_contract.sandbox_profile}${item.runtime_contract.backend ? ` / ${item.runtime_contract.backend}` : ''}</${MetaTag}>`
-                        : null}
-                      ${item.selected_model
-                        ? html`<${MetaTag} mono>${item.selected_model}</${MetaTag}>`
                         : null}
                       ${item.disposition
                         ? html`<span class="rounded-[var(--r-1)] border px-1.5 py-0.5 font-bold ${approvalDispositionToneClass(item.disposition)}">

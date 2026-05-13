@@ -244,7 +244,7 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
            ; "last_seen", `String a.last_seen
            ; "emoji", `String profile.emoji
            ; "koreanName", `String profile.korean_name
-           ; "model", Json_util.string_opt_to_json profile.model
+           ; "model", `Null
            ; "traits", `List (List.map (fun t -> `String t) profile.traits)
            ; "interests", `List (List.map (fun i -> `String i) profile.interests)
            ; "activityLevel", Json_util.float_opt_to_json profile.activity_level
@@ -926,7 +926,7 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
     ; "emoji", `String profile.emoji
     ; "koreanName", `String profile.korean_name
-    ; "model", Json_util.string_opt_to_json profile.model
+    ; "model", `Null
     ; "traits", `List (List.map (fun t -> `String t) profile.traits)
     ; "interests", `List (List.map (fun i -> `String i) profile.interests)
     ; "activityLevel", Json_util.float_opt_to_json profile.activity_level

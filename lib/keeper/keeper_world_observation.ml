@@ -1187,14 +1187,11 @@ let provider_cooldown_remaining_sec_for_cascade
       ~(cascade_name : Keeper_cascade_profile.runtime_name)
   : int option
   =
-  let model_ids =
+  let runtime_health_keys =
     Cascade_runtime.models_of_cascade_name cascade_name
-    |> Cascade_config.parse_model_strings
-    |> List.map (fun (cfg : Llm_provider.Provider_config.t) -> String.trim cfg.model_id)
-    |> List.filter (fun model_id -> model_id <> "")
-    |> List.sort_uniq String.compare
+    |> Cascade_runtime_candidate.runtime_health_keys_of_labels
   in
-  match model_ids with
+  match runtime_health_keys with
   | [] -> None
   | _ ->
     let provider_infos =
@@ -1203,7 +1200,7 @@ let provider_cooldown_remaining_sec_for_cascade
            Cascade_health_tracker.provider_info
              Cascade_health_tracker.global
              ~provider_key)
-        model_ids
+        runtime_health_keys
     in
     if not (List.for_all Option.is_some provider_infos)
     then None

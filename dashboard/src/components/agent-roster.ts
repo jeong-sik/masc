@@ -48,7 +48,6 @@ import {
 } from '../runtime-counts'
 import {
   keeperActivityDisplay,
-  keeperDisplayModel,
 } from '../lib/keeper-runtime-display'
 
 type StatusFilter = 'all' | RuntimeBand
@@ -60,34 +59,6 @@ function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[var(--err-border)] bg-[var(--bad-soft)] text-[var(--color-status-err)]'
   if (stageKey === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--purple)]'
   return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'
-}
-
-function compactModelLabel(model: string | null | undefined): string | null {
-  const value = model?.trim()
-  if (!value) return null
-  const separator = value.indexOf(':')
-  if (separator >= 0 && separator < value.length - 1) {
-    const provider = value.slice(0, separator).trim()
-    const suffix = value.slice(separator + 1).trim()
-    if (!suffix) return value
-    if (suffix === 'auto') return provider.replace(/(?:[_-](?:cli|code))$/i, '')
-    return suffix
-  }
-  return value
-}
-
-function rosterModelMeta(
-  source: {
-    last_model_used_label?: string | null
-    last_model_used?: string | null
-    active_model_label?: string | null
-    active_model?: string | null
-    model?: string | null
-    primary_model?: string | null
-    metrics_series?: Array<{ model_used?: string | null } | null> | null
-  } | null | undefined,
-): { label: string; value: string } | null {
-  return keeperDisplayModel(source)
 }
 
 function rosterContextMeta(
@@ -219,10 +190,9 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
 /**
  * Pure filter for agent roster rows.
  *
- * Case-insensitive substring match on `row.name`, `row.model`,
- * `row.current_task`, and `row.koreanName` so operators can locate an
- * agent/keeper by display name, by the model it runs, by its current
- * task text, or by the Korean alias shown on the card.
+ * Case-insensitive substring match on `row.name`, `row.current_task`, and
+ * `row.koreanName` so operators can locate an agent/keeper by display name,
+ * current task text, or the Korean alias shown on the card.
  *
  * Empty/whitespace query returns the input reference unchanged (no new
  * array allocation, preserves referential equality for memoisation).
@@ -237,7 +207,6 @@ function filterAgentRoster(
   if (needle === '') return rows
   return rows.filter(row => {
     if (row.name.toLowerCase().includes(needle)) return true
-    if (row.model && row.model.toLowerCase().includes(needle)) return true
     if (row.current_task && row.current_task.toLowerCase().includes(needle)) return true
     if (row.koreanName && row.koreanName.toLowerCase().includes(needle)) return true
     return false
@@ -509,7 +478,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         const terms = searchTermsByAgent.get(a.name) ?? [a.name.toLowerCase()]
         const identityMatch = terms.some(term => term.includes(normalizedSearch))
         if (!identityMatch) {
-          // Fall back to the pure roster filter (model / current_task / koreanName).
+          // Fall back to the pure roster filter (current_task / koreanName).
           const fieldMatch = filterAgentRoster([a], search).length === 1
           if (!fieldMatch) return false
         }
@@ -594,13 +563,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             </div>
 
             <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-muted)] uppercase">
-              <span>이름 / model / 작업</span>
+              <span>이름 / 작업</span>
               <${TextInput}
                 class="rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-4 py-3 text-base text-[var(--color-fg-primary)] shadow-[inset_0_1px_0_var(--color-border-default)] focus:border-[var(--color-accent-fg)] focus:shadow-[0_0_0_2px_var(--color-accent-soft)]"
                 name="agent_search"
-                ariaLabel="에이전트 이름 · 모델 · 작업 검색"
+                ariaLabel="에이전트 이름 · 작업 검색"
                 autoComplete="off"
-                placeholder="이름 · runtime alias · model · 작업으로 찾기"
+                placeholder="이름 · 작업으로 찾기"
                 value=${search}
                 onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
               />
@@ -689,10 +658,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               keeperRuntime?.agent_name ?? agent.name,
             )
             ?? agent.name
-          const modelMeta = rosterModelMeta(keeperRuntime ?? agent)
-          const modelDisplay = isKeeper
-            ? modelMeta?.value ?? null
-            : compactModelLabel(modelMeta?.value)
           const fsmPhaseKey =
             keeperMonitoring?.phase.key && keeperMonitoring.phase.key !== 'unknown'
               ? keeperMonitoring.phase.key
@@ -800,12 +765,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <span class="inline-block h-1.5 w-12 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-hover)]">
                       <span class="block h-full rounded-[var(--r-0)] ${contextMeta.pct > 85 ? 'bg-[var(--color-status-err)]' : contextMeta.pct > 60 ? 'bg-[var(--color-status-warn)]' : 'bg-[var(--color-status-ok)]'}" style="width:${contextMeta.pct}%"></span>
                     </span>
-                  </span>
-                ` : null}
-                ${modelMeta && modelDisplay ? html`
-                  <span class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1">
-                    <span>${modelMeta.label}</span>
-                    <span class="max-w-[18rem] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-3xs text-[var(--color-fg-primary)]" translate="no" title=${modelMeta.value}>${modelDisplay}</span>
                   </span>
                 ` : null}
               </div>

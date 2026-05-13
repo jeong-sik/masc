@@ -116,7 +116,7 @@ Focused local checks:
 
 ```bash
 scripts/dune-local.sh build test/test_cascade_config_validity.exe
-scripts/dune-local.sh build test/test_cascade_toml_materializer_admission.exe
+scripts/dune-local.sh build test/test_cascade_declarative_parser.exe
 ```
 
 Useful source references:

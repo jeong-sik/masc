@@ -11,7 +11,7 @@
 (* ================================================================ *)
 
 type stop_reason =
-  Keeper_agent_context.stop_reason =
+  Cascade_agent_context.stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
@@ -28,7 +28,7 @@ type cli_transport_overrides =
 }
 
 type config =
-  Keeper_agent_context.config = {
+  Cascade_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
   provider : Agent_sdk.Provider.config;
@@ -81,7 +81,7 @@ type config =
           to scrub [STATE] blocks before the 100-char truncation. *)
 }
 
-let default_config = Keeper_agent_context.default_config
+let default_config = Cascade_agent_context.default_config
 
 type run_result = {
   response : Agent_sdk.Types.api_response;
@@ -245,7 +245,7 @@ let build
   | Error _ as e -> e
   | Ok transport ->
       let builder =
-        Keeper_agent_context.builder_without_approval ~net ~config ?transport ()
+        Cascade_agent_context.builder_without_approval ~net ~config ?transport ()
       in
       let builder =
         match config.approval with
@@ -279,12 +279,8 @@ let dashboard_status_of_stop_reason = function
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =
   try
-    let provider_id = Provider_adapter.provider_label_of_config config.provider_cfg in
-    let model_id =
-      let response_model = String.trim response.model in
-      if response_model = "" then config.model_id else response_model
-    in
-    Dashboard_oas_bridge.record_response ~provider_id ~model_id
+    Dashboard_oas_bridge.record_response ~provider_id:"runtime"
+      ~model_id:"runtime"
       ~total_duration_ms ?serialization_ms ~status response
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -343,7 +339,7 @@ let resume_from_checkpoint
   | Error _ as e -> e
   | Ok transport ->
       let prepared_resume =
-        Keeper_agent_context.prepare_resume ~config ~checkpoint
+        Cascade_agent_context.prepare_resume ~config ~checkpoint
       in
       Log.Misc.info
         "oas_worker %s: resume checkpoint_turn_count=%d per_call_turn_budget=%d effective_max_turns=%d"

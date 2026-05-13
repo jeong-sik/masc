@@ -263,12 +263,9 @@ function entryPreview(e: TelemetryEntry): string {
     case 'keeper_metric': {
       const name = normalizeText(e.name) ?? '-'
       const channel = normalizeText(e.channel) ?? '-'
-      const rawModel = normalizeText(e.model_used)
-      const isStatusTag = rawModel != null && /^(turn-exhausted|unknown|none|-)$/i.test(rawModel)
-      const model = rawModel == null ? '-' : isStatusTag ? `(${rawModel})` : rawModel
       const tools = normalizeStringArray(e.tools_used)
       const toolCount = typeof e.tool_call_count === 'number' ? e.tool_call_count : tools.length
-      return `${name} [${channel}] model=${model} tools=${toolCount}`
+      return `${name} [${channel}] tools=${toolCount}`
     }
     case 'agent_event': {
       const event = e.event

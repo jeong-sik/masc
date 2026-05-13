@@ -1,9 +1,9 @@
 (** Tests for [Dashboard_oas_bridge].
 
     Per-call telemetry collector for I1 telemetry pipeline (#11924). Covers
-    ring-buffer semantics (record/recent/clear), provider filter, and
-    the nearest-rank percentile in {!Dashboard_oas_bridge.summary}, plus
-    provider-error count aggregation for I2 (#11925). *)
+    ring-buffer semantics (record/recent/clear), runtime-lane compatibility
+    filters, and the nearest-rank percentile in {!Dashboard_oas_bridge.summary},
+    plus provider-error count aggregation for I2 (#11925). *)
 
 module DOB = Masc_mcp.Dashboard_oas_bridge
 module Json = Yojson.Safe.Util
@@ -91,25 +91,37 @@ let make_response ?usage ?telemetry ?(model = "claude-opus-4-7") ()
 let test_record_then_recent () =
   setup ();
   DOB.record (make_sample ());
-  let xs = DOB.recent () in
-  Alcotest.(check int) "1 sample" 1 (List.length xs)
+  match DOB.recent () with
+  | [ (sample, _) ] ->
+    Alcotest.(check string) "provider normalized" "runtime" sample.provider_id;
+    Alcotest.(check string) "model normalized" "runtime" sample.model_id
+  | xs -> Alcotest.failf "expected one sample, got %d" (List.length xs)
 ;;
 
-let test_unknown_provider_returns_empty () =
+let test_legacy_provider_filter_selects_runtime_lane () =
   setup ();
   DOB.record (make_sample ~provider:"anthropic" ());
-  Alcotest.(check int) "unknown provider" 0 (List.length (DOB.recent ~provider:"nope" ()))
+  Alcotest.(check int)
+    "legacy provider filter maps to runtime"
+    1
+    (List.length (DOB.recent ~provider:"nope" ()))
 ;;
 
-(* --- provider filter + cross-provider merge --- *)
+(* --- runtime-lane compatibility filters --- *)
 
-let test_provider_filter () =
+let test_provider_filter_is_runtime_lane_alias () =
   setup ();
   DOB.record (make_sample ~provider:"anthropic" ());
   DOB.record (make_sample ~provider:"anthropic" ());
   DOB.record (make_sample ~provider:"ollama" ());
-  Alcotest.(check int) "anthropic" 2 (List.length (DOB.recent ~provider:"anthropic" ()));
-  Alcotest.(check int) "ollama" 1 (List.length (DOB.recent ~provider:"ollama" ()));
+  Alcotest.(check int)
+    "anthropic aliases runtime"
+    3
+    (List.length (DOB.recent ~provider:"anthropic" ()));
+  Alcotest.(check int)
+    "ollama aliases runtime"
+    3
+    (List.length (DOB.recent ~provider:"ollama" ()));
   Alcotest.(check int) "all merged" 3 (List.length (DOB.recent ()))
 ;;
 
@@ -178,12 +190,12 @@ let test_sample_json_preserves_signal_fields () =
          ())
   in
   Alcotest.(check string)
-    "provider"
-    "ollama"
+    "provider redacted"
+    "runtime"
     (json |> Json.member "provider_id" |> Json.to_string);
   Alcotest.(check string)
-    "model"
-    "qwen3"
+    "model redacted"
+    "runtime"
     (json |> Json.member "model_id" |> Json.to_string);
   Alcotest.(check (float 1e-9))
     "ttfb"
@@ -223,24 +235,26 @@ let test_sample_json_preserves_signal_fields () =
   Alcotest.(check int) "retry" 2 (json |> Json.member "retry_count" |> Json.to_int)
 ;;
 
-let test_recent_json_filters_provider () =
+let test_recent_json_provider_filter_is_runtime_alias () =
   setup ();
   DOB.record (make_sample ~provider:"anthropic" ());
   DOB.record (make_sample ~provider:"ollama" ~model:"qwen3" ());
   let json = DOB.recent_json ~provider:"ollama" ~limit:5 () in
   Alcotest.(check string)
-    "provider"
-    "ollama"
+    "provider redacted"
+    "runtime"
     (json |> Json.member "provider" |> Json.to_string);
   Alcotest.(check int) "limit" 5 (json |> Json.member "limit" |> Json.to_int);
-  Alcotest.(check int) "count" 1 (json |> Json.member "count" |> Json.to_int);
+  Alcotest.(check int) "count" 2 (json |> Json.member "count" |> Json.to_int);
   match json |> Json.member "samples" |> Json.to_list with
-  | [ entry ] ->
-    Alcotest.(check string)
-      "sample provider"
-      "ollama"
-      (entry |> Json.member "sample" |> Json.member "provider_id" |> Json.to_string)
-  | samples -> Alcotest.failf "expected one sample, got %d" (List.length samples)
+  | samples ->
+    List.iter
+      (fun entry ->
+         Alcotest.(check string)
+           "sample provider redacted"
+           "runtime"
+           (entry |> Json.member "sample" |> Json.member "provider_id" |> Json.to_string))
+      samples
 ;;
 
 let test_summary_json_contains_aggregate () =
@@ -287,42 +301,43 @@ let provider_error_count ~provider ~cascade ~kind ~capacity_scope counts =
 
 let test_provider_error_counts_group_and_filter () =
   setup ();
-  let rate_limit = P.RateLimit { retry_after = Some 2.0; provider = "anthropic" } in
-  let capacity = P.CapacityExhausted { scope = `Model; affected = [ "ollama" ] } in
+  let rate_limit = P.RateLimit { retry_after = Some 2.0 } in
+  let capacity = P.CapacityExhausted { scope = `Model } in
   DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"anthropic" rate_limit;
   DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"anthropic" rate_limit;
+  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" rate_limit;
   DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" capacity;
   let all = DOB.provider_error_counts () in
   Alcotest.(check int) "two groups" 2 (List.length all);
-  let anthropic =
+  let rate_limit_count =
     provider_error_count
-      ~provider:"anthropic"
+      ~provider:"runtime"
       ~cascade:"primary"
       ~kind:"rate_limit"
       ~capacity_scope:"none"
       all
   in
-  Alcotest.(check int) "anthropic rate_limit count" 2 anthropic.DOB.count;
-  let ollama =
+  Alcotest.(check int) "runtime rate_limit count" 3 rate_limit_count.DOB.count;
+  let capacity_count =
     provider_error_count
-      ~provider:"ollama"
+      ~provider:"runtime"
       ~cascade:"primary"
       ~kind:"capacity_exhausted"
       ~capacity_scope:"model"
       all
   in
-  Alcotest.(check int) "ollama capacity count" 1 ollama.DOB.count;
+  Alcotest.(check int) "runtime capacity count" 1 capacity_count.DOB.count;
   let filtered = DOB.provider_error_counts ~provider:"anthropic" () in
-  Alcotest.(check int) "filtered groups" 1 (List.length filtered);
-  let filtered_anthropic =
+  Alcotest.(check int) "filtered groups" 2 (List.length filtered);
+  let filtered_rate_limit =
     provider_error_count
-      ~provider:"anthropic"
+      ~provider:"runtime"
       ~cascade:"primary"
       ~kind:"rate_limit"
       ~capacity_scope:"none"
       filtered
   in
-  Alcotest.(check int) "filtered count" 2 filtered_anthropic.DOB.count
+  Alcotest.(check int) "filtered count" 3 filtered_rate_limit.DOB.count
 ;;
 
 let test_summary_json_contains_provider_error_counts () =
@@ -330,7 +345,7 @@ let test_summary_json_contains_provider_error_counts () =
   DOB.record_provider_error
     ~cascade_name:"primary"
     ~provider_id:"anthropic"
-    (P.AuthError { provider = "anthropic" });
+    P.AuthError;
   let json = DOB.summary_json ~provider:"anthropic" ~limit:10 () in
   let summary = json |> Json.member "summary" in
   Alcotest.(check int)
@@ -340,8 +355,8 @@ let test_summary_json_contains_provider_error_counts () =
   match summary |> Json.member "provider_error_counts" |> Json.to_list with
   | [ count ] ->
     Alcotest.(check string)
-      "provider"
-      "anthropic"
+      "provider redacted"
+      "runtime"
       (count |> Json.member "provider_id" |> Json.to_string);
     Alcotest.(check string)
       "cascade"
@@ -368,10 +383,11 @@ let test_clear_provider () =
   DOB.record (make_sample ~provider:"ollama" ());
   DOB.clear ~provider:"anthropic" ();
   Alcotest.(check int)
-    "anthropic cleared"
+    "legacy provider clears runtime lane"
     0
     (List.length (DOB.recent ~provider:"anthropic" ()));
-  Alcotest.(check int) "ollama remains" 1 (List.length (DOB.recent ~provider:"ollama" ()))
+  Alcotest.(check int) "other legacy alias also cleared" 0 (List.length (DOB.recent ~provider:"ollama" ()));
+  Alcotest.(check int) "all cleared" 0 (List.length (DOB.recent ()))
 ;;
 
 let test_clear_provider_error_counts () =
@@ -379,19 +395,19 @@ let test_clear_provider_error_counts () =
   DOB.record_provider_error
     ~cascade_name:"primary"
     ~provider_id:"anthropic"
-    (P.RateLimit { retry_after = None; provider = "anthropic" });
+    (P.RateLimit { retry_after = None });
   DOB.record_provider_error
     ~cascade_name:"primary"
     ~provider_id:"ollama"
     (P.ServerError { code = 503; transient = true });
   DOB.clear ~provider:"anthropic" ();
   Alcotest.(check int)
-    "anthropic counts cleared"
+    "legacy provider clears runtime counts"
     0
     (List.length (DOB.provider_error_counts ~provider:"anthropic" ()));
   Alcotest.(check int)
-    "ollama counts remain"
-    1
+    "other legacy alias also cleared"
+    0
     (List.length (DOB.provider_error_counts ~provider:"ollama" ()));
   DOB.clear ();
   Alcotest.(check int) "all counts cleared" 0 (List.length (DOB.provider_error_counts ()))
@@ -420,8 +436,8 @@ let test_sample_of_response_uses_usage_and_native_telemetry () =
       ~status:DOB.Success
       response
   in
-  Alcotest.(check string) "provider" "openai_compat" sample.provider_id;
-  Alcotest.(check string) "model" "gpt-4" sample.model_id;
+  Alcotest.(check string) "provider normalized" "runtime" sample.provider_id;
+  Alcotest.(check string) "model normalized" "runtime" sample.model_id;
   Alcotest.(check bool) "usage reported" true sample.usage_reported;
   Alcotest.(check bool) "input tokens" true (sample.input_tokens = Some 11);
   Alcotest.(check bool) "output tokens" true (sample.output_tokens = Some 5);
@@ -503,6 +519,8 @@ let test_record_response_records_missing_usage_as_unknown_sample () =
     response;
   match DOB.recent ~provider:"kimi_cli" () with
   | [ (sample, _) ] ->
+    Alcotest.(check string) "provider normalized" "runtime" sample.provider_id;
+    Alcotest.(check string) "model normalized" "runtime" sample.model_id;
     Alcotest.(check bool) "usage reported" false sample.usage_reported;
     Alcotest.(check bool) "input tokens unknown" true (sample.input_tokens = None);
     Alcotest.(check bool) "output tokens unknown" true (sample.output_tokens = None);
@@ -606,10 +624,17 @@ let () =
     "Dashboard_oas_bridge"
     [ ( "record_recent"
       , [ Alcotest.test_case "record + recent" `Quick test_record_then_recent
-        ; Alcotest.test_case "unknown provider" `Quick test_unknown_provider_returns_empty
+        ; Alcotest.test_case
+            "legacy provider filter"
+            `Quick
+            test_legacy_provider_filter_selects_runtime_lane
         ] )
     ; ( "provider_filter"
-      , [ Alcotest.test_case "filter + merge" `Quick test_provider_filter ] )
+      , [ Alcotest.test_case
+            "runtime lane alias"
+            `Quick
+            test_provider_filter_is_runtime_lane_alias
+        ] )
     ; ( "summary"
       , [ Alcotest.test_case "empty" `Quick test_summary_empty
         ; Alcotest.test_case
@@ -625,9 +650,9 @@ let () =
             `Quick
             test_sample_json_preserves_signal_fields
         ; Alcotest.test_case
-            "recent filters provider"
+            "recent provider filter alias"
             `Quick
-            test_recent_json_filters_provider
+            test_recent_json_provider_filter_is_runtime_alias
         ; Alcotest.test_case
             "summary aggregate"
             `Quick

@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { formatPct1, formatTokens } from '../lib/format-number'
 import { Eyebrow } from './common/eyebrow'
 import { StatTile } from './common/stat-tile'
-import { ProgressBar } from './common/progress-bar'
 import type { Keeper, KeeperMetricPoint } from '../types'
 import {
   formatDuration,
@@ -139,16 +138,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const ctxTone: KpiTone = ctxPct == null ? 'default' : ctxPct > CTX_CRITICAL_PCT ? 'bad' : ctxPct > CTX_WARN_PCT ? 'warn' : ctxPct > 0 ? 'ok' : 'default'
   const ctxHint = ctxPct != null && ctxPct > CTX_WARN_PCT ? '한계 접근 중' : undefined
 
-  // Provider-model call statistics from metrics_series
-  const modelCounts: Record<string, number> = {}
-  for (const pt of series) {
-    if (pt.model_used) {
-      modelCounts[pt.model_used] = (modelCounts[pt.model_used] ?? 0) + 1
-    }
-  }
-  const modelEntries = Object.entries(modelCounts).sort((a, b) => b[1] - a[1])
-  const totalCalls = modelEntries.reduce((s, [, c]) => s + c, 0)
-
   const outcomes = keeper.outcomes
 
   return html`
@@ -192,32 +181,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
               : null}
           </div>
           <${OperationalHealth} keeper=${keeper} />
-          ${totalCalls > 0 ? html`
-            <${DetailCard} class="p-3">
-              <div class="mb-2 text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">모델 호출 분포</div>
-              <div class="flex flex-col gap-1.5">
-                ${modelEntries.slice(0, 4).map(([model, count]) => {
-                  const pct = Math.round((count / totalCalls) * 100)
-                  return html`
-                    <div class="flex items-center gap-2 text-xs">
-                      <span class="shrink-0 w-35 truncate font-mono text-2xs text-[var(--color-accent-fg)]" title=${model}>${model}</span>
-                      <${ProgressBar}
-                        pct=${pct}
-                        size="sm"
-                        tone="accent"
-                        trackTone="dim"
-                        trackClass="flex-1"
-                      />
-                      <span class="shrink-0 w-10 text-right text-[var(--color-fg-muted)]">${count}회</span>
-                    </div>
-                  `
-                })}
-              </div>
-              ${modelEntries.length > 4 ? html`
-                <div class="mt-1 text-3xs text-[var(--color-fg-muted)]">외 ${modelEntries.length - 4}개 모델</div>
-              ` : null}
-            <//>
-          ` : null}
         </div>
       <//>
 

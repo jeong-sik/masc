@@ -50,7 +50,7 @@ let operator_judge_runtime_json (config : Coord.config) =
       ("refreshing", `Bool runtime.refreshing);
       ("generated_at", string_option_to_json runtime.generated_at);
       ("expires_at", string_option_to_json runtime.expires_at);
-      ("model_used", string_option_to_json runtime.model_used);
+      ("model_used", `Null);
       ("keeper_name", `String runtime.keeper_name);
       ("last_error", string_option_to_json runtime.last_error);
     ]

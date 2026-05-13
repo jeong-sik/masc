@@ -63,9 +63,10 @@ let partial_response_of_stop
     ~(model_id : string)
     ~(text : string)
   : Agent_sdk.Types.api_response =
+  let _ = model_id in
   {
     id = session_id;
-    model = model_id;
+    model = "runtime";
     stop_reason = Agent_sdk.Types.EndTurn;
     content = [ Agent_sdk.Types.Text text ];
     usage = None;

@@ -173,7 +173,7 @@ describe('normalizeKeeperConversationDetails', () => {
     expect(result).not.toBeNull()
     expect(result!.traceId).toBe('trace-123')
     expect(result!.generation).toBe(5)
-    expect(result!.modelUsed).toBe('gpt-4')
+    expect(result!.modelUsed).toBeNull()
     expect(result!.latencyMs).toBe(1500)
     expect(result!.costUsd).toBe(0.05)
     expect(result!.skillPrimary).toBe('router')

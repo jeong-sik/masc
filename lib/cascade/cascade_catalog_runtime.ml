@@ -261,6 +261,9 @@ let int_opt_to_json = function
 let provider_kind_string (cfg : Llm_provider.Provider_config.t) =
   Llm_provider.Provider_config.string_of_provider_kind cfg.kind
 
+let public_runtime_provider_label = "runtime"
+let public_runtime_model_label = "runtime"
+
 let candidate_probe_error (candidate : candidate_runtime) message =
   {
     model_string = candidate.model_string;
@@ -421,9 +424,9 @@ let record_probe_metrics (profiles : profile_snapshot list) =
             Prometheus.metric_provider_actual_health_status
             ~labels:
               [
-                ("provider_name", probe.provider_kind);
+                ("provider_name", public_runtime_provider_label);
                 ("profile_name", profile.name);
-                ("model_id", probe.model_id);
+                ("model_id", public_runtime_model_label);
               ]
             (probe_health_value probe.status))
         profile.probes)
@@ -432,10 +435,10 @@ let record_probe_metrics (profiles : profile_snapshot list) =
 let candidate_probe_to_yojson (probe : candidate_probe) =
   `Assoc
     [
-      ("model_string", `String probe.model_string);
-      ("provider_kind", `String probe.provider_kind);
-      ("model_id", `String probe.model_id);
-      ("base_url", `String probe.base_url);
+      ("model_string", `String public_runtime_model_label);
+      ("provider_kind", `String public_runtime_provider_label);
+      ("model_id", `String public_runtime_model_label);
+      ("base_url", `String "");
       ( "status",
         match probe.status with
         | Probe_ok -> `String "ok"

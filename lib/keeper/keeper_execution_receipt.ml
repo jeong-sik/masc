@@ -603,7 +603,6 @@ let to_json (receipt : t) =
       ~visible_tool_count:receipt.tool_surface.visible_tool_count
       ~required_tools:receipt.tool_surface.required_tools
       ~missing_required_tools:receipt.tool_surface.missing_required_tools
-      ?model:receipt.model_used
       ~cascade_profile:(cascade_name_to_string receipt.cascade_name)
       ()
   in
@@ -645,10 +644,7 @@ let to_json (receipt : t) =
     ; "runtime_contract", runtime_contract
     ; "action_radius", action_radius
     ; "response_text_present", `Bool receipt.response_text_present
-    ; ( "model_used"
-      , match receipt.model_used with
-        | Some value -> `String value
-        | None -> `Null )
+    ; "model_used", `Null
     ; "requested_tools", list_json receipt.requested_tools
     ; "reported_tools", list_json receipt.reported_tools
     ; "observed_tools", list_json receipt.observed_tools
@@ -697,10 +693,7 @@ let to_json (receipt : t) =
     ; ( "cascade"
       , `Assoc
           [ "name", `String (cascade_name_to_string receipt.cascade_name)
-          ; ( "selected_model"
-            , match receipt.cascade_selected_model with
-              | Some value -> `String value
-              | None -> `Null )
+          ; "selected_model", `Null
           ; "attempt_count", `Int receipt.cascade_attempt_count
           ; "fallback_applied", `Bool receipt.cascade_fallback_applied
           ; "outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
@@ -838,10 +831,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           ; ( "network_mode"
             , `String (Keeper_types.network_mode_to_string receipt.network_mode) )
           ] )
-    ; ( "model_used"
-      , match receipt.model_used with
-        | Some value -> `String value
-        | None -> `Null )
+    ; "model_used", `Null
     ; ( "stop_reason"
       , match receipt.stop_reason with
         | Some value -> `String (stop_reason_to_string value)

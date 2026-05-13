@@ -786,7 +786,9 @@ let log_call
         | Some _ -> cascade_profile
         | None -> ctx.cascade_profile
       in
-      let model_field = if model = "" then [] else [ "model", `String model ] in
+      let model_field =
+        if model = "" then [] else [ "model", `String "runtime" ]
+      in
       let result_bytes_field =
         match result_bytes with
         | Some n -> [ "result_bytes", `Int n ]

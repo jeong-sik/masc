@@ -14,6 +14,8 @@ include Keeper_turn_helpers
 include Keeper_turn_liveness
 include Keeper_turn_cascade_budget
 
+let runtime_lane_label = "runtime"
+
 (* RFC-0047 follow-up: exhaustive match on [Keeper_turn_disposition.t].
    Pre-fix this used [String.starts_with ~prefix:"api_error_"] on the
    wire form of [terminal_reason.code]; that substring guard depended
@@ -558,142 +560,10 @@ let run_keeper_cycle
           Keeper_runtime_manifest.Cascade_routed;
         resolved_cascade
       in
-      let effective_cascade_name =
-        match
-          Keeper_world_observation.provider_cooldown_remaining_sec_for_cascade
-            ~cascade_name:(KCP.runtime_name_of_string effective_cascade_name)
-        with
-        | Some remaining_sec ->
-          Prometheus.set_gauge
-            Keeper_metrics.metric_keeper_provider_cooldown_remaining_sec
-            ~labels:[ "keeper", meta.name; "cascade", effective_cascade_name ]
-            (float_of_int remaining_sec);
-          (match
-             EC.fallback_cascade_for_unavailable_profile
-               ~base_cascade:(cascade_name_of_meta meta)
-               ~effective_cascade:effective_cascade_name
-           with
-           | Some fallback_cascade
-             when not (String.equal fallback_cascade effective_cascade_name) ->
-             Log.Keeper.warn
-               "%s: cascade %s provider cooldown pending (%ds); fail-opening to %s"
-               meta.name
-               effective_cascade_name
-               remaining_sec
-               fallback_cascade;
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_provider_cooldown_skip
-               ~labels:
-                 [ "keeper", meta.name
-                 ; "from_cascade", effective_cascade_name
-                 ; "to_cascade", fallback_cascade
-                 ]
-               ();
-             fallback_cascade
-           | _ -> effective_cascade_name)
-        | None ->
-          Prometheus.set_gauge
-            Keeper_metrics.metric_keeper_provider_cooldown_remaining_sec
-            ~labels:[ "keeper", meta.name; "cascade", effective_cascade_name ]
-            0.0;
-          effective_cascade_name
-      in
-      (* PR-B: ollama saturation pre-skip.  If the resolved cascade
-         is ollama-only and the [/api/ps] cache reports zero
-         available slots, skip this cycle BEFORE [Agent.run] dispatch
-         so the queued request cannot exceed the keeper turn budget
-         and trip a FAILED cycle.  Probe failures fall through to the
-         normal dispatch path (fail-open) so a flaky probe never
-         starves the keeper. *)
-      let saturation_skip_meta =
-        let meta_for_check = set_cascade_name effective_cascade_name meta in
-        let labels = Keeper_coordination.effective_model_labels_for_turn meta_for_check in
-        match resolve_shared_probeable_base_url labels with
-        | None ->
-          saturation_skip_count_reset ~keeper_name:meta.name;
-          None
-        | Some base_url ->
-          if not (is_base_url_saturated base_url)
-          then (
-            saturation_skip_count_reset ~keeper_name:meta.name;
-            None)
-          else (
-            let next_count = saturation_skip_count_inc ~keeper_name:meta.name in
-            let cap = max_consecutive_saturation_skips () in
-            if next_count > cap
-            then (
-              Log.Keeper.warn
-                ~keeper_name:meta.name
-                ~turn_id:keeper_turn_id
-                "%s: saturation skip cap reached (count=%d cap=%d) \xe2\x80\x94 \
-                 force-dispatching despite saturated probe"
-                meta.name
-                next_count
-                cap;
-              saturation_skip_count_reset ~keeper_name:meta.name;
-              None)
-            else (
-              let info = Cascade_capacity_probe.cached ~url:base_url () in
-              let queue_len =
-                match info with
-                | Some i -> i.process_queue_length
-                | None -> 0
-              in
-              let available =
-                match info with
-                | Some i -> i.process_available
-                | None -> 0
-              in
-              Log.Keeper.info
-                ~keeper_name:meta.name
-                ~turn_id:keeper_turn_id
-                "%s: ollama saturated for keeper=%s cascade=%s queue=%d available=%d \
-                 skip_count=%d/%d \xe2\x80\x94 skipping turn"
-                meta.name
-                meta.name
-                effective_cascade_name
-                queue_len
-                available
-                next_count
-                cap;
-              record_pre_dispatch_terminal_observation
-                ~config
-                ~meta
-                ~generation
-                ~cascade_name:
-                  (Keeper_execution_receipt.cascade_name_of_string effective_cascade_name)
-                ~outcome:`Skipped
-                ~terminal_reason_code:"ollama_saturated"
-                ~activity_kind:"keeper.turn_skipped"
-                ~trajectory_outcome:(Trajectory.Gated "ollama_saturated")
-                ~keeper_turn_id
-                ();
-              Keeper_turn_fsm.emit_transition
-                ~keeper_name:meta.name
-                ~turn_id:keeper_turn_id
-                ~prev:Keeper_turn_fsm.Cascade_routing
-                (Keeper_turn_fsm.Failed
-                   (Keeper_turn_fsm.Failure_cascade_unavailable
-                      { base = effective_cascade_name
-                      ; resolved = Some "ollama_saturated"
-                      }));
-              Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_ollama_saturation_skip
-                ~labels:[ "keeper", meta.name; "cascade", effective_cascade_name ]
-                ();
-              (match Eio_context.get_clock_opt () with
-               | Some clock ->
-                 (try Eio.Time.sleep clock (saturation_skip_sleep_duration ()) with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                    Log.Keeper.debug
-                      "%s: saturation skip sleep failed: %s"
-                      meta.name
-                      (Printexc.to_string exn))
-               | None -> ());
-              Some meta))
-      in
-      (match saturation_skip_meta with
+      (* Concrete runtime health/capacity is owned by OAS/provider adapters.
+         Keeper routing no longer rewrites cascades from provider cooldown or
+         process-queue probes. *)
+      (match None with
        | Some meta_after_skip -> Ok meta_after_skip
        | None ->
          let build_cascade_execution ~(cascade_name : KCP.runtime_name)
@@ -773,18 +643,12 @@ let run_keeper_cycle
             Error err
           | Ok initial_execution ->
             let turn_id = keeper_turn_id in
-            let model =
-              match meta.models with
-              | m :: _ -> Some m
-              | [] -> None
-            in
             (match
                Keeper_turn_livelock.guard_and_record_turn_start
                  ~keeper:meta.name
                  ~turn_id
                  ~max_attempts:(turn_livelock_max_attempts ())
                  ~stuck_after_sec:(turn_livelock_stuck_after_sec ())
-                 ?model
                  ()
              with
              | Keeper_turn_livelock.Blocked reason ->
@@ -2875,8 +2739,8 @@ let run_keeper_cycle
                                 ; ( "cost_usd"
                                   , if usage_trusted then `Float turn_cost else `Null )
                                 ; "latency_ms", `Int latency_ms
-                                ; "model_used", `String model_used
-                                ; "resolved_model_id", `String resolved_model_id
+                                ; "model_used", `Null
+                                ; "resolved_model_id", `Null
                                 ; ( "usage_trust"
                                   , `String
                                       (Keeper_unified_metrics.usage_trust_to_string
@@ -3007,33 +2871,28 @@ let run_keeper_cycle
                   then (
                     Prometheus.inc_counter
                       Keeper_metrics.metric_keeper_input_tokens
-                      ~labels:[ "keeper_name", updated_meta.name; "model", model_used ]
+                      ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
                       ~delta:(float_of_int result.usage.input_tokens)
                       ();
                     Prometheus.inc_counter
                       Keeper_metrics.metric_keeper_output_tokens
-                      ~labels:[ "keeper_name", updated_meta.name; "model", model_used ]
+                      ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
                       ~delta:(float_of_int result.usage.output_tokens)
                       ();
-                    (* #7469 Step 1: emit prompt-cache usage so Anthropic/Bedrock
-               hit rate is observable. Skip when both are zero — non-caching
-               providers (GLM/local-llama) would otherwise register a series
-               per keeper+model combination that never moves off zero.
-               Metric names pulled from [Prometheus] constants so a typo
-               here would fail to compile instead of silently creating a
-               dead series. *)
+                    (* #7469 Step 1: emit prompt-cache usage. Skip when both are
+                       zero so idle cache series do not appear for each keeper. *)
                     if result.usage.cache_creation_input_tokens > 0
                     then
                       Prometheus.inc_counter
                         Keeper_metrics.metric_keeper_cache_creation_tokens
-                        ~labels:[ "keeper_name", updated_meta.name; "model", model_used ]
+                        ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
                         ~delta:(float_of_int result.usage.cache_creation_input_tokens)
                         ();
                     if result.usage.cache_read_input_tokens > 0
                     then
                       Prometheus.inc_counter
                         Keeper_metrics.metric_keeper_cache_read_tokens
-                        ~labels:[ "keeper_name", updated_meta.name; "model", model_used ]
+                        ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
                         ~delta:(float_of_int result.usage.cache_read_input_tokens)
                         ())
                   else (
@@ -3048,17 +2907,16 @@ let run_keeper_cycle
                            Keeper_metrics.metric_keeper_usage_anomalies
                            ~labels:
                              [ "keeper_name", updated_meta.name
-                             ; "model", model_used
+                             ; "model", runtime_lane_label
                              ; "reason", reason
                              ]
                            ())
                       reasons;
                     Log.Keeper.warn
-                      "%s: keeper usage telemetry untrusted model=%s resolved_model=%s \
+                      "%s: keeper usage telemetry untrusted runtime_lane=%s \
                        reasons=%s input=%d output=%d context_max=%d"
                       updated_meta.name
-                      model_used
-                      resolved_model_id
+                      runtime_lane_label
                       (String.concat "," reasons)
                       result.usage.input_tokens
                       result.usage.output_tokens
@@ -3069,9 +2927,9 @@ let run_keeper_cycle
                     else 0
                   in
                   Log.Keeper.info
-                    "%s: keeper cycle OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
+                    "%s: keeper cycle OK runtime_lane=%s tokens=%d latency=%dms mode=%s stop=%s"
                     updated_meta.name
-                    model_used
+                    runtime_lane_label
                     logged_total_tokens
                     latency_ms
                     turn_mode_label

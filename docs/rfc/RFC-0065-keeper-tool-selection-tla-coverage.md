@@ -25,7 +25,7 @@ TLA+ coverage audit at `origin/main` HEAD `f97b088f3` (post-#14613):
 
 | Stage | OCaml seam | TLA+ coverage today | Bug-model pair |
 |---|---|---|---|
-| 0 Admission | `keeper_admission_router` + `keeper_turn_slot` | KeeperAdmissionLiveness (387 LOC) — token bucket + WFQ outcomes | yes (3 cfgs) |
+| 0 Turn admission | `keeper_turn_slot` | Covered by keeper semaphore tests; MASC-side provider admission was retired | no |
 | 1 Tool Surface | `keeper_run_tools.compute_tool_surface` (lines 628–970, 11 transforms) | **None** — runtime `Keeper_tool_surface_mismatch` is the only invariant | — |
 | 2 Cascade Attempt FSM | `cascade_fsm.ml::decide` + `keeper_turn_driver::try_cascade` | KeeperCascadeRouting (365 LOC) models routing as *outcome predicates*, NOT as explicit FSM states | partial (routing only) |
 | 3 Tool Execution | `keeper_exec_tools` + `keeper_tool_alias` | KeeperTurnCycle subsumes via `Awaiting_tool_result` phase | partial |
@@ -91,7 +91,7 @@ Spec drift relative to OCaml is currently detected only by humans reading both.
 
 ## 2. Non-Goals
 
-- **Not a rewrite of existing specs.** KeeperAdmissionLiveness, KeeperCascadeRouting, KeeperCompositeLifecycle, KeeperGenerationLineage remain authoritative for their stages. This RFC only adds three new specs and one harness.
+- **Not a rewrite of existing specs.** KeeperCascadeRouting, KeeperCompositeLifecycle, KeeperGenerationLineage remain authoritative for their stages. This RFC only adds three new specs and one harness.
 - **Not a refinement proof.** TLC checks invariants and bounded liveness, not full state-space refinement against OCaml. The correspondence harness (§3.6) is *trace-replay*, not refinement.
 - **Not RFC-0058 territory.** Cascade routing (RFC-0058 Phase 5.1+) continues to evolve. This RFC's Stage 2 spec models the orthogonal *attempt FSM* axis (states + transitions), not provider selection.
 - **Not a CompositeLifecycle restructure.** New specs join as observer sub-FSMs (additive). Existing joint invariants stay unchanged.
@@ -217,7 +217,7 @@ LOC budget: ~200.
 **Scope**: trace-replay verification.
 
 **Inputs**:
-- TLA+ traces emitted by TLC for each of B1/B2/B3 + the existing KeeperStateMachine, KeeperRolloverDecision, KeeperAdmissionLiveness clean cfgs.
+- TLA+ traces emitted by TLC for each of B1/B2/B3 + the existing KeeperStateMachine and KeeperRolloverDecision clean cfgs.
 - OCaml state-machine functions: `keeper_state_machine.ml::next`, `keeper_turn_fsm.ml::transition`, `cascade_fsm.ml::decide`, `keeper_rollover.ml::classify_rollover_gate`.
 
 **Procedure**:
@@ -244,7 +244,7 @@ KCompositeLifecycle EXTENDS
 
 New joint invariants (one per pair of interest):
 
-- `AttemptFSMRespectsAdmission` — when KeeperAdmissionLiveness denies admission, KeeperCascadeAttemptFSM cannot enter `Attempting`.
+- `AttemptFSMRespectsAdmission` — historical invariant name; the live projection now means KeeperCascadeAttemptFSM cannot enter `Attempting` before the turn measurement/semaphore entry signal.
 - `ToolSurfaceFeedsAttempt` — KeeperToolSurface's `emitted` is non-empty when KeeperCascadeAttemptFSM enters `Attempting` (no empty-surface attempt).
 - `PostTurnConsumesAttempt` — KeeperPostTurnOrchestration begins only when KeeperCascadeAttemptFSM reaches a terminal state.
 

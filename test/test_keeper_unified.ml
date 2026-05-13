@@ -3351,20 +3351,19 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
   in
   check
     string
-    "helper canonicalizes surface model"
-    selected_label
+    "helper redacts surface model"
+    "runtime"
     (KAR.surface_model_used result);
   check
     string
-    "last_model_used stores canonical surface label"
-    selected_label
+    "last_model_used no longer stores concrete surface label"
+    ""
     updated.runtime.usage.last_model_used
 ;;
 
-(* #9953: [surface_resolved_model_id] returns the concrete model_id from
-   the last cascade attempt, even when [model_label] is populated. This
-   lets analysts correlate ["context_max"] with the actual resolved
-   variant instead of the auto label. *)
+(* Provider/model identity is OAS-owned; MASC status/metrics helpers keep the
+   legacy fields but collapse both display and resolved ids to the runtime
+   lane. *)
 let test_metrics_resolved_model_id_prefers_last_attempt_id () =
   let result =
     make_run_result
@@ -3408,19 +3407,18 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
   in
   check
     string
-    "surface_model_used returns cascade label"
-    "claude_code:auto"
+    "surface_model_used returns runtime lane"
+    "runtime"
     (KAR.surface_model_used result);
   check
     string
-    "surface_resolved_model_id returns concrete variant id"
-    "claude-opus-4-6"
+    "surface_resolved_model_id returns runtime lane"
+    "runtime"
     (KAR.surface_resolved_model_id result)
 ;;
 
-(* #9953: when no cascade observation is available, resolved id falls
-   back to the raw [model_used] reported by the provider, not to the
-   empty string. This preserves signal for non-cascade keeper turns. *)
+(* Non-cascade keeper turns are redacted the same way: provider-reported
+   model_used remains an OAS bridge detail, not a MASC surface. *)
 let test_metrics_resolved_model_id_fallback_to_model_used () =
   let result =
     make_run_result
@@ -3433,8 +3431,8 @@ let test_metrics_resolved_model_id_fallback_to_model_used () =
   in
   check
     string
-    "surface_resolved_model_id falls back to model_used"
-    "claude-opus-4-6"
+    "surface_resolved_model_id redacts provider model"
+    "runtime"
     (KAR.surface_resolved_model_id result)
 ;;
 
@@ -4126,10 +4124,10 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
        in
        let json = Yojson.Safe.from_string line in
        check
-         string
-         "metrics snapshot uses canonical surface model"
-         "llama:qwen3.5-3b-a3b-ud-q8-xl"
-         Yojson.Safe.Util.(json |> member "model_used" |> to_string);
+         bool
+         "metrics snapshot redacts model_used"
+         true
+         Yojson.Safe.Util.(json |> member "model_used" = `Null);
        check
          bool
          "cascade field present"
@@ -4158,6 +4156,17 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          true
          Yojson.Safe.Util.(
            json |> member "cascade" |> member "attempt_details_available" |> to_bool);
+       check
+         bool
+         "cascade selected model redacted"
+         true
+         Yojson.Safe.Util.(json |> member "cascade" |> member "selected_model" = `Null);
+       check
+         int
+         "cascade candidate models redacted"
+         0
+         Yojson.Safe.Util.(
+           json |> member "cascade" |> member "candidate_models" |> to_list |> List.length);
        check
          string
          "attempt detail boundary persisted"
@@ -4570,7 +4579,7 @@ let test_append_metrics_snapshot_persists_cache_usage () =
        check int "cache read persisted" 300 (usage |> member "cache_read_tokens" |> to_int))
 ;;
 
-let test_estimate_trusted_usage_cost_uses_cache_usage () =
+let test_trusted_usage_cost_uses_oas_reported_cost () =
   let result =
     make_run_result
       ~text:"Claude reported cache usage."
@@ -4582,16 +4591,22 @@ let test_estimate_trusted_usage_cost_uses_cache_usage () =
       ~cache_read_tokens:200_000
       ()
   in
+  let reported_usage = { result.usage with cost_usd = Some 2.535 } in
   let cost =
     UM.estimate_trusted_usage_cost_usd
       ~usage_trusted:true
       ~model:"claude-sonnet-4-6"
-      result.usage
+      reported_usage
   in
-  (* regular input 700k * $3/M + cache write 100k * $3/M * 1.25
-     + cache read 200k * $3/M * 0.1 = $2.535.  This pins the unified
-     keeper path to the same cache-aware pricing semantics as OAS. *)
-  check (float 0.001) "cache-aware trusted cost" 2.535 cost;
+  check (float 0.001) "OAS-reported trusted cost" 2.535 cost;
+  check
+    (float 0.001)
+    "missing OAS-reported cost is zero"
+    0.0
+    (UM.estimate_trusted_usage_cost_usd
+       ~usage_trusted:true
+       ~model:"claude-sonnet-4-6"
+       result.usage);
   check
     (float 0.001)
     "untrusted usage is zero cost"
@@ -4599,7 +4614,7 @@ let test_estimate_trusted_usage_cost_uses_cache_usage () =
     (UM.estimate_trusted_usage_cost_usd
        ~usage_trusted:false
        ~model:"claude-sonnet-4-6"
-       result.usage)
+       reported_usage)
 ;;
 
 let test_record_keeper_total_cost_metric () =
@@ -4923,11 +4938,21 @@ let test_append_decision_record_persists_tool_calls () =
          "success"
          Yojson.Safe.Util.(json |> member "terminal_reason_code" |> to_string);
        check
-         string
-         "provider context selected model"
-         "codex_cli:gpt-5.4"
+         bool
+         "provider context selected model redacted"
+         true
          Yojson.Safe.Util.(
-           json |> member "provider_context" |> member "selected_model" |> to_string);
+           json |> member "provider_context" |> member "selected_model" = `Null);
+       check
+         int
+         "provider context candidate models redacted"
+         0
+         Yojson.Safe.Util.(
+           json
+           |> member "provider_context"
+           |> member "candidate_models"
+           |> to_list
+           |> List.length);
        check
          string
          "tool contract requirement"
@@ -5502,26 +5527,11 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
        "record_pre_dispatch_terminal_observation");
   check
     bool
-    "saturation skip has durable terminal reason"
-    true
+    "keeper cycle does not pre-skip on provider saturation"
+    false
     (source_file_contains
        "lib/keeper/keeper_unified_turn.ml"
        "~terminal_reason_code:\"ollama_saturated\"");
-  check
-    bool
-    "saturation skip is not recorded as error"
-    true
-    (source_file_contains
-       "lib/keeper/keeper_unified_turn.ml"
-       "~terminal_reason_code:\"ollama_saturated\"\n\
-       \                ~activity_kind:\"keeper.turn_skipped\"");
-  check
-    bool
-    "saturation skip uses fsm-allowed cascade unavailable transition"
-    true
-    (source_file_contains
-       "lib/keeper/keeper_unified_turn.ml"
-       "Keeper_turn_fsm.Failure_cascade_unavailable");
   check
     bool
     "livelock block has durable terminal reason"
@@ -5845,16 +5855,16 @@ let test_keeper_msg_async_failure_surface () =
             | None -> fail "masc_keeper_msg dispatch missing"))
 ;;
 
-let provider_config_of_label label =
-  match Masc_mcp.Cascade_config.parse_model_string label with
-  | Some cfg -> cfg
-  | None -> fail ("expected model label to parse: " ^ label)
+let runtime_url_of_label label =
+  match Masc_mcp.Cascade_runtime_candidate.runtime_url_of_label label with
+  | Some url -> url
+  | None -> fail ("expected model label to resolve to runtime URL: " ^ label)
 ;;
 
 let test_decide_local_only_liveness_keeps_non_local_effective () =
   match
     UT.decide_local_only_liveness
-      ~resolve_label:(fun _ -> fail "resolver should not run")
+      ~resolve_runtime_url:(fun _ -> fail "resolver should not run")
       ~base_cascade:"keeper_unified"
       ~effective_cascade:"default"
       [ "not-a-real-label" ]
@@ -5867,7 +5877,7 @@ let test_decide_local_only_liveness_keeps_non_local_effective () =
 let test_decide_local_only_liveness_keeps_explicit_local_only () =
   match
     UT.decide_local_only_liveness
-      ~resolve_label:(fun _ -> fail "resolver should not run")
+      ~resolve_runtime_url:(fun _ -> fail "resolver should not run")
       ~base_cascade:"local_only"
       ~effective_cascade:"local_only"
       [ "not-a-real-label" ]
@@ -5945,170 +5955,6 @@ let test_fail_open_local_only_preserves_healthy_local_only () =
     "healthy ollama keeps phase-buffer route"
     (phase_buffer_cascade_name ())
     cascade
-;;
-
-(* PR-B: ollama saturation pre-skip helpers. *)
-
-let make_capacity_info ?(total = 1) ?(active = 0) ?(available = 1) ?(queue = 0) ()
-  : Masc_mcp.Cascade_throttle.capacity_info
-  =
-  { total
-  ; process_active = active
-  ; process_available = available
-  ; process_queue_length = queue
-  ; source = Llm_provider.Provider_throttle.Discovered
-  }
-;;
-
-let test_resolve_shared_probeable_base_url_empty_returns_none () =
-  match UT.resolve_shared_probeable_base_url [] with
-  | None -> ()
-  | Some _ -> fail "empty labels should not resolve to a shared host"
-;;
-
-let test_resolve_shared_probeable_base_url_single_label () =
-  let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
-  let cfg = provider_config_of_label label in
-  match UT.resolve_shared_probeable_base_url ~can_probe:(fun _ -> true) [ label ] with
-  | Some url -> check string "single label base url" cfg.base_url url
-  | None -> fail "single probeable label should resolve"
-;;
-
-let test_resolve_shared_probeable_base_url_requires_probe_registration () =
-  (* Provider variant is irrelevant; what matters is whether the URL
-     is recognised by the probe registry. *)
-  let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
-  match UT.resolve_shared_probeable_base_url ~can_probe:(fun _ -> false) [ label ] with
-  | None -> ()
-  | Some _ -> fail "no probe registration must yield None"
-;;
-
-let test_resolve_shared_probeable_base_url_mixed_host () =
-  match
-    UT.resolve_shared_probeable_base_url
-      ~can_probe:(fun _ -> true)
-      [ "ollama:qwen3.6:35b-a3b-mlx-bf16"; "claude:sonnet-4-5" ]
-  with
-  | None -> ()
-  | Some _ -> fail "mixed hosts must not collapse to a single base url"
-;;
-
-let test_resolve_shared_probeable_base_url_different_hosts () =
-  let resolve_label = function
-    | "ollama:a" ->
-      Some
-        (Llm_provider.Provider_config.make
-           ~kind:Llm_provider.Provider_config.Ollama
-           ~model_id:"a"
-           ~base_url:"http://127.0.0.1:11434"
-           ())
-    | "ollama:b" ->
-      Some
-        (Llm_provider.Provider_config.make
-           ~kind:Llm_provider.Provider_config.Ollama
-           ~model_id:"b"
-           ~base_url:"http://10.0.0.5:11434"
-           ())
-    | _ -> None
-  in
-  match
-    UT.resolve_shared_probeable_base_url
-      ~resolve_label
-      ~can_probe:(fun _ -> true)
-      [ "ollama:a"; "ollama:b" ]
-  with
-  | None -> ()
-  | Some _ -> fail "different hosts must not collapse"
-;;
-
-let test_is_base_url_saturated_returns_false_when_cache_missing () =
-  let url = "http://127.0.0.1:11434" in
-  check
-    bool
-    "missing cache treated as healthy"
-    false
-    (UT.is_base_url_saturated ~capacity_lookup:(fun _ -> None) url)
-;;
-
-let test_is_base_url_saturated_returns_false_when_idle () =
-  let url = "http://127.0.0.1:11434" in
-  let info = make_capacity_info ~active:0 ~available:1 ~queue:0 () in
-  check
-    bool
-    "idle endpoint not saturated"
-    false
-    (UT.is_base_url_saturated ~capacity_lookup:(fun _ -> Some info) url)
-;;
-
-let test_is_base_url_saturated_returns_true_when_full_with_queue () =
-  let url = "http://127.0.0.1:11434" in
-  let info = make_capacity_info ~active:1 ~available:0 ~queue:3 () in
-  check
-    bool
-    "full endpoint with queue is saturated"
-    true
-    (UT.is_base_url_saturated ~capacity_lookup:(fun _ -> Some info) url)
-;;
-
-let test_is_base_url_saturated_ignores_zero_available_when_idle () =
-  (* Defensive: discovery may report 0 available before any traffic.
-     Without active or queued requests the keeper should still dispatch. *)
-  let url = "http://127.0.0.1:11434" in
-  let info = make_capacity_info ~active:0 ~available:0 ~queue:0 () in
-  check
-    bool
-    "idle endpoint with no slots is fail-open"
-    false
-    (UT.is_base_url_saturated ~capacity_lookup:(fun _ -> Some info) url)
-;;
-
-let test_saturation_skip_count_starts_at_zero () =
-  UT.saturation_skip_count_clear_all ();
-  check
-    int
-    "fresh keeper has zero skip count"
-    0
-    (UT.saturation_skip_count_get ~keeper_name:"fresh_keeper")
-;;
-
-let test_saturation_skip_count_inc_returns_new_value () =
-  UT.saturation_skip_count_clear_all ();
-  let n1 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
-  let n2 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
-  let n3 = UT.saturation_skip_count_inc ~keeper_name:"k_inc" in
-  check int "first inc returns 1" 1 n1;
-  check int "second inc returns 2" 2 n2;
-  check int "third inc returns 3" 3 n3;
-  check int "get matches last inc" 3 (UT.saturation_skip_count_get ~keeper_name:"k_inc")
-;;
-
-let test_saturation_skip_count_reset_zeros_one_keeper () =
-  UT.saturation_skip_count_clear_all ();
-  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_a" in
-  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_b" in
-  let _ = UT.saturation_skip_count_inc ~keeper_name:"k_b" in
-  UT.saturation_skip_count_reset ~keeper_name:"k_a";
-  check int "reset target zeroed" 0 (UT.saturation_skip_count_get ~keeper_name:"k_a");
-  check
-    int
-    "untouched keeper preserved"
-    2
-    (UT.saturation_skip_count_get ~keeper_name:"k_b")
-;;
-
-let test_saturation_skip_cap_default_is_at_least_one () =
-  (* The cap is floored at 1 even if the env var is set to 0 or
-     negative — a cap of 0 would force-dispatch every cycle. *)
-  let prev =
-    try Some (Sys.getenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS") with
-    | Not_found -> None
-  in
-  Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" "0";
-  let cap = UT.max_consecutive_saturation_skips () in
-  (match prev with
-   | Some v -> Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" v
-   | None -> Unix.putenv "MASC_MAX_CONSECUTIVE_SATURATION_SKIPS" "");
-  check bool "cap floored at 1 even with env=0" true (cap >= 1)
 ;;
 
 let wrapped_claude_limit_error () =
@@ -11350,9 +11196,9 @@ let () =
             `Quick
             test_append_metrics_snapshot_persists_cache_usage
         ; test_case
-            "trusted usage cost uses cache token pricing"
+            "trusted usage cost uses OAS-reported cost"
             `Quick
-            test_estimate_trusted_usage_cost_uses_cache_usage
+            test_trusted_usage_cost_uses_oas_reported_cost
         ; test_case
             "total cost gauge records accumulated keeper cost"
             `Quick
@@ -12059,58 +11905,6 @@ let () =
             "healthy local_only stays selected"
             `Quick
             test_fail_open_local_only_preserves_healthy_local_only
-        ; test_case
-            "PR-B: empty labels yield no shared host"
-            `Quick
-            test_resolve_shared_probeable_base_url_empty_returns_none
-        ; test_case
-            "PR-B: single probeable label resolves"
-            `Quick
-            test_resolve_shared_probeable_base_url_single_label
-        ; test_case
-            "PR-B: probe registry gates resolution"
-            `Quick
-            test_resolve_shared_probeable_base_url_requires_probe_registration
-        ; test_case
-            "PR-B: mixed hosts collapse to None"
-            `Quick
-            test_resolve_shared_probeable_base_url_mixed_host
-        ; test_case
-            "PR-B: different hosts collapse to None"
-            `Quick
-            test_resolve_shared_probeable_base_url_different_hosts
-        ; test_case
-            "PR-B: missing cache is fail-open"
-            `Quick
-            test_is_base_url_saturated_returns_false_when_cache_missing
-        ; test_case
-            "PR-B: idle endpoint not saturated"
-            `Quick
-            test_is_base_url_saturated_returns_false_when_idle
-        ; test_case
-            "PR-B: full endpoint with queue is saturated"
-            `Quick
-            test_is_base_url_saturated_returns_true_when_full_with_queue
-        ; test_case
-            "PR-B: zero available without traffic is fail-open"
-            `Quick
-            test_is_base_url_saturated_ignores_zero_available_when_idle
-        ; test_case
-            "PR-B follow-up: fresh keeper has zero skip count"
-            `Quick
-            test_saturation_skip_count_starts_at_zero
-        ; test_case
-            "PR-B follow-up: inc returns monotonic counts"
-            `Quick
-            test_saturation_skip_count_inc_returns_new_value
-        ; test_case
-            "PR-B follow-up: reset zeros one keeper only"
-            `Quick
-            test_saturation_skip_count_reset_zeros_one_keeper
-        ; test_case
-            "PR-B follow-up: cap floored at 1"
-            `Quick
-            test_saturation_skip_cap_default_is_at_least_one
         ; test_case
             "hard quota degraded retry uses local_recovery"
             `Quick

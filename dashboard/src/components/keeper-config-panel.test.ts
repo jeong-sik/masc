@@ -527,7 +527,7 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('active_goal_ids')
     expect(container.textContent).toContain('Ship runtime clarity')
     expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
-    expect(container.textContent).toContain('활성 모델')
+    expect(container.textContent).toContain('활성 런타임')
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
     expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')

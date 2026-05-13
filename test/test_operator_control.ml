@@ -25,10 +25,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_max_turns_override_source_accepts_raised_ceiling;
-          Alcotest.test_case "snapshot context ratio resolves cli provider budget"
+          Alcotest.test_case "snapshot context ratio does not infer provider budget"
             `Quick
             Test_operator_control_snapshot
-            .test_compute_context_ratio_uses_resolved_cli_context_budget;
+            .test_compute_context_ratio_does_not_infer_provider_budget;
           Alcotest.test_case "snapshot prefers metrics context truth over usage counters"
             `Quick
             Test_operator_control_snapshot

@@ -38,7 +38,6 @@ import {
   formatActivitySignal,
   formatLatency,
   formatPercent,
-  healthStatusColor,
   pressureClass,
   sourceCountClass,
   sourceDetail,
@@ -58,8 +57,8 @@ export { buildFleetRows }
 /**
  * Pure filter for fleet rows.
  *
- * Case-insensitive substring match on keeper identity, runtime model,
- * cascade/provider/fallback labels, and runtime blocker.
+ * Case-insensitive substring match on keeper identity, runtime/cascade
+ * attempt labels, and runtime blocker.
  *
  * Empty/whitespace query returns the input reference unchanged (no
  * new array allocation, preserves referential equality for memoisation).
@@ -78,8 +77,6 @@ function filterFleetRows(
     if (row.cascade_label && row.cascade_label.toLowerCase().includes(needle)) return true
     if (row.provider_label && row.provider_label.toLowerCase().includes(needle)) return true
     if (row.fallback_label && row.fallback_label.toLowerCase().includes(needle)) return true
-    if (row.provider_health_label && row.provider_health_label.toLowerCase().includes(needle)) return true
-    if (row.provider_health_status && row.provider_health_status.toLowerCase().includes(needle)) return true
     if (row.runtime_blocker_class && row.runtime_blocker_class.toLowerCase().includes(needle)) return true
     return false
   })
@@ -377,7 +374,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
             <${ThRight}>Ctx</${ThRight}>
             <${ThRight}>지연</${ThRight}>
             <${ThRight}>런타임</${ThRight}>
-            <th scope="col" class="py-1 text-center font-normal">프로바이더</th>
+            <th scope="col" class="py-1 text-center font-normal">상태</th>
             <th scope="col" class="py-1 text-center font-normal">예산</th>
             <th scope="col" class="w-8 py-1"></th>
           </tr>
@@ -491,22 +488,14 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   ? html`<div class="max-w-56 truncate" title=${row.cascade_label}>cascade ${row.cascade_label}</div>`
                   : null}
                 ${row.provider_label
-                  ? html`<div class="max-w-56 truncate" title=${row.provider_label}>provider ${row.provider_label}</div>`
+                  ? html`<div class="max-w-56 truncate" title=${row.provider_label}>attempts ${row.provider_label}</div>`
                   : null}
                 ${row.fallback_label
                   ? html`<div class="max-w-56 truncate text-[var(--color-status-warn)]" title=${row.fallback_label}>fallback ${row.fallback_label}</div>`
                   : null}
               </td>
               <td class="py-1.5 text-center">
-                ${row.provider_health_status
-                  ? html`
-                    <span class="inline-flex items-center gap-1 rounded-[var(--r-1)] border px-1.5 py-0.5 text-3xs" style=${`border-color:${healthStatusColor(row.provider_health_status)}33;background:${healthStatusColor(row.provider_health_status)}11;color:${healthStatusColor(row.provider_health_status)}`}>
-                      <span class="inline-block h-1.5 w-1.5 rounded-full" style=${`background:${healthStatusColor(row.provider_health_status)}`}></span>
-                      ${row.provider_health_status}
-                    </span>
-                    <div class="mt-0.5 text-3xs text-[var(--color-fg-disabled)]">${row.provider_health_label}</div>
-                  `
-                  : html`<span class="text-3xs text-[var(--color-fg-disabled)]">—</span>`}
+                <span class="text-3xs text-[var(--color-fg-disabled)]">—</span>
               </td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
@@ -815,7 +804,7 @@ export function FleetTelemetryPanel() {
           <${TextInput}
             type="search"
             value=${query.value}
-            placeholder="name / model / blocker 필터"
+            placeholder="name / blocker 필터"
             ariaLabel="Keeper 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
             class="min-w-40 max-w-60 flex-1 !px-2 !py-1 !text-2xs"

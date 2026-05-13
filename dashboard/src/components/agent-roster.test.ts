@@ -272,9 +272,8 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('sangsu')
     expect(text).toContain('하트비트')
     expect(text).toContain('6분 전')
-    expect(text).toContain('claude_code:auto')
+    expect(text).not.toContain('claude_code:auto')
     expect(text).not.toContain('마지막 행동 이후')
     expect(text).not.toContain('최근 모델claude')
   })
 })
-

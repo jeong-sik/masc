@@ -1,7 +1,7 @@
 (** Cascade_runner — config, build, and run entry points
     for OAS agent execution.
 
-    Thin facade over {!Keeper_agent_context},
+    Thin facade over {!Cascade_agent_context},
     {!Cascade_transport}, and
     {!Keeper_oas_checkpoint}.  External callers reach
     the entry points via [Cascade_runner.X]; the heavy
@@ -31,7 +31,7 @@
 
 (** {1 Stop reason} *)
 
-type stop_reason = Keeper_agent_context.stop_reason =
+type stop_reason = Cascade_agent_context.stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of {
@@ -64,7 +64,7 @@ type cli_transport_overrides =
 
 (** {1 Config} *)
 
-type config = Keeper_agent_context.config = {
+type config = Cascade_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
   provider : Agent_sdk.Provider.config;
@@ -258,7 +258,7 @@ val resume_from_checkpoint :
   checkpoint:Agent_sdk.Checkpoint.t ->
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
 (** Resumes from a persisted checkpoint.  Uses
-    [Keeper_agent_context.prepare_resume] to reconcile
+    [Cascade_agent_context.prepare_resume] to reconcile
     [checkpoint.turn_count] with the current
     [config.max_turns]. *)
 

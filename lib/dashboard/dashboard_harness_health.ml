@@ -302,6 +302,8 @@ let role_counts_of_json json : (string * int) list =
     | _ -> None)
 ;;
 
+let public_runtime_model_id = "runtime"
+
 let wake_payload_record_json (event : wake_payload_event) =
   `Assoc
     [ "record_type", `String "wake_payload"
@@ -309,7 +311,7 @@ let wake_payload_record_json (event : wake_payload_event) =
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
     ; "turn_index", `Int event.turn_index
-    ; "model_id", `String event.model_id
+    ; "model_id", `String public_runtime_model_id
     ; "context_window", `Int event.context_window
     ; "approx_body_bytes", `Int event.approx_body_bytes
     ; "system_prompt_bytes", `Int event.system_prompt_bytes
@@ -328,7 +330,7 @@ let wake_payload_event_json (event : wake_payload_event) =
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
     ; "turn_index", `Int event.turn_index
-    ; "model_id", `String event.model_id
+    ; "model_id", `String public_runtime_model_id
     ; "context_window", `Int event.context_window
     ; "approx_body_bytes", `Int event.approx_body_bytes
     ; "system_prompt_bytes", `Int event.system_prompt_bytes
@@ -351,7 +353,7 @@ let wake_payload_event_of_json json =
       ; keeper_name = string_field json "keeper_name"
       ; trace_id = string_field json "trace_id"
       ; turn_index = Safe_ops.json_int ~default:0 "turn_index" json
-      ; model_id = string_field json "model_id"
+      ; model_id = public_runtime_model_id
       ; context_window =
           Safe_ops.json_int
             ~default:Cascade_runtime.fallback_context_window
@@ -706,6 +708,7 @@ let record_wake_payload_at
       ~tool_count
       ~has_compact_happened
   =
+  let model_id = public_runtime_model_id in
   (* Project World Building: Broadcast live Yjs telemetry *)
   Dashboard_yjs.broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id;
   let event =

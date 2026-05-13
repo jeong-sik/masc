@@ -9,9 +9,10 @@ val frame_update : string -> string
 
 (** [broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id]
     publishes a keeper Yjs telemetry update to dashboard observer sessions.
-    The payload includes all four routing fields. Delivery is synchronous and
-    best-effort through the in-process SSE observer fanout; exceptions from
-    disconnected observers are logged, while cancellation is propagated. *)
+    [model_id] is accepted for legacy call sites but redacted to the neutral
+    ["runtime"] lane in the payload. Delivery is synchronous and best-effort
+    through the in-process SSE observer fanout; exceptions from disconnected
+    observers are logged, while cancellation is propagated. *)
 val broadcast_keeper_telemetry :
   keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> unit
 

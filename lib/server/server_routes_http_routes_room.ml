@@ -93,7 +93,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
              ("current_task", Json_util.string_opt_to_json a.current_task);
              ("emoji", `String profile.emoji);
              ("koreanName", `String profile.korean_name);
-             ("model", Json_util.string_opt_to_json profile.model);
+             ("model", `Null);
              ("traits", `List (List.map (fun t -> `String t) profile.traits));
              ("interests", `List (List.map (fun i -> `String i) profile.interests));
            ]

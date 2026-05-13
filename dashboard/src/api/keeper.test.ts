@@ -127,8 +127,6 @@ describe('keeper runtime trace', () => {
 	        started_count: 1,
 	        finished_count: 1,
 	        terminal_status: 'timeout',
-	        terminal_provider_kind: 'glm',
-	        terminal_model_id: 'glm-5.1',
 	        terminal_error: 'Timeout after 120.0s',
 	        terminal_exception_kind: 'outer_oas_timeout',
 	        attempts: [
@@ -136,8 +134,6 @@ describe('keeper runtime trace', () => {
 	            ts: '2026-05-12T00:00:00Z',
 	            event: 'provider_attempt_finished',
 	            cascade_name: 'coding_plan',
-	            provider_kind: 'glm',
-	            model_id: 'glm-5.1',
 	            status: 'timeout',
 	            error: 'Timeout after 120.0s',
 	            exception_kind: 'outer_oas_timeout',
@@ -164,12 +160,86 @@ describe('keeper runtime trace', () => {
 	    expect(result.turn_identity.provider_lane_resolved_count).toBe(0)
 	    expect(result.turn_identity.provider_attempt_started_count).toBe(1)
 	    expect(result.provider_attempts.terminal_status).toBe('timeout')
-	    expect(result.provider_attempts.terminal_model_id).toBe('glm-5.1')
 	    expect(result.provider_attempts.attempts[0]?.exception_kind).toBe('outer_oas_timeout')
 	    expect(result.event_bus.correlation_ids).toEqual(['corr-1'])
     expect(result.memory.memory_flushed_count).toBe(0)
     expect(result.memory.episodes_flushed).toBe(2)
     expect(result.health).toBe('ok')
+  })
+
+  it('parses runtime lens evidence with safe defaults and gap codes', () => {
+    const result = parseKeeperRuntimeTrace({
+      keeper: 'sangsu',
+      trace_id: 'trace-lens',
+      turn_id: 9,
+      manifest_path: '/tmp/runtime-manifest.jsonl',
+      manifest_path_present: true,
+      manifest_total_rows: 4,
+      manifest_returned_rows: 4,
+      receipt_returned_rows: 0,
+      turn_identity: {},
+      provider_attempts: {},
+      event_bus: {},
+      memory: {},
+      runtime_lens: {
+        axes: {
+          tool_surface: {
+            requested_tools: ['read_file'],
+            required_tools: ['keeper_task_done'],
+            materialized_tools: ['read_file'],
+            missing_required_tools: ['keeper_task_done'],
+            terminal_status: 'missing_required_tool',
+          },
+          provider_lane: {
+            resolved: false,
+            status: 'error',
+            resolved_lane: 'inline',
+            missing_required_tools: ['keeper_task_done'],
+          },
+          provider_attempt: {
+            started_count: 1,
+            finished_count: 1,
+            terminal_status: 'timeout',
+          },
+        },
+        swimlanes: {
+          provider: {
+            lane: 'provider',
+            label: 'Provider',
+            event_count: 2,
+            terminal_status: 'timeout',
+            gap_codes: [],
+            events: [{ event: 'provider_attempt_finished', count: 1 }],
+          },
+          tool_runtime: {
+            lane: 'tool_runtime',
+            label: 'Tool Runtime',
+            event_count: 1,
+            terminal_status: 'missing_required_tool',
+            gap_codes: ['required_tool_not_materialized'],
+          },
+        },
+        gaps: [
+          {
+            code: 'required_tool_not_materialized',
+            severity: 'bad',
+            lane: 'tool_runtime',
+            detail: 'missing required tools: keeper_task_done',
+          },
+        ],
+      },
+      health: 'partial',
+    })
+
+    expect(result.runtime_lens.turn_clock.trace_id).toBe('trace-lens')
+    expect(result.runtime_lens.turn_clock.terminal_event_present).toBe(false)
+    expect(result.runtime_lens.axes.tool_surface.requested_tools).toEqual(['read_file'])
+    expect(result.runtime_lens.axes.tool_surface.visible_tool_count).toBeNull()
+    expect(result.runtime_lens.axes.provider_lane.resolved).toBe(false)
+    expect(result.runtime_lens.axes.provider_attempt.terminal_status).toBe('timeout')
+    expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
+    expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
+    expect(result.runtime_lens.gaps.map(gap => gap.code)).toEqual(['required_tool_not_materialized'])
   })
 
   it('fetches runtime trace evidence with query params', async () => {
@@ -200,7 +270,6 @@ describe('keeper runtime trace', () => {
 	          started_count: 1,
 	          finished_count: 1,
 	          terminal_status: 'provider_returned',
-	          terminal_model_id: 'mock-model',
 	          attempts: [],
 	        },
 	        event_bus: {
@@ -233,6 +302,7 @@ describe('keeper runtime trace', () => {
 	    expect(result.turn_identity.max_oas_turn_count).toBe(4)
 	    expect(result.provider_attempts.terminal_status).toBe('provider_returned')
 	    expect(result.memory.memory_injected_count).toBe(1)
+    expect(result.runtime_lens.turn_clock.trace_id).toBe('trace 1')
   })
 })
 

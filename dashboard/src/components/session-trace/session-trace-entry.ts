@@ -420,13 +420,12 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
   const durableKind = typeof d.durable_kind === 'string' ? d.durable_kind : ''
 
   if (durableKind === 'llm_request') {
-    const model = typeof d.model === 'string' ? d.model : 'unknown'
     const inputTokens = typeof d.input_tokens === 'number' ? d.input_tokens : 0
     const turn = d.turn
     return html`
       <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.infoPanel} space-y-1">
         <div class="flex items-center gap-3 text-xs">
-          <span><span class="text-[var(--color-fg-disabled)]">모델:</span> <span class="font-mono">${model}</span></span>
+          <span><span class="text-[var(--color-fg-disabled)]">런타임:</span> <span class="font-mono">runtime</span></span>
           <span><span class="text-[var(--color-fg-disabled)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>
           ${turn != null ? html`<span><span class="text-[var(--color-fg-disabled)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
         </div>

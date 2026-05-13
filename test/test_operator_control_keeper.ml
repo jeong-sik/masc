@@ -292,6 +292,7 @@ let test_keeper_sandbox_status_exposes_local_summary () =
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
       Keeper_registry.clear ();
+      Masc_mcp.Config_dir_resolver.reset ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -566,7 +567,7 @@ let test_playground_repo_status_refreshes_cached_git_metadata () =
       Alcotest.(check string) "cache context preserved" "clone"
         (repo |> member "last_action" |> to_string);
       Alcotest.(check bool) "status is observed live" true
-        (repo |> member "observed_at" |> to_string |> contains_substring "T");
+        (contains_substring (repo |> member "observed_at" |> to_string) "T");
       Alcotest.(check bool) "unix observation timestamp is numeric" true
         (match repo |> member "observed_at_unix" with
          | `Float _ | `Int _ -> true
@@ -686,6 +687,9 @@ let test_keeper_sandbox_status_fleet_includes_configured_keeper () =
          sandbox_profile = \"local\"\n\
          proactive_enabled = false\n\
          autoboot_enabled = false\n";
+      with_env "MASC_CONFIG_DIR" (Filename.concat (Coord.masc_root_dir config) "config")
+      @@ fun () ->
+      Masc_mcp.Config_dir_resolver.reset ();
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -2061,28 +2065,23 @@ let test_keeper_status_exposes_model_observability () =
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "recent turn observation true" true
         (observability |> member "recent_turn_observation" |> to_bool);
-      Alcotest.(check (list string)) "configured labels surfaced"
-        [ "llama:auto"; "glm:auto" ]
+      Alcotest.(check (list string)) "configured labels omitted" []
         (observability |> member "configured_labels" |> to_list
        |> List.map to_string);
-      Alcotest.(check (list string)) "resolved candidates surfaced"
-        [
-          "llama:qwen3.5-35b-a3b-ud-q8-xl";
-          "llama:qwen3.5-3b-a3b-ud-q8-xl";
-        ]
+      Alcotest.(check (list string)) "resolved candidates omitted" []
         (observability |> member "resolved_candidates" |> to_list
        |> List.map to_string);
       Alcotest.(check (option string))
-        ("selected model surfaced\n" ^ status_dump)
-        (Some "llama:qwen3.5-3b-a3b-ud-q8-xl")
+        ("selected model omitted\n" ^ status_dump)
+        None
         (observability |> member "selected_model" |> to_string_option);
       Alcotest.(check string) "attempt summary surfaced"
-        "2 attempt(s); fallback after 1 hop(s); selected candidate 2/2."
+        "2 attempt(s); fallback after 1 hop(s); selected candidate index 2."
         (observability |> member "attempt_summary" |> member "summary"
        |> to_string);
-      Alcotest.(check string) "runtime scope local" "local"
+      Alcotest.(check bool) "runtime provider scope omitted" true
         (observability |> member "runtime_contract" |> member "provider_scope"
-       |> to_string);
+        = `Null);
       Alcotest.(check bool) "runtime contract unverified" false
         (observability |> member "runtime_contract" |> member "verified"
        |> to_bool);
@@ -2160,9 +2159,6 @@ let test_keeper_status_ignores_stale_cascade_observation () =
         | Ok None -> Alcotest.fail "keeper meta missing after up"
         | Error err -> Alcotest.fail ("meta read failed: " ^ err)
       in
-      let current_labels =
-        Keeper_model_labels.configured_model_labels_of_meta meta
-      in
       let stale_selected_model = "stale:old-path" in
       Dated_jsonl.append
         (Keeper_types.keeper_metrics_store config keeper_name)
@@ -2205,7 +2201,6 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       let open Yojson.Safe.Util in
       let observability = status_json |> member "model_observability" in
       let status_dump = Yojson.Safe.pretty_to_string status_json in
-      let sorted_strings = List.sort String.compare in
       Alcotest.(check (option string))
         ("current cascade name wins over stale metrics\n" ^ status_dump)
         (Some (Keeper_types.cascade_name_of_meta meta))
@@ -2213,20 +2208,20 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       Alcotest.(check bool) "stale observation ignored" false
         (observability |> member "recent_turn_observation" |> to_bool);
       Alcotest.(check (list string))
-        "configured labels come from current meta"
-        (sorted_strings current_labels)
+        "configured labels omitted"
+        []
         (observability |> member "configured_labels" |> to_list
-       |> List.map to_string |> sorted_strings);
+       |> List.map to_string);
       Alcotest.(check (list string))
-        "resolved candidates fall back to current config"
-        (sorted_strings current_labels)
+        "resolved candidates omitted"
+        []
         (observability |> member "resolved_candidates" |> to_list
-       |> List.map to_string |> sorted_strings);
+       |> List.map to_string);
       Alcotest.(check bool) "stale selected model not surfaced" true
         (observability |> member "selected_model" |> to_string_option
        <> Some stale_selected_model);
       Alcotest.(check string) "attempt summary resets to current config"
-        "No recent cascade observation for current keeper config. Showing configured labels only."
+        "No recent cascade observation for current keeper config."
         (observability |> member "attempt_summary" |> member "summary"
        |> to_string))
 
@@ -2795,10 +2790,12 @@ proactive_enabled = true
       Alcotest.(check bool) "unknown active goal rejected" false ok;
       Alcotest.(check bool) "unknown active goal names surfaced" true
         (contains_substring msg "goal-missing");
+      let meta = read_keeper_meta_exn config keeper_name in
       let mutated =
         {
           meta with
           proactive = { meta.proactive with enabled = false };
+          autoboot_enabled = false;
           runtime =
             { meta.runtime with
               usage =
@@ -2822,6 +2819,7 @@ proactive_enabled = true
       (match Masc_mcp.Keeper_types.write_meta config mutated with
       | Ok () -> ()
       | Error err -> Alcotest.fail ("meta write failed: " ^ err));
+      Keeper_keepalive.stop_keepalive keeper_name;
       let status, json =
         Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
       in

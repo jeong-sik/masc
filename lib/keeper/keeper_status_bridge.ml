@@ -275,7 +275,18 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   let summary =
     match cls with
     | Cascade_exhausted reason ->
-      if summary = "" then cascade_exhaustion_summary reason else summary
+      if summary = ""
+      then cascade_exhaustion_summary reason
+      else (
+        match Keeper_turn_driver.classify_masc_internal_error_of_string summary with
+        | Some (Keeper_turn_driver.Cascade_exhausted { reason = structured_reason; _ }) ->
+          let reason =
+            match structured_reason with
+            | Other_detail _ -> reason
+            | _ -> structured_reason
+          in
+          cascade_exhaustion_summary reason
+        | _ -> summary)
     | Oas_timeout_budget ->
       if summary = ""
       then "OAS budget timeout fired before the keeper hard timeout."
@@ -292,10 +303,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
        | None -> if summary = "" then str else summary)
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
-    | Admission_wait_wfq ->
-      if summary = "" then "Admission wait: enqueued in WFQ overflow" else summary
-    | Admission_surface ->
-      if summary = "" then "Admission surface: no usable provider" else summary
     | Ambiguous_post_commit_timeout
     | Ambiguous_post_commit_failure
     | Autonomous_slot_wait_timeout
@@ -324,8 +331,6 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   | Cascade_exhausted _ -> runtime_blocker_surface_of_typed_class cls
   (* All other blocker classes carry no embedded reason payload, so the
      legacy string [reason] argument provides the fallback summary. *)
-  | Admission_wait_wfq
-  | Admission_surface
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
   | Autonomous_slot_wait_timeout
@@ -753,16 +758,6 @@ let non_empty_string_opt value =
   if trimmed = "" then None else Some trimmed
 ;;
 
-let active_model_label_opt_of_meta (meta : keeper_meta) =
-  Keeper_exec_status.active_model_label_of_meta meta |> non_empty_string_opt
-;;
-
-let last_model_used_label_opt_of_meta (meta : keeper_meta) =
-  if String.trim meta.runtime.usage.last_model_used = ""
-  then None
-  else active_model_label_opt_of_meta meta
-;;
-
 let social_model_resolution_fields_json (meta : keeper_meta) =
   let resolved = Keeper_social_model.normalize_social_model meta.social_model in
   let recognized = Keeper_social_model.is_known_social_model meta.social_model in
@@ -785,10 +780,8 @@ let social_runtime_fields_json (meta : keeper_meta) =
     Keeper_social_model.delivery_surface_view_source_of_meta meta
   in
   social_model_resolution_fields_json meta
-  @ [ ( "active_model_label"
-      , Json_util.string_opt_to_json (active_model_label_opt_of_meta meta) )
-    ; ( "last_model_used_label"
-      , Json_util.string_opt_to_json (last_model_used_label_opt_of_meta meta) )
+  @ [ "active_model_label", `Null
+    ; "last_model_used_label", `Null
     ; "last_speech_act", trimmed_string_json meta.runtime.last_speech_act
     ; "delivery_surface_view", Json_util.string_opt_to_json delivery_surface_view
     ; ( "delivery_surface_view_source"

@@ -691,6 +691,7 @@ let memory_summary_json scan =
     ]
 
 let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
+  let decision_string key = json_string_member_opt key row.decision in
   `Assoc
     [
       ("ts", `String row.ts);
@@ -698,15 +699,26 @@ let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
       ("cascade_name", json_string_opt row.cascade_name);
       ("provider_kind", json_string_opt row.provider_kind);
       ("model_id", json_string_opt row.model_id);
+      ("model_source", json_string_opt (decision_string "model_source"));
+      ( "resolved_model_source",
+        json_string_opt (decision_string "resolved_model_source") );
+      ("capability_source", json_string_opt (decision_string "capability_source"));
+      ("fallback_authority", json_string_opt (decision_string "fallback_authority"));
+      ( "provider_source_cascade",
+        json_string_opt (decision_string "provider_source_cascade") );
       ("status", `String row.status);
-      ("error", json_string_opt (json_string_member_opt "error" row.decision));
+      ("error", json_string_opt (decision_string "error"));
       ( "exception_kind",
-        json_string_opt (json_string_member_opt "exception_kind" row.decision) );
+        json_string_opt (decision_string "exception_kind") );
     ]
 
 let provider_attempts_summary_json scan =
   let attempt_rows = queue_to_list scan.provider_attempt_rows in
   let terminal = scan.provider_terminal_row in
+  let terminal_decision_string key =
+    Option.bind terminal (fun row ->
+      json_string_member_opt key row.Keeper_runtime_manifest.decision)
+  in
   `Assoc
     [
       ("started_count", `Int scan.provider_started_count);
@@ -722,16 +734,20 @@ let provider_attempts_summary_json scan =
         json_string_opt
           (Option.bind terminal (fun row -> row.Keeper_runtime_manifest.model_id))
       );
+      ( "terminal_model_source",
+        json_string_opt (terminal_decision_string "model_source") );
+      ( "terminal_resolved_model_source",
+        json_string_opt (terminal_decision_string "resolved_model_source") );
+      ( "terminal_capability_source",
+        json_string_opt (terminal_decision_string "capability_source") );
+      ( "terminal_fallback_authority",
+        json_string_opt (terminal_decision_string "fallback_authority") );
+      ( "terminal_provider_source_cascade",
+        json_string_opt (terminal_decision_string "provider_source_cascade") );
       ( "terminal_error",
-        json_string_opt
-          (Option.bind terminal (fun row ->
-             json_string_member_opt "error" row.Keeper_runtime_manifest.decision))
-      );
+        json_string_opt (terminal_decision_string "error") );
       ( "terminal_exception_kind",
-        json_string_opt
-          (Option.bind terminal (fun row ->
-             json_string_member_opt "exception_kind"
-               row.Keeper_runtime_manifest.decision)) );
+        json_string_opt (terminal_decision_string "exception_kind") );
       ("attempts", `List (List.map provider_attempt_row_json attempt_rows));
     ]
 

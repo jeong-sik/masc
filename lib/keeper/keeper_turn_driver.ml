@@ -31,6 +31,51 @@ let provider_attempt_status_and_error_of_exception = function
         (Printexc.to_string inner) )
   | exn -> "exception", Printexc.to_string exn
 
+type provider_attempt_provenance =
+  { model_source : string
+  ; resolved_model_source : string
+  ; capability_source : string
+  ; fallback_authority : string
+  ; provider_source_cascade : string option
+  }
+
+let base_provider_attempt_provenance ~uses_direct_model_strings =
+  if uses_direct_model_strings then
+    { model_source = "direct_model_strings"
+    ; resolved_model_source = "direct_model_string"
+    ; capability_source = "provider_config_from_direct_model_string"
+    ; fallback_authority = "direct_model_strings"
+    ; provider_source_cascade = None
+    }
+  else
+    { model_source = "named_cascade"
+    ; resolved_model_source = "cascade_catalog_binding"
+    ; capability_source = "provider_config_from_cascade_catalog"
+    ; fallback_authority = "declared_cascade"
+    ; provider_source_cascade = None
+    }
+
+let cross_cascade_provider_attempt_provenance ~source_cascade =
+  { model_source = "cross_cascade_recovery"
+  ; resolved_model_source = "cross_cascade_catalog_binding"
+  ; capability_source = "provider_config_from_cross_cascade_catalog"
+  ; fallback_authority = "cross_cascade_recovery"
+  ; provider_source_cascade = Some source_cascade
+  }
+
+let provider_attempt_provenance_fields p =
+  let base =
+    [ ("model_source", `String p.model_source)
+    ; ("resolved_model_source", `String p.resolved_model_source)
+    ; ("capability_source", `String p.capability_source)
+    ; ("fallback_authority", `String p.fallback_authority)
+    ]
+  in
+  match p.provider_source_cascade with
+  | None -> base
+  | Some source_cascade ->
+      ("provider_source_cascade", `String source_cascade) :: base
+
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)
@@ -199,7 +244,10 @@ let run_named
   (* Cross-cascade health-aware fallback: when the current cascade has no
      tool-capable providers after filtering, search all other cascades for
      a healthy tool-capable provider. Depth 1 only (no recursive search). *)
-  let candidate_cfgs =
+  let base_attempt_provenance =
+    base_provider_attempt_provenance ~uses_direct_model_strings
+  in
+  let provider_attempt_provenance, candidate_cfgs =
     match candidate_cfgs with
     | [] ->
         (match resolve_tool_capable_provider_across_cascades
@@ -230,7 +278,8 @@ let run_named
                cascade_name
                (Provider_tool_support.provider_debug_label provider_cfg)
                source_cascade;
-             [provider_cfg]
+             ( cross_cascade_provider_attempt_provenance ~source_cascade
+             , [provider_cfg] )
          | None ->
              Log.Misc.error
                "cascade %s: no callable models available (cross-cascade \
@@ -240,8 +289,8 @@ let run_named
                (String.concat ", " configured_labels)
                require_tool_choice_support
                require_tool_support;
-             [])
-    | _ -> candidate_cfgs
+             (base_attempt_provenance, []))
+    | _ -> (base_attempt_provenance, candidate_cfgs)
   in
   match candidate_cfgs with
   | [] ->
@@ -524,21 +573,23 @@ let run_named
       let provider_kind =
         Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind
       in
+      let started_decision_fields =
+        provider_attempt_provenance_fields provider_attempt_provenance
+        @ [
+            ("provider_health_key", `String provider_health_key);
+            ("provider_model_health_key", `String provider_model_health_key);
+            ("is_last", `Bool is_last);
+            ( "per_provider_timeout_s",
+              match pp_timeout with
+              | None -> `Null
+              | Some timeout -> `Float timeout );
+          ]
+      in
       emit_runtime_manifest
         ~status:"started"
         ~provider_kind
         ~model_id:provider_cfg.model_id
-        ~decision:
-          (`Assoc
-            [
-              ("provider_health_key", `String provider_health_key);
-              ("provider_model_health_key", `String provider_model_health_key);
-              ("is_last", `Bool is_last);
-              ( "per_provider_timeout_s",
-                match pp_timeout with
-                | None -> `Null
-                | Some timeout -> `Float timeout );
-            ])
+        ~decision:(`Assoc started_decision_fields)
         Keeper_runtime_manifest.Provider_attempt_started;
       let provider_attempt_finished_emitted = ref false in
       let emit_provider_attempt_finished_once
@@ -559,6 +610,10 @@ let run_named
               ("response_model", response_model);
               ("error", error);
             ]
+          in
+          let decision_fields =
+            provider_attempt_provenance_fields provider_attempt_provenance
+            @ decision_fields
           in
           let decision_fields =
             match exception_kind with

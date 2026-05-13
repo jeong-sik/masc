@@ -297,8 +297,19 @@ function useSubscribedSnapshot<T>(
   const [value, setValue] = useState<ReadonlyArray<T>>(() => read())
 
   useEffect(() => {
-    setValue(read())
-    return subscribe(() => setValue(read()))
+    let current = read()
+    setValue(previous => previous === current ? previous : current)
+
+    let sawInitialSnapshot = false
+    return subscribe(() => {
+      const next = read()
+      if (!sawInitialSnapshot) {
+        sawInitialSnapshot = true
+        if (next === current) return
+      }
+      current = next
+      setValue(previous => previous === next ? previous : next)
+    })
   }, [read, subscribe])
 
   return value

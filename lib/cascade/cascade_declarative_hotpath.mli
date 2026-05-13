@@ -1,8 +1,7 @@
-(** Declarative catalog → runtime snapshot conversion (RFC-0058 Phase 3).
+(** Declarative catalog -> runtime snapshot conversion (RFC-0058 Phase 3).
 
     Converts an {!Cascade_declarative_adapter.adapted_catalog} into a
-    lightweight {!decl_snapshot} that can be compared against the legacy
-    JSON hotpath snapshot for parallel validation.
+    lightweight {!decl_snapshot} used by the active cascade runtime.
 
     This module does NOT depend on {!Cascade_catalog_runtime} to avoid
     a dependency cycle.  Mirror types are defined locally and the runtime
@@ -84,9 +83,7 @@ val declarative_route_bindings :
 val decl_snapshot_profile_names :
   decl_snapshot -> string list
 (** Extract profile names from a declarative snapshot as a sorted,
-    deduplicated set.  The sort is required because callers compare
-    this against profile lists from the JSON-shape discovery path,
-    which already runs [List.sort_uniq String.compare] before
-    construction — without matching that contract here, list equality
+    deduplicated set.  The sort gives callers a stable comparison and
+    output order independent of TOML declaration order; without it, list equality
     flips on declaration-order differences and produces spurious
     [profile name mismatch] WARNs. *)

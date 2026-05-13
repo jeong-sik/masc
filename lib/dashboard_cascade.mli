@@ -20,9 +20,9 @@
     {[
       {
         "updated_at": "2026-04-15T08:15:00Z",
-        "config_path": "/path/to/cascade.json" | null,
-        "source_kind": "json" | "toml",
-        "source_path": "/path/to/cascade.json" | "/path/to/cascade.toml",
+        "config_path": "/path/to/cascade.toml" | null,
+        "source_kind": "toml",
+        "source_path": "/path/to/cascade.toml",
         "profiles": [
           { "name": "keeper_unified",
             "keeper_assignable": true,
@@ -41,7 +41,7 @@
 
     Only validated profiles from the active runtime snapshot are surfaced in
     [profiles]. Each profile also carries [keeper_assignable] metadata from the
-    live [cascade.json] catalog so the UI can distinguish keeper-routing
+    live [cascade.toml] catalog so the UI can distinguish keeper-routing
     profiles from manual/system-only trial profiles. Keepers whose raw
     [cascade_name] drifts from the validated catalog still appear in
     [keeper_profiles] so the UI can show the mismatch.
@@ -49,7 +49,7 @@
     @since 0.6.0 *)
 val config_json : unit -> Yojson.Safe.t
 
-(** Raw [cascade.json] payload from the active resolved config root.
+(** Raw cascade TOML payload from the active resolved config root.
 
     Shape:
     {[
@@ -67,9 +67,8 @@ val config_json : unit -> Yojson.Safe.t
     [source_text] is the editable TOML source file content; [raw_json] is the
     in-memory rendering returned by
     {!Cascade_toml_materializer.render_toml_to_json_string}. RFC-0058 §9
-    Phase 9.3 retired the JSON-native authoring mode and the on-disk
-    [cascade.json] sibling, so the [config_path] and [raw_json_editable]
-    fields are gone.
+    Phase 9.3 retired the JSON-native authoring mode and the on-disk JSON
+    sibling, so the [config_path] and [raw_json_editable] fields are gone.
 
     @since 0.160.1 *)
 val raw_config_json : unit -> Yojson.Safe.t
@@ -105,12 +104,12 @@ val keeper_profile_fields
   -> (string * Yojson.Safe.t) list
 
 (** JSON snapshot of the cascade health tracker, merged with
-    [cascade.json]'s declared candidate list.
+    [cascade.toml]'s declared candidate list.
 
     Entries come from two sources:
     1. {!Cascade_health_tracker.all_providers Health.global} — every
        provider the tracker has observed events for.
-    2. Providers declared in any [cascade.json] profile but absent from
+    2. Providers declared in any [cascade.toml] profile but absent from
        the tracker, synthesised via {!zero_provider_info}.  Lets the UI
        surface "why isn't this provider being used?" for candidates that
        never get selected.
@@ -152,7 +151,7 @@ val keeper_profile_fields
     ]}
 
     [status] is one of [active | cooldown | configured]; see
-    {!provider_status}.  [declared] is [true] iff [cascade.json] lists a
+    {!provider_status}.  [declared] is [true] iff [cascade.toml] lists a
     model whose scheme prefix matches [provider_key].
 
     When [?base_path] is supplied, each provider entry additionally
@@ -178,7 +177,7 @@ val health_json : ?window_minutes:int -> ?base_path:string -> unit -> Yojson.Saf
 val provider_status : Cascade_health_tracker.provider_info -> string
 
 (** Synthesise a provider_info with optimistic defaults for a provider
-    that is declared in [cascade.json] but has no tracker events in the
+    that is declared in [cascade.toml] but has no tracker events in the
     current window.  Used by {!health_json} to merge declared-only
     candidates; exposed for tests so fixtures don't have to hand-build
     the record. *)
@@ -254,7 +253,7 @@ val recommendation_to_json : recommendation -> Yojson.Safe.t
 val recommendations_json : unit -> Yojson.Safe.t
 
 (** [provider_scheme_of_model_string s] returns the scheme prefix of a
-    [cascade.json] model spec (the text before the first [:]), or [s]
+    cascade model spec (the text before the first [:]), or [s]
     unchanged when no [:] is present.  The scheme corresponds to the
     [provider_key] produced at runtime by
     [Keeper_hooks_oas.provider_of_model] for prefixed specs. *)

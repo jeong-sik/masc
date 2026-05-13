@@ -351,7 +351,7 @@ mutation testing pattern).
 
 ## 6. Provider taxonomy
 
-Not all providers in `big_three` natively stream. Concrete migration
+Not all providers in `primary` natively stream. Concrete migration
 table:
 
 | Provider | Streams natively | First-class chunk | Implementation note |
@@ -444,7 +444,7 @@ Phase C (default `enforce` everywhere):
   (Step 2 of goal `oas-bridge-stabilization`).
 - **Permitted (per-cascade override, added 2026-05-06)**: a cascade
   profile in `config/cascade.toml` may set its own
-  `turn_timeout_sec`. Checked-in remote/CLI profiles (`big_three`,
+  `turn_timeout_sec`. Checked-in remote/CLI profiles (`primary`,
   `keeper_diverse`, `retired_fast_profile`, `tier_medium`) run at 600 s.
   Operator-populated local-model profiles (not the checked-in
   `[local_recovery]` fallback profile) run at 900 s when they declare

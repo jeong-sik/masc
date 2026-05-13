@@ -672,7 +672,7 @@ let test_load_keeper_toml_inherits_base_defaults () =
     (fun () ->
       write_file base_path {|
 [keeper]
-cascade_name = "big_three"
+cascade_name = "primary"
 sandbox_profile = "docker"
 network_mode = "inherit"
 work_discovery_enabled = true
@@ -693,7 +693,7 @@ preset = "coding"
       | Error e -> fail e
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
-          check (option string) "base cascade" (Some "big_three")
+          check (option string) "base cascade" (Some "primary")
             defaults.cascade_name;
           check (option string) "base sandbox" (Some "docker")
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
@@ -849,7 +849,7 @@ let test_profile_ignores_legacy_allowed_providers () =
 [keeper]
 goal = "test"
 allowed_providers = ["Ollama", "GLM"]
-cascade_name = "big_three"
+cascade_name = "primary"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -858,7 +858,7 @@ cascade_name = "big_three"
      | Error e -> fail e
      | Ok d ->
        check (option string) "cascade preserved"
-         (Some "big_three") d.cascade_name)
+         (Some "primary") d.cascade_name)
 
 let test_profile_max_turns_overrides () =
   let input = {|
@@ -1482,7 +1482,7 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
-cascade_name = "big_three"
+cascade_name = "primary"
 github_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]

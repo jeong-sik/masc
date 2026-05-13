@@ -133,7 +133,7 @@ describe('buildFleetRows runtime labels', () => {
         status: 'active',
         keepalive_running: true,
         cascade_name: 'oas-keeper_unified',
-        cascade_canonical: 'big_three',
+        cascade_canonical: 'primary',
         active_model_label: 'codex_cli:auto',
         trust: {
           execution_summary: {
@@ -169,7 +169,7 @@ describe('buildFleetRows runtime labels', () => {
             total_tokens: null,
             wall_tokens_per_second: null,
             inference_telemetry: null,
-            cascade_name: 'big_three',
+            cascade_name: 'primary',
             cascade_selected_model: 'anthropic:claude-sonnet-4-6',
             cascade_attempt_count: 2,
             cascade_outcome: 'passed_to_next_model',
@@ -195,7 +195,7 @@ describe('buildFleetRows runtime labels', () => {
 
     expect(row).toMatchObject({
       model: 'codex_cli:auto',
-      cascade_label: 'oas-keeper_unified -> big_three',
+      cascade_label: 'oas-keeper_unified -> primary',
       provider_label: 'anthropic:claude-sonnet-4-6 · 2 attempts · fallback',
       fallback_label: 'openai:gpt-5.4 -> anthropic:claude-sonnet-4-6 · turn_timeout · 1 hops',
     })

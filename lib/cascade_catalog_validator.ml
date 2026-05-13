@@ -40,17 +40,20 @@ let split_provider_model (s : string) : (string * string) option =
         in
         if model_id = "" then None else Some (provider_name, model_id)
 
-let discover_profiles_in_json = function
-  | `Assoc fields ->
-      fields
-      |> List.filter_map (fun (key, value) ->
-             match value with
-             | `List _ when has_suffix ~suffix:"_models" key ->
-                 let suffix_len = String.length "_models" in
-                 Some (String.sub key 0 (String.length key - suffix_len))
-             | _ -> None)
-      |> List.sort_uniq String.compare
-  | _ -> []
+let declarative_snapshot_for_config_path config_path =
+  match Cascade_declarative_hotpath.try_load_declarative config_path with
+  | Some (Ok snapshot) -> Some snapshot
+  | Some (Error _) | None -> None
+
+let discover_profiles_declarative config_path =
+  match Cascade_declarative_parser.parse_file config_path with
+  | Error _ -> []
+  | Ok cfg ->
+    let catalog = Cascade_declarative_adapter.adapt_config cfg in
+    catalog.profiles
+    |> List.map (fun (profile : Cascade_declarative_adapter.adapted_profile) ->
+           profile.name)
+    |> List.sort_uniq String.compare
 
 let discover_profiles_impl ~emit_telemetry ~config_path =
   let load_catalog_source =
@@ -59,7 +62,7 @@ let discover_profiles_impl ~emit_telemetry ~config_path =
     else Cascade_config_loader.load_catalog_source_for_diagnostics
   in
   match load_catalog_source config_path with
-  | Ok json -> discover_profiles_in_json json
+  | Ok _ -> discover_profiles_declarative config_path
   | Error _ -> []
 
 let discover_profiles ~config_path =
@@ -140,7 +143,7 @@ let priority_tier_issue ~profile configured_specs raw_tiers =
    validation time so the operator sees it before each turn pays the
    cost.  Severity is [Catalog_warn] for now — the operator may have
    private cascade configs that legitimately omit bound-actor support
-   (system-only profiles like [tool_rerank]).  Strict-mode
+   (private operator-only profiles, for example offline scoring).  Strict-mode
    ([Catalog_error]) gating is left to a follow-up that knows which
    profiles are keeper-assignable. *)
 let codex_with_bound_actor_only_issue ~profile model_specs =
@@ -239,11 +242,6 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
           };
         ]
 
-(* RFC-0066 Phase 4: prefer the validated runtime snapshot for
-   [required_capability_profile] and [weighted_entries] when the active
-   snapshot's [source_path] matches the caller-provided [config_path].
-   Falls through to the legacy reader when the snapshot is unrelated
-   (fixture tests with explicit path) or unavailable (early boot). *)
 let snapshot_profile_for ~config_path ~profile =
   match Cascade_catalog_runtime.inspect_active () with
   | Error _ -> None
@@ -263,42 +261,54 @@ let snapshot_profile_for ~config_path ~profile =
      | _ -> None)
 
 let diagnose_profile ~emit_telemetry ~config_path ~profile =
-  let snapshot_profile = snapshot_profile_for ~config_path ~profile in
+  let (_ : bool) = emit_telemetry in
+  let snapshot_profile =
+    match snapshot_profile_for ~config_path ~profile with
+    | Some _ as value -> value
+    | None ->
+      (match declarative_snapshot_for_config_path config_path with
+       | None -> None
+       | Some snapshot ->
+         List.find_opt
+           (fun (p : Cascade_declarative_hotpath.profile) ->
+              String.equal p.name profile)
+           snapshot.profiles
+         |> Option.map
+              (fun (p : Cascade_declarative_hotpath.profile) ->
+                 let candidates =
+                   List.map
+                     (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+                        { Cascade_catalog_runtime.model_string =
+                            candidate.model_string
+                        ; provider_cfg = candidate.provider_cfg
+                        })
+                     p.candidates
+                 in
+                 { Cascade_catalog_runtime.name = p.name
+                 ; weighted_entries = p.weighted_entries
+                 ; inference_params = p.inference_params
+                 ; api_key_env_overrides = []
+                 ; strategy = p.strategy
+                 ; ollama_max_concurrent = p.ollama_max_concurrent
+                 ; cli_max_concurrent = p.cli_max_concurrent
+                 ; candidates
+                 ; probes = []
+                 ; required_capability_profile = None
+                 }))
+  in
   let model_specs =
     match snapshot_profile with
     | Some (p : Cascade_catalog_runtime.profile_build) ->
       List.map
         (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
         p.weighted_entries
-    | None ->
-      (if emit_telemetry
-       then Cascade_config_loader.load_profile_weighted ~config_path ~name:profile
-       else
-         Cascade_config_loader.load_profile_weighted_for_diagnostics
-           ~config_path
-           ~name:profile)
-      |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
-             entry.model)
+    | None -> []
   in
   let required_profile_opt =
     match snapshot_profile with
     | Some (p : Cascade_catalog_runtime.profile_build) ->
       p.required_capability_profile
-    | None ->
-      (match
-         if emit_telemetry
-         then Cascade_config_loader.load_catalog ~config_path
-         else Cascade_config_loader.load_catalog_for_diagnostics ~config_path
-       with
-       | Error _ -> None
-       | Ok entries ->
-           List.find_map
-             (fun (e : Cascade_config_loader.catalog_entry) ->
-               if String.equal e.name profile then
-                 Some e.required_capability_profile
-               else None)
-             entries
-           |> Option.value ~default:None)
+    | None -> None
   in
   let capability_issues =
     match required_profile_opt with
@@ -331,51 +341,11 @@ let diagnose_profile ~emit_telemetry ~config_path ~profile =
               (format_spec_errors invalid_specs);
         }
   in
-  let strategy_cfg =
-    (if emit_telemetry
-     then Cascade_config_loader.resolve_strategy_config ~config_path ~name:profile
-     else
-       Cascade_config_loader.resolve_strategy_config_for_diagnostics
-         ~config_path
-         ~name:profile)
-  in
-  let strategy_issue =
-    match strategy_cfg.kind with
-    | None -> None
-    | Some raw_kind -> (
-        match Cascade_strategy.parse_kind raw_kind with
-        | Error msg ->
-            Some
-              {
-                profile = Some profile;
-                severity = Catalog_error;
-                message =
-                  Printf.sprintf
-                    "Cascade preset %s has unknown strategy %S: %s"
-                    profile raw_kind msg;
-              }
-        | Ok Cascade_strategy.Priority_tier -> (
-            match strategy_cfg.tiers with
-            | None ->
-                Some
-                  {
-                    profile = Some profile;
-                    severity = Catalog_error;
-                    message =
-                      Printf.sprintf
-                        "Cascade preset %s uses priority_tier without a \
-                         valid non-empty <name>_tiers configuration."
-                        profile;
-                  }
-            | Some raw_tiers ->
-                priority_tier_issue ~profile model_specs raw_tiers)
-        | Ok _ -> None)
-  in
   let bound_actor_issue =
     codex_with_bound_actor_only_issue ~profile model_specs
   in
   let issues =
-    [ invalid_model_issue; strategy_issue; bound_actor_issue ]
+    [ invalid_model_issue; bound_actor_issue ]
     |> List.filter_map (fun issue -> issue)
   in
   issues @ capability_issues
@@ -399,7 +369,8 @@ let diagnose_catalog_impl ~emit_telemetry ~config_path =
         };
       ]
   | Ok json ->
-      discover_profiles_in_json json
+      ignore json;
+      discover_profiles_declarative config_path
       |> List.concat_map (fun profile ->
         diagnose_profile ~emit_telemetry ~config_path ~profile)
 

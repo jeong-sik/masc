@@ -78,13 +78,13 @@ max-concurrent = 3
 [claude_code.sonnet]
 max-concurrent = 2
 
-[claude_code.haiku.for-tool-rerank]
+[claude_code.haiku.for-scoring]
 max-input = 4096
 
 [ollama.qwen3]
 
 [tier.rerank]
-members = ["claude_code.haiku.for-tool-rerank"]
+members = ["claude_code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
@@ -95,15 +95,15 @@ strategy = "failover"
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.big-three]
+[tier-group.primary]
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 
 [routes.default]
-target = "tier-group.big-three"
+target = "tier-group.primary"
 
 [system.governance]
-target = "claude_code.haiku.for-tool-rerank"
+target = "claude_code.haiku.for-scoring"
 |}
 
 (* --- Tests: snapshot conversion --- *)
@@ -124,17 +124,17 @@ let test_profile_names () =
   check bool "has tier.rerank" true (List.mem "tier.rerank" names);
   check bool "has tier.primary" true (List.mem "tier.primary" names);
   check bool "has tier.local" true (List.mem "tier.local" names);
-  check bool "has tier-group.big-three" true
-    (List.mem "tier-group.big-three" names)
+  check bool "has tier-group.primary" true
+    (List.mem "tier-group.primary" names)
 
 let test_candidates () =
   let snapshot = get_snapshot valid_toml in
   let rerank = find_profile snapshot "tier.rerank" in
   check int "rerank has 1 candidate" 1
     (List.length rerank.Hotpath.candidates);
-  let big_three = find_profile snapshot "tier-group.big-three" in
-  check int "big-three has 3 candidates" 3
-    (List.length big_three.Hotpath.candidates)
+  let primary = find_profile snapshot "tier-group.primary" in
+  check int "primary has 3 candidates" 3
+    (List.length primary.Hotpath.candidates)
 
 let test_model_string_format () =
   let snapshot = get_snapshot valid_toml in
@@ -156,13 +156,13 @@ let test_weighted_entries_count () =
 let test_strategy_preserved () =
   let snapshot = get_snapshot valid_toml in
   let rerank = find_profile snapshot "tier.rerank" in
-  let big_three = find_profile snapshot "tier-group.big-three" in
+  let primary = find_profile snapshot "tier-group.primary" in
   check string "rerank strategy" "failover"
     (Cascade_strategy.kind_to_string
        rerank.Hotpath.strategy.Cascade_strategy.kind);
-  check string "big-three strategy" "priority_tier"
+  check string "primary strategy" "priority_tier"
     (Cascade_strategy.kind_to_string
-       big_three.Hotpath.strategy.Cascade_strategy.kind)
+       primary.Hotpath.strategy.Cascade_strategy.kind)
 
 let test_probes_field_absent () =
   (* Mirror type has no probes field — this test verifies the type shape *)

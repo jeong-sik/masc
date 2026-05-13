@@ -36,7 +36,7 @@ L2 (transport keeper-identity gap) 와 L3 (permission-aware filtering) 는 본 R
 
 | Cascade | Substitutions |
 |---------|---------------|
-| `big_three` | 108 |
+| `primary` | 108 |
 | `retired_coding_profile` | **100/100 (100%)** — 별개 namespace mismatch bug |
 | `retired_local_profile` | 20/21 (95%) |
 | `retired_fast_profile` | 18 |
@@ -227,7 +227,7 @@ let cross_cascade_mode_current () = (* MASC_CROSS_CASCADE_FALLBACK *)
 
 **Migration guide**: cascade.toml 의 모든 user-facing cascade 가 `fallback_cascade` 명시. 예:
 ```toml
-[big_three]
+[primary]
 fallback_cascade = "retired_fast_profile"  # 기존 implicit cross-cascade 대신
 ```
 

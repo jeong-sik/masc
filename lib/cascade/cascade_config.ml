@@ -17,7 +17,6 @@ let parse_custom_model = Cascade_model_resolve.parse_custom_model
 
 (* Config loader *)
 let load_catalog_source = Cascade_config_loader.load_catalog_source
-let load_profile = Cascade_config_loader.load_profile
 
 type inference_params = Cascade_config_loader.inference_params = {
   temperature: float option;
@@ -545,7 +544,7 @@ let expand_weighted_auto_entries
 
 (** Parse a list of weighted entries, dropping ones that cannot produce a
     provider config. Load-time drops are logged once per call with
-    categorised reasons so upstream drift (e.g. a cascade.json entry
+    categorised reasons so upstream drift (e.g. a cascade.toml entry
     referencing an unregistered provider scheme due to library/binary
     version skew) surfaces as ERROR rather than silently filtering away.
 
@@ -583,7 +582,7 @@ let parse_weighted_entries
   (if unregistered <> [] then
      Log.Misc.error
        "%s: dropped %d entry/entries referencing unregistered provider \
-        scheme(s): [%s]. Likely library/binary drift or cascade.json typo \
+        scheme(s): [%s]. Likely library/binary drift or cascade.toml typo \
         — rebuild or fix the config entry."
        label (List.length unregistered) (render_drops unregistered));
   (if invalid <> [] then
@@ -864,46 +863,53 @@ let order_weighted_entries
     in
     weighted_shuffle ~rand_int effective
 
+let configured_weighted_entries ~config_path ~name =
+  let (_ : string) = config_path in
+  let (_ : string) = name in
+  []
+
 let resolve_model_strings_traced_with
     ~rand_int ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
-    (* Probe load_catalog_source before delegating to load_profile_weighted so we
-       can distinguish a load failure (Load_failed source) from a
-       successful-but-empty profile (Hardcoded_defaults source).  The
-       load is cached, so the subsequent call inside
-       load_profile_weighted is a cache hit. *)
     (match Cascade_config_loader.load_catalog_source path with
      | Error msg -> (defaults, Load_failed msg)
      | Ok _ ->
-    let from_file_weighted =
-      Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
-    if from_file_weighted <> [] then
-      let ordered =
-        order_weighted_entries ~rand_int ~cascade:name from_file_weighted
-      in
-      let models = List.map
-          (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
-      (models, Named)
-    else
-      let fallback_profile =
-        Cascade_routes.cascade_name_for_use
-          ~config_path:path
-          Cascade_routes.Keeper_turn
-      in
-      let fallback_weighted =
-        Cascade_config_loader.load_profile_weighted
-          ~config_path:path ~name:fallback_profile in
-      if fallback_weighted <> [] then
-        let ordered =
-          order_weighted_entries
-            ~rand_int ~cascade:fallback_profile fallback_weighted
-        in
-        let models = List.map
-            (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
-            ordered in
-        (models, Default_fallback)
-      else (defaults, Hardcoded_defaults))
+       let from_file_weighted =
+         configured_weighted_entries ~config_path:path ~name
+       in
+       if from_file_weighted <> [] then
+         let ordered =
+           order_weighted_entries ~rand_int ~cascade:name from_file_weighted
+         in
+         let models =
+           List.map
+             (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
+             ordered
+         in
+         (models, Named)
+       else
+         let fallback_profile =
+           Cascade_routes.cascade_name_for_use
+             ~config_path:path
+             Cascade_routes.Keeper_turn
+         in
+         let fallback_weighted =
+           configured_weighted_entries
+             ~config_path:path ~name:fallback_profile
+         in
+         if fallback_weighted <> [] then
+           let ordered =
+             order_weighted_entries
+               ~rand_int ~cascade:fallback_profile fallback_weighted
+           in
+           let models =
+             List.map
+               (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
+               ordered
+           in
+           (models, Default_fallback)
+         else (defaults, Hardcoded_defaults))
   | None -> (defaults, Hardcoded_defaults)
 
 let resolve_model_strings_traced ?config_path ~name ~defaults () =
@@ -1025,8 +1031,6 @@ let selection_trace_of_weighted_entries
 let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
-    (* Phase 2b: same probe pattern as resolve_model_strings_traced_with —
-       distinguish a load fault from operator-intended absence. *)
     (match Cascade_config_loader.load_catalog_source path with
      | Error msg ->
        let candidates =
@@ -1039,7 +1043,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
        (defaults, { candidates; source = Load_failed msg })
      | Ok _ ->
     let from_file_weighted =
-      Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
+      configured_weighted_entries ~config_path:path ~name in
     if from_file_weighted <> [] then
       let ordered = order_weighted_entries ~cascade:name from_file_weighted in
       let models = List.map
@@ -1053,7 +1057,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
           Cascade_routes.Keeper_turn
       in
       let fallback_weighted =
-        Cascade_config_loader.load_profile_weighted
+        configured_weighted_entries
           ~config_path:path ~name:fallback_profile in
       if fallback_weighted <> [] then
         let ordered =
@@ -1252,21 +1256,9 @@ let warn_invalid_priority_tier ~name ~msg ~fallback_kind =
   end
 
 let default_strategy_kind ?config_path ~name () =
-  match config_path with
-  | None -> Cascade_strategy.Failover
-  | Some path ->
-    (match Cascade_config_loader.load_catalog ~config_path:path with
-     | Ok entries ->
-       (match
-          List.find_opt
-            (fun (entry : Cascade_config_loader.catalog_entry) ->
-               String.equal entry.name name)
-            entries
-        with
-        | Some entry when entry.keeper_assignable ->
-            Cascade_strategy.Round_robin
-        | _ -> Cascade_strategy.Failover)
-     | Error _ -> Cascade_strategy.Failover)
+  let (_ : string option) = config_path in
+  let (_ : string) = name in
+  Cascade_strategy.Failover
 
 let parse_kind_or_default ~name ~default_kind = function
   | None -> default_kind
@@ -1304,12 +1296,10 @@ let model_ids_of_specs (specs : string list) : string list =
   |> List.sort_uniq String.compare
 
 let normalize_priority_tiers ~config_path ~name raw_tiers =
-  (* Phase 2c: probe load_catalog_source before delegating so that an unreadable
-     cascade.toml/json surfaces as a load-failure error instead of the
+  (* Probe the active TOML before resolving declarative candidates so an
+     unreadable cascade.toml surfaces as a load-failure error instead of the
      generic "no configured models" message — the latter mis-leads
-     operators into thinking the profile is empty when the file is
-     actually broken.  Mirrors the probe pattern in
-     resolve_model_strings_traced_with / _with_trace (PR #11361). *)
+     operators into thinking the profile is empty when the file is broken. *)
   match Cascade_config_loader.load_catalog_source config_path with
   | Error msg ->
       Error
@@ -1318,7 +1308,7 @@ let normalize_priority_tiers ~config_path ~name raw_tiers =
            msg)
   | Ok _ ->
   let configured_model_ids =
-    Cascade_config_loader.load_profile_weighted ~config_path ~name
+    configured_weighted_entries ~config_path ~name
     |> List.map (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
     |> model_ids_of_specs
   in

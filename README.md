@@ -239,7 +239,7 @@ Reload contracts:
 
 - env vars are a boot contract unless a runtime control plane says otherwise
 - `config/keepers/*.toml` is reconciled on the next supervisor sweep
-- `config/cascade.toml` materializes sibling `config/cascade.json` on the next model resolve/turn
+- `config/cascade.toml` is rendered in memory on the next model resolve/turn
 - `config/keeper_runtime.toml` and `config/tool_policy.toml` require restart
 
 See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
@@ -248,11 +248,11 @@ See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
 ## Model Cascade
 
 - Authoring manual: [docs/CASCADE-TOML.md](docs/CASCADE-TOML.md)
-- `config/cascade.toml` is the supported human-authored cascade catalog when present.
-- `config/cascade.json` remains the runtime contract and generated artifact served to existing consumers.
+- `config/cascade.toml` is the supported cascade catalog and runtime source.
+- `config/cascade.json` is retired and is not generated or consumed.
 - MASC owns cascade schema, parsing, and selection policy; OAS only sees the resolved concrete provider/model choice passed per call.
 - Each keeper can override the repo default via `cascade_name` in its TOML.
-- The checked-in seed deliberately exposes only `big_three` as a normal keeper choice; `default`, `local_only`, `local_recovery`, and `tool_rerank` are system-only plumbing profiles.
+- The checked-in seed deliberately exposes only `primary` as a normal keeper choice; `default`, `local_only`, `local_recovery`, and `scoring` are system-only plumbing profiles.
 - For committed defaults, use explicit `provider:model_id` labels when review-stable pinning matters; use `provider:auto` only when the adapter default is the intended checked-in contract.
 - Checked-in defaults must stay limited to providers that the currently pinned OAS runtime can actually execute once selected.
 - For copy-paste local/private examples, see [docs/CASCADE-COOKBOOK.md](docs/CASCADE-COOKBOOK.md).

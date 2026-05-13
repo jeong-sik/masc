@@ -125,7 +125,7 @@ val parse_weighted_entry_with_drop_metric :
     Drops are categorised (unregistered provider scheme, unavailable
     provider, invalid syntax) and logged once per call through
     {!Log.Misc}: unregistered schemes and invalid syntax are promoted to
-    ERROR because they usually indicate cascade.json drift or a stale
+    ERROR because they usually indicate cascade.toml drift or a stale
     binary linked against an older provider registry. Unavailable
     schemes (missing API key, missing CLI binary) log at WARN. If every
     entry is filtered out the call escalates to an additional ERROR so
@@ -153,7 +153,7 @@ val order_weighted_entries :
 (** Order weighted entries using the same health-adjusted runtime logic as
     {!resolve_model_strings}. Exposed so runtime-authoritative catalog
     snapshots can preserve dynamic health ordering without rereading raw
-    [cascade.json].
+    cascade source text.
 
     When [rotation_scope] is provided, equal-weight top-level provider entries
     are round-robined within that scope, and each [provider:auto] expansion is
@@ -199,7 +199,7 @@ val expand_weighted_auto_entries :
     When [api_key_env_overrides] is provided, it overrides the default
     API key env var for matching providers. The list maps provider names
     (or ["*"] for all) to env var names. Used by cascade execution paths
-    to apply per-cascade key configuration from cascade.json.
+    to apply per-cascade key configuration from cascade.toml.
 
     @since 0.122.0 api_key_env_overrides parameter added *)
 val parse_model_strings :
@@ -209,27 +209,11 @@ val parse_model_strings :
   ?api_key_env_overrides:(string * string) list ->
   string list -> Llm_provider.Provider_config.t list
 
-(** {1 JSON Config Loading} *)
-
-(** Load a named model list from a JSON config file.
-
-    The JSON file maps "{name}_models" keys to string arrays:
-    {[
-      { "primary_models":    ["llama:qwen3.5", "glm:auto"],
-        "evaluation_models": ["llama:qwen3.5", "glm:glm-4.5"] }
-    ]}
-
-    Results are cached and hot-reloaded when the file mtime changes.
-    Returns an empty list when the file is missing or the key is absent
-    (caller provides defaults). *)
-val load_profile :
-  config_path:string ->
-  name:string ->
-  string list
+(** {1 Cascade Config Loading} *)
 
 (** How a cascade name was resolved. *)
 type cascade_source =
-  | Named              (** Found as "{name}_models" in config *)
+  | Named              (** Found as a declarative profile in cascade.toml *)
   | Default_fallback   (** Name not found; used the [routes.keeper_turn] profile *)
   | Hardcoded_defaults (** Neither found; used hardcoded [defaults] *)
   | Load_failed of string
@@ -241,7 +225,7 @@ type cascade_source =
 (** Resolve model strings for a named cascade.
 
     Resolution order:
-    1. Named profile "{name}_models" from [config_path]
+    1. Named declarative profile from [config_path]
     2. [routes.keeper_turn] profile from [config_path] (fallback)
     3. Hardcoded [defaults]
 
@@ -299,7 +283,7 @@ type candidate_info = {
   display_provider_name : string option; (** User-facing provider family label *)
   runtime_kind : string option; (** "local" / "cli_agent" / "direct_api" when known *)
   expanded_models : string list; (** Concrete execution order for this configured candidate *)
-  config_weight : int;          (** Weight from [cascade.json] ([1] when absent) *)
+  config_weight : int;          (** Weight from cascade config ([1] when absent) *)
   effective_weight : int;       (** Weight after health adjustment; [0] = cooled-down *)
   success_rate : float;         (** Rolling-window success rate, [0.0]–[1.0] *)
   in_cooldown : bool;           (** Provider currently skipped by cooldown *)
@@ -327,7 +311,7 @@ type selection_trace = {
 (** Build a live selection trace from already-known weighted entries.
 
     Applies {!order_weighted_entries} and snapshots current health signals
-    without rereading raw [cascade.json]. Useful when callers already hold
+    without rereading raw cascade source text. Useful when callers already hold
     validated runtime profile data and need the same dashboard trace shape.
 
     @since 0.150.4 *)
@@ -355,9 +339,9 @@ val resolve_model_strings_with_trace :
 
 (** Load and cache the cascade catalog source.
 
-    Returns a [Yojson.Safe.t] view for legacy JSON-shaped consumers,
-    but reads no on-disk JSON: [cascade.toml] is the SSOT and is parsed
-    into the returned value in memory. Cached by source-path mtime.
+    Returns a [Yojson.Safe.t] in-memory view for internal consumers, but
+    reads no on-disk JSON: [cascade.toml] is the SSOT and is parsed into
+    the returned value in memory. Cached by source-path mtime.
     Exposed for consumers needing custom fields beyond model lists
     (e.g., per-cascade temperature/max_tokens overrides).
 
@@ -385,7 +369,7 @@ type inference_params = {
       mapping happens downstream in OAS. *)
 }
 
-(** Resolve inference parameters from cascade.json.
+(** Resolve inference parameters from cascade.toml.
 
     Resolution order:
     1. ["{name}_temperature"] / ["{name}_max_tokens"]
@@ -396,7 +380,7 @@ type inference_params = {
 val resolve_inference_params :
   config_path:string -> name:string -> inference_params
 
-(** Resolve per-cascade API key env var overrides from cascade.json.
+(** Resolve per-cascade API key env var overrides from cascade.toml.
 
     Supports two formats:
     - String: applies to all providers.

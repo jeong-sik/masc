@@ -112,7 +112,7 @@ type binding = {
 type alias = {
   provider_id : string;
   model_id : string;
-  name : string;              (* e.g. "for-tool-rerank" *)
+  name : string;              (* e.g. "for-scoring" *)
   max_input : int option;
   max_output : int option;
   temperature : float option;
@@ -319,7 +319,7 @@ max-concurrent = 1
 ### 3.5 Layer 4: Aliases (Per-Use Overrides)
 
 ```toml
-[claude-code.haiku.for-tool-rerank]
+[claude-code.haiku.for-scoring]
 max-output = 1024
 temperature = 0.1
 
@@ -350,7 +350,7 @@ fields, overrides specified fields.
 
 ```toml
 [tier.rerank]
-members = ["claude-code.haiku.for-tool-rerank"]
+members = ["claude-code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
@@ -362,7 +362,7 @@ max-concurrent = 5
 members = ["ollama.qwen3-8b"]
 strategy = "failover"
 
-[tier-group.big-three]
+[tier-group.primary]
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 fallback = true
@@ -372,9 +372,9 @@ tiers = ["rerank"]
 strategy = "failover"
 
 [routes]
-keeper_turn = "big-three"
-governance_judge = "big-three"
-tool_rerank = "rerank-only"
+keeper_turn = "primary"
+governance_judge = "primary"
+scoring = "rerank-only"
 simple_task = "local"
 
 [system.governance]
@@ -434,7 +434,7 @@ The migration path:
 
 | Current | New |
 |---------|-----|
-| `[big_three]` profile with `models = [...]` | `[tier.primary]` members referencing bindings |
+| `[primary]` profile with `models = [...]` | `[tier.primary]` members referencing bindings |
 | `"claude_code:auto"` model strings | `[claude-code.haiku]` binding + `[models.haiku]` |
 | `_required_capability_profile` field | Per-model `tools-support` + per-route filtering |
 | `cascade_capability_profile.ml` closed variant | Config-driven `api_format` + `transport` |

@@ -51,10 +51,10 @@ describe('dashboard cascade split', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchCascadeStrategyTrace({ limit: 25, cascade: 'big_three' })
+    const result = await fetchCascadeStrategyTrace({ limit: 25, cascade: 'primary' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/strategy_trace?limit=25&cascade=big_three')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/strategy_trace?limit=25&cascade=primary')
     expect(result.events).toEqual([])
   })
 
@@ -87,14 +87,14 @@ describe('dashboard cascade split', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await updateKeeperCascade('sojin', 'big_three')
+    const result = await updateKeeperCascade('sojin', 'primary')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keeper/cascade')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
       keeper: 'sojin',
-      cascade_name: 'big_three',
+      cascade_name: 'primary',
     }))
     expect(result.ok).toBe(true)
   })
@@ -130,17 +130,17 @@ describe('dashboard cascade split', () => {
       'is-default = true',
       'max-concurrent = 2',
       '',
-      '[tier.big_three]',
+      '[tier.primary]',
       'members = ["glm-coding.glm-auto"]',
       'strategy = "failover"',
       '',
-      '[tier-group.big_three]',
-      'tiers = ["big_three"]',
+      '[tier-group.primary]',
+      'tiers = ["primary"]',
       'strategy = "priority_tier"',
       'fallback = true',
       '',
       '[routes.keeper_turn]',
-      'target = "tier-group.big_three"',
+      'target = "tier-group.primary"',
       '',
     ].join('\n')
 

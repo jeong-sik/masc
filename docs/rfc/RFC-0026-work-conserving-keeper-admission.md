@@ -113,7 +113,7 @@ Diagnostic facts:
    produces 8 skips.
 3. **PR-level fixes do not converge.**
    PR #1087 (cascade ollama_bench gating) merged → stall recurs on
-   `cascade=big_three`. PR #12863 (slot release at inner cancel)
+   `cascade=primary`. PR #12863 (slot release at inner cancel)
    merged → stall recurs. PR #12885 / #12894 / #12895 (slot lifecycle
    redesign) all open as drafts. The semaphore abstraction is the
    root, not any individual call site.

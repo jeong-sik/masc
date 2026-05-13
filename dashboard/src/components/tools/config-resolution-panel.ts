@@ -526,10 +526,6 @@ export function ConfigResolutionPanel({
 
   return html`
     <${Card} title="설정 경로" class="section mb-4">
-      <div class="mb-4 text-xs text-[var(--color-fg-muted)]">
-        cascade.toml(seed) ≠ cascade.json(runtime). 현재 실행 경로가 체크인된 seed config와 다를 수 있습니다.
-      </div>
-
       ${resolution
         ? html`
             <div class="mb-6">
@@ -558,7 +554,7 @@ export function ConfigResolutionPanel({
                   rootSource=${rootSource}
                 />
                 <${ConfigRow}
-                  label="cascade runtime"
+                  label="cascade source"
                   item=${resolution.cascade}
                   rootPath=${rootPath}
                   rootSource=${rootSource}

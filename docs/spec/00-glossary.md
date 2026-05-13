@@ -80,10 +80,10 @@ Keeper 런타임은 12-state FSM과 turn/post-turn sub-FSM으로 구성된다. `
 노드 기반 실행 파이프라인 엔진(`lib/chain/`)은 purge됐다. `Chain`, `Node`, `Node Type`(23 variant), `Chain Result` 같은 세부 용어도 같이 제거. 현재 execution은 OAS swarm + keeper FSM + verifier 조합이다.
 
 **Cascade**
-LLM 모델 호출의 폴백 순서를 정의하는 설정. `config/cascade.json`에 cascade 이름별로 모델 리스트가 지정된다. 첫 번째 모델 실패 시 다음 모델로 폴백한다. 기본 순서: llama(local) -> GLM Cloud -> Skip. `-> config/cascade.json`, `-> lib/cascade_inference.mli`
+LLM 모델 호출의 폴백 순서를 정의하는 설정. `config/cascade.toml`에 cascade 이름별로 모델 리스트가 지정된다. 첫 번째 모델 실패 시 다음 모델로 폴백한다. 기본 순서: llama(local) -> GLM Cloud -> Skip. `-> config/cascade.toml`, `-> lib/cascade_inference.mli`
 
 **Cascade Inference**
-cascade.json에서 cascade 이름별 추론 파라미터(temperature, max_tokens)를 읽어 해결하는 모듈. 해결 순서: cascade별 값 -> default 값 -> 호출자 fallback. `-> lib/cascade_inference.mli`
+cascade.toml에서 cascade 이름별 추론 파라미터(temperature, max_tokens)를 읽어 해결하는 모듈. 해결 순서: cascade별 값 -> default 값 -> 호출자 fallback. `-> lib/cascade_inference.mli`
 
 **Layer (Architecture Layer)**
 MASC 아키텍처의 계층 구조. HTTP Server(L0) -> MCP Protocol(L1) -> Tool Dispatch(L2) -> Domain Logic(L3) -> Storage(L4) -> OAS Integration(L5) 순으로 구성된다.
@@ -364,7 +364,7 @@ MASC가 에이전트 실행에 사용하는 SDK 라이브러리. 프로젝트: `
 MASC에서 OAS 기반 모델 호출을 수행하는 통합 진입점. cascade_name 또는 model_label로 모델을 지정하고, OAS Agent.run을 통해 실행한다. 결과로 `run_result`(response, checkpoint, session_id, turns, trace_ref)를 반환한다. `-> lib/oas_worker.mli`
 
 **Cascade Config**
-`config/cascade.json`에 정의된 cascade 이름별 모델 리스트와 추론 파라미터. OAS Provider와 MASC 모두에서 사용된다. `-> config/cascade.json`
+`config/cascade.toml`에 정의된 cascade 이름별 모델 리스트와 추론 파라미터. OAS Provider와 MASC 모두에서 사용된다. `-> config/cascade.toml`
 
 **Provider Kind**
 OAS에서 LLM 제공자를 구분하는 타입. MASC에서는 `llama`(local), `glm`(GLM Cloud), `claude`, `gemini` 등이 사용된다.

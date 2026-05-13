@@ -62,7 +62,7 @@ let test_turn_timeout_kind () =
 
 let test_cascade_exhausted_kind () =
   let kind = "cascade_exhausted" in
-  let cascade_name = "big_three" in
+  let cascade_name = "primary" in
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
@@ -74,13 +74,13 @@ let test_cascade_exhausted_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "cascade_exhausted{cascade_name=big_three} counter +1"
+    "cascade_exhausted{cascade_name=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
 let test_resumable_cli_session_kind () =
   let kind = "resumable_cli_session" in
-  let cascade_name = "big_three" in
+  let cascade_name = "primary" in
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
@@ -92,7 +92,7 @@ let test_resumable_cli_session_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "resumable_cli_session{cascade_name=big_three} counter +1"
+    "resumable_cli_session{cascade_name=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -192,7 +192,7 @@ let test_accept_rejected_kind () =
 
 let test_admission_queue_timeout_kind () =
   let kind = "admission_queue_timeout" in
-  let cascade_name = "big_three" in
+  let cascade_name = "primary" in
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
@@ -204,7 +204,7 @@ let test_admission_queue_timeout_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "admission_queue_timeout{cascade_name=big_three} counter +1"
+    "admission_queue_timeout{cascade_name=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 

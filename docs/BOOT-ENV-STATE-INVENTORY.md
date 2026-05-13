@@ -84,7 +84,7 @@ The checked-in versioned seed config tree currently contains:
 
 | Path | Purpose |
 | --- | --- |
-| `config/cascade.json` | Provider/model cascade and routing defaults. |
+| `config/cascade.toml` | Provider/model cascade and routing defaults. |
 | `config/tool_policy.toml` | Tool preset policy and allow/deny rules. |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
@@ -473,7 +473,7 @@ Current log sink observed today:
    - `<runtime_root>/keepers/<name>/`
    - `<runtime_root>/traces/`
    - `<active config root>/tool_policy.toml`
-   - `<active config root>/cascade.json`
+   - `<active config root>/cascade.toml`
 
 ## Appendix A. Centralized Environment Inventory
 

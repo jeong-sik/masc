@@ -147,7 +147,7 @@ describe('parseKeeperCompositeSnapshot', () => {
           message_truncated: false,
         },
         cascade: {
-          name: 'big_three',
+          name: 'primary',
           selected_model: 'claude_code:auto',
           attempt_count: 2,
           fallback_applied: true,

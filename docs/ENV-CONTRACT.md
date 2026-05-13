@@ -31,7 +31,7 @@ Use this document together with
 | --- | --- | --- |
 | `boot_static` | Requires process restart | socket bind, config root resolution, startup seeding |
 | `sweep_dynamic` | Applied on next supervisor sweep or periodic reconcile | running keeper declarative profile sync |
-| `request_dynamic` | Applied on next request/turn/lookup | `cascade.json` resolve path, some runtime getters |
+| `request_dynamic` | Applied on next request/turn/lookup | `cascade.toml` resolve path, some runtime getters |
 | `immediate_dynamic` | Applied immediately inside the running process | `Runtime_params.set`, in-process override mutation |
 
 ## Default Policy

@@ -82,7 +82,7 @@ describe('ConfigResolutionPanel', () => {
           warnings: ['Resolved config child is missing: keepers'],
           config_root: { path: '/tmp/runtime/config', exists: true, source: 'env' },
           cascade_authoring: { path: '/tmp/runtime/config/cascade.toml', exists: true, source: 'env' },
-          cascade: { path: '/tmp/runtime/config/cascade.json', exists: true, source: 'env' },
+          cascade: { path: '/tmp/runtime/config/cascade.toml', exists: true, source: 'env' },
           prompts: { path: '/tmp/runtime/config/prompts', exists: true, source: 'env' },
           keepers: { path: '/tmp/runtime/config/keepers', exists: false, source: 'env' },
           personas: { path: '/tmp/custom-personas', exists: false, source: 'invalid_env' },
@@ -138,10 +138,8 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('env override')
     expect(container.textContent).toContain('Resolved config child is missing: keepers')
     expect(container.textContent).toContain('cascade.toml')
-    expect(container.textContent).toContain('cascade.json')
     expect(container.textContent).toContain('root-relative')
     expect(container.textContent).toContain('under config root')
-    expect(container.textContent).not.toContain('/tmp/runtime/config/cascade.json')
     expect(container.textContent).not.toContain('/tmp/runtime/config/cascade.toml')
     expect(container.textContent).toContain('/tmp/custom-personas')
     expect(container.textContent).toContain('invalid env')
@@ -167,8 +165,8 @@ describe('ConfigResolutionPanel', () => {
           status: 'ready',
           warnings: [],
           config_root: { path: '/tmp/root-config', exists: true, source: 'env' },
-          cascade_authoring: { path: '/tmp/root-config/cascade.toml', exists: false, source: 'env' },
-          cascade: { path: '/tmp/root-config/cascade.json', exists: true, source: 'env' },
+          cascade_authoring: { path: '/tmp/root-config/cascade.toml', exists: true, source: 'env' },
+          cascade: { path: '/tmp/root-config/cascade.toml', exists: true, source: 'env' },
           prompts: { path: '/tmp/root-config/prompts', exists: true, source: 'env' },
           keepers: { path: '/tmp/root-config/keepers', exists: true, source: 'cwd' },
           personas: { path: '/tmp/root-config/personas', exists: true, source: 'env' },
@@ -178,7 +176,6 @@ describe('ConfigResolutionPanel', () => {
     )
 
     const cards = Array.from(container.querySelectorAll('[title]'))
-    expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config/cascade.json')
     expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config/cascade.toml')
     expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config')
     expect(container.textContent?.match(/env override/g)?.length ?? 0).toBe(1)
@@ -192,8 +189,8 @@ describe('ConfigResolutionPanel', () => {
           status: 'ready',
           warnings: [],
           config_root: { path: '/tmp/root', exists: true, source: 'env' },
-          cascade_authoring: { path: '/tmp/root/cascade.toml', exists: false, source: 'env' },
-          cascade: { path: '/tmp/root/cascade.json', exists: true, source: 'env' },
+          cascade_authoring: { path: '/tmp/root/cascade.toml', exists: true, source: 'env' },
+          cascade: { path: '/tmp/root/cascade.toml', exists: true, source: 'env' },
           prompts: { path: '/tmp/root/prompts', exists: true, source: 'env' },
           keepers: { path: '/tmp/root/keepers', exists: true, source: 'env' },
           personas: { path: '/tmp/root-extra/personas', exists: true, source: 'env' },
@@ -234,8 +231,8 @@ describe('ConfigResolutionPanel', () => {
           status: 'ready',
           warnings: [],
           config_root: { path: '/', exists: true, source: 'cwd' },
-          cascade_authoring: { path: '/etc/cascade.toml', exists: false, source: 'cwd' },
-          cascade: { path: '/etc/cascade.json', exists: true, source: 'cwd' },
+          cascade_authoring: { path: '/etc/cascade.toml', exists: true, source: 'cwd' },
+          cascade: { path: '/etc/cascade.toml', exists: true, source: 'cwd' },
           prompts: { path: '/var/prompts', exists: true, source: 'cwd' },
           keepers: { path: '/opt/keepers', exists: true, source: 'cwd' },
           personas: { path: '/srv/personas', exists: true, source: 'cwd' },
@@ -244,7 +241,7 @@ describe('ConfigResolutionPanel', () => {
       container,
     )
 
-    expect(container.textContent).toContain('etc/cascade.json')
+    expect(container.textContent).toContain('etc/cascade.toml')
     expect(container.textContent).toContain('root-relative')
   })
 
@@ -255,8 +252,8 @@ describe('ConfigResolutionPanel', () => {
           status: 'ready',
           warnings: [],
           config_root: { path: '/home/test/.masc/config', exists: true, source: 'home_masc' },
-          cascade_authoring: { path: '/home/test/.masc/config/cascade.toml', exists: false, source: 'home_masc' },
-          cascade: { path: '/home/test/.masc/config/cascade.json', exists: true, source: 'home_masc' },
+          cascade_authoring: { path: '/home/test/.masc/config/cascade.toml', exists: true, source: 'home_masc' },
+          cascade: { path: '/home/test/.masc/config/cascade.toml', exists: true, source: 'home_masc' },
           prompts: { path: '/home/test/.masc/config/prompts', exists: true, source: 'home_masc' },
           keepers: { path: '/home/test/.masc/config/keepers', exists: true, source: 'home_masc' },
           personas: { path: '/home/test/.masc/config/personas', exists: true, source: 'home_masc' },
@@ -276,8 +273,8 @@ describe('ConfigResolutionPanel', () => {
           status: 'ready',
           warnings: [],
           config_root: { path: '/tmp/project/.masc/config', exists: true, source: 'local_masc' },
-          cascade_authoring: { path: '/tmp/project/.masc/config/cascade.toml', exists: false, source: 'local_masc' },
-          cascade: { path: '/tmp/project/.masc/config/cascade.json', exists: true, source: 'local_masc' },
+          cascade_authoring: { path: '/tmp/project/.masc/config/cascade.toml', exists: true, source: 'local_masc' },
+          cascade: { path: '/tmp/project/.masc/config/cascade.toml', exists: true, source: 'local_masc' },
           prompts: { path: '/tmp/project/.masc/config/prompts', exists: true, source: 'local_masc' },
           keepers: { path: '/tmp/project/.masc/config/keepers', exists: true, source: 'local_masc' },
           personas: { path: '/tmp/project/.masc/config/personas', exists: true, source: 'local_masc' },

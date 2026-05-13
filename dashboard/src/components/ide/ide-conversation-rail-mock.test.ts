@@ -52,7 +52,7 @@ describe('IdeConversationRailMock', () => {
       }],
       [{
         ts: Date.UTC(2026, 4, 5, 10, 2, 0) / 1000,
-        cascade_name: 'big_three',
+        cascade_name: 'primary',
         strategy: 'ranked',
         cycle: 1,
         candidates_in: 3,
@@ -108,7 +108,7 @@ describe('IdeConversationRailMock', () => {
           total_events: 1,
           events: [{
             ts: Date.UTC(2026, 4, 5, 10, 2, 0) / 1000,
-            cascade_name: 'big_three',
+            cascade_name: 'primary',
             strategy: 'ranked',
             cycle: 1,
             candidates_in: 3,
@@ -128,7 +128,7 @@ describe('IdeConversationRailMock', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('new thread body')
       expect(container.textContent).toContain('turn_completed')
-      expect(container.textContent).toContain('big_three')
+      expect(container.textContent).toContain('primary')
     })
 
     const slider = container.querySelector('[role="slider"]') as HTMLElement
@@ -142,7 +142,7 @@ describe('IdeConversationRailMock', () => {
     })
     expect(container.textContent).not.toContain('new thread body')
     expect(container.textContent).not.toContain('turn_completed')
-    expect(container.textContent).not.toContain('big_three')
+    expect(container.textContent).not.toContain('primary')
 
     render(null, container)
   })

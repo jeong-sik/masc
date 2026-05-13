@@ -90,10 +90,10 @@ let test_running_with_custom_base () =
 let test_tool_required_turn_preserves_routed_cascade () =
   let r =
     Routing.route_effective_cascade_for_tool_requirement
-      ~effective_cascade:"big_three" ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
+      ~effective_cascade:"primary" ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
   in
   check string "required tool turns preserve routed cascade"
-    "big_three" r.effective_cascade;
+    "primary" r.effective_cascade;
   check bool "required tool turns do not rewrite to strict cascade" false
     (String.equal Masc_mcp.Keeper_config.tool_use_strict_cascade_name
        r.effective_cascade)

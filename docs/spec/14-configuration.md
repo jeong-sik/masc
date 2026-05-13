@@ -39,7 +39,7 @@ code_refs:
 │ Layer 4: Env_config_keeper      (Keeper 부트/알림/감독)  │
 │ Layer 5: Level2/Level4_config   (메트릭, Swarm, 학습)   │
 │ Layer 6: Runtime_params         (런타임 오버라이드)       │
-│ Layer 7: config/cascade.json    (Cascade 모델 순서)     │
+│ Layer 7: config/cascade.toml    (Cascade 모델 순서)     │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -56,7 +56,7 @@ code_refs:
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
 | `MASC_BASE_PATH` | string | `.` | `.masc` 데이터 디렉토리의 기준 경로 |
-| `MASC_CONFIG_DIR` | string | 자동 탐색 | resolved config root override. 하위 항목: `cascade.json`, `prompts/`, `keepers/`, `personas/` |
+| `MASC_CONFIG_DIR` | string | 자동 탐색 | resolved config root override. 하위 항목: `cascade.toml`, `prompts/`, `keepers/`, `personas/` |
 | `MASC_PERSONAS_DIR` | string | unset | persona root override. 설정 시 resolved config root의 `personas/` 대신 이 디렉토리를 사용 |
 | `MASC_HTTP_PORT` | string | `"8935"` | HTTP 서버 포트 |
 | `MASC_HTTP_BASE_URL` | string | - | 전체 base URL (설정 시 host/port 무시) |
@@ -319,7 +319,7 @@ Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다
 
 ## 7. Cascade Configuration
 
-### 7.1 config/cascade.json 구조
+### 7.1 config/cascade.toml 구조
 
 JSON 파일로 cascade별 설정을 정의한다. 기본 키 패턴은
 `{cascade_name}_models`이며, catalog discovery는
@@ -572,4 +572,4 @@ dir-local local-dev에서는 `.masc/`가 target 디렉토리 내부를 가리키
 
 ### 12.6 모델 실행
 
-모델 선택은 `cascade.json`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고, `Cascade_runtime`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.
+모델 선택은 `cascade.toml`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고, `Cascade_runtime`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.

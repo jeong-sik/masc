@@ -66,14 +66,14 @@ max-concurrent = 3
 [claude-code.sonnet]
 max-concurrent = 2
 
-[claude-code.haiku.for-tool-rerank]
+[claude-code.haiku.for-scoring]
 max-input = 4096
 
 [ollama.qwen3-8b]
 max-concurrent = 1
 
 [tier.rerank]
-members = ["claude-code.haiku.for-tool-rerank"]
+members = ["claude-code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
@@ -84,15 +84,15 @@ strategy = "failover"
 members = ["ollama.qwen3-8b"]
 strategy = "failover"
 
-[tier-group.big-three]
+[tier-group.primary]
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 
 [routes.default]
-target = "tier-group.big-three"
+target = "tier-group.primary"
 
 [system.governance]
-target = "claude-code.haiku.for-tool-rerank"
+target = "claude-code.haiku.for-scoring"
 |}
 
 let test_valid_config () =

@@ -33,8 +33,7 @@ The key distinction is:
 | `<base_path>/.masc/config/keeper_runtime.toml` | startup env seeding for `MASC_KEEPER_*` knobs | server bootstrap before `Env_config_keeper` consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
 | `<resolved-config-root>/tool_policy.toml` | keeper tool preset/group policy | server bootstrap via `init_policy_config` | none | `boot_static` | presets are stored in process memory once loaded |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
-| `<resolved-config-root>/cascade.toml` | human-authored cascade catalog source | model resolve path in OAS/MASC (materializes sibling JSON first) | next resolve / next turn | `request_dynamic` | when present, TOML wins and invalid TOML blocks cascade load |
-| `<resolved-config-root>/cascade.json` | generated runtime artifact for cascade order and per-cascade inference settings | model resolve path in OAS/MASC | next resolve / next turn | `request_dynamic` | direct JSON editing is only the active source when sibling TOML is absent |
+| `<resolved-config-root>/cascade.toml` | cascade catalog source | model resolve path in OAS/MASC (rendered in memory) | next resolve / next turn | `request_dynamic` | invalid TOML blocks cascade load; `cascade.json` is retired |
 
 ## Current Behavior by File
 
@@ -81,15 +80,14 @@ Operational meaning:
 - They are applied on the next sweep for running keepers, or on the next
   `keeper_up`/create path for inactive keepers.
 
-### `cascade.toml` / `cascade.json`
+### `cascade.toml`
 
 - TOML source resolution/materialization lives in
   [`Cascade_toml_materializer`](../lib/cascade/cascade_toml_materializer.ml)
 - Resolved via
   [`Cascade_runtime.models_of_cascade_name`](../lib/cascade/cascade_runtime.ml)
-- The code materializes sibling `cascade.json` before loading and then
-  delegates runtime JSON caching/reload to OAS with the same request-path
-  contract
+- The code renders TOML to an in-memory JSON-shaped view and caches by
+  source-path mtime
   ([`cascade_runtime.ml`](../lib/cascade/cascade_runtime.ml))
 
 Operational meaning:

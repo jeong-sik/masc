@@ -2872,11 +2872,11 @@ proactive_enabled = true
         "turn_budget_heuristic"
         (json |> member "execution" |> member "per_provider_timeout_mode"
        |> to_string);
-      Alcotest.(check string) "cascade catalog source kind" "json"
+      Alcotest.(check string) "cascade catalog source kind" "toml"
         (json |> member "sources" |> member "cascade_catalog_source_kind"
        |> to_string);
       Alcotest.(check string) "cascade catalog source path"
-        (Filename.concat config_dir "cascade.json")
+        (Filename.concat config_dir "cascade.toml")
         (json |> member "sources" |> member "cascade_catalog_source_path"
        |> to_string);
       Alcotest.(check string) "active config root" config_dir

@@ -1,7 +1,7 @@
 (** Config-driven cascade profile name resolution.
 
     Per RFC-0041 cascade routing SSOT, the live cascade catalog
-    (cascade.json) is the only source of truth for cascade profile
+    (cascade.toml) is the only source of truth for cascade profile
     names — there is no compile-time enum here.  Code that needs to
     know "what profiles are available" reads them through
     {!catalog_names} / {!catalog_names_result} /
@@ -70,7 +70,7 @@ val runtime_name_of_string : string -> runtime_name
     after [String.trim]. *)
 
 val catalog_names : ?config_path:string -> unit -> string list
-(** Live profile catalog discovered from the active [cascade.json].
+(** Live profile catalog discovered from the active [cascade.toml].
     When the file cannot be read, returns [[]]. *)
 
 val catalog_names_result : ?config_path:string -> unit -> (string list, string) result
@@ -90,7 +90,7 @@ val keeper_catalog_names : ?config_path:string -> unit -> string list
     [keeper_assignable] metadata. *)
 
 val system_catalog_names : ?config_path:string -> unit -> string list
-(** Live system-only profile names present in [cascade.json]. *)
+(** Live system-only profile names present in [cascade.toml]. *)
 
 val fallback_cascade_for : ?config_path:string -> string -> string option
 (** Declarative escalation hint for [name].
@@ -136,7 +136,7 @@ val normalize_declared_name : string -> string
     Logical route aliases resolve through {!cascade_name_for_use}; otherwise
     the trimmed input is returned. *)
 
-(** {1 cascade.json key helpers} *)
+(** {1 In-memory cascade key helpers} *)
 
 (** First canonicalize, then build the key. *)
 val models_key : string -> string

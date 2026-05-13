@@ -3,10 +3,10 @@
 open Cascade_ref
 
 (** Per RFC-0041 cascade routing SSOT, the live cascade catalog
-    (cascade.json) is the only source of truth for cascade profile
+    (cascade.toml) is the only source of truth for cascade profile
     names.  There is no compile-time enum here — anything that needs to
     know "what profiles are available" reads them from
-    [Cascade_config_loader.load_catalog] / [catalog_names_*] below.  If
+    [Cascade_catalog_runtime] / [catalog_names_*] below.  If
     the catalog is empty at runtime,
     [Cascade_catalog_runtime.validate_path_result] is the boot-time
     gate that rejects keeper boot, so a missing catalog never reaches
@@ -45,30 +45,6 @@ let cascade_name_for_use = Cascade_routes.cascade_name_for_use
 type runtime_name = Cascade_ref.runtime_name = Runtime_name of string
 
 let runtime_name_to_string = Cascade_ref.runtime_name_to_string
-
-let catalog_entries ?config_path () =
-  let path_opt =
-    match config_path with
-    | Some path -> Some path
-    | None -> Config_dir_resolver.cascade_path_opt ()
-  in
-  match path_opt with
-  | None -> None
-  | Some path -> (
-      match Cascade_config_loader.load_catalog ~config_path:path with
-      | Ok entries -> Some entries
-      | Error _ -> None)
-
-let catalog_entries_result ?config_path () =
-  let path_opt =
-    match config_path with
-    | Some path -> Some path
-    | None -> Config_dir_resolver.cascade_path_opt ()
-  in
-  match path_opt with
-  | None -> Error "cascade catalog path is not resolved"
-  | Some path ->
-      Cascade_config_loader.load_catalog ~config_path:path
 
 let strip_declarative_profile_prefix name =
   let tier_group_prefix = "tier-group." in
@@ -111,33 +87,33 @@ let declarative_public_catalog_names ?config_path () =
       | None -> Error "cascade.toml is not a declarative cascade catalog")
 
 (** RFC-0066 Phase 2: prefer the live validated snapshot (declarative
-    [provider]/[model]/[profile] aware) over the legacy
-    [Cascade_config_loader.load_catalog] (only sees `*_models` namespaces).
-    Falls back to the legacy reader when the snapshot is not yet
-    materialized (early boot, before [validate_path]) so existing
-    boot-order semantics are preserved. *)
+    [provider]/[model]/[profile] aware). *)
 let catalog_names ?config_path () =
-  match Cascade_catalog_runtime.known_profile_names () with
-  | Ok names when names <> [] -> names
-  | Ok _ | Error _ ->
-      (match catalog_entries ?config_path () with
-       | Some entries ->
-           List.map
-             (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-             entries
-       | None -> [])
+  match config_path with
+  | Some _ ->
+      (match declarative_public_catalog_names ?config_path () with
+       | Ok names -> names
+       | Error _ -> [])
+  | None ->
+      (match Cascade_catalog_runtime.known_profile_names () with
+       | Ok names when names <> [] ->
+           names |> List.map strip_declarative_profile_prefix
+           |> List.sort_uniq String.compare
+       | Ok _ | Error _ ->
+           (match declarative_public_catalog_names () with
+            | Ok names -> names
+            | Error _ -> []))
 
 let catalog_names_result ?config_path () =
-  match Cascade_catalog_runtime.known_profile_names () with
-  | Ok names when names <> [] -> Ok names
-  | Ok _ | Error _ ->
-      (match catalog_entries_result ?config_path () with
-       | Error _ as err -> err
-       | Ok entries ->
+  match config_path with
+  | Some _ -> declarative_public_catalog_names ?config_path ()
+  | None ->
+      (match Cascade_catalog_runtime.known_profile_names () with
+       | Ok names when names <> [] ->
            Ok
-             (List.map
-                (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-                entries))
+             (names |> List.map strip_declarative_profile_prefix
+              |> List.sort_uniq String.compare)
+       | Ok _ | Error _ -> declarative_public_catalog_names ())
 
 let catalog_names_for_validation ?config_path () =
   let path_opt =
@@ -150,102 +126,20 @@ let catalog_names_for_validation ?config_path () =
   | Some path -> declarative_public_catalog_names ~config_path:path ()
 
 let is_system_only_cascade raw =
-  let name = String.trim raw in
-  match catalog_entries () with
-  | None -> false
-  | Some entries ->
-      List.exists
-        (fun (entry : Cascade_config_loader.catalog_entry) ->
-          String.equal entry.name name && not entry.keeper_assignable)
-        entries
+  let (_ : string) = raw in
+  false
 
 let keeper_catalog_names ?config_path () =
-  let declarative_names =
-    match config_path with
-    | Some path -> (
-        match Cascade_declarative_hotpath.try_load_declarative path with
-        | Some (Ok snapshot) ->
-            public_names_of_declarative_snapshot snapshot
-        | Some (Error _) | None -> [])
-    | None -> (
-        match declarative_public_catalog_names () with
-        | Ok names -> names
-        | Error _ -> (
-            match Cascade_catalog_runtime.known_profile_names () with
-            | Ok names -> List.map strip_declarative_profile_prefix names
-            | Error _ -> []))
-  in
-  match declarative_names with
-  | _ :: _ -> declarative_names
-  | [] ->
-      (match catalog_entries ?config_path () with
-       | Some entries ->
-           entries
-           |> List.filter_map
-                (fun (entry : Cascade_config_loader.catalog_entry) ->
-                  if entry.keeper_assignable then Some entry.name else None)
-       | None -> [])
+  catalog_names ?config_path ()
 
 let system_catalog_names ?config_path () =
-  match catalog_entries ?config_path () with
-  | Some entries ->
-      entries
-      |> List.filter_map
-           (fun (entry : Cascade_config_loader.catalog_entry) ->
-             if entry.keeper_assignable then None else Some entry.name)
-  | None -> []
-
-(** Track which (cascade, target) pairs we have already logged as
-    invalid fallback_cascade hints so the WARN line fires once per
-    process — not once per keeper turn. *)
-let logged_invalid_fallback : (string * string, unit) Hashtbl.t =
-  Hashtbl.create 4
+  let (_ : string option) = config_path in
+  []
 
 let fallback_cascade_for ?config_path name =
-  let trimmed_name = String.trim name in
-  if String.equal trimmed_name "" then None
-  else
-    match catalog_entries ?config_path () with
-    | None -> None
-    | Some entries ->
-        let catalog_names =
-          List.map
-            (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-            entries
-        in
-        let entry_opt =
-          List.find_opt
-            (fun (entry : Cascade_config_loader.catalog_entry) ->
-              String.equal entry.name trimmed_name)
-            entries
-        in
-        (match entry_opt with
-         | None -> None
-         | Some entry ->
-             (match entry.fallback_cascade with
-              | None -> None
-              | Some target ->
-                  if String.equal target trimmed_name then None
-                  else if List.mem target catalog_names then Some target
-                  else begin
-                    (* Iter 37: tick a counter on every invalid-hint
-                       hit (not only on the once-per-pair WARN) so
-                       operators can alert on the rate.  Runtime
-                       complement to iter-32 [capability_mismatch]
-                       which catches the same graph fault at
-                       catalog-build time. *)
-                    Cascade_metrics.on_fallback_hint_invalid ();
-                    let key = (trimmed_name, target) in
-                    if not (Hashtbl.mem logged_invalid_fallback key) then begin
-                      Hashtbl.add logged_invalid_fallback key ();
-                      Log.Misc.warn
-                        "[CascadeConfig] profile %s declares \
-                         fallback_cascade=%s which is not in the live \
-                         catalog; ignoring hint"
-                        trimmed_name target
-                    end;
-                    None
-                  end))
+  let (_ : string option) = config_path in
+  let (_ : string) = name in
+  None
 
 let canonicalize_with_catalog ~catalog raw =
   match String.trim raw with

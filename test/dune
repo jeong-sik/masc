@@ -56,10 +56,8 @@
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
         test_post_verifier
         test_reward_advice_artifact
-        test_keeper_cascade_profile
         test_cascade_capability_profile
         test_cascade_secondary_expand
-        test_cascade_validator_capability_lint
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
         test_keeper_hooks_oas_telemetry
@@ -296,10 +294,8 @@
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
           test_post_verifier
         test_reward_advice_artifact
-          test_keeper_cascade_profile
           test_cascade_capability_profile
           test_cascade_secondary_expand
-          test_cascade_validator_capability_lint
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing
           test_keeper_hooks_oas_telemetry
@@ -1160,8 +1156,6 @@
 (include stanzas/test_cascade_attempt_fsm_response_pins.inc)
 (include stanzas/test_oas_worker_named_liveness_integration.inc)
 (include stanzas/test_cascade_capability_gate.inc)
-(include stanzas/test_cascade_catalog_runtime.inc)
-(include stanzas/test_cascade_config_validity.inc)
 (include stanzas/test_cascade_fsm.inc)
 (include stanzas/test_cascade_health_tracker.inc)
 (include stanzas/test_cascade_inventory.inc)

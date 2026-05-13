@@ -1,11 +1,12 @@
 (** Per-cascade inference parameters — thin delegation to MASC Cascade_config.
 
     Delegates to MASC [Cascade_config.resolve_inference_params].
-    JSON caching and field extraction are handled by the local cascade module.
+    TOML rendering, caching, and field extraction are handled by the local
+    cascade module.
 
     Resolution order:
-    1. cascade.json "{name}_temperature" / "{name}_max_tokens"
-    2. cascade.json "default_temperature" / "default_max_tokens"
+    1. cascade.toml "{name}_temperature" / "{name}_max_tokens"
+    2. cascade.toml "default_temperature" / "default_max_tokens"
     3. Caller-provided fallback
 
     @since v2.128.0

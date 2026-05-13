@@ -23,7 +23,7 @@ let bucket_lookup_ref : Keeper_admission_router.bucket_lookup Atomic.t =
    between states — never across the file I/O step.
 
      Idle      : nothing tried yet.  Eligible to take ownership.
-     In_progress : one fiber is reading cascade.json right now.  Other
+     In_progress : one fiber is reading cascade.toml right now.  Other
                    fibers see this and skip without blocking.
      Done      : registry installed (or load failed and we logged).
                  Subsequent calls are no-ops. *)
@@ -43,7 +43,7 @@ let default_bucket_capacity = 10
 let default_bucket_refill_rate = 1.0
 let now () = Unix.gettimeofday ()
 
-(* Attempt to read per-provider rate config from cascade.json.
+(* Attempt to read per-provider rate config from the in-memory cascade view.
    Returns (capacity, refill_rate) or None if not found. *)
 let read_provider_rate_config ~provider json =
   let open Yojson.Safe.Util in
@@ -73,8 +73,8 @@ let read_provider_rate_config ~provider json =
 ;;
 
 (* Build a lazy bucket lookup that reads per-provider rates from
-   cascade.json when available. *)
-let make_lazy_bucket_lookup ~cascade_json_opt () =
+   the rendered cascade source when available. *)
+let make_lazy_bucket_lookup ~cascade_view_opt () =
   let table : (string, Keeper_provider_token_bucket.t) Hashtbl.t = Hashtbl.create 16 in
   let table_mutex = Stdlib.Mutex.create () in
   fun provider ->
@@ -83,7 +83,7 @@ let make_lazy_bucket_lookup ~cascade_json_opt () =
       | Some b -> Some b
       | None ->
         let capacity, refill_rate =
-          match cascade_json_opt with
+          match cascade_view_opt with
           | Some json ->
             (match read_provider_rate_config ~provider json with
              | Some (c, r) -> c, r
@@ -139,13 +139,8 @@ let init_once_from_base_path ~base_path =
        and may block on disk — holding [init_mutex] across that risks
        domain-wide stalls of any other fiber that hits this code.
 
-       Iter 17 cleanup of iter-1 deferred housekeeping: the previous
-       code constructed [<base_path>/.masc/config/cascade.json] and
-       named the variable [cascade_json_path].  The loader still
-       worked (the materializer redirects [.json] to the sibling
-       [.toml]) but the name + literal lied about the post-RFC-0058
-       §9.3 reality — no on-disk JSON is read.  Resolved via the
-       [Config_dir_resolver.cascade_toml_filename] SSOT. *)
+       The retired JSON compatibility path is gone; callers now pass the
+       TOML source path directly. *)
     let cascade_source_path =
       Filename.concat
         (Filename.concat base_path ".masc/config")
@@ -173,7 +168,7 @@ let init_once_from_base_path ~base_path =
            matters: a parallel fiber reading [policy_lookup] should
            never observe Done with the default [no_policy]. *)
       set_policy_lookup (fun id -> Keeper_admission_registry.lookup registry id);
-      set_bucket_lookup (make_lazy_bucket_lookup ~cascade_json_opt:(Some json) ());
+      set_bucket_lookup (make_lazy_bucket_lookup ~cascade_view_opt:(Some json) ());
       mark_init_done ();
       Log.Keeper.info
         "RFC-0026 PR-E-1.6: admission runtime initialised (policies=%d, errors=%d, \

@@ -36,10 +36,9 @@ type route_spec = {
    the runtime cascade chain handles try/fail/next-cascade.  If the
    catalog is empty at runtime,
    [Cascade_catalog_runtime.validate_path_result] already rejects keeper
-   boot.  [fallback_from_entries]/[fallback_name_for_catalog] return the
-   first alias from [spec_for_use] as a soft fallback, so test
-   executables that link these modules transitively do not crash at
-   module-init time. *)
+   boot.  [fallback_name_for_catalog] returns the first alias from
+   [spec_for_use] as a soft fallback, so test executables that link
+   these modules transitively do not crash at module-init time. *)
 
 let route use key aliases = { use; key; aliases }
 
@@ -130,17 +129,11 @@ let logical_use_of_string_opt raw =
              then Some spec.use
              else None)
 
-(* RFC-0058 v2 supports two route encodings in the materialized JSON:
-   - legacy:    {"routes": {"X": "tier_or_group"}}            (string value)
-   - declarative: {"routes": {"X": {"target": "tier-..."}}}   (object value)
-   The Phase 4 materializer (lib/cascade/cascade_toml_materializer.ml)
-   passes sub-tables through verbatim, so this consumer must extract
-   the [target] field instead of filtering non-string values to None —
-   otherwise every declarative route silently disappears from the
-   runtime view (Cascade_routes.configured_route_targets returns []).
-   See PR #14550 review thread #DUH/#DUN for the regression report. *)
+(* RFC-0058 v2 route encoding in the materialized JSON:
+   {"routes": {"X": {"target": "tier-..."}}}.
+   The TOML materializer passes [routes.X] sub-tables through verbatim,
+   so this consumer extracts the [target] field. *)
 let target_of_route_value : Yojson.Safe.t -> string option = function
-  | `String raw -> Some (String.trim raw)
   | `Assoc obj ->
       (match List.assoc_opt "target" obj with
        | Some (`String raw) -> Some (String.trim raw)
@@ -167,11 +160,9 @@ let route_bindings_from_json = function
                        ~reason:"empty_key_or_target";
                      None
                  | None ->
-                     (* Iter 33: value matches neither legacy-string
-                        nor declarative-table encoding, or the
-                        [Assoc] has no [target] subfield.  Most
-                        common cause: operator typoed the [target]
-                        key. *)
+                     (* Iter 33: value is not a declarative route
+                        object with a [target] subfield. Most common
+                        cause: operator typoed the [target] key. *)
                      Cascade_metrics.on_route_binding_dropped
                        ~reason:"invalid_value";
                      None)
@@ -205,19 +196,6 @@ let configured_unknown_route_keys ?config_path () =
   configured_route_keys ?config_path ()
   |> List.filter (fun key -> not (List.mem key known_route_keys))
 
-let catalog_entries ?config_path () =
-  let path_opt =
-    match config_path with
-    | Some path -> Some path
-    | None -> Config_dir_resolver.cascade_path_opt ()
-  in
-  match path_opt with
-  | None -> None
-  | Some path -> (
-      match Cascade_config_loader.load_catalog ~config_path:path with
-      | Ok entries -> Some entries
-      | Error _ -> None)
-
 let declarative_catalog_names_from_json = function
   | `Assoc fields ->
       let keys_with_prefix table prefix =
@@ -245,31 +223,12 @@ let declarative_catalog_names ?config_path () =
       | Error _ -> [])
 
 let live_catalog_names ?config_path () =
-  match declarative_catalog_names ?config_path () with
-  | _ :: _ as names -> names
-  | [] ->
-      (match catalog_entries ?config_path () with
-       | Some entries ->
-           List.map
-             (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
-             entries
-       | None -> [])
-
-let first_catalog_name entries =
-  match entries with
-  | (entry : Cascade_config_loader.catalog_entry) :: _ -> Some entry.name
-  | [] -> None
+  declarative_catalog_names ?config_path ()
 
 let first_alias_or_key (spec : route_spec) =
   match spec.aliases with
   | first :: _ -> first
   | [] -> spec.key
-
-let fallback_from_entries use entries =
-  let spec = spec_for_use use in
-  match first_catalog_name entries with
-  | Some name -> name
-  | None -> first_alias_or_key spec
 
 let fallback_name_for_catalog use ~catalog =
   let spec = spec_for_use use in
@@ -298,7 +257,7 @@ let warn_unvalidated_route_target_once ~route_key ~target ~fallback =
     Hashtbl.add logged_unvalidated_route_targets key ();
     Log.Misc.warn
       "[CascadeRoutes] routes.%s targets %s but no live catalog profiles \
-       were validated; preserving configured target (legacy fallback would be %s)"
+       were validated; preserving configured target (fallback would be %s)"
       route_key target fallback
   end
 

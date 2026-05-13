@@ -177,7 +177,7 @@ let test_compute_context_ratio_uses_resolved_cli_context_budget () =
             ("name", `String "ctx-ratio-demo");
             ("agent_name", `String "keeper-ctx-ratio-demo-agent");
             ("trace_id", `String "trace-ctx-ratio-demo");
-            ("cascade_name", `String "big_three");
+            ("cascade_name", `String "primary");
           ])
     with
     | Ok meta -> meta
@@ -445,7 +445,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ( "cascade",
               `Assoc
                 [
-                  ("name", `String "big_three");
+                  ("name", `String "primary");
                   ("selected_model", `String "kimi-for-coding");
                   ("outcome", `String "completed");
                 ] );
@@ -544,7 +544,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             ( "cascade",
               `Assoc
                 [
-                  ("name", `String "big_three");
+                  ("name", `String "primary");
                   ("selected_model", `String "kimi-for-coding");
                   ("outcome", `String "completed");
                 ] );

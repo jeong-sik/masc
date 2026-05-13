@@ -15,7 +15,7 @@ Production keeper crashed with an `Assert_failure` from
 
 ```
 [2026-05-08 20:58:22] [INFO] [Keeper] context overflow guard: 24 tools > max 15, truncating
-[2026-05-08 20:58:22] [ERROR] [Misc] oas_worker oas-big_three: execution exception:
+[2026-05-08 20:58:22] [ERROR] [Misc] oas_worker oas-primary: execution exception:
 File "lib/keeper/keeper_registry.ml", line 775, characters 7-13: Assertion failed
 Backtrace:
   Masc_mcp__Keeper_registry.validate_turn_phase_transition

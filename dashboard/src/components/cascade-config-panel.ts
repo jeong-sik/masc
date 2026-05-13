@@ -1,4 +1,4 @@
-// CascadeConfigPanel — renders cascade.json profiles + health tracker state
+// CascadeConfigPanel — renders cascade.toml profiles + health tracker state
 // side-by-side so operators can see *why* a given provider is picked first.
 //
 // Consumes:
@@ -214,11 +214,11 @@ function validationDescription(status: CascadeValidationStatus): string {
     case 'validated':
       return '현재 cascade catalog 이 정상 검증되었습니다.'
     case 'serving_valid_subset':
-      return '현재 cascade.json 일부 profile 이 검증에 실패해 invalid profile 은 제외하고 유효한 subset 만 계속 서빙 중입니다.'
+      return '현재 cascade.toml 일부 profile 이 검증에 실패해 invalid profile 은 제외하고 유효한 subset 만 계속 서빙 중입니다.'
     case 'serving_last_known_good':
-      return '새 cascade.json 업데이트가 검증에 실패해 마지막 검증 성공 snapshot 을 계속 서빙 중입니다.'
+      return '새 cascade.toml 업데이트가 검증에 실패해 마지막 검증 성공 snapshot 을 계속 서빙 중입니다.'
     case 'invalid':
-      return '현재 cascade.json 검증에 실패했습니다. 서버와 dashboard 는 degraded 로 계속 동작하지만 유효하지 않은 profile 은 라우팅에서 제외될 수 있습니다.'
+      return '현재 cascade.toml 검증에 실패했습니다. 서버와 dashboard 는 degraded 로 계속 동작하지만 유효하지 않은 profile 은 라우팅에서 제외될 수 있습니다.'
   }
 }
 
@@ -734,7 +734,7 @@ function HealthTable({
               const status: CascadeProviderStatus | undefined = p.status
               // `declared = false` on a tracker-only row signals config
               // drift (provider was tracked but is no longer referenced
-              // by cascade.json). Surface it next to the provider key so
+              // by cascade.toml). Surface it next to the provider key so
               // operators can prune it. `undefined` means the server is
               // too old to carry the field — don't decorate in that case.
               const orphaned = p.declared === false
@@ -744,7 +744,7 @@ function HealthTable({
                 <td class="py-1">
                   <code class="text-[var(--color-fg-primary)]">${p.provider_key}</code>
                   ${orphaned
-                    ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Provider 가 추적되었지만 cascade.json 에 더 이상 선언되어 있지 않음">orphan</span>`
+                    ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Provider 가 추적되었지만 cascade.toml 에 더 이상 선언되어 있지 않음">orphan</span>`
                     : null}
                 </td>
                 <td class="py-1">

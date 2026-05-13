@@ -289,15 +289,15 @@ let test_provider_error_counts_group_and_filter () =
   setup ();
   let rate_limit = P.RateLimit { retry_after = Some 2.0; provider = "anthropic" } in
   let capacity = P.CapacityExhausted { scope = `Model; affected = [ "ollama" ] } in
-  DOB.record_provider_error ~cascade_name:"big_three" ~provider_id:"anthropic" rate_limit;
-  DOB.record_provider_error ~cascade_name:"big_three" ~provider_id:"anthropic" rate_limit;
-  DOB.record_provider_error ~cascade_name:"big_three" ~provider_id:"ollama" capacity;
+  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"anthropic" rate_limit;
+  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"anthropic" rate_limit;
+  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" capacity;
   let all = DOB.provider_error_counts () in
   Alcotest.(check int) "two groups" 2 (List.length all);
   let anthropic =
     provider_error_count
       ~provider:"anthropic"
-      ~cascade:"big_three"
+      ~cascade:"primary"
       ~kind:"rate_limit"
       ~capacity_scope:"none"
       all
@@ -306,7 +306,7 @@ let test_provider_error_counts_group_and_filter () =
   let ollama =
     provider_error_count
       ~provider:"ollama"
-      ~cascade:"big_three"
+      ~cascade:"primary"
       ~kind:"capacity_exhausted"
       ~capacity_scope:"model"
       all
@@ -317,7 +317,7 @@ let test_provider_error_counts_group_and_filter () =
   let filtered_anthropic =
     provider_error_count
       ~provider:"anthropic"
-      ~cascade:"big_three"
+      ~cascade:"primary"
       ~kind:"rate_limit"
       ~capacity_scope:"none"
       filtered
@@ -328,7 +328,7 @@ let test_provider_error_counts_group_and_filter () =
 let test_summary_json_contains_provider_error_counts () =
   setup ();
   DOB.record_provider_error
-    ~cascade_name:"big_three"
+    ~cascade_name:"primary"
     ~provider_id:"anthropic"
     (P.AuthError { provider = "anthropic" });
   let json = DOB.summary_json ~provider:"anthropic" ~limit:10 () in
@@ -345,7 +345,7 @@ let test_summary_json_contains_provider_error_counts () =
       (count |> Json.member "provider_id" |> Json.to_string);
     Alcotest.(check string)
       "cascade"
-      "big_three"
+      "primary"
       (count |> Json.member "cascade_name" |> Json.to_string);
     Alcotest.(check string)
       "kind"
@@ -377,11 +377,11 @@ let test_clear_provider () =
 let test_clear_provider_error_counts () =
   setup ();
   DOB.record_provider_error
-    ~cascade_name:"big_three"
+    ~cascade_name:"primary"
     ~provider_id:"anthropic"
     (P.RateLimit { retry_after = None; provider = "anthropic" });
   DOB.record_provider_error
-    ~cascade_name:"big_three"
+    ~cascade_name:"primary"
     ~provider_id:"ollama"
     (P.ServerError { code = 503; transient = true });
   DOB.clear ~provider:"anthropic" ();

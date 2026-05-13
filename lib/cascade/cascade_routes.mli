@@ -1,7 +1,7 @@
 (** Config-driven mapping from logical cascade usages to live profile names.
 
     Code should name the usage it needs (for example [Governance_judge]) and
-    let [cascade.toml]/[cascade.json] decide which concrete profile handles it.
+    let [cascade.toml] decide which concrete profile handles it.
     This keeps profiles as configuration data instead of scattering profile
     literals through runtime call sites. *)
 
@@ -43,11 +43,9 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
     boundary that prevents this state from being reached at runtime. *)
 
 val route_bindings_from_json : Yojson.Safe.t -> (string * string) list
-(** Decode the [routes] object of a materialized cascade JSON into a
-    [(key, target)] association list. Accepts both the legacy
-    encoding [routes.X = "Y"] and the RFC-0058 sub-table encoding
-    [\[routes.X\] target = "Y"]. Exposed for regression testing of
-    the dual-form decoder. *)
+(** Decode the [routes] object of the in-memory cascade view into a
+    [(key, target)] association list. Only the RFC-0058 sub-table
+    encoding [\[routes.X\] target = "Y"] is accepted. *)
 
 val configured_route_targets : ?config_path:string -> unit -> string list
 (** Unique non-empty profile names referenced by [routes]. *)

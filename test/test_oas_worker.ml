@@ -1418,7 +1418,7 @@ let test_fallback_class_labels_resumable_cli_session () =
   let err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = internal_cascade_name "big_three"
+         { cascade_name = internal_cascade_name "primary"
          ; detail =
              "kimi_cli reported a resumable CLI session (exit 1). Resumable session \
               available via -r."
@@ -3279,7 +3279,7 @@ let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers ()
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
       ~require_tool_support:true
-      ~label:"big_three"
+      ~label:"primary"
       [ make_codex_cli_provider_cfg () ]
   in
   Alcotest.(check int)
@@ -3462,7 +3462,7 @@ let test_keeper_internal_tools_force_materialized_runtime_surface () =
       ~tools
       ~require_tool_choice_support:false
       ~require_tool_support
-      ~label:"big_three"
+      ~label:"primary"
       [ make_gemini_cli_provider_cfg ~model_id:"gemini-3-flash-preview" ()
       ; make_glm_provider_cfg ~model_id:"glm-5-turbo" ()
       ]

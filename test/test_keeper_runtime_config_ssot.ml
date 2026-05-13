@@ -74,7 +74,7 @@ let contains_substring haystack needle =
 
 let with_config_dir f =
   with_temp_dir "keeper-config-ssot" @@ fun config_dir ->
-  let cascade_path = Filename.concat config_dir "cascade.json" in
+  let cascade_path = Filename.concat config_dir "cascade.toml" in
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
@@ -86,9 +86,26 @@ let with_config_dir f =
     (fun () ->
       write_file
         cascade_path
-        {|{
-  "big_three_models": ["test-only:model"]
-}|};
+        {|[providers.custom]
+protocol = "openai-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.mock]
+api-name = "mock"
+max-context = 128000
+tools-support = true
+
+[custom.mock]
+
+[tier.keeper_unified]
+members = ["custom.mock"]
+
+[tier-group.keeper_unified]
+tiers = ["keeper_unified"]
+
+[routes.keeper_turn]
+target = "tier-group.keeper_unified"
+|};
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
       Cascade_catalog_runtime.install_snapshot_for_tests

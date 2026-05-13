@@ -17,7 +17,7 @@ The current `cascade.json` defines fallback chains that terminate in `local_reco
 
 | Line | Cascade | Fallback Target | `keeper_assignable` |
 |------|---------|-----------------|---------------------|
-| 30 | `big_three` | `local_recovery` | true |
+| 30 | `primary` | `local_recovery` | true |
 | 92 | `retired_tool_profile` | `local_recovery` | true |
 | 127 | `retired_fast_profile` | `retired_tool_profile` | true |
 
@@ -46,7 +46,7 @@ Ollama (all variants) returns `supports_runtime_mcp_tools = false` because it is
 ### 1.3 Operational Impact
 
 - **2026-05-04 incident** (`cascade.json:169` comment): `ollama_bench` escalation into the general keeper path hit the 600 s `MASC_KEEPER_TURN_TIMEOUT_SEC` ceiling. The fiber stayed in `with_timeout_exn` long enough that all 14 keepers entered the 60 s "peers holding slot" skip branch, producing **5,963 skip-turn events in 24 h** until manual restart.
-- **2026-05-09 prod log** (09:35:20--09:50:36): `big_three` weighted random selected `claude:claude-sonnet-4-6` (weight 3) and `gemini:gemini-2.5-flash` (weight 4). Both failed with external errors (429 admin-disabled, insufficient balance, quota exceeded). Fallback to `local_recovery` produced 100% `Runtime_mcp_caps_missing` rejections. No terminal successful dispatch occurred.
+- **2026-05-09 prod log** (09:35:20--09:50:36): `primary` weighted random selected `claude:claude-sonnet-4-6` (weight 3) and `gemini:gemini-2.5-flash` (weight 4). Both failed with external errors (429 admin-disabled, insufficient balance, quota exceeded). Fallback to `local_recovery` produced 100% `Runtime_mcp_caps_missing` rejections. No terminal successful dispatch occurred.
 
 The cascade system has no terminal fallback that satisfies the capability requirements of the original request.
 
@@ -74,7 +74,7 @@ This RFC explicitly refuses the following four workaround patterns per `~/me/ins
 
 1. **Telemetry-as-fix**: Adding a Prometheus counter for `local_recovery` rejection rate makes the failure visible but does not fix the dead-end.
 2. **String/substring classifier**: Adding a `starts_with ~prefix:"ollama:"` guard in the fallback router is a string classifier where a typed capability check belongs.
-3. **N-of-M patch**: Fixing `big_three` fallback only, leaving `retired_tool_profile` and `retired_fast_profile` unchanged, is an N-of-M patch.
+3. **N-of-M patch**: Fixing `primary` fallback only, leaving `retired_tool_profile` and `retired_fast_profile` unchanged, is an N-of-M patch.
 4. **Cap/cooldown/dedup/repair**: Raising the `ollama_bench` timeout or adding a cooldown between fallback attempts suppresses the symptom without resolving the structural issue.
 
 ---
@@ -179,7 +179,7 @@ At config load time (`cascade_catalog_runtime.ml` or equivalent):
 ### 5.1 Target Topology
 
 ```
-big_three ──► retired_tool_profile ──► retired_fast_profile ──► retired_cloud_profile
+primary ──► retired_tool_profile ──► retired_fast_profile ──► retired_cloud_profile
                                                     │
                                                     ▼
                                                 (terminal: no fallback)
@@ -210,7 +210,7 @@ Where `retired_cloud_profile` is a new assignable cascade containing only cloud 
 
 | Cascade | Current Fallback | New Fallback | Rationale |
 |---------|-----------------|--------------|-----------|
-| `big_three` | `local_recovery` | `retired_tool_profile` | Preserve cloud-capable path |
+| `primary` | `local_recovery` | `retired_tool_profile` | Preserve cloud-capable path |
 | `retired_tool_profile` | `local_recovery` | `retired_fast_profile` | Continue down the capability-preserving chain |
 | `retired_fast_profile` | `retired_tool_profile` | `retired_cloud_profile` | Break the cycle; point to terminal cloud-only cascade |
 | `local_recovery` | N/A | N/A (Sink) | Remove from assignable set; only explicit non-tool dispatch may use it |
@@ -243,7 +243,7 @@ Apply the TLA+ Bug Model pattern from `software-development.md`:
 
 ### 6.3 Integration Tests
 
-1. **Config load rejection**: Provide a config where `big_three.fallback = "local_recovery"`. Assert load fails with `Cascade_config_invalid`.
+1. **Config load rejection**: Provide a config where `primary.fallback = "local_recovery"`. Assert load fails with `Cascade_config_invalid`.
 2. **Happy path dispatch**: Mock all cloud providers as available. Assert a runtime-MCP request succeeds without touching `local_recovery`.
 3. **All-cloud-down path**: Mock all cloud providers as returning 429. Assert the request reaches `retired_cloud_profile`, exhausts its models, and returns an explicit `No_available_provider` error (not a silent skip).
 
@@ -259,7 +259,7 @@ Apply the TLA+ Bug Model pattern from `software-development.md`:
 
 1. **RFC-0041 mesh**: RFC-0041 introduced hierarchical cascade config + TOML groups. How does the GADT validation interact with group-level overrides? Does a group override that changes `fallback` re-trigger monotonicity checking?
 2. **Terminal fallback necessity**: Is `retired_cloud_profile` (a terminal assignable cascade) actually required, or should `retired_fast_profile` itself become terminal? The trade-off is between "one more retry layer" and "simpler topology".
-3. **Layer B interaction**: `worker_oas.ml` has a known thinking + tool_choice mutex on Sonnet 4.6/Opus 4.6/4.7. If `big_three` currently routes to these models and the mutex causes a request-level failure, the fallback chain is exercised more frequently. Should Layer B be fixed before or concurrently with this RFC?
+3. **Layer B interaction**: `worker_oas.ml` has a known thinking + tool_choice mutex on Sonnet 4.6/Opus 4.6/4.7. If `primary` currently routes to these models and the mutex causes a request-level failure, the fallback chain is exercised more frequently. Should Layer B be fixed before or concurrently with this RFC?
 
 ---
 

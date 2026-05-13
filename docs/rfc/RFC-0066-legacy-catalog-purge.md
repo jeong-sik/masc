@@ -19,8 +19,8 @@ The mismatch causes a known production divergence:
 
 | Layer | Production result | Test result (per-profile fixture) |
 |---|---|---|
-| `Cascade_catalog_runtime` (declarative path) | `"big_three"` (live snapshot) | `"big_three"` (legacy reader sees flat key) |
-| `Keeper_config.default_cascade_name` (legacy path, init-time cached) | `"default"` (catalog empty at init) | `"big_three"` |
+| `Cascade_catalog_runtime` (declarative path) | `"primary"` (live snapshot) | `"primary"` (legacy reader sees flat key) |
+| `Keeper_config.default_cascade_name` (legacy path, init-time cached) | `"default"` (catalog empty at init) | `"primary"` |
 
 18 production call sites of `Keeper_config.default_cascade_name` therefore reference a stale fallback that has no corresponding entry in the live catalog: `Keeper_turn_cascade_budget` comparisons never match, `Keeper_turn_up_create/update` defaults to an invalid cascade name, `Dashboard_cascade` advertises a non-existent profile in `config_path` defaults, and so on. Six Pattern C test failures in PR #14620 are the visible symptom; #14624 documents the layered cause.
 
@@ -116,7 +116,7 @@ Two strategies:
    ```
    Plus the matching `[providers.<provider>]` + `[<provider>.<model>]` binding blocks.
 
-2. **`flat_json_to_toml` helper retrofit** (`test_cascade_catalog_runtime.ml`): widen the inline JSON→TOML transformer to emit the declarative shape instead of per-profile blocks. The fixture call sites stay unchanged; the helper now produces declarative TOML.
+2. **Obsolete fixture removal**: delete the flat JSON-shaped `test_cascade_catalog_runtime` suite instead of preserving its transformer. Declarative parser/validator/hotpath suites own the TOML-only contract.
 
 Strategy (2) is cheap for the 23-fixture catalog_runtime suite. Strategy (1) is required for the per-fixture-tailored tests where fixture content is itself the subject of assertion.
 
@@ -131,7 +131,7 @@ Replace the 3 sites in `lib/keeper/keeper_cascade_profile.ml` (`catalog_entries`
 Acceptance:
 - All existing tests pass (Pattern A fixtures still emit flat JSON which the materializer keeps emitting — Phase 1 doesn't touch the materializer arm).
 - `Cascade_catalog_runtime.resolve_declared_name ~raw_name:""` returns the same name as `Keeper_config.default_cascade_name ()` in test fixtures that install a catalog.
-- Production behavior of `keeper_turn_cascade_budget`/`keeper_turn_up_create`/etc. now references the *live* default cascade name (`"big_three"` per current config), not the init-cached `"default"`.
+- Production behavior of `keeper_turn_cascade_budget`/`keeper_turn_up_create`/etc. now references the *live* default cascade name (`"primary"` per current config), not the init-cached `"default"`.
 
 ### Phase 2 — Remaining lib callers migration (Task #30)
 

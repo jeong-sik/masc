@@ -52,7 +52,7 @@ OAS  ──does not know──→ MASC
 ## Config Ownership
 
 - `config/cascade.toml`은 **MASC runtime contract**다. On-disk
-  `cascade.json`은 legacy compatibility/fallback input일 뿐이며 새 authoring SSOT가 아니다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
+  `cascade.json`은 retired compatibility input이며 더 이상 생성/소비하지 않는다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
 - cascade schema, parsing, label semantics, selection policy의 owner는 MASC다.
 - MASC는 repo-level default와 keeper별 `cascade_name` override를 해석해 concrete provider/model 후보를 고른다.
 - OAS는 MASC가 선택한 concrete provider/model config를 실행하는 단일-provider runtime으로 남는다.
@@ -153,7 +153,7 @@ Use this checklist when reviewing boundary-touching PRs:
 3. **문서 truth가 코드 truth와 일치하는가?**
    - 특히 cascade labels, runtime-health semantics, boundary-audit snapshot은 구현과 SSOT 문서가 함께 갱신되어야 한다.
 4. **Checked-in cascade labels are explicit enough for stable review**
-   - repository-default `config/cascade.json` entries should pin explicit `provider:model_id` labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
+   - repository-default `config/cascade.toml` entries should pin explicit provider/model labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
 
 ## Boundary Rules for Future Work
 

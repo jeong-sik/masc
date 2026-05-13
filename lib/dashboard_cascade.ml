@@ -53,6 +53,31 @@ let invalid_profile_to_json ((name, errors) : string * string list) =
   `Assoc [ "name", `String name; "errors", string_list_to_json errors ]
 ;;
 
+let public_cascade_profile_name name =
+  let tier_group_prefix = "tier-group." in
+  let tier_prefix = "tier." in
+  if String.starts_with ~prefix:tier_group_prefix name then
+    String.sub name (String.length tier_group_prefix)
+      (String.length name - String.length tier_group_prefix)
+  else if String.starts_with ~prefix:tier_prefix name then
+    String.sub name (String.length tier_prefix)
+      (String.length name - String.length tier_prefix)
+  else
+    name
+;;
+
+let public_invalid_profiles profiles =
+  profiles
+  |> List.map (fun (name, errors) -> (public_cascade_profile_name name, errors))
+  |> List.fold_left
+       (fun acc (name, errors) ->
+          let prior = Option.value (List.assoc_opt name acc) ~default:[] in
+          (name, prior @ errors) :: List.remove_assoc name acc)
+       []
+  |> List.map (fun (name, errors) -> (name, List.sort_uniq String.compare errors))
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+;;
+
 let json_assoc_member key = function
   | `Assoc fields -> Option.value (List.assoc_opt key fields) ~default:`Null
   | _ -> `Null
@@ -78,6 +103,7 @@ let invalid_profiles_of_rejection_json rejection_json =
            Some (name, json_string_list (json_assoc_member "errors" profile_json))
          | _ -> None)
       profiles
+    |> public_invalid_profiles
   | _ -> []
 ;;
 
@@ -102,8 +128,8 @@ let source_json_fields (source : Cascade_toml_materializer.source_info) =
 
     When the validated runtime snapshot is unavailable (for example
     before first successful validation), fall back to the active
-    [cascade.json] catalog so the dashboard still renders a best-effort
-    raw projection instead of failing hard. *)
+    [cascade.toml] projection so the dashboard still renders a best-effort
+    raw view instead of failing hard. *)
 let live_profiles ?config_path () = Keeper_cascade_profile.catalog_names ?config_path ()
 
 let keeper_assignable_name_set ?config_path () =
@@ -185,7 +211,9 @@ let invalid_name_set = function
 
 let invalid_profiles_of_config_path = function
   | None -> []
-  | Some path -> Cascade_catalog_validator.error_messages_by_profile ~config_path:path
+  | Some path ->
+    Cascade_catalog_validator.error_messages_by_profile ~config_path:path
+    |> public_invalid_profiles
 ;;
 
 let validation_summary_json ?config_path () =
@@ -408,7 +436,7 @@ let save_raw_config_json raw_json =
     - [cooldown]: tracker opened a cooldown window.
     - [active]: events arrived in the current window and the tracker is
       not cooled down.
-    - [configured]: declared in [cascade.json] but has not produced
+    - [configured]: declared in [cascade.toml] but has not produced
       tracker events in the current window (either untouched since
       startup, or expired from the window). The UI uses this to tell
       "declared-but-never-called" apart from the normal healthy case.
@@ -452,7 +480,7 @@ let zero_provider_info (key : string) : Health.provider_info =
 (** [provider_entry_to_json ~declared info] serialises a provider_info
     together with two derived fields:
 
-    - [declared : bool]  — [true] iff any [cascade.json] profile lists a
+    - [declared : bool]  — [true] iff any [cascade.toml] profile lists a
       model whose scheme prefix matches [info.provider_key].  Lets the
       UI distinguish "still referenced in config" from "left over in the
       tracker after a config change".
@@ -699,7 +727,7 @@ let recommendations_json () : Yojson.Safe.t =
     [:] in [s], or [s] itself if no colon is present.  The scheme
     corresponds to the provider_key produced by
     [Keeper_hooks_oas.provider_of_model] for prefixed specs; bare model
-    ids (rare in cascade.json) fall through unchanged and merge with
+    ids fall through unchanged and merge with
     whatever heuristic keeper_hooks_oas assigned them at runtime.  *)
 let provider_scheme_of_model_string (s : string) : string =
   match String.index_opt s ':' with
@@ -714,31 +742,26 @@ let provider_scheme_of_model_string (s : string) : string =
     is already surfaced by [config_json]; we do not want the health
     endpoint to disappear just because the catalog loader fails.
 
-    Path-explicit reads (legacy contract preserved): callers that pass
-    an explicit [config_path] must see schemes from THAT path.
-    Snapshot-based reads cross-talk with fixture tests (snapshot's
-    source_path is unrelated to caller's path).  An earlier
-    snapshot-first variant was reverted because it broke the
-    [?config_path:None -> []] contract relied on by
-    [test_declared_provider_schemes_handles_missing_path]. *)
+    Path-explicit reads validate that exact TOML path so fixture tests do
+    not cross-talk through the process-global active snapshot. *)
 let declared_provider_schemes_set ?(config_path : string option) () : StringSet.t =
   match config_path with
   | None -> StringSet.empty
   | Some path ->
-    (match Cascade_config_loader.load_catalog ~config_path:path with
+    (match Cascade_catalog_runtime.validate_path ~config_path:path () with
      | Error _ -> StringSet.empty
-     | Ok entries ->
+     | Ok snapshot ->
        List.fold_left
-         (fun acc (entry : Cascade_config_loader.catalog_entry) ->
-            let models =
-              Cascade_config_loader.load_profile ~config_path:path ~name:entry.name
-            in
+         (fun acc (profile : Cascade_catalog_runtime.profile_build) ->
             List.fold_left
-              (fun acc m -> StringSet.add (provider_scheme_of_model_string m) acc)
+              (fun acc (candidate : Cascade_catalog_runtime.candidate_runtime) ->
+                 StringSet.add
+                   (provider_scheme_of_model_string candidate.model_string)
+                   acc)
               acc
-              models)
+              profile.candidates)
          StringSet.empty
-         entries)
+         snapshot.profiles)
 ;;
 
 (** Public list version of {!declared_provider_schemes_set}.  Sorted and

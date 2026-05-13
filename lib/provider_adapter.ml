@@ -1408,9 +1408,9 @@ let preferred_execution_model_labels () =
        | Ok label -> Some label
        | Error _ -> None)
       (* No hardcoded provider preference here.  Model order is determined
-       by MASC cascade.json via [Cascade_config], not by this adapter module. The auto_detect
-       list below only serves as a last-resort fallback when cascade.json
-       is missing entirely. *)
+         by MASC cascade.toml via [Cascade_config], not by this adapter module.
+         The auto_detect list below only serves as a last-resort fallback when
+         no cascade source is available. *)
     ]
   in
   Json_util.dedupe_keep_order

@@ -151,47 +151,43 @@ let install_snapshot_for_tests ~source_path ~profile_names =
           rejected_update = None;
         })
 
+type declarative_catalog_info = {
+  declarative_snapshot : Cascade_declarative_hotpath.decl_snapshot option;
+  declarative_profile_names : string list;
+  declarative_errors : Cascade_declarative_adapter.adapter_error list;
+}
+
+let load_declarative_catalog_info ~config_path =
+  match Cascade_declarative_parser.parse_file config_path with
+  | Error _ -> None
+  | Ok cfg ->
+      let catalog = Cascade_declarative_adapter.adapt_config cfg in
+      let snapshot =
+        Cascade_declarative_hotpath.adapted_catalog_to_snapshot
+          ~source_path:config_path catalog
+      in
+      let profile_names =
+        catalog.profiles
+        |> List.map
+             (fun (profile : Cascade_declarative_adapter.adapted_profile) ->
+               profile.name)
+        |> List.sort_uniq String.compare
+      in
+      Some
+        {
+          declarative_snapshot = snapshot;
+          declarative_profile_names = profile_names;
+          declarative_errors = catalog.errors;
+        }
+
 (* RFC-0066 §3.1 Phase 1: profile name discovery flows through the
    declarative adapter ({!Cascade_declarative_hotpath.try_load_declarative})
-   reading [cascade.toml] as the sole SSOT (RFC-0058 §9.4).
-
-   Legacy JSON [<name>_models] scan retained as fallback while RFC-0066
-   Phase 4 migrates per-profile test fixtures off the legacy materializer
-   arm.  When the active source is 5-layer declarative, the JSON path
-   would render the same key set, so the fallback never wins on real
-   production configs — it only catches per-profile fixture TOML that
-   pre-dates the declarative schema. *)
-let discover_legacy_profile_names_from_json = function
-  | `Assoc fields ->
-      fields
-      |> List.filter_map (fun (key, value) ->
-             match value with
-             | `List _ when String.ends_with ~suffix:"_models" key ->
-                 let suffix_len = String.length "_models" in
-                 let profile =
-                   String.sub key 0 (String.length key - suffix_len)
-                 in
-                 if
-                   Cascade_config_loader.is_deprecated_logical_profile_name
-                     profile
-                 then begin
-                   (* Iter 31: legacy profile name filtered out.  Tick
-                      a counter so RFC-0066 Phase 4 migration progress
-                      is observable per name. *)
-                   Cascade_metrics.on_deprecated_profile_name_filter
-                     ~name:profile;
-                   None
-                 end
-                 else Some profile
-             | _ -> None)
-      |> List.sort_uniq String.compare
-  | _ -> []
-
+   reading [cascade.toml] as the sole SSOT (RFC-0058 §9.4). *)
 let discover_profile_names ~config_path ~json : string list =
-  match Cascade_declarative_hotpath.try_load_declarative config_path with
-  | Some (Ok snap) ->
+  match load_declarative_catalog_info ~config_path with
+  | Some { declarative_profile_names = names; declarative_errors = []; _ } ->
       Cascade_metrics.on_profile_discovery ~path:"declarative";
-      Cascade_declarative_hotpath.decl_snapshot_profile_names snap
+      names
       |> List.filter (fun profile ->
              if
                Cascade_config_loader.is_deprecated_logical_profile_name
@@ -203,10 +199,11 @@ let discover_profile_names ~config_path ~json : string list =
              end
              else true)
       |> List.sort_uniq String.compare
-  | Some (Error errs) ->
+  | Some { declarative_profile_names = names; declarative_errors = errs; _ } ->
       (* Declarative parser ran but produced adapter errors.  Do not fall
          through to the retired flat TOML reader: cascade.toml is now
-         declarative-only, so adapter errors are the real fault. *)
+         declarative-only, so adapter errors are surfaced while the valid
+         subset remains available for partial validation. *)
       Cascade_metrics.on_declarative_parse_error ();
       List.iter
         (fun err ->
@@ -215,7 +212,7 @@ let discover_profile_names ~config_path ~json : string list =
             (Cascade_declarative_adapter.show_adapter_error err))
         errs;
       Cascade_metrics.on_profile_discovery ~path:"declarative_error";
-      []
+      names
   | None ->
       ignore json;
       Cascade_metrics.on_profile_discovery ~path:"declarative_missing";
@@ -630,110 +627,29 @@ let validate_profile_static
     ~required_capability_profile
     name
     : (profile_build, profile_rejection) result =
-  let weighted_entries =
-    Cascade_config_loader.load_profile_weighted ~config_path ~name
-  in
-  if weighted_entries = [] then
-    match declarative_snapshot with
-    | Some (snapshot : Cascade_declarative_hotpath.decl_snapshot) ->
-      (match
-         List.find_opt
-           (fun (profile : Cascade_declarative_hotpath.profile) ->
-              String.equal profile.name name)
-           snapshot.profiles
-       with
-       | Some profile ->
-         Ok (profile_build_of_declarative_profile ~required_capability_profile profile)
-       | None ->
-         Error
-           { name
-           ; errors = [ "profile has no non-empty configured candidates" ]
-           ; probes = []
-           })
-    | None ->
-      Error
-        { name
-        ; errors = [ "profile has no non-empty configured candidates" ]
-        ; probes = []
-        }
-  else
-    let inference_params =
-      Cascade_config_loader.resolve_inference_params ~config_path ~name
-    in
-    let api_key_env_overrides =
-      Cascade_config_loader.resolve_api_key_env ~config_path ~name
-    in
-    match validate_strategy ~config_path ~name with
-    | Error errors -> Error { name; errors; probes = [] }
-    | Ok (strategy, ollama_max_concurrent, cli_max_concurrent) ->
-        let expanded_entries =
-          expand_weighted_entries ~cascade:name weighted_entries
-        in
-        let candidates, candidate_errors =
-          List.fold_left
-            (fun (ok_acc, err_acc) (entry : Cascade_config_loader.weighted_entry) ->
-              match
-                Cascade_config.parse_weighted_entry_diag
-                  ~api_key_env_overrides
-                  ?keep_alive:inference_params.keep_alive
-                  ?num_ctx:inference_params.num_ctx
-                  entry
-              with
-              | Ok provider_cfg ->
-                  ({ model_string = entry.model; provider_cfg } :: ok_acc, err_acc)
-              | Error
-                  (Cascade_config.Drop_unregistered_scheme { model; scheme }) ->
-                  Cascade_metrics.on_profile_candidate_drop
-                    ~cascade:name ~reason:"unregistered_scheme";
-                  ( ok_acc,
-                    Printf.sprintf
-                      "candidate %S uses unregistered provider scheme %S"
-                      model scheme
-                    :: err_acc )
-              | Error
-                  (Cascade_config.Drop_unavailable_scheme { model; scheme }) ->
-                  Cascade_metrics.on_profile_candidate_drop
-                    ~cascade:name ~reason:"unavailable_scheme";
-                  ( ok_acc,
-                    Printf.sprintf
-                      "candidate %S uses unavailable provider scheme %S \
-                       (missing credential or disabled runtime lane)"
-                      model scheme
-                    :: err_acc )
-              | Error (Cascade_config.Drop_invalid_syntax model) ->
-                  Cascade_metrics.on_profile_candidate_drop
-                    ~cascade:name ~reason:"invalid_syntax";
-                  ( ok_acc,
-                    Printf.sprintf
-                      "candidate %S has invalid provider:model syntax"
-                      model
-                    :: err_acc ))
-            ([], [])
-            expanded_entries
-        in
-        let candidates = List.rev candidates in
-        let candidate_errors = List.rev candidate_errors in
-        if candidate_errors <> [] then
-          Error
-            {
-              name;
-              errors = candidate_errors;
-              probes = [];
-            }
-        else
-          Ok
-            {
-              name;
-              weighted_entries;
-              inference_params;
-              api_key_env_overrides;
-              strategy;
-              ollama_max_concurrent;
-              cli_max_concurrent;
-              candidates;
-              probes = profile_probes candidates;
-              required_capability_profile;
-            }
+  let (_ : string) = config_path in
+  match declarative_snapshot with
+  | Some (snapshot : Cascade_declarative_hotpath.decl_snapshot) ->
+    (match
+       List.find_opt
+         (fun (profile : Cascade_declarative_hotpath.profile) ->
+            String.equal profile.name name)
+         snapshot.profiles
+     with
+     | Some profile ->
+       Ok (profile_build_of_declarative_profile ~required_capability_profile profile)
+     | None ->
+       Error
+         { name
+         ; errors = [ "profile has no non-empty configured candidates" ]
+         ; probes = []
+         })
+  | None ->
+    Error
+      { name
+      ; errors = [ "profile has no non-empty configured candidates" ]
+      ; probes = []
+      }
 
 let profile_build_of_declarative
     (profile : Cascade_declarative_hotpath.profile)
@@ -759,13 +675,9 @@ let profile_build_of_declarative
 
 let runtime_required_profiles ~config_path =
   let keepers_from_catalog =
-    match Cascade_config_loader.load_catalog ~config_path with
-    | Ok entries ->
-        List.filter_map
-          (fun (entry : Cascade_config_loader.catalog_entry) ->
-            if entry.keeper_assignable then Some entry.name else None)
-          entries
-    | Error _ -> []
+    match load_declarative_catalog_info ~config_path with
+    | Some { declarative_profile_names; _ } -> declarative_profile_names
+    | None -> []
   in
   List.sort_uniq String.compare
     (keepers_from_catalog
@@ -806,13 +718,16 @@ let validate_path_result ?sw ?net ~config_path () =
                ]
              ~profiles:[])
     | Ok json ->
-        let declarative_result =
-          Cascade_declarative_hotpath.try_load_declarative config_path
-        in
+        let declarative_info = load_declarative_catalog_info ~config_path in
         let declarative_snapshot =
-          match declarative_result with
-          | Some (Ok snapshot) -> Some snapshot
-          | Some (Error _) | None -> None
+          match declarative_info with
+          | Some { declarative_snapshot = Some snapshot; _ } -> Some snapshot
+          | Some { declarative_snapshot = None; _ } | None -> None
+        in
+        let declarative_errors =
+          match declarative_info with
+          | Some { declarative_errors; _ } -> declarative_errors
+          | None -> []
         in
         let profiles = discover_profile_names ~config_path ~json in
         if profiles = [] then
@@ -871,32 +786,12 @@ let validate_path_result ?sw ?net ~config_path () =
                   required_default_profile;
               ]
           in
-        (* RFC-0066 Phase 3: hoist [load_catalog] out of the per-profile
-           validator so that [required_capability_profile] hints are
-           read once per [validate_path] regardless of how many profiles
-           are being validated. load_catalog has TOML materialization +
-           fallback-cycle metric/warn side-effects; reloading per
-           profile inflated startup work. *)
-        let required_capability_profile_lookup =
-          match Cascade_config_loader.load_catalog ~config_path with
-          | Ok entries ->
-              List.fold_left
-                (fun acc (entry : Cascade_config_loader.catalog_entry) ->
-                  (entry.name, entry.required_capability_profile) :: acc)
-                []
-                entries
-          | Error _ -> []
-        in
         let built_profiles, statically_rejected_profiles =
           List.fold_left
             (fun (ok_acc, err_acc) name ->
-              let required_capability_profile =
-                List.assoc_opt name required_capability_profile_lookup
-                |> Option.value ~default:None
-              in
               match
                 validate_profile_static ?declarative_snapshot ~config_path
-                  ~required_capability_profile name
+                  ~required_capability_profile:None name
               with
               | Ok profile -> (profile :: ok_acc, err_acc)
               | Error rejection -> (ok_acc, rejection :: err_acc))
@@ -945,8 +840,8 @@ let validate_path_result ?sw ?net ~config_path () =
 
              Each branch emits a Prometheus counter so operators can
              alert on drift / adapter faults without scraping logs. *)
-          (match declarative_result with
-           | Some (Ok decl_snap) ->
+          (match declarative_snapshot with
+           | Some decl_snap ->
              let json_names =
                List.map (fun (p : profile_build) -> p.name)
                  profile_snapshots
@@ -973,12 +868,22 @@ let validate_path_result ?sw ?net ~config_path () =
                Cascade_metrics.on_parallel_validation ~result:"ok";
                Log.Misc.info
                  "[CascadeDeclarative] parallel validation OK, %d profiles"
-                 (List.length decl_names))
-           | Some (Error errs) ->
+                 (List.length decl_names));
+             if declarative_errors <> [] then begin
+               Cascade_metrics.on_parallel_validation ~result:"adapter_error";
+               List.iter
+                 (fun e ->
+                   Log.Misc.warn "[CascadeDeclarative] adapter error: %s"
+                     (Cascade_declarative_adapter.show_adapter_error e))
+                 declarative_errors
+             end
+           | None when declarative_errors <> [] ->
              Cascade_metrics.on_parallel_validation ~result:"adapter_error";
-             List.iter (fun e ->
-               Log.Misc.warn "[CascadeDeclarative] adapter error: %s"
-                 (Cascade_declarative_adapter.show_adapter_error e)) errs
+             List.iter
+               (fun e ->
+                 Log.Misc.warn "[CascadeDeclarative] adapter error: %s"
+                   (Cascade_declarative_adapter.show_adapter_error e))
+               declarative_errors
            | None ->
              Cascade_metrics.on_parallel_validation ~result:"no_decl");
           if rejected_profiles = [] then

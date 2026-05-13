@@ -1,11 +1,9 @@
 (** Runtime-authoritative validated cascade catalog.
 
-    The runtime still executes from [cascade.json], but when a sibling
-    [cascade.toml] exists it becomes the authoring SSOT and [cascade.json] is
-    materialized from it on load. This module validates the active source
-    statically and keeps serving the last-known-good snapshot when a hot reload
-    is rejected. Provider liveness is advisory runtime state and does not
-    invalidate an otherwise-correct catalog.
+    The runtime executes from [cascade.toml]. This module validates the
+    active source statically and keeps serving the last-known-good snapshot
+    when a hot reload is rejected. Provider liveness is advisory runtime
+    state and does not invalidate an otherwise-correct catalog.
 
     @stability Internal *)
 
@@ -39,14 +37,10 @@ type profile_build = {
   candidates : candidate_runtime list;
   probes : candidate_probe list;
   required_capability_profile : string option;
-      (** RFC-0066 Phase 3 — profile-scoped capability lint hint, copied
-          from the legacy [catalog_entry] at validation time. The legacy
-          flat-JSON schema exposes this via the [<name>_required_capability_profile]
-          key; the RFC-0058 declarative namespaces ([providers], [models],
-          [tier], [tier-group] + provider binding tables) do not carry
-          this field, so callers see [None] under fully-declarative
-          configs. [Cascade_catalog_validator] consumes it via snapshot
-          read in Phase 4 instead of re-invoking [load_catalog]. *)
+      (** Profile-scoped capability lint hint. The RFC-0058 declarative
+          namespaces ([providers], [models], [tier], [tier-group] +
+          provider binding tables) do not carry this field yet, so callers
+          normally see [None] under fully-declarative configs. *)
 }
 
 type snapshot = {

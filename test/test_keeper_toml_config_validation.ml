@@ -214,7 +214,7 @@ let test_cascade_name_accepts_known () =
         fail (Printf.sprintf "%s: '%s' should be accepted but got: %s" label
                 cascade_name e)
   in
-  check_ok "big_three variant" "big_three";
+  check_ok "primary variant" "primary";
   check_ok "local_only phase-routing" "local_only";
   check_ok "local_recovery phase-routing" "local_recovery";
   check_ok "tool_use_strict reserved tool lane" "tool_use_strict"

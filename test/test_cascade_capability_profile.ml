@@ -101,7 +101,7 @@ let test_lite_accepts_runtime_mcp_without_http_headers () =
     (CP.provider_satisfies_profile "lite" all_off)
 
 (* Regression: the 2026-05-05 incident keepers used a cascade whose
-   fallback (big_three) included gemini_cli + codex_cli but their turn
+   fallback (primary) included gemini_cli + codex_cli but their turn
    required keeper-bound runtime MCP HTTP headers.  Profile [tool_strict]
    must reject every CLI runtime that strips per-request headers, and
    [lite] must accept them — that is the entire point of the split. *)
@@ -133,7 +133,7 @@ let test_system_cascade_name_predicate () =
   check bool "single underscore is not system" false
     (CP.is_system_cascade_name "_single");
   check bool "no prefix is not system" false
-    (CP.is_system_cascade_name "big_three");
+    (CP.is_system_cascade_name "primary");
   check bool "empty string is not system" false
     (CP.is_system_cascade_name "")
 

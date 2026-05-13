@@ -72,7 +72,7 @@ Each surface is independently shippable. Order matters — 2.3 depends on
 ```
 masc create persona \
   --name <string> \
-  --tier <big_three|retired_fast_profile|tier_small|...> \
+  --tier <primary|retired_fast_profile|tier_small|...> \
   --tools <preset|comma-list> \
   [--work-source <unclaimed_tasks|...>] \
   [--git-identity-mode <github_identity|keeper_alias>] \

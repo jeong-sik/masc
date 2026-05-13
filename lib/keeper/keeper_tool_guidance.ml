@@ -15,11 +15,10 @@
       - keeper.tool_unknown_guard.md
 
     The only runtime substitution is masc_web_fetch's default timeout: TOML
-    carries `{{web_fetch_timeout}}`, replaced at load time.
+    carries `{{web_fetch_timeout}}`, replaced when hints are first loaded.
 
-    Missing or malformed config raises [Failure] with the offending path so
-    deployment drift surfaces immediately instead of silently rendering blank
-    guidance to the model. *)
+    Missing or malformed external config logs a config-drift warning and falls
+    back to safe minimal guidance rather than crashing prompt rendering. *)
 
 type hint =
   { name : string
@@ -35,6 +34,14 @@ let substitute_web_fetch_timeout s =
   Str.global_replace web_fetch_timeout_re value s
 ;;
 
+let observe_guidance_config_drift ~label ~detail =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_prompt_failures
+    ~labels:[ "prompt", label ]
+    ();
+  Log.Keeper.warn "keeper tool guidance config drift: %s: %s" label detail
+;;
+
 let hints_toml_path () =
   let dir =
     match Prompt_registry.get_markdown_dir () with
@@ -46,30 +53,26 @@ let hints_toml_path () =
 
 let load_hints () =
   let path = hints_toml_path () in
-  let doc =
-    try Otoml.Parser.from_file path with
-    | Sys_error msg ->
-      failwith
-        (Printf.sprintf
-           "keeper_tool_guidance: cannot read TOML at %s: %s. Verify the file \
-            ships with the binary (config/prompts/keeper.tool_hints.toml)."
-           path msg)
-    | Otoml.Parse_error (_, msg) ->
-      failwith
-        (Printf.sprintf
-           "keeper_tool_guidance: malformed TOML at %s: %s"
-           path msg)
-  in
-  let entries = Otoml.find doc (Otoml.get_array Fun.id) [ "hints" ] in
-  List.map
-    (fun entry ->
-      { name = Otoml.find entry Otoml.get_string [ "name" ]
-      ; call =
-          substitute_web_fetch_timeout
-            (Otoml.find entry Otoml.get_string [ "call" ])
-      ; description = Otoml.find entry Otoml.get_string [ "description" ]
-      })
-    entries
+  try
+    let doc = Otoml.Parser.from_file path in
+    let entries = Otoml.find doc (Otoml.get_array Fun.id) [ "hints" ] in
+    List.map
+      (fun entry ->
+        { name = Otoml.find entry Otoml.get_string [ "name" ]
+        ; call =
+            substitute_web_fetch_timeout
+              (Otoml.find entry Otoml.get_string [ "call" ])
+        ; description = Otoml.find entry Otoml.get_string [ "description" ]
+        })
+      entries
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    observe_guidance_config_drift
+      ~label:"keeper.tool_hints"
+      ~detail:
+        (Printf.sprintf "%s: %s" path (Printexc.to_string exn));
+    []
 ;;
 
 (* Deferred until first use so module load does not require the TOML file to
@@ -78,22 +81,68 @@ let load_hints () =
    single-domain model satisfies this. *)
 let hints : hint list Lazy.t = lazy (load_hints ())
 
-(* Empty prose is treated as a deployment error: a missing markdown file
-   would otherwise silently drop guard text (e.g. render_unknown_tool_guard)
-   into "" and the LLM would receive no warning. Fail loud at first use. *)
+let fallback_prose key =
+  if String.equal key Keeper_prompt_names.tool_preferred_header
+  then
+    Some
+      "Preferred keeper tools currently allowed for you (copy the name and \
+       schema verbatim):"
+  else if String.equal key Keeper_prompt_names.tool_preferred_empty
+  then
+    Some
+      "Preferred keeper tools: use only the tool schemas currently shown by \
+       the runtime."
+  else if String.equal key Keeper_prompt_names.tool_workflow_gh_full
+  then
+    Some
+      "GitHub/code workflow: if you do not already hold a task, call \
+       `keeper_task_claim` first; `keeper_shell op=gh` derives repo context \
+       from the active task worktree/current_task_id. Then inspect with \
+       `keeper_shell op=gh`; if code change is needed, `masc_worktree_create` \
+       -> edit -> `keeper_bash` for `git add` / `git commit` / `git push` -> \
+       `keeper_pr_create` with `draft=true` -> \
+       `keeper_task_submit_for_verification` with notes and `pr_url`."
+  else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
+  then
+    Some
+      "GitHub/code workflow: if you do not already hold a task, call \
+       `keeper_task_claim` first; inspect with `keeper_shell op=gh`; if code \
+       change is needed, `masc_worktree_create` -> edit -> `keeper_bash` for \
+       `git add` / `git commit` / `git push`. Do not create PRs through \
+       `keeper_shell op=gh`; submit verification notes with the pushed branch \
+       and request a dedicated draft-PR tool."
+  else if String.equal key Keeper_prompt_names.tool_workflow_gh_minimal
+  then
+    Some
+      "GitHub workflow: use `keeper_shell op=gh` only for commands supported \
+       by your active tool policy. `keeper_shell op=gh` derives repo context \
+       from the active task worktree/current_task_id; claim a task first when \
+       repo context is required. Do not create PRs through `keeper_shell \
+       op=gh`; use the dedicated draft-PR tool when it is listed."
+  else if String.equal key Keeper_prompt_names.tool_unknown_guard
+  then
+    Some
+      "Do not call tool names that are absent from the active runtime schema \
+       list. Heartbeat is server-managed; public lifecycle/status tools such \
+       as `masc_join`, `masc_who`, and `masc_heartbeat` are not keeper action \
+       tools unless they are explicitly shown to you. Copy active schema names \
+       exactly; do not substitute public `masc_*` aliases such as \
+       `masc_board_list` for keeper-scoped tools."
+  else None
+;;
+
 let load_prose key =
   let raw =
     match Prompt_registry.render_prompt_template key [] with
     | Ok value -> value
-    | Error _ -> Prompt_registry.get_prompt key
+    | Error msg ->
+      let fallback = Prompt_registry.get_prompt key in
+      if String.trim fallback = "" then
+        observe_guidance_config_drift ~label:key ~detail:msg;
+      fallback
   in
   let trimmed = String.trim raw in
-  if trimmed = "" then
-    failwith
-      (Printf.sprintf
-         "keeper_tool_guidance: prompt %S resolved to empty. Verify \
-          config/prompts/%s.md exists and is non-empty."
-         key key)
+  if String.equal trimmed "" then Option.value ~default:"" (fallback_prose key)
   else trimmed
 ;;
 

@@ -59,6 +59,7 @@ const ENTRIES_PER_PLANE: ReadonlyMap<CockpitPlane, CockpitEntrypoint[]> = (() =>
 const COCKPIT_COVERED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'covered').length
 const COCKPIT_BLOCKED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'backend-blocked').length
 
+// tie-break: strict `>` keeps the initial accumulator, so PLANE_ORDER[0] (first listed plane) wins on equal counts.
 const PLANE_WITH_MOST_ENTRIES = PLANE_ORDER.reduce((top, plane) => {
   const count = ENTRIES_PER_PLANE.get(plane)?.length ?? 0
   const topCount = ENTRIES_PER_PLANE.get(top)?.length ?? 0
@@ -193,10 +194,8 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
               </span>
               <${ArrowUpRight} class="mt-0.5 shrink-0 text-[var(--color-fg-muted)] transition-colors group-hover:text-[var(--color-fg-primary)]" size=${14} aria-hidden="true" />
             </span>
-            <span class="flex items-center">
-              <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs ${coverageClass(entrypoint.coverage)}`}>
-                ${entrypoint.coverage}
-              </span>
+            <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs ${coverageClass(entrypoint.coverage)}`}>
+              ${entrypoint.coverage}
             </span>
           <//>
         `)}

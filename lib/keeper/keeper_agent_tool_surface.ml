@@ -250,7 +250,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
   |> List.filter_map turn_affordance_of_string
   |> List.concat_map (function
        | Board_curation ->
-         [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
+         [ "keeper_board_curation_submit" ]
        | Board_post_or_comment
        | Message_sweep
        | Reply_in_room

@@ -10354,8 +10354,8 @@ let test_tools_for_gated_affordance_covers_each_variant () =
           [ "board_curation"; "task_claim"; "board_curation" ]));
   check
     bool
-    "board_curation force-includes cleanup tool"
-    true
+    "board_curation does not force optional cleanup tool"
+    false
     (List.mem
        "keeper_board_cleanup"
        (Surface.preferred_tool_names_for_turn_affordances

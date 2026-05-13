@@ -107,25 +107,13 @@ def merge_commit_already_in_base(
 
 def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
     """Get set of file paths changed in a PR."""
-    files: List[dict] = []
-    page = 1
-    while True:
-        resp = _run_gh([
-            f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
-            "--paginate",
-        ])
-        if isinstance(resp, list):
-            batch = resp
-        else:
-            break
-        if not batch:
-            break
-        files.extend(batch)
-        if len(batch) < 100:
-            break
-        page += 1
-
-    return {f["filename"] for f in files}
+    resp = _run_gh([
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
+        "--paginate",
+    ])
+    if not isinstance(resp, list):
+        return set()
+    return {f["filename"] for f in resp}
 
 
 def get_recently_merged_prs(
@@ -336,34 +324,34 @@ def main() -> int:
     if not args.pr:
         parser.error("Either --pr or --scan-all-open is required")
 
-    risks = check_pr_axis_stale(args.pr, owner, repo, args.hours, args.limit)
-    blockers = [r for r in risks if _block(r)]
-    warnings = [r for r in risks if not _block(r)]
+    single_risks = check_pr_axis_stale(args.pr, owner, repo, args.hours, args.limit)
+    single_blockers = [r for r in single_risks if _block(r)]
+    single_warnings = [r for r in single_risks if not _block(r)]
 
     if args.json:
         print(json.dumps([
             {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
-            for r in blockers
+            for r in single_blockers
         ], indent=2))
     else:
-        if warnings:
-            print(f"Found {len(warnings)} LOW-confidence overlap(s) for PR #{args.pr} (informational only):\n")
+        if single_warnings:
+            print(f"Found {len(single_warnings)} LOW-confidence overlap(s) for PR #{args.pr} (informational only):\n")
             print("| Merged PR | Risk Type | Overlap Files | Confidence |")
             print("|-----------|-----------|---------------|------------|")
-            for r in warnings:
+            for r in single_warnings:
                 print(r.to_markdown())
             print()
-        if blockers:
-            total = len(blockers)
+        if single_blockers:
+            total = len(single_blockers)
             print(f"Found {total} blocking risk(s) for PR #{args.pr}:\n")
             print("| Merged PR | Risk Type | Overlap Files | Confidence |")
             print("|-----------|-----------|---------------|------------|")
-            for r in blockers:
+            for r in single_blockers:
                 print(r.to_markdown())
             print()
             print("Recommended action: rebase on latest main and run `dune build @check`.")
             return 1
-        if not warnings:
+        if not single_warnings:
             print(f"No axis risks found for PR #{args.pr}.")
 
     return 0

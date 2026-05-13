@@ -789,6 +789,11 @@ let log_call
       let model_field =
         if model = "" then [] else [ "model", `String "runtime" ]
       in
+      let cascade_profile_field =
+        match cascade_profile with
+        | Some value when String.trim value <> "" -> [ "cascade_profile", `String value ]
+        | _ -> []
+      in
       let result_bytes_field =
         match result_bytes with
         | Some n -> [ "result_bytes", `Int n ]
@@ -936,6 +941,7 @@ let log_call
            ]
            @ route_evidence_field
            @ model_field
+           @ cascade_profile_field
            @ lane_field
            @ tool_choice_field
            @ thinking_enabled_field

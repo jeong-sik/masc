@@ -93,6 +93,7 @@ opam_version="${opam_version:-$(sed -n 's/^version: "\([^"]*\)"/\1/p' masc_mcp.o
 [[ -n "$roadmap_package_version" ]] || fail "missing current package version in ROADMAP.md"
 [[ -n "$roadmap_changelog_entry" ]] || fail "missing latest changelog entry in ROADMAP.md"
 [[ -n "$roadmap_published_release" ]] || fail "missing latest published GitHub release in ROADMAP.md"
+grep -q "^## \[${roadmap_published_release//./\\.}\]" CHANGELOG.md || fail "CHANGELOG.md has no release heading for published release $roadmap_published_release (ROADMAP.md may contain a typo or stale value)"
 [[ -n "$changelog_latest_release" ]] || fail "missing released version header in CHANGELOG.md"
 
 require_changelog_body_filled "$changelog_latest_release"

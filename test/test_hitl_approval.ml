@@ -1174,6 +1174,7 @@ let test_read_recent_audit_filters_after_wide_scan () =
   let keeper_name = "audit-target-keeper" in
   AQ.audit_approval_event ~event_type:"resolved" ~id:"target-audit"
     ~keeper_name ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+    ~selected_model:"openai:gpt-5.4"
     ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
   for i = 1 to 32 do
     AQ.audit_approval_event ~event_type:"resolved"
@@ -1186,7 +1187,9 @@ let test_read_recent_audit_filters_after_wide_scan () =
   | [ json ] ->
       Alcotest.(check string) "target approval survives unrelated tail"
         "target-audit"
-        Yojson.Safe.Util.(json |> member "id" |> to_string)
+        Yojson.Safe.Util.(json |> member "id" |> to_string);
+      Alcotest.(check bool) "audit selected model redacted" true
+        Yojson.Safe.Util.(json |> member "selected_model" = `Null)
   | items ->
       Alcotest.fail
         (Printf.sprintf "expected one target audit, got %d" (List.length items))

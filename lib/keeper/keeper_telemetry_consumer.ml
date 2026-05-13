@@ -1,19 +1,15 @@
-(** Keeper_telemetry_consumer — MASC-side subscriber for OAS telemetry events.
+(** Keeper_telemetry_consumer — MASC-side observer for OAS telemetry events.
 
     Subscribes to the OAS event bus via [Agent_sdk_metrics_bridge],
-    filters [Custom("telemetry_event", json)] payloads, deserialises
-    them with [Agent_sdk.Telemetry_event.of_yojson], and feeds the
-    result into [Keeper_provider_health.update_from_event].
+    filters [Custom("telemetry_event", json)] payloads, and records that a
+    telemetry item was observed. MASC deliberately does not deserialize
+    provider/model-bearing OAS telemetry; concrete runtime identity belongs to
+    OAS.
 
-    A dedicated fiber drains the subscription in a loop.  If JSON
-    deserialisation fails, the event is dropped and a Prometheus
-    counter is bumped so operators can detect schema drift.
-
-    State is purely internal: the subscription handle and the fiber
-    are both bound to the caller's [Eio.Switch.t]. *)
+    State is purely internal: the subscription handle and the fiber are both
+    bound to the caller's [Eio.Switch.t]. *)
 
 let telemetry_event_counter = "masc_keeper_telemetry_events_consumed_total"
-let telemetry_event_drop_counter = "masc_keeper_telemetry_events_dropped_total"
 
 (* drain is non-blocking; loop must yield or it pins the Eio domain and
    starves co-located fibers (HTTP handlers, lazy startup tasks). *)
@@ -38,22 +34,11 @@ let spawn_subscriber ~sw ~clock ~bus =
          List.iter
            (fun (evt : Agent_sdk.Event_bus.event) ->
               match evt.payload with
-              | Agent_sdk.Event_bus.Custom ("telemetry_event", json) -> (
-                  match Agent_sdk.Telemetry_event.of_yojson json with
-                  | Ok te ->
-                      Keeper_provider_health.update_from_event te;
-                      Prometheus.inc_counter
-                        telemetry_event_counter
-                        ~labels:[ "result", "ok" ]
-                        ()
-                  | Error err ->
-                      Prometheus.inc_counter
-                        telemetry_event_drop_counter
-                        ~labels:[ "result", "deser_failed" ]
-                        ();
-                      Log.Keeper.debug
-                        "telemetry_consumer: drop malformed event: %s"
-                        err)
+              | Agent_sdk.Event_bus.Custom ("telemetry_event", _) ->
+                  Prometheus.inc_counter
+                    telemetry_event_counter
+                    ~labels:[ "result", "observed" ]
+                    ()
               | _ -> ())
            events
        with

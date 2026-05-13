@@ -418,14 +418,14 @@ describe('FleetTelemetryPanel', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
       name: 'keeper-sparse',
-      model: 'glm-5.1',
+      model: 'runtime',
       tool_calls: 3,
       tool_activity_known: true,
     })
     expect(rows[0]?.recent_tools).toEqual(['masc_status', 'keeper_stay_silent'])
   })
 
-  it('uses display model and freshest keeper activity helpers for fleet rows', async () => {
+  it('redacts display model and uses freshest keeper activity helpers for fleet rows', async () => {
     vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))
     const { buildFleetRows } = await loadPanel({
       fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
@@ -456,7 +456,7 @@ describe('FleetTelemetryPanel', () => {
     const rows = buildFleetRows(keepers, { ...toolQualityResponse, by_keeper: [] })
 
     expect(rows).toHaveLength(1)
-    expect(rows[0]?.model).toBe('gpt-5.4')
+    expect(rows[0]?.model).toBe('runtime')
     expect(rows[0]).toMatchObject({
       activity_label: '하트비트',
       activity_source: 'heartbeat',
@@ -690,7 +690,7 @@ describe('FleetTelemetryPanel', () => {
 
     expect(container.textContent).toContain('3 tool calls')
     expect(container.textContent).not.toContain('최근 도구 기록 없음')
-    expect(container.textContent).toContain('glm-5.1')
+    expect(container.textContent).not.toContain('glm-5.1')
   })
 
   it('shows partial telemetry warnings without treating tool quality as runtime state', async () => {

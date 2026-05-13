@@ -41,8 +41,6 @@ type t = {
   oas_turn_count : int option;
   event : event_kind;
   cascade_name : string option;
-  provider_kind : string option;
-  model_id : string option;
   status : string;
   decision : Yojson.Safe.t;
   links : links;
@@ -72,8 +70,6 @@ val make :
   ?oas_turn_count:int ->
   event:event_kind ->
   ?cascade_name:string ->
-  ?provider_kind:string ->
-  ?model_id:string ->
   ?status:string ->
   ?decision:Yojson.Safe.t ->
   ?receipt_path:string ->
@@ -87,8 +83,6 @@ val make_for_context :
   event:event_kind ->
   ?oas_turn_count:int ->
   ?cascade_name:string ->
-  ?provider_kind:string ->
-  ?model_id:string ->
   ?status:string ->
   ?decision:Yojson.Safe.t ->
   ?receipt_path:string ->

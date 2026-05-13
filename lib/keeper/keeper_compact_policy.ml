@@ -147,12 +147,7 @@ let compact_if_needed_typed
           Cascade_runtime.models_of_cascade_name
             (Keeper_cascade_profile.Runtime_name (cascade_name_of_meta meta))
       in
-      let primary_id =
-        match Cascade_config.parse_model_strings model_labels with
-        | c :: _ -> c.Llm_provider.Provider_config.model_id
-        | [] -> "auto"
-      in
-      Llm_provider.Model_meta.for_model_id primary_id
+      Cascade_runtime_candidate.context_window_hint_of_labels model_labels
     in
     let pre_compact_event =
       Dashboard_harness_health.record_pre_compact
@@ -162,7 +157,7 @@ let compact_if_needed_typed
         ~token_count:tok_count
         ~strategies:strategy_names
         ~context_window:model_meta.context_window
-        ~is_local_model:model_meta.is_local
+        ~is_local_model:model_meta.is_local_model
         ~trigger
     in
     (try

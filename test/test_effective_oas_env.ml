@@ -15,7 +15,6 @@
 
     Cross-reference:
     - [lib/keeper/keeper_types_profile.ml] — [effective_oas_env]
-    - [lib/keeper/keeper_mcp_provider_audit.ml] — SSOT audit table
     - OAS [transport_gemini_cli.ml:67-85] — sentinel behavior *)
 
 open Alcotest

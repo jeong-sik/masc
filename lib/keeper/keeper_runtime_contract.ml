@@ -211,26 +211,19 @@ let nonempty_list = function
   | Some values -> values
   | None -> []
 
-let provider_of_model = function
-  | None -> None
-  | Some model -> (
-      let model = String.trim model in
-      if model = "" then None
-      else
-        match String.index_opt model ':' with
-        | Some idx when idx > 0 -> Some (String.sub model 0 idx)
-        | _ -> None)
+let runtime_lane_label = "runtime"
+
+let runtime_lane_opt = function
+  | Some value when String.trim value <> "" -> Some runtime_lane_label
+  | _ -> None
 
 let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
     ?visible_tool_count ?required_tools ?missing_required_tools ?provider ?model
     ?cascade_profile () : Yojson.Safe.t =
-  let provider =
-    match provider with
-    | Some _ -> provider
-    | None -> provider_of_model model
-  in
+  let provider = runtime_lane_opt provider in
+  let model = runtime_lane_opt model in
   `Assoc
     [
       ("keeper_name", `String keeper_name);

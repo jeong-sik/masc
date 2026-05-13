@@ -1616,7 +1616,7 @@ let provider_label_from_registry (cfg : Llm_provider.Provider_config.t) =
       auth token actually reach the wire.
     - All other shapes are returned unchanged.
 
-    Keeper-layer callers ({!Keeper_agent_context.default_config}) used
+    Keeper-layer callers ({!Cascade_agent_context.default_config}) used
     to inline this match on [provider_cfg.kind] and
     [provider.provider]. RFC-0058 Phase 5.6 moves that inspection into
     this single boundary helper so adding another OpenAI-compatible

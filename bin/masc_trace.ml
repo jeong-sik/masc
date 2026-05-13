@@ -251,20 +251,14 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
           let cascade =
             Option.value (string_field json "cascade_name") ~default:"-"
           in
-          let provider =
-            Option.value (string_field json "provider_kind") ~default:"-"
-          in
-          let model =
-            Option.value (string_field json "model_id") ~default:"-"
-          in
           let decision =
             match Yojson.Safe.Util.member "decision" json with
             | `Null -> "{}"
             | decision_json -> Yojson.Safe.to_string decision_json
           in
           Printf.printf
-            "%s [manifest %s] event=%s status=%s cascade=%s provider=%s model=%s decision=%s\n"
-            ts f event status cascade provider model decision)
+            "%s [manifest %s] event=%s status=%s cascade=%s decision=%s\n"
+            ts f event status cascade decision)
         matches
 
 (** Scan [.masc/logs/system_log_*.jsonl] for [\[fsm:transition\]]

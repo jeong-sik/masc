@@ -19,8 +19,10 @@ module Obs = Cascade_attempt_liveness_observer
 let mk_observer ?(mode = Cfg.Observe) ?(budget = L.bootstrap)
     ?(cascade = "test_cascade") ?(provider = "test_provider")
     ?candidate_key ?(started_at = 0.0) () =
-  Obs.create ~mode ~budget ~cascade_label:cascade ~provider_label:provider
-    ?candidate_key ~started_at ()
+  ignore provider;
+  Obs.create ~mode ~budget ~cascade_label:cascade ?candidate_key ~started_at ()
+
+let public_provider = "runtime"
 
 let counter_value name labels =
   Prometheus.metric_value_or_zero name ~labels ()
@@ -57,9 +59,9 @@ let test_off_finalize_is_noop () =
   let cascade = "off_cascade_finalize" in
   let provider = "off_provider_finalize" in
   let obs = mk_observer ~mode:Cfg.Off ~cascade ~provider () in
-  let before = observed_value cascade provider "success" in
+  let before = observed_value cascade public_provider "success" in
   Obs.finalize obs;
-  let after = observed_value cascade provider "success" in
+  let after = observed_value cascade public_provider "success" in
   Alcotest.(check (float 1e-6))
     "Off finalize emits no observed counter" before after
 
@@ -82,11 +84,11 @@ let test_observe_emits_kill_counter_no_raise () =
   | None -> Alcotest.fail "Observe should return Some wrapper"
   | Some f ->
       let before =
-        kill_value "observe" "provider_error" cascade provider
+        kill_value "observe" "provider_error" cascade public_provider
       in
       f (Agent_sdk.Types.SSEError "boom");
       let after =
-        kill_value "observe" "provider_error" cascade provider
+        kill_value "observe" "provider_error" cascade public_provider
       in
       Alcotest.(check int) "original called" 1 !original_calls;
       Alcotest.(check (float 1e-6))
@@ -107,11 +109,11 @@ let test_observe_parse_failure_is_wire_error () =
   | None -> Alcotest.fail "Observe should return Some wrapper"
   | Some f ->
       let before =
-        kill_value "observe" "provider_error" cascade provider
+        kill_value "observe" "provider_error" cascade public_provider
       in
       f (Agent_sdk.Types.SSEParseFailed { raw = "{not json"; reason = "json" });
       let after =
-        kill_value "observe" "provider_error" cascade provider
+        kill_value "observe" "provider_error" cascade public_provider
       in
       Alcotest.(check (float 1e-6))
         "SSE parse failure emits provider_error kill counter"
@@ -147,14 +149,14 @@ let test_observe_finalize_emits_outcome () =
   (match wrapped with
    | Some f -> f stop
    | None -> Alcotest.fail "wrapper missing");
-  let before = observed_value cascade provider "success" in
+  let before = observed_value cascade public_provider "success" in
   Obs.finalize obs;
-  let after = observed_value cascade provider "success" in
+  let after = observed_value cascade public_provider "success" in
   Alcotest.(check (float 1e-6))
     "finalize emits success outcome" (before +. 1.0) after;
   (* Idempotent. *)
   Obs.finalize obs;
-  let after2 = observed_value cascade provider "success" in
+  let after2 = observed_value cascade public_provider "success" in
   Alcotest.(check (float 1e-6))
     "finalize is idempotent" after after2
 
@@ -190,9 +192,9 @@ let test_observe_finalize_pending_is_wire_error () =
   let obs =
     mk_observer ~mode:Cfg.Observe ~cascade ~provider ~started_at:0.0 ()
   in
-  let before = observed_value cascade provider "wire_error" in
+  let before = observed_value cascade public_provider "wire_error" in
   Obs.finalize obs;
-  let after = observed_value cascade provider "wire_error" in
+  let after = observed_value cascade public_provider "wire_error" in
   Alcotest.(check (float 1e-6))
     "Awaiting at finalize -> wire_error" (before +. 1.0) after
 

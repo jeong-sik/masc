@@ -8,7 +8,6 @@ import { findKeeper } from '../lib/keeper-utils'
 import { resolveKeeperForDetail } from '../lib/keeper-detail-resolution'
 import {
   keeperDisplayStatus,
-  keeperDisplayModel,
   keeperActivityDisplay,
 } from '../lib/keeper-runtime-display'
 import { clearKeeper, fetchKeeperTransitions } from '../api/keeper'
@@ -119,9 +118,8 @@ export function KeeperDetailPage() {
     typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)
       ? `${Math.round(keeper.context_ratio * 100)}%`
       : '정보 없음'
-  const effectiveModelMeta = keeperDisplayModel(keeper)
-  const effectiveModelLabel = effectiveModelMeta?.label ?? '모델'
-  const effectiveModel = effectiveModelMeta?.value ?? '정보 없음'
+  const effectiveModelLabel = '런타임'
+  const effectiveModel = 'runtime'
   const activityDisplay = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
 
   const submitClearContext = () => {

@@ -124,7 +124,7 @@ let test_sensitive_input_fields_redacted () =
     Alcotest.(check bool) "token value redacted" false
       (Observability_redact.contains_substring ~sub:"sk-proj-abcdefghijklmnop12345678" entry_str))
 
-(* ── Model field preserved ───────────────────────────── *)
+(* ── Model field redacted ───────────────────────────── *)
 
 let test_model_field_stored () =
   with_tmp_log (fun () ->
@@ -136,8 +136,11 @@ let test_model_field_stored () =
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
-    Alcotest.(check bool) "model field present" true
-      (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str))
+    Alcotest.(check bool) "raw model absent" false
+      (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str);
+    Alcotest.(check (option string)) "model redacted to runtime"
+      (Some "runtime")
+      (Safe_ops.json_string_opt "model" (List.hd entries)))
 
 let test_policy_denied_structured_error_gets_semantic_failure () =
   with_tmp_log (fun () ->
@@ -527,12 +530,12 @@ let test_dashboard_aggregate_groups_runtime_fields () =
     let by_lane = Yojson.Safe.Util.member "by_lane" summary in
     let by_thinking = Yojson.Safe.Util.member "by_thinking_mode" summary in
     let by_tool_choice = Yojson.Safe.Util.member "by_tool_choice" summary in
-    let glm_bucket = find_bucket "glm-5.1" by_model in
+    let runtime_bucket = find_bucket "runtime" by_model in
     let retry_bucket = find_bucket "retry" by_lane in
     let enabled_bucket = find_bucket "enabled" by_thinking in
     let auto_bucket = find_bucket "auto" by_tool_choice in
-    Alcotest.(check int) "glm bucket calls" 1
-      (Safe_ops.json_int ~default:0 "calls" glm_bucket);
+    Alcotest.(check int) "runtime bucket calls" 2
+      (Safe_ops.json_int ~default:0 "calls" runtime_bucket);
     Alcotest.(check int) "retry bucket calls" 1
       (Safe_ops.json_int ~default:0 "calls" retry_bucket);
     Alcotest.(check int) "enabled thinking calls" 1

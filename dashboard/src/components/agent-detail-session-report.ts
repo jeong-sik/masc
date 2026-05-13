@@ -10,7 +10,6 @@ import { TextInput } from './common/input'
 import { ringFocusClasses } from './common/ring'
 import {
   agentTimeline,
-  selectedAgent,
   missionAgentBrief,
   continuityBriefForAgent,
   keeperForAgent,
@@ -128,7 +127,6 @@ function taskEventColor(type: string): string {
 // ── Components ───────────────────────────────────
 
 function SessionMeta({ agentName }: { agentName: string }) {
-  const agent = selectedAgent()
   const brief = missionAgentBrief(agentName)
   const continuity = continuityBriefForAgent(agentName)
   const keeper = keeperForAgent(agentName)
@@ -142,10 +140,6 @@ function SessionMeta({ agentName }: { agentName: string }) {
 
   if (brief?.related_session_id) {
     meta.push({ label: '세션', value: brief.related_session_id })
-  }
-
-  if (agent?.model) {
-    meta.push({ label: '모델', value: agent.model })
   }
 
   if (timeline?.summary?.active_duration_minutes) {

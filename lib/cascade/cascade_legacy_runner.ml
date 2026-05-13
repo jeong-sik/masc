@@ -73,6 +73,8 @@ and cascade_fallback_event = {
 
 module StringMap = Map.Make(String)
 
+let public_runtime_model_label = "runtime"
+
 type cascade_counter = {
   calls : int;
   successes : int;
@@ -159,20 +161,6 @@ let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
   Provider_adapter.model_label_of_config cfg
 
-let model_label_option_of_model_id
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
-    (model_id : string) =
-  let matches =
-    candidate_cfgs
-    |> List.filter (fun (cfg : Llm_provider.Provider_config.t) ->
-           String.equal cfg.model_id model_id)
-    |> List.map model_label_of_config
-    |> List.sort_uniq String.compare
-  in
-  match matches with
-  | [ label ] -> Some label
-  | _ -> None
-
 let strip_latest_suffix s =
   let trimmed = String.trim s in
   if String.length trimmed > 7
@@ -180,60 +168,26 @@ let strip_latest_suffix s =
   then String.sub trimmed 0 (String.length trimmed - 7)
   else trimmed
 
-let selected_index_of_model ~(selected_model_raw : string option)
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list) =
-  match selected_model_raw with
-  | None -> None
-  | Some raw ->
-      let selected = strip_latest_suffix raw in
-      let rec loop idx = function
-        | [] -> None
-        | cfg :: rest ->
-            let candidate_label = model_label_of_config cfg |> strip_latest_suffix in
-            let candidate_model = strip_latest_suffix cfg.model_id in
-            if selected = candidate_label || selected = candidate_model then Some idx
-            else loop (idx + 1) rest
-      in
-      loop 0 candidate_cfgs
-
-let normalized_selected_model ~(selected_model_raw : string option)
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
-    ~(candidate_models : string list) ~(selected_index : int option) =
-  match selected_index with
-  | Some idx -> List.nth_opt candidate_models idx
-  | None ->
-      (match selected_model_raw with
-      | None -> None
-      | Some raw ->
-          let trimmed = String.trim raw in
-          if trimmed = "" then None
-          else
-            let stripped = strip_latest_suffix trimmed in
-            match model_label_option_of_model_id ~candidate_cfgs stripped with
-            | Some label -> Some label
-            | None -> Some trimmed)
-
 (* ================================================================ *)
 (* Observation building                                              *)
 (* ================================================================ *)
 
 let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
-    ~(selected_model_raw : string option)
+    ~(candidate_count : int)
+    ~selected_model_raw:(_ : string option)
     ?(attempts = [])
     ?(fallback_events = [])
     ?(attempt_details_available = false)
     ?(attempt_details_source = "opaque_named_cascade")
     () : cascade_observation =
-  let candidate_models = List.map model_label_of_config candidate_cfgs in
-  let primary_model = match candidate_models with first :: _ -> Some first | [] -> None in
-  let selected_index =
-    selected_index_of_model ~selected_model_raw ~candidate_cfgs
+  let candidate_models =
+    List.init (max 0 candidate_count) (fun _ -> public_runtime_model_label)
   in
-  let selected_model =
-    normalized_selected_model ~selected_model_raw ~candidate_cfgs
-      ~candidate_models ~selected_index
+  let primary_model =
+    match candidate_models with first :: _ -> Some first | [] -> None
   in
+  let selected_index = None in
+  let selected_model = None in
   let fallback_hops = Option.map (fun idx -> max 0 idx) selected_index in
   let fallback_applied =
     match fallback_hops with
@@ -243,11 +197,11 @@ let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
   {
     cascade_name;
     strategy;
-    configured_labels;
+    configured_labels = [];
     candidate_models;
     primary_model;
     selected_model;
-    selected_model_raw;
+    selected_model_raw = None;
     selected_index;
     fallback_hops;
     fallback_applied;
@@ -271,8 +225,8 @@ let cascade_attempt_to_json (attempt : cascade_attempt) : Yojson.Safe.t =
   `Assoc
     [
       ("attempt_index", `Int attempt.attempt_index);
-      ("model_id", `String attempt.model_id);
-      ("model_label", Json_util.string_opt_to_json attempt.model_label);
+      ("model_id", `String public_runtime_model_label);
+      ("model_label", `Null);
       ("latency_ms", Json_util.int_opt_to_json attempt.latency_ms);
       ("error", Json_util.string_opt_to_json attempt.error);
     ]
@@ -281,10 +235,10 @@ let cascade_fallback_event_to_json (event : cascade_fallback_event) :
     Yojson.Safe.t =
   `Assoc
     [
-      ("from_model_id", `String event.from_model_id);
-      ("from_model_label", Json_util.string_opt_to_json event.from_model_label);
-      ("to_model_id", `String event.to_model_id);
-      ("to_model_label", Json_util.string_opt_to_json event.to_model_label);
+      ("from_model_id", `String public_runtime_model_label);
+      ("from_model_label", `Null);
+      ("to_model_id", `String public_runtime_model_label);
+      ("to_model_label", `Null);
       ("reason", `String event.reason);
     ]
 
@@ -297,15 +251,14 @@ let update_first_attempt_if ~predicate ~update attempts_rev =
   in
   loop attempts_rev
 
-let record_attempt_start (capture : cascade_metrics_capture)
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list) ~(model_id : string) =
+let record_attempt_start (capture : cascade_metrics_capture) ~model_id:_ =
   let attempt_index = capture.next_attempt_index in
   capture.next_attempt_index <- capture.next_attempt_index + 1;
   capture.attempts_rev <-
     {
       attempt_index;
-      model_id;
-      model_label = model_label_option_of_model_id ~candidate_cfgs model_id;
+      model_id = public_runtime_model_label;
+      model_label = None;
       latency_ms = None;
       error = None;
     }
@@ -319,15 +272,15 @@ let record_attempt_start (capture : cascade_metrics_capture)
     string-based classification at this layer (see #12817 spirit and the
     project memory rule "no string matching for classification"). *)
 let cascade_attempt_terminal_event_json ?slot_release_at_phase
-    ?productive_phase_elapsed_ms ?retry_phase_elapsed_ms ~model_id ~model_label
+    ?productive_phase_elapsed_ms ?retry_phase_elapsed_ms ~model_id:_
+    ~model_label:_
     ~latency_ms ~error () =
   let outcome = if Option.is_some error then "failure" else "success" in
   `Assoc
     [
       ("event", `String "cascade_attempt_terminal");
-      ("model_id", `String model_id);
-      ( "model_label",
-        match model_label with Some s -> `String s | None -> `Null );
+      ("model_id", `String public_runtime_model_label);
+      ("model_label", `Null);
       ( "latency_ms",
         match latency_ms with Some n -> `Int n | None -> `Null );
       ("outcome", `String outcome);
@@ -351,22 +304,22 @@ let log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
   in
   let summary =
     Printf.sprintf
-      "cascade candidate terminal: model=%s outcome=%s latency_ms=%s" model_id
-      outcome
+      "cascade candidate terminal: model=%s outcome=%s latency_ms=%s"
+      public_runtime_model_label outcome
       (match latency_ms with Some n -> string_of_int n | None -> "n/a")
   in
   Log.Telemetry.emit Log.Info ~details summary
 
 let ensure_terminal_attempt (capture : cascade_metrics_capture)
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
-    ~(model_id : string) ~(latency_ms : int option) ~(error : string option) =
+    ~model_id:_ ~(latency_ms : int option) ~(error : string option) =
+  let model_id = public_runtime_model_label in
   let is_open attempt =
     String.equal attempt.model_id model_id
     && Option.is_none attempt.latency_ms
     && Option.is_none attempt.error
   in
   let update attempt = { attempt with latency_ms; error } in
-  let model_label = model_label_option_of_model_id ~candidate_cfgs model_id in
+  let model_label = None in
   (match update_first_attempt_if ~predicate:is_open ~update capture.attempts_rev with
   | Some attempts_rev -> capture.attempts_rev <- attempts_rev
   | None ->
@@ -384,21 +337,18 @@ let ensure_terminal_attempt (capture : cascade_metrics_capture)
   log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error
 
 let record_fallback_event (capture : cascade_metrics_capture)
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
-    ~(from_model : string) ~(to_model : string) ~(reason : string) =
+    ~from_model:_ ~to_model:_ ~(reason : string) =
   capture.fallback_events_rev <-
     {
-      from_model_id = from_model;
-      from_model_label =
-        model_label_option_of_model_id ~candidate_cfgs from_model;
-      to_model_id = to_model;
-      to_model_label = model_label_option_of_model_id ~candidate_cfgs to_model;
+      from_model_id = public_runtime_model_label;
+      from_model_label = None;
+      to_model_id = public_runtime_model_label;
+      to_model_label = None;
       reason;
     }
     :: capture.fallback_events_rev
 
-let cascade_metrics_for_candidates
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list) () =
+let cascade_metrics_for_candidates ~candidate_count:(_ : int) () =
   let capture =
     { next_attempt_index = 0; attempts_rev = []; fallback_events_rev = [] }
   in
@@ -409,11 +359,10 @@ let cascade_metrics_for_candidates
       ~on_cache_miss:(fun ~model_id ->
         Llm_metric_bridge.emit_cache_miss ~model_id)
       ~on_request_start:(fun ~model_id ->
-        record_attempt_start capture ~candidate_cfgs ~model_id;
+        record_attempt_start capture ~model_id;
         Llm_metric_bridge.emit_request_start ~model_id)
       ~on_request_end:(fun ~model_id ~latency_ms ->
-        ensure_terminal_attempt capture ~candidate_cfgs ~model_id
-          ~latency_ms ~error:None;
+        ensure_terminal_attempt capture ~model_id ~latency_ms ~error:None;
         (* Forward to Prometheus so per-model latency is visible on
            the dashboard. Without this, the cascade capture records
            latency internally but never exports it — the global
@@ -424,8 +373,8 @@ let cascade_metrics_for_candidates
             Llm_metric_bridge.emit_request_latency ~model_id ~latency_ms
         | None -> ())
       ~on_error:(fun ~model_id ~error ->
-        ensure_terminal_attempt capture ~candidate_cfgs ~model_id
-          ~latency_ms:None ~error:(Some error);
+        ensure_terminal_attempt capture ~model_id ~latency_ms:None
+          ~error:(Some error);
         Llm_metric_bridge.emit_error ~model_id ~error)
       ~on_capability_drop:(fun ~model_id ~field ->
         (* The explicit cascade metrics object bypasses the global
@@ -451,10 +400,10 @@ let cascade_metrics_for_candidates
   (capture, metrics)
 
 let cascade_observation_with_metrics ~cascade_name ?strategy ~configured_labels
-    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
+    ~(candidate_count : int)
     ~(selected_model_raw : string option) ~(capture : cascade_metrics_capture) () =
   cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
-    ~candidate_cfgs ~selected_model_raw
+    ~candidate_count ~selected_model_raw
     ~attempts:(List.rev capture.attempts_rev)
     ~fallback_events:(List.rev capture.fallback_events_rev)
     ~attempt_details_available:true

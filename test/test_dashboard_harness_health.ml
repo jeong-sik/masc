@@ -430,7 +430,8 @@ let test_wake_payload_round_trip () =
   check string "keeper_name round-trip" before.keeper_name after.keeper_name;
   check string "trace_id round-trip" before.trace_id after.trace_id;
   check int "turn_index round-trip" before.turn_index after.turn_index;
-  check string "model_id round-trip" before.model_id after.model_id;
+  check string "model_id redacted before persistence" "runtime" before.model_id;
+  check string "model_id redacted after persistence" "runtime" after.model_id;
   check int "context_window round-trip"
     before.context_window after.context_window;
   check int "approx_body_bytes round-trip"

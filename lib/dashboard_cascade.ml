@@ -27,12 +27,12 @@ let now_iso () = Masc_domain.now_iso ()
 
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc
-    [ "model", `String c.model_string
-    ; "display_model", `String c.display_model_string
-    ; "provider_name", Json_util.string_opt_to_json c.provider_name
-    ; "display_provider_name", Json_util.string_opt_to_json c.display_provider_name
-    ; "runtime_kind", Json_util.string_opt_to_json c.runtime_kind
-    ; "expanded_models", `List (List.map (fun model -> `String model) c.expanded_models)
+    [ "model", `String "runtime"
+    ; "display_model", `Null
+    ; "provider_name", `Null
+    ; "display_provider_name", `Null
+    ; "runtime_kind", `String "runtime"
+    ; "expanded_models", `List []
     ; "config_weight", `Int c.config_weight
     ; "effective_weight", `Int c.effective_weight
     ; "success_rate", `Float c.success_rate
@@ -440,14 +440,15 @@ let raw_config_json () =
            msg;
          "", Some msg)
   in
+  let _ = source_text, raw_json, materialization_error in
   `Assoc
     [ "updated_at", `String (now_iso ())
     ; "source_kind", `String (Cascade_toml_materializer.source_kind_to_string source.kind)
     ; "source_path", `String source.source_path
-    ; "source_editable", `Bool true
-    ; "source_text", `String source_text
-    ; "raw_json", `String raw_json
-    ; "materialization_error", Json_util.string_opt_to_json materialization_error
+    ; "source_editable", `Bool false
+    ; "source_text", `String ""
+    ; "raw_json", `String ""
+    ; "materialization_error", `Null
     ]
 ;;
 
@@ -770,11 +771,9 @@ let recommendations_json () : Yojson.Safe.t =
 ;;
 
 (** [provider_scheme_of_model_string s] returns the text before the first
-    [:] in [s], or [s] itself if no colon is present.  The scheme
-    corresponds to the provider_key produced by
-    [Keeper_hooks_oas.provider_of_model] for prefixed specs; bare model
-    ids fall through unchanged and merge with
-    whatever heuristic keeper_hooks_oas assigned them at runtime.  *)
+    [:] in [s], or [s] itself if no colon is present.  This is a legacy
+    cascade-health helper; keeper-facing runtime telemetry no longer uses it to
+    derive provider identity. *)
 let provider_scheme_of_model_string (s : string) : string =
   match String.index_opt s ':' with
   | Some i -> String.sub s 0 i
@@ -1081,32 +1080,15 @@ let stable_audit_run_id json =
 ;;
 
 let model_display_of_attempt attempt =
-  first_nonempty
-    [ json_string_member "model_label" attempt; json_string_member "model_id" attempt ]
-  |> Option.value ~default:"unknown"
+  let _ = attempt in
+  "runtime"
 ;;
 
 let fallback_reason_for_model ~model_id ~model_label fallback_events =
-  let matches value =
-    match nonempty_string value with
-    | None -> false
-    | Some value ->
-      (match model_id with
-       | Some id -> String.equal value id
-       | None -> false)
-      ||
-        (match model_label with
-        | Some label -> String.equal value label
-        | None -> false)
-  in
-  List.find_map
-    (fun event ->
-       if
-         matches (json_string_member "from_model_id" event)
-         || matches (json_string_member "from_model_label" event)
-       then json_string_opt_member "reason" event
-       else None)
-    fallback_events
+  let _ = model_id, model_label in
+  match fallback_events with
+  | [] -> None
+  | _ :: _ -> Some "runtime_fallback"
 ;;
 
 let audit_hop_json ~selected_model ~fallback_events attempt =
@@ -1117,21 +1099,12 @@ let audit_hop_json ~selected_model ~fallback_events attempt =
   let error = json_string_opt_member "error" attempt in
   let reason =
     match error with
-    | Some _ as value -> value
+    | Some _ -> Some "runtime_error"
     | None -> fallback_reason_for_model ~model_id ~model_label fallback_events
   in
   let selected =
-    match selected_model with
-    | Some selected ->
-      String.equal selected model
-      || (match model_id with
-          | Some id -> String.equal selected id
-          | None -> false)
-      ||
-        (match model_label with
-        | Some label -> String.equal selected label
-        | None -> false)
-    | None -> false
+    let _ = selected_model in
+    false
   in
   let status =
     match error, reason, selected with
@@ -1172,32 +1145,8 @@ let last_attempt_error attempts =
 
 let audit_run_json_of_record json =
   let observation = json_assoc_member "observation" json in
-  let configured_labels =
-    json_string_list (json_assoc_member "configured_labels" observation)
-  in
-  let candidate_models =
-    json_string_list (json_assoc_member "candidate_models" observation)
-  in
-  let configured =
-    match configured_labels with
-    | [] -> candidate_models
-    | labels -> labels
-  in
   let attempts = json_list_member "attempts" observation in
   let fallback_events = json_list_member "fallback_events" observation in
-  let selected =
-    first_nonempty
-      [ json_string_member "selected_model" observation
-      ; json_string_member "selected_model_raw" observation
-      ]
-  in
-  let primary =
-    first_nonempty
-      [ json_string_member "primary_model" observation
-      ; List.nth_opt configured 0
-      ; List.nth_opt candidate_models 0
-      ]
-  in
   let cascade =
     first_nonempty
       [ json_string_member "cascade_name" json
@@ -1209,8 +1158,11 @@ let audit_run_json_of_record json =
   let top_level_reason = json_string_opt_member "top_level_reason" json in
   let error_category =
     match top_level_reason with
-    | Some _ as value -> value
-    | None -> last_attempt_error attempts
+    | Some _ -> Some "runtime_error"
+    | None ->
+      (match last_attempt_error attempts with
+       | Some _ -> Some "runtime_error"
+       | None -> None)
   in
   let base =
     [ "id", `String (stable_audit_run_id json)
@@ -1221,9 +1173,9 @@ let audit_run_json_of_record json =
     ; "at", `Float ts
     ; ( "outcome"
       , `String (json_string_member "outcome" json |> Option.value ~default:"unknown") )
-    ; "configured", `List (List.map (fun value -> `String value) configured)
-    ; "primary", Json_util.string_opt_to_json primary
-    ; "selected", Json_util.string_opt_to_json selected
+    ; "configured", `List []
+    ; "primary", `Null
+    ; "selected", `Null
     ; "total_ms", `Int (attempt_latency_total attempts)
     ; ( "total_ms_source"
       , `String
@@ -1235,7 +1187,7 @@ let audit_run_json_of_record json =
            else "unavailable") )
     ; ( "hops"
       , `List
-          (List.map (audit_hop_json ~selected_model:selected ~fallback_events) attempts) )
+          (List.map (audit_hop_json ~selected_model:None ~fallback_events) attempts) )
     ]
   in
   let fields =

@@ -46,8 +46,6 @@ let non_overflow_classes_are_not_matched () =
     KT.Autonomous_slot_wait_timeout;
     KT.Admission_queue_wait_timeout;
     KT.Turn_timeout_after_queue_wait;
-    KT.Admission_wait_wfq;
-    KT.Admission_surface;
     KT.Oas_timeout_budget;
     KT.Turn_timeout;
     KT.Completion_contract_violation;

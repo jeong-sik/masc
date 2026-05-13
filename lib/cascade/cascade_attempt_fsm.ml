@@ -458,18 +458,20 @@ let provider_label provider =
   | "" -> "unknown"
   | value -> value
 
+let public_runtime_provider_label = "runtime"
+
 let transient_http_status code =
   code = 408 || code = 409 || code = 425 || code = 429 || code >= 500
 
-let provider_capacity ?(scope = `Provider) provider =
-  Some (Provider_error.CapacityExhausted { scope; affected = [ provider ] })
+let provider_capacity ?(scope = `Provider) _provider =
+  Some (Provider_error.CapacityExhausted { scope })
 
 let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
   let provider = provider_label provider in
   match api_error with
   | Llm_provider.Retry.RateLimited { retry_after; _ } ->
       if capacity_exhausted then provider_capacity provider
-      else Some (Provider_error.RateLimit { retry_after; provider })
+      else Some (Provider_error.RateLimit { retry_after })
   | Llm_provider.Retry.Overloaded _ ->
       if capacity_exhausted then provider_capacity provider
       else Some (Provider_error.ServerError { code = 529; transient = true })
@@ -477,13 +479,12 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
       Some
         (Provider_error.ServerError
            { code = status; transient = transient_http_status status })
-  | Llm_provider.Retry.AuthError _ ->
-      Some (Provider_error.AuthError { provider })
+  | Llm_provider.Retry.AuthError _ -> Some Provider_error.AuthError
   | Llm_provider.Retry.InvalidRequest { message } ->
       if capacity_exhausted then provider_capacity provider
-      else Some (Provider_error.InvalidRequest { provider; reason = message })
+      else Some (Provider_error.InvalidRequest { reason = message })
   | Llm_provider.Retry.NotFound { message } ->
-      Some (Provider_error.InvalidRequest { provider; reason = message })
+      Some (Provider_error.InvalidRequest { reason = message })
   | Llm_provider.Retry.ContextOverflow _ ->
       provider_capacity ~scope:`Model provider
   | Llm_provider.Retry.NetworkError _
@@ -515,23 +516,23 @@ let () =
       "Total provider-level errors classified during cascade \
        attempts (rate limit, auth failure, capacity exhaustion, \
        server error, invalid request). Labels: kind \
-       (Provider_error.to_error_kind), provider (provider debug \
+       (Provider_error.to_error_kind), provider (neutral runtime \
        label), cascade_name (originating cascade), capacity_scope \
        (CapacityExhausted scope or \"none\")."
     ()
 
 let provider_error_capacity_scope_label = function
-  | Provider_error.CapacityExhausted { scope; _ } ->
+  | Provider_error.CapacityExhausted { scope } ->
       Provider_error.scope_to_string scope
   | Provider_error.RateLimit _
-  | Provider_error.AuthError _
+  | Provider_error.AuthError
   | Provider_error.ServerError _
   | Provider_error.InvalidRequest _
   | Provider_error.CliWrappedHardQuota _
   | Provider_error.CliWrappedMaxTurns _
   | Provider_error.CliWrappedResumableSession _
   | Provider_error.PermissionDenied _
-  | Provider_error.ModelNotFound _ ->
+  | Provider_error.ModelNotFound ->
       "none"
 
 let emit_provider_error_metric ~cascade_name ~provider error =
@@ -543,7 +544,7 @@ let emit_provider_error_metric ~cascade_name ~provider error =
     ~labels:
       [
         ("kind", Provider_error.to_error_kind error);
-        ("provider", provider);
+        ("provider", public_runtime_provider_label);
         ("cascade_name", cascade_name);
         ("capacity_scope", provider_error_capacity_scope_label error);
       ]
@@ -579,16 +580,15 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
   in
   if is_max_execution_time then "max_execution_time" else "provider"
 
-let emit_oas_run_timeout_metric ~cascade_name ~provider err =
+let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
   match err with
   | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
       let cascade_name = provider_label (cascade_name_to_string cascade_name) in
-      let provider = provider_label provider in
       Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
         ~labels:
           [
             ("cascade", cascade_name);
-            ("provider", provider);
+            ("provider", public_runtime_provider_label);
             ("source", timeout_source_label err);
           ]
         ()

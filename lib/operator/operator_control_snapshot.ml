@@ -3,12 +3,8 @@ include Operator_pending_confirm
 include Operator_digest
 
 let resolved_context_budget_of_meta (meta : Keeper_types.keeper_meta) : int option =
-  let active_model_label = Keeper_exec_status.active_model_label_of_meta meta in
-  if active_model_label = ""
-  then None
-  else (
-    let max_ctx = Cascade_runtime.max_context_of_label active_model_label in
-    if max_ctx = 0 then None else Some max_ctx)
+  let _ = meta in
+  None
 ;;
 
 let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
@@ -122,32 +118,13 @@ let non_empty_trimmed_string_opt value =
 let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
   let cascade_name = Keeper_types.cascade_name_of_meta meta in
   let effective_cascade = Keeper_cascade_profile.resolve_live cascade_name in
-  let primary_model =
-    match
-      Cascade_runtime.models_of_cascade_name
-        (Keeper_cascade_profile.Runtime_name effective_cascade)
-    with
-    | model :: _ -> Some model
-    | [] -> None
-  in
-  let active_model =
-    Keeper_exec_status.active_model_of_meta meta |> non_empty_trimmed_string_opt
-  in
-  let active_model_label =
-    Keeper_exec_status.active_model_label_of_meta meta |> non_empty_trimmed_string_opt
-  in
-  let last_model_used_label =
-    if String.trim meta.runtime.usage.last_model_used = ""
-    then None
-    else active_model_label
-  in
   [ "cascade_name", string_option_to_json (non_empty_trimmed_string_opt cascade_name)
   ; "cascade_canonical", `String effective_cascade
   ; "selected_cascade_canonical", `String effective_cascade
-  ; "primary_model", string_option_to_json primary_model
-  ; "active_model", string_option_to_json active_model
-  ; "active_model_label", string_option_to_json active_model_label
-  ; "last_model_used_label", string_option_to_json last_model_used_label
+  ; "primary_model", `Null
+  ; "active_model", `Null
+  ; "active_model_label", `Null
+  ; "last_model_used_label", `Null
   ]
 ;;
 
@@ -924,13 +901,11 @@ let keepers_json
                          ; "last_compaction_ago_s", `Float last_compaction_ago_s
                          ; "last_proactive_ago_s", `Float last_proactive_ago_s
                          ; "last_activity_ago_s", `Float last_activity_ago_s
-                         ; "last_model_used", `String meta.runtime.usage.last_model_used
+                         ; "last_model_used", `Null
                          ]
                          @ keeper_runtime_identity_fields meta
                          @ [ "keepalive_running", `Bool keepalive_running
-                           ; ( "next_model_hint"
-                             , string_option_to_json
-                                 (Keeper_exec_status.next_model_hint_of_meta meta) )
+                           ; "next_model_hint", `Null
                            ; ( "active_goal_ids"
                              , `List
                                  (List.map
@@ -1247,12 +1222,9 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "status", `String agent_status
                     ; "generation", `Int meta.runtime.generation
                     ; "turn_count", `Int meta.runtime.usage.total_turns
-                    ; "last_model_used", `String meta.runtime.usage.last_model_used
-                    ; ( "active_model"
-                      , `String (Keeper_exec_status.active_model_of_meta meta) )
-                    ; ( "next_model_hint"
-                      , string_option_to_json
-                          (Keeper_exec_status.next_model_hint_of_meta meta) )
+                    ; "last_model_used", `Null
+                    ; "active_model", `Null
+                    ; "next_model_hint", `Null
                     ; ( "active_goal_ids"
                       , `List
                           (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)

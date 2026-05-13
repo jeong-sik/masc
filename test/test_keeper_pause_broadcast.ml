@@ -330,6 +330,33 @@ let string_list_member name json =
   json |> U.member name |> U.to_list |> List.map U.to_string
 ;;
 
+let test_receipt_json_redacts_provider_model_identity () =
+  let receipt =
+    { (mk_receipt ())
+      with
+      model_used = Some "provider:model-private"
+    ; cascade_selected_model = Some "provider:model-private"
+    }
+  in
+  let json = R.to_json receipt in
+  check bool "receipt model_used redacted" true (json |> U.member "model_used" = `Null);
+  check
+    bool
+    "receipt cascade selected_model redacted"
+    true
+    (json |> U.member "cascade" |> U.member "selected_model" = `Null);
+  check
+    bool
+    "runtime contract provider redacted"
+    true
+    (json |> U.member "runtime_contract" |> U.member "provider" = `Null);
+  check
+    bool
+    "runtime contract model redacted"
+    true
+    (json |> U.member "runtime_contract" |> U.member "model" = `Null)
+;;
+
 let test_broadcast_payload_carries_turn_diagnostics () =
   let receipt =
     mk_receipt
@@ -343,6 +370,12 @@ let test_broadcast_payload_carries_turn_diagnostics () =
       ~stop_reason:Masc_mcp.Cascade_runner.Completed
       ~goal_ids:[ "goal-main" ]
       ()
+  in
+  let receipt =
+    { receipt with
+      model_used = Some "provider:model-private"
+    ; cascade_selected_model = Some "provider:model-private"
+    }
   in
   let payload =
     R.operator_broadcast_payload
@@ -378,7 +411,8 @@ let test_broadcast_payload_carries_turn_diagnostics () =
     "missing required tools"
     [ "keeper_shell" ]
     (string_list_member "missing_required_tools" contract);
-  check string "stop reason" "completed" (payload |> U.member "stop_reason" |> U.to_string)
+  check string "stop reason" "completed" (payload |> U.member "stop_reason" |> U.to_string);
+  check bool "broadcast model_used redacted" true (payload |> U.member "model_used" = `Null)
 ;;
 
 let test_stale_broadcast_payload_uses_low_cardinality_stale_reason () =
@@ -598,6 +632,10 @@ let () =
             "all 3 broadcast paths reachable"
             `Quick
             test_each_broadcast_disp_is_reachable
+        ; test_case
+            "receipt JSON redacts provider/model identity"
+            `Quick
+            test_receipt_json_redacts_provider_model_identity
         ; test_case
             "broadcast payload carries turn diagnostics"
             `Quick

@@ -35,11 +35,15 @@ type run_result =
 (** Trim and return [None] if the result is empty. *)
 val nonempty_trimmed : string -> string option
 
-(** Resolve the model name to display in user-facing surfaces.
-    Prefers cascade-observation [model_label] over [model_id], falls
-    back to provider-reported [model_used]. *)
+(** Legacy MASC-facing model label helper.
+
+    MASC no longer exposes concrete provider/model identity on status,
+    metrics, or dashboard surfaces; OAS owns that resolution. Kept for
+    schema compatibility and returns the neutral runtime lane label. *)
 val surface_model_used : run_result -> string
 
-(** Resolve the concrete model id (always prefers [model_id] over any
-    cascade label) for accountability. See #9953. *)
+(** Legacy MASC-facing resolved model helper.
+
+    Kept for schema compatibility and returns the neutral runtime lane label;
+    concrete provider/model identity belongs to OAS telemetry. *)
 val surface_resolved_model_id : run_result -> string

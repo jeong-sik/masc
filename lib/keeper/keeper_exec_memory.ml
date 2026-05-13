@@ -467,7 +467,7 @@ let keeper_context_status_json
          ; "context_tokens", `Int ctx_tokens
          ; "context_max", `Int ctx_max
          ; "message_count", `Int (List.length (messages_of_context ctx_work))
-         ; "last_model_used", `String meta.runtime.usage.last_model_used
+         ; "last_model_used", `Null
          ]
          @ Keeper_sandbox.context_status_fields sandbox
          @ [ "sandbox_live", sandbox_live

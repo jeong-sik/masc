@@ -348,16 +348,16 @@ function ingestRuntimeProjection(
       recordOasLlmCall(eventTimestampMs(event))
       if (opts?.includeLiveTrace) {
         const turn = asNumber(payload.turn)
-        const model = asString(payload.model) ?? 'unknown'
+        const runtime = 'runtime'
         const inputTokens = asNumber(payload.input_tokens) ?? 0
         maybeAppendLiveTrace(agentName, event, {
           idSuffix: `llm_request|${turn ?? 'na'}`,
           kind: 'lifecycle',
-          summary: `LLM 요청 · ${model} · ${inputTokens}tok${turn != null ? ` · turn ${turn}` : ''}`,
+          summary: `LLM 요청 · ${runtime} · ${inputTokens}tok${turn != null ? ` · turn ${turn}` : ''}`,
           data: {
             durable_kind: 'llm_request',
             turn: turn ?? null,
-            model,
+            model: runtime,
             input_tokens: inputTokens,
           },
         })

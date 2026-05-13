@@ -263,18 +263,9 @@ let api_key_env_json ~path value =
     loop [] fields
 ;;
 
-(* Generic Otoml -> Yojson conversion used for namespaces that the
-   materializer should pass through verbatim instead of treating as a
-   cascade profile.  Currently used for the [admission] namespace
-   introduced by RFC-0026 PR-B (#12926, #1089).
-
-   Without this, every [admission.<keeper>] sub-table breaks the
-   materializer (treated as a profile, sub-table keys rejected as
-   "unknown field"), which fails cascade.toml rendering and
-   takes down every keeper that resolves a cascade through cascade.toml
-   — not just the keepers with admission blocks.  The error is a
-   single fleet-wide regression, so the materializer needs to know
-   about the admission namespace explicitly. *)
+(* Generic Otoml -> Yojson conversion used for RFC-0058 namespaces that the
+   materializer should pass through verbatim instead of treating as a cascade
+   profile. *)
 let rec otoml_to_yojson (value : Otoml.t) : Yojson.Safe.t =
   match value with
   | Otoml.TomlString s -> `String s
@@ -403,13 +394,6 @@ let render_toml_to_yojson toml =
           match profiles_json ~path:"profiles" value with
           | Ok profiles -> loop ([ "profiles", profiles ] :: acc) rest
           | Error _ as err -> err)
-        else if String.equal key "admission"
-        then
-          (* RFC-0026 admission namespace — pass through to JSON
-                 verbatim.  The schema is owned by
-                 [Keeper_admission_policy.parse_admission_json] in
-                 lib/keeper/, not by the cascade profile schema. *)
-          loop ([ "admission", otoml_to_yojson value ] :: acc) rest
         else if is_rfc_0058_namespace key
         then loop ([ key, otoml_to_yojson value ] :: acc) rest
         else (

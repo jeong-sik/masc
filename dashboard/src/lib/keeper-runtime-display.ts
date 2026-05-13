@@ -50,48 +50,14 @@ type ActivityCandidate = {
   ageSeconds: number
 }
 
-const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a', 'null', 'undefined', 'default', 'auto'])
-
 function trimmed(value: string | null | undefined): string | null {
   const text = value?.trim()
   return text ? text : null
 }
 
-function modelText(value: string | null | undefined): string | null {
-  const text = trimmed(value)
-  if (!text || MODEL_PLACEHOLDERS.has(text.toLowerCase())) return null
-  return text
-}
-
-function latestMetricModel(source: KeeperModelDisplaySource | null | undefined): string | null {
-  const series = source?.metrics_series ?? []
-  for (let index = series.length - 1; index >= 0; index -= 1) {
-    const model = modelText(series[index]?.model_used)
-    if (model) return model
-  }
-  return null
-}
-
 export function keeperDisplayModel(
-  source: KeeperModelDisplaySource | null | undefined,
+  _source: KeeperModelDisplaySource | null | undefined,
 ): KeeperModelDisplay | null {
-  const lastModelLabel = modelText(source?.last_model_used_label)
-  if (lastModelLabel) return { label: '최근 모델', value: lastModelLabel }
-
-  const lastModel = modelText(source?.last_model_used)
-  if (lastModel) return { label: '최근 모델', value: lastModel }
-
-  const activeModelLabel = modelText(source?.active_model_label)
-  if (activeModelLabel) return { label: '현재 모델', value: activeModelLabel }
-
-  const activeModel = modelText(source?.active_model)
-  if (activeModel) return { label: '현재 모델', value: activeModel }
-
-  const metricModel = latestMetricModel(source)
-  if (metricModel) return { label: '최근 모델', value: metricModel }
-
-  const fallbackModel = modelText(source?.model) ?? modelText(source?.primary_model)
-  if (fallbackModel) return { label: '모델', value: fallbackModel }
   return null
 }
 
@@ -207,12 +173,7 @@ function isHeartbeatAlive(heartbeat: string): boolean {
 
 function socialModelFallbackHint(keeper: Keeper): string | null {
   if (keeper.social_model_recognized !== false) return null
-  const configured = keeper.configured_social_model?.trim()
-  const fallback = keeper.social_model_fallback?.trim()
-  if (configured && fallback) return `대화 모델 ${configured} 미인식 · ${fallback}로 대체 중`
-  if (configured) return `대화 모델 ${configured} 미인식`
-  if (fallback) return `대화 모델 fallback · ${fallback}`
-  return '미인식 대화 모델 설정'
+  return '대화 런타임 설정 확인 필요'
 }
 
 function continueGateHint(keeper: Keeper): string {
@@ -301,7 +262,7 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
   }
   if (blockerClass === 'cascade_exhausted') {
-    return '캐스케이드 후보가 모두 소진되어 provider 상태 확인이 필요합니다.'
+    return '캐스케이드 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
   }
   if (blockerClass === 'no_tool_capable_provider') {
     return '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.'

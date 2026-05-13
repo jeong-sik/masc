@@ -87,9 +87,6 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
           ${execution.tool_contract_result ? html`
             <${StatusChip} tone=${turnFsmChipTone(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')} uppercase=${false} class="font-mono">tool ${execution.tool_contract_result}</${StatusChip}>
           ` : null}
-          ${execution.model_used ? html`
-            <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">model ${execution.model_used}</${StatusChip}>
-          ` : null}
         </div>
       ` : null}
     </section>

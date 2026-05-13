@@ -463,10 +463,7 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
       updated)
 ;;
 
-(* ── RFC-0026 Phase A1 helpers (defined after with_in_turn_liveness_pulse
-   to avoid forward reference) ───────────────────────────────────────── *)
-
-(** Run keeper cycle with semaphore slot control (legacy path). *)
+(** Run keeper cycle with semaphore slot control. *)
 let run_keeper_cycle_with_slot
       ~ctx
       ~meta_after_cursor_persist
@@ -973,257 +970,28 @@ let run_keepalive_unified_turn
           ~channel:turn_decision.channel
           ~kind:Semaphore_wait_pending
           ();
-        (* RFC-0026 Phase A1: live admission dispatch wiring.
-           [init_once_from_base_path] populates the registry from
-           [<base_path>/.masc/config/cascade.toml] [admission.*]
-           sub-tables on first call.  When the JSON has no admission
-           blocks the registry stays empty and [decide_live] returns
-           [Live_legacy] always — caller falls through to the existing
-           semaphore path. *)
-        Keeper_admission_runtime.init_once_from_base_path ~base_path:ctx.config.base_path;
         let selected_item_opt = None in
-        let admission_result =
-          Keeper_admission_runtime.decide_live ~keeper_id:meta_after_triage.name
-        in
-        (match admission_result with
-         | Keeper_admission_runtime.Live_dispatch { drift; _ } ->
-           Log.Keeper.info
-             "%s: admission dispatch provider=%s drift=%s"
-             meta_after_triage.name
-             drift.actual_provider
-             drift.reason
-         | Keeper_admission_runtime.Live_wait ->
-           Log.Keeper.info
-             "%s: admission wait (enqueued in WFQ, depth=%d)"
-             meta_after_triage.name
-             (Keeper_admission_runtime.wfq_depth ())
-         | Keeper_admission_runtime.Live_surface reason ->
-           let reason_str =
-             match reason with
-             | Keeper_admission_router.Min_tier_unsatisfiable -> "min_tier_unsatisfiable"
-             | Keeper_admission_router.All_candidates_throttled ->
-               "all_candidates_throttled"
-           in
-           Log.Keeper.warn
-             "%s: admission surface reason=%s"
-             meta_after_triage.name
-             reason_str
-         | Keeper_admission_runtime.Live_legacy -> ());
-        match admission_result with
-        | Keeper_admission_runtime.Live_legacy ->
-          (* Flag off or no policy — fall through to legacy semaphore path.
-               Preserve all existing telemetry and error handling. *)
-          (match
-             Keeper_turn_slot.with_keeper_turn_slot_control
-               ~cascade_profile:(cascade_name_of_meta meta_after_triage)
-               ~keeper_name:meta_after_triage.name
-               ~channel:turn_decision.channel
-               (fun ~semaphore_wait_ms ~slot_control ->
-                  run_keeper_cycle_with_slot
-                    ~ctx
-                    ~meta_after_cursor_persist
-                    ~stop
-                    ~obs
-                    ~turn_decision
-                    ~shared_context
-                    ~semaphore_wait_ms
-                    ~slot_control
-                    ?selected_item:selected_item_opt
-                    ())
-           with
-           | Ok meta -> meta
-           | Error (`Semaphore_wait_timeout timeout) ->
-             handle_semaphore_wait_timeout ~ctx ~meta_after_triage ~turn_decision timeout)
-        | Keeper_admission_runtime.Live_wait ->
-          (* Enqueued in WFQ overflow — skip this turn, retry on next
-               heartbeat when refill wakes this keeper. *)
-          let blocker_text =
-            Printf.sprintf
-              "admission_wait: wfq_depth=%d"
-              (Keeper_admission_runtime.wfq_depth ())
-          in
-          Log.Keeper.info "%s: skipping turn (%s)" meta_after_triage.name blocker_text;
-          Keeper_types.map_runtime
-            (fun rt ->
-               { rt with
-                 last_blocker =
-                   Some
-                     (Keeper_meta_contract.blocker_info_of_class
-                        ~detail:blocker_text
-                        Keeper_types.Admission_wait_wfq)
-               })
-            meta_after_triage
-        | Keeper_admission_runtime.Live_surface reason ->
-          let reason_str =
-            match reason with
-            | Keeper_admission_router.Min_tier_unsatisfiable ->
-              "admission_surface: min_tier_unsatisfiable"
-            | Keeper_admission_router.All_candidates_throttled ->
-              "admission_surface: all_candidates_throttled"
-          in
-          Log.Keeper.warn "%s: skipping turn (%s)" meta_after_triage.name reason_str;
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_admission_shadow_outcome
-            ~labels:[ "keeper", meta_after_triage.name; "outcome", "surface" ]
-            ();
-          Keeper_types.map_runtime
-            (fun rt ->
-               { rt with
-                 last_blocker =
-                   Some
-                     (Keeper_meta_contract.blocker_info_of_class
-                        ~detail:reason_str
-                        Keeper_types.Admission_surface)
-               })
-            meta_after_triage
-        | Keeper_admission_runtime.Live_dispatch { candidate; drift; bucket } ->
-          (* Bypass semaphore, run cycle directly with acquired token.
-               Release token via Fun.protect to ensure no leak on exception. *)
-          Log.Keeper.info
-            "%s: admission dispatch provider=%s model=%s tier=%s drift=%s"
-            meta_after_triage.name
-            candidate.provider
-            candidate.model
-            (Keeper_admission_policy.tier_label candidate.tier)
-            drift.reason;
-          Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_admission_shadow_outcome
-            ~labels:
-              [ "keeper", meta_after_triage.name
-              ; "outcome", "dispatch"
-              ; "provider", drift.actual_provider
-              ; "drift", drift.reason
-              ]
-            ();
-          Eio_guard.protect
-            ~finally:(fun () -> Keeper_admission_runtime.release_bucket bucket)
-            (fun () ->
-               match
-                 with_in_turn_liveness_pulse
-                   ~ctx
-                   ~meta:meta_after_cursor_persist
-                   ~stop
-                   (fun () ->
-                      Keeper_unified_turn.run_keeper_cycle
-                        ~config:ctx.config
-                        ~meta:meta_after_cursor_persist
-                        ~observation:obs
-                        ~generation:meta_after_cursor_persist.runtime.generation
-                        ~channel:turn_decision.channel
-                        ~semaphore_wait_ms:0
-                        ~shared_context
-                        ?selected_item:selected_item_opt
-                        ())
-               with
-               | Error err ->
-                 let e_str = Agent_sdk.Error.to_string err in
-                 Log.Keeper.debug
-                   "%s: keeper cycle failed: %s"
-                   meta_after_cursor_persist.name
-                   e_str;
-                 if
-                   String_util.contains_substring e_str "Eio switch not available"
-                   || String_util.contains_substring e_str "Eio net not available"
-                 then (
-                   Log.Keeper.error
-                     "%s: fatal environment error — promoting to Keeper_fiber_crash: %s"
-                     meta_after_cursor_persist.name
-                     e_str;
-                   Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_heartbeat_failures
-                     ~labels:
-                       [ "keeper", meta_after_cursor_persist.name
-                       ; "phase", "fatal_environment"
-                       ]
-                     ();
-                   Keeper_registry.set_failure_reason
-                     ~base_path:ctx.config.base_path
-                     meta_after_cursor_persist.name
-                     (Some
-                        (Keeper_registry.Exception
-                           (Printf.sprintf "fatal environment error: %s" e_str)));
-                   raise Keeper_registry.Keeper_fiber_crash);
-                 if is_oas_timeout_budget_error err
-                 then (
-                   let keeper_name = meta_after_cursor_persist.name in
-                   let prior_strikes =
-                     prior_oas_timeout_budget_strikes
-                       ~base_path:ctx.config.base_path
-                       ~keeper_name
-                   in
-                   let strikes =
-                     Keeper_turn_slot.bump_budget_exhaustion_seeded
-                       ~keeper_name
-                       ~prior_strikes
-                   in
-                   Keeper_registry.set_failure_reason
-                     ~base_path:ctx.config.base_path
-                     keeper_name
-                     (Some (Keeper_registry.Oas_timeout_budget_loop { count = strikes }));
-                   record_oas_timeout_budget_observation
-                     ~base_path:ctx.config.base_path
-                     ~keeper_name;
-                   if strikes >= Keeper_turn_slot.oas_timeout_budget_strike_limit
-                   then (
-                     Log.Keeper.error
-                       "%s: %d consecutive oas_timeout_budget strikes (>= %d) — \
-                        promoting to Keeper_fiber_crash for supervisor auto-pause"
-                       keeper_name
-                       strikes
-                       Keeper_turn_slot.oas_timeout_budget_strike_limit;
-                     Prometheus.inc_counter
-                       Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-                       ~labels:[ "keeper", keeper_name; "outcome", "promote" ]
-                       ();
-                     Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
-                     raise Keeper_registry.Keeper_fiber_crash)
-                   else (
-                     Log.Keeper.warn
-                       "%s: oas_timeout_budget strike %d/%d (next strike will trigger \
-                        fiber crash + auto-pause)"
-                       keeper_name
-                       strikes
-                       Keeper_turn_slot.oas_timeout_budget_strike_limit;
-                     Prometheus.inc_counter
-                       Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-                       ~labels:[ "keeper", keeper_name; "outcome", "warn" ]
-                       ()));
-                 (match read_meta ctx.config meta_after_cursor_persist.name with
-                  | Ok (Some latest) -> latest
-                  | Ok None ->
-                    Log.Keeper.error
-                      "keeper:%s read_meta returned None after turn failure, using stale \
-                       meta"
-                      meta_after_cursor_persist.name;
-                    Prometheus.inc_counter
-                      Keeper_metrics.metric_keeper_meta_read_failures
-                      ~labels:
-                        [ "keeper", meta_after_cursor_persist.name
-                        ; "site", "none_after_failure"
-                        ]
-                      ();
-                    meta_after_cursor_persist
-                  | Error e ->
-                    Log.Keeper.error
-                      "keeper:%s read_meta failed after turn failure (%s), using stale \
-                       meta"
-                      meta_after_cursor_persist.name
-                      e;
-                    Prometheus.inc_counter
-                      Keeper_metrics.metric_keeper_meta_read_failures
-                      ~labels:
-                        [ "keeper", meta_after_cursor_persist.name
-                        ; "site", "error_after_failure"
-                        ]
-                      ();
-                    meta_after_cursor_persist)
-               | Ok updated ->
-                 Keeper_turn_slot.reset_budget_exhaustion
-                   ~keeper_name:meta_after_cursor_persist.name;
-                 clear_oas_timeout_budget_failure_reason
-                   ~base_path:ctx.config.base_path
-                   ~keeper_name:meta_after_cursor_persist.name;
-                 updated))
+        match
+          Keeper_turn_slot.with_keeper_turn_slot_control
+            ~cascade_profile:(cascade_name_of_meta meta_after_triage)
+            ~keeper_name:meta_after_triage.name
+            ~channel:turn_decision.channel
+            (fun ~semaphore_wait_ms ~slot_control ->
+               run_keeper_cycle_with_slot
+                 ~ctx
+                 ~meta_after_cursor_persist
+                 ~stop
+                 ~obs
+                 ~turn_decision
+                 ~shared_context
+                 ~semaphore_wait_ms
+                 ~slot_control
+                 ?selected_item:selected_item_opt
+                 ())
+        with
+        | Ok meta -> meta
+        | Error (`Semaphore_wait_timeout timeout) ->
+          handle_semaphore_wait_timeout ~ctx ~meta_after_triage ~turn_decision timeout)
       else if obs.message_cursor_updates <> []
       then meta_after_cursor_persist
       else meta_after_triage

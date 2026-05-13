@@ -537,8 +537,7 @@ let run_turn
        if keeper_oas_context.claude_mcp_config = None
        then (
          let uses_cli_missing_sync =
-           List.exists
-             Provider_adapter.supports_runtime_mcp_http_headers_for_model_label
+           Cascade_runtime_candidate.labels_require_runtime_mcp_header_sync
              meta.models
          in
          if uses_cli_missing_sync
@@ -728,7 +727,7 @@ let run_turn
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
                  let text = Agent_sdk.Types.text_of_content result.response.content in
-                 let model = result.response.model in
+                 let model = "runtime" in
                  receipt_turn_count_ref := Some result.turns;
                  receipt_model_used_ref := Some model;
                  receipt_stop_reason_ref := Some result.stop_reason;
@@ -1610,7 +1609,7 @@ let run_turn
                                @ (match result.response.telemetry with
                                   | Some t ->
                                     [ ( "inference_telemetry"
-                                      , Agent_sdk.Types.inference_telemetry_to_yojson t )
+                                      , Keeper_hooks_oas.inference_telemetry_to_runtime_json t )
                                     ]
                                   | None -> [])
                                @
@@ -1863,8 +1862,7 @@ let run_turn
            ~keeper_turn_id:(start_turn_count + 1) ~event
            ~cascade_name:
              (Keeper_execution_receipt.cascade_name_to_string receipt.cascade_name)
-           ?model_id:receipt.model_used ~status ~decision ~receipt_path
-           ?tool_call_log_path ()
+           ~status ~decision ~receipt_path ?tool_call_log_path ()
          |> Keeper_runtime_manifest.append_best_effort ~site config
        in
        (* Tier A2 / Cycle 5: receipt append failure escalates to a

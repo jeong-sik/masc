@@ -65,7 +65,7 @@ val run_try_provider :
   try_provider_ctx ->
   ?resume_checkpoint:Agent_sdk.Checkpoint.t ->
   ?per_provider_timeout_s:float ->
-  Llm_provider.Provider_config.t ->
+  Cascade_runtime_candidate.t ->
   (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
   * Agent_sdk.Checkpoint.t option
   * (string * Cascade_attempt_liveness_config.success_sample) option

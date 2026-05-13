@@ -171,11 +171,7 @@ let runtime_mcp_keeper_log_context_of_entry
   let trace_id =
     Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id
   in
-  let model =
-    let last_model_used = String.trim entry.meta.runtime.usage.last_model_used in
-    if last_model_used <> "" then last_model_used
-    else String.trim (Keeper_types.cascade_name_of_meta entry.meta)
-  in
+  let model = "runtime" in
   let session_id =
     match json_nonempty_string_opt "session_id" arguments with
     | Some _ as session_id -> session_id

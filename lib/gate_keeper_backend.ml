@@ -7,19 +7,14 @@ let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
   Safe_ops.protect ~default:None (fun () ->
     let json = Yojson.Safe.from_string body in
     let open Yojson.Safe.Util in
-    let model =
-      json |> member "model_used" |> to_string_option
-      |> Option.value
-           ~default:
-             (json |> member "model" |> to_string_option
-              |> Option.value ~default:"")
-    in
     let dur = json |> member "duration_ms" |> to_int_option
               |> Option.value ~default:0 in
     let tok = json |> member "total_tokens" |> to_int_option
               |> Option.value ~default:0 in
-    if model = "" && dur = 0 && tok = 0 then None
-    else Some { Gate_protocol.model_used = model; duration_ms = dur; tokens_used = tok })
+    if dur = 0 && tok = 0 then None
+    else
+      Some
+        { Gate_protocol.model_used = "runtime"; duration_ms = dur; tokens_used = tok })
 
 let extract_reply_text (body : string) : string =
   Safe_ops.protect ~default:body (fun () ->
@@ -149,7 +144,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       let structured = extract_structured body in
       let stats = match extract_turn_stats body with
         | Some s -> Some { s with duration_ms }
-        | None -> Some { Gate_protocol.model_used = ""; duration_ms; tokens_used = 0 }
+        | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
       Gate_protocol.Reply { content = reply; structured; stats }
   | Some (false, err) ->

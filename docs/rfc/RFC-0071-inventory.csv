@@ -389,11 +389,6 @@ lib/keeper/keeper_accountability.ml,173,None,unclassified
 lib/keeper/keeper_accountability.ml,296,None,unclassified
 lib/keeper/keeper_accountability.ml,326,None,unclassified
 lib/keeper/keeper_accountability.ml,1121,false,unclassified
-lib/keeper/keeper_admission_glue.ml,8,false,unclassified
-lib/keeper/keeper_admission_policy.ml,34,None,unclassified
-lib/keeper/keeper_admission_policy.ml,73,None,unclassified
-lib/keeper/keeper_admission_policy.ml,81,None,unclassified
-lib/keeper/keeper_admission_registry.ml,20,None,unclassified
 lib/keeper/keeper_agent_tool_surface.ml,33,None,unclassified
 lib/keeper/keeper_agent_tool_surface.ml,72,None,unclassified
 lib/keeper/keeper_agent_tool_surface.ml,92,None,unclassified

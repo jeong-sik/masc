@@ -1482,10 +1482,8 @@ let test_composite_routes_surface_latest_execution_receipt () =
   let fleet_execution = fleet_snapshot |> member "execution" in
   check bool "fleet composite exposes latest receipt presence" true
     (fleet_execution |> member "latest_receipt_present" |> to_bool);
-  check bool "fleet composite exposes selected model when available" true
-    (match fleet_execution |> member "cascade" |> member "selected_model" with
-     | `String "custom:mock" | `Null -> true
-     | _ -> false)
+  check bool "fleet composite omits selected model" true
+    (fleet_execution |> member "cascade" |> member "selected_model" = `Null)
 ;;
 
 let test_composite_routes_surface_runtime_recommended_actions () =

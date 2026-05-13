@@ -18,20 +18,7 @@
 
 let normalize_model_name s =
   let s = String.trim s in
-  let s =
-    match String.index_opt s ':' with
-    | None -> s
-    | Some i ->
-        let prefix = String.sub s 0 i |> String.lowercase_ascii in
-        if Provider_adapter.resolve_direct_canonical_name prefix <> None then
-          String.sub s (i + 1) (String.length s - i - 1)
-        else
-          s
-  in
-  if String.ends_with ~suffix:":latest" s then
-    String.sub s 0 (String.length s - String.length ":latest")
-  else
-    s
+  Cascade_runtime_candidate.normalize_runtime_name_for_bucket s
 
 type keeper_gen_window_stats = {
   mutable turns: int;

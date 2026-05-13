@@ -100,17 +100,17 @@ describe('keeperDisplayStatus', () => {
 })
 
 describe('keeperDisplayModel', () => {
-  it('keeps CLI/provider runtime labels intact for active auto profiles', () => {
+  it('redacts active runtime labels', () => {
     expect(
       keeperDisplayModel({
         active_model_label: 'claude_code:auto',
         active_model: 'claude',
         model: 'claude',
       }),
-    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+    ).toBeNull()
   })
 
-  it('keeps active runtime labels ahead of metrics-series fallback', () => {
+  it('does not fall back to metrics-series model labels', () => {
     expect(
       keeperDisplayModel({
         active_model: 'claude_code:auto',
@@ -119,20 +119,20 @@ describe('keeperDisplayModel', () => {
           { model_used: 'anthropic:claude-sonnet-4-6' },
         ],
       }),
-    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+    ).toBeNull()
   })
 
-  it('skips placeholder model sentinels before falling back to active runtime labels', () => {
+  it('redacts even non-placeholder legacy labels', () => {
     expect(
       keeperDisplayModel({
         last_model_used: 'unknown',
         active_model: 'claude_code:auto',
         model: 'claude',
       }),
-    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+    ).toBeNull()
   })
 
-  it('skips expanded exact placeholders without hiding provider auto labels', () => {
+  it('redacts provider auto labels and primary model labels', () => {
     expect(
       keeperDisplayModel({
         last_model_used_label: 'default',
@@ -140,10 +140,10 @@ describe('keeperDisplayModel', () => {
         active_model_label: 'codex_cli:auto',
         primary_model: 'openai:gpt-5.4',
       }),
-    ).toEqual({ label: '현재 모델', value: 'codex_cli:auto' })
+    ).toBeNull()
   })
 
-  it('uses the latest metrics model when structured runtime model is absent', () => {
+  it('redacts metrics-only model labels', () => {
     expect(
       keeperDisplayModel({
         metrics_series: [
@@ -151,7 +151,7 @@ describe('keeperDisplayModel', () => {
           { model_used: 'anthropic:claude-sonnet-4-6' },
         ],
       }),
-    ).toEqual({ label: '최근 모델', value: 'anthropic:claude-sonnet-4-6' })
+    ).toBeNull()
   })
 })
 

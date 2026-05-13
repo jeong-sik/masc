@@ -300,18 +300,17 @@ let keeper_action_kind_of_tool_names tool_names =
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
   (* provider filtering now handled by OAS cascade via ~provider_filter *)
   let configured = Keeper_model_labels.configured_model_labels_of_meta m in
-  let configured_ids =
-    try
-      Cascade_config.parse_model_strings configured
-      |> List.map (fun (c : Llm_provider.Provider_config.t) -> String.trim c.model_id)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
-  in
   match String.trim (Keeper_exec_status.active_model_of_meta m) with
   | "" -> configured
   | model ->
       let model_allowed =
         List.mem model configured
-        || List.mem model configured_ids
+        || List.exists
+             (fun label ->
+               Cascade_runtime_candidate.label_matches_runtime_id
+                 ~label
+                 ~runtime_id:model)
+             configured
       in
       if model_allowed
       then dedupe_keep_order (model :: configured)

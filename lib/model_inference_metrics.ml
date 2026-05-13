@@ -299,26 +299,11 @@ type raw_entry =
   ; is_error : bool
   }
 
-let provider_opt_of_model (model : string) : string option =
-  let provider = Keeper_hooks_oas.provider_of_model model in
-  if String.equal provider "unknown" then None else Some provider
-;;
-
-let provider_kind_opt_of_fields (fields : (string * Yojson.Safe.t) list) =
-  match List.assoc_opt "provider_kind" fields with
-  | Some (`String s) -> Llm_provider.Provider_config.provider_kind_of_string s
-  | _ -> None
-;;
-
 let provider_opt_of_fields ~(model : string) (fields : (string * Yojson.Safe.t) list)
   : string option
   =
-  match List.assoc_opt "provider" fields with
-  | Some (`String s) when String.trim s <> "" -> Some s
-  | _ ->
-    let provider_kind = provider_kind_opt_of_fields fields in
-    let provider = Keeper_hooks_oas.provider_of_model ?provider_kind model in
-    if String.equal provider "unknown" then None else Some provider
+  let _ = model, fields in
+  None
 ;;
 
 let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
@@ -557,13 +542,8 @@ let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
 ;;
 
 let canonical_cost_model_id ~(provider : string option) model =
-  let module PK = Llm_provider.Provider_kind in
-  let provider_kind = Option.bind provider PK.of_string in
-  let ollama_prefix = Provider_adapter.cn_ollama ^ ":" in
-  match provider_kind with
-  | Some PK.Ollama when not (String.starts_with ~prefix:ollama_prefix model) ->
-    ollama_prefix ^ model
-  | _ -> model
+  let _ = provider in
+  model
 ;;
 
 let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
@@ -1013,7 +993,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
        let provider =
          match List.find_map (fun e -> e.provider) entries with
          | Some _ as p -> p
-         | None -> provider_opt_of_model model_id
+        | None -> None
        in
        let stats =
          { model_id
@@ -1283,6 +1263,9 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min : model_bucketed list =
 
 (* ── JSON serialization ─────────────────────────────────── *)
 
+let public_runtime_label = "runtime"
+let public_runtime_lane_label index = Printf.sprintf "runtime_lane_%d" (index + 1)
+
 let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
   let opt_float = function
     | Some f -> `Float f
@@ -1301,7 +1284,9 @@ let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
     ]
 ;;
 
-let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
+let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
+  : Yojson.Safe.t
+  =
   let opt_float = function
     | Some f -> `Float f
     | None -> `Null
@@ -1315,8 +1300,8 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
     | None -> `Null
   in
   `Assoc
-    [ "model_id", `String s.model_id
-    ; "provider", opt_string s.provider
+    [ "model_id", `String model_label
+    ; "provider", `Null
     ; "entry_count", `Int s.entry_count
     ; "avg_tok_per_sec", opt_float s.avg_tok_per_sec
     ; "p50_tok_per_sec", opt_float s.p50_tok_per_sec
@@ -1366,7 +1351,7 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
              (fun (r : recent_entry) ->
                 `Assoc
                   [ "ts_unix", `Float r.re_ts_unix
-                  ; "provider", opt_string r.re_provider
+                  ; "provider", `Null
                   ; "outcome", `String r.re_outcome
                   ; "stop_reason", opt_string r.re_stop_reason
                   ; "turn_lane", opt_string r.re_turn_lane
@@ -1416,16 +1401,21 @@ let to_json (agg : aggregate) : Yojson.Safe.t =
     ; "total_entries", `Int agg.total_entries
     ; "total_error_entries", `Int agg.total_error_entries
     ; "latency_buckets", `List (List.map latency_bucket_to_json agg.latency_buckets)
-    ; "models", `List (List.map model_stats_to_json agg.models)
+    ; ( "models"
+      , `List
+          (List.mapi
+             (fun index stats ->
+                model_stats_to_json
+                  ~model_label:(public_runtime_lane_label index)
+                  stats)
+             agg.models) )
     ]
 ;;
 
-(* ── Provider-scope rollup ─────────────────────────────────
-   Groups per-model stats by their [provider] string (the scheme prefix
-   produced by [Keeper_hooks_oas.provider_of_model]). Feeds
-   [Dashboard_cascade.health_json] so the cascade dashboard can surface
-   throughput and latency per provider next to the behavioural signals
-   from [Cascade_health_tracker].
+(* ── Runtime-lane rollup ────────────────────────────────────
+   Legacy provider strings are not reconstructed here.  Public dashboard
+   projections keep aggregate throughput/latency evidence while model/provider
+   identity is represented by neutral runtime lanes.
 
    All means are [entry_count]-weighted. Latency percentiles are
    approximations — averaging per-model p50/p95 does not produce a
@@ -1532,9 +1522,9 @@ let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
     | None -> `Null
   in
   `Assoc
-    [ "provider", `String s.ps_provider
+    [ "provider", `String public_runtime_label
     ; "entry_count", `Int s.ps_entry_count
-    ; "model_count", `Int s.ps_model_count
+    ; "model_count", `Int 0
     ; "avg_tok_per_sec", opt_float s.ps_avg_tok_per_sec
     ; "avg_prompt_tok_per_sec", opt_float s.ps_avg_prompt_tok_per_sec
     ; "avg_decode_tok_per_sec", opt_float s.ps_avg_decode_tok_per_sec
@@ -1560,20 +1550,21 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
   let entries = read_all_entries ~base_path ~since_unix in
   let model_stats_list = aggregate_by_model entries in
+  let indexed_model_stats = List.mapi (fun index stats -> index, stats) model_stats_list in
   (* per-agent rows — sorted by cost descending, skip zero-signal rows *)
   let per_agent =
-    model_stats_list
-    |> List.filter (fun (m : model_stats) ->
+    indexed_model_stats
+    |> List.filter (fun (_, (m : model_stats)) ->
       Option.value ~default:0.0 m.total_cost_usd > 0.0
       || Option.value ~default:0 m.total_input_tokens > 0
       || Option.value ~default:0 m.total_output_tokens > 0)
-    |> List.sort (fun a b ->
+    |> List.sort (fun (_, a) (_, b) ->
       Float.compare
         (Option.value ~default:0.0 b.total_cost_usd)
         (Option.value ~default:0.0 a.total_cost_usd))
-    |> List.map (fun (m : model_stats) ->
+    |> List.map (fun (index, (m : model_stats)) ->
       `Assoc
-        [ "agent", `String m.model_id
+        [ "agent", `String (public_runtime_lane_label index)
         ; "in_tok", `Int (Option.value ~default:0 m.total_input_tokens)
         ; "out_tok", `Int (Option.value ~default:0 m.total_output_tokens)
         ; "cost", `Float (Option.value ~default:0.0 m.total_cost_usd)
@@ -1581,38 +1572,19 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
         ; "p95_ms", opt_float m.p95_latency_ms
         ])
   in
-  (* provider × model cost matrix *)
-  let providers =
-    model_stats_list
-    |> List.filter_map (fun (m : model_stats) -> m.provider)
-    |> List.sort_uniq String.compare
-  in
-  let model_ids = model_stats_list |> List.map (fun (m : model_stats) -> m.model_id) in
-  let cost_map : (string * string, float) Hashtbl.t = Hashtbl.create 32 in
-  List.iter
-    (fun (m : model_stats) ->
-       match m.provider with
-       | Some p ->
-         Hashtbl.replace
-           cost_map
-           (p, m.model_id)
-           (Option.value ~default:0.0 m.total_cost_usd)
-       | None -> ())
-    model_stats_list;
+  (* Public matrix keeps cost shape without exporting provider/model identities. *)
+  let providers = if model_stats_list = [] then [] else [ public_runtime_label ] in
+  let model_ids = List.mapi (fun index _ -> public_runtime_lane_label index) model_stats_list in
   let grid =
-    List.map
-      (fun provider ->
-         `List
-           (List.map
-              (fun model_id ->
-                 let cost =
-                   match Hashtbl.find_opt cost_map (provider, model_id) with
-                   | Some c -> c
-                   | None -> 0.0
-                 in
-                 `Float cost)
-              model_ids))
-      providers
+    match providers with
+    | [] -> []
+    | _ ->
+      [ `List
+          (List.map
+             (fun (m : model_stats) ->
+                `Float (Option.value ~default:0.0 m.total_cost_usd))
+             model_stats_list)
+      ]
   in
   (* global p50/p95 from all entry latencies *)
   let all_latencies =

@@ -90,13 +90,6 @@ type blocker_class =
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
-  | Admission_wait_wfq
-    (** RFC-0026 Phase A1: keeper was enqueued in the WFQ overflow
-        queue because all above-floor candidates were throttled.
-        Will retry on next heartbeat tick when refill wakes it. *)
-  | Admission_surface
-    (** RFC-0026 Phase A1: admission router could not find any usable
-        provider (misconfiguration or all candidates below min_tier). *)
   | Oas_timeout_budget
   | Turn_timeout
   | Completion_contract_violation
@@ -142,8 +135,6 @@ let blocker_class_to_string = function
   | Autonomous_slot_wait_timeout -> "autonomous_slot_wait_timeout"
   | Admission_queue_wait_timeout -> "admission_queue_wait_timeout"
   | Turn_timeout_after_queue_wait -> "turn_timeout_after_queue_wait"
-  | Admission_wait_wfq -> "admission_wait_wfq"
-  | Admission_surface -> "admission_surface"
   | Oas_timeout_budget -> "oas_timeout_budget"
   | Turn_timeout -> "turn_timeout"
   | Completion_contract_violation -> "completion_contract_violation"
@@ -169,8 +160,6 @@ let blocker_class_of_serialized_string = function
   | "autonomous_slot_wait_timeout" -> Some Autonomous_slot_wait_timeout
   | "admission_queue_wait_timeout" -> Some Admission_queue_wait_timeout
   | "turn_timeout_after_queue_wait" -> Some Turn_timeout_after_queue_wait
-  | "admission_wait_wfq" -> Some Admission_wait_wfq
-  | "admission_surface" -> Some Admission_surface
   | "oas_timeout_budget" -> Some Oas_timeout_budget
   | "turn_timeout" -> Some Turn_timeout
   | "completion_contract_violation" -> Some Completion_contract_violation

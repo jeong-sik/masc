@@ -26,16 +26,7 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
         : null}
       ${keeper.social_model_recognized === false
         ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-status-warn)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)]">
-            대화 모델
-            ${keeper.configured_social_model
-              ? html`<span class="font-mono text-[var(--color-fg-primary)]">${keeper.configured_social_model}</span>`
-              : null}
-            ${keeper.configured_social_model && keeper.social_model_fallback
-              ? html`<span>→</span>`
-              : null}
-            ${keeper.social_model_fallback
-              ? html`<span class="font-mono text-[var(--color-fg-primary)]">${keeper.social_model_fallback}</span>`
-              : null}
+            대화 런타임 설정 확인 필요
           </span>`
         : null}
       ${(keeper.k2k_count ?? 0) > 0

@@ -230,7 +230,7 @@ let test_single_model_success () =
     check int "models" 1 (List.length agg.models);
     let s = List.hd agg.models in
     check string "model_id" "claude-sonnet" s.model_id;
-    check (option string) "provider" (Some "claude") s.provider;
+    check (option string) "provider" None s.provider;
     check int "entry_count" 2 s.entry_count;
     check int "success_count" 2 s.success_count;
     check int "error_count" 0 s.error_count;
@@ -247,15 +247,12 @@ let test_single_model_success () =
     check bool "tok/s > 0" true
       (Option.value ~default:0.0 s.avg_tok_per_sec > 0.0))
 
-let test_provider_kind_classifies_bare_model_provider () =
+let test_provider_kind_is_not_reconstructed_from_legacy_fields () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "kinded" in
     let ts = now_unix () in
-    let provider_kind =
-      Llm_provider.Provider_config.string_of_provider_kind
-        Llm_provider.Provider_config.Kimi_cli
-    in
+    let provider_kind = "kimi_cli" in
     write_decisions path [
       success_entry ~model:"kimi-k2.5" ~ts:(ts -. 5.0)
         ~provider_kind ();
@@ -264,15 +261,11 @@ let test_provider_kind_classifies_bare_model_provider () =
     check int "total_entries" 1 agg.total_entries;
     let s = List.hd agg.models in
     check string "model stays bare" "kimi-k2.5" s.model_id;
-    check (option string) "provider from provider_kind"
-      (Some "kimi_cli") s.provider;
+    check (option string) "provider not reconstructed" None s.provider;
     let recent = List.hd s.recent_entries in
-    check (option string) "recent provider from provider_kind"
-      (Some "kimi_cli") recent.re_provider;
+    check (option string) "recent provider not reconstructed" None recent.re_provider;
     let rollup = M.provider_rollup agg in
-    check int "provider rollup keeps entry" 1 (List.length rollup);
-    check string "rollup provider" "kimi_cli"
-      (List.hd rollup).M.ps_provider)
+    check int "provider rollup stays empty" 0 (List.length rollup))
 
 let test_untrusted_usage_excluded_from_aggregates () =
   let base = test_dir () in
@@ -418,7 +411,9 @@ let test_json_roundtrip () =
     let models = json |> member "models" |> to_list in
     check bool "has models" true (List.length models > 0);
     let m = List.hd models in
-    check bool "provider unresolved -> null" true
+    check string "model id redacted" "runtime_lane_1"
+      (m |> member "model_id" |> to_string);
+    check bool "provider redacted -> null" true
       (match m |> member "provider" with `Null -> true | _ -> false);
     check int "success_count" 1 (m |> member "success_count" |> to_int);
     check int "usage_sample_count" 1
@@ -586,8 +581,7 @@ let test_costs_jsonl_backfills_wall_tok_per_sec () =
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
-    check string "cost model"
-      "ollama:qwen3.6:27b-coding-nvfp4" s.model_id;
+    check string "cost model" "qwen3.6:27b-coding-nvfp4" s.model_id;
     check int "one cost entry" 1 s.entry_count;
     check (option (float 0.001)) "wall tok/sec from cost latency"
       (Some 200.0) s.avg_tok_per_sec;
@@ -666,7 +660,7 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
     let per_agent = json |> member "perAgent" |> to_list in
     check int "perAgent row count" 2 (List.length per_agent);
     let first = List.hd per_agent in
-    check string "highest cost first" "claude-sonnet"
+    check string "highest cost first redacted" "runtime_lane_1"
       (first |> member "agent" |> to_string);
     check int "input tokens summed" 110
       (first |> member "in_tok" |> to_int);
@@ -676,17 +670,15 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
       (first |> member "cost" |> to_float);
 
     let matrix = json |> member "matrix" in
-    check (list string) "provider axis sorted"
-      ["anthropic"; "openai"]
+    check (list string) "provider axis redacted"
+      ["runtime"]
       (matrix |> member "providers" |> to_list |> List.map to_string);
-    check (list string) "model axis follows model aggregate order"
-      ["claude-sonnet"; "gpt-4o"]
+    check (list string) "model axis redacted"
+      ["runtime_lane_1"; "runtime_lane_2"]
       (matrix |> member "models" |> to_list |> List.map to_string);
     let grid = matrix |> member "grid" |> to_list in
     let row0 = List.nth grid 0 |> to_list |> List.map to_float in
-    let row1 = List.nth grid 1 |> to_list |> List.map to_float in
-    check (list (float 0.001)) "anthropic row costs" [0.05; 0.0] row0;
-    check (list (float 0.001)) "openai row costs" [0.0; 0.01] row1;
+    check (list (float 0.001)) "runtime row costs" [0.05; 0.01] row0;
 
     check (float 0.001) "global p50" 200.0
       (json |> member "p50" |> to_float);
@@ -1065,9 +1057,12 @@ let test_provider_rollup_json_shape () =
   let json = M.provider_stats_to_json (List.hd (M.provider_rollup agg)) in
   match json with
   | `Assoc fields ->
-    check string "provider"
+    check string "provider redacted"
       (match List.assoc "provider" fields with `String s -> s | _ -> "!")
-      "kimi_cli";
+      "runtime";
+    check int "model_count redacted"
+      0
+      (match List.assoc "model_count" fields with `Int n -> n | _ -> -1);
     check int "request_count surfaces entry_count"
       42
       (match List.assoc "entry_count" fields with `Int n -> n | _ -> -1);
@@ -1083,8 +1078,8 @@ let () =
     "basics", [
       test_case "empty dir" `Quick test_empty_dir;
       test_case "single model success" `Quick test_single_model_success;
-      test_case "provider_kind classifies bare model provider" `Quick
-        test_provider_kind_classifies_bare_model_provider;
+      test_case "provider_kind is not reconstructed" `Quick
+        test_provider_kind_is_not_reconstructed_from_legacy_fields;
       test_case "untrusted usage excluded from aggregates" `Quick
         test_untrusted_usage_excluded_from_aggregates;
       test_case "error turns counted" `Quick test_error_turns_counted;

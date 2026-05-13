@@ -694,26 +694,26 @@ let test_sse_error_event_ignored () =
 (* ================================================================ *)
 
 let test_default_model_strings_keeper () =
-  let models = Keeper_turn_driver.default_model_strings ~cascade_name:"keeper_turn" in
+  let models = Cascade_oas_runner.default_model_strings ~cascade_name:"keeper_turn" in
   Alcotest.(check bool) "keeper_turn has models" true (models <> [])
 ;;
 
 let test_default_model_strings_heartbeat () =
   let models =
-    Keeper_turn_driver.default_model_strings ~cascade_name:"heartbeat_action"
+    Cascade_oas_runner.default_model_strings ~cascade_name:"heartbeat_action"
   in
   Alcotest.(check bool) "heartbeat has models" true (models <> [])
 ;;
 
 let test_default_model_strings_unknown () =
   let models =
-    Keeper_turn_driver.default_model_strings ~cascade_name:"nonexistent_cascade_xyz"
+    Cascade_oas_runner.default_model_strings ~cascade_name:"nonexistent_cascade_xyz"
   in
   Alcotest.(check bool) "unknown cascade has fallback" true (models <> [])
 ;;
 
 let test_default_model_strings_local_only () =
-  let models = Keeper_turn_driver.default_model_strings ~cascade_name:"local_only" in
+  let models = Cascade_oas_runner.default_model_strings ~cascade_name:"local_only" in
   let is_local label =
     match Cascade_runtime.provider_name_of_label label with
     | Some pname -> Provider_adapter.is_local_provider pname
@@ -764,7 +764,7 @@ let test_default_config_path () =
       Cascade_catalog_runtime.reset_cache_for_tests ();
       cleanup_dir base)
     (fun () ->
-       match Keeper_turn_driver.default_config_path () with
+       match Cascade_oas_runner.default_config_path () with
        | Some path ->
          Alcotest.(check bool) "non-empty path" true (String.length path > 0);
          Alcotest.(check bool) "path contains separator" true (String.contains path '/');
@@ -788,7 +788,7 @@ let test_cascade_names_produce_models () =
   in
   List.iter
     (fun name ->
-       let models = Keeper_turn_driver.default_model_strings ~cascade_name:name in
+       let models = Cascade_oas_runner.default_model_strings ~cascade_name:name in
        Alcotest.(check bool) (name ^ " has models") true (models <> []))
     cascades
 ;;
@@ -1493,7 +1493,7 @@ fallback = true
       (Llm_provider.Retry.AuthError { message = "Invalid Authentication" })
   in
   let rendered =
-    Keeper_turn_driver.enrich_sdk_error
+    Cascade_attempt_fsm.enrich_sdk_error
       ~cascade_name:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
@@ -1521,7 +1521,7 @@ let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
       (Llm_provider.Retry.InvalidRequest { message = {|{"detail":"Not Found"}|} })
   in
   let rendered =
-    Keeper_turn_driver.enrich_sdk_error
+    Cascade_attempt_fsm.enrich_sdk_error
       ~cascade_name:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
@@ -2656,10 +2656,13 @@ let check_timeout_opt label expected actual =
 ;;
 
 let provider_timeout ?(is_last = false) ?configured provider_cfg =
-  Keeper_turn_driver.effective_provider_attempt_timeout_s
+  let candidate =
+    Masc_mcp.Cascade_runtime_candidate.of_provider_config provider_cfg
+  in
+  Masc_mcp.Cascade_runtime_candidate.effective_attempt_timeout_s
     ~is_last
     ~configured_timeout_s:configured
-    provider_cfg
+    candidate
 ;;
 
 let test_provider_attempt_timeout_caps_claude_code () =
@@ -3274,7 +3277,7 @@ let test_filter_candidate_providers_for_tool_support_normalizes_codex_headers ()
       [ "masc_status" ]
   in
   let filtered =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -3324,7 +3327,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
     | [] -> None
   in
   let filtered =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -3385,7 +3388,7 @@ let test_filter_candidate_providers_for_tool_support_keeps_codex_with_per_keeper
       [ "masc_status"; "masc_claim_next" ]
   in
   let filtered =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -3412,10 +3415,10 @@ let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_fo
   @@ fun _base_path ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
+    Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
   let filtered =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3442,7 +3445,7 @@ let test_keeper_internal_tools_force_materialized_runtime_surface () =
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_pr_review_comment" ] in
   let require_tool_support =
-    Masc_mcp.Keeper_turn_driver.keeper_internal_tools_require_materialized_runtime_surface
+    Masc_mcp.Cascade_oas_runner.keeper_internal_tools_require_materialized_runtime_surface
       ~keeper_name:"issue_king"
       tools
   in
@@ -3451,12 +3454,12 @@ let test_keeper_internal_tools_force_materialized_runtime_surface () =
     true
     require_tool_support;
   let runtime_mcp_policy =
-    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools
+    Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools
       ~keeper_name:"issue_king"
       tools
   in
   let filtered =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"issue_king"
       ?runtime_mcp_policy
       ~tools
@@ -3482,10 +3485,10 @@ let test_filter_candidate_providers_for_tool_support_secondary_preserves_priorit
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
+    Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
   let filtered =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3514,10 +3517,10 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
+    Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
   let filtered =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3562,11 +3565,11 @@ let test_dual_track_swap_emits_secondary_kind_label_on_success () =
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
+    Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
   let before = count_swap_metric ~detail:"swapped:claude_code" in
   let _ =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3595,7 +3598,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   @@ fun () ->
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
+    Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
   (* Rejected primary, secondary that *also* fails the gate (another
      codex_cli with bound-actor tools). Detail format is
@@ -3603,7 +3606,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   let detail = "rejected:codex_cli:codex_keeper_bound_actor_required" in
   let before = count_swap_metric ~detail in
   let _ =
-    Masc_mcp.Keeper_turn_driver.filter_candidate_providers_for_tool_support
+    Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3654,7 +3657,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
        (Cascade_runner.runtime_mcp_tool_requires_bound_actor "masc_claim_next")
    | None -> Alcotest.fail "expected public MCP runtime policy");
   let reason =
-    Masc_mcp.Keeper_turn_driver.classify_filter_rejection
+    Masc_mcp.Cascade_oas_runner.classify_filter_rejection
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -3664,7 +3667,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
   Alcotest.(check (option string))
     "codex_cli with bound-actor policy classified as keeper_bound_actor"
     (Some "codex_keeper_bound_actor_required")
-    (Option.map Masc_mcp.Keeper_turn_driver.filter_rejection_reason_label reason)
+    (Option.map Masc_mcp.Cascade_oas_runner.filter_rejection_reason_label reason)
 ;;
 
 let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token
@@ -3682,10 +3685,10 @@ let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keep
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
   let tools = [ make_named_noop_tool "keeper_bash" ] in
   let runtime_mcp_policy =
-    Masc_mcp.Keeper_turn_driver.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
+    Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
   let reason =
-    Masc_mcp.Keeper_turn_driver.classify_filter_rejection
+    Masc_mcp.Cascade_oas_runner.classify_filter_rejection
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~tools
@@ -3696,7 +3699,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keep
   Alcotest.(check (option string))
     "codex_cli passes keeper-bound policy when per-keeper bearer exists"
     None
-    (Option.map Masc_mcp.Keeper_turn_driver.filter_rejection_reason_label reason)
+    (Option.map Masc_mcp.Cascade_oas_runner.filter_rejection_reason_label reason)
 ;;
 
 let test_classify_filter_rejection_passes_when_provider_supported () =
@@ -3710,7 +3713,7 @@ let test_classify_filter_rejection_passes_when_provider_supported () =
       [ "masc_status" ]
   in
   let reason =
-    Masc_mcp.Keeper_turn_driver.classify_filter_rejection
+    Masc_mcp.Cascade_oas_runner.classify_filter_rejection
       ~keeper_name:"sangsu"
       ?runtime_mcp_policy
       ~require_tool_choice_support:true
@@ -4635,7 +4638,7 @@ let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Keeper_turn_driver.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Cascade_error_classify.codex_cli_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
     Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
     Alcotest.(check bool) "context limit hit" true preflight.hits_context_window;
@@ -4660,7 +4663,7 @@ let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow ()
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Keeper_turn_driver.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Cascade_error_classify.codex_cli_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
     Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
     Alcotest.(check bool) "context limit not hit" false preflight.hits_context_window;

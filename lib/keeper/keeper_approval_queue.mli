@@ -38,6 +38,7 @@ type pending_approval =
   ; goal_id : string option
   ; goal_ids : string list
   ; runtime_contract : Yojson.Safe.t option
+  (* Legacy/internal OAS model hint. Public approval JSON redacts this field. *)
   ; selected_model : string option
   ; disposition : string option
   ; disposition_reason : string option

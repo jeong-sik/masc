@@ -26,24 +26,9 @@ let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
 let resolved_model_id_for_result ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result) : string =
-  let strip_latest s =
-    if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest"
-    then String.sub s 0 (String.length s - 7)
-    else s
-  in
-  let used = strip_latest result.model_used in
-  let cascade_models =
-    Keeper_model_labels.configured_model_labels_of_meta meta
-  in
-  let cfgs = Cascade_config.parse_model_strings cascade_models in
-  match
-    List.find_opt
-      (fun (c : Llm_provider.Provider_config.t) ->
-        c.model_id = result.model_used || c.model_id = used)
-      cfgs
-  with
-  | Some c -> c.model_id
-  | None -> (match cfgs with c :: _ -> c.model_id | [] -> result.model_used)
+  Cascade_runtime_candidate.resolve_reported_runtime_id
+    ~labels:(Keeper_model_labels.configured_model_labels_of_meta meta)
+    ~reported_runtime_id:result.model_used
 
 let turn_cost_for_result ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result) : float =
@@ -107,7 +92,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
               meta.runtime.usage.total_tokens + trusted_total_tokens;
             total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
             last_turn_ts = now_ts;
-            last_model_used = surface_model_used;
+            last_model_used = "";
             last_input_tokens = trusted_input_tokens;
             last_output_tokens = trusted_output_tokens;
             last_total_tokens = trusted_total_tokens;
@@ -693,7 +678,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 `Assoc [
                   ("reply", `String result.response_text);
                   ("model", `String surface_model_used);
-                  ("model_used_raw", `String result.model_used);
+                  ("model_used_raw", `String surface_model_used);
                   ("turns", `Int result.turn_count);
                   ("tool_calls", `Int result.tool_calls_made);
                   ( "tool_call_evidence",

@@ -18,8 +18,8 @@ vi.mock('../api/dashboard', () => apiMocks)
 function modelMetrics({
   models = [
     {
-      model_id: 'glm-5-air',
-      provider: 'zai',
+      model_id: 'runtime_lane_1',
+      provider: null,
       total_cost_usd: 0.12,
       total_input_tokens: 1200,
       total_output_tokens: 500,
@@ -52,7 +52,7 @@ function keeperMetrics() {
         p50_latency_ms: 900,
         p95_latency_ms: 2100,
         sample_count: 4,
-        model_breakdown: [{ model: 'glm-5-air', cost_usd: 0.2 }],
+        model_breakdown: [{ model: 'runtime', cost_usd: 0.2 }],
       },
     ],
   }
@@ -88,7 +88,7 @@ describe('CostDashboard route-backed focus behavior', () => {
     container.remove()
   })
 
-  it('keeps an existing model focus when the active model radio is clicked', async () => {
+  it('keeps an existing runtime focus when the active runtime radio is clicked', async () => {
     const { route } = await import('../router')
     const { CostDashboard } = await import('./cost-dashboard')
     route.value = {
@@ -98,17 +98,17 @@ describe('CostDashboard route-backed focus behavior', () => {
     }
 
     render(h(CostDashboard, { view: 'cost' }), container)
-    await waitFor(() => container.textContent?.includes('glm-5-air') ?? false, 'model metrics')
+    await waitFor(() => container.textContent?.includes('runtime_lane_1') ?? false, 'runtime metrics')
 
-    const modelButton = Array.from(container.querySelectorAll('button[role="radio"]'))
-      .find(button => button.textContent?.trim() === '모델') as HTMLButtonElement | undefined
-    expect(modelButton?.getAttribute('aria-checked')).toBe('true')
+    const runtimeButton = Array.from(container.querySelectorAll('button[role="radio"]'))
+      .find(button => button.textContent?.trim() === 'Runtime') as HTMLButtonElement | undefined
+    expect(runtimeButton?.getAttribute('aria-checked')).toBe('true')
 
-    modelButton?.click()
+    runtimeButton?.click()
     expect(route.value.params.focus).toBe('matrix')
   })
 
-  it('leaves every focus chip unselected in the unfocused model overview', async () => {
+  it('leaves every focus chip unselected in the unfocused runtime overview', async () => {
     const { route } = await import('../router')
     const { CostDashboard } = await import('./cost-dashboard')
     route.value = {
@@ -118,7 +118,7 @@ describe('CostDashboard route-backed focus behavior', () => {
     }
 
     render(h(CostDashboard, { view: 'cost' }), container)
-    await waitFor(() => container.textContent?.includes('glm-5-air') ?? false, 'model overview metrics')
+    await waitFor(() => container.textContent?.includes('runtime_lane_1') ?? false, 'runtime overview metrics')
 
     const tabs = Array.from(
       container.querySelectorAll('[data-testid="cost-focus-rail"] [role="tab"]'),
@@ -142,7 +142,7 @@ describe('CostDashboard route-backed focus behavior', () => {
 
     render(h(CostDashboard, { view: 'cost' }), container)
     await waitFor(
-      () => container.textContent?.includes('이 시간 창에서 기록된 모델 지연 분포가 없습니다.') ?? false,
+      () => container.textContent?.includes('이 시간 창에서 기록된 Runtime 지연 분포가 없습니다.') ?? false,
       'focused latency empty state',
     )
 
@@ -165,7 +165,7 @@ describe('CostDashboard route-backed focus behavior', () => {
     }
 
     render(h(CostDashboard, { view: 'cost' }), container)
-    await waitFor(() => container.textContent?.includes('glm-5-air') ?? false, 'model metrics')
+    await waitFor(() => container.textContent?.includes('runtime_lane_1') ?? false, 'runtime metrics')
 
     const latencyTab = Array.from(
       container.querySelectorAll('[data-testid="cost-focus-rail"] [role="tab"]'),
@@ -210,7 +210,7 @@ describe('CostDashboard route-backed focus behavior', () => {
     }
 
     render(h(CostDashboard, { view: 'cost' }), container)
-    await waitFor(() => container.textContent?.includes('glm-5-air') ?? false, 'model metrics')
+    await waitFor(() => container.textContent?.includes('runtime_lane_1') ?? false, 'runtime metrics')
 
     const keeperButton = Array.from(container.querySelectorAll('button[role="radio"]'))
       .find(button => button.textContent?.trim() === 'Keeper') as HTMLButtonElement | undefined

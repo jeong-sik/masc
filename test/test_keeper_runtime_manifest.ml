@@ -225,6 +225,9 @@ let check_source_omits rel needle =
     false
     (contains_substring body needle)
 
+let check_source_missing rel =
+  Alcotest.(check bool) (rel ^ " is absent") false (Sys.file_exists (source_path rel))
+
 let test_event_kind_roundtrip () =
   List.iter
     (fun kind ->
@@ -242,17 +245,24 @@ let test_json_roundtrip () =
     M.make ~ts:"2026-05-12T00:00:00Z" ~keeper_name:"sangsu"
       ~agent_name:"keeper-sangsu-agent" ~trace_id:"trace-1" ~generation:7
       ~keeper_turn_id:11 ~oas_turn_count:3 ~event:M.Provider_attempt_finished
-      ~cascade_name:"default" ~provider_kind:"openai" ~model_id:"gpt-test"
-      ~status:"ok"
+      ~cascade_name:"default" ~status:"ok"
       ~decision:
         (`Assoc
           [
             ("phase", `String "work");
             ("attempt", `Int 2);
             ("tool_surface", `String "inline");
-          ])
+            ("provider_kind", `String "openai");
+            ("model_id", `String "gpt-test");
+            ("response_model", `String "gpt-test");
+      ])
       ~receipt_path:"/tmp/receipt.jsonl" ~checkpoint_path:"/tmp/checkpoint.json"
       ~tool_call_log_path:"/tmp/tool-calls.jsonl" ()
+  in
+  let json_has_key name json =
+    match json with
+    | `Assoc fields -> List.mem_assoc name fields
+    | _ -> false
   in
   match M.of_json (M.to_json manifest) with
   | Error msg -> Alcotest.fail ("roundtrip failed: " ^ msg)
@@ -268,7 +278,67 @@ let test_json_roundtrip () =
         "receipt link" (Some "/tmp/receipt.jsonl")
         parsed.links.receipt_path;
       Alcotest.(check (option int)) "oas turns" (Some 3)
-        parsed.oas_turn_count
+        parsed.oas_turn_count;
+      let emitted_json = M.to_json manifest in
+      Alcotest.(check bool)
+        "manifest JSON omits provider kind"
+        false
+        (json_has_key "provider_kind" emitted_json);
+      Alcotest.(check bool)
+        "manifest JSON omits model id"
+        false
+        (json_has_key "model_id" emitted_json);
+      let emitted_decision =
+        Yojson.Safe.Util.(emitted_json |> member "decision")
+      in
+      Alcotest.(check bool)
+        "manifest decision omits provider kind"
+        false
+        (json_has_key "provider_kind" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision omits model id"
+        false
+        (json_has_key "model_id" emitted_decision);
+      Alcotest.(check bool)
+        "manifest decision omits response model"
+        false
+        (json_has_key "response_model" emitted_decision);
+      let legacy_json =
+        `Assoc
+          [
+            ("schema_version", `Int 1);
+            ("ts", `String "2026-05-12T00:00:00Z");
+            ("keeper_name", `String "sangsu");
+            ("agent_name", `Null);
+            ("trace_id", `String "trace-legacy");
+            ("generation", `Null);
+            ("keeper_turn_id", `Null);
+            ("oas_turn_count", `Null);
+            ("event", `String "provider_attempt_started");
+            ("cascade_name", `String "default");
+            ("provider_kind", `String "openai");
+            ("model_id", `String "gpt-test");
+            ("status", `String "started");
+            ("decision", `Assoc [ ("response_model", `String "gpt-test") ]);
+            ("links", `Assoc []);
+          ]
+      in
+      match M.of_json legacy_json with
+      | Error msg -> Alcotest.fail ("legacy manifest parse failed: " ^ msg)
+      | Ok legacy ->
+          Alcotest.(check string)
+            "legacy trace parses"
+            "trace-legacy"
+            legacy.trace_id;
+          let legacy_emitted = M.to_json legacy in
+          Alcotest.(check bool)
+            "legacy manifest JSON omits provider kind"
+            false
+            (json_has_key "provider_kind" legacy_emitted);
+          Alcotest.(check bool)
+            "legacy manifest JSON omits model id"
+            false
+            (json_has_key "model_id" legacy_emitted)
 
 let test_of_json_rejects_unknown_event () =
   let json =
@@ -393,6 +463,15 @@ let json_int_list_member name json =
         | _ -> None)
   | _ -> []
 
+let json_string_list_member name json =
+  match Yojson.Safe.Util.member name json with
+  | `List values ->
+      values
+      |> List.filter_map (function
+        | `String value -> Some value
+        | _ -> None)
+  | _ -> []
+
 let json_list_length name json =
   match Yojson.Safe.Util.member name json with
   | `List values -> List.length values
@@ -403,9 +482,19 @@ let json_bool_member name json =
   | `Bool value -> value
   | _ -> false
 
+let json_has_key name json =
+  match json with
+  | `Assoc fields -> List.mem_assoc name fields
+  | _ -> false
+
 let require_some label = function
   | Some value -> value
   | None -> Alcotest.fail ("missing " ^ label)
+
+let append_manifest_or_fail config manifest =
+  match M.append config manifest with
+  | Ok () -> ()
+  | Error msg -> Alcotest.fail ("manifest append failed: " ^ msg)
 
 let make_tool name : Agent_sdk.Tool.t =
   Agent_sdk.Tool.create ~name ~description:("test tool " ^ name)
@@ -623,6 +712,237 @@ let test_runtime_trace_api_bounds_rows_but_counts_full_manifest () =
         1
         (json_int_member "receipt_appended_count" turn_identity))
 
+let test_runtime_trace_lens_summarizes_tool_axis () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-tools" in
+      let trace_id = "trace-runtime-lens-tools" in
+      let keeper_turn_id = 42 in
+      let strings values =
+        `List (List.map (fun value -> `String value) values)
+      in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Tool_surface_selected
+           ~status:"selected"
+           ~decision:
+             (`Assoc
+               [
+                 ("turn_lane", `String "tool_required");
+                 ("tool_surface_class", `String "runtime_mcp");
+                 ("tool_requirement", `String "required");
+                 ("visible_tool_count", `Int 1);
+                 ("tool_gate_enabled", `Bool true);
+                 ("tool_surface_fallback_used", `Bool false);
+                 ("required_tool_names", strings [ "keeper_task_done" ]);
+                 ("missing_required_tool_names", strings [ "keeper_task_done" ]);
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Provider_lane_resolved
+           ~status:"error"
+           ~decision:
+             (`Assoc
+               [
+                 ("requested_tool_names", strings [ "read_file" ]);
+                 ("required_tool_names", strings [ "keeper_task_done" ]);
+                 ("materialized_tool_names", strings [ "read_file" ]);
+                 ( "missing_required_tool_names_after_lane",
+                   strings [ "keeper_task_done" ] );
+                 ("resolved_lane", `String "inline");
+                 ("effective_tool_count", `Int 1);
+                 ("runtime_mcp_policy_present", `Bool false);
+                 ("tool_requirement", `String "required");
+                 ("provider_health_key", `String "glm");
+                 ("provider_model_health_key", `String "glm:glm-5.1");
+                 ("response_model", `String "glm-5.1");
+                 ("configured_labels", strings [ "glm:glm-5.1" ]);
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_finished ~status:"error"
+           ());
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "runtime lens status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let lens = Yojson.Safe.Util.(json |> member "runtime_lens") in
+      let turn_clock = Yojson.Safe.Util.(lens |> member "turn_clock") in
+      Alcotest.(check bool)
+        "lens terminal event present"
+        true
+        (json_bool_member "terminal_event_present" turn_clock);
+      let axes = Yojson.Safe.Util.(lens |> member "axes") in
+      let tool_surface =
+        Yojson.Safe.Util.(axes |> member "tool_surface")
+      in
+      let provider_lane =
+        Yojson.Safe.Util.(axes |> member "provider_lane")
+      in
+      let provider_attempt =
+        Yojson.Safe.Util.(axes |> member "provider_attempt")
+      in
+      Alcotest.(check (list string))
+        "lens requested tools"
+        [ "read_file" ]
+        (json_string_list_member "requested_tools" tool_surface);
+      Alcotest.(check (list string))
+        "lens required tools"
+        [ "keeper_task_done" ]
+        (json_string_list_member "required_tools" tool_surface);
+      Alcotest.(check (list string))
+        "lens materialized tools"
+        [ "read_file" ]
+        (json_string_list_member "materialized_tools" tool_surface);
+      Alcotest.(check (list string))
+        "lens missing tools"
+        [ "keeper_task_done" ]
+        (json_string_list_member "missing_required_tools" tool_surface);
+      Alcotest.(check string)
+        "lens tool terminal status"
+        "missing_required_tool"
+        Yojson.Safe.Util.(tool_surface |> member "terminal_status" |> to_string);
+      Alcotest.(check bool)
+        "lens provider lane hides provider kind"
+        false
+        (json_has_key "provider_kind" provider_lane);
+      Alcotest.(check bool)
+        "lens provider lane hides model id"
+        false
+        (json_has_key "model_id" provider_lane);
+      Alcotest.(check bool)
+        "lens provider attempt hides terminal provider kind"
+        false
+        (json_has_key "terminal_provider_kind" provider_attempt);
+      Alcotest.(check bool)
+        "lens provider attempt hides terminal model id"
+        false
+        (json_has_key "terminal_model_id" provider_attempt);
+      let api_manifest_rows =
+        Yojson.Safe.Util.(json |> member "manifest_rows" |> to_list)
+      in
+      let api_provider_row =
+        match
+          List.find_opt
+            (fun row ->
+              String.equal
+                Yojson.Safe.Util.(row |> member "event" |> to_string)
+                "provider_lane_resolved")
+            api_manifest_rows
+        with
+        | Some row -> row
+        | None -> Alcotest.fail "missing public provider manifest row"
+      in
+      Alcotest.(check bool)
+        "public manifest row hides provider kind"
+        false
+        (json_has_key "provider_kind" api_provider_row);
+      Alcotest.(check bool)
+        "public manifest row hides model id"
+        false
+        (json_has_key "model_id" api_provider_row);
+      let api_provider_decision =
+        Yojson.Safe.Util.(api_provider_row |> member "decision")
+      in
+      Alcotest.(check bool)
+        "public manifest decision hides provider health key"
+        false
+        (json_has_key "provider_health_key" api_provider_decision);
+      Alcotest.(check bool)
+        "public manifest decision hides provider model health key"
+        false
+        (json_has_key "provider_model_health_key" api_provider_decision);
+      Alcotest.(check bool)
+        "public manifest decision hides response model"
+        false
+        (json_has_key "response_model" api_provider_decision);
+      Alcotest.(check bool)
+        "public manifest decision hides configured labels"
+        false
+        (json_has_key "configured_labels" api_provider_decision);
+      let gaps =
+        Yojson.Safe.Util.(
+          lens |> member "gaps" |> to_list
+          |> List.map (fun gap -> gap |> member "code" |> to_string))
+      in
+      Alcotest.(check (list string))
+        "lens gap codes"
+        [ "required_tool_not_materialized"; "context_delta_missing" ]
+        gaps)
+
+let test_runtime_trace_lens_groups_context_memory_swimlane () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-memory" in
+      let trace_id = "trace-runtime-lens-memory" in
+      let keeper_turn_id = 8 in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Context_injected
+           ~status:"injected" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Memory_injected
+           ~status:"injected" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Memory_flushed
+           ~status:"success"
+           ~decision:
+             (`Assoc
+               [
+                 ("episodes_flushed", `Int 2);
+                 ("procedures_flushed", `Int 1);
+               ])
+           ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:03Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_finished
+           ~status:"finished" ());
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "runtime lens memory status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let lens = Yojson.Safe.Util.(json |> member "runtime_lens") in
+      let memory_context =
+        Yojson.Safe.Util.(lens |> member "swimlanes" |> member "memory_context")
+      in
+      Alcotest.(check int)
+        "memory context lane event count"
+        3
+        (json_int_member "event_count" memory_context);
+      Alcotest.(check string)
+        "memory context terminal"
+        "flushed"
+        Yojson.Safe.Util.(memory_context |> member "terminal_status" |> to_string);
+      let memory_axis =
+        Yojson.Safe.Util.(lens |> member "axes" |> member "memory")
+      in
+      Alcotest.(check int)
+        "lens memory episodes flushed"
+        2
+        (json_int_member "episodes_flushed" memory_axis);
+      Alcotest.(check int)
+        "lens memory has no gap"
+        0
+        (json_list_length "gaps" lens))
+
 let test_runtime_trace_api_surfaces_meta_read_error_without_trace_id () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -671,8 +991,7 @@ let test_unfinished_provider_attempt_repair_skips_malformed_manifest_rows () =
         }
       in
       let started =
-        M.make_for_context ctx ~event:M.Provider_attempt_started
-          ~provider_kind:"openai_compat" ~model_id:"model-a" ()
+        M.make_for_context ctx ~event:M.Provider_attempt_started ()
       in
       begin
         match M.append config started with
@@ -980,7 +1299,27 @@ let test_successful_provider_turn_links_runtime_artifacts () =
 	            (Some "provider_returned")
 	            (json_string_member_opt
 	               "terminal_status"
-	               provider_attempts))))
+	               provider_attempts);
+          Alcotest.(check bool)
+            "provider attempts summary hides terminal provider kind"
+            false
+            (json_has_key "terminal_provider_kind" provider_attempts);
+          Alcotest.(check bool)
+            "provider attempts summary hides terminal model id"
+            false
+            (json_has_key "terminal_model_id" provider_attempts);
+          let api_receipts =
+            Yojson.Safe.Util.(api_json |> member "receipts" |> to_list)
+          in
+          let api_receipt =
+            match api_receipts with
+            | receipt :: _ -> receipt
+            | [] -> Alcotest.fail "expected public runtime trace receipt"
+          in
+          Alcotest.(check bool)
+            "public receipts hide model used"
+            false
+            (json_has_key "model_used" api_receipt))))
 
 let test_provider_attempt_finish_recorded_on_oas_timeout () =
   let base_dir = temp_dir () in
@@ -1002,7 +1341,7 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
           in
           let base_url, request_count =
             try
-              start_delayed_mock ~sw ~net ~clock ~port ~delay_s:0.4
+              start_delayed_mock ~sw ~net ~clock ~port ~delay_s:2.0
                 (openai_text_response "this response should arrive after timeout")
             with
             | Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) ->
@@ -1042,7 +1381,7 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                   ~generation:meta.runtime.generation
                   ~max_turns:1
                   ~max_idle_turns:1
-                  ~oas_timeout_s:0.1
+                  ~oas_timeout_s:1.0
                   ()
               in
               (match result with
@@ -1357,8 +1696,7 @@ let test_context_helper () =
   in
   let manifest =
     M.make_for_context ctx ~event:M.Provider_attempt_started
-      ~oas_turn_count:2 ~cascade_name:"default" ~provider_kind:"openai"
-      ~model_id:"gpt-test" ~status:"started"
+      ~oas_turn_count:2 ~cascade_name:"default" ~status:"started"
       ~decision:(`Assoc [ ("provider_health_key", `String "openai:gpt-test") ])
       ()
   in
@@ -1369,9 +1707,7 @@ let test_context_helper () =
   Alcotest.(check (option int)) "keeper_turn_id" (Some 9)
     manifest.keeper_turn_id;
   Alcotest.(check (option int)) "oas_turn_count" (Some 2)
-    manifest.oas_turn_count;
-  Alcotest.(check (option string))
-    "provider_kind" (Some "openai") manifest.provider_kind
+    manifest.oas_turn_count
 
 let test_required_tool_lane_missing_names () =
   let module FT = Masc_mcp.Keeper_turn_driver_helpers in
@@ -1504,6 +1840,157 @@ let test_keeper_hot_path_avoids_oas_complete_cascade () =
       "lib/keeper/keeper_turn_driver_wrappers.ml";
     ]
 
+let test_runtime_manifest_contract_omits_provider_model_fields () =
+  check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "provider_kind";
+  check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "model_id";
+  check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "?provider_kind";
+  check_source_omits "lib/keeper/keeper_runtime_manifest.mli" "?model_id";
+  check_source_contains "lib/cascade/cascade_runtime_candidate.mli" "type t";
+  check_source_contains
+    "lib/cascade/cascade_runtime_candidate.mli"
+    "val effective_attempt_timeout_s";
+  check_source_omits "lib/cascade/cascade_runtime_candidate.mli" "oas_provider_config";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver.mli"
+    "include module type of Cascade_oas_runner";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver.mli"
+    "include module type of Cascade_attempt_fsm";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver.mli"
+    "include module type of Cascade_error_classify";
+  check_source_omits "lib/keeper/keeper_turn_driver.mli" "config_for_label";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver.mli"
+    "codex_cli_prompt_preflight";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver.mli"
+    "with_codex_cli_preflight";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver.mli"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver.mli"
+    "Llm_provider.Provider_config.t ->";
+  check_source_omits "lib/keeper/keeper_turn_driver.ml" "Provider_adapter.";
+  check_source_omits "lib/keeper/keeper_turn_driver.ml" ".base_url";
+  check_source_omits "lib/keeper/keeper_turn_driver.ml" ".model_id";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver.ml"
+    "resolve_tool_capable_provider_across_cascades";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver_helpers.mli"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver_helpers.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver_helpers.ml"
+    "classify_filter_rejection";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver_try_provider.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_turn_liveness.mli"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_turn_liveness.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_unified_turn.mli"
+    "resolve_label:(string -> Llm_provider.Provider_config.t option)";
+  check_source_omits
+    "lib/keeper/keeper_usage_trust.mli"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_usage_trust.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_usage_trust.mli"
+    "provider_kind";
+  check_source_omits
+    "lib/keeper/keeper_exec_context.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_exec_context.ml"
+    "Cascade_config.parse_model_strings";
+  check_source_omits
+    "lib/keeper/keeper_hooks_oas.mli"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_hooks_oas.mli"
+    "provider_kind:";
+  List.iter
+    (fun rel ->
+      check_source_omits rel "Provider_adapter";
+      check_source_omits rel "Llm_provider.Provider_config";
+      check_source_omits rel "Llm_provider.Model_meta";
+      check_source_omits rel "Cascade_config.parse_model_strings")
+    [
+      "lib/keeper/keeper_agent_run.ml";
+      "lib/keeper/keeper_context_core.ml";
+      "lib/keeper/keeper_exec_status.ml";
+      "lib/keeper/keeper_hooks_oas.ml";
+      "lib/keeper/keeper_unified_metrics.ml";
+      "lib/dashboard/dashboard_http_keeper.ml";
+      "lib/dashboard/dashboard_http_keeper_metrics.ml";
+      "lib/dashboard/dashboard_execution_fixture.ml";
+    ];
+  check_source_missing "lib/keeper/keeper_agent_context.ml";
+  check_source_missing "lib/keeper/keeper_agent_context.mli";
+  check_source_omits
+    "lib/keeper/keeper_stale_watchdog.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_stale_watchdog.ml"
+    "Provider_adapter.provider_health_key_of_config";
+  check_source_omits
+    "lib/keeper/keeper_world_observation.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_world_observation.ml"
+    "Cascade_config.parse_model_strings";
+  check_source_omits
+    "lib/keeper/keeper_turn.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_turn.ml"
+    "Cascade_config.parse_model_strings";
+  check_source_omits
+    "lib/keeper/keeper_compact_policy.ml"
+    "Llm_provider.Provider_config";
+  check_source_omits
+    "lib/keeper/keeper_compact_policy.ml"
+    "Llm_provider.Model_meta";
+  check_source_omits
+    "lib/keeper/keeper_memory_recall.ml"
+    "Llm_provider.Model_meta";
+  check_source_omits
+    "lib/keeper/keeper_memory_recall.mli"
+    "Llm_provider.Model_meta";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver_try_provider.ml"
+    "Cascade_runner.default_config";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver_try_provider.ml"
+    "Cascade_runner.resolve_tool_lane_for_oas_tools";
+  check_source_omits
+    "lib/keeper/keeper_turn_driver_try_provider.ml"
+    "Cascade_runner.runtime_mcp_policy_for_provider";
+  check_source_omits "lib/keeper/keeper_turn_driver_try_provider.ml" "~provider_cfg";
+  List.iter
+    (fun rel ->
+      check_source_omits rel "(\"provider_health_key\"";
+      check_source_omits rel "(\"provider_model_health_key\"";
+      check_source_omits rel "(\"response_model\"";
+      check_source_omits rel "(\"configured_labels\"";
+      check_source_omits rel "(\"provider_rejections\"";
+      check_source_omits rel "provider=%s model=%s")
+    [
+      "lib/keeper/keeper_turn_driver.ml";
+      "lib/keeper/keeper_turn_driver_try_provider.ml";
+    ]
+
 let () =
   Alcotest.run "keeper_runtime_manifest"
     [
@@ -1529,6 +2016,12 @@ let () =
           Alcotest.test_case
             "runtime trace API bounds rows while counting full manifest"
             `Quick test_runtime_trace_api_bounds_rows_but_counts_full_manifest;
+          Alcotest.test_case "runtime trace lens summarizes tool axis" `Quick
+            test_runtime_trace_lens_summarizes_tool_axis;
+          Alcotest.test_case
+            "runtime trace lens groups context and memory swimlane"
+            `Quick
+            test_runtime_trace_lens_groups_context_memory_swimlane;
           Alcotest.test_case
             "runtime trace API surfaces corrupt meta without trace id"
             `Quick
@@ -1564,5 +2057,9 @@ let () =
             `Quick test_keeper_cascade_engine_boundary;
           Alcotest.test_case "keeper hot path avoids OAS Complete_cascade"
             `Quick test_keeper_hot_path_avoids_oas_complete_cascade;
+          Alcotest.test_case
+            "runtime manifest contract omits provider/model fields"
+            `Quick
+            test_runtime_manifest_contract_omits_provider_model_fields;
         ] );
     ]

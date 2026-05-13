@@ -28,26 +28,42 @@ let keeper_denied_tools =
    them there avoids a circular dependency and concentrates the
    gate-level concerns in one module. *)
 
-(** Derive a provider label from a model id.
+(** Keeper-facing telemetry uses a neutral runtime lane.  Concrete
+    provider/model identity belongs to OAS and lower-level cascade adapters. *)
+let runtime_lane_label = "runtime"
 
-    Delegates to {!Provider_adapter.provider_of_model_label}. Explicit
-    ["provider:model"] labels are trusted; bare model ids require typed OAS
-    [provider_kind] telemetry and otherwise stay ["unknown"]. *)
-let provider_of_model ?provider_kind (model : string) : string =
-  Provider_adapter.provider_of_model_label ?provider_kind model
+let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
-let provider_kind_of_telemetry
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
-  match telemetry with
-  | Some { provider_kind = Some kind; _ } -> Some kind
-  | Some _ | None -> None
+let redacts_inference_telemetry_key key =
+  match String.lowercase_ascii (String.trim key) with
+  | "provider"
+  | "provider_id"
+  | "provider_kind"
+  | "provider_name"
+  | "model"
+  | "model_id"
+  | "canonical_model_id"
+  | "default_model"
+  | "discovered_model"
+  | "system_fingerprint" -> true
+  | _ -> false
 
-let provider_of_model_with_telemetry ~model ~telemetry =
-  let provider_kind = provider_kind_of_telemetry telemetry in
-  provider_of_model ?provider_kind model
+let rec redact_inference_telemetry_json = function
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if redacts_inference_telemetry_key key then (key, `Null)
+              else (key, redact_inference_telemetry_json value))
+           fields)
+  | `List values -> `List (List.map redact_inference_telemetry_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      value
 
-let structurally_unmetered_provider provider =
-  Provider_adapter.is_structurally_unmetered_provider provider
+let inference_telemetry_to_runtime_json telemetry =
+  telemetry
+  |> Agent_sdk.Types.inference_telemetry_to_yojson
+  |> redact_inference_telemetry_json
 
 let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
   usage.input_tokens > 0
@@ -61,8 +77,8 @@ let is_keeper_board_write_tool_name tool_name =
   | None -> false
 
 let current_keeper_model meta =
-  let m = meta.Keeper_types.runtime.usage.last_model_used in
-  if m = "" then Keeper_types.cascade_name_of_meta meta else m
+  let _ = meta in
+  runtime_lane_label
 
 let stop_reason_to_label = function
   | Agent_sdk.Types.EndTurn -> "end_turn"
@@ -240,24 +256,17 @@ let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
     ~labels:[ ("keeper", keeper_name); ("tool", tool_name) ] ()
 
-(* #10083: some OAS transports (kimi_cli silent-failure and
-   CompletionContractViolation synthetic responses) emit
-   [response.model = ""].  That empty string then flows into every
-   per-model counter label in this hook (after_turn_hook_total,
-   masc_llm_inference_duration_seconds, pricing_catalog_miss_total)
-   and contaminates per-provider aggregates — one empty-model turn
-   wipes out the ability to attribute its ~50s of inference time to
-   any specific provider.  The resolve helper applies a layered
-   fallback (raw → telemetry canonical_model_id → named sentinel)
-   and emits a labelled counter so the operator can see WHICH
-   transport leaked and WHICH resolution path recovered it. *)
+(* #10083 originally patched empty [response.model] leaks by recovering a
+   canonical model id inside MASC.  The ownership boundary has since moved:
+   OAS owns concrete provider/model identity, while keeper-facing telemetry
+   records only a neutral runtime lane.  These counters remain as quality
+   signals for missing or selector-like response.model values, but their
+   labels never carry the concrete model id. *)
 let empty_response_model_metric =
   Prometheus.metric_after_turn_response_model_empty
 
 let alias_response_model_metric =
   Prometheus.metric_after_turn_response_model_alias
-
-let unknown_model_sentinel = Provider_adapter.cn_unknown_provider
 
 let zero_usage : Agent_sdk.Types.api_usage =
   {
@@ -268,91 +277,55 @@ let zero_usage : Agent_sdk.Types.api_usage =
     cost_usd = None;
   }
 
-let canonical_model_id_of_telemetry ~model
+let telemetry_has_canonical_model_id
     (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
-  | Some { canonical_model_id = Some id; _ } when String.trim id <> "" ->
-      String.trim id
-  | _ -> model
+  | Some { canonical_model_id = Some id; _ } -> String.trim id <> ""
+  | Some _ | None -> false
 
-let known_provider_model_id_of_label model =
-  let trimmed = String.trim model in
-  match String.index_opt trimmed ':' with
-  | None -> None
-  | Some idx when idx <= 0 || idx >= String.length trimmed - 1 -> None
-  | Some idx ->
-      let provider = provider_of_model trimmed in
-      if String.equal provider "unknown" then None
-      else
-        Some
-          (String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
-           |> String.trim)
+let is_runtime_selector_alias model =
+  let trimmed = String.trim model |> String.lowercase_ascii in
+  let leaf =
+    match String.rindex_opt trimmed ':' with
+    | None -> trimmed
+    | Some idx when idx >= String.length trimmed - 1 -> ""
+    | Some idx ->
+        String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
+        |> String.trim
+  in
+  String.equal leaf "auto"
 
-let model_id_leaf model =
-  match known_provider_model_id_of_label model with
-  | Some id -> id
-  | None -> String.trim model
-
-let is_auto_model_label model =
-  String.equal
-    (String.lowercase_ascii (model_id_leaf model))
-    "auto"
-
-let is_unresolved_pricing_label model =
-  let trimmed = String.trim model in
-  String.equal trimmed ""
-  || is_auto_model_label trimmed
-  || String.equal trimmed unknown_model_sentinel
-
-let canonical_model_id_opt
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
-  match telemetry with
-  | Some { canonical_model_id = Some id; _ } ->
-      let trimmed = String.trim id in
-      if trimmed = "" || is_auto_model_label trimmed then None
-      else Some trimmed
-  | Some _ | None -> None
-
-(* #10083: layered fallback for [response.model] empty-string leaks.
-   Non-empty raw model is returned unchanged.  When empty, we consult
-   the telemetry envelope's [canonical_model_id] (which OAS populates
-   on well-formed transports even when the completion body omits
-   [model]); if that is also missing we tag the turn
-   [unknown_model_sentinel] so downstream labels remain explicit
-   rather than becoming the ambiguous empty string.  Each fallback
-   path emits a counter so the operator can attribute leaks per
-   keeper per source. *)
+(* #10083: keep the missing/alias observability, but return the keeper-facing
+   runtime lane instead of reconstructing OAS-owned model identity. *)
 let resolve_after_turn_model ~keeper_name
     ~(response : Agent_sdk.Types.api_response) =
-  let raw_model = response.model in
-  if String.trim raw_model <> "" then
-    match canonical_model_id_opt response.telemetry with
-    | Some canonical when is_auto_model_label raw_model ->
-        Prometheus.inc_counter alias_response_model_metric
-          ~labels:
-            [
-              ("keeper", keeper_name);
-              ("alias", model_id_leaf raw_model);
-              ("source", "telemetry_canonical");
-            ]
-          ();
-        Log.Keeper.warn
-          "keeper:%s after_turn response.model alias=%s → canonical=%s"
-          keeper_name raw_model canonical;
-        canonical
-    | Some _ | None -> raw_model
-  else begin
-    let canonical = canonical_model_id_of_telemetry ~model:"" response.telemetry in
-    let resolved, source =
-      if String.trim canonical <> "" then canonical, "telemetry_resolved"
-      else unknown_model_sentinel, "unknown_sentinel"
+  let raw_model = String.trim response.model in
+  if String.equal raw_model "" then begin
+    let source =
+      if telemetry_has_canonical_model_id response.telemetry then
+        "telemetry_resolved"
+      else "unknown_sentinel"
     in
     Prometheus.inc_counter empty_response_model_metric
       ~labels:[ ("keeper", keeper_name); ("source", source) ] ();
     Log.Keeper.warn
-      "keeper:%s after_turn response.model empty → fallback=%s resolved=%s"
-      keeper_name source resolved;
-    resolved
+      "keeper:%s after_turn response.model empty -> runtime_lane source=%s"
+      keeper_name source;
+    runtime_lane_label
+  end else begin
+    if is_runtime_selector_alias raw_model then (
+      Prometheus.inc_counter alias_response_model_metric
+        ~labels:
+          [
+            ("keeper", keeper_name);
+            ("alias", runtime_lane_label);
+            ("source", "telemetry_canonical");
+          ]
+        ();
+      Log.Keeper.warn
+        "keeper:%s after_turn response.model selector -> runtime_lane source=%s"
+        keeper_name "telemetry_canonical");
+    runtime_lane_label
   end
 
 let context_max_of_telemetry
@@ -362,15 +335,15 @@ let context_max_of_telemetry
   | _ -> 0
 
 let classify_usage_trust ?usage ~model ~telemetry () =
+  let _ = model in
   let usage_reported, usage =
     match usage with
     | Some usage -> true, usage
     | None -> false, zero_usage
   in
-  let provider_kind = provider_kind_of_telemetry telemetry in
-  Keeper_usage_trust.classify_with_provider_kind ~provider_kind ~usage_reported ~usage
-    ~model_used:model
-    ~resolved_model_id:(canonical_model_id_of_telemetry ~model telemetry)
+  Keeper_usage_trust.classify
+    ~usage_reported ~usage ~model_used:runtime_lane_label
+    ~resolved_model_id:runtime_lane_label
     ~context_max:(context_max_of_telemetry telemetry)
 
 let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
@@ -384,152 +357,45 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
       (fun reason ->
          Prometheus.inc_counter
            Keeper_metrics.metric_keeper_usage_anomalies
-           ~labels:
-             [
-               ("keeper_name", keeper_name);
-               ("model", model);
-               ("reason", reason);
-             ]
+	           ~labels:
+	             [
+	               ("keeper_name", keeper_name);
+	               ("model", "runtime");
+	               ("reason", reason);
+	             ]
            ())
       reasons
 
-(* #9868: use [pricing_for_model_opt] so unknown models surface as
-   [None] and get a loud catalog-miss signal instead of silently
-   returning $0. [pricing_for_model] (non-opt) collapses unknown into
-   [zero_pricing], which is the exact "Unknown -> Permissive Default"
-   anti-pattern called out in `instructions/software-development.md`
-   (OAS #555 parallel). Paid providers (openai gpt-5 family, glm
-   family) are missing from the upstream OAS catalog today, so this
-   path is the only place the miss becomes observable. *)
-let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage)
-    : float =
-  (* P1-6: distinguish two distinct "no price" paths so operators get
-     actionable signals instead of misleading "add to pricing.ml" advice.
-
-     1. Unresolved alias (model=auto, model=claude_code:auto, empty, unknown
-        sentinel): the alias was not resolved to a canonical id before this
-        call.  The root fix is ensuring telemetry always provides a
-        canonical_model_id; adding "auto" to pricing.ml is wrong.  Use INFO.
-
-     2. Genuine catalog miss (concrete model id not present in the OAS
-        Pricing catalog): operators/contributors need to add the entry.
-        Keep the existing WARN so the gap is visible. *)
-  let pricing_unresolved_alias () =
-    (* P1-6: use a distinct label value so monitoring dashboards can
-       distinguish unresolved-alias events from genuine catalog misses.
-       "(alias):<model>" in the model label maps to a different time series
-       than "<model>" so operators can filter each case independently. *)
-    Prometheus.inc_counter
-      Prometheus.metric_pricing_catalog_miss
-      ~labels:[("model", "(alias):" ^ model)] ();
-    Log.Keeper.info
-      "pricing_unresolved_alias model=%s input_tokens=%d output_tokens=%d \
-       — model label is an unresolved alias (auto / sentinel / empty); cost \
-       recorded as 0.0. Ensure telemetry provides canonical_model_id so the \
-       alias is resolved before pricing."
-      model usage.input_tokens usage.output_tokens;
-    0.0
-  in
-  let pricing_catalog_miss () =
-    Prometheus.inc_counter
-      Prometheus.metric_pricing_catalog_miss
-      ~labels:[("model", model)] ();
-    Log.Keeper.warn
-      "pricing_catalog_miss model=%s input_tokens=%d output_tokens=%d \
-       — no pricing entry in Llm_provider.Pricing catalog; cost recorded \
-       as 0.0 (not a true zero). Add the entry upstream in \
-       agent_sdk/llm_provider/pricing.ml, then bump the OAS pin."
-      model usage.input_tokens usage.output_tokens;
-    0.0
-  in
-  if is_unresolved_pricing_label model then pricing_unresolved_alias ()
-  else match Llm_provider.Pricing.pricing_for_model_opt model with
-  | Some pricing ->
-    Llm_provider.Pricing.estimate_cost ~pricing
-      ~input_tokens:usage.input_tokens
-      ~output_tokens:usage.output_tokens
-      ~cache_creation_input_tokens:usage.cache_creation_input_tokens
-      ~cache_read_input_tokens:usage.cache_read_input_tokens
-      ()
-  | None -> pricing_catalog_miss ()
-
 type cost_status =
-  | Cost_reported_or_estimated
+  | Cost_reported
   | Cost_known_free
-  | Cost_known_unpriced_model
   | Cost_no_tokens
   | Cost_usage_missing
   | Cost_usage_untrusted
-  | Cost_provider_unknown
-  | Cost_unresolved_model_alias
-  | Cost_unpriced_model
+  | Cost_runtime_unknown
+  | Cost_oas_cost_unreported
 
 let cost_status_to_string = function
-  | Cost_reported_or_estimated -> "priced"
+  | Cost_reported -> "reported"
   | Cost_known_free -> "known_free"
-  | Cost_known_unpriced_model -> "known_unpriced_model"
   | Cost_no_tokens -> "no_tokens"
   | Cost_usage_missing -> "usage_missing"
   | Cost_usage_untrusted -> "usage_untrusted"
-  | Cost_provider_unknown -> "provider_unknown"
-  | Cost_unresolved_model_alias -> "unresolved_model_alias"
-  | Cost_unpriced_model -> "unpriced_model"
+  | Cost_runtime_unknown -> "runtime_unknown"
+  | Cost_oas_cost_unreported -> "oas_cost_unreported"
 
 let cost_status_reason = function
-  | Cost_reported_or_estimated ->
-      "provider_reported_or_pricing_catalog_estimate"
+  | Cost_reported -> "oas_reported_cost"
   | Cost_known_free -> "known_structurally_unmetered_or_zero_price"
-  | Cost_known_unpriced_model -> "known_non_catalog_model"
   | Cost_no_tokens -> "no_billable_tokens"
   | Cost_usage_missing -> "usage_missing"
   | Cost_usage_untrusted -> "usage_untrusted"
-  | Cost_provider_unknown -> "provider_unknown"
-  | Cost_unresolved_model_alias -> "model_alias_unresolved"
-  | Cost_unpriced_model -> "pricing_catalog_miss"
-
-let pricing_model_leaf model =
-  let trimmed = String.trim model in
-  match String.rindex_opt trimmed ':' with
-  | None -> trimmed
-  | Some idx ->
-      String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
-
-let is_known_non_catalog_pricing_model model =
-  match pricing_model_leaf model with
-  | "gpt-5.3-codex-spark" -> true
-  | _ -> false
-
-let pricing_model_for_ledger ~model ~telemetry =
-  match canonical_model_id_opt telemetry with
-  | Some canonical when is_auto_model_label model -> canonical
-  | Some canonical when String.trim model = "" -> canonical
-  | Some canonical when String.equal (String.trim model) unknown_model_sentinel ->
-      canonical
-  | Some _ | None -> String.trim model
-
-let model_resolution_source_for_ledger ~model ~pricing_model =
-  let trimmed = String.trim model in
-  if String.equal trimmed pricing_model then "raw"
-  else if String.equal trimmed "" then "telemetry_canonical_empty"
-  else if is_auto_model_label trimmed then "telemetry_canonical_alias"
-  else if String.equal trimmed unknown_model_sentinel then
-    "telemetry_canonical_unknown"
-  else "raw"
-
-let pricing_catalog_status ~pricing_model =
-  if is_unresolved_pricing_label pricing_model then "alias_unresolved"
-  else if is_known_non_catalog_pricing_model pricing_model then "known_unpriced"
-  else match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
-  | Some pricing
-    when pricing.input_per_million = 0.0
-         && pricing.output_per_million = 0.0 ->
-      "hit_free"
-  | Some _ -> "hit_paid"
-  | None -> "miss"
+  | Cost_runtime_unknown -> "runtime_unknown"
+  | Cost_oas_cost_unreported -> "oas_cost_unreported"
 
 let cost_status_for_event
-    ~(provider : string)
-    ~(pricing_model : string)
+    ~(runtime_unknown : bool)
+    ~(runtime_unmetered : bool)
     ~(usage_missing : bool)
     ~(usage_trusted : bool)
     ~(input_tokens : int)
@@ -537,45 +403,17 @@ let cost_status_for_event
     ~(cost_usd : float) =
   if usage_missing then Cost_usage_missing
   else if not usage_trusted then Cost_usage_untrusted
-  else if cost_usd > 0.0 then Cost_reported_or_estimated
+  else if cost_usd > 0.0 then Cost_reported
   else if input_tokens <= 0 && output_tokens <= 0 then Cost_no_tokens
-  else if structurally_unmetered_provider provider then Cost_known_free
-  else if String.equal provider "unknown" then Cost_provider_unknown
-  else if is_unresolved_pricing_label pricing_model then
-    Cost_unresolved_model_alias
-  else if is_known_non_catalog_pricing_model pricing_model then
-    Cost_known_unpriced_model
-  else
-    match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
-    | Some pricing
-      when pricing.input_per_million = 0.0
-           && pricing.output_per_million = 0.0 ->
-        Cost_known_free
-    | Some _ -> Cost_reported_or_estimated
-    | None -> Cost_unpriced_model
+  else if runtime_unmetered then Cost_known_free
+  else if runtime_unknown then Cost_runtime_unknown
+  else Cost_oas_cost_unreported
 
-let cost_usd_for_usage ?provider_kind ~(model : string)
-    (usage : Agent_sdk.Types.api_usage)
-    : float =
-  let provider = provider_of_model ?provider_kind model in
+let oas_reported_cost (usage : Agent_sdk.Types.api_usage) : float =
   match usage.cost_usd with
   | Some cost when cost > 0.0 -> cost
-  | Some cost ->
-      if
-        usage_has_tokens usage
-        && not (structurally_unmetered_provider provider)
-      then
-        estimate_usage_cost_usd ~model usage
-      else
-        cost
-  | None ->
-      if
-        usage_has_tokens usage
-        && not (structurally_unmetered_provider provider)
-      then
-        estimate_usage_cost_usd ~model usage
-      else
-        0.0
+  | Some _ -> 0.0
+  | None -> 0.0
 
 type tool_execution_summary =
   { tool_name : string
@@ -587,7 +425,7 @@ type tool_execution_summary =
 let tool_execution_summary ~tool_name ~model ~success ~duration_ms :
     tool_execution_summary =
   { tool_name
-  ; provider = provider_of_model model
+  ; provider = runtime_lane_of_model model
   ; outcome = if success then "ok" else "error"
   ; duration_ms = max 0.0 duration_ms
   }
@@ -626,14 +464,11 @@ let record_llm_tok_s_metrics
       t.prompt_per_second, t.predicted_per_second
     | _ -> None, None
   in
-  let provider_kind_label =
-    match provider_kind_of_telemetry telemetry with
-    | Some pk -> Llm_provider.Provider_kind.to_string pk
-    | None -> "unknown"
-  in
-  let provider = provider_of_model_with_telemetry ~model ~telemetry in
+  let provider_kind_label = "runtime" in
+  let _ = model in
+  let provider = "runtime" in
   let labels =
-    [ "model", model
+    [ "model", "runtime"
     ; "provider", provider
     ; "provider_kind", provider_kind_label
     ]
@@ -657,7 +492,8 @@ let record_llm_inference_latency_metric
     ~(model : string)
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
-  let labels = [("model", model)] in
+  let _ = model in
+  let labels = [("model", "runtime")] in
   Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
   match telemetry with
   | Some t ->
@@ -703,14 +539,12 @@ let wall_tokens_per_second
     "tracking is broken" without the next concrete action.
 
     Bounded source values:
-    - [computed]              — cost > 0 written by the pricing path.
+    - [computed]              — cost > 0 reported by OAS.
     - [missing_usage]         — no usage payload from the provider.
     - [untrusted_usage]       — usage_trust gate suppressed the value.
-    - [unmetered_provider]    — local LLM (ollama, etc.); 0 by design.
-    - [pricing_catalog_miss]  — model not in
-                                [Llm_provider.Pricing] catalog;
-                                [estimate_usage_cost_usd] returned 0.
-    - [zero_token_call]       — trusted+priced but tokens=0
+    - [unmetered_provider]    — OAS/runtime explicitly marks the call free.
+    - [oas_cost_unreported]   — OAS returned tokens but no positive cost.
+    - [zero_token_call]       — trusted but tokens=0
                                 (tool-only call or empty completion). *)
 let cost_emit_source_metric = Prometheus.metric_cost_emit_zero_source
 
@@ -721,25 +555,20 @@ let () =
       "Total cost.jsonl emits where cost_usd ended up as 0.0 due to a \
        known classification path (vs an actually-zero call).  Labels: \
        source ∈ {missing_usage, untrusted_usage, unmetered_provider, \
-       unresolved_model_alias, known_unpriced_model, pricing_catalog_miss, \
-       zero_token_call}.  A high [pricing_catalog_miss] rate is the hint \
-       to add upstream OAS pricing entries; a high [untrusted_usage] rate \
-       points at the trust classifier; a high [missing_usage] rate points \
-       at the provider adapter not surfacing usage.  See #10318 and #13698."
+       oas_cost_unreported, zero_token_call}.  A high \
+       [oas_cost_unreported] rate means OAS did not annotate usage with cost; \
+       a high [untrusted_usage] rate points at the trust classifier; a high \
+       [missing_usage] rate points at the provider adapter not surfacing usage. \
+       See #10318 and #13698."
     ()
 
-let classify_cost_usd_source ~usage_missing ~usage_trusted ~provider
-    ~model ~cost_usd =
+let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
+    ~cost_usd =
   if usage_missing then "missing_usage"
   else if not usage_trusted then "untrusted_usage"
-  else if structurally_unmetered_provider provider then "unmetered_provider"
+  else if runtime_unmetered then "unmetered_provider"
   else if cost_usd > 0.0 then "computed"
-  else if is_unresolved_pricing_label model then "unresolved_model_alias"
-  else if is_known_non_catalog_pricing_model model then "known_unpriced_model"
-  else
-    match Llm_provider.Pricing.pricing_for_model_opt model with
-    | None -> "pricing_catalog_miss"
-    | Some _ -> "zero_token_call"
+  else "oas_cost_unreported"
 
 let record_cost_emit_source source =
   if not (String.equal source "computed") then
@@ -801,14 +630,16 @@ let assemble_cost_event_payload
   let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
   let safe_input_tokens = if usage_trusted then input_tokens else 0 in
   let safe_output_tokens = if usage_trusted then output_tokens else 0 in
-  let provider = provider_of_model_with_telemetry ~model ~telemetry in
-  let pricing_model = pricing_model_for_ledger ~model ~telemetry in
-  (* Classify cost_status using raw cost_usd so pricing catalog
-     lookup is independent of the safe_value mask below. *)
+  let _ = model in
+  let provider = runtime_lane_label in
+  let runtime_unknown = false in
+  let runtime_unmetered = false in
+  (* Classify cost_status using raw cost_usd so OAS-reported cost is
+     considered before the safe-value mask below. *)
   let cost_status =
     cost_status_for_event
-      ~provider
-      ~pricing_model
+      ~runtime_unknown
+      ~runtime_unmetered
       ~usage_missing
       ~usage_trusted
       ~input_tokens
@@ -817,13 +648,13 @@ let assemble_cost_event_payload
   in
   let safe_cost_usd =
     match cost_status with
-    | Cost_reported_or_estimated -> cost_usd
-    | Cost_known_free | Cost_no_tokens -> 0.0
-    | Cost_usage_missing | Cost_usage_untrusted -> 0.0
-    | Cost_provider_unknown
-    | Cost_unresolved_model_alias
-    | Cost_known_unpriced_model
-    | Cost_unpriced_model -> 0.0
+    | Cost_reported -> cost_usd
+    | Cost_known_free
+    | Cost_no_tokens
+    | Cost_usage_missing
+    | Cost_usage_untrusted
+    | Cost_runtime_unknown
+    | Cost_oas_cost_unreported -> 0.0
   in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in
@@ -861,24 +692,18 @@ let assemble_cost_event_payload
   in
   let cost_usd_source =
     classify_cost_usd_source ~usage_missing ~usage_trusted
-      ~provider ~model:pricing_model ~cost_usd
+      ~runtime_unmetered ~cost_usd
   in
   let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
-    ("provider", `String provider);
-    ("model", `String model);
+    ("provider", `String "runtime");
+    ("model", `String "runtime");
     ("input_tokens", `Int safe_input_tokens);
     ("output_tokens", `Int safe_output_tokens);
     ("cost_usd", `Float safe_cost_usd);
     ("cost_status", `String cost_status_label);
     ("cost_status_reason", `String cost_status_reason_label);
-    ("cost_pricing_model", `String pricing_model);
-    ( "cost_pricing_catalog",
-      `String (pricing_catalog_status ~pricing_model) );
-    ( "model_resolution_source",
-      `String
-        (model_resolution_source_for_ledger ~model ~pricing_model) );
     (* #10318: self-describing reason for [cost_usd]'s value. *)
     ("cost_usd_source", `String cost_usd_source);
     ("usage_missing", `Bool usage_missing);
@@ -2024,10 +1849,9 @@ let make_hooks
         let input_tok, output_tok, turn_cost_usd, usage_missing =
           match response.usage with
           | Some u when usage_trusted ->
-              let provider_kind = provider_kind_of_telemetry response.telemetry in
               ( u.input_tokens,
                 u.output_tokens,
-                cost_usd_for_usage ?provider_kind ~model u,
+                oas_reported_cost u,
                 false )
           | Some _ -> (0, 0, 0.0, false)
           | None -> (0, 0, 0.0, true)
@@ -2042,17 +1866,15 @@ let make_hooks
         let total_tok = input_tok + output_tok in
         if (not usage_missing) && not usage_trusted then
           Log.Keeper.warn
-            "keeper:%s after_turn usage telemetry untrusted model=%s resolved_model=%s reasons=%s input=%d output=%d context_max=%d"
-            meta.name model
-            (canonical_model_id_of_telemetry ~model response.telemetry)
+            "keeper:%s after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+            meta.name runtime_lane_label
             (String.concat ","
                (match Keeper_usage_trust.reasons usage_trust with
                 | [] -> [Keeper_usage_trust.to_string usage_trust]
                 | reasons -> reasons))
             raw_input_tok raw_output_tok
             (context_max_of_telemetry response.telemetry);
-        (* Provider prefix cache token tracking (Anthropic).
-           Non-Anthropic providers report 0 for these fields. *)
+        (* Cache-token tracking uses OAS-reported counters only. *)
         (match response.usage with
          | Some u when usage_trusted ->
            let cc = u.cache_creation_input_tokens in
@@ -2104,7 +1926,7 @@ let make_hooks
         let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
         let decode_tok_s = fmt_tok_s decode_tok_s_opt in
         Log.Keeper.info
-          "keeper:%s turn=%d total_turns=%d model=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
+          "keeper:%s turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok
           wall_tok_s prompt_tok_s decode_tok_s latency_ms;
         (* Emit per-turn cost event for task attribution.
@@ -2134,7 +1956,7 @@ let make_hooks
                  ("name", `String meta.name);
                  ("generation", `Int generation);
                  ("turn", `Int turn);
-                 ("model_used", `String model);
+                 ("model_used", `Null);
                  ("input_tokens", `Int input_tok);
                  ("output_tokens", `Int output_tok);
                  ("has_state_block", `Bool has_state_block);
@@ -2197,8 +2019,7 @@ let make_hooks
           else (Time_compat.now () -. !tool_start_time) *. 1000.0
         in
         let model =
-          let m = (!meta_ref).runtime.usage.last_model_used in
-          if m = "" then (Keeper_types.cascade_name_of_meta !meta_ref) else m
+          current_keeper_model !meta_ref
         in
         let summary =
           tool_execution_summary
@@ -2249,8 +2070,7 @@ let make_hooks
                ~keeper_name:(!meta_ref).name
                ~tool_name ~input ~output_text
                ~success:(outcome = "ok") ~duration_ms
-               ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
-                       if m = "" then (Keeper_types.cascade_name_of_meta !meta_ref) else m)
+               ~model:(current_keeper_model !meta_ref)
                ?lane ?tool_choice ?thinking_enabled ?thinking_budget
                ?prompt_fingerprint
                ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids

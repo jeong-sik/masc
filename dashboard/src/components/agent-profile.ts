@@ -39,7 +39,7 @@ import { missionSnapshot } from '../mission-store'
 import { navigate } from '../router'
 import { formatDuration } from './mission-utils'
 import { trimText } from '../lib/truncate'
-import { keeperActivityDisplay, keeperDisplayModel } from '../lib/keeper-runtime-display'
+import { keeperActivityDisplay } from '../lib/keeper-runtime-display'
 import type {
   Agent,
   DashboardExecutionContinuityBrief,
@@ -221,7 +221,6 @@ function CharacterPlate({ name }: { name: string }) {
   const ctxRatio = keeper?.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper?.generation
-  const model = keeper ? keeperDisplayModel(keeper)?.value ?? agent?.model ?? null : agent?.model ?? null
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   const signalTruth = brief?.signal_truth
   const continuitySummary =
@@ -263,7 +262,6 @@ function CharacterPlate({ name }: { name: string }) {
 
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
-          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-2xs text-[var(--color-fg-muted)] bg-[var(--accent-8)] border border-[var(--accent-10)] px-[5px] py-px rounded-[var(--r-1)]">${model}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`

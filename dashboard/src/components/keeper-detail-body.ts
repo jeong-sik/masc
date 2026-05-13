@@ -17,6 +17,7 @@ import {
   TraitsList,
 } from './keeper-detail-panels'
 import {
+  RuntimeLensSection,
   RuntimeSignals,
   TurnBudgetSection,
   KeeperNeighborhood,
@@ -181,6 +182,9 @@ export function KeeperDetailBody({
         >
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
+          <${CollapsibleSection} title="Runtime Lens" open=${true}>
+            <${RuntimeLensSection} trace=${runtimeTrace} />
+          <//>
           <${CollapsibleSection}
             title="런타임 진단"
             open=${diagOpen}

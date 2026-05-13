@@ -28,6 +28,8 @@ let counter_for ~kind ~provider ~cascade_name ~capacity_scope =
     ()
 ;;
 
+let public_provider = "runtime"
+
 type health_decision =
   | Hard_quota
   | Soft_rate_limited
@@ -53,18 +55,18 @@ let legacy_health_decision err =
 let typed_health_decision err =
   let error = OWN.sdk_error_to_provider_error ~provider:"anthropic" err in
   match error with
-  | Some (P.CapacityExhausted { scope = `Provider; _ }) -> Hard_quota
+  | Some (P.CapacityExhausted { scope = `Provider }) -> Hard_quota
   | Some (P.CliWrappedHardQuota _) -> Hard_quota
   | Some (P.RateLimit _) -> Soft_rate_limited
   | Some
-      ( P.CapacityExhausted { scope = `Model; _ }
-      | P.AuthError _
+      ( P.CapacityExhausted { scope = `Model }
+      | P.AuthError
       | P.ServerError _
       | P.InvalidRequest _
       | P.CliWrappedMaxTurns _
       | P.CliWrappedResumableSession _
       | P.PermissionDenied _
-      | P.ModelNotFound _ ) -> Failure
+      | P.ModelNotFound ) -> Failure
   | None -> Failure
 ;;
 
@@ -77,13 +79,13 @@ let test_rate_limit_maps_retry_after () =
     |> expect_some
   in
   match error with
-  | P.RateLimit { retry_after; provider } ->
-    check string "provider normalized" "anthropic" provider;
+  | P.RateLimit { retry_after } ->
     check (option (float 0.001)) "retry_after" (Some 1.5) retry_after;
+    check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error);
     check string "kind" "rate_limit" (P.to_error_kind error);
     check_json
       "json"
-      {|{"kind":"rate_limit","retry_after":1.5,"provider":"anthropic"}|}
+      {|{"kind":"rate_limit","retry_after":1.5,"provider":"runtime"}|}
       error
   | _ -> fail "expected RateLimit"
 ;;
@@ -97,12 +99,12 @@ let test_rate_limit_can_be_capacity_exhausted () =
     |> expect_some
   in
   match error with
-  | P.CapacityExhausted { scope = `Provider; affected } ->
-    check (list string) "affected" [ "claude_code:auto" ] affected;
+  | P.CapacityExhausted { scope = `Provider } ->
+    check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error);
     check bool "capacity" true (P.is_capacity_exhausted error);
     check_json
       "json"
-      {|{"kind":"capacity_exhausted","scope":"provider","affected":["claude_code:auto"]}|}
+      {|{"kind":"capacity_exhausted","scope":"provider","affected":["runtime"]}|}
       error
   | _ -> fail "expected provider CapacityExhausted"
 ;;
@@ -123,8 +125,8 @@ let test_anthropic_invalid_request_specified_limit_body_pins_capacity () =
     OWN.sdk_error_to_provider_error ~provider:"anthropic" sdk_error |> expect_some
   in
   match error with
-  | P.CapacityExhausted { scope = `Provider; affected } ->
-    check (list string) "affected" [ "anthropic" ] affected
+  | P.CapacityExhausted { scope = `Provider } ->
+    check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error)
   | _ -> fail "expected specified-limit InvalidRequest to become capacity"
 ;;
 
@@ -141,8 +143,8 @@ let test_cli_hard_quota_wrapper_emits_capacity_variant () =
   in
   check bool "existing wrapper classifier" true (OWN.sdk_error_is_hard_quota sdk_error);
   match OWN.sdk_error_to_provider_error ~provider:"claude_code:auto" sdk_error with
-  | Some (P.CapacityExhausted { scope = `Provider; affected }) ->
-    check (list string) "affected" [ "claude_code:auto" ] affected
+  | Some (P.CapacityExhausted { scope = `Provider } as error) ->
+    check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error)
   | Some error -> failf "expected CapacityExhausted, got %s" (P.to_error_kind error)
   | None -> fail "expected provider_error"
 ;;
@@ -159,8 +161,8 @@ let test_server_and_auth_errors_are_closed_variants () =
     |> expect_some
   in
   match server, auth with
-  | P.ServerError { code = 503; transient = true }, P.AuthError { provider } ->
-    check string "auth provider" "kimi" provider;
+  | P.ServerError { code = 503; transient = true }, P.AuthError ->
+    check (list string) "auth affected runtime lane" [ public_provider ] (P.affected_providers auth);
     check (list string) "server has no provider owner" [] (P.affected_providers server)
   | _ -> fail "expected ServerError/AuthError"
 ;;
@@ -175,8 +177,8 @@ let test_non_capacity_invalid_request_preserves_reason () =
     |> expect_some
   in
   match error with
-  | P.InvalidRequest { provider; reason = actual } ->
-    check string "provider" "anthropic" provider;
+  | P.InvalidRequest { reason = actual } ->
+    check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error);
     check string "reason" reason actual;
     check bool "not capacity" false (P.is_capacity_exhausted error)
   | _ -> fail "expected InvalidRequest"
@@ -254,7 +256,7 @@ let test_emit_sdk_provider_error_metric_rate_limit () =
   let before =
     counter_for
       ~kind:"rate_limit"
-      ~provider:"anthropic"
+      ~provider:public_provider
       ~cascade_name:"primary"
       ~capacity_scope:"none"
   in
@@ -273,7 +275,7 @@ let test_emit_sdk_provider_error_metric_rate_limit () =
     (before +. 1.0)
     (counter_for
        ~kind:"rate_limit"
-       ~provider:"anthropic"
+       ~provider:public_provider
        ~cascade_name:"primary"
        ~capacity_scope:"none")
 ;;
@@ -282,7 +284,7 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
   let before =
     counter_for
       ~kind:"capacity_exhausted"
-      ~provider:"anthropic"
+      ~provider:public_provider
       ~cascade_name:"primary"
       ~capacity_scope:"provider"
   in
@@ -305,7 +307,7 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
     (before +. 1.0)
     (counter_for
        ~kind:"capacity_exhausted"
-       ~provider:"anthropic"
+       ~provider:public_provider
        ~cascade_name:"primary"
        ~capacity_scope:"provider")
 ;;
@@ -314,7 +316,7 @@ let test_emit_sdk_provider_error_metric_skips_non_api () =
   let before =
     counter_for
       ~kind:"invalid_request"
-      ~provider:"anthropic"
+      ~provider:public_provider
       ~cascade_name:"primary"
       ~capacity_scope:"none"
   in
@@ -331,7 +333,7 @@ let test_emit_sdk_provider_error_metric_skips_non_api () =
     before
     (counter_for
        ~kind:"invalid_request"
-       ~provider:"anthropic"
+       ~provider:public_provider
        ~cascade_name:"primary"
        ~capacity_scope:"none")
 ;;

@@ -96,14 +96,14 @@ let governance_model_source_to_string = function
   | Unknown_sentinel -> "unknown_sentinel"
 
 let resolve_governance_model_used ~raw_model ~canonical_model_id =
-  if String.trim raw_model <> "" then raw_model, Response_model
+  if String.trim raw_model <> "" then "runtime", Response_model
   else
     match canonical_model_id with
     | Some id ->
         let trimmed = String.trim id in
-        if trimmed <> "" then trimmed, Telemetry_resolved
-        else "unknown_provider", Unknown_sentinel
-    | None -> "unknown_provider", Unknown_sentinel
+        if trimmed <> "" then "runtime", Telemetry_resolved
+        else "runtime", Unknown_sentinel
+    | None -> "runtime", Unknown_sentinel
 
 let governance_dir base_path =
   Filename.concat
@@ -427,7 +427,7 @@ let runtime_status_at ~now_ts base_path =
         generated_at_unix = st.generated_at_unix;
         expires_at = st.expires_at;
         expires_at_unix = st.expires_at_unix;
-        model_used = st.model_used;
+        model_used = None;
         keeper_name;
         last_error = st.last_error;
         compute_in_flight = st.compute_in_flight;
@@ -547,7 +547,7 @@ let parse_required_guardrail_state json =
   | `Null -> Error "missing guardrail_state"
   | _ -> Error "invalid guardrail_state: expected object"
 
-let parse_item_judgment ~generated_at ~expires_at ~model_used json =
+let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
   let target_kind =
     json |> member "kind" |> to_string_option |> Option.value ~default:""
     |> String.lowercase_ascii
@@ -588,7 +588,7 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used json =
                    ("confidence", `Float confidence);
                    ("generated_at", `String generated_at);
                    ("expires_at", `String expires_at);
-                   ("model_used", `String model_used);
+                   ("model_used", `Null);
                    ("keeper_name", `String keeper_name);
                    ( "evidence_refs",
                      `List (List.map (fun item -> `String item) evidence_refs) );
@@ -668,21 +668,9 @@ let compute_judgments
         let raw_text = Agent_sdk_response.text_of_response response in
         let generated_at = now_iso () in
         let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
-        (* #9880 facet 4: 17% of yesterday's judgment records had
-           [model_used = ""] because OAS transports occasionally
-           return [response.model = ""] (Kimi/Codex CLI silent
-           failure path; CompletionContractViolation
-           retry-exhausted synthetic responses).  An empty
-           [model_used] field destroys attribution downstream
-           (cost rollups, per-model latency p50/p99, daily
-           judgments-by-model breakdown).
-
-           Same shape as keeper-side fix #10083: layered
-           fallback (raw → telemetry canonical_model_id → named
-           sentinel) plus a counter so the operator can see WHICH
-           transport leaked.  Sentinel matches the keeper-side
-           string [unknown_provider] so dashboards can
-           union-aggregate empty-model events across both callers. *)
+        (* #9880: keep the internal fallback/counter for empty OAS model
+           metadata, but do not project concrete model names into MASC-owned
+           dashboard or judgment JSON. *)
         let canonical_model_id =
           match response.telemetry with
           | Some { canonical_model_id = Some id; _ } -> Some id
@@ -702,8 +690,8 @@ let compute_judgments
                 ~labels:[ ("source", source) ]
                 ();
               Log.Governance.warn
-                "compute_judgments: response.model empty → fallback=%s resolved=%s (#9880)"
-                source resolved_model;
+                "compute_judgments: response.model empty -> fallback=%s (#9880)"
+                source;
         end;
         match
           parse_governance_response ~raw_text ~generated_at ~expires_at
@@ -863,12 +851,12 @@ let refresh_once ~sw ~net
              ~timeout_sec:timeout_budget);
         if judgments = [] then
           Log.Governance.routine
-            "refresh_once: ok model=%s judgments=%d"
-            model_used 0
+            "refresh_once: ok runtime=redacted judgments=%d"
+            0
         else
           Log.Governance.info
-            "refresh_once: ok model=%s judgments=%d"
-            model_used (List.length judgments);
+            "refresh_once: ok runtime=redacted judgments=%d"
+            (List.length judgments);
         append_judgments base_path judgments;
         with_lock st (fun () ->
             st.refreshing <- false;

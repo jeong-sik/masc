@@ -92,13 +92,18 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_trusted
   | Usage_untrusted of string list
 
+let runtime_lane_label = "runtime"
+
 let classify_usage_trust ~(usage_reported : bool)
     ~(usage : Agent_sdk.Types.api_usage)
     ~(model_used : string)
     ~(resolved_model_id : string)
     ~(context_max : int) : usage_trust =
-  Keeper_usage_trust.classify ~usage_reported ~usage ~model_used
-    ~resolved_model_id ~context_max
+  let _ = model_used, resolved_model_id in
+  Keeper_usage_trust.classify ~usage_reported ~usage
+    ~model_used:runtime_lane_label
+    ~resolved_model_id:runtime_lane_label
+    ~context_max
 
 (* #9953: bucket the raw [context_max] integer into a tightly
    bounded vocabulary so the Prometheus label cardinality stays
@@ -127,14 +132,17 @@ let record_context_max_observation
     ~(model_used : string)
     ~(resolved_model_id : string)
     ~(context_max : int) : unit =
+  let _ = model_used, resolved_model_id in
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_context_max_observed
-    ~labels:[
-      ("keeper", keeper);
-      ("model_used", model_used);
-      ("resolved_model_id", resolved_model_id);
-      ("context_max_bucket", context_max_bucket context_max);
-    ] ()
+    ~labels:
+      [
+        ("keeper", keeper);
+        ("model_used", runtime_lane_label);
+        ("resolved_model_id", runtime_lane_label);
+        ("context_max_bucket", context_max_bucket context_max);
+      ]
+    ()
 
 (* #9943: per-keeper turn-latency bucket counter.  Buckets are
    chosen so each name a reachable operator state:
@@ -191,8 +199,8 @@ let label_or_unknown raw =
   if trimmed = "" then "unknown" else trimmed
 
 let provider_kind_of_model_used raw =
-  let model_used = label_or_unknown raw in
-  Provider_adapter.provider_of_model_label model_used
+  let _ = raw in
+  "runtime"
 
 let record_turn_latency_by_model_bucket
     ~(keeper : string)
@@ -202,8 +210,9 @@ let record_turn_latency_by_model_bucket
     ~(cascade_profile : string)
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
-  let model_used = label_or_unknown model_used in
-  let resolved_model_id = label_or_unknown resolved_model_id in
+  let _ = model_used, resolved_model_id in
+  let model_used = runtime_lane_label in
+  let resolved_model_id = runtime_lane_label in
   let cascade_profile = label_or_unknown cascade_profile in
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_turn_latency_by_model_bucket
@@ -221,9 +230,11 @@ let record_turn_latency_by_model_bucket
 
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
-let estimate_trusted_usage_cost_usd ~usage_trusted ~model usage =
+let estimate_trusted_usage_cost_usd ~usage_trusted ~model:_ usage =
   if usage_trusted then
-    Keeper_hooks_oas.estimate_usage_cost_usd ~model usage
+    match usage.Agent_sdk.Types.cost_usd with
+    | Some cost when cost > 0.0 -> cost
+    | Some _ | None -> 0.0
   else 0.0
 
 let usage_trust_to_string = Keeper_usage_trust.to_string
@@ -339,24 +350,13 @@ let telemetry_reported_of_result
     (result : Keeper_agent_run.run_result) : bool =
   Option.is_some result.inference_telemetry
 
-let structurally_unmetered_provider (provider : string) : bool =
-  Provider_adapter.is_structurally_unmetered_provider provider
-
 let coverage_reason_of_result
     (result : Keeper_agent_run.run_result) : string option =
   let telemetry_reported = telemetry_reported_of_result result in
   if result.usage_reported && telemetry_reported then None
   else
-    let provider =
-      Keeper_agent_run.surface_model_used result
-      |> Keeper_hooks_oas.provider_of_model
-    in
     match result.usage_reported, telemetry_reported with
-    | false, false ->
-        if result.tool_surface.tool_requirement = Keeper_agent_tool_surface.No_tools
-           && structurally_unmetered_provider provider
-        then Some "text_only_unmetered"
-        else Some "missing_usage_and_inference"
+    | false, false -> Some "missing_usage_and_inference"
     | false, true -> Some "missing_usage"
     | true, false -> Some "missing_inference"
     | true, true -> None
@@ -555,35 +555,70 @@ let provider_context_json ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result option) =
   match result with
   | Some r ->
-      let cascade_name, selected_model, candidate_models =
+      let cascade_name =
         match r.cascade_observation with
         | Some observation ->
-            ( Keeper_cascade_profile.runtime_name_to_string
-                observation.cascade_name,
-              observation.selected_model,
-              observation.candidate_models )
-        | None ->
-            ( (cascade_name_of_meta meta),
-              Some (Keeper_agent_run.surface_model_used r),
-              [] )
+            Keeper_cascade_profile.runtime_name_to_string observation.cascade_name
+        | None -> cascade_name_of_meta meta
       in
       `Assoc
         [ ("cascade_name", `String cascade_name)
-        ; ( "selected_model",
-            Json_util.string_opt_to_json selected_model )
-        ; ( "candidate_models",
-            `List (List.map (fun value -> `String value) candidate_models) )
+        ; "selected_model", `Null
+        ; "candidate_models", `List []
         ]
   | None ->
       `Assoc
         [ ("cascade_name", `String (cascade_name_of_meta meta))
         ; ("selected_model", `Null)
-        ; ( "candidate_models",
-            `List
-              (List.map
-                 (fun value -> `String value)
-                 (Keeper_model_labels.configured_model_labels_of_meta meta)) )
+        ; "candidate_models", `List []
         ]
+
+let redacted_cascade_attempt_to_json
+    (attempt : Cascade_legacy_runner.cascade_attempt) : Yojson.Safe.t =
+  `Assoc
+    [ "attempt_index", `Int attempt.attempt_index
+    ; ( "latency_ms"
+      , match attempt.latency_ms with
+        | Some value -> `Int value
+        | None -> `Null )
+    ; ( "error"
+      , match attempt.error with
+        | Some value -> `String value
+        | None -> `Null )
+    ]
+;;
+
+let redacted_cascade_fallback_event_to_json
+    (event : Cascade_legacy_runner.cascade_fallback_event) : Yojson.Safe.t =
+  `Assoc [ "reason", `String event.reason ]
+;;
+
+let redacted_cascade_observation_to_json
+    (obs : Cascade_legacy_runner.cascade_observation) : Yojson.Safe.t =
+  let cascade_name =
+    Keeper_cascade_profile.runtime_name_to_string obs.cascade_name
+  in
+  `Assoc
+    [ "cascade_name", `String cascade_name
+    ; "strategy", Json_util.string_opt_to_json obs.strategy
+    ; "configured_labels", `List []
+    ; "candidate_models", `List []
+    ; "primary_model", `Null
+    ; "selected_model", `Null
+    ; "selected_model_raw", `Null
+    ; "selected_index", Json_util.int_opt_to_json obs.selected_index
+    ; "fallback_hops", Json_util.int_opt_to_json obs.fallback_hops
+    ; "fallback_applied", `Bool obs.fallback_applied
+    ; ( "attempts"
+      , `List (List.map redacted_cascade_attempt_to_json obs.attempts) )
+    ; ( "fallback_events"
+      , `List
+          (List.map redacted_cascade_fallback_event_to_json obs.fallback_events)
+      )
+    ; "attempt_details_available", `Bool obs.attempt_details_available
+    ; "attempt_details_source", `String obs.attempt_details_source
+    ]
+;;
 
 let tool_contract_json ~(tool_call_count : int) ~(tools_used : string list)
     (result : Keeper_agent_run.run_result option) =
@@ -886,11 +921,11 @@ let append_decision_record
                     [
                       ("cascade_name", `String cascade_name);
                       ("strategy", Json_util.string_opt_to_json co.strategy);
-                      ("primary_model", match co.primary_model with Some m -> `String m | None -> `Null);
-                      ("selected_model", match co.selected_model with Some m -> `String m | None -> `Null);
+                      ("primary_model", `Null);
+                      ("selected_model", `Null);
                       ("fallback_applied", `Bool co.fallback_applied);
                       ("fallback_hops", match co.fallback_hops with Some n -> `Int n | None -> `Int 0);
-                      ("candidate_models", `List (List.map (fun s -> `String s) co.candidate_models));
+                      ("candidate_models", `List []);
                     ]
                 | None -> []
               in
@@ -999,8 +1034,8 @@ let append_decision_record
                   @ usage_trust_json_fields usage_trust
               in
               `Assoc ([
-                ("model_used", `String surface_model_used);
-                ("resolved_model_id", `String resolved_model_id);
+                ("model_used", `Null);
+                ("resolved_model_id", `Null);
                 ("outcome", `String "success");
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
@@ -1019,15 +1054,12 @@ let append_decision_record
               (* Partial telemetry for turns without a run_result: record
                  what we know without collapsing skipped/cancelled/partial
                  outcomes into telemetry.outcome=error. *)
-              let cascade_models =
-                Keeper_model_labels.configured_model_labels_of_meta meta
-              in
               let error_category =
                 error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
                 ("cascade_name", `String (cascade_name_of_meta meta));
-                ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
+                ("candidate_models", `List []);
                 ( "error_category",
                   match error_category with
                   | Some category -> `String category
@@ -1092,16 +1124,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let trusted_total_tokens =
     if usage_trusted then Keeper_exec_context.total_tokens result.usage else 0
   in
-  (* Use cascade_observation.selected_model (canonical, no :latest suffix)
-     instead of parsing model strings and stripping :latest manually.
-     surface_model_used already extracts this from cascade_observation.
-     Removes L3 (Cascade_config.parse_model_strings direct call) and
-     L6 (strip_latest model ID parsing) boundary violations. See #5626. *)
-  let used_model_id = surface_model_used in
   let turn_cost =
     estimate_trusted_usage_cost_usd
       ~usage_trusted
-      ~model:used_model_id
+      ~model:surface_model_used
       result.usage
   in
   let substantive_tool_call_count =
@@ -1165,7 +1191,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.usage.total_tokens + trusted_total_tokens;
         total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
         last_turn_ts = now_ts;
-        last_model_used = surface_model_used;
+        last_model_used = "";
         last_input_tokens = trusted_input_tokens;
         last_output_tokens = trusted_output_tokens;
         last_total_tokens = trusted_total_tokens;
@@ -1413,8 +1439,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("generation", `Int turn_generation);
-        ("model_used", `String surface_model_used);
-        ("resolved_model_id", `String resolved_model_id);
+        ("model_used", `Null);
+        ("resolved_model_id", `Null);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ( "timeout_budget",
@@ -1475,7 +1501,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | None -> `Null );
         ("cascade",
          match result.cascade_observation with
-         | Some observation -> Cascade_legacy_runner.cascade_observation_to_json observation
+         | Some observation -> redacted_cascade_observation_to_json observation
          | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
@@ -1520,7 +1546,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("inference_telemetry",
          match result.inference_telemetry with
          | Some t ->
-           Agent_sdk.Types.inference_telemetry_to_yojson t
+           Keeper_hooks_oas.inference_telemetry_to_runtime_json t
          | None -> `Null);
       ]
   in

@@ -10,9 +10,12 @@
     untouched until I7 (string elimination) and I2 (provider_error variant)
     converge into a Type Triad SSOT.
 
-    In-process, mutex-protected ring buffer keyed by [provider_id]. The
-    buffer caps itself at a small bounded window per provider so recording
-    is O(1) amortized and memory stays bounded regardless of emit volume.
+    In-process, mutex-protected ring buffer keyed by the neutral runtime
+    lane. Provider/model identifiers accepted at the boundary are discarded
+    before storage so MASC-side dashboard state does not retain concrete OAS
+    runtime identities. The buffer caps itself at a small bounded window so
+    recording is O(1) amortized and memory stays bounded regardless of emit
+    volume.
 
     OAS workers call {!record} after each LLM turn (tool path or chat path),
     and the REST/SSE endpoints read from {!recent} and {!summary}. Each
@@ -43,8 +46,11 @@ type status =
     a later cycle. *)
 type sample = {
   provider_id : string;
-      (** e.g. ["anthropic"], ["ollama"], ["codex_cli"]. *)
-  model_id : string;  (** e.g. ["claude-opus-4-7"]. *)
+      (** Compatibility field normalized to the neutral ["runtime"] lane by
+          constructors and [record] before MASC stores the sample. *)
+  model_id : string;
+      (** Compatibility field normalized to the neutral ["runtime"] lane by
+          constructors and [record] before MASC stores the sample. *)
   ttfb_ms : float;
       (** Time-to-first-byte (or first token) in milliseconds. *)
   total_duration_ms : float;  (** Full call duration in milliseconds. *)
@@ -71,8 +77,9 @@ type sample = {
 }
 
 val record : sample -> unit
-(** [record s] appends [s] to its provider's ring. Thread-safe.
-    When the per-provider cap is reached, the oldest entry is dropped. *)
+(** [record s] appends [s] to the runtime-lane ring after normalizing
+    [provider_id] and [model_id]. Thread-safe. When the cap is reached, the
+    oldest entry is dropped. *)
 
 val sample_of_response :
   provider_id:string ->
@@ -95,6 +102,8 @@ val sample_of_response :
     - native decode throughput is preferred when OAS telemetry exposes it;
       otherwise wall-clock throughput is derived from output tokens and
       duration.
+    - [provider_id] and [model_id] are accepted for source compatibility but
+      are not retained; returned samples carry the neutral ["runtime"] lane.
     - [serialization_ms] carries request-serialize + response-parse overhead
       measured at the adapter boundary; defaults to [0.0] when not provided.
 
@@ -127,11 +136,14 @@ type provider_error_count = {
 val record_provider_error :
   cascade_name:string -> provider_id:string -> Provider_error.t -> unit
 (** [record_provider_error ~cascade_name ~provider_id error] increments the
-    dashboard count for a typed provider-error event. *)
+    dashboard count for a typed provider-error event. [provider_id] is accepted
+    for source compatibility but normalized to the runtime lane before
+    storage. *)
 
 val provider_error_counts : ?provider:string -> unit -> provider_error_count list
-(** Current provider-error counts, sorted by descending [count]. With
-    [provider], only matching provider rows are returned. *)
+(** Current provider-error counts, sorted by descending [count]. [provider] is
+    accepted as a legacy runtime-lane filter; concrete provider identities are
+    not tracked. *)
 
 val recent :
   ?provider:string -> ?limit:int -> unit -> (sample * float) list
@@ -140,8 +152,9 @@ val recent :
     [recorded_at] is [Unix.gettimeofday] at {!record} time.
 
     - Default [limit] is [50].
-    - When [provider] is provided, only that provider's ring is scanned.
-      Unknown providers return [[]].
+    - When [provider] is provided, it selects the same neutral runtime lane
+      used for storage. Concrete provider-specific filtering is intentionally
+      unavailable on the MASC side.
     - When [provider] is absent, samples are merged across providers and
       sorted by [recorded_at] descending. *)
 
@@ -199,8 +212,9 @@ val summary_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
 
 val clear : ?provider:string -> unit -> unit
 (** [clear ?provider ()] drops samples and provider-error counts. With
-    [provider] only that provider's ring/counts are cleared. Without
-    [provider] the entire telemetry table is reset.
+    [provider], the neutral runtime lane is cleared; concrete
+    provider-specific state is not retained. Without [provider] the entire
+    telemetry table is reset.
 
     Intended for test fixtures and dashboard reset; do not call from
     production code. *)

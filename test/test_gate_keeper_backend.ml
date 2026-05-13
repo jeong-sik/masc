@@ -182,10 +182,15 @@ let test_extract_turn_stats_present () =
   let body = {|{"model_used":"claude-opus","duration_ms":1500,"total_tokens":500}|} in
   match Gate_keeper_backend.extract_turn_stats body with
   | Some { Gate_protocol.model_used; duration_ms; tokens_used } ->
-      check string "model" "claude-opus" model_used;
+      check string "model redacted to runtime lane" "runtime" model_used;
       check int "duration" 1500 duration_ms;
       check int "tokens" 500 tokens_used
   | None -> fail "expected Some stats"
+
+let test_extract_turn_stats_ignores_model_only_payload () =
+  let body = {|{"model_used":"claude-opus"}|} in
+  let result = Gate_keeper_backend.extract_turn_stats body in
+  check bool "model-only fields are not stats" true (result = None)
 
 let test_extract_turn_stats_missing_returns_none () =
   let body = {|{"other_field":"value"}|} in
@@ -247,6 +252,8 @@ let () =
           test_case "text field fallback" `Quick test_extract_reply_fallback_to_text_field;
           test_case "raw body on non-json" `Quick test_extract_reply_raw_on_non_json;
           test_case "turn stats present" `Quick test_extract_turn_stats_present;
+          test_case "turn stats ignore model-only payload" `Quick
+            test_extract_turn_stats_ignores_model_only_payload;
           test_case "turn stats missing returns None" `Quick
             test_extract_turn_stats_missing_returns_none;
         ] );

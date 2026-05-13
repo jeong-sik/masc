@@ -41,7 +41,7 @@ let broadcast_update ~kind payload =
       Log.Dashboard.warn "dashboard Yjs SSE broadcast failed: %s"
         (Printexc.to_string exn)
 
-let broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id =
+let broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id:_ =
   let payload =
     `Assoc
       [
@@ -49,7 +49,7 @@ let broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id =
         ("keeper_name", `String keeper_name);
         ("trace_id", `String trace_id);
         ("turn_index", `Int turn_index);
-        ("model_id", `String model_id);
+        ("model_id", `String "runtime");
       ]
     |> Yojson.Safe.to_string
   in

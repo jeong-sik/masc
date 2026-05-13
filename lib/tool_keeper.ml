@@ -519,15 +519,8 @@ let resolve_keeper_meta ctx args =
   | Error err -> Error (Printf.sprintf "%s" err)
 
 let default_keeper_model_label (meta : keeper_meta) =
-  match String.trim meta.runtime.usage.last_model_used with
-  | "" -> (
-      match
-        Cascade_runtime.models_of_cascade_name
-          (Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta))
-      with
-      | first :: _ when not (String.equal (String.trim first) "") -> first
-      | _ -> Env_config.Local_runtime.default_model)
-  | model -> model
+  let _ = meta in
+  "runtime"
 
 let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
   let parsed =

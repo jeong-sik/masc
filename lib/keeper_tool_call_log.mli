@@ -148,8 +148,8 @@ val log_call :
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
-    Output is truncated to 4000 bytes. [model] records which LLM generated
-    the tool call. Turn-policy fields ([lane], [tool_choice],
+    Output is truncated to 4000 bytes. [model] is a compatibility input only;
+    non-empty values are redacted to the neutral runtime lane. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
     selection context. [result_bytes] is the original output size before
     any truncation. [truncated_to] is present when Tool_output_validation

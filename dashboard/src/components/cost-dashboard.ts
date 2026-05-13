@@ -1,13 +1,13 @@
-// MASC Dashboard — O4 · Cost & Latency dashboard
+// MASC Dashboard — runtime cost & latency dashboard
 //
 // Phase 2 spec (`design-system/preview/cb-group-f.jsx:CostPerAgent`)
 // renders a 4-cell totals header (cost / tokens / p50 / p95) plus a
 // per-agent table with cost bar + p95 latency bar. Production has
-// rich cost + latency telemetry on `DashboardRuntimeModelMetric`
-// (`/api/v1/models/metrics`) but no surface that consolidates it
-// into a "where is the money going / where is the latency going" view.
+// redacted runtime-lane cost + latency telemetry on
+// `DashboardRuntimeModelMetric` (`/api/v1/models/metrics`), consolidated into
+// a "where is the money going / where is the latency going" view.
 //
-// This component now supports both per-model and per-keeper views,
+// This component now supports both per-runtime and per-keeper views,
 // toggled via a segmented control. The per-keeper view consumes the
 // new `/api/v1/dashboard/keeper-costs` endpoint.
 
@@ -458,23 +458,23 @@ function KeeperRow({
         </div>
       </td>
       <td class="px-2 py-1.5 text-left font-mono text-2xs text-text-muted">
-        ${topModel ? `${topModel.model} (${formatCost(topModel.cost_usd)})` : '—'}
+        ${topModel ? formatCost(topModel.cost_usd) : '—'}
       </td>
     </tr>
   `
 }
 
 function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
-  const providers = Array.from(new Set(models.map(m => m.provider ?? 'unknown'))).sort()
+  const providers = models.length > 0 ? ['runtime'] : []
   const modelIds = Array.from(new Set(models.map(m => m.model_id))).sort((a, b) => {
     const ca = models.find(m => m.model_id === a)?.total_cost_usd ?? 0
     const cb = models.find(m => m.model_id === b)?.total_cost_usd ?? 0
     return cb - ca
   })
 
-  const grid: number[][] = providers.map(p =>
+  const grid: number[][] = providers.map(() =>
     modelIds.map(mid => {
-      const match = models.find(m => m.model_id === mid && (m.provider ?? 'unknown') === p)
+      const match = models.find(m => m.model_id === mid)
       return match?.total_cost_usd ?? 0
     })
   )
@@ -503,12 +503,12 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
   }
 
   return html`
-    <section class="flex flex-col gap-2" aria-label="Provider × Model cost matrix">
+    <section class="flex flex-col gap-2" aria-label="Runtime lane cost matrix">
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">provider × model · $ spent</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">runtime lanes · $ spent</span>
       </div>
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Provider by model cost matrix">
+        <table class="w-full" aria-label="Runtime lane cost matrix">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left"></th>
@@ -1011,7 +1011,7 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
               <th scope="col" class="px-2 py-1.5 text-left">keeper</th>
               <th scope="col" class="px-2 py-1.5 text-left">event</th>
               <th scope="col" class="px-2 py-1.5 text-left">outcome</th>
-              <th scope="col" class="px-2 py-1.5 text-left">model</th>
+              <th scope="col" class="px-2 py-1.5 text-left">runtime</th>
               <th scope="col" class="px-2 py-1.5 text-right">latency</th>
               <th scope="col" class="px-2 py-1.5 text-right">cost</th>
               <th scope="col" class="px-2 py-1.5 text-center">tool</th>
@@ -1024,7 +1024,7 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
                 <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${e.keeper_name}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.event_type}</td>
                 <td class="px-2 py-1.5 text-left font-mono ${e.outcome === 'success' ? 'text-[var(--color-status-ok)]' : e.outcome === 'error' ? 'text-[var(--color-status-err)]' : 'text-text-muted'}">${e.outcome ?? '—'}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.model_used ?? '—'}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">—</td>
                 <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.latency_ms == null ? '—' : `${Math.round(e.latency_ms)}ms`}</td>
                 <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.cost_usd == null ? '—' : formatCost(e.cost_usd)}</td>
                 <td class="px-2 py-1.5 text-center font-mono text-text-muted">${e.tool ?? '—'}</td>
@@ -1056,7 +1056,7 @@ function CostFocusRail({
       <${FilterChips}
         chips=${[
           { key: 'agent', label: 'Keeper별 비용', count: keeperCount, title: 'keeper별 비용 / 토큰 / 지연 테이블' },
-          { key: 'matrix', label: '비용 매트릭스', count: modelCount, title: 'provider x model 비용 heatmap' },
+          { key: 'matrix', label: '비용 매트릭스', count: modelCount, title: 'runtime lane 비용 heatmap' },
           { key: 'latency', label: '지연 분포', count: bucketCount, title: 'latency histogram과 p50/p95 분포' },
         ]}
         value=${active}
@@ -1111,9 +1111,9 @@ function CostDashboardContent({ view }: { view: CostView }) {
     const showLatency = modelLoadedState != null && latencyBuckets.length > 0 && (focus == null || focus === 'latency')
     const showTable = focus !== 'matrix' && focus !== 'latency'
     const focusedEmptyMessage = focus === 'matrix' && data.length === 0
-      ? '이 시간 창에서 기록된 모델 비용 매트릭스가 없습니다.'
+      ? '이 시간 창에서 기록된 Runtime 비용 매트릭스가 없습니다.'
       : focus === 'latency' && latencyBuckets.length === 0
-        ? '이 시간 창에서 기록된 모델 지연 분포가 없습니다.'
+        ? '이 시간 창에서 기록된 Runtime 지연 분포가 없습니다.'
         : null
 
     return html`
@@ -1121,7 +1121,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
         <header class="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <h2 class="text-base font-semibold text-text-strong">비용 / 지연 대시보드</h2>
-            <p class="text-2xs text-text-muted">최근 ${activeState.windowMinutes}분 · ${mode === 'model' ? '모델별' : 'Keeper별'} 토큰 / 비용 / latency</p>
+            <p class="text-2xs text-text-muted">최근 ${activeState.windowMinutes}분 · ${mode === 'model' ? 'Runtime별' : 'Keeper별'} 토큰 / 비용 / latency</p>
           </div>
           <div class="flex items-center gap-2">
             <div class="flex rounded-[var(--r-1)] border border-card-border/40 p-0.5" role="group" aria-label="보기 모드">
@@ -1134,7 +1134,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   : 'text-text-muted hover:text-text-strong'}"
                 onClick=${() => { setCostViewMode('model') }}
               >
-                모델
+                Runtime
               </button>
               <button
                 type="button"
@@ -1181,7 +1181,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
               label="Total Cost"
               value=${formatCost(t.totalCost)}
               status="ok"
-              delta=${{ direction: 'up', text: `${t.count} ${mode === 'model' ? 'models' : 'keepers'}` }}
+              delta=${{ direction: 'up', text: `${t.count} ${mode === 'model' ? 'runtime lanes' : 'keepers'}` }}
             />
             <${StatTile}
               label="Tokens In / Out"
@@ -1219,14 +1219,14 @@ function CostDashboardContent({ view }: { view: CostView }) {
 
         ${!showTable ? null : data.length === 0 ? html`
           <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-6 text-center text-sm text-text-muted">
-            이 시간 창에서 기록된 ${mode === 'model' ? '모델' : 'Keeper'} 비용이 없습니다.
+            이 시간 창에서 기록된 ${mode === 'model' ? 'Runtime' : 'Keeper'} 비용이 없습니다.
           </div>
         ` : html`
           <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-            <table class="w-full" aria-label=${`${data.length}개 ${mode === 'model' ? '모델' : 'Keeper'}의 비용 / 지연`}>
+            <table class="w-full" aria-label=${`${data.length}개 ${mode === 'model' ? 'Runtime' : 'Keeper'}의 비용 / 지연`}>
               <thead>
                 <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-                  <th scope="col" class="px-2 py-1.5 text-left">${mode === 'model' ? 'model' : 'keeper'}</th>
+                  <th scope="col" class="px-2 py-1.5 text-left">${mode === 'model' ? 'runtime' : 'keeper'}</th>
                   <${ThRight}>in tok</${ThRight}>
                   <${ThRight}>out tok</${ThRight}>
                   <${ThRight}>$ cost</${ThRight}>
@@ -1234,7 +1234,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   <${ThRight}>p50</${ThRight}>
                   <${ThRight}>p95</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">p95 trend</th>
-                  ${mode === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">top model</th>` : null}
+                  ${mode === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">runtime cost</th>` : null}
                 </tr>
               </thead>
               <tbody>

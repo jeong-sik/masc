@@ -173,7 +173,7 @@ val ensure_local_discovery_ready
 
 (** Deterministic decision for the phase-buffer fallback boundary. This
     does not probe runtime liveness; it only decides whether the selected
-    labels warrant an Ollama liveness check before preserving the configured
+    labels resolve to a probeable runtime URL before preserving the configured
     [routes.phase_buffer] target. Legacy [local_only] aliases are normalized
     through routes before this decision. *)
 type local_only_liveness_decision =
@@ -185,64 +185,23 @@ type local_only_liveness_decision =
       }
 
 val decide_local_only_liveness
-  :  ?resolve_label:(string -> Llm_provider.Provider_config.t option)
+  :  ?resolve_runtime_url:(string -> string option)
   -> base_cascade:string
   -> effective_cascade:string
   -> string list
   -> local_only_liveness_decision
 
 (** When phase routing temporarily forces the phase-buffer route, fail open to the
-    keeper's configured base cascade if the local Ollama endpoint is
+    keeper's configured base cascade if the probeable runtime endpoint is
     unavailable. Explicit legacy [local_only] aliases follow the configured
     [routes.phase_buffer] target. Exposed for targeted tests. *)
 val fail_open_local_only_when_unavailable
-  :  ?resolve_label:(string -> Llm_provider.Provider_config.t option)
+  :  ?resolve_runtime_url:(string -> string option)
   -> ?probe_base_url:(string -> bool)
   -> base_cascade:string
   -> effective_cascade:string
   -> string list
   -> string
-
-(** PR-B: when every label in the resolved cascade points at the
-    same [base_url] AND a registered [Cascade_capacity_probe]
-    recognises that URL, return [Some url]; otherwise [None].
-    Purely structural: does not probe the network. Provider variant
-    is never inspected. *)
-val resolve_shared_probeable_base_url
-  :  ?resolve_label:(string -> Llm_provider.Provider_config.t option)
-  -> ?can_probe:(string -> bool)
-  -> string list
-  -> string option
-
-(** PR-B: read the [Cascade_capacity_probe] cache and report whether
-    the endpoint is saturated (no available slots while at least one
-    request is active or queued).  No cache / failed probe returns
-    [false] (fail-open) so a flaky probe never starves the keeper. *)
-val is_base_url_saturated
-  :  ?capacity_lookup:(string -> Cascade_throttle.capacity_info option)
-  -> string
-  -> bool
-
-(** Upper bound on consecutive saturation skips per keeper (env
-    [MASC_MAX_CONSECUTIVE_SATURATION_SKIPS], default 5, floored at
-    1).  When a keeper exceeds this count its next dispatch escapes
-    the saturation pre-skip path so a stuck or stale probe cannot
-    starve the keeper indefinitely. *)
-val max_consecutive_saturation_skips : unit -> int
-
-(** Current consecutive-skip count for [keeper_name].  Returns 0 when
-    the keeper has no recorded skips. *)
-val saturation_skip_count_get : keeper_name:string -> int
-
-(** Increment and return the new consecutive-skip count for
-    [keeper_name]. *)
-val saturation_skip_count_inc : keeper_name:string -> int
-
-(** Reset [keeper_name]'s consecutive-skip count to zero. *)
-val saturation_skip_count_reset : keeper_name:string -> unit
-
-(** Test helper: clear all per-keeper consecutive-skip counters. *)
-val saturation_skip_count_clear_all : unit -> unit
 
 (** Pure merge step for runtime-owned fail-open rotation candidates. The
     active path feeds this from the live cascade catalog: catalog order is

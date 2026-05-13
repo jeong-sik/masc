@@ -233,8 +233,8 @@ let test_runtime_status_and_judgments_are_live () =
         (judge |> member "judge_online" |> to_bool);
       check string "judge status is online" "online"
         (judge |> member "status" |> to_string);
-      check string "judge model uses runtime" "llama:qwen3.5"
-        (judge |> member "model_used" |> to_string);
+      check bool "judge model is redacted" true
+        (judge |> member "model_used" = `Null);
       let judgments = json |> member "judgments" |> to_list in
       check int "legacy judgment surfaced" 1 (List.length judgments);
       let first = List.hd judgments in
@@ -549,7 +549,7 @@ let test_refresh_failure_keeps_fresh_cache_online () =
         status.cached_judgments_visible;
       check (option string) "last_error recorded"
         (Some "Execution timed out after 60.0s") status.last_error;
-      check (option string) "model preserved" (Some "glm:test")
+      check (option string) "model redacted" None
         status.model_used)
 
 let test_refresh_failure_marks_expired_cache_offline () =
@@ -840,6 +840,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
             ~tool_name:"masc_code_delete"
             ~input:(`Assoc [ ("path", `String "/tmp/danger") ])
             ~risk_level:Lib.Keeper_approval_queue.Critical
+            ~selected_model:"openai:gpt-5.4"
             ()
         in
         decision_result := Some decision);
@@ -861,6 +862,8 @@ let test_dashboard_exposes_keeper_approval_queue () =
         (approval |> member "tool_name" |> to_string);
       check string "approval risk level" "critical"
         (approval |> member "risk_level" |> to_string);
+      check bool "approval selected model is redacted" true
+        (approval |> member "selected_model" = `Null);
       check string "approval preview"
         {|{"path":"/tmp/danger"}|}
         (approval |> member "input_preview" |> to_string);

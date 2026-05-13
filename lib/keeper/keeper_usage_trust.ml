@@ -1,8 +1,8 @@
 (** Shared trust classification for LLM usage telemetry.
 
-    This module is intentionally independent of the unified keeper metrics
-    pipeline so both unified turns and OAS after-turn hooks can apply the same
-    guard before aggregating tokens, cost, or wall-clock tok/s. *)
+    This module validates provider-reported usage shape without inferring
+    provider/model-specific behavior. Concrete runtime identity and capability
+    semantics belong to OAS. *)
 
 type t =
   | Usage_missing
@@ -10,51 +10,6 @@ type t =
   | Usage_untrusted of string list
 
 let absurd_token_threshold = 1_000_000
-
-(* #9959: Anthropic prompt caching minimum cacheable input size.
-
-   Anthropic's prompt caching (the [cache_control] field on
-   message content blocks) only kicks in when the cached prefix
-   contains at least 1024 input tokens for sonnet/opus and 2048
-   for haiku.  Below that threshold,
-   [cache_creation_input_tokens] and [cache_read_input_tokens]
-   legitimately stay at zero.  The conservative minimum (1024)
-   avoids false positives on tiny keepalive prompts while still
-   catching the #9959 case where 1078/1078 turn rows (every
-   claude_code:auto turn over a full day) reported
-   cache_creation = cache_read = 0 despite typical keeper system
-   prompts running 5K-30K tokens. *)
-let anthropic_cache_min_input_tokens = 1024
-
-(* RFC-0058 §2.4 — dispatch by adapter capability flag
-   ([tool_policy.uses_anthropic_caching]), never by provider variant.
-   Adding a new vendor whose wire format supports Anthropic-style
-   prompt caching is now a registry/TOML change, not a code change here. *)
-let provider_kind_uses_anthropic_caching
-    (kind : Llm_provider.Provider_config.provider_kind) : bool =
-  match Provider_adapter.adapter_of_provider_kind kind with
-  | Some adapter -> adapter.tool_policy.uses_anthropic_caching
-  | None -> false
-
-let model_label_provider_kind label =
-  Provider_kind_resolver.kind_of_spec label
-
-let model_uses_anthropic_caching_with_provider_kind ~provider_kind ~(model_used : string)
-    ~(resolved_model_id : string) : bool =
-  match provider_kind with
-  | Some kind -> provider_kind_uses_anthropic_caching kind
-  | None ->
-      List.exists
-        (fun label ->
-           match model_label_provider_kind label with
-           | Some kind -> provider_kind_uses_anthropic_caching kind
-           | None -> false)
-        [ model_used; resolved_model_id ]
-
-let model_uses_anthropic_caching ~(model_used : string)
-    ~(resolved_model_id : string) : bool =
-  model_uses_anthropic_caching_with_provider_kind ~provider_kind:None
-    ~model_used ~resolved_model_id
 
 let is_trusted = function
   | Usage_trusted -> true
@@ -84,20 +39,17 @@ let json_fields trust =
 let add_reason reason reasons =
   if List.mem reason reasons then reasons else reason :: reasons
 
-let classify_with_provider_kind ~provider_kind ~(usage_reported : bool)
+let classify ~(usage_reported : bool)
     ~(usage : Agent_sdk.Types.api_usage)
     ~(model_used : string)
     ~(resolved_model_id : string)
     ~(context_max : int) : t =
+  let _ = model_used in
+  let _ = resolved_model_id in
   if not usage_reported then Usage_missing
   else
     let reasons = ref [] in
     let add reason = reasons := add_reason reason !reasons in
-    let model_used = String.trim model_used in
-    let resolved_model_id = String.trim resolved_model_id in
-    let model_missing value = value = "" || String.equal value "unknown" in
-    if model_missing model_used && model_missing resolved_model_id then
-      add "missing_model_id";
     if usage.input_tokens < 0 then add "negative_input_tokens";
     if usage.output_tokens < 0 then add "negative_output_tokens";
     if usage.cache_creation_input_tokens < 0 then
@@ -111,31 +63,6 @@ let classify_with_provider_kind ~provider_kind ~(usage_reported : bool)
       add "output_tokens_gt_1m";
     if context_max > 0 && usage.input_tokens > context_max * 2 then
       add "input_tokens_gt_2x_context_max";
-    (* #9959 facet 1: Anthropic prompt caching silently disabled.
-       claude_code:auto and similar Anthropic-routed models report
-       [cache_creation_input_tokens = cache_read_input_tokens = 0]
-       across every turn even though keeper system prompts run far
-       above the minimum cacheable size.  This costs roughly 90%
-       of the input-token bill the cache would otherwise eliminate.
-       We classify it as an anomaly per turn whose input passes the
-       cache-eligibility threshold; dashboards convert that into a
-       per-keeper rate and alert when the rate is sustained
-       (one-shot anomalies on tiny prompts are correctly noise). *)
-    if
-      model_uses_anthropic_caching_with_provider_kind ~provider_kind ~model_used
-        ~resolved_model_id
-      && usage.input_tokens >= anthropic_cache_min_input_tokens
-      && usage.cache_creation_input_tokens = 0
-      && usage.cache_read_input_tokens = 0
-    then add "anthropic_caching_likely_disabled";
     match List.rev !reasons with
     | [] -> Usage_trusted
     | reasons -> Usage_untrusted reasons
-
-let classify ~(usage_reported : bool)
-    ~(usage : Agent_sdk.Types.api_usage)
-    ~(model_used : string)
-    ~(resolved_model_id : string)
-    ~(context_max : int) : t =
-  classify_with_provider_kind ~provider_kind:None ~usage_reported ~usage
-    ~model_used ~resolved_model_id ~context_max

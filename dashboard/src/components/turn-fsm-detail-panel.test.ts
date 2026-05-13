@@ -119,7 +119,6 @@ describe("TurnFsmDetailPanel", () => {
       "receipt failed",
       "reason tool_contract",
       "tool violated",
-      "model glm-4.5",
     ]))
     expect(chips.map(chip => chip.getAttribute("data-status-chip-tone"))).toEqual(expect.arrayContaining([
       "info",

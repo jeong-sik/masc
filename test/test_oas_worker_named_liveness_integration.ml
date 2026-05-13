@@ -79,6 +79,8 @@ let observed_value cascade provider outcome =
       ]
     ()
 
+let public_provider = "runtime"
+
 let test_e2e_observe_finalize_emits_observed_total () =
   with_env (Some "observe") (fun () ->
       let cascade = "integ_observe_cascade" in
@@ -88,17 +90,16 @@ let test_e2e_observe_finalize_emits_observed_total () =
         (Cfg.budget_for_candidate ~candidate_key:("test:" ^ provider)).budget
       in
       let obs =
-        Obs.create ~mode ~budget ~cascade_label:cascade
-          ~provider_label:provider ~started_at:0.0 ()
+        Obs.create ~mode ~budget ~cascade_label:cascade ~started_at:0.0 ()
       in
       (* Simulate: provider streamed Done before any chunk -> Success. *)
       let wrapped = Obs.wrap_on_event obs None in
       (match wrapped with
        | Some f -> f Agent_sdk.Types.MessageStop
        | None -> Alcotest.fail "Observe should wrap");
-      let before = observed_value cascade provider "success" in
+      let before = observed_value cascade public_provider "success" in
       Obs.finalize obs;
-      let after = observed_value cascade provider "success" in
+      let after = observed_value cascade public_provider "success" in
       Alcotest.(check (float 1e-6))
         "observed_total{outcome=success} incremented"
         (before +. 1.0) after)
@@ -112,12 +113,11 @@ let test_e2e_off_no_observed_total () =
         (Cfg.budget_for_candidate ~candidate_key:("test:" ^ provider)).budget
       in
       let obs =
-        Obs.create ~mode ~budget ~cascade_label:cascade
-          ~provider_label:provider ~started_at:0.0 ()
+        Obs.create ~mode ~budget ~cascade_label:cascade ~started_at:0.0 ()
       in
-      let before = observed_value cascade provider "wire_error" in
+      let before = observed_value cascade public_provider "wire_error" in
       Obs.finalize obs;
-      let after = observed_value cascade provider "wire_error" in
+      let after = observed_value cascade public_provider "wire_error" in
       Alcotest.(check (float 1e-6))
         "Off finalize emits no observed counter" before after)
 
@@ -135,7 +135,7 @@ let test_enforce_registered_switch_kills_attempt_without_tick_clock () =
                 in
                 let obs =
                   Obs.create ~mode ~budget ~cascade_label:cascade
-                    ~provider_label:provider ~started_at:0.0 ()
+                    ~started_at:0.0 ()
                 in
                 Obs.register_attempt_switch obs ~sw:attempt_sw;
                 let wrapped = Obs.wrap_on_event obs None in

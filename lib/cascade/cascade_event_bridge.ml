@@ -235,9 +235,9 @@ let sdk_agent_error_fields = function
     ; "spent_usd", `Float spent_usd
     ; "limit_usd", `Float limit_usd
     ]
-  | Agent_sdk.Error.CostBudgetUnenforceable { model_id; limit_usd } ->
+  | Agent_sdk.Error.CostBudgetUnenforceable { model_id = _; limit_usd } ->
     [ "variant", `String "cost_budget_unenforceable"
-    ; "model_id", `String model_id
+    ; "runtime", `String "runtime"
     ; "limit_usd", `Float limit_usd
     ]
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->

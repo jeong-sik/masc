@@ -83,7 +83,7 @@ function agentsToPresence(
       keeper_id: agent.name,
       workspace_label: workspaceLabelForAgent(agent.name, worktrees),
       branch: status.project ?? 'main',
-      role: agent.model ?? 'agent',
+      role: 'agent',
       status: mapAgentStatus(agent.status),
       last_seen_ms: now - idx * 1000,
     })),

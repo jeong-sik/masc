@@ -195,8 +195,8 @@ let transient_mutex_contention_tool_error
 ;;
 
 let current_keeper_model (meta : Keeper_types.keeper_meta) =
-  let m = meta.runtime.usage.last_model_used in
-  if m = "" then Keeper_types.cascade_name_of_meta meta else m
+  let _ = meta in
+  "runtime"
 ;;
 
 let persist_tool_call_io_from_handler

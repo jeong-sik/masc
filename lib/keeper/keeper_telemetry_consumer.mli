@@ -1,8 +1,8 @@
-(** MASC-side subscriber for OAS telemetry events.
+(** MASC-side observer for OAS telemetry events.
 
     Spawns a fiber that drains [Custom("telemetry_event", json)]
-    payloads from the OAS event bus and feeds them into
-    [Keeper_provider_health]. *)
+    payloads from the OAS event bus without deserializing provider/model
+    identity. *)
 
 val spawn_subscriber
   :  sw:Eio.Switch.t

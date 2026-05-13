@@ -70,7 +70,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Offline: { key: 'Offline', label: '오프라인', description: '런타임이 올라오지 않았거나 연결 정보가 없습니다.' },
   Running: { key: 'Running', label: '실행중', description: 'keeper_state_machine 기준으로 정상 실행 상태입니다.' },
   Failing: { key: 'Failing', label: '오류중', description: '최근 실행에서 오류를 감지했습니다.' },
-  Overflowed: { key: 'Overflowed', label: '컨텍스트 초과', description: '프롬프트가 provider 컨텍스트 한도를 넘겨 자동 복구가 필요합니다.' },
+  Overflowed: { key: 'Overflowed', label: '컨텍스트 초과', description: '프롬프트가 runtime 컨텍스트 한도를 넘겨 자동 복구가 필요합니다.' },
   Compacting: { key: 'Compacting', label: '압축중', description: '컨텍스트를 정리하는 중입니다.' },
   HandingOff: { key: 'HandingOff', label: '승계중', description: '새 세대로 넘기는 중입니다.' },
   Draining: { key: 'Draining', label: '종료중', description: '현재 작업을 마무리하는 중입니다.' },
@@ -238,11 +238,6 @@ function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   if (runtimeBlocker) return runtimeBlocker
   if (keeper.social_model_recognized === false) {
-    const configured = keeper.configured_social_model?.trim()
-    const fallback = keeper.social_model_fallback?.trim()
-    if (configured && fallback) return `대화 모델 ${configured} 미인식 · ${fallback}로 대체 중입니다.`
-    if (configured) return `대화 모델 ${configured} 미인식입니다.`
-    if (fallback) return `대화 모델 fallback이 ${fallback}로 설정돼 있습니다.`
     return '미인식 대화 모델 설정이 감지됐습니다.'
   }
   if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'

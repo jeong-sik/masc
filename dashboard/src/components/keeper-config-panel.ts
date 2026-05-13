@@ -405,6 +405,15 @@ function ModelList({ models }: { models: string[] }) {
   `
 }
 
+function RuntimeList({ runtimes }: { runtimes: string[] }) {
+  if (runtimes.length === 0) return html`<span class="text-2xs text-text-muted italic">none</span>`
+  return html`
+    <div class="flex flex-wrap gap-1.5">
+      ${runtimes.map((_runtime, index) => html`<span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-1 hover:bg-[var(--accent-20)] transition-colors cursor-default">runtime ${index + 1}</span>`)}
+    </div>
+  `
+}
+
 function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: number | null }) {
   if (!text || text.trim() === '') return html`<span class="text-2xs text-text-muted italic">--</span>`
   const truncated =
@@ -798,7 +807,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${Callout}
         title="편집 가능 범위"
-        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 모델은 keeper별 설정이 아니라 resolved config root의 cascade.toml 해석 결과로 결정됩니다."
+        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 런타임은 keeper별 설정이 아니라 resolved config root의 cascade.toml 해석 결과로 결정됩니다."
       />
 
       ${promptSection}
@@ -884,15 +893,15 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
 
       <${MajorSectionHeader} title="실행" />
-      <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
-      <${ConfigRow} label="provider timeout" value=${perProviderTimeoutLabel(c.execution)} />
+      <${ConfigRow} label="활성 런타임" value=${c.execution.active_model ? 'runtime' : '--'} />
+      <${ConfigRow} label="runtime timeout" value=${perProviderTimeoutLabel(c.execution)} />
       <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-        cascade fallback 중 마지막 provider를 제외한 provider들에만 적용됩니다.
+        cascade fallback 중 마지막 runtime을 제외한 runtime들에만 적용됩니다.
       </div>
       <${BoolRow} label="검증" value=${c.execution.verify} />
       <div class="mt-1.5">
-        <${SectionHeader} size="xs" class="mb-1">모델</${SectionHeader}>
-        <${ModelList} models=${c.execution.models} />
+        <${SectionHeader} size="xs" class="mb-1">런타임 후보</${SectionHeader}>
+        <${RuntimeList} runtimes=${c.execution.models} />
       </div>
 
       <${SectionHeader} title="컴팩션" />

@@ -357,19 +357,11 @@ let attempt_secondary_swap
   match secondary_resolver provider_index primary with
   | None -> Either.Right (primary, primary_reason)
   | Some secondary ->
-    (* RFC-0027 PR-9c: per-secondary accounting label.
-         The secondary's [provider_kind] is a closed enum from
-         [Llm_provider.Provider_config.string_of_provider_kind] so
-         label cardinality stays bounded (≤ kind count). This lets
-         dashboards split [dual_track_swap] swap volume by which
-         backend the cascade is actually leaning on (CLI vs Direct
-         API), without inflating the [detail] axis. The lookup of
-         the matching [Keeper_provider_token_bucket] for the
-         secondary continues to flow through the keeper admission
-         router, which is provider-name keyed and lazy-creates a
-         distinct bucket per concrete provider — so accounting
-         already separates primary and secondary draws as a
-         consequence of [provider_kind] differing. *)
+    (* RFC-0027 PR-9c: per-secondary accounting label. The secondary's
+       [provider_kind] is a closed enum from
+       [Llm_provider.Provider_config.string_of_provider_kind], so label
+       cardinality stays bounded without putting concrete model ids on the
+       metric axis. *)
     let secondary_kind_label =
       Llm_provider.Provider_config.string_of_provider_kind secondary.kind
     in

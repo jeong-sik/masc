@@ -141,12 +141,10 @@ function executionReceiptLabel(execution: KeeperCompositeExecution | undefined):
   if (!execution) return null
   if (!execution.latest_receipt_present) return 'receipt 없음'
   const terminal = shortText(execution.terminal_reason_code, 32)
-  const model = shortText(execution.cascade?.selected_model ?? execution.model_used, 36)
   const elapsed = formatMs(execution.duration_ms)
   return [
     execution.outcome ?? 'unknown',
     terminal,
-    model,
     elapsed,
   ].filter(Boolean).join(' · ')
 }
@@ -214,9 +212,8 @@ function runtimeProviderAttemptClass(trace: KeeperRuntimeTraceResponse): string 
 
 function runtimeProviderAttemptLabel(trace: KeeperRuntimeTraceResponse): string {
   const provider = trace.provider_attempts
-  const model = shortText(provider.terminal_model_id, 20)
   const status = shortText(provider.terminal_status, 18) || 'unknown'
-  return ['prov', status, model].filter(Boolean).join(' ')
+  return ['prov', status].filter(Boolean).join(' ')
 }
 
 function formatRuntimeTraceUnknown(value: unknown): string {
@@ -254,8 +251,6 @@ function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
 	    turn.receipt_turn_counts.length > 0 ? `receipt_turn_counts: ${turn.receipt_turn_counts.join(', ')}` : '',
 	    `provider attempts: ${turn.provider_attempt_started_count}/${turn.provider_attempt_finished_count}`,
 	    provider.terminal_status ? `provider terminal: ${provider.terminal_status}` : '',
-	    provider.terminal_provider_kind ? `provider kind: ${provider.terminal_provider_kind}` : '',
-	    provider.terminal_model_id ? `provider model: ${provider.terminal_model_id}` : '',
 	    provider.terminal_exception_kind ? `provider exception: ${provider.terminal_exception_kind}` : '',
 	    provider.terminal_error ? `provider error: ${shortText(provider.terminal_error, 220)}` : '',
 	    eventBus.correlation_ids.length > 0 ? `correlation_ids: ${eventBus.correlation_ids.join(', ')}` : '',
@@ -386,7 +381,6 @@ export function FsmHub(props: FsmHubProps = {}) {
       setSelected(props.selectedName)
     }
     // Only react to external changes; local selection stays internal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedName])
   const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
   const [keeperFilter, setKeeperFilter] = useState('')

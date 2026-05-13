@@ -116,7 +116,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(metric).toMatchObject({
       is_handoff: true,
       is_compaction: false,
-      handoff_to_model: 'glm-5',
+      handoff_to_model: null,
       handoff_new_generation: 4,
     })
     expect(deriveLifecycleState(keeper!)).toBe('handoff-imminent')
@@ -153,7 +153,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     const metric = keeper!.metrics_series![0]
     expect(metric).toMatchObject({
       is_handoff: true,
-      handoff_to_model: 'llama:test-balanced',
+      handoff_to_model: null,
       handoff_new_generation: 6,
     })
     expect(deriveLifecycleState(keeper!)).toBe('handoff-imminent')
@@ -488,7 +488,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
-  it('preserves runtime cascade identity and metric provider observations', () => {
+  it('preserves cascade lane evidence while redacting model/provider identity', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'cascade-keeper',
@@ -535,22 +535,25 @@ describe('normalizeKeepers lifecycle metrics', () => {
       cascade_name: 'oas-keeper_unified',
       cascade_canonical: 'primary',
       selected_cascade_canonical: 'primary',
-      primary_model: 'openai:gpt-5.4',
-      active_model_label: 'openai:gpt-5.4',
-      last_model_used_label: 'openai:gpt-5.4',
+      active_model_label: null,
+      last_model_used_label: null,
     })
+    expect(keeper?.primary_model).toBeUndefined()
+    expect(keeper?.active_model).toBeUndefined()
+    expect(keeper?.last_model_used).toBeUndefined()
     expect(keeper?.metrics_series?.[0]).toMatchObject({
       cascade_name: 'primary',
-      cascade_selected_model: 'anthropic:claude-sonnet-4-6',
+      cascade_selected_model: null,
       cascade_attempt_count: 2,
       cascade_outcome: 'passed_to_next_model',
       cascade_strategy: 'round_robin',
       fallback_applied: true,
       fallback_hops: 1,
-      fallback_from: 'openai:gpt-5.4',
-      fallback_to: 'anthropic:claude-sonnet-4-6',
+      fallback_from: null,
+      fallback_to: null,
       fallback_reason: 'turn_timeout',
     })
+    expect(keeper?.metrics_series?.[0]?.model_used).toBe('')
   })
 
   it('normalizes ctx composition telemetry from keeper metric points', () => {
@@ -714,10 +717,10 @@ describe('normalizeKeepers lifecycle metrics', () => {
       runtime_blocker_summary:
         'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
       runtime_blocker_continue_gate: true,
-      social_model: 'bdi_speech_v1',
-      configured_social_model: 'experimental_v99',
+      social_model: null,
+      configured_social_model: null,
       social_model_recognized: false,
-      social_model_fallback: 'bdi_speech_v1',
+      social_model_fallback: null,
       last_blocker: 'missing social headers',
       last_speech_act: 'defer',
       last_need: '현재 대화 맥락',

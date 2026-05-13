@@ -410,7 +410,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | `Null -> Ok ()
         | _ ->
             Error
-              "legacy keeper model args removed for masc_keeper_msg: models. Keepers now use cascade_name and last_model_used only."
+              "legacy keeper model args removed for masc_keeper_msg: models. Use cascade_name; concrete provider/model identity is OAS-owned."
       in
       let direct_reply =
         match request.payload |> U.member "direct_reply" with

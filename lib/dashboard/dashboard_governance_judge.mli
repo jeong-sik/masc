@@ -75,7 +75,9 @@ type runtime_snapshot = {
 (** Snapshot of the daemon's externally-visible runtime
     state.  Constructed by {!runtime_status_at} under
     [with_lock] so every field is consistent with one
-    observation of the underlying {!state}. *)
+    observation of the underlying {!state}.  [model_used]
+    is a legacy compatibility field and is redacted to
+    [None] on this public snapshot. *)
 
 (** {1 Daemon mutable state} *)
 
@@ -135,11 +137,11 @@ val resolve_governance_model_used :
   raw_model:string ->
   canonical_model_id:string option ->
   string * governance_model_source
-(** Picks the model id to pin against a judgment.
-    [raw_model] (trimmed non-empty) wins; otherwise
-    falls back to [canonical_model_id], otherwise the
-    [unknown_provider] sentinel.  Returned tag is the
-    classification that fired. *)
+(** Picks the internal model id for empty-model diagnostics.
+    [raw_model] (trimmed non-empty) wins for classification; otherwise
+    falls back to [canonical_model_id], otherwise the unknown sentinel branch.
+    The returned id is always the neutral [runtime] lane so dashboard state does
+    not expose concrete provider/model identity. *)
 
 type governance_response_parse_failure =
   | Lenient_fallback of string
@@ -158,7 +160,9 @@ val parse_governance_response_for_testing :
 (** Parses and validates a governance judge response without
     mutating metrics or daemon state.  Exposed so regression
     tests can prove malformed [guardrail_state] output fails
-    closed instead of silently producing a distorted judgment. *)
+    closed instead of silently producing a distorted judgment.
+    [model_used] remains accepted for legacy call sites, but
+    parsed public rows redact it to [null]. *)
 
 (** {1 Daemon identity} *)
 

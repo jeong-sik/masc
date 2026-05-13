@@ -199,6 +199,7 @@ let test_outbound_to_json_roundtrip () =
   check string "reply" "reply text" (json |> member "reply" |> to_string);
   check string "destination_id" "luna" (json |> member "destination_id" |> to_string);
   let stats = json |> member "turn_stats" in
+  check bool "model redacted" true (stats |> member "model_used" = `Null);
   check int "duration" 100 (stats |> member "duration_ms" |> to_int)
 
 let test_error_json () =

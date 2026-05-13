@@ -15,7 +15,6 @@ import { MutedSpan, DetailCard, DetailRow } from './keeper-detail-kpi'
 const SPARKLINE_W = 200
 const SPARKLINE_H = 40
 const SPARKLINE_PAD = 2
-const MODEL_NAME_MAX_LEN = 20
 
 // ── Context Chart ────────────────────────────────────────
 
@@ -182,13 +181,6 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const lastLatency = latencySeries[latencySeries.length - 1] ?? null
   const totalCost = costs.reduce((a: number, b: number) => a + b, 0)
 
-  const modelSwitches: { index: number; model: string }[] = []
-  for (let i = 1; i < series.length; i++) {
-    if ((series[i] as KeeperMetricPoint).model_used !== (series[i - 1] as KeeperMetricPoint).model_used) {
-      modelSwitches.push({ index: i, model: (series[i] as KeeperMetricPoint).model_used })
-    }
-  }
-
   const latencyLine = miniSparkline(latencySeries)
   const costLine = miniSparkline(costs)
 
@@ -230,23 +222,6 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
         </svg>
       <//>
 
-      ${'' /* Model timeline */}
-      ${modelSwitches.length > 0 ? html`
-        <${DetailCard} class="md:col-span-2">
-          <${DetailRow}>
-            <${Eyebrow}>모델 전환</${Eyebrow}>
-            <${MutedSpan}>${modelSwitches.length}회</${MutedSpan}>
-          </${DetailRow}>
-          <div class="flex flex-wrap gap-1.5">
-            ${modelSwitches.map(s => html`
-              <${StatusChip} tone="warn" uppercase=${false} class="font-mono">
-                T${s.index} -> ${s.model.length > MODEL_NAME_MAX_LEN ? s.model.slice(0, MODEL_NAME_MAX_LEN) + '...' : s.model}
-              <//>
-            `)}
-          </div>
-        <//>
-      ` : null}
-
       ${'' /* Cascade fallback events */}
       ${fallbackCount > 0 ? html`
         <div class="md:col-span-2 p-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-6)]">
@@ -257,7 +232,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           <div class="flex flex-wrap gap-1.5">
             ${series.filter((p: KeeperMetricPoint) => p.fallback_applied).slice(-10).map((p: KeeperMetricPoint) => html`
               <${StatusChip} tone="bad" uppercase=${false} class="font-mono">
-                ${p.fallback_from ?? '?'} -> ${p.fallback_to ?? p.model_used}${p.fallback_reason ? ` (${p.fallback_reason.length > 20 ? p.fallback_reason.slice(0, 20) + '...' : p.fallback_reason})` : ''}
+                fallback${p.fallback_reason ? ` (${p.fallback_reason.length > 20 ? p.fallback_reason.slice(0, 20) + '...' : p.fallback_reason})` : ''}
               <//>
             `)}
           </div>

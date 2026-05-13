@@ -345,8 +345,8 @@ let classify_tool_correctness
   | Some recommendation, Some stats when stats.calls >= 3 && stats.success_pct < 80.0 ->
       let summary =
         Printf.sprintf
-          "benchmark recommends %s but live tool success is %.1f%% across %d calls"
-          recommendation.model_label stats.success_pct stats.calls
+          "benchmark recommends runtime adjustment but live tool success is %.1f%% across %d calls"
+          stats.success_pct stats.calls
       in
       ( make_domain ~id:tool_domain_id ~status:Fail ~score:stats.success_pct
           ~summary ~evidence_refs,
@@ -370,8 +370,8 @@ let classify_tool_correctness
       in
       let summary =
         Printf.sprintf
-          "benchmark recommends %s (score %.1f, stability %.2f)"
-          recommendation.model_label recommendation.composite_score stability
+          "benchmark recommends runtime adjustment (score %.1f, stability %.2f)"
+          recommendation.composite_score stability
       in
       ( make_domain ~id:tool_domain_id ~status
           ~score:recommendation.composite_score
@@ -853,7 +853,7 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
             `Assoc
               [
                 ("keeper_profile", `String recommendation.keeper_profile);
-                ("model_label", `String recommendation.model_label);
+                ("model_label", `String "runtime");
                 ("composite_score", `Float recommendation.composite_score);
                 ("task_pass_rate", `Float recommendation.task_pass_rate);
                 ("stability_score", float_opt_to_json recommendation.stability_score);

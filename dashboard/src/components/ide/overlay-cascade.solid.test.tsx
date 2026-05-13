@@ -6,7 +6,7 @@
 //   - formatCost / formatLatency / shortModel helpers (pure)
 //   - OverlayCascade DOM structure (Solid render)
 //   - Zero-hits empty state (mockup §3 requirement)
-//   - Provider chip colour token mapping
+//   - Neutral runtime chip rendering
 //   - Axe accessibility (RFC-0020 §, toggle keyboard accessibility)
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -77,17 +77,10 @@ describe('formatLatency', () => {
 })
 
 describe('shortModel', () => {
-  it('strips 8-digit date suffix', () => {
-    expect(shortModel('claude-3-5-sonnet-20241022')).toBe('claude-3-5-sonnet')
-  })
-  it('strips path prefix (ollama/... style)', () => {
-    expect(shortModel('ollama/llama3.2')).toBe('llama3.2')
-  })
-  it('leaves short names unchanged', () => {
-    expect(shortModel('gpt-4o-mini')).toBe('gpt-4o-mini')
-  })
-  it('handles name with no suffix', () => {
-    expect(shortModel('gemma3')).toBe('gemma3')
+  it('redacts concrete model names to the neutral runtime label', () => {
+    expect(shortModel('claude-3-5-sonnet-20241022')).toBe('runtime')
+    expect(shortModel('ollama/llama3.2')).toBe('runtime')
+    expect(shortModel('gpt-4o-mini')).toBe('runtime')
   })
 })
 
@@ -140,31 +133,35 @@ describe('OverlayCascade', () => {
     expect(li.textContent).toContain('42')
   })
 
-  // ── Provider chip ──────────────────────────────────────────────
+  // ── Runtime chip ───────────────────────────────────────────────
 
-  it('includes provider name in chip text', () => {
+  it('includes neutral runtime chip text', () => {
     const el = mount([SAMPLE_HIT])
-    expect(el.textContent).toContain('anthropic')
+    expect(el.textContent).toContain('runtime')
+    expect(el.textContent).not.toContain('anthropic')
   })
 
-  it('applies provider color token as border/color for known provider', () => {
+  it('uses neutral styling for known provider input', () => {
     const el = mount([SAMPLE_HIT])
     const chip = el.querySelector('li > span:nth-child(2)') as HTMLElement | null
-    expect(chip?.getAttribute('style') ?? '').toContain('--color-p-anthropic')
+    const style = chip?.getAttribute('style') ?? ''
+    expect(style).toContain('var(--color-border-default)')
+    expect(style).not.toContain('--color-p-anthropic')
   })
 
-  it('falls back to fg-muted color for unknown provider', () => {
+  it('keeps neutral styling for unknown provider input', () => {
     const hit: CascadeLineHit = { ...SAMPLE_HIT, provider: 'unknown-llm' }
     const el = mount([hit])
     const chip = el.querySelector('li > span:nth-child(2)') as HTMLElement | null
-    expect(chip?.getAttribute('style') ?? '').toContain('var(--color-fg-muted)')
+    expect(chip?.getAttribute('style') ?? '').toContain('var(--color-border-default)')
+    expect(el.textContent).not.toContain('unknown-llm')
   })
 
   // ── Model label ────────────────────────────────────────────────
 
-  it('shows short model name (no date suffix)', () => {
+  it('does not show model name', () => {
     const el = mount([SAMPLE_HIT])
-    expect(el.textContent).toContain('claude-3-5-sonnet')
+    expect(el.textContent).not.toContain('claude-3-5-sonnet')
     expect(el.textContent).not.toContain('20241022')
   })
 
@@ -207,7 +204,8 @@ describe('OverlayCascade', () => {
     const li = el.querySelector('li')!
     const label = li.getAttribute('aria-label') ?? ''
     expect(label).toContain('Line 42')
-    expect(label).toContain('anthropic')
-    expect(label).toContain('claude-3-5-sonnet')
+    expect(label).toContain('runtime')
+    expect(label).not.toContain('anthropic')
+    expect(label).not.toContain('claude-3-5-sonnet')
   })
 })

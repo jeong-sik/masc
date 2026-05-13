@@ -60,7 +60,9 @@ $ echo $?
 
 Once #14843 lands, the corpus will be at **0 orphans / 200 cfgs**.  The 5th drift class is formally isolated to one historical mistake (`9faabfadf` cfg leak ~6 months ago), with no other instances anywhere.
 
-The single skip is a cfg whose suffix-stripping doesn't find a parent — verified harmless (it's the rare 2-segment suffix variant `KeeperAdmissionLiveness-buggy-2.cfg`, sibling `.tla` is `KeeperAdmissionLiveness.tla`, but the iterative stripping pattern misses `-2` first.  Improving the heuristic is a follow-up.)
+The previous single skip was tied to the now-retired KeeperAdmissionLiveness
+buggy cfg pair. That spec and its cfg fixtures have been removed with the
+MASC-side provider admission router.
 
 ## What this means for R-F-1.c (validator extension)
 

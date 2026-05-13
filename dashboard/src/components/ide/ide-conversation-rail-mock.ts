@@ -406,7 +406,6 @@ function DecisionCard(
   const summary = [
     decision.event_type,
     decision.outcome,
-    decision.model_used,
     decision.tool,
   ].filter(Boolean).join(' · ')
   const entry = entries.find(e => e.keeper_id === keeper)

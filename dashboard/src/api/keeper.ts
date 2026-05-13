@@ -643,8 +643,6 @@ export interface KeeperRuntimeTraceProviderAttempt {
   ts: string
   event: string
   cascade_name: string | null
-  provider_kind: string | null
-  model_id: string | null
   status: string
   error: string | null
   exception_kind: string | null
@@ -654,11 +652,119 @@ export interface KeeperRuntimeTraceProviderAttemptsSummary {
   started_count: number
   finished_count: number
   terminal_status: string | null
-  terminal_provider_kind: string | null
-  terminal_model_id: string | null
   terminal_error: string | null
   terminal_exception_kind: string | null
   attempts: KeeperRuntimeTraceProviderAttempt[]
+}
+
+export interface KeeperRuntimeLensTurnClock {
+  trace_id: string
+  keeper_turn_id: number | null
+  max_oas_turn_count: number | null
+  terminal_event_present: boolean
+  terminal_event: string | null
+  manifest_total_rows: number
+}
+
+export interface KeeperRuntimeLensLifecycleAxis {
+  turn_started_count: number
+  phase_gate_decided_count: number
+  pre_dispatch_blocked_count: number
+  receipt_appended_count: number
+  turn_finished_count: number
+  terminal_status: string
+}
+
+export interface KeeperRuntimeLensToolSurfaceAxis {
+  requested_tools: string[]
+  required_tools: string[]
+  materialized_tools: string[]
+  missing_required_tools: string[]
+  turn_lane: string | null
+  tool_surface_class: string | null
+  tool_requirement: string | null
+  visible_tool_count: number | null
+  tool_gate_enabled: boolean | null
+  tool_surface_fallback_used: boolean | null
+  terminal_status: string
+}
+
+export interface KeeperRuntimeLensProviderLaneAxis {
+  resolved: boolean
+  status: string | null
+  resolved_lane: string | null
+  effective_tool_count: number | null
+  runtime_mcp_policy_present: boolean | null
+  required_tools: string[]
+  materialized_tools: string[]
+  missing_required_tools: string[]
+}
+
+export interface KeeperRuntimeLensProviderAttemptAxis {
+  started_count: number
+  finished_count: number
+  terminal_status: string | null
+}
+
+export interface KeeperRuntimeLensContextAxis {
+  context_injected_count: number
+  context_compacted_event_count: number
+  event_bus_correlated_count: number
+  context_compact_started_count: number
+  context_compacted_count: number
+  checkpoint_loaded_count: number
+  checkpoint_saved_count: number
+  state_snapshot_sidecar_saved_count: number
+  last_compaction: unknown
+}
+
+export interface KeeperRuntimeLensMemoryAxis extends KeeperRuntimeTraceMemorySummary {}
+
+export interface KeeperRuntimeLensAxes {
+  lifecycle: KeeperRuntimeLensLifecycleAxis
+  tool_surface: KeeperRuntimeLensToolSurfaceAxis
+  provider_lane: KeeperRuntimeLensProviderLaneAxis
+  provider_attempt: KeeperRuntimeLensProviderAttemptAxis
+  context: KeeperRuntimeLensContextAxis
+  memory: KeeperRuntimeLensMemoryAxis
+}
+
+export interface KeeperRuntimeLensLaneEvent {
+  event: string
+  count: number
+}
+
+export interface KeeperRuntimeLensLane {
+  lane: string
+  label: string
+  event_count: number
+  terminal_status: string
+  gap_codes: string[]
+  gap_badge: string | null
+  events: KeeperRuntimeLensLaneEvent[]
+}
+
+export interface KeeperRuntimeLensSwimlanes {
+  keeper: KeeperRuntimeLensLane
+  masc_policy_cascade: KeeperRuntimeLensLane
+  oas_agent: KeeperRuntimeLensLane
+  provider: KeeperRuntimeLensLane
+  tool_runtime: KeeperRuntimeLensLane
+  memory_context: KeeperRuntimeLensLane
+}
+
+export interface KeeperRuntimeLensGap {
+  code: string
+  severity: string
+  lane: string
+  detail: string | null
+}
+
+export interface KeeperRuntimeLens {
+  turn_clock: KeeperRuntimeLensTurnClock
+  axes: KeeperRuntimeLensAxes
+  swimlanes: KeeperRuntimeLensSwimlanes
+  gaps: KeeperRuntimeLensGap[]
 }
 
 export interface KeeperRuntimeTraceResponse {
@@ -674,6 +780,7 @@ export interface KeeperRuntimeTraceResponse {
   provider_attempts: KeeperRuntimeTraceProviderAttemptsSummary
   event_bus: KeeperRuntimeTraceEventBusSummary
   memory: KeeperRuntimeTraceMemorySummary
+  runtime_lens: KeeperRuntimeLens
   health: string
   stale_reason: string | null
 }
@@ -686,6 +793,11 @@ function numberField(raw: Record<string, unknown>, key: string): number {
 function nullableNumberField(raw: Record<string, unknown>, key: string): number | null {
   const value = raw[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function nullableBooleanField(raw: Record<string, unknown>, key: string): boolean | null {
+  const value = raw[key]
+  return typeof value === 'boolean' ? value : null
 }
 
 function stringField(raw: Record<string, unknown>, key: string): string {
@@ -760,8 +872,6 @@ function parseRuntimeTraceProviderAttempt(raw: unknown): KeeperRuntimeTraceProvi
     ts: stringField(obj, 'ts'),
     event: stringField(obj, 'event'),
     cascade_name: nullableStringField(obj, 'cascade_name'),
-    provider_kind: nullableStringField(obj, 'provider_kind'),
-    model_id: nullableStringField(obj, 'model_id'),
     status: stringField(obj, 'status'),
     error: nullableStringField(obj, 'error'),
     exception_kind: nullableStringField(obj, 'exception_kind'),
@@ -777,19 +887,166 @@ function parseRuntimeTraceProviderAttempts(raw: unknown): KeeperRuntimeTraceProv
     started_count: numberField(obj, 'started_count'),
     finished_count: numberField(obj, 'finished_count'),
     terminal_status: nullableStringField(obj, 'terminal_status'),
-    terminal_provider_kind: nullableStringField(obj, 'terminal_provider_kind'),
-    terminal_model_id: nullableStringField(obj, 'terminal_model_id'),
     terminal_error: nullableStringField(obj, 'terminal_error'),
     terminal_exception_kind: nullableStringField(obj, 'terminal_exception_kind'),
     attempts,
   }
 }
 
+function parseRuntimeLensTurnClock(raw: unknown, fallbackTraceId: string): KeeperRuntimeLensTurnClock {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    trace_id: stringField(obj, 'trace_id') || fallbackTraceId,
+    keeper_turn_id: nullableNumberField(obj, 'keeper_turn_id'),
+    max_oas_turn_count: nullableNumberField(obj, 'max_oas_turn_count'),
+    terminal_event_present: obj.terminal_event_present === true,
+    terminal_event: nullableStringField(obj, 'terminal_event'),
+    manifest_total_rows: numberField(obj, 'manifest_total_rows'),
+  }
+}
+
+function parseRuntimeLensLifecycleAxis(raw: unknown): KeeperRuntimeLensLifecycleAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    turn_started_count: numberField(obj, 'turn_started_count'),
+    phase_gate_decided_count: numberField(obj, 'phase_gate_decided_count'),
+    pre_dispatch_blocked_count: numberField(obj, 'pre_dispatch_blocked_count'),
+    receipt_appended_count: numberField(obj, 'receipt_appended_count'),
+    turn_finished_count: numberField(obj, 'turn_finished_count'),
+    terminal_status: stringField(obj, 'terminal_status') || 'unknown',
+  }
+}
+
+function parseRuntimeLensToolSurfaceAxis(raw: unknown): KeeperRuntimeLensToolSurfaceAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    requested_tools: stringListField(obj, 'requested_tools'),
+    required_tools: stringListField(obj, 'required_tools'),
+    materialized_tools: stringListField(obj, 'materialized_tools'),
+    missing_required_tools: stringListField(obj, 'missing_required_tools'),
+    turn_lane: nullableStringField(obj, 'turn_lane'),
+    tool_surface_class: nullableStringField(obj, 'tool_surface_class'),
+    tool_requirement: nullableStringField(obj, 'tool_requirement'),
+    visible_tool_count: nullableNumberField(obj, 'visible_tool_count'),
+    tool_gate_enabled: nullableBooleanField(obj, 'tool_gate_enabled'),
+    tool_surface_fallback_used: nullableBooleanField(obj, 'tool_surface_fallback_used'),
+    terminal_status: stringField(obj, 'terminal_status') || 'unknown',
+  }
+}
+
+function parseRuntimeLensProviderLaneAxis(raw: unknown): KeeperRuntimeLensProviderLaneAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    resolved: obj.resolved === true,
+    status: nullableStringField(obj, 'status'),
+    resolved_lane: nullableStringField(obj, 'resolved_lane'),
+    effective_tool_count: nullableNumberField(obj, 'effective_tool_count'),
+    runtime_mcp_policy_present: nullableBooleanField(obj, 'runtime_mcp_policy_present'),
+    required_tools: stringListField(obj, 'required_tools'),
+    materialized_tools: stringListField(obj, 'materialized_tools'),
+    missing_required_tools: stringListField(obj, 'missing_required_tools'),
+  }
+}
+
+function parseRuntimeLensProviderAttemptAxis(raw: unknown): KeeperRuntimeLensProviderAttemptAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    started_count: numberField(obj, 'started_count'),
+    finished_count: numberField(obj, 'finished_count'),
+    terminal_status: nullableStringField(obj, 'terminal_status'),
+  }
+}
+
+function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    context_injected_count: numberField(obj, 'context_injected_count'),
+    context_compacted_event_count: numberField(obj, 'context_compacted_event_count'),
+    event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
+    context_compact_started_count: numberField(obj, 'context_compact_started_count'),
+    context_compacted_count: numberField(obj, 'context_compacted_count'),
+    checkpoint_loaded_count: numberField(obj, 'checkpoint_loaded_count'),
+    checkpoint_saved_count: numberField(obj, 'checkpoint_saved_count'),
+    state_snapshot_sidecar_saved_count: numberField(obj, 'state_snapshot_sidecar_saved_count'),
+    last_compaction: obj.last_compaction ?? null,
+  }
+}
+
+function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    lifecycle: parseRuntimeLensLifecycleAxis(obj.lifecycle),
+    tool_surface: parseRuntimeLensToolSurfaceAxis(obj.tool_surface),
+    provider_lane: parseRuntimeLensProviderLaneAxis(obj.provider_lane),
+    provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
+    context: parseRuntimeLensContextAxis(obj.context),
+    memory: parseRuntimeTraceMemory(obj.memory),
+  }
+}
+
+function parseRuntimeLensLaneEvent(raw: unknown): KeeperRuntimeLensLaneEvent {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    event: stringField(obj, 'event'),
+    count: numberField(obj, 'count'),
+  }
+}
+
+function parseRuntimeLensLane(raw: unknown, lane: string, label: string): KeeperRuntimeLensLane {
+  const obj = isRecord(raw) ? raw : {}
+  const events = Array.isArray(obj.events)
+    ? obj.events.map(parseRuntimeLensLaneEvent).filter(event => event.event !== '')
+    : []
+  return {
+    lane: stringField(obj, 'lane') || lane,
+    label: stringField(obj, 'label') || label,
+    event_count: numberField(obj, 'event_count'),
+    terminal_status: stringField(obj, 'terminal_status') || 'unknown',
+    gap_codes: stringListField(obj, 'gap_codes'),
+    gap_badge: nullableStringField(obj, 'gap_badge'),
+    events,
+  }
+}
+
+function parseRuntimeLensSwimlanes(raw: unknown): KeeperRuntimeLensSwimlanes {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    keeper: parseRuntimeLensLane(obj.keeper, 'keeper', 'Keeper'),
+    masc_policy_cascade: parseRuntimeLensLane(obj.masc_policy_cascade, 'masc_policy_cascade', 'MASC Cascade'),
+    oas_agent: parseRuntimeLensLane(obj.oas_agent, 'oas_agent', 'OAS'),
+    provider: parseRuntimeLensLane(obj.provider, 'provider', 'Provider'),
+    tool_runtime: parseRuntimeLensLane(obj.tool_runtime, 'tool_runtime', 'Tool Runtime'),
+    memory_context: parseRuntimeLensLane(obj.memory_context, 'memory_context', 'Memory/Context'),
+  }
+}
+
+function parseRuntimeLensGap(raw: unknown): KeeperRuntimeLensGap {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    code: stringField(obj, 'code') || 'unknown_gap',
+    severity: stringField(obj, 'severity') || 'warn',
+    lane: stringField(obj, 'lane') || 'unknown',
+    detail: nullableStringField(obj, 'detail'),
+  }
+}
+
+function parseRuntimeLens(raw: unknown, fallbackTraceId: string): KeeperRuntimeLens {
+  const obj = isRecord(raw) ? raw : {}
+  const gaps = Array.isArray(obj.gaps) ? obj.gaps.map(parseRuntimeLensGap) : []
+  return {
+    turn_clock: parseRuntimeLensTurnClock(obj.turn_clock, fallbackTraceId),
+    axes: parseRuntimeLensAxes(obj.axes),
+    swimlanes: parseRuntimeLensSwimlanes(obj.swimlanes),
+    gaps,
+  }
+}
+
 export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceResponse {
   if (!isRecord(raw)) throw new Error('runtime trace response is not a record')
+  const traceId = stringField(raw, 'trace_id')
   return {
     keeper: stringField(raw, 'keeper'),
-    trace_id: stringField(raw, 'trace_id'),
+    trace_id: traceId,
     turn_id: nullableNumberField(raw, 'turn_id'),
     manifest_path: stringField(raw, 'manifest_path'),
     manifest_path_present: raw.manifest_path_present === true,
@@ -800,6 +1057,7 @@ export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceRespons
     provider_attempts: parseRuntimeTraceProviderAttempts(raw.provider_attempts),
     event_bus: parseRuntimeTraceEventBus(raw.event_bus),
     memory: parseRuntimeTraceMemory(raw.memory),
+    runtime_lens: parseRuntimeLens(raw.runtime_lens, traceId),
     health: stringField(raw, 'health') || 'unknown',
     stale_reason: nullableStringField(raw, 'stale_reason'),
   }

@@ -21,7 +21,7 @@ type try_provider_ctx =
   ; error_cascade_name : Cascade_error_classify.cascade_name
   ; keeper_name : string
   ; name : string
-  ; (* Agent config — fields passed to [Cascade_runner.default_config] *)
+  ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
   ; require_tool_choice_support : bool
   ; require_tool_support : bool
@@ -86,8 +86,6 @@ let emit_runtime_manifest
       (ctx : try_provider_ctx)
       ?status
       ?decision
-      ?provider_kind
-      ?model_id
       event
   =
   match ctx.runtime_manifest_context, ctx.runtime_manifest_append with
@@ -106,8 +104,7 @@ let emit_runtime_manifest
                @ [ ("decision", other) ]))
     in
     Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-      ~cascade_name:ctx.cascade_name ?provider_kind ?model_id ?status ?decision
-      ()
+      ~cascade_name:ctx.cascade_name ?status ?decision ()
     |> append
   | _ -> ()
 
@@ -120,7 +117,7 @@ let emit_runtime_manifest
     @param ctx Explicit closure context (captures from [run_named]).
     @param resume_checkpoint Checkpoint from a previous failed provider.
     @param per_provider_timeout_s Per-provider wall-clock timeout.
-    @param provider_cfg The provider configuration to attempt.
+    @param candidate The opaque runtime candidate to attempt.
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the cascade
     accept predicate accepts the response. *)
@@ -128,28 +125,27 @@ let run_try_provider
       (ctx : try_provider_ctx)
       ?resume_checkpoint
       ?per_provider_timeout_s
-      (provider_cfg : Llm_provider.Provider_config.t)
+      candidate
   =
   let config_result =
     match
-      Cascade_runner.resolve_tool_lane_for_oas_tools
+      Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
         ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt ctx.keeper_name)
         ~tool_requirement:
           (if ctx.require_tool_choice_support || ctx.require_tool_support
            then `Required
            else `Optional)
-        ~provider_cfg
         ~tools:ctx.tools
-        ()
+        candidate
     with
     | Error _ as err -> err
     | Ok (effective_tools, runtime_mcp_policy) ->
       let runtime_mcp_policy =
         match runtime_mcp_policy, String.trim ctx.keeper_name with
         | Some policy, keeper_name when keeper_name <> "" ->
-          Cascade_runner.runtime_mcp_policy_for_provider
-            ~provider_cfg
+          Cascade_runtime_candidate.runtime_mcp_policy_for_agent
             ~agent_name:(Keeper_types.keeper_agent_name ctx.keeper_name)
+            candidate
             (Some policy)
         | _ -> runtime_mcp_policy
       in
@@ -173,10 +169,6 @@ let run_try_provider
       in
       emit_runtime_manifest ctx
         ~status:(if missing_required_tool_names = [] then "resolved" else "error")
-        ~provider_kind:
-          (Llm_provider.Provider_config.string_of_provider_kind
-             provider_cfg.kind)
-        ~model_id:provider_cfg.model_id
         ~decision:
           (`Assoc
             [
@@ -209,21 +201,18 @@ let run_try_provider
         Error
           (Agent_sdk.Error.Internal
              (Printf.sprintf
-                "required_tool_lane_unavailable: provider=%s model=%s lane=%s \
+                "required_tool_lane_unavailable: lane=%s \
                  missing_required_tools=[%s] materialized_tools=[%s]"
-                (Llm_provider.Provider_config.string_of_provider_kind
-                   provider_cfg.kind)
-                provider_cfg.model_id
                 resolved_lane
                 (String.concat ", " missing_required_tool_names)
                 (String.concat ", " materialized_tool_names)))
       else
         Ok
-          { (Cascade_runner.default_config
+          { (Cascade_runtime_candidate.default_config
                ~name:ctx.name
-               ~provider_cfg
                ~system_prompt:ctx.system_prompt
-               ~tools:effective_tools)
+               ~tools:effective_tools
+               candidate)
             with
             priority = ctx.priority
           ; max_turns = ctx.max_turns
@@ -252,9 +241,7 @@ let run_try_provider
           ; tool_retry_policy = ctx.tool_retry_policy
           ; required_tool_satisfaction = ctx.required_tool_satisfaction
           ; description =
-              Some
-                (Printf.sprintf "cascade:%s/%s" ctx.cascade_name
-                   provider_cfg.model_id)
+              Some (Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
           ; transport = ctx.transport_resolved
           ; allowed_paths = ctx.allowed_paths
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
@@ -284,15 +271,9 @@ let run_try_provider
   | Error err -> Error err, None, None
   | Ok config ->
     let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
-    (* Compute the concrete provider/model key once so liveness budget lookup,
-       success-history training, and the [outer_wall_for_attempt] dispatch key
-       cannot diverge. *)
-    let candidate_key =
-      Provider_adapter.provider_model_health_key_of_config provider_cfg
-    in
-    let provider_label =
-      Provider_adapter.provider_label_of_config provider_cfg
-    in
+    (* MASC stores one neutral runtime-lane budget; concrete provider/model
+       identities remain on the OAS side. *)
+    let candidate_key = Cascade_attempt_liveness_config.runtime_candidate_key in
     let liveness_observer_opt =
       match liveness_mode with
       | Cascade_attempt_liveness_config.Off -> None
@@ -315,7 +296,6 @@ let run_try_provider
             ~mode:liveness_mode
             ~budget:resolved_budget.budget
             ~cascade_label:ctx.cascade_name
-            ~provider_label
             ~candidate_key
             ~started_at:(Time_compat.now ())
             ()
@@ -339,9 +319,8 @@ let run_try_provider
         (Timeout
            { message =
                Printf.sprintf
-                 "Cascade attempt liveness guard killed provider %s/%s: %s"
+                 "Cascade attempt liveness guard killed runtime lane %s: %s"
                  ctx.cascade_name
-                 provider_cfg.model_id
                  kind
            })
     in
@@ -398,7 +377,7 @@ let run_try_provider
     in
     (match
        Cascade_error_classify.with_codex_cli_preflight
-         ~scope:(Printf.sprintf "cascade:%s/%s" ctx.cascade_name provider_cfg.model_id)
+         ~scope:(Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
          ~config
          ~goal:ctx.goal
          (fun () ->
@@ -446,10 +425,9 @@ let run_try_provider
                      (try Eio.Time.with_timeout_exn clock t run_fn with
                       | Eio.Time.Timeout ->
                         Log.Misc.info
-                          "[cascade-fallback] cascade %s: provider %s per-provider \
+                          "[cascade-fallback] cascade %s: runtime lane per-provider \
                            timeout after %.1fs, falling back"
                           ctx.cascade_name
-                          provider_cfg.model_id
                           t;
                         Error
                           (Agent_sdk.Error.Api
@@ -469,9 +447,9 @@ let run_try_provider
        let liveness_success_sample = liveness_success_sample () in
        let result =
          Result.map_error
-           (Cascade_attempt_fsm.enrich_sdk_error
+           (Cascade_runtime_candidate.enrich_sdk_error
               ~cascade_name:ctx.error_cascade_name
-              ~provider_cfg)
+              candidate)
            result
        in
        let checkpoint_after =

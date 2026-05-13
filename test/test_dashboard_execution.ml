@@ -688,10 +688,10 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
             check string "canonical cascade surfaced on execution keeper row"
               Lib.(Keeper_config.default_cascade_name ())
               (row |> member "cascade_canonical" |> to_string);
-            check bool "primary model surfaced on execution keeper row" true
-              (row |> member "primary_model" <> `Null);
-            check bool "active model label surfaced on execution keeper row" true
-              (row |> member "active_model_label" <> `Null))))
+            check bool "primary model omitted on execution keeper row" true
+              (row |> member "primary_model" = `Null);
+            check bool "active model label omitted on execution keeper row" true
+              (row |> member "active_model_label" = `Null))))
 
 let test_execution_trust_surfaces_latest_receipt () =
   let dir = test_dir () in
@@ -745,7 +745,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (compact_row |> member "trust" |> member "last_outcome"
              |> to_string);
             check string "compact keeper row exposes trust contract result"
-              "satisfied"
+              "satisfied_completion"
               (compact_row |> member "trust" |> member "tool_contract_result"
              |> to_string);
             check string "execution trust row preserves sandbox kind"
@@ -810,10 +810,9 @@ let test_execution_trust_surfaces_latest_receipt () =
             check int "execution row exposes provider attempt count" 2
               (execution_row |> member "trust" |> member "execution_summary"
              |> member "provider_attempt_count" |> to_int);
-            check string "execution row exposes provider selected model"
-              "custom:mock"
+            check bool "execution row omits provider selected model" true
               (execution_row |> member "trust" |> member "execution_summary"
-             |> member "provider_selected_model" |> to_string);
+             |> member "provider_selected_model" = `Null);
             check bool "execution row exposes provider fallback" true
               (execution_row |> member "trust" |> member "execution_summary"
              |> member "provider_fallback_applied" |> to_bool);

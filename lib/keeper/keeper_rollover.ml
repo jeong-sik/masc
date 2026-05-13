@@ -74,8 +74,6 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
-  | Admission_wait_wfq
-  | Admission_surface
   | Oas_timeout_budget
   | Turn_timeout
   | Completion_contract_violation
@@ -312,6 +310,7 @@ let maybe_rollover_oas_handoff
                      };
                    }
                  in
+                 let model = "runtime" in
                  let handoff_json =
                    `Assoc
                      [

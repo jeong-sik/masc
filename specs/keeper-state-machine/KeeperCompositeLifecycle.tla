@@ -524,10 +524,11 @@ EventPriorityMonotone ==
 \* predicates over projections only, no enumeration of the full
 \* product state space.
 
-\* I5 — AttemptFSMRespectsAdmission (RFC §3.4)
-\* B1.KCAF cannot enter "attempting" unless the admission gate
-\* (measurement hub here, which is the in-spec projection of
-\* KeeperAdmissionLiveness) has fired in the current turn.
+\* I5 — AttemptFSMRespectsAdmission (RFC §3.4, historical name)
+\* B1.KCAF cannot enter "attempting" unless the turn measurement hub has fired
+\* in the current turn. The former MASC-side KeeperAdmissionLiveness provider
+\* gate was retired; this projection now models the live turn-semaphore entry
+\* signal only.
 AttemptFSMRespectsAdmission ==
     (kcaf_attempt_phase = "attempting") =>
         (shared_measurement /= 0 /\ measurement_turn = turn_tick)

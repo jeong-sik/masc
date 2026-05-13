@@ -118,7 +118,7 @@ describe('normalizeOperatorDigest', () => {
     })
     expect(result.operator_judge_runtime).not.toBeNull()
     expect(result.operator_judge_runtime!.enabled).toBe(true)
-    expect(result.operator_judge_runtime!.model_used).toBe('gpt-4')
+    expect(result.operator_judge_runtime!.model_used).toBeNull()
   })
 
   it('returns null operator_judge_runtime for invalid input', () => {
@@ -134,11 +134,15 @@ describe('normalizeOperatorDigest', () => {
         surface: 'operator',
         status: 'complete',
         confidence: 0.85,
+        model_name: 'gpt-4.1',
+        runtime_name: 'openai',
       },
     })
     expect(result.judgment).not.toBeNull()
     expect(result.judgment!.surface).toBe('operator')
     expect(result.judgment!.confidence).toBe(0.85)
+    expect(result.judgment!.model_name).toBeNull()
+    expect(result.judgment!.runtime_name).toBe('runtime')
   })
 
   it('extracts active_guidance_layer and active_summary', () => {
@@ -227,13 +231,14 @@ describe('normalizeOperatorSnapshot', () => {
   it('extracts keepers with valid name', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [
-        { name: 'janitor', status: 'Running', generation: 10 },
+        { name: 'janitor', status: 'Running', generation: 10, active_model: 'claude-sonnet' },
         { name: 'dreamer', status: 'Idle' },
       ],
     })
     expect(result.keepers).toHaveLength(2)
     expect(result.keepers[0]!.name).toBe('janitor')
     expect(result.keepers[0]!.generation).toBe(10)
+    expect(result.keepers[0]!.model).toBe('runtime')
   })
 
   it('preserves keeper runtime_trust terminal reason fields', () => {

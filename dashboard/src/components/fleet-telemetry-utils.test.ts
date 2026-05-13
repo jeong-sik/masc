@@ -126,7 +126,7 @@ describe('normalizeModelText', () => {
 })
 
 describe('buildFleetRows runtime labels', () => {
-  it('surfaces cascade, provider, and fallback labels from keeper telemetry', () => {
+  it('redacts model/provider identity while keeping lane outcome evidence', () => {
     const [row] = buildFleetRows([
       {
         name: 'cascade-keeper',
@@ -194,10 +194,10 @@ describe('buildFleetRows runtime labels', () => {
     })
 
     expect(row).toMatchObject({
-      model: 'codex_cli:auto',
+      model: 'runtime',
       cascade_label: 'oas-keeper_unified -> primary',
-      provider_label: 'anthropic:claude-sonnet-4-6 · 2 attempts · fallback',
-      fallback_label: 'openai:gpt-5.4 -> anthropic:claude-sonnet-4-6 · turn_timeout · 1 hops',
+      provider_label: 'passed_to_next_model · 2 attempts · fallback',
+      fallback_label: 'fallback · turn_timeout · 1 hops',
     })
   })
 })

@@ -226,9 +226,6 @@ val metric_timeout_policy_overshoot : string
     across contract/gate/FS-resolver layers.  Labels:
     [kind="out_of_roots"|"not_found_relative"]. *)
 
-(** RFC-0026 PR-E-1.6 shadow observation. Counter; labels
-    [keeper] and [outcome \in {legacy, dispatch, wait, surface}]. *)
-
 val metric_write_meta_cas_retry_total : string
 
 (** Total board signals that did not produce a wake decision for a

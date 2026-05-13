@@ -589,18 +589,8 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
           in
           let trace_history_count = List.length m.runtime.trace_history in
-          let active_model = Keeper_exec_status.active_model_of_meta m in
-          let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
-          let effective_cascade_name = live_keeper_cascade_name (Keeper_types.cascade_name_of_meta m) in
-          let cascade_models =
-            Cascade_runtime.models_of_cascade_name
-              (Keeper_cascade_profile.Runtime_name effective_cascade_name)
-          in
-          let primary_model =
-            match cascade_models with
-            | model :: _ -> model
-            | [] -> ""
-          in
+          let _effective_cascade_name = live_keeper_cascade_name (Keeper_types.cascade_name_of_meta m) in
+          let primary_model = "" in
           let primary_model_norm = normalize_model_name primary_model in
           let last_compaction_saved_tokens =
             max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
@@ -673,50 +663,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           in
           let metrics_series = `List metrics_series_items in
 
-          let models_resolved =
-            `List (List.filter_map (fun label ->
-              match String.index_opt label ':' with
-              | Some i ->
-                  let provider = String.sub label 0 i in
-                  let model_id = String.sub label (i + 1) (String.length label - i - 1) in
-                  Some (`Assoc [
-                    ("provider", `String provider);
-                    ("model_id", `String model_id);
-                    ("max_context", `Int 0);
-                  ])
-              | None -> None
-            ) cascade_models)
-          in
-
-          let provider_health_json =
-            match cascade_models with
-            | first_label :: _ ->
-                (match String.index_opt first_label ':' with
-                 | Some i ->
-                     let provider = String.sub first_label 0 i in
-                     let model_id = String.sub first_label (i + 1) (String.length first_label - i - 1) in
-                     (match Keeper_provider_health.get_health ~provider ~model:model_id with
-                      | Some h ->
-                          let config = Keeper_provider_health.get_config () in
-                          let status =
-                            if h.timeout_count_5m >= config.timeout_count_5m_unhealthy then "unhealthy"
-                            else if h.ttfrc_ms_ewma > config.ttfrc_unhealthy_ms then "unhealthy"
-                            else if h.ttfrc_ms_ewma > config.ttfrc_degraded_ms then "degraded"
-                            else "healthy"
-                          in
-                          `Assoc [
-                            ("provider", `String provider);
-                            ("model", `String model_id);
-                            ("status", `String status);
-                            ("ttfrc_ms_ewma", `Float h.ttfrc_ms_ewma);
-                            ("timeout_count_5m", `Int h.timeout_count_5m);
-                            ("prefill_ms_ewma", `Float h.prefill_ms_ewma);
-                            ("last_updated", `Float h.last_updated);
-                          ]
-                      | None -> `Null)
-                 | None -> `Null)
-            | [] -> `Null
-          in
+          let provider_health_json = `Null in
 
           (* In compact mode (used by execution surface), skip heavy memory bank I/O.
              Full memory bank is only needed for individual keeper detail view. *)
@@ -930,19 +877,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (let effective_cascade_name = live_keeper_cascade_name (Keeper_types.cascade_name_of_meta m) in
-                 let effective_models =
-                   Cascade_runtime.models_of_cascade_name
-                     (Keeper_cascade_profile.Runtime_name effective_cascade_name)
-                 in
-                 let cfgs = Cascade_config.parse_model_strings effective_models in
-                 match cfgs with
-                 | [] when effective_models <> [] ->
-                     `Assoc [("has_checkpoint", `Bool false)]
-                 | _ ->
-                     let primary_max_context =
-                       Cascade_runtime.resolve_primary_max_context effective_models
-                     in
+                (let primary_max_context = 0 in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =
                        Keeper_execution.load_context_from_checkpoint
@@ -1147,15 +1082,15 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
                 ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
               ]);
-              ("models", `List (List.map (fun s -> `String s) cascade_models));
-              ("models_resolved", models_resolved);
-              ("primary_model", `String primary_model);
+              ("models", `List []);
+              ("models_resolved", `List []);
+              ("primary_model", `Null);
               ( "cascade_ref",
                 (match m.cascade_ref with
                  | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
                  | None -> `Null) );
-              ("active_model", `String active_model);
-              ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
+              ("active_model", `Null);
+              ("next_model_hint", `Null);
               ("sandbox_profile",
                 `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
               ("sandbox_target", `String sandbox_target);
@@ -1194,7 +1129,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);
               ("total_tokens", `Int m.runtime.usage.total_tokens);
               ("total_cost_usd", `Float m.runtime.usage.total_cost_usd);
-              ("last_model_used", `String m.runtime.usage.last_model_used);
+              ("last_model_used", `Null);
               ("last_usage", `Assoc [
                 ("input_tokens", `Int m.runtime.usage.last_input_tokens);
                 ("output_tokens", `Int m.runtime.usage.last_output_tokens);
@@ -1466,7 +1401,7 @@ let recent_token_spend_json metrics =
                     ("ts_unix", `Float (metric_ts json));
                     ("ts", Json_util.string_opt_to_json (string_member_nonempty "ts" json));
                     ("channel", Json_util.string_opt_to_json (string_member_nonempty "channel" json));
-                    ("model", Json_util.string_opt_to_json (string_member_nonempty "model_used" json));
+                    ("model", `Null);
                     ("input_tokens", Json_util.int_opt_to_json input_tokens);
                     ("output_tokens", Json_util.int_opt_to_json output_tokens);
                     ("total_tokens", Json_util.int_opt_to_json total_tokens);
@@ -1577,15 +1512,6 @@ let keeper_config_json (config : Coord.config) (name : string)
   | Ok (Some (m : Keeper_types.keeper_meta)) ->
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
-      let active_model = Keeper_exec_status.active_model_of_meta m in
-      let active_model_label =
-        let value = Keeper_exec_status.active_model_label_of_meta m |> String.trim in
-        if value = "" then None else Some value
-      in
-      let last_model_used_label =
-        if String.trim m.runtime.usage.last_model_used = "" then None
-        else active_model_label
-      in
       let defaults = Keeper_types_profile.load_keeper_profile_defaults m.name in
       let persona_extended =
         Keeper_types_profile.resolved_persona_name ~keeper_name:m.name defaults
@@ -1702,14 +1628,10 @@ let keeper_config_json (config : Coord.config) (name : string)
             (match m.cascade_ref with
              | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
              | None -> `Null) );
-          ( "models",
-            `List
-              (List.map (fun s -> `String s)
-                 (Cascade_runtime.models_of_cascade_name
-                    (Keeper_cascade_profile.Runtime_name effective_cascade_name))) );
-          ("active_model", `String active_model);
-          ("active_model_label", Json_util.string_opt_to_json active_model_label);
-          ("last_model_used_label", Json_util.string_opt_to_json last_model_used_label);
+          ("models", `List []);
+          ("active_model", `Null);
+          ("active_model_label", `Null);
+          ("last_model_used_label", `Null);
           ( "per_provider_timeout_sec",
             Json_util.float_opt_to_json m.per_provider_timeout_s );
           ( "per_provider_timeout_mode",
@@ -1757,7 +1679,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);
           ("total_tokens", `Int m.runtime.usage.total_tokens);
           ("total_cost_usd", `Float m.runtime.usage.total_cost_usd);
-          ("last_model_used", `String m.runtime.usage.last_model_used);
+          ("last_model_used", `Null);
           ("last_input_tokens", `Int m.runtime.usage.last_input_tokens);
           ("last_output_tokens", `Int m.runtime.usage.last_output_tokens);
           ("last_total_tokens", `Int m.runtime.usage.last_total_tokens);
@@ -1936,9 +1858,9 @@ let keeper_config_json (config : Coord.config) (name : string)
 
     Reads each keeper's metrics JSONL, extracts cost_usd / latency_ms /
     token fields, and returns per-keeper totals plus p50/p95 latency
-    percentiles and a model-level cost breakdown.
+    percentiles and a redacted runtime cost breakdown.
 
-    This closes the Phase-2 gap between per-model metrics (already in
+    This closes the Phase-2 gap between runtime metrics (already in
     /api/v1/models/metrics) and per-agent spend (required by preview). *)
 let percentile_sorted_float (sorted : float array) (p : float) : float =
   let n = Array.length sorted in
@@ -1990,7 +1912,7 @@ let keeper_cost_aggregates_json
       let input_tokens = ref 0 in
       let output_tokens = ref 0 in
       let total_tokens = ref 0 in
-      let model_costs : (string, float) Hashtbl.t = Hashtbl.create 8 in
+      let runtime_costs : (string, float) Hashtbl.t = Hashtbl.create 8 in
       let sample_count = ref 0 in
       List.iter (fun line ->
         try
@@ -2011,10 +1933,6 @@ let keeper_cost_aggregates_json
             let total_t =
               int_member_fallback "total_tokens" j |> Option.value ~default:0
             in
-            let model_used =
-              Safe_ops.json_string ~default:"" "model_used" j
-            in
-            let model_used_norm = normalize_model_name model_used in
             if
               keeper_cost_metric_row_is_event j
               && (cost > 0.0 || latency_ms > 0)
@@ -2026,9 +1944,9 @@ let keeper_cost_aggregates_json
               total_tokens := !total_tokens + total_t;
               let prev =
                 Option.value ~default:0.0
-                  (Hashtbl.find_opt model_costs model_used_norm)
+                  (Hashtbl.find_opt runtime_costs "runtime")
               in
-              Hashtbl.replace model_costs model_used_norm (prev +. cost);
+              Hashtbl.replace runtime_costs "runtime" (prev +. cost);
               incr sample_count;
             end
           end
@@ -2049,8 +1967,8 @@ let keeper_cost_aggregates_json
         if Array.length latency_arr = 0 then None
         else Some (percentile_sorted_float latency_arr 95.0)
       in
-      let model_breakdown_json =
-        model_costs
+      let runtime_breakdown_json =
+        runtime_costs
         |> Hashtbl.to_seq
         |> List.of_seq
         |> List.sort (fun (_, ca) (_, cb) -> Float.compare cb ca)
@@ -2069,7 +1987,7 @@ let keeper_cost_aggregates_json
         ("p50_latency_ms", Json_util.float_opt_to_json p50_latency);
         ("p95_latency_ms", Json_util.float_opt_to_json p95_latency);
         ("sample_count", `Int !sample_count);
-        ("model_breakdown", `List model_breakdown_json);
+        ("model_breakdown", `List runtime_breakdown_json);
       ]
     ) keepers
   in
@@ -2171,7 +2089,7 @@ let keeper_decisions_json
         ("event_type", `String event_type);
         ("outcome", string_or_null "outcome");
         ("terminal_reason_code", terminal_reason_code);
-        ("model_used", string_or_null "model_used");
+        ("model_used", `Null);
         ("latency_ms", float_or_null "latency_ms");
         ("cost_usd", float_or_null "cost_usd");
         ("input_tokens", int_or_null "input_tokens");

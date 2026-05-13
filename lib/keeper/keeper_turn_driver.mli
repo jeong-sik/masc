@@ -4,31 +4,129 @@
     profiles ([run_named]) or explicit model label ([run_model_by_label]),
     with optional MASC tool bridging variants.
 
-    The facade [include]s the three sub-modules:
-    - {!Cascade_oas_runner} — Eio context, cascade resolution, runtime MCP policy
-    - {!Cascade_error_classify} — masc_internal_error type, error conversion, codex CLI preflight
-    - {!Cascade_attempt_fsm} — SDK error to FSM outcome, session/resumption analysis
+    The facade intentionally exposes only the logical keeper entry points and
+    typed MASC/OAS error helpers. Provider/model-shaped OAS runner helpers stay
+    behind lower-level boundary modules.
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
-include module type of Cascade_oas_runner
-include module type of Cascade_error_classify
-include module type of Cascade_attempt_fsm
+(** {1 MASC/OAS structured errors} *)
 
-(** [effective_provider_attempt_timeout_s] applies provider-specific
-    timeout constraints to a configured cascade attempt budget.
+type cascade_name = Keeper_cascade_profile.runtime_name
 
-    - Ollama has a 300s floor for local model cold-load.
-    - Claude Code, Gemini, and Kimi CLI have shorter attempt caps so one
-      provider cannot spend the whole keeper turn budget before fallback.
-    - Providers without a known constraint keep the configured timeout unless
-      they are the last attempt, where the enclosing keeper/OAS timeout is
-      sufficient. *)
-val effective_provider_attempt_timeout_s :
-  is_last:bool ->
-  configured_timeout_s:float option ->
-  Llm_provider.Provider_config.t ->
-  float option
+val cascade_name_of_string : string -> cascade_name
+val cascade_name_to_string : cascade_name -> string
+
+type provider_rejection = {
+  reason : string;
+}
+
+type masc_internal_error =
+  | Cascade_exhausted of {
+      cascade_name : cascade_name;
+      reason : Keeper_types.cascade_exhaustion_reason;
+    }
+  | Resumable_cli_session of {
+      cascade_name : cascade_name;
+      detail : string;
+      exit_code : int option;
+    }
+  | No_tool_capable_provider of {
+      cascade_name : cascade_name;
+      configured_labels : string list;
+      required_tool_names : string list;
+      provider_rejections : provider_rejection list;
+    }
+  | Accept_rejected of {
+      scope : string;
+      model : string option;
+      reason : string;
+    }
+  | Admission_queue_timeout of {
+      keeper_name : string;
+      cascade_name : cascade_name;
+      wait_sec : float;
+    }
+  | Admission_queue_rejected of {
+      keeper_name : string;
+      reason : string;
+    }
+  | Turn_timeout of { elapsed_sec : float }
+  | Oas_timeout_budget of {
+      budget_sec : float;
+      keeper_turn_timeout_sec : float;
+      estimated_input_tokens : int;
+      source : string;
+      remaining_turn_budget_sec : float option;
+      min_required_sec : float;
+      phase : string;
+    }
+  | Ambiguous_post_commit of {
+      is_timeout : bool;
+      tools : string list;
+      original_error : string;
+    }
+
+val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
+
+val summary_of_masc_internal_error : masc_internal_error -> string option
+
+val sdk_error_of_masc_internal_error :
+  masc_internal_error -> Agent_sdk.Error.sdk_error
+
+val classify_masc_internal_error :
+  Agent_sdk.Error.sdk_error -> masc_internal_error option
+
+val classify_masc_internal_error_of_string :
+  string -> masc_internal_error option
+
+val kind_of_masc_internal_error : masc_internal_error -> string
+
+val cascade_name_of_masc_internal_error : masc_internal_error -> string
+
+val masc_oas_error_total_metric : string
+
+val admission_wait_timeout_error :
+  keeper_name:string ->
+  cascade_name:cascade_name ->
+  priority:Llm_provider.Request_priority.t ->
+  int ->
+  (string, Agent_sdk.Error.sdk_error) result
+
+val cross_cascade_fallback_metric : string
+
+(** {1 Cascade error helpers} *)
+
+val sdk_error_to_cascade_outcome :
+  Agent_sdk.Error.sdk_error -> Cascade_fsm.provider_outcome option
+
+val message_looks_like_cli_wrapped_hard_quota : string -> bool
+
+val message_looks_like_cli_wrapped_max_turns : string -> bool
+
+val message_looks_like_resumable_cli_session : string -> bool
+
+val sdk_error_to_resumable_cli_session :
+  cascade_name:Cascade_error_classify.cascade_name ->
+  Agent_sdk.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error option
+
+val sdk_error_is_resumable_cli_session : Agent_sdk.Error.sdk_error -> bool
+
+val sdk_error_is_terminal_provider_runtime_failure :
+  Agent_sdk.Error.sdk_error -> bool
+
+val sdk_error_is_model_access_denied : Agent_sdk.Error.sdk_error -> bool
+
+val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
+
+val sdk_error_soft_rate_limited :
+  Agent_sdk.Error.sdk_error -> float option option
+
+val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
+
+val sdk_error_cascade_fallback_class :
+  Agent_sdk.Error.sdk_error -> string option
 
 (** [apply_stream_idle_timeout_default opt] returns [opt] when the caller
     supplied a value, otherwise injects

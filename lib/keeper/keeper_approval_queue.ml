@@ -586,7 +586,7 @@ let audit_approval_event
          ; "task_id", Json_util.string_opt_to_json task_id
          ; "goal_id", Json_util.string_opt_to_json goal_id
          ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
-         ; "selected_model", Json_util.string_opt_to_json selected_model
+         ; "selected_model", `Null
          ; "disposition", Json_util.string_opt_to_json disposition
          ; "disposition_reason", Json_util.string_opt_to_json disposition_reason
          ]
@@ -774,7 +774,7 @@ let pending_entry_json_fields
   ; "task_id", Json_util.string_opt_to_json entry.task_id
   ; "goal_id", Json_util.string_opt_to_json entry.goal_id
   ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
-  ; "selected_model", Json_util.string_opt_to_json entry.selected_model
+  ; "selected_model", `Null
   ; "disposition", Json_util.string_opt_to_json entry.disposition
   ; "disposition_reason", Json_util.string_opt_to_json entry.disposition_reason
   ]
@@ -905,7 +905,7 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
                 ; "keeper_name", `String entry.keeper_name
                 ; "tool_name", `String entry.tool_name
                 ; "decision", `String decision_str
-                ; "selected_model", Json_util.string_opt_to_json entry.selected_model
+                ; "selected_model", `Null
                 ; "disposition", Json_util.string_opt_to_json entry.disposition
                 ; ( "disposition_reason"
                   , Json_util.string_opt_to_json entry.disposition_reason )

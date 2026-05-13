@@ -14,6 +14,10 @@ import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { toolCategory } from './tool-call-shared'
 import type { Keeper } from '../types'
+import type {
+  KeeperRuntimeLensLane,
+  KeeperRuntimeTraceResponse,
+} from '../api/keeper'
 import { serverStatus } from '../store'
 import { operatorSnapshot } from '../operator-store'
 import {
@@ -394,7 +398,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
       title: '폴백',
       rows: [
         { label: '전체 폴백', value: formatPct1(mw?.fallback_rate) },
-        { label: '모델 폴백', value: formatPct1(mw?.model_fallback_rate) },
+        { label: '런타임 폴백', value: formatPct1(mw?.model_fallback_rate) },
         { label: '프로액티브 폴백', value: formatPct1(mw?.proactive_fallback_rate) },
       ],
     },
@@ -452,7 +456,6 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 
   const topListSections = [
     topListDistribution(mw?.top_tools, 'tool', '주요 도구'),
-    topListDistribution(mw?.top_models, 'model', '주요 모델'),
     topListDistribution(mw?.top_work_kinds, 'kind', '주요 작업 종류'),
   ].filter((section): section is {
     title: string
@@ -558,6 +561,120 @@ function topListDistribution(
     subtitle: 'metrics_window Top-N 집계를 막대 형태로 표시합니다.',
     items,
   }
+}
+
+// ── Runtime Lens ─────────────────────────────────────────
+
+function formatLensList(values: string[], emptyLabel = 'none'): string {
+  if (values.length === 0) return emptyLabel
+  if (values.length <= 3) return values.join(', ')
+  return `${values.slice(0, 3).join(', ')} +${values.length - 3}`
+}
+
+function lensGapTone(severity: string): StatusChipTone {
+  switch (severity) {
+    case 'bad':
+    case 'error':
+      return 'bad'
+    case 'warn':
+    case 'warning':
+      return 'warn'
+    default:
+      return 'neutral'
+  }
+}
+
+function lensLaneTone(lane: KeeperRuntimeLensLane): StatusChipTone {
+  if (lane.gap_codes.length > 0) return 'warn'
+  if (lane.terminal_status === 'empty' || lane.event_count === 0) return 'neutral'
+  if (lane.terminal_status.includes('error') || lane.terminal_status.includes('missing')) return 'bad'
+  return 'ok'
+}
+
+function RuntimeLensLaneRow({ lane }: { lane: KeeperRuntimeLensLane }) {
+  return html`
+    <div class="grid grid-cols-[minmax(8rem,1fr)_auto] md:grid-cols-[minmax(9rem,1fr)_auto_auto] gap-2 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 min-w-0">
+      <div class="min-w-0">
+        <div class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${lane.label}</div>
+        <div class="text-3xs text-[var(--color-fg-muted)] font-mono truncate">
+          ${lane.events.length > 0
+            ? lane.events.map(event => `${event.event}:${event.count}`).join(' · ')
+            : 'no events'}
+        </div>
+      </div>
+      <span class="text-3xs font-mono text-[var(--color-fg-muted)] tabular-nums justify-self-end">
+        ${lane.event_count}
+      </span>
+      <div class="col-span-2 md:col-span-1 flex flex-wrap gap-1 justify-start md:justify-end min-w-0">
+        <${StatusChip} tone=${lensLaneTone(lane)} uppercase=${false}>${lane.terminal_status}<//>
+        ${lane.gap_codes.map(code => html`
+          <${StatusChip} tone="warn" uppercase=${false}>${code}<//>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+export function RuntimeLensSection({
+  trace,
+}: {
+  trace: KeeperRuntimeTraceResponse | null
+}) {
+  if (!trace) {
+    return html`
+      <div class="text-2xs text-[var(--color-fg-muted)] italic">
+        runtime_trace_unavailable
+      </div>
+    `
+  }
+
+  const lens = trace.runtime_lens
+  const tool = lens.axes.tool_surface
+  const lane = lens.axes.provider_lane
+  const context = lens.axes.context
+  const memory = lens.axes.memory
+  const clock = lens.turn_clock
+  const swimlanes = [
+    lens.swimlanes.keeper,
+    lens.swimlanes.masc_policy_cascade,
+    lens.swimlanes.oas_agent,
+    lens.swimlanes.provider,
+    lens.swimlanes.tool_runtime,
+    lens.swimlanes.memory_context,
+  ]
+
+  return html`
+    <div class="flex flex-col gap-3" data-testid="runtime-lens">
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5">
+        <${SignalRow} label="keeper / OAS turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_oas_turn_count ?? '-'}`} />
+        <${SignalRow} label="terminal event" value=${clock.terminal_event_present ? clock.terminal_event ?? 'present' : 'missing'} />
+        <${SignalRow} label="runtime lane" value=${lane.resolved_lane ?? lane.status ?? 'unknown'} />
+        <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />
+        <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
+        <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
+        <${SignalRow} label="context compaction" value=${`${context.context_compacted_count}/${context.context_compact_started_count}`} />
+        <${SignalRow} label="memory flush" value=${`${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`} />
+        <${SignalRow} label="manifest rows" value=${clock.manifest_total_rows} />
+      </div>
+
+      <div class="flex flex-wrap gap-1.5 min-w-0" data-testid="runtime-lens-gaps">
+        ${lens.gaps.length > 0
+          ? lens.gaps.map(gap => html`
+              <${StatusChip}
+                tone=${lensGapTone(gap.severity)}
+                uppercase=${false}
+              >
+                ${gap.code}
+              <//>
+            `)
+          : html`<${StatusChip} tone="ok" uppercase=${false}>no lens gaps<//>`}
+      </div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-2">
+        ${swimlanes.map(lane => html`<${RuntimeLensLaneRow} lane=${lane} />`)}
+      </div>
+    </div>
+  `
 }
 
 // ── Neighborhood & Tool Audit ────────────────────────────

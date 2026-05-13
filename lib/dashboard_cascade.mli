@@ -281,9 +281,8 @@ val recommendations_json : unit -> Yojson.Safe.t
 
 (** [provider_scheme_of_model_string s] returns the scheme prefix of a
     cascade model spec (the text before the first [:]), or [s]
-    unchanged when no [:] is present.  The scheme corresponds to the
-    [provider_key] produced at runtime by
-    [Keeper_hooks_oas.provider_of_model] for prefixed specs. *)
+    unchanged when no [:] is present.  This legacy cascade-health helper is not
+    used for keeper-facing provider/model telemetry. *)
 val provider_scheme_of_model_string : string -> string
 
 (** [declared_provider_schemes_of_config ?config_path ()] returns the

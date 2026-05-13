@@ -15,7 +15,6 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
     { title: '이름', key: 'name', value: keeper.name },
     { title: '이모지', key: 'emoji', value: keeper.emoji ?? '-' },
     { title: '한글명', key: 'koreanName', value: keeper.koreanName ?? '-' },
-    { title: '모델', key: 'model', value: keeper.model ?? '-' },
     { title: '상태', key: 'status', value: keeper.status },
     { title: '주력', key: 'primaryValue', value: keeper.primaryValue ?? '-' },
     { title: '세대', key: 'generation', value: String(keeper.generation ?? '-') },
@@ -30,9 +29,6 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   const extras: { title: string; value: string; mono?: boolean }[] = []
   if (keeper.trace_id) extras.push({ title: '추적 ID', value: keeper.trace_id, mono: true })
   if (keeper.agent_name) extras.push({ title: '에이전트', value: keeper.agent_name })
-  if (keeper.primary_model) extras.push({ title: '주력 모델', value: keeper.primary_model, mono: true })
-  if (keeper.active_model) extras.push({ title: '활성 모델', value: keeper.active_model, mono: true })
-  if (keeper.next_model_hint) extras.push({ title: '다음 모델 힌트', value: keeper.next_model_hint, mono: true })
   if (keeper.skill_primary) extras.push({ title: '스킬 (주)', value: keeper.skill_primary })
   if (keeper.skill_secondary?.length) extras.push({ title: '스킬 (보조)', value: keeper.skill_secondary.join(', ') })
   if (keeper.skill_reason) extras.push({ title: '스킬 사유', value: keeper.skill_reason })

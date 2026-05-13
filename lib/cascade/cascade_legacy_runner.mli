@@ -35,9 +35,7 @@
     [cascade_counter] type, [StringMap], [worker_min_p],
     [cascade_max_keys], [create_cascade_counter],
     [cascade_eviction] type, [find_cascade_eviction_candidate],
-    [display_provider_name_of_config],
-    [model_label_option_of_model_id], [strip_latest_suffix],
-    [selected_index_of_model], [normalized_selected_model],
+    [display_provider_name_of_config], [strip_latest_suffix],
     [cascade_observation_of_candidates],
     [cascade_attempt_to_json], [cascade_fallback_event_to_json],
     [update_first_attempt_if], [record_attempt_start],
@@ -117,8 +115,9 @@ val provider_name_of_config :
 val model_label_of_config :
   Llm_provider.Provider_config.t -> string
 (** Canonical [provider:model] label (e.g.
-    ["anthropic:claude-opus-4.7"]).  Used in attempt
-    rows + fallback event labels. *)
+    ["anthropic:claude-opus-4.7"]).  Compatibility helper for legacy
+    tests and callers; current public attempt/fallback projections use
+    runtime-lane labels instead. *)
 
 (** {1 Cascade metrics capture} *)
 
@@ -153,7 +152,7 @@ val cascade_attempt_terminal_event_json :
     slot instead of scheduling another degraded retry. *)
 
 val cascade_metrics_for_candidates :
-  candidate_cfgs:Llm_provider.Provider_config.t list ->
+  candidate_count:int ->
   unit ->
   cascade_metrics_capture * Llm_provider.Metrics.t
 (** Builds the [(capture, metrics)] pair the per-call
@@ -168,7 +167,7 @@ val cascade_observation_with_metrics :
   cascade_name:Keeper_cascade_profile.runtime_name ->
   ?strategy:string ->
   configured_labels:string list ->
-  candidate_cfgs:Llm_provider.Provider_config.t list ->
+  candidate_count:int ->
   selected_model_raw:string option ->
   capture:cascade_metrics_capture ->
   unit ->
@@ -184,16 +183,13 @@ val cascade_observation_with_metrics :
 
 val record_fallback_event :
   cascade_metrics_capture ->
-  candidate_cfgs:Llm_provider.Provider_config.t list ->
   from_model:string ->
   to_model:string ->
   reason:string ->
   unit
-(** Appends a fallback event to [capture].  Resolves the
-    [from] / [to] model labels via [candidate_cfgs] so
-    the recorded entry carries both the provider id and
-    the canonical label (the dashboard renders the
-    label, the structured logs key on the id). *)
+(** Appends a fallback event to [capture].  The public event keeps the
+    historical field names but records runtime-lane labels rather than
+    concrete provider/model identities. *)
 
 (** {1 Cascade audit actor} *)
 

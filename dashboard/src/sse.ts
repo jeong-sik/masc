@@ -468,7 +468,7 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_turn_complete':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Turn ${event.turn ?? '?'} model=${event.model_used ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}`,
+        `Turn ${event.turn ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}`,
         'keepers',
         'unknown',
         {
@@ -476,7 +476,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)} turn ${event.turn ?? '?'}`
-            + ` (${event.model_used ?? '?'}, ${formatCost(event.cost_usd ?? 0)}, tools=${event.tool_calls_made ?? 0})`,
+            + ` (${formatCost(event.cost_usd ?? 0)}, tools=${event.tool_calls_made ?? 0})`,
         },
       )
       break
@@ -498,7 +498,7 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_handoff':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (${event.to_model ?? '?'})`,
+        `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (runtime)`,
         'keepers',
         'keeper_handoff',
         {
@@ -506,7 +506,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)}가 keeper handoff를 수행했습니다`
-            + ` (gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}, ${event.to_model ?? '?'})`,
+            + ` (gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}, runtime)`,
         },
       )
       break
@@ -826,11 +826,10 @@ function handleEvent(event: SSEEvent): void {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
       const turn = asNumber(p.turn)
-      const model = asString(p.model) ?? 'unknown'
       const inputTokens = asNumber(p.input_tokens) ?? 0
       addTypedJournalEntry(
         agentName,
-        `OAS durable llm_request${turn != null ? ` · T${turn}` : ''} · ${model} · ${inputTokens}tok`,
+        `OAS durable llm_request${turn != null ? ` · T${turn}` : ''} · runtime · ${inputTokens}tok`,
         'oas',
         'oas_event',
         {

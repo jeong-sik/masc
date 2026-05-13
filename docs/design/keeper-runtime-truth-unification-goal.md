@@ -58,14 +58,21 @@ Implemented in this branch:
   `event_bus` summary with correlation ids, run ids, and compaction counts.
   It also includes a `memory` summary with injection/flush counts and flushed
   episode/procedure counts.
+- `/runtime-trace` now includes a derived `runtime_lens` object. It keeps the
+  manifest schema at v1 and normalizes the existing decision rows into
+  `turn_clock`, axis summaries, owner swimlanes, and code-shaped `gaps`.
 - Keeper detail now fetches the runtime-trace endpoint and renders compact
   FsmHub evidence chips for trace health, keeper/OAS turn identity,
   Event_bus/compaction counters, and memory injection/flush counts.
-- `/runtime-trace` now includes a `provider_attempts` summary with start/finish
-  counts, terminal provider kind/model/status/error/exception, and compact
-  attempt rows. Keeper detail renders that terminal provider chip directly in
-  FsmHub so operator-visible failure evidence no longer requires opening raw
+- Keeper detail also renders a Runtime Lens section under runtime diagnostics:
+  tool required/materialized/missing, provider lane, context compaction,
+  memory flush, and per-owner swimlane status are visible without reading raw
   manifest JSON.
+- `/runtime-trace` now includes a `provider_attempts` summary with start/finish
+  counts, terminal status/error/exception, and compact attempt rows. It does
+  not expose terminal provider/model identifiers. Keeper detail renders that
+  terminal provider chip directly in FsmHub so operator-visible failure
+  evidence no longer requires opening raw manifest JSON.
 - `scripts/keeper-runtime-truth-gate.sh` now provides a read-only live proof
   gate for an existing keeper turn. It checks manifest events, provider-lane
   boundary fields, Event_bus summary fields, memory-injection fields, linked
@@ -77,7 +84,8 @@ Implemented in this branch:
   turn where the OAS context rolls back without `checkpoint_saved`; the latter
   is accepted only when `turn_finished.status = error` and provider
   start/finish counts are terminal.
-- Focused test binary: `test/test_keeper_runtime_manifest.ml` with 15 tests,
+- Focused test binary: `test/test_keeper_runtime_manifest.ml` with focused
+  manifest/runtime trace regressions,
   including:
   - a producer fixture that calls the pre-dispatch terminal path and verifies
     manifest JSONL rows plus the linked receipt path;
@@ -90,6 +98,10 @@ Implemented in this branch:
     replay metadata before raw `[STATE]` text re-derivation.
   - a read-only runtime trace API fixture proving manifest rows and matching
     execution receipt rows are joined through the operator endpoint JSON.
+  - Runtime Lens API fixtures proving the tool axis reports
+    requested/required/materialized/missing tools, required-tool lane gaps are
+    code-shaped as `required_tool_not_materialized`, and context/memory rows
+    are grouped into the `memory_context` swimlane.
   - a typed cascade-engine boundary fixture proving keeper runtime dispatch
     uses `single_provider_agent_run` and disables OAS-internal cascade fallback.
 - `test/test_memory_hooks.ml` now covers runtime manifest rows from the
@@ -169,7 +181,7 @@ Latest verification:
 - `scripts/dune-local.sh build test/test_cascade_attempt_liveness_observer.exe test/test_ci_hardening_source.exe test/test_keeper_runtime_manifest.exe test/test_keeper_terminal_reason.exe test/test_keeper_sdk_error_typed_bridge.exe test/test_keeper_unified.exe bin/main_eio.exe`
 - `./_build/default/test/test_cascade_attempt_liveness_observer.exe` (11 tests; tick-fiber pending-stop regression now completes in 0.003s)
 - `./_build/default/test/test_ci_hardening_source.exe test source_guard 37`
-- `./_build/default/test/test_keeper_runtime_manifest.exe` (18 tests)
+- `./_build/default/test/test_keeper_runtime_manifest.exe` (22 tests)
 - `./_build/default/test/test_keeper_terminal_reason.exe` (34 tests)
 - `./_build/default/test/test_keeper_sdk_error_typed_bridge.exe` (2 tests)
 - `./_build/default/test/test_keeper_unified.exe` (359 tests)
@@ -178,8 +190,9 @@ Latest verification:
 - `opam exec -- ocamlformat --check lib/config_doctor.ml lib/config_doctor.mli test/test_config_doctor.ml`
 - `MASC_CONFIG_DIR=/Users/dancer/me/.masc/config MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false ./_build/default/bin/main_eio.exe doctor config --base-path /Users/dancer/me --json`
   (expected exit 1: live `keeper_turn` and `tool_required` both target
-  `tier-group.coding_plan`, whose only candidate is `glm:glm-5.1`; doctor now
-  reports `no_tool_capable_provider` risk before runtime dispatch)
+  `tier-group.coding_plan`, whose single candidate lacks the required tool
+  lane; doctor now reports `no_tool_capable_provider` risk before runtime
+  dispatch)
 - `scripts/keeper-runtime-truth-gate.sh --self-test` (success fixture plus
   timeout/error fixture)
 - `env RUN_ID=keeper-runtime-truth-live-20260512-codex5 RUN_DIR=/private/tmp/keeper-runtime-truth-live-20260512-codex5 KEEP_ARTIFACTS=1 TARGET_PHASES=bootstrap,liveness MAX_TURNS=1 TURN_TIMEOUT_SEC=120 HEALTH_TIMEOUT_SEC=45 HEARTBEAT_WAIT_SEC=20 PRESSURE_BYTES=1000 MASC_CONFIG_DIR=/Users/dancer/me/.masc/config scripts/harness_keeper_continuity_validation.sh`
@@ -213,8 +226,7 @@ Latest-main live evidence:
   `turn_status=error terminal_reason=api_error_timeout provider_status=timeout
   provider_error=Timeout: Timeout after 120.0s (budget=120s)`.
 - The codex5 manifest includes the previously missing terminal row:
-  `provider_attempt_finished` with `status = timeout`,
-  `provider_kind = glm`, `model_id = glm-5.1`, and
+  `provider_attempt_finished` with `status = timeout` and
   `exception_kind = outer_oas_timeout`.
 - `scripts/keeper-runtime-truth-gate.sh` passes against the codex5 failed
   live-like turn. It accepts absent `checkpoint_saved` and absent
@@ -223,22 +235,237 @@ Latest-main live evidence:
   healthy success path.
 - Post tick-stop live run:
   `/private/tmp/keeper-runtime-truth-live-20260513-codex8` still classified
-  `FAIL`, but the GLM insufficient-balance provider error propagated after
+  `FAIL`, but the insufficient-balance provider error propagated after
   `0.738s` instead of being masked as a 120s outer timeout.
 - Latest live run:
   `/private/tmp/keeper-runtime-truth-live-20260513-codex9` classified `FAIL`;
   phase summary reports `turn_status=error
   terminal_reason=no_tool_capable_provider`.
 - The codex9 manifest includes `pre_dispatch_blocked` with
-  `reason = no_tool_capable_provider`, `configured_labels = ["glm:glm-5.1"]`,
-  `require_tool_support = true`, and `original_candidate_count = 1`.
+  `reason = no_tool_capable_provider`, `candidate_count = 1`,
+  `require_tool_support = true`, and non-identifying rejection reasons.
 - The codex9 receipt and `turn_finished` rows both carry
   `terminal_reason_code = no_tool_capable_provider`.
 - Current live `masc-mcp doctor config --base-path /Users/dancer/me --json`
   also reports `status = error` for the same route capability gap:
   both `keeper_turn` and `tool_required` target `tier-group.coding_plan`, and
-  its only candidate `glm:glm-5.1` is rejected for forced required-tool use
-  with `runtime_mcp_caps_missing`.
+  its single candidate is rejected for forced required-tool use with
+  `runtime_mcp_caps_missing`.
+
+## Runtime Lens Normalization (2026-05-13)
+
+The raw manifest is implemented and remains the durable SSOT. Runtime Lens is
+a read-time projection over those rows; it does not introduce a second JSONL
+stream or a schema-v2 manifest.
+
+Mapping:
+
+- HTML item 1, "orthogonal axes", is represented by
+  `/runtime-trace.runtime_lens.axes`: lifecycle, tool surface, provider lane,
+  provider attempt, context, and memory.
+- HTML item 4, "simultaneous swimlanes", is represented by
+  `/runtime-trace.runtime_lens.swimlanes`: keeper, MASC policy/cascade, OAS,
+  provider, tool runtime, and memory/context.
+- Tool visibility mismatch is not left as prose. It is emitted as gap code
+  `required_tool_not_materialized` with the missing required tool names in
+  `detail`.
+- Provider/materialization ambiguity is emitted as `provider_lane_unresolved`.
+  Missing terminal, context, and memory rows are represented as
+  `missing_turn_finished`, `context_delta_missing`, and
+  `memory_flush_missing`.
+- Runtime Lens and the provider-attempt summary are intentionally
+  provider/model-free: they report provider-lane resolution, attempt status,
+  capability/materialization status, and gaps, but they do not copy
+  `provider_kind`, `model_id`, `terminal_provider_kind`, or
+  `terminal_model_id` into product-facing summary objects.
+- New `Keeper_runtime_manifest` rows no longer expose provider/model fields in
+  the typed row contract or serialized JSON. The parser remains tolerant of
+  legacy v1 rows that still contain those keys, and the writer recursively
+  redacts provider/model-shaped decision keys before appending rows.
+- Keeper runtime manifest producer decisions avoid provider/model-shaped
+  diagnostic keys at source. Attempt rows keep lane status, timing, checkpoint
+  presence, errors, and candidate/rejection counts rather than provider labels,
+  model ids, provider health keys, configured provider labels, or response
+  model ids.
+- `no_tool_capable_provider` SDK error payloads and summaries now follow the
+  same rule: they retain required tool names, candidate counts, and rejection
+  reasons, but omit configured provider labels and rejected provider identities.
+- Keeper runtime/social status JSON keeps the legacy `active_model_label` and
+  `last_model_used_label` keys for compatibility but sets them to `null` so
+  the status surface does not resolve provider/model display labels.
+- Keeper status detail, runtime trust, composite execution, and keeper FSM
+  helper projections keep legacy keys such as `active_model`, `selected_model`,
+  `model_used`, `provider_selected_model`, `models_resolved`,
+  `cascade_models`, and `last_provider_result` for compatibility but return
+  `null` or empty lists for provider/model identity. They still expose
+  non-identifying cascade outcome, attempt count, fallback state, tool
+  contract, sandbox, and runtime blocker signals.
+- Keeper execution receipt JSON and the derived operator-broadcast payload keep
+  compatibility keys such as `model_used` and `cascade.selected_model`, but
+  set them to `null`. Receipt runtime contracts no longer pass a concrete
+  provider/model label from MASC into the public contract JSON.
+- Keeper decision-log rows and metrics snapshot JSONL rows now treat
+  provider/model fields as compatibility-only projection keys. They keep
+  cascade name, strategy, selected index, fallback state, attempt count, timing,
+  errors, usage, and tool evidence, but set `model_used`, `resolved_model_id`,
+  `provider_context.selected_model`, `cascade.selected_model`,
+  `cascade.primary_model`, `cascade.selected_model_raw`, configured labels, and
+  candidate model lists to `null` or `[]`.
+- Dashboard legacy normalizers and fleet/detail display helpers now treat
+  model/provider fields as non-product data even when older payloads still
+  contain them. `keeper-store-normalize`, fleet telemetry rows, Runtime Alert
+  Strip, KPI cards, metrics charts, FsmHub receipt labels, and Turn FSM detail
+  keep cascade lane/outcome/attempt/fallback evidence but no longer render
+  concrete model/provider labels or model-switch timelines.
+- Governance and board dashboard adapters follow the same rule for human-facing
+  product surfaces: judge/approval cards preserve keeper name, status, action,
+  runtime contract, and sandbox evidence, while `model_used` and
+  `selected_model` normalize to `null` or are omitted from display. The same
+  projection rule applies to persisted governance judgment rows and
+  operator-judgment records: MASC keeps freshness/status evidence, not concrete
+  OAS provider/model identity.
+- Model-inference and cost/latency projections keep internal aggregation math
+  unchanged, but the public JSON boundary now emits neutral runtime lane labels
+  for compatibility fields such as `model_id`, `agent`, and matrix axes, and
+  emits `provider = null` or `runtime` rather than concrete provider/model
+  identities. Keeper cost aggregates and keeper-decision dashboards likewise
+  hide raw `model_used`; the UI labels these views as runtime lanes instead of
+  provider/model matrices. SSE journal text and operator digest normalization
+  no longer surface raw keeper-turn or judge model labels.
+- Keeper detail metric windows and handoff summaries now keep legacy keys such
+  as `model_used`, `primary_model`, `handoff_to_model`, and `to_model` as
+  compatibility fields, but public projection values are `null` or the neutral
+  `runtime` bucket.
+- Operator control snapshots preserve keeper phase, cascade name, trust, and
+  context evidence, but redact `primary_model`, `active_model`,
+  `last_model_used`, and model hint/label fields from operator-facing rows.
+- Keeper approval queue projections, audit rows, and resolution broadcasts keep
+  `selected_model` for compatibility but emit `null`; HITL policy and sandbox
+  evidence remain visible.
+- Autoresearch cycle JSON and attribution evidence keep `model_used` only as a
+  compatibility key and emit `null`; legacy persisted strings are accepted and
+  normalized to the neutral `runtime` label on decode.
+- Channel Gate turn stats preserve duration/token metrics but collapse the
+  legacy in-memory model slot to `runtime`; outbound wire JSON keeps
+  `model_used` only as a compatibility key and emits `null`.
+- Dashboard harness wake-payload telemetry and Yjs keeper updates keep the
+  legacy `model_id` key but emit the neutral `runtime` lane.
+- The OAS dashboard telemetry bridge accepts provider/model compatibility
+  fields at ingress, but normalizes samples, provider-error counters, filters,
+  and SSE/REST projections to the neutral `runtime` lane before MASC stores
+  them.
+- Operator pending-confirm runtime metadata keeps `model_used` as a
+  compatibility key only and emits `null` at the boundary.
+- Keeper detail provider-health projections, keeper execution memory context,
+  keeper turn-complete SSE, and keeper turn-completed event payloads retain
+  operational status/usage fields while redacting provider/model identity
+  fields to `null`.
+- Keeper meta JSON keeps the legacy `last_model_used` key but writes it as an
+  empty string so new persisted meta does not carry concrete provider/model
+  labels.
+- Cost ledger JSONL keeps status diagnostics but redacts persisted `provider`
+  and `model` values to the neutral `runtime` lane. MASC no longer estimates
+  provider/model pricing locally or emits `cost_pricing_model` /
+  `cost_pricing_catalog` compatibility fields; `cost_usd` is trusted only when
+  OAS reports it, otherwise the row is marked `oas_cost_unreported`.
+- No-tool provider rejection records carry only non-identifying rejection
+  reasons in the MASC structured error type. Legacy payloads with
+  provider/model-shaped fields still parse, but those identities are not
+  re-emitted.
+- Cascade attempt-liveness observer metrics keep the historical `provider`
+  label key for dashboard compatibility but emit the neutral `runtime` lane.
+  Liveness budget history also uses a single neutral runtime candidate key
+  instead of retaining concrete provider/model keys.
+- Provider-error and OAS-run-timeout Prometheus counters also retain their
+  historical `provider` label key for compatibility, but the value is the
+  neutral `runtime` lane. Error kind, cascade, capacity scope, and timeout
+  source remain visible.
+- The typed `Provider_error` contract itself is runtime-lane scoped: variants
+  no longer store provider/model identifiers, and legacy JSON keys such as
+  `provider`, `affected`, and `model_name` emit neutral `runtime` values only.
+- Cascade catalog runtime probe JSON and provider-health probe metric labels
+  keep status/error/profile evidence but redact provider kind, model id,
+  model string, endpoint, and metric provider/model labels to neutral runtime
+  values.
+- Cascade legacy observations and attempt/fallback audit rows now store
+  runtime-lane candidate identities. Keeper turn-driver fallback, cooldown,
+  preflight, and retry logs also use runtime labels instead of concrete
+  provider/model labels.
+- Keeper cascade bookkeeping now routes through `Cascade_runtime_candidate` for
+  health keys, capacity keys, HTTP probe registration, strategy ordering, and
+  per-attempt timeout bounds. `Keeper_turn_driver` no longer exposes a public
+  `Provider_config.t` timeout helper or directly inspects provider kind,
+  `base_url`, or model id for these decisions; concrete provider config is
+  unwrapped only at the OAS dispatch adapter.
+- Keeper liveness/pre-skip helpers no longer expose
+  `Provider_config.t`-returning label resolvers. They operate on neutral
+  label-to-runtime-URL resolution from `Cascade_runtime_candidate`, keeping
+  provider config parsing outside the keeper liveness API.
+- Keeper usage-trust classification no longer exposes provider-kind arguments.
+  The OAS hook derives a cache-capability boolean from telemetry, and the
+  trust classifier consumes only that capability plus usage/context evidence.
+- Keeper turn-context label filtering no longer parses configured labels into
+  `Provider_config.t` locally; model-id compatibility checks go through
+  `Cascade_runtime_candidate`.
+- Keeper OAS hook public helpers no longer accept provider-kind arguments.
+  Typed provider evidence is consumed inside telemetry bridge helpers, while
+  bare keeper-facing model labels remain unknown unless explicitly
+  provider-qualified.
+- `Keeper_turn_driver.mli` no longer re-exports the full `Cascade_oas_runner`
+  or provider-attempt FSM surfaces, and it now exposes an explicit structured
+  error surface instead of all `Cascade_error_classify` helpers. Provider/model
+  shaped helpers such as tool-filter classification, default model-string
+  lookup, label-to-config construction, Codex preflight, and provider-specific
+  error enrichment must be reached through lower-level OAS boundary modules,
+  not the keeper facade.
+- `/runtime-trace.manifest_rows` and `/runtime-trace.receipts` are public API
+  projections, not byte-for-byte raw artifacts. They recursively redact
+  provider/model identifier keys such as `provider_kind`, `model_id`,
+  `response_model`, provider health keys, and configured provider labels.
+
+Dashboard behavior:
+
+- Keeper detail shows Runtime Lens before lower-level runtime diagnostics.
+- Redacted `manifest_rows` remain in the API response for debug tooling, but
+  the product surface uses the normalized axis/swimlane summary first.
+- Missing fields parse to `unknown`, `null`, empty arrays, or zero counts so
+  older trace payloads do not crash the dashboard.
+
+Boundary follow-up:
+
+- The stricter target, "MASC does not know provider/model and only OAS owns
+  those details", is not fully complete in this branch. This branch removes
+  provider/model identity from the new keeper runtime manifest/API/dashboard
+  contract plus selected legacy status/trust projections, and moves keeper
+  cascade bookkeeping and keeper-facade API boundaries behind opaque/runtime
+  adapters. The latest cleanup also moves direct keeper use of
+  `Llm_provider.Provider_config`, `Llm_provider.Model_meta`,
+  `Cascade_config.parse_model_strings`, and provider health-key derivation
+  behind `Cascade_runtime_candidate` for liveness, cooldown/recovery,
+  context-window, and memory-threshold decisions. The after-turn
+  `response.model` resolver, keeper OAS hook cost/tool metrics, tool-call
+  handler model labels, and runtime-contract provider/model compatibility
+  fields now collapse to neutral runtime lanes rather than canonicalizing or
+  inferring concrete provider/model identities. Older unified-turn token,
+  cache, context-window, latency-bucket, and usage-anomaly metric labels also
+  emit the neutral runtime lane instead of concrete `model_used` /
+  `resolved_model_id` values.
+- Residual work remains: pricing/telemetry labels, auth/display helpers,
+  runtime-MCP quirks, local-default labels, dashboard debug fixtures, and
+  broader cascade config/catalog/transport surfaces still know concrete
+  providers/models by design or history.
+- Follow-up issue: <https://github.com/jeong-sik/masc-mcp/issues/15028>
+
+Focused verification:
+
+- `scripts/dune-local.sh build --cache=disabled test/test_keeper_runtime_manifest.exe test/test_keeper_unified.exe test/test_keeper_memory.exe bin/main_eio.exe`
+- `./_build/default/test/test_keeper_runtime_manifest.exe` (22 tests)
+- `./_build/default/test/test_keeper_unified.exe` (359 tests)
+- `./_build/default/test/test_keeper_memory.exe` (70 tests)
+- `pnpm exec vitest run --config vitest.config.ts src/api/keeper.test.ts src/components/keeper-detail-runtime.test.ts --no-file-parallelism --maxWorkers=1`
+- `pnpm typecheck`
+- `opam exec -- ocamlformat --check lib/cascade/cascade_runtime_candidate.mli lib/cascade/cascade_runtime_candidate.ml lib/keeper/keeper_memory_recall.mli lib/keeper/keeper_memory_recall.ml lib/keeper/keeper_unified_metrics.ml test/test_keeper_runtime_manifest.ml`
+- `git diff --check`
 
 ## Goal
 
@@ -276,7 +503,8 @@ Healthy parts:
 - Keeper pre-dispatch skips/errors are receipt-backed.
 - Tool selection has explicit policy gates, required-tool checks, and
   reported/observed/canonical reconciliation.
-- MASC owns cascade routing and provider attempt observations.
+- MASC owns logical cascade/runtime-lane routing and non-identifying attempt
+  observations.
 - OAS owns the generic single-agent loop, tool execution loop, context reducer,
   memory primitive, checkpoint primitive, and compaction machinery.
 - Boundary documentation already states that OAS must stay generic while MASC
@@ -318,12 +546,12 @@ Fragile parts:
   should still remove module-init route constants in favor of explicit dynamic
   route resolution or literal phase sentinels. The current slice closes the
   observed failures, not the whole historical naming ambiguity.
-- Production-like config no longer masks the observed GLM provider error as a
+- Production-like config no longer masks the observed provider error as a
   120-second outer timeout, but the active keeper route still does not
   complete a keeper turn under production-like config. The latest failure is
   now earlier and more precise: `no_tool_capable_provider` because the active
-  route has `glm:glm-5.1` while the turn requires materialized keeper tool
-  support. `masc-mcp doctor config` now catches this same route-capability
+  route has no candidate that materializes the required keeper tool support.
+  `masc-mcp doctor config` now catches this same route-capability
   gap without starting a keeper turn.
 - Live config drift is real: the current config root exposes `coding_plan` as
   the only active catalog profile, while older scripts assumed `primary`.
@@ -378,7 +606,7 @@ Highest-risk gaps:
    `/api/v1/keepers/:name/runtime-trace` now expose manifest rows and linked
    receipt artifacts, Event_bus correlation, compaction counters, and
    memory-injection/flush summaries. The API also exposes provider-attempt
-   terminal status/error/model directly, and
+   terminal status/error directly, and
    `scripts/keeper-runtime-truth-gate.sh` can validate the chain from an
    existing live turn. The keeper detail FsmHub now has compact evidence
    chips for that endpoint, including provider terminal status. Remaining
@@ -447,10 +675,10 @@ Prompt-to-artifact checklist:
    focused memory/context tests.
 6. Product readiness judgment: this branch is shippable as a gated
    observability/reliability improvement. It is not yet a final product
-   runtime guarantee because the latest-main live-like run failed with a
-   structured route-capability error:
-   `no_tool_capable_provider` for `tier-group.coding_plan` with
-   `glm:glm-5.1`.
+  runtime guarantee because the latest-main live-like run failed with a
+  structured route-capability error:
+   `no_tool_capable_provider` for `tier-group.coding_plan` with no candidate
+   that materializes the required keeper tool support.
 
 Completion status: not complete as a full product-readiness goal. The immediate
 observability slice is useful and verified locally, and the first P0 follow-up
@@ -536,8 +764,6 @@ Minimal fields:
   "oas_turn_count": 3,
   "event": "tool_surface_selected",
   "cascade_name": "tier_medium",
-  "provider_kind": "codex_cli",
-  "model_id": "auto",
   "status": "ok",
   "decision": {},
   "links": {

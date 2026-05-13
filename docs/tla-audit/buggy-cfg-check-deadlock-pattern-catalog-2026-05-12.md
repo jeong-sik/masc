@@ -23,7 +23,6 @@ For each active canonical `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
 
 | Spec | `NextBuggy` shape |
 |---|---|
-| `KeeperAdmissionLiveness` | `Next \/ BugAction_GreedyKeeper(k)` |
 | `KeeperCascadeAttemptFSM` | `Next \/ BugHardQuotaBypass` |
 | `KeeperCascadeRouting` | `Next \/ BugIgnoreHealth(k)` |
 | `KeeperPostTurnOrchestration` | `Next \/ BugWireinOutOfOrder` |

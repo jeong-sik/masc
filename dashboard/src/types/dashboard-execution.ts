@@ -601,6 +601,12 @@ export interface GoalKeeperTrustApprovalState {
   state?: string | null
   summary?: string | null
   pending_count?: number | null
+  pending_first?: {
+    id?: string | null
+    tool_name?: string | null
+    task_id?: string | null
+    blocker_class?: string | null
+  } | null
 }
 
 export interface GoalKeeperTrustExecutionSummary {

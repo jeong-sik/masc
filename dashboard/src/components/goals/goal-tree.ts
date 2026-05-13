@@ -197,6 +197,10 @@ function trustDispositionLabel(disposition: string | null | undefined): string |
   ] ?? disposition
 }
 
+function compactTrustList(items: readonly string[] | null | undefined): string[] {
+  return (items ?? []).map(item => item.trim()).filter(Boolean)
+}
+
 function healthClass(health: GoalTreeNode['health']): string {
   switch (health) {
     case 'done': return 'border-[var(--color-ok-border)] bg-[var(--color-ok-soft)] text-[var(--color-ok-fg)]'
@@ -870,19 +874,57 @@ function DetailTabs({ active }: { active: GoalDetailTab }) {
 
 function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const trust = keeper.runtime_trust
+  const execution = trust?.execution_summary ?? null
   const latestEvent = keeper.latest_causal_event ?? trust?.latest_causal_event ?? null
   const trustSummary =
     trust?.attention_reason?.trim()
     || trust?.disposition_reason?.trim()
-    || trust?.execution_summary?.mutation_guard_summary?.trim()
-    || trust?.execution_summary?.sandbox_summary?.trim()
+    || execution?.mutation_guard_summary?.trim()
+    || execution?.sandbox_summary?.trim()
     || null
+  const runtimeProofStatus = execution?.runtime_proof_status?.trim() || null
+  const toolContractResult = execution?.tool_contract_result?.trim() || null
+  const requiredTools = compactTrustList(execution?.required_tools)
+  const missingRequiredTools = compactTrustList(execution?.missing_required_tools)
+  const requestedTools = compactTrustList(execution?.requested_tools)
+  const toolsUsed = compactTrustList(execution?.tools_used)
+  const requestedToolCount = execution?.requested_tool_count
+  const toolsUsedCount = execution?.tools_used_count
+  const providerAttempts = execution?.provider_attempt_count
+  const providerFallback = execution?.provider_fallback_applied
+  const providerSelectedModel = execution?.provider_selected_model?.trim() || null
+  const executionCascadeOutcome = execution?.cascade_outcome?.trim() || null
+  const sandboxRoot = execution?.sandbox_root?.trim() || null
   const latestTerminalCode = trust?.latest_terminal_reason?.code?.trim() || null
   const latestTerminalSummary = trust?.latest_terminal_reason?.summary?.trim() || null
   const latestNextAction = trust?.latest_next_action?.trim() || null
   const operatorDispositionReason = trust?.operator_disposition_reason?.trim() || null
+  const pendingApproval = trust?.approval_state?.pending_first ?? null
+  const pendingApprovalId = pendingApproval?.id?.trim() || null
+  const pendingApprovalTool = pendingApproval?.tool_name?.trim() || null
+  const pendingApprovalTask = pendingApproval?.task_id?.trim() || null
+  const pendingApprovalBlocker = pendingApproval?.blocker_class?.trim() || null
   const shouldShowOperatorDispositionReason =
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
+  const shouldShowTrustSummary =
+    Boolean(trustSummary)
+    || Boolean(trust?.approval_state?.state)
+    || Boolean(trust?.next_human_action)
+    || Boolean(latestTerminalCode)
+    || Boolean(latestNextAction)
+    || Boolean(runtimeProofStatus)
+    || Boolean(toolContractResult)
+    || requiredTools.length > 0
+    || missingRequiredTools.length > 0
+    || requestedTools.length > 0
+    || toolsUsed.length > 0
+    || typeof requestedToolCount === 'number'
+    || typeof toolsUsedCount === 'number'
+    || typeof providerAttempts === 'number'
+    || providerFallback === true
+    || Boolean(providerSelectedModel)
+    || Boolean(executionCascadeOutcome)
+    || Boolean(sandboxRoot)
 
   return html`
     <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
@@ -910,11 +952,11 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div>승인</div>
         <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
         <div>캐스케이드</div>
-        <div class="text-right text-text-body">${keeper.cascade_name}</div>
+        <div class="text-right text-text-body">${keeper.cascade_name ?? executionCascadeOutcome ?? '-'}</div>
         <div>결과</div>
-        <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
+        <div class="text-right text-text-body">${keeper.cascade_outcome ?? executionCascadeOutcome ?? '-'}</div>
       </div>
-      ${trustSummary || trust?.approval_state?.state || trust?.next_human_action || latestTerminalCode || latestNextAction ? html`
+      ${shouldShowTrustSummary ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-3">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">검증 요약</div>
           ${trustSummary ? html`
@@ -927,8 +969,52 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ${trust?.approval_state?.state ? html`
               <span>승인 상태 ${trust.approval_state.state}</span>
             ` : null}
-            ${trust?.execution_summary?.tool_contract_result ? html`
-              <span>계약 ${trust.execution_summary.tool_contract_result}</span>
+            ${pendingApprovalId ? html`
+              <span>승인 ID ${pendingApprovalId}</span>
+            ` : null}
+            ${pendingApprovalTool ? html`
+              <span>승인 도구 ${pendingApprovalTool}</span>
+            ` : null}
+            ${pendingApprovalTask ? html`
+              <span>승인 작업 ${pendingApprovalTask}</span>
+            ` : null}
+            ${pendingApprovalBlocker ? html`
+              <span>승인 차단 ${pendingApprovalBlocker}</span>
+            ` : null}
+            ${runtimeProofStatus ? html`
+              <span>증명 ${runtimeProofStatus}</span>
+            ` : null}
+            ${toolContractResult ? html`
+              <span>계약 ${toolContractResult}</span>
+            ` : null}
+            ${missingRequiredTools.length > 0 ? html`
+              <span class="text-[var(--color-status-err)]" title=${missingRequiredTools.join(', ')}>누락 ${missingRequiredTools.join(', ')}</span>
+            ` : null}
+            ${requiredTools.length > 0 ? html`
+              <span title=${requiredTools.join(', ')}>필요 ${requiredTools.join(', ')}</span>
+            ` : null}
+            ${toolsUsed.length > 0 ? html`
+              <span title=${toolsUsed.join(', ')}>사용 ${toolsUsed.join(', ')}</span>
+            ` : null}
+            ${requestedTools.length > 0 ? html`
+              <span title=${requestedTools.join(', ')}>요청 ${requestedTools.join(', ')}</span>
+            ` : null}
+            ${typeof toolsUsedCount === 'number' || typeof requestedToolCount === 'number' ? html`
+              <span>도구 카운트 ${toolsUsedCount ?? '-'}/${requestedToolCount ?? '-'}</span>
+            ` : null}
+            ${typeof providerAttempts === 'number' || providerFallback === true || providerSelectedModel ? html`
+              <span>
+                provider
+                ${typeof providerAttempts === 'number' ? ` ${providerAttempts}회` : ''}
+                ${providerFallback === true ? ' fallback' : ''}
+                ${providerSelectedModel ? ` ${providerSelectedModel}` : ''}
+              </span>
+            ` : null}
+            ${executionCascadeOutcome ? html`
+              <span>cascade ${executionCascadeOutcome}</span>
+            ` : null}
+            ${sandboxRoot ? html`
+              <span title=${sandboxRoot}>sandbox ${sandboxRoot}</span>
             ` : null}
             ${trust?.next_human_action ? html`
               <span>다음 ${trust.next_human_action}</span>

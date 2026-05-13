@@ -1390,10 +1390,19 @@ function decodeGoalKeeperTrustLatestEvent(raw: unknown): GoalKeeperTrustLatestEv
 
 function decodeGoalKeeperTrustApprovalState(raw: unknown): GoalKeeperTrustApprovalState | null {
   if (!isRecord(raw)) return null
+  const pendingFirst = isRecord(raw.pending_first) ? raw.pending_first : null
   return {
     state: asNullableString(raw.state),
     summary: asNullableString(raw.summary),
     pending_count: asInt(raw.pending_count) ?? null,
+    pending_first: pendingFirst
+      ? {
+          id: asNullableString(pendingFirst.id),
+          tool_name: asNullableString(pendingFirst.tool_name),
+          task_id: asNullableString(pendingFirst.task_id),
+          blocker_class: asNullableString(pendingFirst.blocker_class),
+        }
+      : null,
   }
 }
 
@@ -1401,7 +1410,22 @@ function decodeGoalKeeperTrustExecutionSummary(raw: unknown): GoalKeeperTrustExe
   if (!isRecord(raw)) return null
   return {
     tool_contract_result: asNullableString(raw.tool_contract_result),
+    runtime_proof_status: asNullableString(raw.runtime_proof_status),
+    required_tools: asStringArray(raw.required_tools),
+    missing_required_tools: asStringArray(raw.missing_required_tools),
+    requested_tools: asStringArray(raw.requested_tools),
+    tools_used: asStringArray(raw.tools_used),
+    requested_tool_count: asInt(raw.requested_tool_count) ?? null,
+    tools_used_count: asInt(raw.tools_used_count) ?? null,
+    provider_attempt_count: asInt(raw.provider_attempt_count) ?? null,
+    provider_fallback_applied:
+      typeof raw.provider_fallback_applied === 'boolean'
+        ? raw.provider_fallback_applied
+        : null,
+    provider_selected_model: asNullableString(raw.provider_selected_model),
+    cascade_outcome: asNullableString(raw.cascade_outcome),
     sandbox_summary: asNullableString(raw.sandbox_summary),
+    sandbox_root: asNullableString(raw.sandbox_root),
     mutation_guard_summary: asNullableString(raw.mutation_guard_summary),
     latest_receipt_at: asNullableString(raw.latest_receipt_at),
   }

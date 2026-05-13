@@ -109,62 +109,29 @@ let option_field name = function
 
 type cascade_diagnosis = {
   issues : catalog_issue list;
-  fallback_cycles : string list list;
-  missing_toml_with_legacy_json : bool;
-  (** Cycles surface as warning issues inside [issues] for the
-      flat warnings list, but we keep the raw list here so
-      {!cascade_catalog_next_actions} can emit a cycle-specific
-      operator action distinct from the degraded-metadata one. *)
+  missing_source : bool;
 }
 
-let format_fallback_cycle cycle =
-  (* Display the loop with its closing edge so an operator who sees
-     [A -> B -> A] reads "cycle" rather than [A -> B], which looks
-     like a non-cycling chain.  Empty cycles cannot occur here
-     ({!Cascade_config_loader.detect_fallback_cycles} only emits
-     non-empty cycles), so guard defensively with [match] rather
-     than a partial [List.hd]. *)
-  match cycle with
-  | [] -> "(empty cycle)"
-  | first :: _ -> String.concat " -> " (cycle @ [ first ])
-
 let diagnose_cascade_catalog ~active_config_root =
-  (* RFC-0058 §9: the on-disk cascade source is [cascade.toml]; the
-     legacy [cascade.json] sibling is no longer read.  Probing for
-     [cascade.json] here made the catalog diagnostic a no-op in every
-     post-§9 config root (the file is absent), so the dashboard's
-     cascade-health panel showed green without ever validating the
-     catalog. *)
   let config_path =
     Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
   in
   if not (Env_config_core.existing_file config_path) then
-    (* No cascade.toml — but if a legacy cascade.json is still lying
-       around, the operator forgot to migrate.  Config_dir_resolver
-       already emits a warning at startup (see its
-       [degraded_legacy_json_warnings] using the same
-       [legacy_cascade_json_warning_prefix] SSOT below).  We share
-       the prefix so the two surfaces stay aligned on what they
-       identify; the appended operator action differs by context
-       (startup says "Rename or convert it", doctor says "Migrate ...
-       so catalog diagnostics can run"). *)
-    let legacy_json =
-      Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
-    in
-    if Env_config_core.existing_file legacy_json then
-      { issues =
-          [ { profile = None
-            ; severity = Catalog_warn
-            ; message =
-                Config_dir_resolver.legacy_cascade_json_warning_prefix
-                ^ " Migrate to cascade.toml so catalog diagnostics can run."
-            }
-          ]
-      ; fallback_cycles = []
-      ; missing_toml_with_legacy_json = true
-      }
-    else
-      { issues = []; fallback_cycles = []; missing_toml_with_legacy_json = false }
+    {
+      missing_source = true;
+      issues =
+        [
+          {
+            profile = None;
+            severity = Catalog_error;
+            message =
+              Printf.sprintf
+                "Cascade catalog source is missing: %s. Runtime cascade \
+                 resolution requires cascade.toml."
+                config_path;
+          };
+        ];
+    }
   else
     let profiles =
       Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path
@@ -172,46 +139,9 @@ let diagnose_cascade_catalog ~active_config_root =
     let validator_issues =
       Cascade_catalog_validator.diagnose_catalog_for_diagnostics ~config_path
     in
-    (* Surface fallback-cycle detection alongside the per-profile
-       validator output.  [Cascade_config_loader.load_catalog]
-       already detects cycles and bumps
-       [masc_cascade_fallback_cycle_detected_total] internally, but a
-       counter only registers a rate — the operator still needs to
-       open Grafana to learn the cycle exists.  Threading the cycle
-       list through the doctor's [issues] makes it land in the same
-       warnings/next-actions surface the dashboard renders, so a
-       misconfigured [fallback_cascade] chain is visible in the
-       Config Doctor panel without leaving the page.
-
-       Use the diagnostics-only loader variant so the doctor's poll
-       cycle (every dashboard refresh / `masc-mcp doctor config` run)
-       does not re-fire the cycle / mismatch / deprecated-name
-       counters or re-emit the WARN log for the same stable
-       misconfiguration. *)
-    let fallback_cycles =
-      match
-        Cascade_config_loader.load_catalog_for_diagnostics ~config_path
-      with
-      | Ok entries -> Cascade_config_loader.detect_fallback_cycles entries
-      | Error _ -> []
-    in
-    let cycle_issues =
-      List.map
-        (fun cycle ->
-          {
-            profile = None;
-            severity = Catalog_warn;
-            message =
-              Printf.sprintf
-                "Cascade fallback_cascade cycle detected: %s. Rotation cannot \
-                 escape this loop; break the chain or remove the hint."
-                (format_fallback_cycle cycle);
-          })
-        fallback_cycles
-    in
-    let issues = validator_issues @ cycle_issues in
+    let issues = validator_issues in
     if issues = [] then
-      { issues = []; fallback_cycles; missing_toml_with_legacy_json = false }
+      { issues = []; missing_source = false }
     else
       let error_count =
         issues
@@ -230,10 +160,9 @@ let diagnose_cascade_catalog ~active_config_root =
             error_count
             warn_count;
       } in
-      { issues = summary :: issues; fallback_cycles; missing_toml_with_legacy_json = false }
+      { issues = summary :: issues; missing_source = false }
 
-let cascade_catalog_next_actions ~config_path
-    { issues; fallback_cycles; missing_toml_with_legacy_json } =
+let cascade_catalog_next_actions ~config_path { issues; missing_source } =
   if issues = [] then
     []
   else
@@ -241,34 +170,16 @@ let cascade_catalog_next_actions ~config_path
       List.exists (fun issue -> issue.severity = Catalog_error) issues
     in
     let primary_action =
-      if has_errors then
+      if missing_source then
+        Printf.sprintf
+          "Create or bootstrap cascade.toml at %s before assigning keepers or \
+           starting the server."
+          config_path
+      else if has_errors then
         Printf.sprintf
           "Fix or disable the broken cascade preset entries in %s before \
            assigning keepers to them."
           config_path
-      else if missing_toml_with_legacy_json then
-        let legacy_json =
-          Filename.concat
-            (Filename.dirname config_path)
-            Config_dir_resolver.cascade_json_filename
-        in
-        Printf.sprintf
-          "Migrate or rename %s to %s before relying on catalog diagnostics."
-          legacy_json
-          config_path
-      else if fallback_cycles <> [] then
-        (* Cycle warnings are a runtime-stalling loop, not degraded
-           metadata.  Give them a distinct primary action so the
-           operator is pointed at the actual hazard (cycle break)
-           rather than at a generic metadata cleanup. *)
-        Printf.sprintf
-          "Break the fallback_cascade cycle(s) in %s: %s. Rotation cannot \
-           escape these loops, so every participant inherits any single \
-           provider stall."
-          config_path
-          (fallback_cycles
-           |> List.map format_fallback_cycle
-           |> String.concat "; ")
       else
         Printf.sprintf
           "Clean up the degraded cascade preset metadata in %s so doctor \

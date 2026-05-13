@@ -1408,9 +1408,9 @@ let preferred_execution_model_labels () =
        | Ok label -> Some label
        | Error _ -> None)
       (* No hardcoded provider preference here.  Model order is determined
-       by MASC cascade.json via [Cascade_config], not by this adapter module. The auto_detect
-       list below only serves as a last-resort fallback when cascade.json
-       is missing entirely. *)
+         by MASC cascade.toml via [Cascade_config], not by this adapter module.
+         The auto_detect list below only serves as a last-resort fallback when
+         no cascade source is available. *)
     ]
   in
   Json_util.dedupe_keep_order
@@ -1854,6 +1854,23 @@ let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provide
   match resolve_direct_adapter cn with
   | Some a -> a.cascade_prefix
   | None -> cn
+;;
+
+let provider_kind_of_declarative_protocol raw =
+  match normalize_label raw with
+  | "anthropic-cli" -> Some Llm_provider.Provider_config.Claude_code
+  | "anthropic-http" -> Some Llm_provider.Provider_config.Anthropic
+  | "openai-cli" -> Some Llm_provider.Provider_config.Codex_cli
+  | "openai-http" -> Some Llm_provider.Provider_config.OpenAI_compat
+  | "google-cli" -> Some Llm_provider.Provider_config.Gemini_cli
+  | "kimi-cli" -> Some Llm_provider.Provider_config.Kimi_cli
+  | "ollama-http" -> Some Llm_provider.Provider_config.Ollama
+  | _ -> None
+;;
+
+let cascade_prefix_of_declarative_protocol raw =
+  provider_kind_of_declarative_protocol raw
+  |> Option.map cascade_prefix_of_provider_kind
 ;;
 
 (** Resolve auth detail for any provider by canonical name or alias.

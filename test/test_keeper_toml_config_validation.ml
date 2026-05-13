@@ -155,10 +155,111 @@ let with_temp_toml content f =
     (fun () -> f path)
 
 let write_file path contents =
+  let rec mkdir_p path =
+    if path = "" || path = "." || path = "/" then
+      ()
+    else if Sys.file_exists path then
+      ()
+    else begin
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o755
+    end
+  in
+  mkdir_p (Filename.dirname path);
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc contents)
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some value -> Unix.putenv key value
+      | None -> Unix.putenv key "")
+    f
+
+let minimal_cascade_profile_metadata_toml = {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[models.qwen3-small]
+api-name = "qwen3:1.7b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[ollama.qwen3-small]
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.backup]
+members = ["ollama.qwen3-small"]
+strategy = "failover"
+
+[tier.scoring]
+keeper-assignable = false
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.primary]
+tiers = ["primary", "backup"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.scoring]
+tiers = ["scoring"]
+strategy = "priority_tier"
+fallback = false
+keeper-assignable = false
+
+[routes.keeper_turn]
+target = "tier-group.primary"
+
+[routes.llm_rerank]
+target = "tier-group.scoring"
+|}
+
+let with_temp_config_dir cascade_toml f =
+  let dir = Filename.temp_file "keeper_cascade_config_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let config_root = Filename.concat dir "config" in
+  let cascade_path = Filename.concat config_root "cascade.toml" in
+  write_file cascade_path cascade_toml;
+  let reset () =
+    Masc_mcp.Config_dir_resolver.reset ();
+    Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ()
+  in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
+      reset ();
+      Fun.protect ~finally:reset (fun () -> f ~config_root ~cascade_path))
 
 let repo_config_dir () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -214,7 +315,7 @@ let test_cascade_name_accepts_known () =
         fail (Printf.sprintf "%s: '%s' should be accepted but got: %s" label
                 cascade_name e)
   in
-  check_ok "big_three variant" "big_three";
+  check_ok "primary variant" "primary";
   check_ok "local_only phase-routing" "local_only";
   check_ok "local_recovery phase-routing" "local_recovery";
   check_ok "tool_use_strict reserved tool lane" "tool_use_strict"
@@ -280,6 +381,368 @@ let test_cascade_name_accepts_catalog_entry () =
       (* If catalog is unavailable, skip rather than fail *)
       if catalog = [] then ()
       else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
+
+let test_resolve_model_strings_reads_declarative_profile () =
+  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  @@ fun ~config_root:_ ~cascade_path ->
+  let models =
+    Masc_mcp.Cascade_config.resolve_model_strings
+      ~config_path:cascade_path ~name:"primary" ~defaults:["fallback"] ()
+  in
+  check (list string) "primary group models"
+    ["ollama:qwen3:8b"; "ollama:qwen3:1.7b"]
+    models
+
+let test_resolve_model_strings_uses_provider_protocol_for_custom_id () =
+  let cascade_toml =
+    {|
+[providers.custom]
+protocol = "openai-http"
+endpoint = "https://example.invalid/v1"
+
+[models.stable]
+api-name = "gpt-custom"
+max-context = 32768
+tools-support = true
+
+[custom.stable]
+max-concurrent = 1
+
+[tier.primary]
+members = ["custom.stable"]
+strategy = "failover"
+
+[routes.keeper_turn]
+target = "tier.primary"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  let models =
+    Masc_mcp.Cascade_config.resolve_model_strings
+      ~config_path:cascade_path ~name:"primary" ~defaults:["fallback"] ()
+  in
+  check (list string) "custom provider resolved from protocol"
+    ["custom:gpt-custom@https://example.invalid/v1"]
+    models
+
+let test_cascade_profile_metadata_from_toml () =
+  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  @@ fun ~config_root:_ ~cascade_path:_ ->
+  check (list string) "keeper assignable catalog" ["backup"; "primary"]
+    (Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ());
+  check bool "rerank route is system-only" true
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "llm_rerank");
+  check bool "scoring catalog entry is system-only" true
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "scoring");
+  check (option string) "primary fallback hint" (Some "backup")
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for "primary")
+
+let test_cascade_name_accepts_unrouted_assignable_catalog_entry () =
+  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  @@ fun ~config_root:_ ~cascade_path:_ ->
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"backup\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> ()
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "unrouted keeper-assignable catalog entry should be accepted: %s"
+           e)
+
+let test_keeper_assignability_uses_preferred_qualified_profile () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.primary]
+tiers = ["primary"]
+strategy = "priority_tier"
+keeper-assignable = false
+
+[routes.keeper_turn]
+target = "tier-group.primary"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  check bool "preferred tier-group controls public assignability" false
+    (List.mem "primary" (Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ()));
+  check bool "preferred tier-group is system-only" true
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "primary");
+  check bool "qualified tier remains assignable" false
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "tier.primary");
+  check bool "qualified tier-group remains system-only" true
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "tier-group.primary");
+  check string "qualified tier resolves without fallback" "tier.primary"
+    (Masc_mcp.Keeper_cascade_profile.resolve_live
+       ~config_path:cascade_path "tier.primary");
+  check string "qualified tier-group resolves without fallback" "tier-group.primary"
+    (Masc_mcp.Keeper_cascade_profile.resolve_live
+       ~config_path:cascade_path "tier-group.primary");
+  (match
+     with_temp_toml
+       "[keeper]\nname = \"testkeeper\"\ncascade_name = \"tier.primary\"\n"
+       KTP.load_keeper_toml
+   with
+   | Ok _ -> ()
+   | Error e ->
+       fail
+         (Printf.sprintf
+            "explicit qualified tier.primary should be accepted: %s"
+            e));
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"primary\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> fail "preferred system-only tier-group should reject public primary"
+  | Error e ->
+      check bool "error mentions system-only" true
+        (contains ~needle:"system-only" e)
+
+let test_fallback_cascade_preserves_qualified_source_profile () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.mid]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.slow]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.primary]
+tiers = ["mid", "slow"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.alt]
+tiers = ["primary", "mid"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.primary"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  check (option string) "public primary resolves as tier-group.primary"
+    (Some "slow")
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for
+       ~config_path:cascade_path "primary");
+  check (option string) "qualified tier.primary keeps tier edge"
+    (Some "mid")
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for
+       ~config_path:cascade_path "tier.primary")
+
+let test_catalog_validator_surfaces_adapter_errors () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[tier.broken]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[routes.keeper_turn]
+target = "tier.broken"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  let issues =
+    Masc_mcp.Cascade_catalog_validator.diagnose_catalog
+      ~config_path:cascade_path
+  in
+  let has_adapter_error =
+    List.exists
+      (fun (issue : Masc_mcp.Cascade_catalog_validator.issue) ->
+         match issue.severity with
+         | Masc_mcp.Cascade_catalog_validator.Catalog_warn -> false
+         | Masc_mcp.Cascade_catalog_validator.Catalog_error ->
+             contains
+               ~needle:"Declarative cascade adapter error"
+               issue.message
+             && contains ~needle:"Binding_resolution_failed" issue.message)
+      issues
+  in
+  check bool "adapter error is surfaced as catalog error" true has_adapter_error
+
+let test_catalog_validator_surfaces_declarative_parse_errors () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen3"]
+strategy = "not_a_strategy"
+
+[routes.keeper_turn]
+target = "tier.primary"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  let issues =
+    Masc_mcp.Cascade_catalog_validator.diagnose_catalog
+      ~config_path:cascade_path
+  in
+  let has_parse_error =
+    List.exists
+      (fun (issue : Masc_mcp.Cascade_catalog_validator.issue) ->
+         match issue.severity with
+         | Masc_mcp.Cascade_catalog_validator.Catalog_warn -> false
+         | Masc_mcp.Cascade_catalog_validator.Catalog_error ->
+             contains
+               ~needle:"Declarative cascade parse error"
+               issue.message
+             && contains ~needle:"not_a_strategy" issue.message)
+      issues
+  in
+  check bool "parse error is surfaced as catalog error" true has_parse_error
+
+let rejection_error_messages rejection =
+  let json = Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection in
+  Yojson.Safe.Util.member "errors" json
+  |> Yojson.Safe.Util.to_list
+  |> List.filter_map (function
+       | `String value -> Some value
+       | _ -> None)
+
+let test_runtime_validation_rejects_declarative_parse_errors () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen3"]
+strategy = "not_a_strategy"
+
+[routes.keeper_turn]
+target = "tier.primary"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  match
+    Masc_mcp.Cascade_catalog_runtime.validate_path ~config_path:cascade_path ()
+  with
+  | Ok _ -> fail "runtime validation should reject declarative parse errors"
+  | Error rejection ->
+      let errors = rejection_error_messages rejection in
+      check bool "runtime rejection contains parse error" true
+        (List.exists
+           (fun message ->
+              contains ~needle:"declarative cascade parse error" message
+              && contains ~needle:"not_a_strategy" message)
+           errors)
+
+let test_runtime_validation_rejects_declarative_adapter_errors () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[tier.broken]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[routes.keeper_turn]
+target = "tier.broken"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  match
+    Masc_mcp.Cascade_catalog_runtime.validate_path ~config_path:cascade_path ()
+  with
+  | Ok _ -> fail "runtime validation should reject declarative adapter errors"
+  | Error rejection ->
+      let errors = rejection_error_messages rejection in
+      check bool "runtime rejection contains adapter error" true
+        (List.exists
+           (fun message ->
+              contains ~needle:"declarative cascade adapter error" message
+              && contains ~needle:"Binding_resolution_failed" message)
+           errors)
+
+let test_cascade_name_rejects_system_only_catalog_entry () =
+  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  @@ fun ~config_root:_ ~cascade_path:_ ->
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"scoring\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> fail "system-only cascade_name should be rejected"
+  | Error e ->
+      check bool "error mentions system-only" true
+        (contains ~needle:"system-only" e)
 
 let test_tool_access_accepts_dispatch () =
   let result =
@@ -404,6 +867,28 @@ let () =
             test_cascade_name_accepts_tool_lane_without_catalog;
           test_case "accepts live catalog entry" `Quick
             test_cascade_name_accepts_catalog_entry;
+          test_case "resolves declarative profile model strings" `Quick
+            test_resolve_model_strings_reads_declarative_profile;
+          test_case "resolves custom provider ids through protocol" `Quick
+            test_resolve_model_strings_uses_provider_protocol_for_custom_id;
+          test_case "derives profile metadata from cascade.toml" `Quick
+            test_cascade_profile_metadata_from_toml;
+          test_case "accepts unrouted assignable catalog entry" `Quick
+            test_cascade_name_accepts_unrouted_assignable_catalog_entry;
+          test_case "assignability follows preferred qualified profile" `Quick
+            test_keeper_assignability_uses_preferred_qualified_profile;
+          test_case "fallback preserves qualified source profile" `Quick
+            test_fallback_cascade_preserves_qualified_source_profile;
+          test_case "surfaces declarative adapter errors" `Quick
+            test_catalog_validator_surfaces_adapter_errors;
+          test_case "surfaces declarative parse errors" `Quick
+            test_catalog_validator_surfaces_declarative_parse_errors;
+          test_case "runtime rejects declarative parse errors" `Quick
+            test_runtime_validation_rejects_declarative_parse_errors;
+          test_case "runtime rejects declarative adapter errors" `Quick
+            test_runtime_validation_rejects_declarative_adapter_errors;
+          test_case "rejects system-only catalog entry" `Quick
+            test_cascade_name_rejects_system_only_catalog_entry;
           test_case "accepts dispatch tool_access preset" `Quick
             test_tool_access_accepts_dispatch;
         ] );

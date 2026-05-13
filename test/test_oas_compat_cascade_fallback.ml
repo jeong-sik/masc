@@ -1,7 +1,7 @@
 (* test/test_oas_compat_cascade_fallback.ml
 
    #9932: kimi_cli permanent failure blocks 5 keepers (409 BDI blockers) —
-   big_three cascade fallback was not firing because
+   primary cascade fallback was not firing because
    [Oas_compat.Http_client.should_cascade] classified per-provider CLI
    rejections as non-cascadable. The correct policy: a permanent error
    specific to one provider (kimi auth/config, gemini startup crash) still

@@ -13,19 +13,15 @@ let metric_fallbacks = "masc_cascade_fallbacks_total"
 let metric_providers_exhausted = "masc_cascade_providers_exhausted_total"
 let metric_routing_phase_overrides = "masc_cascade_routing_phase_overrides_total"
 
-(* RFC-0066 Phase 4 migration observability: which path discovered the
-   profile names — the declarative 5-layer parser ([Some (Ok _)]) or
-   the legacy [<name>_models] JSON-shape scan ([Some (Error _)] or
-   [None]).  Operators use [path="legacy_*"] non-zero counters as the
-   signal that fixture migration is incomplete (legacy_no_decl) or that
-   the live [cascade.toml] is malformed (legacy_after_decl_error). *)
+(* RFC-0066 profile discovery observability: which path discovered the
+   profile names from the active declarative cascade.toml, or whether
+   discovery failed before any profile list could be produced. *)
 let metric_profile_discovery = "masc_cascade_profile_discovery_total"
 
 (* Declarative parser ran but returned errors.  Counter ticks per
    discovery call, not per error within a call — the individual errors
    are surfaced via WARN logs.  A non-zero rate here means the live
-   cascade.toml is producing adapter errors even though the loader
-   keeps serving (currently via legacy fallback). *)
+   cascade.toml is producing adapter errors. *)
 let metric_declarative_parse_errors = "masc_cascade_declarative_parse_errors_total"
 
 (* Parallel declarative validation (RFC-0058 Phase 3) cross-checks the
@@ -74,10 +70,8 @@ let on_phase_override ~phase ~from_cascade ~to_cascade =
 
 (* [path] is one of:
    - "declarative" — 5-layer parser succeeded (the steady-state path)
-   - "legacy_after_decl_error" — declarative parser returned errors and
-     the loader fell through to the legacy [<name>_models] scan
-   - "legacy_no_decl" — declarative parser produced no result (likely
-     a pre-RFC-0058 fixture TOML) *)
+   - "declarative_error" — declarative parser returned errors
+   - "declarative_missing" — declarative parser produced no result *)
 let on_profile_discovery ~path =
   Prometheus.inc_counter metric_profile_discovery
     ~labels:[ ("path", path) ]
@@ -601,8 +595,8 @@ let on_llama_model_not_discovered () =
      catalog_unvalidated    — route_target is set but the live
                                catalog has zero validated names
                                (cascade.toml load / validate fault).
-                               The runtime resolves anyway via
-                               fallback_from_entries.
+                               The runtime preserves the configured
+                               route target.
      target_not_in_catalog  — route_target points at a profile that
                                is not in the validated catalog.
                                Typically a typo or a profile removed
@@ -631,12 +625,9 @@ let on_route_resolve_fallback ~reason =
     ()
 
 (* [Cascade_config_loader.is_deprecated_logical_profile_name] returns
-   true for ~28 legacy profile names (pre-RFC-0058 conventions like
-   "default", "keeper_reply", "phase_recovery", etc.).  Three callers
-   filter these names out of profile discovery silently:
-     - cascade_catalog_runtime.ml L175 (legacy [_models] fallback)
-     - cascade_catalog_runtime.ml L190 (declarative path filter)
-     - cascade_config_loader.ml L576 (builder validation)
+   true for retired logical profile names (pre-RFC-0058 conventions like
+   "default", "keeper_reply", "phase_recovery", etc.).  Declarative
+   catalog discovery filters these names out of public profile lists.
 
    When an operator references one of these names in a current
    cascade.toml (typo, copy-paste from old docs, surviving fixture),
@@ -659,26 +650,22 @@ let on_deprecated_profile_name_filter ~name =
     ~labels:[ ("name", name) ]
     ()
 
-(* [Cascade_config_loader.detect_capability_mismatches] is the twin
-   of [detect_fallback_cycles]: both walk the catalog's
-   [fallback_cascade] graph looking for RFC-0055/0058 violations.
-   The cycle detector already emits
-   [metric_cascade_fallback_cycle_detected_total] (pre-iter-32);
-   the capability-mismatch detector emitted only a string in the
-   load_catalog Error, with no Prometheus surface.
+(* Capability-mismatch validation is the sibling of fallback-cycle
+   validation: both inspect operator-declared fallback edges looking
+   for RFC-0055/0058 violations.  This counter keeps that class of
+   validation failure visible in Prometheus.
 
    Iter 5's [serving_last_known_good{reason="validation_failed"}]
-   does fire when load_catalog Errors, but it conflates capability
-   mismatches with every other validation fault — operators
+   fires for validation failures, but it conflates capability
+   mismatches with every other validation fault; operators
    couldn't distinguish "a fallback edge violates the capability
    subset invariant" (RFC-0055 actionable) from "cascade.toml is
    syntactically malformed" (RFC-0058 §9 actionable).
 
-   Bumped by the number of mismatches in a single load_catalog
-   invocation rather than +1 per call, so a single deploy that
-   introduces N broken edges spikes proportionally (same shape as
-   iter 7 leak / iter 9 route_config_error / iter 15
-   auto_expansion_fanout).
+   Bumped by the number of mismatches in a single validation pass
+   rather than +1 per call, so a single deploy that introduces N
+   broken edges spikes proportionally (same shape as iter 7 leak /
+   iter 9 route_config_error / iter 15 auto_expansion_fanout).
 
    Cardinality: 1 series. *)
 let metric_capability_mismatch = "masc_cascade_capability_mismatch_total"
@@ -695,12 +682,9 @@ let on_capability_mismatch ~count =
    unknown-route-key, NOT value-shape faults):
 
      invalid_value         — [target_of_route_value] returned None.
-                              Either the value isn't a string (legacy
-                              encoding) and isn't an [Assoc] with a
-                              [target] field (declarative encoding),
-                              or the [Assoc] exists but has no
-                              [target] subfield.  Typical: operator
-                              typoed the [target] subfield key.
+                              The value is not a declarative route
+                              table with a [target] field.  Typical:
+                              operator typoed the [target] subfield key.
      empty_key_or_target   — both encodings produced a value but the
                               route key or target name is the empty
                               string after trimming.
@@ -720,26 +704,24 @@ let on_route_binding_dropped ~reason =
     ~labels:[ ("reason", reason) ]
     ()
 
-(* [Cascade_config_loader.parse_weighted_item] silently drops two
-   classes of malformed entry in the legacy [<name>_models]
-   JSON-shape list:
+(* Retired flat-profile parsing silently dropped two classes of
+   malformed weighted entries:
 
      missing_or_empty_model — value is an [Assoc] but the [model]
                                subfield is missing, not a string,
                                or trims to empty.
-     invalid_value_type     — value is neither a string (legacy
-                               compact encoding) nor an [Assoc]
-                               (declarative encoding).
+     invalid_value_type     — value is neither a compact string nor
+                               an [Assoc] weighted item.
 
-   The drops happen via [List.filter_map] in [load_profile_weighted],
-   producing a smaller-than-declared candidate list with no signal.
-   Counter complement to iter 33 [route_binding_dropped] — same
-   value-shape-fault class, different containing table.
+   The old drop path produced a smaller-than-declared candidate list
+   with no signal.  Counter complement to iter 33
+   [route_binding_dropped] — same value-shape-fault class, different
+   containing table.
 
    Most cascade.toml deploys land on the 5-layer declarative schema
    (which never hits this code path), so a non-zero rate flags
-   legacy [<name>_models] fixtures still in use — doubles as an
-   RFC-0066 Phase 4 migration tracker for fixture leftover.
+   retired flat-profile fixtures still in use — doubles as an RFC-0066
+   Phase 4 migration tracker for fixture leftover.
 
    Cardinality: 2 reasons = 2 series. *)
 let metric_weighted_item_dropped =
@@ -875,13 +857,11 @@ let metric_discovery_refresh_exception =
 let on_discovery_refresh_exception () =
   Prometheus.inc_counter metric_discovery_refresh_exception ()
 
-(* [Cascade_config_loader.load_catalog] calls
-   [Cascade_capability_profile.register_declared_profiles_from_json]
-   before parsing the catalog so that
-   [resolve_required_capabilities] can find the declared profiles
-   later.  When that registration fails, the existing code logs a
-   WARN line and CONTINUES loading the catalog — silently building
-   a catalog where some capability profiles aren't registered.
+(* Declarative catalog loading registers capability profiles before
+   runtime validation so that [resolve_required_capabilities] can find
+   the declared profiles later.  When that registration fails, the
+   loader logs a WARN line and continues — silently building a catalog
+   where some capability profiles aren't registered.
 
    Downstream impact: [resolve_required_capabilities] returns None
    for the unregistered profiles, capability filtering falls back
@@ -1113,7 +1093,7 @@ let all_cascade_counters : (string * string) list = [
      stays at zero across deploys -> safe to drop from \
      [deprecated_logical_profile_names].";
   metric_capability_mismatch,
-    "Total load_catalog invocations that detected at least one \
+    "Total catalog validation passes that detected at least one \
      RFC-0055 capability subset violation on a fallback_cascade edge. \
      Bumped by the number of mismatches per call (delta semantics). \
      Operator action: align source profile capability requirements \
@@ -1143,7 +1123,7 @@ let all_cascade_counters : (string * string) list = [
      exception is swallowed and the function returns false; this \
      counter makes the swallow rate alertable.";
   metric_profile_registration_failure,
-    "Total [load_catalog] calls where \
+    "Total declarative catalog loads where \
      [register_declared_profiles_from_json] returned Error. \
      Catalog continues loading without the declared profiles, so \
      downstream [resolve_required_capabilities] returns None for \

@@ -182,7 +182,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | `git_identity_mode` | `keeper_alias`, `github_identity` |
 | `tool_preset` | `minimal`, `social`, `messaging`, `coding`, `research`, `delivery`, `full` |
 | `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
-| `cascade_name` | any `<name>` such that `<name>_models` exists in `cascade.json` (e.g. `keeper_unified`, `nick0cave`) |
+| `cascade_name` | keeper-assignable declarative cascade profiles exposed by the active catalog: route targets, tier names, or tier-group names that are not marked `keeper-assignable = false` |
 
 ### Sandbox Example
 
@@ -209,7 +209,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 | Field | Replacement / rationale |
 | --- | --- |
 | `also_allow` | Renamed to `tool_also_allow` in `keeper.toml`. Use `tool_access.also_allow` only inside the JSON `tool_access` object. |
-| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `cascade_name` → `cascade.json`. Do not pin per-keeper. |
+| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `cascade_name` → `cascade.toml`. Do not pin per-keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |
 | `trigger_mode`, `policy_action_budget` | Removed with the legacy policy engine. |
 | `initiative_scope`, `initiative_enabled`, `initiative_idle_sec`, `initiative_cooldown_sec` | Renamed to `proactive_*` (see above). |

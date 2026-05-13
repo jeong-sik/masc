@@ -1,7 +1,7 @@
 (** Config-driven cascade profile name resolution.
 
     Per RFC-0041 cascade routing SSOT, the live cascade catalog
-    (cascade.json) is the only source of truth for cascade profile
+    (cascade.toml) is the only source of truth for cascade profile
     names — there is no compile-time enum here.  Code that needs to
     know "what profiles are available" reads them through
     {!catalog_names} / {!catalog_names_result} /
@@ -70,7 +70,7 @@ val runtime_name_of_string : string -> runtime_name
     after [String.trim]. *)
 
 val catalog_names : ?config_path:string -> unit -> string list
-(** Live profile catalog discovered from the active [cascade.json].
+(** Live profile catalog discovered from the active [cascade.toml].
     When the file cannot be read, returns [[]]. *)
 
 val catalog_names_result : ?config_path:string -> unit -> (string list, string) result
@@ -83,14 +83,17 @@ val catalog_names_for_validation :
 (** Accept-list source for the keeper cascade-name validator.
 
     Requires the declarative cascade catalog; retired flat-profile TOML and
-    flat-key catalog fallback are intentionally not accepted. *)
+    flat-key catalog fallback are intentionally not accepted.  Includes both
+    public names, such as [primary], and qualified declarative names, such as
+    [tier.primary] / [tier-group.primary], so explicit keeper assignments do
+    not collapse to the public route target. *)
 
 val keeper_catalog_names : ?config_path:string -> unit -> string list
 (** Assignable live profile names from {!catalog_names}, filtered by
     [keeper_assignable] metadata. *)
 
 val system_catalog_names : ?config_path:string -> unit -> string list
-(** Live system-only profile names present in [cascade.json]. *)
+(** Live system-only profile names present in [cascade.toml]. *)
 
 val fallback_cascade_for : ?config_path:string -> string -> string option
 (** Declarative escalation hint for [name].
@@ -118,8 +121,9 @@ val resolve_live_with_catalog : catalog:string list -> string -> string
 (** Resolves a keeper-declared cascade against an explicit live catalog.
 
     Names already present in the catalog pass through; logical route
-    aliases collapse via [routes]; otherwise the input is returned
-    trimmed and the catalog membership is the caller's responsibility. *)
+    aliases collapse via [routes]; otherwise the keeper-turn fallback is used.
+    Callers that accept qualified declarative names must pass a lookup catalog
+    containing those qualified names, not only display/public names. *)
 
 val resolve_live : ?config_path:string -> string -> string
 (** Like {!resolve_live_with_catalog}, but reads the active catalog from the
@@ -136,7 +140,7 @@ val normalize_declared_name : string -> string
     Logical route aliases resolve through {!cascade_name_for_use}; otherwise
     the trimmed input is returned. *)
 
-(** {1 cascade.json key helpers} *)
+(** {1 In-memory cascade key helpers} *)
 
 (** First canonicalize, then build the key. *)
 val models_key : string -> string

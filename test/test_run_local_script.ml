@@ -95,7 +95,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.json") "{\"seed\":\"repo\"}";
+  write_file (Filename.concat config "cascade.toml") "# repo seed\n";
   config
 
 let write_keeper_seed repo_root =
@@ -154,7 +154,9 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         failf "run-local failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       let target_abs = Unix.realpath target in
       let captured = read_file capture in
-      check bool "bootstrapped cascade" true
+      check bool "bootstrapped cascade.toml" true
+        (Sys.file_exists (Filename.concat target_abs ".masc/config/cascade.toml"));
+      check bool "did not synthesize cascade.json" false
         (Sys.file_exists (Filename.concat target_abs ".masc/config/cascade.json"));
       check bool "bootstrapped keepers excluded by default" false
         (Sys.file_exists
@@ -258,8 +260,8 @@ let test_existing_target_config_is_not_overwritten () =
       let target = Filename.concat dir "target" in
       let target_config = Filename.concat target ".masc/config" in
       mkdir_p target_config;
-      write_file (Filename.concat target_config "cascade.json")
-        "{\"seed\":\"target\"}";
+      write_file (Filename.concat target_config "cascade.toml")
+        "# preserved target cascade.toml\n";
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
@@ -270,8 +272,8 @@ let test_existing_target_config_is_not_overwritten () =
       in
       if code <> 0 then
         failf "run-local failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
-      let cascade = read_file (Filename.concat target_config "cascade.json") in
-      check string "target config preserved" "{\"seed\":\"target\"}" cascade)
+      let cascade = read_file (Filename.concat target_config "cascade.toml") in
+      check string "target config preserved" "# preserved target cascade.toml\n" cascade)
 
 let test_explicit_config_env_is_preserved_without_bootstrap () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -303,7 +305,7 @@ let test_explicit_config_env_is_preserved_without_bootstrap () =
       check bool "explicit personas dir preserved" true
         (contains_substring captured ("MASC_PERSONAS_DIR=" ^ override_personas));
       check bool "target config not bootstrapped" false
-        (Sys.file_exists (Filename.concat target ".masc/config/cascade.json")))
+        (Sys.file_exists (Filename.concat target ".masc/config/cascade.toml")))
 
 let test_config_dir_set_personas_dir_unset_defaults_to_config_personas () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -353,7 +355,9 @@ let test_bootstrap_only_materializes_state_without_exec () =
       if code <> 0 then
         failf "run-local bootstrap-only failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
-      check bool "bootstrapped cascade" true
+      check bool "bootstrapped cascade.toml" true
+        (Sys.file_exists (Filename.concat target ".masc/config/cascade.toml"));
+      check bool "did not synthesize cascade.json" false
         (Sys.file_exists (Filename.concat target ".masc/config/cascade.json"));
       check bool "fake exe not invoked" false (Sys.file_exists capture);
       check bool "bootstrap ready message" true

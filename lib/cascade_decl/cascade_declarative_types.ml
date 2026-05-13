@@ -323,6 +323,7 @@ type cascade_tier =
   ; cycle_policy : cascade_cycle_policy option
   ; sticky_ttl_ms : int option
   ; scoring_params : cascade_scoring_params option
+  ; keeper_assignable : bool option
   }
 [@@deriving show, eq]
 
@@ -331,6 +332,7 @@ type cascade_tier_group =
   ; tiers : string list
   ; strategy : cascade_strategy
   ; fallback : bool
+  ; keeper_assignable : bool option
   }
 [@@deriving show, eq]
 

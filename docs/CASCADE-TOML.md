@@ -103,8 +103,8 @@ target = "tier-group.local_recovery"
 
 The repo seed stays intentionally small.
 
-- Keeper-assignable default: `big_three` for general turns.
-- System-only lanes: `tool_rerank` for short rerank/scoring calls.
+- Keeper-assignable default: `primary` for general turns.
+- System-only lanes: `scoring` for short rerank/scoring calls.
 - Logical usages (`governance_judge`, `cross_verifier`, etc.) go under
   `[routes.*]`; they are route keys, not profile names.
 - Personal experiments and machine-specific profiles go in live config

@@ -26,8 +26,7 @@
         "test/fixtures/goal_loop/observe.startup.json",
         "test/fixtures/goal_loop/orient.startup.json",
         "test/fixtures/goal_loop/audit-corpus.external-claim.json#NF-1",
-        "lib/cascade/cascade_catalog_runtime.ml#local_probe_unavailable_reason",
-        "test/test_cascade_catalog_runtime.ml#test_valid_catalog_records_probe_error_without_eio_caps"
+        "lib/cascade/cascade_catalog_runtime.ml#local_probe_unavailable_reason"
       ],
       "status": "PASS",
       "criterion_id": "recovery_slo_proof_recorded",

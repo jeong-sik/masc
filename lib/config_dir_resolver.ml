@@ -3,16 +3,9 @@ module StringSet = Set.Make (String)
 (** SSOT for config filenames documented in [docs/TOML-RELOAD-MATRIX.md].
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
-let cascade_json_filename = "cascade.json"
 let cascade_toml_filename = "cascade.toml"
 let tool_policy_toml_filename = "tool_policy.toml"
 let keeper_runtime_toml_filename = "keeper_runtime.toml"
-
-(* SSOT first sentence — see Config_dir_resolver.mli docstring.
-   Callers append their context-specific operator action. *)
-let legacy_cascade_json_warning_prefix =
-  "Found cascade.json but no cascade.toml; cascade.json is no longer \
-   read (RFC-0058 §9)."
 
 type source =
   | Env
@@ -191,13 +184,12 @@ let to_json (resolution : resolution) =
     ]
 
 let config_signature_exists config_dir =
-  let cascade = Filename.concat config_dir cascade_json_filename in
   let cascade_toml = Filename.concat config_dir cascade_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
   let keepers = Filename.concat config_dir "keepers" in
   let personas = Filename.concat config_dir "personas" in
   existing_dir config_dir
-  && ((existing_file cascade || existing_file cascade_toml)
+  && (existing_file cascade_toml
      || existing_dir prompts || existing_dir keepers
      || existing_dir personas)
 
@@ -339,15 +331,7 @@ let config_root_resolution (inputs : inputs) =
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
-  let exists =
-    root.exists
-    &&
-    if String.equal name cascade_json_filename then
-      existing_file path
-      || existing_file (Filename.concat root.path cascade_toml_filename)
-    else
-      existing_dir path
-  in
+  let exists = root.exists && existing_dir path in
   { path; exists; source = root.source }
 
 let file_item (root : path_item) name =
@@ -381,15 +365,12 @@ let inputs_from_env () =
 let resolve_with inputs =
   let config_root, root_warnings = config_root_resolution inputs in
   let cascade_authoring = file_item config_root cascade_toml_filename in
-  let cascade = child_item config_root cascade_json_filename in
+  let cascade = cascade_authoring in
   let prompts = child_item config_root "prompts" in
   let keepers = child_item config_root "keepers" in
   let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
-    (* RFC-0058 §9: [cascade.toml] is the SSOT; the [cascade.json] sibling
-       is no longer read from disk.  Key the missing-child warning off the
-       authoring file so a [.json]-only directory surfaces as degraded
-       instead of silently passing as Ready. *)
+    (* RFC-0058 §9: [cascade.toml] is the only cascade source. *)
     [ ("cascade.toml", cascade_authoring.exists)
     ; ("prompts", prompts.exists)
     ; ("keepers", keepers.exists)
@@ -401,21 +382,8 @@ let resolve_with inputs =
              Some
                (Printf.sprintf "Resolved config child is missing: %s" label))
   in
-  let degraded_legacy_json_warnings =
-    (* Operator left a stale [cascade.json] in place after migrating off
-       it.  We do not read it, but a present-but-unread file is a
-       footgun; surface it as a warning so the dashboard / startup log
-       call it out. *)
-    if (not cascade_authoring.exists)
-       && existing_file (Filename.concat config_root.path cascade_json_filename)
-    then
-      [ legacy_cascade_json_warning_prefix
-        ^ " Rename or convert it to cascade.toml." ]
-    else []
-  in
   let warnings =
     root_warnings @ persona_warnings @ missing_child_warnings
-    @ degraded_legacy_json_warnings
   in
   let status =
     match config_root.source with
@@ -448,12 +416,7 @@ let resolve () =
 let reset () =
   _cached_resolution := None
 
-(* RFC-0058 §9: the on-disk cascade source is [cascade.toml]; the legacy
-   [cascade.json] sibling is materialized in memory by
-   [Cascade_toml_materializer] and never read from disk. Callers feed the
-   returned path through that materializer, which accepts either suffix,
-   so returning the [.toml] path is consistent with the actual source of
-   truth. *)
+(* RFC-0058 §9: the on-disk cascade source is [cascade.toml]. *)
 let cascade_path_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with

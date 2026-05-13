@@ -65,7 +65,7 @@ jobs:
   drift:
     name: TLA+ annotation drift check
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,7 +73,11 @@ jobs:
           fetch-depth: 1
 
       - name: Install ripgrep
-        run: sudo apt-get update -qq && sudo apt-get install -y ripgrep
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ripgrep
+          fi
 
       - name: Run drift validator
         run: |

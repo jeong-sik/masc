@@ -2,11 +2,7 @@
 
     Converts a parsed {!Cascade_declarative_types.cascade_config} (the 5-layer
     TOML schema from Phase 1) into an {!adapted_catalog} that mirrors the
-    shape consumed by the existing cascade runtime ({!Cascade_catalog_runtime}).
-
-    Phase 2 is a **parallel validation path**: the adapter proves the
-    declarative config can produce valid runtime types, but the hotpath still
-    reads from the legacy materialized JSON. Phase 3 will switch the hotpath.
+    shape consumed by the cascade runtime ({!Cascade_catalog_runtime}).
 
     @stability Internal *)
 
@@ -37,7 +33,7 @@ type adapter_error =
 type adapted_profile = {
   name : string;
   (** Profile name derived from tier or tier-group (e.g. "tier.primary",
-      "tier-group.big_three"). *)
+      "tier-group.primary"). *)
   provider_configs : Llm_provider.Provider_config.t list;
   (** Resolved provider configs, in declaration order. *)
   strategy : Cascade_strategy.t;

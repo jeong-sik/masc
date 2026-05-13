@@ -174,11 +174,11 @@ type run_result = {
 
 `run_named`가 cascade 이름 기반 MODEL 호출을 제공한다:
 
-1. `cascade.json`에서 `{name}_models` 목록 조회 (hot-reloadable)
-2. `Cascade_config.parse_model_strings`로 `Provider_config.t list` 생성
-3. MASC가 `Cascade_fsm.decide`로 cascade FSM을 직접 구동
-4. 각 provider에 대해 OAS single-provider `Agent.run` 호출
-5. `accept` 콜백으로 응답 유효성 검증
+1. `cascade.toml`의 `[routes.*]` 대상 또는 호출자가 지정한 프로필 이름을 RFC-0058 declarative catalog에서 해석한다.
+2. 대상은 `[tier.<name>]` / `[tier-group.<name>]` / binding alias로 resolve되고, `Cascade_catalog_runtime`이 ordered weighted entries를 `Provider_config.t list`로 변환한다.
+3. MASC가 `Cascade_fsm.decide`로 cascade FSM을 직접 구동한다.
+4. 각 provider에 대해 OAS single-provider `Agent.run`을 호출한다.
+5. `accept` 콜백으로 응답 유효성을 검증한다.
 
 관측 경계:
 - MASC는 configured labels, resolved candidate models, 최종 selected model은 관측 가능
@@ -186,11 +186,11 @@ type run_result = {
 - `raw_trace`에는 아직 provider attempt record가 없으므로 raw-trace만으로는 opaque 하다
 - 따라서 attempt details source는 `oas_metrics_callbacks` 또는 `no_oas_observation`처럼 경계를 명시한다
 
-Hardcoded fallback (cascade.json 없을 때):
+Hardcoded fallback (cascade.toml 없을 때):
 - `llama:{MASC_DEFAULT_MODEL}` (로컬)
 - `glm:auto` (ZAI_API_KEY 존재 시)
 
-이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/cascade.json`
+이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/cascade.toml`
 기본값과 동일시하지 않는다.
 
 ### 4.6 MASC Tool Bridge
@@ -251,7 +251,7 @@ servers, or non-interactive subscription CLI runtimes.
 
 ### 6.2 Cascade Inference Parameters
 
-`cascade_inference.ml`이 cascade.json에서 per-cascade 추론 파라미터를 읽는다:
+`cascade_inference.ml`이 cascade.toml에서 per-cascade 추론 파라미터를 읽는다:
 
 ```json
 {
@@ -525,7 +525,7 @@ Detailed implementation checklist lives in
 | `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | 5 | OAS Memory store 기본 importance |
 | `ZAI_API_KEY` | (없음) | GLM Cloud cascade fallback 활성화 |
 
-cascade.json 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
+cascade.toml 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
 
 ---
 

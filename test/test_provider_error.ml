@@ -255,14 +255,14 @@ let test_emit_sdk_provider_error_metric_rate_limit () =
     counter_for
       ~kind:"rate_limit"
       ~provider:"anthropic"
-      ~cascade_name:"big_three"
+      ~cascade_name:"primary"
       ~capacity_scope:"none"
   in
   let emitted =
     Agent_sdk.Error.Api
       (Retry.RateLimited { retry_after = Some 2.0; message = "too many" })
     |> OWN.emit_sdk_provider_error_metric
-         ~cascade_name:(cascade_name "big_three")
+         ~cascade_name:(cascade_name "primary")
          ~provider:"anthropic"
     |> expect_some
   in
@@ -274,7 +274,7 @@ let test_emit_sdk_provider_error_metric_rate_limit () =
     (counter_for
        ~kind:"rate_limit"
        ~provider:"anthropic"
-       ~cascade_name:"big_three"
+       ~cascade_name:"primary"
        ~capacity_scope:"none")
 ;;
 
@@ -283,7 +283,7 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
     counter_for
       ~kind:"capacity_exhausted"
       ~provider:"anthropic"
-      ~cascade_name:"big_three"
+      ~cascade_name:"primary"
       ~capacity_scope:"provider"
   in
   let emitted =
@@ -294,7 +294,7 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
               on 2026-05-01 at 00:00 UTC."
          })
     |> OWN.emit_sdk_provider_error_metric
-         ~cascade_name:(cascade_name "big_three")
+         ~cascade_name:(cascade_name "primary")
          ~provider:"anthropic"
     |> expect_some
   in
@@ -306,7 +306,7 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
     (counter_for
        ~kind:"capacity_exhausted"
        ~provider:"anthropic"
-       ~cascade_name:"big_three"
+       ~cascade_name:"primary"
        ~capacity_scope:"provider")
 ;;
 
@@ -315,13 +315,13 @@ let test_emit_sdk_provider_error_metric_skips_non_api () =
     counter_for
       ~kind:"invalid_request"
       ~provider:"anthropic"
-      ~cascade_name:"big_three"
+      ~cascade_name:"primary"
       ~capacity_scope:"none"
   in
   let emitted =
     Agent_sdk.Error.Internal "structural failure"
     |> OWN.emit_sdk_provider_error_metric
-         ~cascade_name:(cascade_name "big_three")
+         ~cascade_name:(cascade_name "primary")
          ~provider:"anthropic"
   in
   check bool "no provider error emitted" true (Option.is_none emitted);
@@ -332,7 +332,7 @@ let test_emit_sdk_provider_error_metric_skips_non_api () =
     (counter_for
        ~kind:"invalid_request"
        ~provider:"anthropic"
-       ~cascade_name:"big_three"
+       ~cascade_name:"primary"
        ~capacity_scope:"none")
 ;;
 

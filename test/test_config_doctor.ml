@@ -55,17 +55,17 @@ tools-support = true
 is-default = true
 max-concurrent = 1
 
-[tier.big_three]
+[tier.primary_profile]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.big_three]
-tiers = ["big_three"]
+[tier-group.primary_profile]
+tiers = ["primary_profile"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.big_three"
+target = "tier-group.primary_profile"
 |}
 
 let with_fake_docker script f =
@@ -158,10 +158,6 @@ let initialize_config_root ?(cascade_toml="") root =
   write_file (Filename.concat root "cascade.toml") cascade_toml;
   mkdir_p (Filename.concat root "personas")
 
-let initialize_legacy_json_only_config_root root =
-  write_file (Filename.concat root "cascade.json") "{}";
-  mkdir_p (Filename.concat root "personas")
-
 let test_invalid_explicit_config_dir () =
   with_temp_dir "config-doctor-invalid" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -209,6 +205,29 @@ let test_initialized_local_base_config () =
   check bool "keeper runtime optional" false report.keeper_runtime_toml_present;
   check (list string) "no warnings" [] report.warnings
 
+let test_initialized_config_without_cascade_toml_errors () =
+  with_temp_dir "config-doctor-no-cascade" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  mkdir_p (Filename.concat config_root "personas");
+  let report =
+    Config_doctor.analyze_with
+      (make_inputs ~cwd:dir ~base_path_input:base_path ())
+  in
+  check string "init_state" "initialized"
+    (init_state report.init_state);
+  check string "status" "error" (status report.status);
+  check bool "warning mentions missing cascade.toml" true
+    (list_contains_substring ~needle:"cascade.toml" report.warnings);
+  check bool "next action bootstraps missing cascade.toml" true
+    (list_contains_substring
+       ~needle:"Create or bootstrap cascade.toml"
+       report.next_actions);
+  check bool "next action avoids broken preset wording" false
+    (list_contains_substring
+       ~needle:"broken cascade preset entries"
+       report.next_actions)
+
 let test_shadowed_explicit_config_dir () =
   with_temp_dir "config-doctor-shadowed" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -226,29 +245,6 @@ let test_shadowed_explicit_config_dir () =
   check string "status" "warn" (status report.status);
   check string "active root" (canonical_path explicit_root) report.active_config_root;
   check bool "local base initialized" true report.local_base_config_initialized
-
-let test_legacy_json_without_toml_next_action_migrates () =
-  with_temp_dir "config-doctor-legacy-json" @@ fun dir ->
-  let base_path = Filename.concat dir "base" in
-  let config_root = Filename.concat base_path ".masc/config" in
-  initialize_legacy_json_only_config_root config_root;
-  let report =
-    Config_doctor.analyze_with
-      (make_inputs ~cwd:dir ~base_path_input:base_path ())
-  in
-  check string "status downgrades to warn" "warn" (status report.status);
-  check bool "legacy json warning present" true
-    (list_contains_substring
-       ~needle:"cascade.json but no cascade.toml"
-       report.warnings);
-  check bool "next action points at migration" true
-    (list_contains_substring
-       ~needle:"Migrate or rename"
-       report.next_actions);
-  check bool "next action names cascade.toml" true
-    (list_contains_substring
-       ~needle:"cascade.toml"
-       report.next_actions)
 
 let fake_docker_missing_image_script =
   "#!/bin/sh\n\
@@ -442,10 +438,11 @@ let () =
              test_missing_init_without_explicit_config;
            test_case "initialized local base config" `Quick
              test_initialized_local_base_config;
+           test_case "initialized config without cascade.toml errors"
+             `Quick
+             test_initialized_config_without_cascade_toml_errors;
            test_case "shadowed explicit config dir" `Quick
              test_shadowed_explicit_config_dir;
-           test_case "legacy cascade.json without toml gets migration action"
-             `Quick test_legacy_json_without_toml_next_action_migrates;
            test_case "analyze_live surfaces sandbox preflight failure"
              `Quick test_analyze_live_surfaces_sandbox_preflight_failure;
            test_case "analyze_live errors on tool-required route without forced tool provider"

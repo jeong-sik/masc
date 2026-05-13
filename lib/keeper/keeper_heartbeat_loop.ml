@@ -975,7 +975,7 @@ let run_keepalive_unified_turn
           ();
         (* RFC-0026 Phase A1: live admission dispatch wiring.
            [init_once_from_base_path] populates the registry from
-           [<base_path>/.masc/config/cascade.json] [admission.*]
+           [<base_path>/.masc/config/cascade.toml] [admission.*]
            sub-tables on first call.  When the JSON has no admission
            blocks the registry stays empty and [decide_live] returns
            [Live_legacy] always — caller falls through to the existing

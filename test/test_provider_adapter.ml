@@ -92,6 +92,28 @@ let test_cascade_prefix_of_provider_kind_keeps_adapter_mapping () =
     (Adapter.cascade_prefix_of_provider_kind Llm_provider.Provider_config.Codex_cli)
 ;;
 
+let test_declarative_protocol_resolves_via_adapter_boundary () =
+  let check_protocol protocol expected =
+    check
+      (option string)
+      protocol
+      (Some expected)
+      (Adapter.cascade_prefix_of_declarative_protocol protocol)
+  in
+  check_protocol "anthropic-cli" "claude_code";
+  check_protocol "anthropic-http" "claude";
+  check_protocol "openai-cli" "codex_cli";
+  check_protocol "openai-http" "openai";
+  check_protocol "google-cli" "gemini_cli";
+  check_protocol "kimi-cli" "kimi_cli";
+  check_protocol "ollama-http" "ollama";
+  check
+    (option string)
+    "unknown protocol"
+    None
+    (Adapter.cascade_prefix_of_declarative_protocol "unknown-http")
+;;
+
 let test_auth_env_keys_of_provider_kind_defaults () =
   check
     (list string)
@@ -530,34 +552,35 @@ let test_local_openai_compat_health_key_is_endpoint_scoped () =
 ;;
 
 let test_provider_model_health_key_is_model_scoped () =
-  let cfg label =
-    match Masc_mcp.Cascade_config.parse_model_string label with
-    | Some cfg -> cfg
-    | None -> fail ("expected model label to parse: " ^ label)
-  in
-  let glm_code = cfg "glm-coding:glm-5-code" in
-  let glm_51 = cfg "glm-coding:glm-5.1" in
-  check
-    string
-    "provider health key stays provider scoped"
-    "glm-coding"
-    (Adapter.provider_health_key_of_config glm_code);
-  check
-    string
-    "model health key includes concrete model"
-    "glm-coding:glm-5-code"
-    (Adapter.provider_model_health_key_of_config glm_code);
-  check
-    bool
-    "sibling models do not share model health key"
-    true
-    (Adapter.provider_model_health_key_of_config glm_code
-     <> Adapter.provider_model_health_key_of_config glm_51);
-  check
-    string
-    "sibling models still share provider health key"
-    (Adapter.provider_health_key_of_config glm_code)
-    (Adapter.provider_health_key_of_config glm_51)
+  with_env "ZAI_API_KEY" (Some "zai-key") (fun () ->
+    let cfg label =
+      match Masc_mcp.Cascade_config.parse_model_string label with
+      | Some cfg -> cfg
+      | None -> fail ("expected model label to parse: " ^ label)
+    in
+    let glm_code = cfg "glm-coding:glm-5-code" in
+    let glm_51 = cfg "glm-coding:glm-5.1" in
+    check
+      string
+      "provider health key stays provider scoped"
+      "glm-coding"
+      (Adapter.provider_health_key_of_config glm_code);
+    check
+      string
+      "model health key includes concrete model"
+      "glm-coding:glm-5-code"
+      (Adapter.provider_model_health_key_of_config glm_code);
+    check
+      bool
+      "sibling models do not share model health key"
+      true
+      (Adapter.provider_model_health_key_of_config glm_code
+       <> Adapter.provider_model_health_key_of_config glm_51);
+    check
+      string
+      "sibling models still share provider health key"
+      (Adapter.provider_health_key_of_config glm_code)
+      (Adapter.provider_health_key_of_config glm_51))
 ;;
 
 let test_provider_of_model_label_uses_typed_boundaries () =
@@ -938,6 +961,10 @@ let () =
             "cascade prefix keeps adapter mapping"
             `Quick
             test_cascade_prefix_of_provider_kind_keeps_adapter_mapping
+        ; test_case
+            "declarative protocol resolves via adapter boundary"
+            `Quick
+            test_declarative_protocol_resolves_via_adapter_boundary
         ; test_case
             "provider kind auth env defaults"
             `Quick

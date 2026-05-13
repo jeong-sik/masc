@@ -175,8 +175,6 @@ Latest verification:
 - `./_build/default/test/test_keeper_unified.exe` (359 tests)
 - `scripts/dune-local.sh build test/test_config_doctor.exe bin/main_eio.exe`
 - `./_build/default/test/test_config_doctor.exe` (9 tests)
-- `scripts/dune-local.sh build test/test_cascade_catalog_runtime.exe`
-- `./_build/default/test/test_cascade_catalog_runtime.exe` (23 tests)
 - `opam exec -- ocamlformat --check lib/config_doctor.ml lib/config_doctor.mli test/test_config_doctor.ml`
 - `MASC_CONFIG_DIR=/Users/dancer/me/.masc/config MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false ./_build/default/bin/main_eio.exe doctor config --base-path /Users/dancer/me --json`
   (expected exit 1: live `keeper_turn` and `tool_required` both target
@@ -206,7 +204,7 @@ Latest-main live evidence:
   classified `PASS`; phase log shows active keepalive and room presence.
 - The active config root used in the live run was
   `/Users/dancer/me/.masc/config`, whose active catalog default was
-  `coding_plan`. The harness no longer hardcodes `big_three`.
+  `coding_plan`. The harness no longer hardcodes `primary`.
 - Latest post-fix live-like liveness rerun:
   `/private/tmp/keeper-runtime-truth-live-20260512-codex5`
   classified `FAIL`; bootstrap passed, liveness still timed out after the
@@ -283,7 +281,7 @@ Healthy parts:
   memory primitive, checkpoint primitive, and compaction machinery.
 - Boundary documentation already states that OAS must stay generic while MASC
   owns world/task/board/governance semantics.
-- The current declarative cascade route target (`tier-group.big_three`) is now
+- The current declarative cascade route target (`tier-group.primary`) is now
   accepted by the active catalog validator and broad keeper lifecycle tests.
 - The latest live-like run no longer hides queued `masc_keeper_msg` responses
   as successful turns; the harness waits for actual turn state.
@@ -328,7 +326,7 @@ Fragile parts:
   support. `masc-mcp doctor config` now catches this same route-capability
   gap without starting a keeper turn.
 - Live config drift is real: the current config root exposes `coding_plan` as
-  the only active catalog profile, while older scripts assumed `big_three`.
+  the only active catalog profile, while older scripts assumed `primary`.
   The harness now avoids that hardcoded default, but operator docs/config still
   need cleanup.
 - Local Docker is not reachable on this host, so declarative docker keepers in

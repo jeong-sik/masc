@@ -98,7 +98,7 @@ max-concurrent = 2
 price-input = 3.00
 price-output = 15.00
 
-[claude-code.haiku.for-tool-rerank]
+[claude-code.haiku.for-scoring]
 max-input = 4096
 max-output = 1024
 
@@ -111,7 +111,8 @@ keep-alive = "5m"
 num-ctx = 32768
 
 [tier.rerank]
-members = ["claude-code.haiku.for-tool-rerank"]
+keeper-assignable = false
+members = ["claude-code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
@@ -123,13 +124,14 @@ max-concurrent = 5
 members = ["ollama.qwen3-8b"]
 strategy = "failover"
 
-[tier-group.big-three]
+[tier-group.primary]
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 fallback = true
+keeper-assignable = true
 
 [routes.default]
-target = "tier-group.big-three"
+target = "tier-group.primary"
 
 [system.governance]
 target = "claude-code.haiku.for-governance"
@@ -211,7 +213,7 @@ let test_layer3_bindings () =
 let test_layer4_aliases () =
   let cfg = ok_config (parse_string full_toml) in
   check int "aliases" 2 (List.length cfg.aliases);
-  (match alias_of_key cfg "claude-code" "haiku" "for-tool-rerank" with
+  (match alias_of_key cfg "claude-code" "haiku" "for-scoring" with
    | Some a ->
      check opt_int "max_input" (Some 4096) a.max_input;
      check opt_int "max_output" (Some 1024) a.max_output
@@ -231,8 +233,10 @@ let test_layer5_tiers () =
      check
        (list string)
        "rerank members"
-       [ "claude-code.haiku.for-tool-rerank" ]
+       [ "claude-code.haiku.for-scoring" ]
        t.members;
+     check (option bool) "rerank keeper_assignable" (Some false)
+       t.keeper_assignable;
      check
        string
        "rerank strategy"
@@ -254,24 +258,38 @@ let test_layer5_tier_groups () =
   let cfg = ok_config (parse_string full_toml) in
   check int "tier_groups" 1 (List.length cfg.tier_groups);
   match
-    List.find_opt (fun (g : cascade_tier_group) -> g.name = "big-three") cfg.tier_groups
+    List.find_opt (fun (g : cascade_tier_group) -> g.name = "primary") cfg.tier_groups
   with
   | Some g ->
     check (list string) "tiers" [ "primary"; "local" ] g.tiers;
     check bool "fallback" true g.fallback;
+    check (option bool) "keeper_assignable" (Some true) g.keeper_assignable;
     check
       string
       "strategy"
       "Cascade_declarative_types.Priority_tier"
       (show_cascade_strategy g.strategy)
-  | None -> failwith "missing big-three tier group"
+  | None -> failwith "missing primary tier group"
+;;
+
+let test_keeper_assignable_duplicate_keys_rejected () =
+  let toml =
+    {|
+[tier.t]
+members = []
+keeper-assignable = true
+keeper_assignable = false
+|}
+  in
+  let errs = is_error (parse_string toml) in
+  has_error_at "tier.t.keeper-assignable" errs
 ;;
 
 let test_routes () =
   let cfg = ok_config (parse_string full_toml) in
   check int "routes" 1 (List.length cfg.routes);
   match List.find_opt (fun (r : cascade_route) -> r.name = "default") cfg.routes with
-  | Some r -> check string "route target" "tier-group.big-three" r.target
+  | Some r -> check string "route target" "tier-group.primary" r.target
   | None -> failwith "missing default route"
 ;;
 
@@ -432,7 +450,7 @@ let test_lookup_helpers () =
     bool
     "alias_of_key found"
     true
-    (alias_of_key cfg "claude-code" "haiku" "for-tool-rerank" <> None);
+    (alias_of_key cfg "claude-code" "haiku" "for-scoring" <> None);
   check bool "provider_of_id missing" true (provider_of_id cfg "nonexistent" = None);
   check bool "model_of_id missing" true (model_of_id cfg "nonexistent" = None);
   check
@@ -452,8 +470,8 @@ let test_key_formatters () =
   (match binding_of_key cfg "claude-code" "haiku" with
    | Some b -> check string "binding_key" "claude-code.haiku" (binding_key b)
    | None -> failwith "missing binding");
-  match alias_of_key cfg "claude-code" "haiku" "for-tool-rerank" with
-  | Some a -> check string "alias_key" "claude-code.haiku.for-tool-rerank" (alias_key a)
+  match alias_of_key cfg "claude-code" "haiku" "for-scoring" with
+  | Some a -> check string "alias_key" "claude-code.haiku.for-scoring" (alias_key a)
   | None -> failwith "missing alias"
 ;;
 
@@ -473,6 +491,11 @@ let test_api_format_of_protocol () =
     "openai-http"
     true
     (api_format_of_protocol "openai-http" = Ok Chat_completions_api);
+  check
+    bool
+    "openai-cli"
+    true
+    (api_format_of_protocol "openai-cli" = Ok Chat_completions_api);
   check
     bool
     "google-cli"
@@ -1436,6 +1459,10 @@ let () =
     ; ( "layer5_tiers"
       , [ test_case "tiers" `Quick test_layer5_tiers
         ; test_case "tier groups" `Quick test_layer5_tier_groups
+        ; test_case
+            "duplicate keeper assignability keys rejected"
+            `Quick
+            test_keeper_assignable_duplicate_keys_rejected
         ] )
     ; ( "routes"
       , [ test_case "routes" `Quick test_routes

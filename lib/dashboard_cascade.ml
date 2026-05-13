@@ -53,6 +53,73 @@ let invalid_profile_to_json ((name, errors) : string * string list) =
   `Assoc [ "name", `String name; "errors", string_list_to_json errors ]
 ;;
 
+let public_cascade_profile_name name =
+  let tier_group_prefix = "tier-group." in
+  let tier_prefix = "tier." in
+  if String.starts_with ~prefix:tier_group_prefix name then
+    String.sub name (String.length tier_group_prefix)
+      (String.length name - String.length tier_group_prefix)
+  else if String.starts_with ~prefix:tier_prefix name then
+    String.sub name (String.length tier_prefix)
+      (String.length name - String.length tier_prefix)
+  else
+    name
+;;
+
+let public_profile_names names =
+  names |> List.map public_cascade_profile_name |> List.sort_uniq String.compare
+;;
+
+let invalid_profiles_with_internal_names profiles =
+  profiles
+  |> List.fold_left
+       (fun acc (name, errors) ->
+          let prior =
+            match List.assoc_opt name acc with
+            | Some prior -> prior
+            | None -> []
+          in
+          (name, prior @ errors) :: List.remove_assoc name acc)
+       []
+  |> List.map (fun (name, errors) -> (name, List.sort_uniq String.compare errors))
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+;;
+
+let qualified_profile_candidates name =
+  let trimmed = String.trim name in
+  if String.starts_with ~prefix:"tier-group." trimmed
+     || String.starts_with ~prefix:"tier." trimmed
+  then [ trimmed ]
+  else [ "tier-group." ^ trimmed; "tier." ^ trimmed; trimmed ]
+;;
+
+let invalid_assignment_reasons ~known_internal_profiles ~invalid_profiles name =
+  let rec first_declared_candidate = function
+    | [] -> None
+    | candidate :: rest ->
+      if List.mem candidate known_internal_profiles
+      then List.assoc_opt candidate invalid_profiles
+      else if List.mem_assoc candidate invalid_profiles
+      then List.assoc_opt candidate invalid_profiles
+      else first_declared_candidate rest
+  in
+  first_declared_candidate (qualified_profile_candidates name)
+;;
+
+let invalid_assignments_for_public_profiles ~known_internal_profiles
+    ~invalid_profiles public_profiles =
+  public_profiles
+  |> List.filter_map (fun public_name ->
+    match
+      invalid_assignment_reasons
+        ~known_internal_profiles
+        ~invalid_profiles
+        public_name
+    with
+    | Some reasons -> Some (public_name, reasons)
+    | None -> None)
+;;
+
 let json_assoc_member key = function
   | `Assoc fields -> Option.value (List.assoc_opt key fields) ~default:`Null
   | _ -> `Null
@@ -78,6 +145,7 @@ let invalid_profiles_of_rejection_json rejection_json =
            Some (name, json_string_list (json_assoc_member "errors" profile_json))
          | _ -> None)
       profiles
+    |> invalid_profiles_with_internal_names
   | _ -> []
 ;;
 
@@ -102,8 +170,8 @@ let source_json_fields (source : Cascade_toml_materializer.source_info) =
 
     When the validated runtime snapshot is unavailable (for example
     before first successful validation), fall back to the active
-    [cascade.json] catalog so the dashboard still renders a best-effort
-    raw projection instead of failing hard. *)
+    [cascade.toml] projection so the dashboard still renders a best-effort
+    raw view instead of failing hard. *)
 let live_profiles ?config_path () = Keeper_cascade_profile.catalog_names ?config_path ()
 
 let keeper_assignable_name_set ?config_path () =
@@ -176,16 +244,11 @@ let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t
        ~cascade_name:(Keeper_types.cascade_name_of_meta entry.meta))
 ;;
 
-let invalid_name_set = function
-  | None -> StringSet.empty
-  | Some path ->
-    Cascade_catalog_validator.error_messages_by_profile ~config_path:path
-    |> List.fold_left (fun acc (name, _reasons) -> StringSet.add name acc) StringSet.empty
-;;
-
 let invalid_profiles_of_config_path = function
   | None -> []
-  | Some path -> Cascade_catalog_validator.error_messages_by_profile ~config_path:path
+  | Some path ->
+    Cascade_catalog_validator.error_messages_by_profile ~config_path:path
+    |> invalid_profiles_with_internal_names
 ;;
 
 let validation_summary_json ?config_path () =
@@ -217,7 +280,7 @@ let validation_summary_json ?config_path () =
   | Error rejection -> of_rejection ~status:"invalid" rejection
 ;;
 
-let config_json () =
+let config_json ?base_path () =
   let config_path = Cascade_runtime.cascade_config_path () in
   let source : Cascade_toml_materializer.source_info = source_info ?config_path () in
   let keeper_assignable_names = keeper_assignable_name_set ?config_path () in
@@ -226,7 +289,7 @@ let config_json () =
        Eio.Cancel.Cancelled. Re-raise cancellation; only fall back
        to empty for non-cancel exceptions (e.g. registry not yet
        initialised). *)
-    try Keeper_registry.all () with
+    try Keeper_registry.all ?base_path () with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Keeper.warn
@@ -266,15 +329,26 @@ let config_json () =
   let profiles =
     match Cascade_catalog_runtime.known_profile_names () with
     | Ok names -> List.filter_map (profile_json_runtime ~keeper_assignable_names) names
-    | Error detail ->
-      Log.Keeper.warn "dashboard cascade config: validated catalog unavailable: %s" detail;
-      let invalid_names = invalid_name_set config_path in
-      let add_profile_name (acc, seen) name =
-        let canonical = Keeper_cascade_profile.canonicalize name in
-        if StringSet.mem canonical invalid_names || StringSet.mem canonical seen
-        then acc, seen
-        else canonical :: acc, StringSet.add canonical seen
-      in
+  | Error detail ->
+    Log.Keeper.warn "dashboard cascade config: validated catalog unavailable: %s" detail;
+    let invalid_profiles = invalid_profiles_of_config_path config_path in
+    let known_internal_profiles =
+      match config_path with
+      | None -> []
+      | Some path ->
+        Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path:path
+    in
+    let add_profile_name (acc, seen) name =
+      let canonical = Keeper_cascade_profile.canonicalize name in
+      if StringSet.mem canonical seen
+         || Option.is_some
+              (invalid_assignment_reasons
+                 ~known_internal_profiles
+                 ~invalid_profiles
+                 canonical)
+      then acc, seen
+      else canonical :: acc, StringSet.add canonical seen
+    in
       let acc_after_catalog, seen_after_catalog =
         List.fold_left
           add_profile_name
@@ -408,7 +482,7 @@ let save_raw_config_json raw_json =
     - [cooldown]: tracker opened a cooldown window.
     - [active]: events arrived in the current window and the tracker is
       not cooled down.
-    - [configured]: declared in [cascade.json] but has not produced
+    - [configured]: declared in [cascade.toml] but has not produced
       tracker events in the current window (either untouched since
       startup, or expired from the window). The UI uses this to tell
       "declared-but-never-called" apart from the normal healthy case.
@@ -452,7 +526,7 @@ let zero_provider_info (key : string) : Health.provider_info =
 (** [provider_entry_to_json ~declared info] serialises a provider_info
     together with two derived fields:
 
-    - [declared : bool]  — [true] iff any [cascade.json] profile lists a
+    - [declared : bool]  — [true] iff any [cascade.toml] profile lists a
       model whose scheme prefix matches [info.provider_key].  Lets the
       UI distinguish "still referenced in config" from "left over in the
       tracker after a config change".
@@ -699,7 +773,7 @@ let recommendations_json () : Yojson.Safe.t =
     [:] in [s], or [s] itself if no colon is present.  The scheme
     corresponds to the provider_key produced by
     [Keeper_hooks_oas.provider_of_model] for prefixed specs; bare model
-    ids (rare in cascade.json) fall through unchanged and merge with
+    ids fall through unchanged and merge with
     whatever heuristic keeper_hooks_oas assigned them at runtime.  *)
 let provider_scheme_of_model_string (s : string) : string =
   match String.index_opt s ':' with
@@ -714,31 +788,26 @@ let provider_scheme_of_model_string (s : string) : string =
     is already surfaced by [config_json]; we do not want the health
     endpoint to disappear just because the catalog loader fails.
 
-    Path-explicit reads (legacy contract preserved): callers that pass
-    an explicit [config_path] must see schemes from THAT path.
-    Snapshot-based reads cross-talk with fixture tests (snapshot's
-    source_path is unrelated to caller's path).  An earlier
-    snapshot-first variant was reverted because it broke the
-    [?config_path:None -> []] contract relied on by
-    [test_declared_provider_schemes_handles_missing_path]. *)
+    Path-explicit reads validate that exact TOML path so fixture tests do
+    not cross-talk through the process-global active snapshot. *)
 let declared_provider_schemes_set ?(config_path : string option) () : StringSet.t =
   match config_path with
   | None -> StringSet.empty
   | Some path ->
-    (match Cascade_config_loader.load_catalog ~config_path:path with
+    (match Cascade_catalog_runtime.validate_path ~config_path:path () with
      | Error _ -> StringSet.empty
-     | Ok entries ->
+     | Ok snapshot ->
        List.fold_left
-         (fun acc (entry : Cascade_config_loader.catalog_entry) ->
-            let models =
-              Cascade_config_loader.load_profile ~config_path:path ~name:entry.name
-            in
+         (fun acc (profile : Cascade_catalog_runtime.profile_build) ->
             List.fold_left
-              (fun acc m -> StringSet.add (provider_scheme_of_model_string m) acc)
+              (fun acc (candidate : Cascade_catalog_runtime.candidate_runtime) ->
+                 StringSet.add
+                   (provider_scheme_of_model_string candidate.model_string)
+                   acc)
               acc
-              models)
+              profile.candidates)
          StringSet.empty
-         entries)
+         snapshot.profiles)
 ;;
 
 (** Public list version of {!declared_provider_schemes_set}.  Sorted and

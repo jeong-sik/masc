@@ -23,8 +23,8 @@ let with_base_path f =
   Unix.mkdir dir 0o755;
   Unix.mkdir (Filename.concat dir Common.masc_dirname) 0o755;
   Unix.mkdir (Filename.concat dir ".masc/config") 0o755;
-  let oc = open_out (Filename.concat dir ".masc/config/cascade.json") in
-  output_string oc "{}\n";
+  let oc = open_out (Filename.concat dir ".masc/config/cascade.toml") in
+  output_string oc "";
   close_out oc;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 

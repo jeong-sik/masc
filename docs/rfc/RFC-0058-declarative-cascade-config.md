@@ -56,7 +56,7 @@ Layer 1: [providers.*]     — How to connect (protocol, transport, credentials)
 Layer 2: [models.*]        — What it can do (capabilities, context window)
 Layer 3: [<p>.<m>]         — How much, at what cost (capacity, pricing)
 Layer 4: [<p>.<m>.<a>]     — Per-use overrides (aliases)
-Layer 5: [tier.*] + [tier-group.*] + [routes] — Routing strategy
+Layer 5: [tier.*] + [tier-group.*] + [routes.*] — Routing strategy
 ```
 
 The naming convention IS the reference: `[claude-code.haiku]` implicitly
@@ -112,7 +112,7 @@ type binding = {
 type alias = {
   provider_id : string;
   model_id : string;
-  name : string;              (* e.g. "for-tool-rerank" *)
+  name : string;              (* e.g. "for-scoring" *)
   max_input : int option;
   max_output : int option;
   temperature : float option;
@@ -148,6 +148,7 @@ never by provider name.
 | `"anthropic-http"` | `Messages_api` | `Messages_api_adapter` | Anthropic Messages |
 | `"google-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Google format |
 | `"ollama-http"` | `Ollama_api` | `Ollama_api_adapter` | Ollama native |
+| `"openai-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | OpenAI-compatible CLI |
 | `"openai-http"` | `Chat_completions_api` | `Chat_completions_api_adapter` | OpenAI format |
 | `"kimi-cli"` | `Chat_completions_api` | `Kimi_cli_adapter` | Kimi format |
 
@@ -319,7 +320,7 @@ max-concurrent = 1
 ### 3.5 Layer 4: Aliases (Per-Use Overrides)
 
 ```toml
-[claude-code.haiku.for-tool-rerank]
+[claude-code.haiku.for-scoring]
 max-output = 1024
 temperature = 0.1
 
@@ -350,7 +351,7 @@ fields, overrides specified fields.
 
 ```toml
 [tier.rerank]
-members = ["claude-code.haiku.for-tool-rerank"]
+members = ["claude-code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
@@ -362,7 +363,7 @@ max-concurrent = 5
 members = ["ollama.qwen3-8b"]
 strategy = "failover"
 
-[tier-group.big-three]
+[tier-group.primary]
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 fallback = true
@@ -371,11 +372,17 @@ fallback = true
 tiers = ["rerank"]
 strategy = "failover"
 
-[routes]
-keeper_turn = "big-three"
-governance_judge = "big-three"
-tool_rerank = "rerank-only"
-simple_task = "local"
+[routes.keeper_turn]
+target = "tier-group.primary"
+
+[routes.governance_judge]
+target = "tier-group.primary"
+
+[routes.scoring]
+target = "tier-group.rerank-only"
+
+[routes.simple_task]
+target = "tier.local"
 
 [system.governance]
 target = "claude-code.haiku.for-governance"
@@ -434,7 +441,7 @@ The migration path:
 
 | Current | New |
 |---------|-----|
-| `[big_three]` profile with `models = [...]` | `[tier.primary]` members referencing bindings |
+| `[primary]` profile with `models = [...]` | `[tier.primary]` members referencing bindings |
 | `"claude_code:auto"` model strings | `[claude-code.haiku]` binding + `[models.haiku]` |
 | `_required_capability_profile` field | Per-model `tools-support` + per-route filtering |
 | `cascade_capability_profile.ml` closed variant | Config-driven `api_format` + `transport` |

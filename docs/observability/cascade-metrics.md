@@ -41,7 +41,7 @@ Label cardinality: `3 × 3 = 9 series`.
 
 | Label | Values |
 |-------|--------|
-| `cascade` | cascade profile name (bounded by `cascade.json`, typically < 20) |
+| `cascade` | cascade profile name (bounded by `cascade.toml`, typically < 20) |
 | `strategy` | `failover`, `capacity_aware`, `weighted_random`, `circuit_breaker_cycling`, `priority_tier`, `sticky`, `round_robin` |
 | `kind` | `ordered`, `filtered_empty`, `exhausted` |
 
@@ -116,7 +116,7 @@ Defines the happy path as an error-budget contract: at most 1% of cycles may hit
 - **1.0 – 2.0** — degraded, investigate
 - **> 2.0** — fast burn (`CascadeOrderedSLOFastBurn` alert fires at 1h window)
 
-**Error budget policy**: when 28d burn rate exceeds 2×, freeze non-critical cascade changes (cascade.json edits, strategy swaps) until burn returns below 1×. This gate is manual — the rule only surfaces the number.
+**Error budget policy**: when 28d burn rate exceeds 2×, freeze non-critical cascade changes (cascade.toml edits, strategy swaps) until burn returns below 1×. This gate is manual — the rule only surfaces the number.
 
 ### Exhaustion SLO (≤ 1/day/cascade)
 

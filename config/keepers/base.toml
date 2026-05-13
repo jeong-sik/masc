@@ -1,5 +1,5 @@
 [keeper]
-cascade_name = "big_three"
+cascade_name = "primary"
 sandbox_profile = "docker"
 network_mode = "inherit"
 work_discovery_enabled = true

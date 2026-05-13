@@ -38,8 +38,9 @@ let config_source_text_of_body body_str =
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/cascade/config" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = Dashboard_cascade.config_json () in
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json = Dashboard_cascade.config_json ~base_path () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

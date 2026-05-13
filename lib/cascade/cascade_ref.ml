@@ -36,7 +36,7 @@ type cascade_group = {
 }
 
 (** A named cascade profile containing one or more groups.
-    This is the top-level configuration object loaded from cascade.json. *)
+    This is the top-level configuration object rendered from cascade.toml. *)
 type cascade_profile = {
   name : string;
   groups : cascade_group list;

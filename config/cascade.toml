@@ -32,7 +32,7 @@ tolerates-bound-actor-fallback = true
 
 [providers.codex_cli]
 display-name = "OpenAI Codex CLI"
-protocol = "openai-http"
+protocol = "openai-cli"
 command = "codex"
 is-non-interactive = true
 
@@ -699,11 +699,11 @@ max-concurrent = 2
 # rather than raw `<provider>.<model>` pairs — that is how RFC-0058
 # §2.4 keeps vendor/model identifiers out of OCaml source.
 
-[claude_code.haiku.for-tool-rerank]
+[claude_code.haiku.for-scoring]
 max-output = 1024
 temperature = 0.1
 
-[codex_cli.codex-spark.for-tool-rerank]
+[codex_cli.codex-spark.for-scoring]
 max-output = 1024
 temperature = 0.1
 
@@ -714,28 +714,30 @@ temperature = 0.1
 
 # ── Layer 5: Tiers ─────────────────────────────────────────────
 
-[tier.big_three]
+[tier.primary]
 # Canonical keeper/workflow tier.
 members = ["codex_cli.codex-spark", "kimi_cli.kimi-coding"]
 strategy = "failover"
 
 [tier.keeper_diverse]
 # Fallback tier for contract violation retry. Different model
-# composition from big_three to break correlated failure.
+# composition from primary to break correlated failure.
 members = ["claude_code.sonnet", "gemini_cli.gemini-flash", "codex_cli.codex-spark"]
 strategy = "failover"
 
-[tier.tool_rerank]
+[tier.scoring]
 # System-only short-output tier for rerank/scoring calls.
 # Members are aliases (Layer 4) with reduced max-output.
+keeper-assignable = false
 members = [
-  "codex_cli.codex-spark.for-tool-rerank",
-  "claude_code.haiku.for-tool-rerank",
+  "codex_cli.codex-spark.for-scoring",
+  "claude_code.haiku.for-scoring",
 ]
 strategy = "failover"
 
 [tier.governance]
 # System-only baseline for governance / judge calls.
+keeper-assignable = false
 members = ["claude_code.haiku.for-governance"]
 strategy = "failover"
 
@@ -753,6 +755,7 @@ strategy = "failover"
 [tier.__safe_lane]
 # System-only baseline tier (RFC-0027 PR-4). Last-resort fallback
 # target that satisfies every capability profile. Not keeper-assignable.
+keeper-assignable = false
 members = ["kimi_cli.kimi-coding"]
 strategy = "failover"
 
@@ -763,35 +766,37 @@ strategy = "failover"
 
 # ── Tier-Groups (fallback chains) ──────────────────────────────
 
-[tier-group.big_three]
-tiers = ["big_three", "keeper_diverse", "__safe_lane"]
+[tier-group.primary]
+tiers = ["primary", "keeper_diverse", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
 
 [tier-group.tier_small]
-tiers = ["tier_small", "tier_medium", "big_three"]
+tiers = ["tier_small", "tier_medium", "primary"]
 strategy = "priority_tier"
 fallback = true
 
 [tier-group.tier_medium]
-tiers = ["tier_medium", "big_three"]
+tiers = ["tier_medium", "primary"]
 strategy = "priority_tier"
 fallback = true
 
 [tier-group.local_recovery]
-tiers = ["local_recovery", "big_three"]
+tiers = ["local_recovery", "primary"]
 strategy = "priority_tier"
 fallback = true
 
-[tier-group.tool_rerank]
-tiers = ["tool_rerank", "__safe_lane"]
+[tier-group.scoring]
+tiers = ["scoring", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
+keeper-assignable = false
 
 [tier-group.governance]
 tiers = ["governance", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
+keeper-assignable = false
 
 # ── Routes (logical usage → tier-group) ────────────────────────
 #
@@ -803,16 +808,16 @@ fallback = true
 # documented degradation path.
 
 [routes.keeper_turn]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.phase_recovery]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.phase_buffer]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.tool_required]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.governance_judge]
 target = "tier-group.governance"
@@ -821,34 +826,34 @@ target = "tier-group.governance"
 target = "tier-group.governance"
 
 [routes.cross_verifier]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.verifier]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.autoresearch]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.adversarial_reviewer]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.auto_responder]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.routing]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.openai_compat]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.persona_generation]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.provider_benchmark]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 [routes.llm_rerank]
-target = "tier-group.tool_rerank"
+target = "tier-group.scoring"
 
 [routes.simple_task]
 target = "tier-group.tier_small"
@@ -857,7 +862,7 @@ target = "tier-group.tier_small"
 target = "tier-group.tier_medium"
 
 [routes.complex_task]
-target = "tier-group.big_three"
+target = "tier-group.primary"
 
 # ── Profiles (capability requirements per route class) ─────────
 

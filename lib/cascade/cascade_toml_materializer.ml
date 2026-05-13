@@ -1,9 +1,4 @@
-(* RFC-0058 §9 Phase 9.3: cascade.json is no longer generated or
-   consumed. The previous [Json] variant of [source_kind] modelled the
-   "operator committed cascade.json without a TOML sibling" mode, which
-   is now disallowed — TOML is the sole SSOT. The variant is kept as a
-   single-arm union so external [source_kind_to_string] callers keep
-   working; future cleanup may drop the type entirely. *)
+(* RFC-0058 §9 Phase 9.3: cascade.toml is the sole cascade source. *)
 type source_kind = Toml [@tla.symbol "toml"] [@@deriving tla]
 
 type source_info =
@@ -19,24 +14,8 @@ type source_state =
 
 let source_kind_to_string Toml = "toml"
 
-let toml_path_of_json_path config_path =
-  Filename.concat (Filename.dirname config_path) Config_dir_resolver.cascade_toml_filename
-;;
-
-(* Accept either a TOML path or a path that points to where a JSON file
-   used to live — we always resolve to the TOML sibling. If neither
-   exists we still return a path so callers can probe via
-   [source_state.source_exists]; an actual read will fail loudly. *)
 let source_info ~config_path =
-  let toml_path = toml_path_of_json_path config_path in
-  let source_path =
-    if Fs_compat.file_exists toml_path
-    then toml_path
-    else if Filename.check_suffix config_path ".toml"
-    then config_path
-    else toml_path
-  in
-  { kind = Toml; source_path }
+  { kind = Toml; source_path = config_path }
 ;;
 
 let source_state ~config_path =
@@ -164,7 +143,7 @@ let model_entry_json ~path value =
               (* #10571: weight=0 means "configured but disabled"
                        (cascade dispatcher skips the entry).  Pre-fix the
                        validator rejected weight=0, breaking dashboard
-                       cascade.json materialization on every hot-reload
+                       cascade.toml rendering on every hot-reload
                        once #10097 introduced explicit weight=0 entries
                        to disable codex_cli without removing it from the
                        seed list.  Negative weights stay rejected — they
@@ -291,7 +270,7 @@ let api_key_env_json ~path value =
 
    Without this, every [admission.<keeper>] sub-table breaks the
    materializer (treated as a profile, sub-table keys rejected as
-   "unknown field"), which fails cascade.json materialization and
+   "unknown field"), which fails cascade.toml rendering and
    takes down every keeper that resolves a cascade through cascade.toml
    — not just the keepers with admission blocks.  The error is a
    single fleet-wide regression, so the materializer needs to know
@@ -322,18 +301,17 @@ let routes_json ~path value =
       | [] -> Ok (`Assoc (List.rev acc))
       | (key, field_value) :: rest ->
         let item_path = Printf.sprintf "%s.%s" path key in
-        (* Two route encodings are accepted:
-               1. Legacy:   [routes] keeper_turn = "tier:big_three"
-               2. RFC-0058: [routes.keeper_turn] target = "tier-group.big_three"
-               The latter is materialized as a JSON object, leaving target
-               extraction to [Cascade_declarative_parser]. *)
+        (* Route entries are declarative subtables:
+               [routes.keeper_turn] target = "tier-group.primary"
+           The subtable is materialized as a JSON object, leaving target
+           extraction to [Cascade_declarative_parser]. *)
         (match field_value with
          | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
            loop ((key, otoml_to_yojson field_value) :: acc) rest
          | _ ->
-           (match trimmed_nonempty_string ~path:item_path field_value with
-            | Ok target -> loop ((key, `String target) :: acc) rest
-            | Error _ as err -> err))
+           errorf
+             "%s must be a subtable with target = \"tier-or-tier-group\""
+             item_path)
     in
     loop [] fields
 ;;
@@ -454,7 +432,7 @@ let render_toml_to_yojson toml =
           then loop ([ key, otoml_to_yojson value ] :: acc) rest
           else
             errorf
-              "legacy flat cascade TOML profile %S is no longer supported; use \
+              "flat cascade TOML profile %S is no longer supported; use \
                RFC-0058 declarative namespaces ([providers.*], [models.*], \
                [<provider>.<binding>], [tier.*], [tier-group.*], [routes.*])"
               key)
@@ -487,7 +465,7 @@ let render_toml_to_json_string ~config_path =
     Error (Printf.sprintf "failed to materialize from %s: %s" source.source_path msg)
 ;;
 
-(* RFC-0058 §9 Phase 9.3: [ensure_materialized_json] retired. cascade.json
-   is no longer generated or consumed; rendering happens in-memory via
+(* RFC-0058 §9 Phase 9.3: [ensure_materialized_json] retired. cascade.toml
+   rendering happens in-memory via
    [render_toml_to_json_string]. The disk-write path and
    [materialize_result] type are gone. *)

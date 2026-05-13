@@ -64,7 +64,7 @@ progress" from "hung turn that will never complete".
   `900 s+` floor (`lib/keeper/keeper_stale_watchdog.ml:405-418`).
 - **Permitted (per-cascade override, added 2026-05-06)**: a cascade
   profile in `config/cascade.toml` may declare its own
-  `turn_timeout_sec`. Checked-in remote/CLI profiles (`big_three`,
+  `turn_timeout_sec`. Checked-in remote/CLI profiles (`primary`,
   `keeper_diverse`, `retired_fast_profile`, `tier_medium`) run at 600 s.
   Operator-populated local-model profiles run at 900 s when they
   declare local providers (for example, `tier_small` with its Ollama

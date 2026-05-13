@@ -52,18 +52,9 @@ type inputs = {
 (** {1 SSOT filenames}
 
     Documented in [docs/TOML-RELOAD-MATRIX.md]. *)
-val cascade_json_filename : string
 val cascade_toml_filename : string
 val tool_policy_toml_filename : string
 val keeper_runtime_toml_filename : string
-
-val legacy_cascade_json_warning_prefix : string
-(** SSOT first sentence of the "operator left cascade.json behind after
-    migrating to cascade.toml" warning. Both [resolve]'s startup
-    warnings and [Config_doctor.diagnose_cascade_catalog] open with this
-    exact sentence and append a context-specific operator action.
-    Centralizing the prefix keeps the two operator-facing surfaces from
-    drifting on the part that identifies the condition. *)
 
 val inputs_from_env : unit -> inputs
 (** Snapshot current environment (cwd, executable, env vars). *)
@@ -101,7 +92,7 @@ val keeper_toml_path_opt : string -> string option
 
 val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid
-    MASC config directory (has cascade.json, prompts/, keepers/, or personas/). *)
+    MASC config directory (has cascade.toml, prompts/, keepers/, or personas/). *)
 
 (** {1 Env introspection}
 

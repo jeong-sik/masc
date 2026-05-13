@@ -19,9 +19,12 @@ import json
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+GH_RETRIES = 3
 
 
 @dataclass(frozen=True)
@@ -41,30 +44,66 @@ class AxisRisk:
         )
 
 
-def _run_gh(args: List[str]) -> dict:
+def _run_gh(args: List[str]) -> Any:
     """Run gh cli and return JSON output."""
-    result = subprocess.run(
-        ["gh", "api"] + args,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"gh api error: {result.stderr}", file=sys.stderr)
-        sys.exit(2)
-    return json.loads(result.stdout)
+    rendered_args = " ".join(args)
+    for attempt in range(1, GH_RETRIES + 1):
+        result = subprocess.run(
+            ["gh", "api"] + args,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            if attempt < GH_RETRIES:
+                time.sleep(attempt)
+                continue
+            print(
+                f"gh api error for {rendered_args}: {result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            if attempt < GH_RETRIES:
+                time.sleep(attempt)
+                continue
+            print(
+                f"gh api invalid JSON for {rendered_args}: {exc}; "
+                f"stdout={result.stdout[:500]!r}; stderr={result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    raise AssertionError("unreachable gh api retry loop")
 
 
 def _run_gh_graphql(query: str) -> dict:
     """Run gh graphql query and return data."""
-    result = subprocess.run(
-        ["gh", "api", "graphql", "-f", f"query={query}"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"gh graphql error: {result.stderr}", file=sys.stderr)
-        sys.exit(2)
-    return json.loads(result.stdout)
+    for attempt in range(1, GH_RETRIES + 1):
+        result = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={query}"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            if attempt < GH_RETRIES:
+                time.sleep(attempt)
+                continue
+            print(f"gh graphql error: {result.stderr.strip()}", file=sys.stderr)
+            sys.exit(2)
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            if attempt < GH_RETRIES:
+                time.sleep(attempt)
+                continue
+            print(
+                f"gh graphql invalid JSON: {exc}; "
+                f"stdout={result.stdout[:500]!r}; stderr={result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    raise AssertionError("unreachable gh graphql retry loop")
 
 
 def get_repo_slug() -> Tuple[str, str]:
@@ -105,27 +144,50 @@ def merge_commit_already_in_base(
     return status in ("ahead", "identical")
 
 
+def _payload_preview(payload: Any) -> str:
+    rendered = json.dumps(payload, sort_keys=True)
+    if len(rendered) > 1000:
+        return rendered[:997] + "..."
+    return rendered
+
+
+def _pr_file_items(resp: Any, pr_number: int, page: int) -> List[Dict[str, Any]]:
+    if not isinstance(resp, list):
+        print(
+            f"gh api unexpected PR files payload for #{pr_number} page {page}: "
+            f"expected list, got {type(resp).__name__}: {_payload_preview(resp)}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    items: List[Dict[str, Any]] = []
+    for idx, item in enumerate(resp):
+        if not isinstance(item, dict) or not isinstance(item.get("filename"), str):
+            print(
+                f"gh api unexpected PR files item for #{pr_number} page {page} "
+                f"at index {idx}: {_payload_preview(item)}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        items.append(item)
+    return items
+
+
 def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
     """Get set of file paths changed in a PR."""
-    files: List[dict] = []
+    files: Set[str] = set()
     page = 1
     while True:
-        resp = _run_gh([
-            f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
-            "--paginate",
-        ])
-        if isinstance(resp, list):
-            batch = resp
-        else:
-            break
-        if not batch:
-            break
-        files.extend(batch)
-        if len(batch) < 100:
+        resp = _run_gh(
+            [f"/repos/{owner}/{repo}/pulls/{pr_number}/files?per_page=100&page={page}"]
+        )
+        items = _pr_file_items(resp, pr_number, page)
+        for item in items:
+            files.add(item["filename"])
+        if len(items) < 100:
             break
         page += 1
-
-    return {f["filename"] for f in files}
+    return files
 
 
 def get_recently_merged_prs(
@@ -336,34 +398,34 @@ def main() -> int:
     if not args.pr:
         parser.error("Either --pr or --scan-all-open is required")
 
-    risks = check_pr_axis_stale(args.pr, owner, repo, args.hours, args.limit)
-    blockers = [r for r in risks if _block(r)]
-    warnings = [r for r in risks if not _block(r)]
+    single_risks = check_pr_axis_stale(args.pr, owner, repo, args.hours, args.limit)
+    single_blockers = [r for r in single_risks if _block(r)]
+    single_warnings = [r for r in single_risks if not _block(r)]
 
     if args.json:
         print(json.dumps([
             {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
-            for r in blockers
+            for r in single_blockers
         ], indent=2))
     else:
-        if warnings:
-            print(f"Found {len(warnings)} LOW-confidence overlap(s) for PR #{args.pr} (informational only):\n")
+        if single_warnings:
+            print(f"Found {len(single_warnings)} LOW-confidence overlap(s) for PR #{args.pr} (informational only):\n")
             print("| Merged PR | Risk Type | Overlap Files | Confidence |")
             print("|-----------|-----------|---------------|------------|")
-            for r in warnings:
+            for r in single_warnings:
                 print(r.to_markdown())
             print()
-        if blockers:
-            total = len(blockers)
+        if single_blockers:
+            total = len(single_blockers)
             print(f"Found {total} blocking risk(s) for PR #{args.pr}:\n")
             print("| Merged PR | Risk Type | Overlap Files | Confidence |")
             print("|-----------|-----------|---------------|------------|")
-            for r in blockers:
+            for r in single_blockers:
                 print(r.to_markdown())
             print()
             print("Recommended action: rebase on latest main and run `dune build @check`.")
             return 1
-        if not warnings:
+        if not single_warnings:
             print(f"No axis risks found for PR #{args.pr}.")
 
     return 0

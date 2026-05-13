@@ -38,7 +38,7 @@ let provider_attempt_status_and_error_of_exception = function
 (** Run a single Agent.run() call with MASC-driven cascade model fallback.
 
     MASC drives the cascade FSM directly:
-    - Resolves cascade providers from cascade.json
+    - Resolves cascade providers from cascade.toml
     - For each provider, runs OAS with a single provider
     - Uses Cascade_fsm.decide to determine next action on failure
     - Cascade loop runs inside Admission_queue permit
@@ -977,7 +977,7 @@ let run_named
   in
   (* Pluggable strategy + cycle/backoff wrapper (since 0.9.6).
 
-     When no [<name>_strategy] is configured in cascade.json,
+     When no [<name>_strategy] is configured in cascade.toml,
      [Cascade_config.resolve_strategy] returns [Cascade_strategy.failover]
      with [max_cycles = 1].  In that case [cycle_loop] invokes
      [try_cascade] exactly once on the original [candidate_cfgs] —

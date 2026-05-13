@@ -19,7 +19,7 @@ code as **bare string literals** scattered across modules:
 | Identifier kind | SSOT location | Example drift sites | Drift count (`rg "<name>"` lib) |
 |-----------------|---------------|---------------------|---------------------------------|
 | Provider name (e.g. "ollama") | `Provider_adapter.cn_ollama` | `keeper_status_detail.ml:199`, `cascade_config.ml:277`, `keeper_mcp_provider_audit.ml:85`, `server_routes_http_routes_cascade.ml:16` | 20+ across 14 files |
-| Cascade name (e.g. "big_three") | `Keeper_cascade_profile.t` variant | `cascade_routes.ml:65-94`, `cascade_config_loader.ml`, `cascade_routes.mli` | 5 files |
+| Cascade name (e.g. "primary") | `Keeper_cascade_profile.t` variant | `cascade_routes.ml:65-94`, `cascade_config_loader.ml`, `cascade_routes.mli` | 5 files |
 | Model id (e.g. "qwen3-coder:30b") | `cascade.toml` (data) | scattered string equality checks across cascade resolvers, telemetry tags |  highly variable |
 
 These identifiers are **external to the codebase** — they come from

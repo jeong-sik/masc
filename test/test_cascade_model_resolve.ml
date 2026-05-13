@@ -246,17 +246,17 @@ let test_expand_model_strings_for_execution_rotation_scope_rotates () =
     State.clear_all ();
     let first =
       C.expand_model_strings_for_execution
-        ~rotation_scope:"big_three"
+        ~rotation_scope:"primary"
         [ "gemini_cli:auto" ]
     in
     let second =
       C.expand_model_strings_for_execution
-        ~rotation_scope:"big_three"
+        ~rotation_scope:"primary"
         [ "gemini_cli:auto" ]
     in
     let other_scope =
       C.expand_model_strings_for_execution
-        ~rotation_scope:"tool_rerank"
+        ~rotation_scope:"scoring"
         [ "gemini_cli:auto" ]
     in
     check
@@ -288,15 +288,15 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
       }
     in
     let first =
-      C.order_weighted_entries ~rotation_scope:"big_three" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"primary" [ entry "codex_cli:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let second =
-      C.order_weighted_entries ~rotation_scope:"big_three" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"primary" [ entry "codex_cli:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let other_scope =
-      C.order_weighted_entries ~rotation_scope:"tool_rerank" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"scoring" [ entry "codex_cli:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     check
@@ -327,19 +327,19 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
       [ entry "claude_code:auto"; entry "codex_cli:auto"; entry "gemini_cli:auto" ]
     in
     let first =
-      C.order_weighted_entries ~rotation_scope:"big_three" entries
+      C.order_weighted_entries ~rotation_scope:"primary" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let second =
-      C.order_weighted_entries ~rotation_scope:"big_three" entries
+      C.order_weighted_entries ~rotation_scope:"primary" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let third =
-      C.order_weighted_entries ~rotation_scope:"big_three" entries
+      C.order_weighted_entries ~rotation_scope:"primary" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let other_scope =
-      C.order_weighted_entries ~rotation_scope:"tool_rerank" entries
+      C.order_weighted_entries ~rotation_scope:"scoring" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     check
@@ -355,7 +355,7 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
     check
       string
       "third call rotates to gemini provider"
-      "gemini_cli:gemini-3-flash-preview"
+      "gemini_cli:gemini-3.1-pro-preview"
       (List.hd third);
     check
       string

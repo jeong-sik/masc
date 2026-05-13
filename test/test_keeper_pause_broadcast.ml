@@ -386,7 +386,7 @@ let test_stale_broadcast_payload_uses_low_cardinality_stale_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(R.cascade_name_of_string "big_three")
+      ~cascade_name:(R.cascade_name_of_string "primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:None
@@ -431,7 +431,7 @@ let test_stale_broadcast_payload_preserves_provider_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(R.cascade_name_of_string "big_three")
+      ~cascade_name:(R.cascade_name_of_string "primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)
@@ -474,7 +474,7 @@ let test_stale_broadcast_payload_preserves_required_tool_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(R.cascade_name_of_string "big_three")
+      ~cascade_name:(R.cascade_name_of_string "primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)
@@ -514,7 +514,7 @@ let test_stale_broadcast_payload_preserves_timeout_budget_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(R.cascade_name_of_string "big_three")
+      ~cascade_name:(R.cascade_name_of_string "primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)

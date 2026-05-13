@@ -913,7 +913,7 @@ end
 (** {1 Cascade Runtime Overrides}
 
     Runtime-only narrowing of the MASC cascade provider set. The underlying
-    cascade profile (loaded from [cascade.json]) is unchanged; this filter is
+    cascade profile (loaded from [cascade.toml]) is unchanged; this filter is
     applied by the named-cascade execution path via [~provider_filter] on every
     keeper turn, so switching between full cascade and a single-provider
     fallback is a pure env-var change with no file or code edit.

@@ -87,7 +87,7 @@ let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
   let source_root = Masc_test_deps.find_project_root () in
   let fake_config_dir = Filename.concat fake_build_root "config" in
   mkdir_p fake_config_dir;
-  write_file (Filename.concat fake_config_dir "cascade.json") "{}\n";
+  write_file (Filename.concat fake_config_dir "cascade.toml") "";
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
   with_cwd fake_build_root @@ fun () ->
   match KTPC.load ~base_path:source_root with

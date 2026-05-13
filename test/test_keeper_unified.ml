@@ -1182,7 +1182,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
 
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   let meta =
-    { (Masc_mcp.Keeper_types.set_cascade_name "tool_rerank" minimal_meta) with
+    { (Masc_mcp.Keeper_types.set_cascade_name "scoring" minimal_meta) with
       current_task_id =
         (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
          | Ok value -> Some value
@@ -5862,7 +5862,7 @@ let test_decide_local_only_liveness_keeps_phase_buffer_route () =
   let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
   match
     UT.decide_local_only_liveness
-      ~base_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
       ~effective_cascade:KC.local_only_cascade_name
       [ label; label ]
   with
@@ -5879,7 +5879,7 @@ let test_fail_open_local_only_when_probe_fails () =
   let cascade =
     UT.fail_open_local_only_when_unavailable
       ~probe_base_url:(fun _ -> false)
-      ~base_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
       ~effective_cascade:KC.local_only_cascade_name
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
@@ -5913,7 +5913,7 @@ let test_fail_open_local_only_preserves_healthy_local_only () =
   let cascade =
     UT.fail_open_local_only_when_unavailable
       ~probe_base_url:(fun _ -> true)
-      ~base_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
       ~effective_cascade:KC.local_only_cascade_name
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
@@ -6188,7 +6188,7 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
          (Masc_mcp.Keeper_turn_driver.Admission_queue_timeout
             { keeper_name = "nick0cave"
-            ; cascade_name = oas_error_cascade_name "big_three"
+            ; cascade_name = oas_error_cascade_name "primary"
             ; wait_sec = 90.0
             }))
   in
@@ -6288,8 +6288,8 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery 
 let test_fallback_cascade_for_unavailable_profile_prefers_default () =
   let fallback =
     EC.fallback_cascade_for_unavailable_profile
-      ~base_cascade:"tool_rerank"
-      ~effective_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
+      ~effective_cascade:"scoring"
   in
   check
     (option string)
@@ -6301,23 +6301,23 @@ let test_fallback_cascade_for_unavailable_profile_prefers_default () =
 let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override () =
   let fallback =
     EC.fallback_cascade_for_unavailable_profile
-      ~base_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
       ~effective_cascade:KC.local_recovery_cascade_name
   in
   check
     (option string)
     "phase override fallback target is base cascade"
-    (Some "tool_rerank")
+    (Some "scoring")
     fallback
 ;;
 
 let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"tool_rerank"
-      ~effective_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
+      ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "tool_rerank" ]
+      ~attempted_cascades:[ "scoring" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6330,10 +6330,10 @@ let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
 let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"tool_rerank"
-      ~effective_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
+      ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "tool_rerank"; KC.default_cascade_name () ]
+      ~attempted_cascades:[ "scoring"; KC.default_cascade_name () ]
       (wrapped_claude_limit_error ())
   in
   check
@@ -6346,11 +6346,11 @@ let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
 let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"tool_rerank"
-      ~effective_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
+      ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
-        [ "tool_rerank"; KC.default_cascade_name (); KC.local_recovery_cascade_name ]
+        [ "scoring"; KC.default_cascade_name (); KC.local_recovery_cascade_name ]
       (wrapped_claude_limit_error ())
   in
   check bool "exhausted rotation group suppressed" true (Option.is_none degraded_retry)
@@ -6359,10 +6359,10 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
 let test_next_fail_open_cascade_for_required_tool_uses_default_not_strict () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"tool_rerank"
-      ~effective_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
+      ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "tool_rerank" ]
+      ~attempted_cascades:[ "scoring" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6375,7 +6375,7 @@ let test_next_fail_open_cascade_for_required_tool_uses_default_not_strict () =
 let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       ~attempted_cascades:[ "strict_exec" ]
@@ -6383,7 +6383,7 @@ let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
   in
   expect_degraded_retry
     "required tool degraded retry"
-    "tool_rerank"
+    "scoring"
     "hard_quota"
     degraded_retry
 ;;
@@ -6409,11 +6409,11 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
     UT.next_fail_open_cascade_for_turn
       ~rotation_cascades:
         [ KC.default_cascade_name (); KC.local_recovery_cascade_name; "ollama_only" ]
-      ~base_cascade:"tool_rerank"
-      ~effective_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
+      ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
-        [ "tool_rerank"; KC.default_cascade_name (); KC.local_recovery_cascade_name ]
+        [ "scoring"; KC.default_cascade_name (); KC.local_recovery_cascade_name ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry "catalog degraded retry" "ollama_only" "hard_quota" degraded_retry
@@ -6423,10 +6423,10 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~rotation_cascades:[ "resilient_profile" ]
-      ~base_cascade:"tool_rerank"
-      ~effective_cascade:"tool_rerank"
+      ~base_cascade:"scoring"
+      ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "tool_rerank" ]
+      ~attempted_cascades:[ "scoring" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6473,7 +6473,7 @@ let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_ca
 let test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; " big_three " ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; " primary " ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6482,7 +6482,7 @@ let test_degraded_rotation_after_recoverable_error_filters_required_catalog_dire
   in
   expect_degraded_retry
     "required catalog classifier rotation"
-    "big_three"
+    "primary"
     "required_tool_contract_violation"
     degraded_retry
 ;;
@@ -6490,12 +6490,12 @@ let test_degraded_rotation_after_recoverable_error_filters_required_catalog_dire
 let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_tool () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "big_three"; "local_recovery" ]
+      ~rotation_cascades:[ "primary"; "local_recovery" ]
       ~fallback_hint:"local_recovery"
       ~base_cascade:"primary_required"
       ~effective_cascade:"secondary_required"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "primary_required"; "secondary_required"; "big_three" ]
+      ~attempted_cascades:[ "primary_required"; "secondary_required"; "primary" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry
@@ -6508,11 +6508,11 @@ let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_to
 let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ ""; " tool_rerank "; " catalog_next "; "catalog_next" ]
-      ~base_cascade:" tool_rerank "
-      ~effective_cascade:"tool_rerank"
+      ~rotation_cascades:[ ""; " scoring "; " catalog_next "; "catalog_next" ]
+      ~base_cascade:" scoring "
+      ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "tool_rerank" ]
+      ~attempted_cascades:[ "scoring" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6525,7 +6525,7 @@ let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly (
 let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; "big_three" ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; "primary" ]
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6543,7 +6543,7 @@ let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
 let test_degraded_rotation_skips_already_attempted_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; "big_three" ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; "primary" ]
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6561,7 +6561,7 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
 let test_degraded_rotation_ignores_blank_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; "big_three" ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; "primary" ]
       ~fallback_hint:"   "
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"

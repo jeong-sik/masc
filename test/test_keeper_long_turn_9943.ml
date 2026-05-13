@@ -184,7 +184,7 @@ let test_record_by_model_bucket () =
       ~provider_kind:"claude_code"
       ~model_used:"claude_code:auto"
       ~resolved_model_id:"claude-sonnet-4.7"
-      ~cascade_profile:"big_three"
+      ~cascade_profile:"primary"
       ~bucket:"over_1200s"
   in
   M.record_turn_latency_by_model_bucket
@@ -192,7 +192,7 @@ let test_record_by_model_bucket () =
     ~channel:"scheduled_autonomous"
     ~model_used:"claude_code:auto"
     ~resolved_model_id:"claude-sonnet-4.7"
-    ~cascade_profile:"big_three"
+    ~cascade_profile:"primary"
     ~latency_ms:1_200_000;
   Alcotest.(check (float 0.0001))
     "by-model over_1200s bucket +1"
@@ -203,7 +203,7 @@ let test_record_by_model_bucket () =
        ~provider_kind:"claude_code"
        ~model_used:"claude_code:auto"
        ~resolved_model_id:"claude-sonnet-4.7"
-       ~cascade_profile:"big_three"
+       ~cascade_profile:"primary"
        ~bucket:"over_1200s");
   Alcotest.(check (float 0.0001))
     "different cascade unchanged"

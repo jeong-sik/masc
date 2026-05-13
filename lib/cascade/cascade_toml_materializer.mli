@@ -6,8 +6,7 @@
     no disk artifact is written. (RFC-0058 §9 Phase 9.3.)
 
     Internal helpers (the OTOML→Yojson value translators
-    [toml_path_of_json_path], [toml_type_name], [errorf],
-    [json_string_list], [table_fields], [string_value],
+    [toml_type_name], [errorf], [json_string_list], [table_fields], [string_value],
     [trimmed_nonempty_string], [bool_value], [int_value],
     [float_value], [string_array_value], [string_matrix_value],
     [model_entry_json], [model_array_value], [api_key_env_json],
@@ -17,11 +16,9 @@
 
 (** {1 Source identity} *)
 
-(** RFC-0058 §9 Phase 9.3: cascade.json is no longer generated or
-    consumed. The [source_kind] variant is retained as a single arm
-    ([Toml]) so external [source_kind_to_string] callers keep working.
-    A future cleanup may drop the type entirely once those callers
-    migrate. *)
+(** RFC-0058 §9 Phase 9.3: cascade.toml is the sole cascade source.
+    The [source_kind] variant is retained as a single arm ([Toml]) so
+    external [source_kind_to_string] callers keep working. *)
 type source_kind = Toml [@@deriving tla]
 
 type source_info =
@@ -38,7 +35,8 @@ type source_state =
 (** Always returns ["toml"] after RFC-0058 §9 Phase 9.3. *)
 val source_kind_to_string : source_kind -> string
 
-(** Resolve to the [cascade.toml] alongside [config_path]. *)
+(** Return [config_path] as the active TOML source path. Callers must pass
+    the resolved [cascade.toml] path; JSON sibling compatibility is gone. *)
 val source_info : config_path:string -> source_info
 
 (** {!source_info} plus the existence flag and mtime of the source

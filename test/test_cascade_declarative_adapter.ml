@@ -130,13 +130,13 @@ max-concurrent = 3
 [claude_code.sonnet]
 max-concurrent = 2
 
-[claude_code.haiku.for-tool-rerank]
+[claude_code.haiku.for-scoring]
 max-input = 4096
 
 [ollama.qwen3]
 
 [tier.rerank]
-members = ["claude_code.haiku.for-tool-rerank"]
+members = ["claude_code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
@@ -147,15 +147,15 @@ strategy = "failover"
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.big-three]
+[tier-group.primary]
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 
 [routes.default]
-target = "tier-group.big-three"
+target = "tier-group.primary"
 
 [system.governance]
-target = "claude_code.haiku.for-tool-rerank"
+target = "claude_code.haiku.for-scoring"
 |}
 ;;
 
@@ -175,7 +175,7 @@ let test_valid_tier_profiles () =
   check bool "has tier.rerank" true (List.mem "tier.rerank" tier_names);
   check bool "has tier.primary" true (List.mem "tier.primary" tier_names);
   check bool "has tier.local" true (List.mem "tier.local" tier_names);
-  check bool "has tier-group.big-three" true (List.mem "tier-group.big-three" tier_names)
+  check bool "has tier-group.primary" true (List.mem "tier-group.primary" tier_names)
 ;;
 
 let test_valid_tier_members_resolved () =
@@ -188,13 +188,13 @@ let test_valid_tier_members_resolved () =
 
 let test_valid_tier_group_flattened () =
   let catalog = adapt_toml valid_toml in
-  let big_three =
+  let primary =
     List.find
-      (fun (p : adapted_profile) -> p.name = "tier-group.big-three")
+      (fun (p : adapted_profile) -> p.name = "tier-group.primary")
       catalog.profiles
   in
   (* primary has 2 members + local has 1 member = 3 provider_configs *)
-  check int "big-three has 3 provider_configs" 3 (List.length big_three.provider_configs)
+  check int "primary has 3 provider_configs" 3 (List.length primary.provider_configs)
 ;;
 
 let test_valid_routes () =
@@ -202,9 +202,9 @@ let test_valid_routes () =
   let route_targets = List.map snd catalog.routes in
   check
     bool
-    "routes to tier-group.big-three"
+    "routes to tier-group.primary"
     true
-    (List.mem "tier-group.big-three" route_targets)
+    (List.mem "tier-group.primary" route_targets)
 ;;
 
 let test_valid_system_targets () =
@@ -214,7 +214,7 @@ let test_valid_system_targets () =
     bool
     "system target is alias key"
     true
-    (List.mem "claude_code.haiku.for-tool-rerank" targets)
+    (List.mem "claude_code.haiku.for-scoring" targets)
 ;;
 
 let test_valid_default_profile () =
@@ -501,6 +501,7 @@ let test_alias_parent_missing () =
           ; cycle_policy = None
           ; sticky_ttl_ms = None
           ; scoring_params = None
+          ; keeper_assignable = None
           }
         ]
     ; tier_groups = []
@@ -766,6 +767,7 @@ let test_duplicate_routes () =
           ; cycle_policy = None
           ; sticky_ttl_ms = None
           ; scoring_params = None
+          ; keeper_assignable = None
           }
         ]
     ; tier_groups = []

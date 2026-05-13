@@ -116,7 +116,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.json") "{\"seed\":\"repo\"}";
+  write_file (Filename.concat config "cascade.toml") "# repo cascade seed\n";
   config
 
 let write_fake_eio_exe exe_path ~marker =
@@ -262,7 +262,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
       make_fake_eio_exe dir;
       let home_dir = Filename.concat dir "home" in
       mkdir_p (Filename.concat home_dir ".masc/config/prompts");
-      write_file (Filename.concat home_dir ".masc/config/cascade.json") "{}";
+      write_file (Filename.concat home_dir ".masc/config/cascade.toml") "";
       let bootstrapped_config =
         Filename.concat (canonical_path dir) ".masc/config"
       in
@@ -291,7 +291,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
         (contains_substring captured_default
            ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
       check bool "base path config bootstrapped" true
-        (Sys.file_exists (Filename.concat bootstrapped_config "cascade.json"));
+        (Sys.file_exists (Filename.concat bootstrapped_config "cascade.toml"));
       let capture_override = Filename.concat dir "captured-override.txt" in
       let code_override, stdout_override, stderr_override =
         run_shell ~cwd:dir
@@ -348,7 +348,7 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
         (contains_substring captured
            ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
       check bool "repo config copied to base path config" true
-        (Sys.file_exists (Filename.concat bootstrapped_config "cascade.json")))
+        (Sys.file_exists (Filename.concat bootstrapped_config "cascade.toml")))
 
 let test_default_base_path_falls_back_to_home_when_unset () =
   with_temp_dir "start-masc-script-home-fallback" (fun dir ->

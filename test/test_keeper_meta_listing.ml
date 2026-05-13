@@ -54,6 +54,30 @@ let write_json path json =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let write_minimal_cascade_toml config_root =
+  write_file
+    (Filename.concat config_root "cascade.toml")
+    {|[providers.custom]
+protocol = "openai-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.mock]
+api-name = "mock"
+max-context = 128000
+tools-support = true
+
+[custom.mock]
+
+[tier.keeper_unified]
+members = ["custom.mock"]
+
+[tier-group.keeper_unified]
+tiers = ["keeper_unified"]
+
+[routes.keeper_turn]
+target = "tier-group.keeper_unified"
+|}
+
 let write_keeper_toml_exn ?autoboot_enabled config ~name =
   let keepers_dir =
     Filename.concat (Coord.masc_root_dir config) "config/keepers"
@@ -197,6 +221,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_toml_exn config ~name:"dot.name";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
@@ -260,7 +285,11 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       let json_detailed = parse_json_exn body_detailed in
       let listed_detailed =
         Yojson.Safe.Util.(
-          json_detailed |> member "keepers" |> to_list |> filter_string)
+          json_detailed |> member "keepers" |> to_list
+          |> List.filter_map (fun row ->
+                 match row |> member "name" with
+                 | `String name -> Some name
+                 | _ -> None))
       in
       check (list string)
         "tool keeper list (detailed) includes persisted keepers"
@@ -271,7 +300,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       check int
         "tool keeper list (detailed) rows include persisted keepers" 2
         Yojson.Safe.Util.(
-          json_detailed |> member "items" |> to_list |> List.length))
+          json_detailed |> member "keepers" |> to_list |> List.length))
 
 let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
   Eio_main.run @@ fun env ->
@@ -290,6 +319,7 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn
@@ -315,6 +345,7 @@ let test_declarative_autoboot_disabled_skips_boot_without_meta () =
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn ~autoboot_enabled:false config ~name:"sangsu";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       let bootable_names = Keeper_runtime.bootable_keeper_names config in
@@ -342,12 +373,8 @@ let test_autoboot_policy_resync_from_declarative_toml () =
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn ~autoboot_enabled:false config ~name:"sangsu";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
-      let cascade_path = Filename.concat config_root "cascade.json" in
-      write_file
-        cascade_path
-        {|{
-  "big_three_models": ["test-only:model"]
-}|};
+      let cascade_path = Filename.concat config_root "cascade.toml" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       Cascade_catalog_runtime.install_snapshot_for_tests
@@ -380,6 +407,7 @@ let test_keeper_up_uses_toml_autoboot_default () =
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn ~autoboot_enabled:false config ~name:keeper_name;
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       let ctx = keeper_ctx env sw config "operator" in
@@ -498,6 +526,7 @@ let test_keeper_persona_audit_reports_durable_live_persona_keeper () =
         ~persona_name:"analyst";
       write_keeper_meta_exn config ~name:"analyst" ~trace_id:"trace-analyst";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       (match Keeper_types.read_meta config "analyst" with
@@ -565,6 +594,7 @@ let test_keeper_persona_audit_flags_missing_persona_runtime () =
       write_keeper_persona_toml_exn config ~name:"ghost"
         ~persona_name:"missing-persona";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       let ctx = keeper_ctx env sw config "operator" in
@@ -629,6 +659,7 @@ let test_keeper_persona_audit_flags_runtime_meta_parse_error () =
       write_keeper_persona_toml_exn config ~name:"broken" ~persona_name:"broken";
       write_corrupt_keeper_meta_exn config ~name:"broken";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       let ctx = keeper_ctx env sw config "operator" in

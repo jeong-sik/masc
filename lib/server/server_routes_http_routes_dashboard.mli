@@ -3,9 +3,8 @@
 
     Top-level router builder for [/api/v1/broadcast],
     [/api/v1/dashboard/*], and the broader operator-facing JSON
-    surface. Cascade-profile gate accessors are exposed for
-    [test_cascade_catalog_runtime] to lock the runtime catalog
-    contract independently of the route pipeline. *)
+    surface. Cascade-profile gate accessors let focused tests lock the
+    runtime catalog contract independently of the route pipeline. *)
 
 val add_routes :
   sw:Eio.Switch.t ->

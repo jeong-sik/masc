@@ -1,16 +1,11 @@
-(** Declarative catalog → runtime snapshot conversion (RFC-0058 Phase 3).
+(** Declarative catalog -> runtime snapshot conversion (RFC-0058 Phase 3).
 
     Converts an {!adapted_catalog} into a lightweight declarative snapshot
-    that {!Cascade_catalog_runtime} can compare against its own snapshot for
-    parallel validation.
+    consumed by {!Cascade_catalog_runtime}.
 
     This module deliberately does NOT depend on {!Cascade_catalog_runtime}
     to avoid a dependency cycle.  It defines its own mirror types and
     {!Cascade_catalog_runtime} bridges them at the call site.
-
-    Phase 3 is a **parallel validation path**: the hotpath still reads
-    from the legacy materialized JSON. This module proves the declarative
-    config can produce valid runtime types. Phase 5 will switch the hotpath.
 
     @stability Internal *)
 

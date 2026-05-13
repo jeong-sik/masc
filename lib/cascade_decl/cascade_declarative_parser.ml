@@ -23,13 +23,14 @@ let add_errors acc more = acc @ more
 let api_format_of_protocol (s : string) : (cascade_api_format, string) result =
   match s with
   | "anthropic-cli" | "anthropic-http" -> Ok Messages_api
-  | "openai-http" | "google-cli" | "kimi-cli" -> Ok Chat_completions_api
+  | "openai-cli" | "openai-http" | "google-cli" | "kimi-cli" ->
+    Ok Chat_completions_api
   | "ollama-http" -> Ok Ollama_api
   | _ ->
     Error
       (Printf.sprintf
          "unknown protocol %S: expected one of anthropic-cli, anthropic-http, \
-          openai-http, google-cli, kimi-cli, ollama-http"
+          openai-cli, openai-http, google-cli, kimi-cli, ollama-http"
          s)
 ;;
 
@@ -594,6 +595,20 @@ let parse_scoring_params (tbl : Otoml.t) : cascade_scoring_params option =
   | _ -> None
 ;;
 
+let keeper_assignable_result path tbl =
+  let hyphen = Otoml.find_opt tbl Otoml.get_boolean [ "keeper-assignable" ] in
+  let underscore = Otoml.find_opt tbl Otoml.get_boolean [ "keeper_assignable" ] in
+  match hyphen, underscore with
+  | Some _, Some _ ->
+    Error
+      (error
+         (path ^ ".keeper-assignable")
+         "ambiguous keeper assignability: declare only one of \
+          keeper-assignable or keeper_assignable")
+  | Some _ as value, None | None, (Some _ as value) -> Ok value
+  | None, None -> Ok None
+;;
+
 let parse_tier (name : string) (tbl : Otoml.t) : (cascade_tier, parse_error list) result =
   let path = Printf.sprintf "tier.%s" name in
   let members =
@@ -606,9 +621,10 @@ let parse_tier (name : string) (tbl : Otoml.t) : (cascade_tier, parse_error list
     | Some s -> strategy_of_string s
     | None -> Ok Failover
   in
-  match strategy_result with
-  | Error e -> Error (error (path ^ ".strategy") e)
-  | Ok strategy ->
+  match strategy_result, keeper_assignable_result path tbl with
+  | Error e, _ -> Error (error (path ^ ".strategy") e)
+  | _, Error e -> Error e
+  | Ok strategy, Ok keeper_assignable ->
     let max_concurrent = Otoml.find_opt tbl Otoml.get_integer [ "max-concurrent" ] in
     let cycle_policy = parse_cycle_policy tbl in
     let sticky_ttl_ms = Otoml.find_opt tbl Otoml.get_integer [ "sticky-ttl-ms" ] in
@@ -621,6 +637,7 @@ let parse_tier (name : string) (tbl : Otoml.t) : (cascade_tier, parse_error list
       ; cycle_policy
       ; sticky_ttl_ms
       ; scoring_params
+      ; keeper_assignable
       }
 ;;
 
@@ -664,11 +681,12 @@ let parse_tier_group (name : string) (tbl : Otoml.t)
     | Some s -> strategy_of_string s
     | None -> Ok Failover
   in
-  match strategy_result with
-  | Error e -> Error (error (path ^ ".strategy") e)
-  | Ok strategy ->
+  match strategy_result, keeper_assignable_result path tbl with
+  | Error e, _ -> Error (error (path ^ ".strategy") e)
+  | _, Error e -> Error e
+  | Ok strategy, Ok keeper_assignable ->
     let fallback = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "fallback" ] in
-    Ok { name; tiers; strategy; fallback }
+    Ok { name; tiers; strategy; fallback; keeper_assignable }
 ;;
 
 let parse_tier_groups (toml : Otoml.t)

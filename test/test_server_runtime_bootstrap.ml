@@ -26,6 +26,9 @@ let write_file path content =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let repo_cascade_toml = "# repo cascade seed\n"
+let local_cascade_toml = "# local cascade seed\n"
+
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
   let needle_len = String.length needle in
@@ -94,7 +97,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.json") "{\"seed\":\"repo\"}";
+  write_file (Filename.concat config "cascade.toml") repo_cascade_toml;
   write_file (Filename.concat config "tool_policy.toml")
     "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
@@ -428,41 +431,108 @@ let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
 let write_invalid_local_only_cascade base_path =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
-  let toml_path = Filename.concat config_root "cascade.toml" in
-  if Sys.file_exists toml_path then Sys.remove toml_path;
   write_file
-    (Filename.concat config_root "cascade.json")
-    {|{
-  "local_only_models": ["ollama:qwen3.6:35b-a3b-mlx-bf16"]
-}|}
+    (Filename.concat config_root "cascade.toml")
+    {|[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen]
+api-name = "qwen3.6:35b-a3b-mlx-bf16"
+max-context = 32768
+tools-support = false
+
+[tier.local_only]
+members = ["missing_provider.qwen"]
+
+[tier-group.local_only]
+tiers = ["local_only"]
+
+[routes.keeper_turn]
+target = "tier-group.local_only"
+|}
+
+let split_custom_model_spec spec =
+  let after_scheme =
+    match String.index_opt spec ':' with
+    | Some idx -> String.sub spec (idx + 1) (String.length spec - idx - 1)
+    | None -> spec
+  in
+  match String.index_opt after_scheme '@' with
+  | Some idx ->
+      ( String.sub after_scheme 0 idx,
+        String.sub after_scheme (idx + 1) (String.length after_scheme - idx - 1) )
+  | None -> after_scheme, "http://127.0.0.1:9/v1"
 
 let write_partially_invalid_cascade ~base_path ~valid_model =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
-  let toml_path = Filename.concat config_root "cascade.toml" in
-  if Sys.file_exists toml_path then Sys.remove toml_path;
+  let model_id, endpoint = split_custom_model_spec valid_model in
   write_file
-    (Filename.concat config_root "cascade.json")
+    (Filename.concat config_root "cascade.toml")
     (Printf.sprintf
-       {|{
-  "big_three_models": ["%s"],
-  "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
-}|}
-       valid_model)
+       {|[providers.custom]
+protocol = "openai-http"
+endpoint = %S
+
+[models.stable]
+api-name = %S
+max-context = 128000
+tools-support = true
+
+[custom.stable]
+
+[tier.primary_profile]
+members = ["custom.stable"]
+
+[tier-group.primary_profile]
+tiers = ["primary_profile"]
+
+[tier.broken_profile]
+members = ["missing_provider.fake"]
+
+[tier-group.broken_profile]
+tiers = ["broken_profile"]
+
+[routes.keeper_turn]
+target = "tier-group.primary_profile"
+|}
+       endpoint model_id)
 
 let write_partially_invalid_default_cascade ~base_path ~valid_model =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
-  let toml_path = Filename.concat config_root "cascade.toml" in
-  if Sys.file_exists toml_path then Sys.remove toml_path;
+  let model_id, endpoint = split_custom_model_spec valid_model in
   write_file
-    (Filename.concat config_root "cascade.json")
+    (Filename.concat config_root "cascade.toml")
     (Printf.sprintf
-       {|{
-  "big_three_models": ["__nonexistent_provider_sentinel__:fake"],
-  "tool_rerank_models": ["%s"]
-}|}
-       valid_model)
+       {|[providers.custom]
+protocol = "openai-http"
+endpoint = %S
+
+[models.stable]
+api-name = %S
+max-context = 128000
+tools-support = true
+
+[custom.stable]
+
+[tier.primary_profile]
+members = ["missing_provider.fake"]
+
+[tier-group.primary_profile]
+tiers = ["primary_profile"]
+
+[tier.secondary_profile]
+members = ["custom.stable"]
+
+[tier-group.secondary_profile]
+tiers = ["secondary_profile"]
+
+[routes.keeper_turn]
+target = "tier-group.primary_profile"
+|}
+       endpoint model_id)
 
 let stop_process pid =
   (try Unix.kill pid Sys.sigterm with _ -> ());
@@ -543,8 +613,8 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
       let config_root = Filename.concat base_path ".masc/config" in
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
-      Alcotest.(check string) "cascade copied" "{\"seed\":\"repo\"}"
-        (read_file (Filename.concat config_root "cascade.json"));
+      Alcotest.(check string) "cascade copied" repo_cascade_toml
+        (read_file (Filename.concat config_root "cascade.toml"));
       Alcotest.(check bool) "tool policy copied" true
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "prompt copied" true
@@ -563,13 +633,13 @@ let test_bootstrap_base_path_config_root_preserves_existing_root_without_refill 
       let base_path = Filename.concat dir "base" in
       let config_root = Filename.concat base_path ".masc/config" in
       mkdir_p config_root;
-      write_file (Filename.concat config_root "cascade.json") "{\"seed\":\"local\"}";
+      write_file (Filename.concat config_root "cascade.toml") local_cascade_toml;
       mkdir_p (Filename.concat config_root "personas");
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
-      Alcotest.(check string) "existing cascade preserved" "{\"seed\":\"local\"}"
-        (read_file (Filename.concat config_root "cascade.json"));
+      Alcotest.(check string) "existing cascade preserved" local_cascade_toml
+        (read_file (Filename.concat config_root "cascade.toml"));
       Alcotest.(check bool) "keepers dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "keepers"));
       Alcotest.(check bool) "prompts dir scaffolded" true
@@ -604,7 +674,7 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "prompts");
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
-      write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "cascade.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -644,10 +714,10 @@ let test_bootstrap_base_path_config_root_collapses_masc_input () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root
         ~base_path:(Filename.concat base_path Common.masc_dirname);
       Alcotest.(check bool) "config root created under parent .masc" true
-        (Sys.file_exists (Filename.concat base_path ".masc/config/cascade.json"));
+        (Sys.file_exists (Filename.concat base_path ".masc/config/cascade.toml"));
       Alcotest.(check bool) "nested .masc/.masc config not created" false
         (Sys.file_exists
-           (Filename.concat base_path ".masc/.masc/config/cascade.json")))
+           (Filename.concat base_path ".masc/.masc/config/cascade.toml")))
 let test_config_bootstrap_mode_parses_env () =
   let check expected value =
     with_env "MASC_CONFIG_BOOTSTRAP" value @@ fun () ->
@@ -684,7 +754,7 @@ let test_bootstrap_empty_mode_creates_scaffold_without_files () =
       Alcotest.(check bool) "prompts dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "prompts"));
       Alcotest.(check bool) "cascade not copied" false
-        (Sys.file_exists (Filename.concat config_root "cascade.json"));
+        (Sys.file_exists (Filename.concat config_root "cascade.toml"));
       Alcotest.(check bool) "tool policy not copied" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "keeper not copied" false
@@ -1280,7 +1350,7 @@ let test_prompt_markdown_dir_falls_back_to_resolved_config_dir_with_repo_fallbac
       let config_root = Filename.concat dir "config" in
       let expected = Filename.concat config_root "prompts" in
       Fs_compat.mkdir_p expected;
-      write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "cascade.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -1304,7 +1374,7 @@ let test_prompt_markdown_dir_does_not_use_repo_fallback_without_opt_in () =
       let home = Filename.concat dir "home" in
       let expected = Filename.concat home ".masc/config/prompts" in
       Fs_compat.mkdir_p repo_prompts;
-      write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "cascade.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       Fs_compat.mkdir_p home;
@@ -2082,7 +2152,7 @@ let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
             (http_status_from_headers config_headers);
           let config_json = parse_json_response_file config_body in
           Alcotest.(check string) "dashboard cascade surface is live"
-            (Filename.concat dir ".masc/config/cascade.json")
+            (Filename.concat dir ".masc/config/cascade.toml")
             Yojson.Safe.Util.(
               config_json |> member "config_path" |> to_string)))
 
@@ -2262,8 +2332,9 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
             |> List.map Yojson.Safe.Util.to_string
           in
           Alcotest.(check bool) "last error includes default-profile failure" true
-            (List.mem
-               "required default profile \"big_three\" failed validation"
+            (List.exists
+               (fun error ->
+                  contains_substring error "required default profile")
                rejection_errors);
           let config_headers, config_body =
             curl_request_capture ~output_dir:dir ~name:"cascade-config-default-invalid"

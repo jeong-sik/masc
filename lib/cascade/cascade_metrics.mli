@@ -7,8 +7,9 @@ val on_phase_override : phase:string -> from_cascade:string -> to_cascade:string
 
 val on_profile_discovery : path:string -> unit
 (** Tick the profile discovery counter.  [path] must be one of
-    [declarative], [legacy_after_decl_error], [legacy_no_decl].
-    See [cascade_catalog_runtime.ml] [discover_profile_names]. *)
+    [declarative], [declarative_error], [declarative_missing],
+    [declarative_parse_error].  See [cascade_catalog_runtime.ml]
+    [discover_profile_names]. *)
 
 val on_declarative_parse_error : unit -> unit
 (** Tick the declarative parse error counter once per discovery call
@@ -201,8 +202,8 @@ val on_deprecated_profile_name_filter : name:string -> unit
 
 val on_capability_mismatch : count:int -> unit
 (** Tick the capability-mismatch counter at
-    [Cascade_config_loader.load_catalog] when
-    [detect_capability_mismatches] returns a non-empty list.
+    catalog validation when capability mismatch detection returns a
+    non-empty list.
     Bumped by [count] so a deploy that introduces N broken edges
     spikes proportionally; [count=0] is a no-op so callers invoke
     unconditionally.  Counter complement to the existing
@@ -214,14 +215,12 @@ val on_route_binding_dropped : reason:string -> unit
 (** Tick the route-binding-dropped counter at
     [Cascade_routes.route_bindings_from_json] when an entry in the
     [routes] table is silently dropped.  [reason] must be one of
-    [invalid_value] (neither legacy-string nor declarative-table
-    encoding produced a target) or [empty_key_or_target] (target
-    or key trimmed to empty string). *)
+    [invalid_value] (not a declarative route table with [target]) or
+    [empty_key_or_target] (target or key trimmed to empty string). *)
 
 val on_weighted_item_dropped : reason:string -> unit
-(** Tick the weighted-item-dropped counter at
-    [Cascade_config_loader.parse_weighted_item] when an entry in
-    a retired flat-profile model list is silently dropped.
+(** Tick the weighted-item-dropped counter when retired flat-profile
+    parsing silently drops an entry.
     [reason] must be one of [missing_or_empty_model] or
     [invalid_value_type].  Also doubles as an RFC-0066 Phase 4
     migration tracker — 5-layer cascade.toml never hits this
@@ -270,8 +269,8 @@ val on_discovery_refresh_exception : unit -> unit
     alertable. *)
 
 val on_profile_registration_failure : unit -> unit
-(** Tick the profile-registration-failure counter at
-    [Cascade_config_loader.load_catalog] when
+(** Tick the profile-registration-failure counter when declarative
+    catalog loading calls
     [Cascade_capability_profile.register_declared_profiles_from_json]
     returns an Error.  The Error is logged but the catalog
     continues loading without the declared profiles; this counter

@@ -243,7 +243,7 @@ describe('IdeContextLens', () => {
     expect(counts.get('board')).toBeGreaterThan(0)
     expect(counts.get('git')).toBeGreaterThan(0)
     expect(counts.get('pr')).toBeGreaterThan(0)
-    expect(counts.get('log')).toBeGreaterThan(0)
+    expect(counts.get('log')).toBe(1)
     expect(model.anchors[0]).toMatchObject({
       surface: 'PR',
       line: 27,
@@ -256,5 +256,37 @@ describe('IdeContextLens', () => {
       'Board',
       'PR',
     ])
+  })
+
+  it('keeps other-file activity out of the current-file lens', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diffRows: [],
+      events: [{
+        id: 'evt-other-file',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'telemetry',
+        timestamp_ms: 400,
+        detail: 'goal:goal-other task:task-other pr:15001 log:turn-10',
+        context: {
+          file_path: 'lib/runtime.ml',
+          line: 99,
+          goal_id: 'goal-other',
+          task_id: 'task-other',
+          pr_id: '15001',
+          board_post_id: 'post-other',
+          git_ref: 'def456',
+          log_id: 'turn-10',
+        },
+      }],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    expect(model.linkedCount).toBe(0)
+    expect(model.activeLineCount).toBe(0)
+    expect(model.anchors).toEqual([])
   })
 })

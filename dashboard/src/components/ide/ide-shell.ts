@@ -113,7 +113,10 @@ export function IdeShell() {
   )
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
-  useEffect(() => activeIdeFile.subscribe(setActiveFilePath), [])
+  useEffect(() => {
+    const unsubscribe = activeIdeFile.subscribe(setActiveFilePath)
+    return () => unsubscribe()
+  }, [])
 
   const activeFocus = focusFromRoute(route.value.params.focus)
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))

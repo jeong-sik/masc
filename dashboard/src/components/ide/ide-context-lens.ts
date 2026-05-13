@@ -110,6 +110,10 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   const fileThreads = (input.threads ?? []).filter(thread =>
     thread.anchor.file_path === input.filePath,
   )
+  const fileEvents = input.events.filter(event => {
+    const eventFile = event.context?.file_path
+    return eventFile === undefined || eventFile === input.filePath
+  })
   const changedRows = input.diffRows.filter(row => row.kind === 'add' || row.kind === 'delete')
   const changedLineCount = changedRows.length
   const activeLines = new Set<number>()
@@ -128,13 +132,13 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     if (start !== null && start >= 1) activeLines.add(start)
     if (end !== null && end >= 1) activeLines.add(end)
   }
-  for (const event of input.events) {
+  for (const event of fileEvents) {
     const line = eventLineForFile(event, input.filePath)
     if (line !== undefined) activeLines.add(line)
   }
 
   const eventText = [
-    ...input.events.map(eventSearchText),
+    ...fileEvents.map(eventSearchText),
     ...fileThreads.map(threadSearchText),
   ]
   const surfaces = SURFACE_ORDER.map(id => {
@@ -145,7 +149,7 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
       changedLineCount,
       activeLineCount: activeLines.size,
       eventText,
-      events: input.events,
+      events: fileEvents,
     })
     const status: SurfaceStatus = count > 0 ? 'linked' : 'quiet'
     return {
@@ -160,7 +164,7 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   return {
     linkedCount: surfaces.filter(surface => surface.status === 'linked').length,
     surfaces,
-    anchors: buildAnchors(input.filePath, fileAnnotations, activeCursors, fileThreads, changedRows, input.events),
+    anchors: buildAnchors(input.filePath, fileAnnotations, activeCursors, fileThreads, changedRows, fileEvents),
     changedLineCount,
     activeLineCount: activeLines.size,
   }
@@ -342,7 +346,7 @@ function surfaceCount(
     ).length + state.threads.length + countEventText(state.eventText, /\b(comment|note|question)[:#/\s-]/)
   }
   if (id === 'log') {
-    return state.events.length + state.events.filter(event => event.context?.log_id).length
+    return state.events.length
   }
   if (id === 'telemetry') return state.events.length + state.changedLineCount + state.annotations.length
   return 0

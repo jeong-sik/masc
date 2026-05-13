@@ -180,6 +180,7 @@ val run_named :
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
+  ?oas_auto_context_overflow_retry:bool ->
   ?checkpoint_dir:string ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->

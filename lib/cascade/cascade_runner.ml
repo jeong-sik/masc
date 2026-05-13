@@ -67,6 +67,7 @@ type config =
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
+  oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
   slot_id : int option;

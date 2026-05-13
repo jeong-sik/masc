@@ -62,6 +62,7 @@ type config =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; compact_ratio : float option
+  ; oas_auto_context_overflow_retry : bool
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; slot_id : int option
@@ -123,6 +124,7 @@ let default_config
   ; cache_system_prompt = false
   ; yield_on_tool = false
   ; compact_ratio = None
+  ; oas_auto_context_overflow_retry = true
   ; context_injector = None
   ; context = None
   ; slot_id = None
@@ -268,6 +270,11 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
+    Agent_sdk.Builder.with_auto_context_overflow_retry
+      config.oas_auto_context_overflow_retry
+      builder
+  in
+  let builder =
     match config.context_injector with
     | Some injector -> Agent_sdk.Builder.with_context_injector injector builder
     | None -> builder
@@ -337,6 +344,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; max_cost_usd = effective_max_cost_usd
     ; yield_on_tool = config.yield_on_tool
     ; context_compact_ratio = config.compact_ratio
+    ; auto_context_overflow_retry = config.oas_auto_context_overflow_retry
     ; priority = config.priority
     ; exit_condition = config.exit_condition
     }

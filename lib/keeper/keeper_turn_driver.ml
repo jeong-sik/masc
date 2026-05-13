@@ -134,6 +134,7 @@ let run_named
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?compact_ratio
+    ?(oas_auto_context_overflow_retry = true)
     ?checkpoint_dir
     ?context_injector
     ?context
@@ -412,6 +413,7 @@ let run_named
     cache_system_prompt;
     yield_on_tool;
     compact_ratio;
+    oas_auto_context_overflow_retry;
     checkpoint_dir;
     context_injector;
     context;

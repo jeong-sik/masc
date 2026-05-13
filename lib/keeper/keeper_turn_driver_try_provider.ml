@@ -54,6 +54,7 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; compact_ratio : float option
+  ; oas_auto_context_overflow_retry : bool
   ; checkpoint_dir : string option
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
@@ -248,6 +249,7 @@ let run_try_provider
           ; session_id = ctx.session_id
           ; cache_system_prompt = ctx.cache_system_prompt
           ; compact_ratio = ctx.compact_ratio
+          ; oas_auto_context_overflow_retry = ctx.oas_auto_context_overflow_retry
           ; contract = ctx.contract
           ; checkpoint_dir = ctx.checkpoint_dir
           ; context_injector = ctx.context_injector

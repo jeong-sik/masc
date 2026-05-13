@@ -66,19 +66,25 @@ extract_single() {
 scripts/check-version-truth.sh
 
 package_version="$(extract_single '^> Current package version: v\([^ ]*\).*$' ROADMAP.md)"
+roadmap_published_release="$(extract_single '^> Latest published GitHub release: v\([^ ]*\).*$' ROADMAP.md)"
 product_package_version="$(extract_single '^> Current package version: v\([^ ]*\).*$' docs/PRODUCT-OPERATING-PLAN.md)"
 product_changelog_entry="$(extract_single '^> Latest changelog entry: v\([^ ]*\).*$' docs/PRODUCT-OPERATING-PLAN.md)"
+product_published_release="$(extract_single '^> Latest published GitHub release: v\([^ ]*\).*$' docs/PRODUCT-OPERATING-PLAN.md)"
 spec_baseline="$(extract_single '^> Snapshot baseline: `dune-project` version `\([^`]*\)`$' docs/spec/SPEC-INDEX.md)"
 changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
 
 [[ -n "$product_package_version" ]] || fail "missing current package version in docs/PRODUCT-OPERATING-PLAN.md"
 [[ -n "$product_changelog_entry" ]] || fail "missing latest changelog entry in docs/PRODUCT-OPERATING-PLAN.md"
+[[ -n "$roadmap_published_release" ]] || fail "missing latest published GitHub release in ROADMAP.md"
+[[ -n "$product_published_release" ]] || fail "missing latest published GitHub release in docs/PRODUCT-OPERATING-PLAN.md"
 [[ -n "$spec_baseline" ]] || fail "missing snapshot baseline in docs/spec/SPEC-INDEX.md"
 
 [[ "$package_version" == "$product_package_version" ]] || \
   fail "ROADMAP current package version ($package_version) != PRODUCT-OPERATING-PLAN current package version ($product_package_version)"
 [[ "$product_changelog_entry" == "$changelog_latest_release" ]] || \
   fail "PRODUCT-OPERATING-PLAN latest changelog entry ($product_changelog_entry) != CHANGELOG latest release ($changelog_latest_release)"
+[[ "$product_published_release" == "$roadmap_published_release" ]] || \
+  fail "PRODUCT-OPERATING-PLAN latest published release ($product_published_release) != ROADMAP latest published release ($roadmap_published_release)"
 [[ "$spec_baseline" == "$package_version" ]] || \
   fail "SPEC-INDEX snapshot baseline ($spec_baseline) != current package version ($package_version)"
 

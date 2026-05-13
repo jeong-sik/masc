@@ -182,7 +182,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | `git_identity_mode` | `keeper_alias`, `github_identity` |
 | `tool_preset` | `minimal`, `social`, `messaging`, `coding`, `research`, `delivery`, `full` |
 | `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
-| `cascade_name` | any `<name>` such that `<name>_models` exists in `cascade.toml` (e.g. `keeper_unified`, `nick0cave`) |
+| `cascade_name` | keeper-assignable declarative cascade profiles exposed by the active catalog: route targets, tier names, or tier-group names that are not marked `keeper-assignable = false` |
 
 ### Sandbox Example
 

@@ -876,15 +876,42 @@ let provider_cascade_prefix provider_id =
         (normalize_decl_provider_id provider_id)
       |> Option.map Provider_adapter.cascade_prefix_of_adapter
 
-let model_api_name (cfg : Cascade_declarative_types.cascade_config) model_id =
-  Cascade_declarative_types.model_of_id cfg model_id
-  |> Option.map (fun (model : Cascade_declarative_types.cascade_model_spec) ->
-         model.api_name)
+let json_assoc_opt key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
 
-let weighted_entry_of_member cfg member =
+let json_string_member key json =
+  match json_assoc_opt key json with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let json_string_list_member key json =
+  match json_assoc_opt key json with
+  | Some (`List values) ->
+    values
+    |> List.filter_map (function
+         | `String value -> Some value
+         | _ -> None)
+  | _ -> []
+
+let materialized_model_api_name json model_id =
+  match
+    Option.bind (json_assoc_opt "models" json) (fun models_json ->
+        json_assoc_opt model_id models_json)
+  with
+  | Some model_json -> (
+    match json_string_member "api-name" model_json with
+    | Some _ as api_name -> api_name
+    | None -> json_string_member "api_name" model_json)
+  | None -> None
+
+let weighted_entry_of_materialized_member json member =
   match String.split_on_char '.' (String.trim member) with
   | provider_id :: model_id :: _ -> (
-      match provider_cascade_prefix provider_id, model_api_name cfg model_id with
+      match
+        ( provider_cascade_prefix provider_id
+        , materialized_model_api_name json model_id )
+      with
       | Some prefix, Some api_name ->
           Some
             {
@@ -897,16 +924,23 @@ let weighted_entry_of_member cfg member =
       | _ -> None)
   | _ -> None
 
-let tier_members (cfg : Cascade_declarative_types.cascade_config) tier_name =
-  cfg.tiers
-  |> List.find_opt
-       (fun (tier : Cascade_declarative_types.cascade_tier) ->
-         String.equal tier.name tier_name)
-  |> Option.map (fun (tier : Cascade_declarative_types.cascade_tier) ->
-         tier.members)
-  |> Option.value ~default:[]
+let materialized_tier_members json tier_name =
+  match
+    Option.bind (json_assoc_opt "tier" json) (fun tiers_json ->
+        json_assoc_opt tier_name tiers_json)
+  with
+  | Some tier_json -> json_string_list_member "members" tier_json
+  | None -> []
 
-let configured_weighted_entries_from_config cfg ~name =
+let materialized_tier_group_tiers json group_name =
+  match
+    Option.bind (json_assoc_opt "tier-group" json) (fun groups_json ->
+        json_assoc_opt group_name groups_json)
+  with
+  | Some group_json -> json_string_list_member "tiers" group_json
+  | None -> []
+
+let configured_weighted_entries_from_materialized_json json ~name =
   let trimmed = String.trim name in
   let candidates =
     if String.starts_with ~prefix:"tier-group." trimmed
@@ -919,21 +953,17 @@ let configured_weighted_entries_from_config cfg ~name =
       let group_name =
         String.sub profile_name 11 (String.length profile_name - 11)
       in
-      cfg.tier_groups
-      |> List.find_opt
-           (fun (group : Cascade_declarative_types.cascade_tier_group) ->
-             String.equal group.name group_name)
-      |> Option.map (fun (group : Cascade_declarative_types.cascade_tier_group) ->
-             group.tiers
-             |> List.concat_map (tier_members cfg)
-             |> List.filter_map (weighted_entry_of_member cfg))
+      Some
+        (materialized_tier_group_tiers json group_name
+         |> List.concat_map (materialized_tier_members json)
+         |> List.filter_map (weighted_entry_of_materialized_member json))
     else if String.starts_with ~prefix:"tier." profile_name then
       let tier_name =
         String.sub profile_name 5 (String.length profile_name - 5)
       in
       Some
-        (tier_members cfg tier_name
-         |> List.filter_map (weighted_entry_of_member cfg))
+        (materialized_tier_members json tier_name
+         |> List.filter_map (weighted_entry_of_materialized_member json))
     else None
   in
   candidates
@@ -943,20 +973,15 @@ let configured_weighted_entries_from_config cfg ~name =
          | Some [] | None -> None)
   |> Option.value ~default:[]
 
-let configured_weighted_entries ~config_path ~name =
-  match Cascade_declarative_parser.parse_file config_path with
-  | Error _ -> []
-  | Ok cfg -> configured_weighted_entries_from_config cfg ~name
-
 let resolve_model_strings_traced_with
     ~rand_int ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
     (match Cascade_config_loader.load_catalog_source path with
      | Error msg -> (defaults, Load_failed msg)
-     | Ok _ ->
+     | Ok json ->
        let from_file_weighted =
-         configured_weighted_entries ~config_path:path ~name
+         configured_weighted_entries_from_materialized_json json ~name
        in
        if from_file_weighted <> [] then
          let ordered =
@@ -975,8 +1000,8 @@ let resolve_model_strings_traced_with
              Cascade_routes.Keeper_turn
          in
          let fallback_weighted =
-           configured_weighted_entries
-             ~config_path:path ~name:fallback_profile
+           configured_weighted_entries_from_materialized_json
+             json ~name:fallback_profile
          in
          if fallback_weighted <> [] then
            let ordered =
@@ -1121,9 +1146,9 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
            defaults
        in
        (defaults, { candidates; source = Load_failed msg })
-     | Ok _ ->
+     | Ok json ->
     let from_file_weighted =
-      configured_weighted_entries ~config_path:path ~name in
+      configured_weighted_entries_from_materialized_json json ~name in
     if from_file_weighted <> [] then
       let ordered = order_weighted_entries ~cascade:name from_file_weighted in
       let models = List.map
@@ -1137,8 +1162,8 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
           Cascade_routes.Keeper_turn
       in
       let fallback_weighted =
-        configured_weighted_entries
-          ~config_path:path ~name:fallback_profile in
+        configured_weighted_entries_from_materialized_json json
+          ~name:fallback_profile in
       if fallback_weighted <> [] then
         let ordered =
           order_weighted_entries ~cascade:fallback_profile fallback_weighted
@@ -1386,9 +1411,9 @@ let normalize_priority_tiers ~config_path ~name raw_tiers =
         (Printf.sprintf
            "priority_tier validation skipped: cascade config load failed: %s"
            msg)
-  | Ok _ ->
+  | Ok json ->
   let configured_model_ids =
-    configured_weighted_entries ~config_path ~name
+    configured_weighted_entries_from_materialized_json json ~name
     |> List.map (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
     |> model_ids_of_specs
   in

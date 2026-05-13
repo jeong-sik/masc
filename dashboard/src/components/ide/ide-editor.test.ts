@@ -231,11 +231,11 @@ describe('IdeEditor', () => {
           evidence: 'Task task-runtime',
         },
         {
-          id: 'telemetry:event-log',
+          id: 'telemetry:turn-9',
           label: 'Telemetry',
           tab: 'monitoring',
-          params: { section: 'fleet-health', view: 'event-log' },
-          evidence: 'Fleet telemetry event log',
+          params: { section: 'fleet-health', view: 'event-log', q: 'turn-9' },
+          evidence: 'Fleet telemetry event log · query turn-9',
         },
       ],
     })
@@ -248,6 +248,6 @@ describe('IdeEditor', () => {
     const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-editor-context-route-link')]
     expect(routeLinks.map(link => link.textContent)).toEqual(['Task', 'Telemetry'])
     fireEvent.click(routeLinks.find(link => link.textContent === 'Telemetry')!)
-    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log')
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
   })
 })

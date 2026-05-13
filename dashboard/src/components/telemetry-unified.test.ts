@@ -90,6 +90,7 @@ describe('TelemetryUnified', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+    window.location.hash = ''
     vi.clearAllMocks()
     vi.resetModules()
     vi.doUnmock('../api/dashboard')
@@ -214,6 +215,58 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('1 차단 작업')
     expect(container.textContent).not.toContain('활성 세션')
     expect(container.textContent).toContain('5 public')
+  })
+
+  it('hydrates telemetry scope and entry focus from route params', async () => {
+    window.location.hash = '#monitoring?section=fleet-health&view=event-log&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
+    const fetchTelemetry = vi.fn().mockResolvedValue({
+      ...baseTelemetry,
+      count: 2,
+      entries: [
+        {
+          source: 'tool_metric',
+          ts: 1_775_709_100,
+          session_id: 'sess-route',
+          operation_id: 'op-route',
+          worker_run_id: 'wr-route',
+          tool_name: 'turn-9-evidence',
+          duration_ms: 22,
+          success: true,
+        },
+        {
+          source: 'keeper_metric',
+          ts: 1_775_709_000,
+          session_id: 'sess-route',
+          name: 'keeper-other',
+          channel: 'turn_end',
+          tool_call_count: 1,
+        },
+      ],
+    })
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      session_id: 'sess-route',
+      operation_id: 'op-route',
+      worker_run_id: 'wr-route',
+      n: 100,
+    }))
+    expect(container.textContent).toContain('session sess-route')
+    expect(container.textContent).toContain('operation op-route')
+    expect(container.textContent).toContain('worker_run wr-route')
+    expect(container.textContent).toContain('focus turn-9')
+    const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="엔트리 텍스트 검색"]')
+    expect(searchInput?.value).toBe('turn-9')
+    expect(container.textContent).toContain('검색 매치 1건')
+    expect(container.textContent).toContain('turn-9-evidence')
+    expect(container.textContent).not.toContain('keeper-other')
   })
 
   it('renders a telemetry entry raw JSON copy action', async () => {

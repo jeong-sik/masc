@@ -34,6 +34,9 @@ export interface RunActivityContext {
   readonly pr_id?: string
   readonly git_ref?: string
   readonly log_id?: string
+  readonly session_id?: string
+  readonly operation_id?: string
+  readonly worker_run_id?: string
 }
 
 export interface RunActivityEvent {
@@ -170,6 +173,9 @@ function isRunActivityContext(value: unknown): value is RunActivityContext {
     && optionalNonEmptyString(value.pr_id)
     && optionalNonEmptyString(value.git_ref)
     && optionalNonEmptyString(value.log_id)
+    && optionalNonEmptyString(value.session_id)
+    && optionalNonEmptyString(value.operation_id)
+    && optionalNonEmptyString(value.worker_run_id)
 }
 
 function optionalNonEmptyString(value: unknown): boolean {

@@ -205,6 +205,12 @@ function mergePayloadContext(next: MutableRunActivityContext, payload: unknown):
   if (gitRef) next.git_ref = gitRef
   const logId = stringValue(record.log_id)
   if (logId) next.log_id = logId
+  const sessionId = stringValue(record.session_id)
+  if (sessionId) next.session_id = sessionId
+  const operationId = stringValue(record.operation_id)
+  if (operationId) next.operation_id = operationId
+  const workerRunId = stringValue(record.worker_run_id)
+  if (workerRunId) next.worker_run_id = workerRunId
 }
 
 function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void {
@@ -236,6 +242,9 @@ function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void 
   else if (key === 'pr' || key === 'pull_request' || key === 'review') next.pr_id = value
   else if (key === 'git' || key === 'commit' || key === 'branch') next.git_ref = value
   else if (key === 'log' || key === 'telemetry') next.log_id = value
+  else if (key === 'session' || key === 'session_id') next.session_id = value
+  else if (key === 'operation' || key === 'operation_id' || key === 'op') next.operation_id = value
+  else if (key === 'worker_run' || key === 'worker_run_id' || key === 'worker') next.worker_run_id = value
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -560,6 +569,9 @@ function ActivityRow(
     prId: item.context?.pr_id,
     gitRef: item.context?.git_ref,
     logId: item.context?.log_id,
+    sessionId: item.context?.session_id,
+    operationId: item.context?.operation_id,
+    workerRunId: item.context?.worker_run_id,
     keeperId: item.keeper_id,
     telemetry: true,
   })

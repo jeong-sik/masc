@@ -102,8 +102,10 @@ describe('IdeActivityMock', () => {
             goal_id: 'goal-runtime',
             comment_id: 'comment-1',
             pr_number: 15000,
+            session_id: 'sess-runtime',
+            operation_id: 'op-runtime',
           },
-          tags: ['task:task-runtime', 'board:post-1', 'comment:comment-1', 'git:main', 'log:turn-1'],
+          tags: ['task:task-runtime', 'board:post-1', 'comment:comment-1', 'git:main', 'log:turn-1', 'worker:wr-runtime'],
         }],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -136,7 +138,7 @@ describe('IdeActivityMock', () => {
       'Keeper',
     ])
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
-    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log')
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
 
     const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
     expect(jump?.textContent).toContain('runtime.ml:4')
@@ -282,6 +284,8 @@ describe('IdeActivityMock', () => {
     expect(container.querySelector('.ide-activity-context-jump')).toBeNull()
     expect([...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
       .map(link => link.textContent)).toEqual(['Log', 'Telemetry', 'Keeper'])
+    fireEvent.click(container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')[1]!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-1')
   })
 
   it('normalizes derived file paths and hides unsafe context jumps', async () => {

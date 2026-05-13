@@ -300,6 +300,9 @@ describe('IdeContextLens', () => {
           comment_id: 'comment-1',
           git_ref: 'abc123',
           log_id: 'turn-9',
+          session_id: 'sess-9',
+          operation_id: 'op-9',
+          worker_run_id: 'wr-9',
         },
       }],
       overlay: { ...overlay, cursors: new Map() },
@@ -341,7 +344,15 @@ describe('IdeContextLens', () => {
     })
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Telemetry')).toMatchObject({
       tab: 'monitoring',
-      params: { section: 'fleet-health', view: 'event-log' },
+      params: {
+        section: 'fleet-health',
+        view: 'event-log',
+        session_id: 'sess-9',
+        operation_id: 'op-9',
+        worker_run_id: 'wr-9',
+        q: 'turn-9',
+      },
+      evidence: 'Fleet telemetry event log · session sess-9 · operation op-9 · worker wr-9 · query turn-9',
     })
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Keeper')).toMatchObject({
       tab: 'monitoring',
@@ -504,5 +515,35 @@ describe('IdeContextLens', () => {
 
     const logRoute = model.anchors[0]?.route_links?.find(link => link.label === 'Log')
     expect(logRoute?.params).toEqual({ section: 'runtime', view: 'audit', log_id: 'turn-9' })
+  })
+
+  it('routes telemetry-only context into event-log query focus', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diffRows: [],
+      events: [{
+        id: 'evt-telemetry',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'telemetry',
+        timestamp_ms: 400,
+        context: {
+          file_path: 'lib/keeper/keeper_exec_ide.ml',
+          line: 27,
+          log_id: 'turn-9',
+        },
+      }],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    const telemetryRoute = model.anchors[0]?.route_links?.find(link => link.label === 'Telemetry')
+    expect(telemetryRoute).toMatchObject({
+      id: 'telemetry:turn-9',
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'event-log', q: 'turn-9' },
+      evidence: 'Fleet telemetry event log · query turn-9',
+    })
   })
 })

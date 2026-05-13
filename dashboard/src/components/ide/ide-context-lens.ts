@@ -69,6 +69,10 @@ export interface IdeContextRouteContext {
   readonly prId?: string
   readonly gitRef?: string
   readonly logId?: string
+  readonly sessionId?: string
+  readonly operationId?: string
+  readonly workerRunId?: string
+  readonly telemetryQuery?: string
   readonly keeperId?: string
   readonly telemetry?: boolean
 }
@@ -574,6 +578,10 @@ function buildAnchors(
         prId: event.context?.pr_id,
         gitRef: event.context?.git_ref,
         logId: event.context?.log_id,
+        sessionId: event.context?.session_id,
+        operationId: event.context?.operation_id,
+        workerRunId: event.context?.worker_run_id,
+        telemetryQuery: event.context?.log_id,
         keeperId: event.keeper_id,
         telemetry: true,
       }),
@@ -598,6 +606,9 @@ function eventSearchText(event: RunActivityEvent): string {
     event.context?.pr_id ? `pr:${event.context.pr_id}` : undefined,
     event.context?.git_ref ? `git:${event.context.git_ref}` : undefined,
     event.context?.log_id ? `log:${event.context.log_id}` : undefined,
+    event.context?.session_id ? `session:${event.context.session_id}` : undefined,
+    event.context?.operation_id ? `operation:${event.context.operation_id}` : undefined,
+    event.context?.worker_run_id ? `worker_run:${event.context.worker_run_id}` : undefined,
     ...(event.tags ?? []),
   ]
     .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
@@ -679,6 +690,9 @@ function eventContextMeta(event: RunActivityEvent): string {
     context.comment_id ? `comment ${context.comment_id}` : null,
     context.git_ref ? `git ${context.git_ref}` : null,
     context.log_id ? `log ${context.log_id}` : null,
+    context.session_id ? `session ${context.session_id}` : null,
+    context.operation_id ? `operation ${context.operation_id}` : null,
+    context.worker_run_id ? `worker ${context.worker_run_id}` : null,
     context.file_path ?? null,
   ])
 }
@@ -775,12 +789,32 @@ export function routeLinksForContext(
     })
   }
   if (context.telemetry) {
+    const sessionId = cleanId(context.sessionId)
+    const operationId = cleanId(context.operationId)
+    const workerRunId = cleanId(context.workerRunId)
+    const telemetryQuery = cleanId(context.telemetryQuery ?? context.logId)
+    const telemetryParams: Record<string, string> = {
+      section: 'fleet-health',
+      view: 'event-log',
+    }
+    if (sessionId) telemetryParams.session_id = sessionId
+    if (operationId) telemetryParams.operation_id = operationId
+    if (workerRunId) telemetryParams.worker_run_id = workerRunId
+    if (telemetryQuery) telemetryParams.q = telemetryQuery
+    const telemetryScope = [
+      sessionId ? `session ${sessionId}` : null,
+      operationId ? `operation ${operationId}` : null,
+      workerRunId ? `worker ${workerRunId}` : null,
+      telemetryQuery ? `query ${telemetryQuery}` : null,
+    ].filter((value): value is string => value !== null)
     add({
-      id: 'telemetry:event-log',
+      id: `telemetry:${sessionId ?? operationId ?? workerRunId ?? telemetryQuery ?? 'event-log'}`,
       label: 'Telemetry',
       tab: 'monitoring',
-      params: { section: 'fleet-health', view: 'event-log' },
-      evidence: 'Fleet telemetry event log',
+      params: telemetryParams,
+      evidence: telemetryScope.length > 0
+        ? `Fleet telemetry event log · ${telemetryScope.join(' · ')}`
+        : 'Fleet telemetry event log',
     })
   }
   const keeperId = cleanId(context.keeperId)

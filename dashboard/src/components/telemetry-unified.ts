@@ -734,16 +734,18 @@ export function TelemetryUnified() {
   const operationFilter = useSignal(params.operation_id ?? '')
   const workerRunFilter = useSignal(params.worker_run_id ?? '')
   const limit = useSignal(100)
-  const entrySearch = useSignal('')
+  const entrySearch = useSignal(params.q ?? '')
 
   useEffect(() => {
     sessionFilter.value = route.value.params.session_id ?? ''
     operationFilter.value = route.value.params.operation_id ?? ''
     workerRunFilter.value = route.value.params.worker_run_id ?? ''
+    entrySearch.value = route.value.params.q ?? ''
   }, [
     route.value.params.session_id,
     route.value.params.operation_id,
     route.value.params.worker_run_id,
+    route.value.params.q,
   ])
 
   async function load() {
@@ -881,6 +883,7 @@ export function TelemetryUnified() {
           ${sessionFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">session ${sessionFilter.value}</span>` : null}
           ${operationFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">operation ${operationFilter.value}</span>` : null}
           ${workerRunFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">worker_run ${workerRunFilter.value}</span>` : null}
+          ${route.value.params.q ? html`<span class="rounded-[var(--r-1)] border border-[var(--color-accent-muted)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-accent-fg)]">focus ${route.value.params.q}</span>` : null}
         </div>
       </div>
 

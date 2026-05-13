@@ -29,12 +29,22 @@ export const ideContextFocus = signal<IdeContextFocus | null>(null)
 export function focusIdeContextAnchor(
   anchor: Omit<IdeContextFocus, 'activated_at_ms'>,
 ): void {
-  const filePath = anchor.file_path.trim()
-  if (filePath === '') return
+  const filePath = normalizeIdeContextFilePath(anchor.file_path)
+  if (filePath === null) return
   activeIdeFile.value = filePath
   ideContextFocus.value = {
     ...anchor,
     file_path: filePath,
     activated_at_ms: Date.now(),
   }
+}
+
+function normalizeIdeContextFilePath(value: string): string | null {
+  const filePath = value.trim().replace(/\\/g, '/')
+  if (filePath === '' || filePath.startsWith('/')) return null
+  const segments = filePath.split('/')
+  if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) {
+    return null
+  }
+  return filePath
 }

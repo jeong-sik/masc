@@ -568,7 +568,6 @@ let test_docker_real_timeout_budgets_are_separated () =
         "preflight keeps short turn-sandbox budget"
         2.0
         (Docker_client_real.session_preflight_timeout_sec ()))
-    (Docker_client_real.session_preflight_timeout_sec ())
 ;;
 
 let () =

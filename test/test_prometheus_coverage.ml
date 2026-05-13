@@ -413,6 +413,8 @@ let test_new_issue_metrics_registered () =
   check_metric_name Prometheus.metric_cascade_server_error_skip_total;
   check_metric_name Masc_mcp.Keeper_metrics.metric_keeper_passive_loop_detected_total;
   check_metric_name Prometheus.metric_write_meta_cas_retry_total;
+  check_metric_name
+    Masc_mcp.Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total;
   check_metric_name Masc_mcp.Keeper_metrics.metric_keeper_zombie_loop_detected_total
 ;;
 

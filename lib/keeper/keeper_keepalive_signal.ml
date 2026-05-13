@@ -334,11 +334,12 @@ let wakeup_relevant_keeper_for_board_signal
          Eio_guard.yield_step yield_meter);
   if dropped > 0 then begin
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_keepalive_signal_failures
-      ~labels:[("keeper", "aggregate"); ("site", "board_capped")]
+      Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
+      ~labels:[("kind", signal_kind_label)]
       ();
-    Log.Keeper.warn
-      "board signal wakeup capped: dropped=%d post=%s generic_limit=%d total_limit=%d"
+    Log.Keeper.info
+      "board signal wakeup capped by configured fanout: dropped=%d post=%s \
+       generic_limit=%d total_limit=%d"
       dropped
       signal.post_id
       board_reactive_generic_wakeup_limit

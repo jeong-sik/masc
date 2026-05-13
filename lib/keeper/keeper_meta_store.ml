@@ -376,18 +376,14 @@ let write_meta_with_retry ?(max_retries = 3) config (m : keeper_meta)
     | Error msg when not (is_version_conflict_error msg) -> Error msg
     | Error _ ->
       (* Version conflict: read latest disk state, lift caller's payload
-         onto its version, and try again. *)
+       onto its version, and try again. *)
       (match read_meta_file_path path with
        | Ok (Some latest) ->
-         Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_write_meta_failures
-           ~labels:[("keeper", m.name); ("phase", "cas_retry")]
-           ();
          Prometheus.inc_counter
            Prometheus.metric_write_meta_cas_retry_total
            ~labels:[("keeper_name", m.name)]
            ();
-         Log.Keeper.warn
+         Log.Keeper.info
            "write_meta CAS retry %d/%d for %s (caller had %d, disk %d)"
            (n + 1)
            max_retries
@@ -426,14 +422,10 @@ let write_meta_with_merge
       (match read_meta_file_path path with
        | Ok (Some latest) ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_write_meta_failures
-           ~labels:[("keeper", caller.name); ("phase", "cas_retry_merge")]
-           ();
-         Prometheus.inc_counter
            Prometheus.metric_write_meta_cas_retry_total
            ~labels:[("keeper_name", caller.name)]
            ();
-         Log.Keeper.warn
+         Log.Keeper.info
            "write_meta CAS retry %d/%d for %s (caller had %d, disk %d; field-level merge)"
            (n + 1)
            max_retries

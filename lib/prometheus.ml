@@ -1596,8 +1596,12 @@ let init () =
     Counter;
   add
     Keeper_metrics.metric_keeper_keepalive_signal_failures
-    "Total keeper keepalive signal failures (board capped/late-event rejected), labeled \
-     by keeper and site"
+    "Total keeper keepalive signal failures (late-event rejected), labeled by keeper and \
+     site"
+    Counter;
+  add
+    Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
+    "Total board signal wakeups dropped by configured fanout caps, labeled by kind"
     Counter;
   add
     Keeper_metrics.metric_keeper_board_signal_no_wake_total

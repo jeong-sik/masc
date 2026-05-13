@@ -142,11 +142,27 @@ masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
 let test_policy_validation_knows_static_and_oas_core_tools () =
   check bool "keeper static tag tool is known" true
     (KTPC.is_known_policy_tool_name "keeper_board_post");
+  check bool "keeper shell alias target is known" true
+    (KTPC.is_known_policy_tool_name "keeper_shell");
+  check bool "keeper bash alias target is known" true
+    (KTPC.is_known_policy_tool_name "keeper_bash");
+  check bool "keeper public Bash alias is known" true
+    (KTPC.is_known_policy_tool_name "Bash");
+  check bool "keeper public Read alias is known" true
+    (KTPC.is_known_policy_tool_name "Read");
+  check bool "keeper task done is known" true
+    (KTPC.is_known_policy_tool_name "keeper_task_done");
+  check bool "keeper time tool is known" true
+    (KTPC.is_known_policy_tool_name "keeper_time_now");
   check bool "masc static tag tool is known" true
     (KTPC.is_known_policy_tool_name "masc_status");
+  check bool "mcp-prefixed masc tool is known" true
+    (KTPC.is_known_policy_tool_name "mcp__masc__masc_status");
+  check bool "masc code git tool is known" true
+    (KTPC.is_known_policy_tool_name "masc_code_git");
   check bool "OAS core tool is known" true
     (KTPC.is_known_policy_tool_name "extend_turns");
-  check bool "retired typed tool is not known" false
+  check bool "typed task completion tool is known" true
     (KTPC.is_known_policy_tool_name "masc_complete_task");
   check bool "unknown tool is not known" false
     (KTPC.is_known_policy_tool_name "__missing_tool")

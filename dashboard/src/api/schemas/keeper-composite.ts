@@ -218,6 +218,8 @@ export const KeeperCompositeSnapshotSchema = object({
   phase_diagnosis: optional(KeeperPhaseDiagnosisSchema),
   is_live: boolean(),
   last_outcome: nullable(KeeperLastOutcomeSchema),
+  idle_seconds: optional(number()),
+  last_turn_ts: optional(number()),
   execution: optional(KeeperCompositeExecutionSchema),
   runtime_attention: optional(KeeperRuntimeAttentionSchema),
   recommended_actions: fallback(array(OperatorRecommendedActionSchema), []),

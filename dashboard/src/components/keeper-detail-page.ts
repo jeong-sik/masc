@@ -24,7 +24,10 @@ import {
   keeperNeedsDiagnosticAttention,
   runSocialSweep,
 } from './keeper-detail-helpers'
-import { useKeeperComposite, useKeeperRuntimeTrace } from './keeper-detail-hooks'
+import {
+  useKeeperCompositeEvidence,
+  useKeeperRuntimeTraceEvidence,
+} from './keeper-detail-hooks'
 import { KeeperLifecycleButtons } from './keeper-detail-lifecycle'
 import {
   KeeperDetailHeaderInfo,
@@ -74,8 +77,10 @@ export function KeeperDetailPage() {
   const [phaseEnteredAtSec, setPhaseEnteredAtSec] = useState<number | null>(null)
   // RFC-0046 §7 #1: single composite snapshot shared with the two
   // derived panels (state-diagram + memory-tier).
-  const compositeSnapshot = useKeeperComposite(keeper.name)
-  const runtimeTrace = useKeeperRuntimeTrace(keeper.name)
+  const compositeEvidence = useKeeperCompositeEvidence(keeper.name)
+  const runtimeTraceEvidence = useKeeperRuntimeTraceEvidence(keeper.name)
+  const compositeSnapshot = compositeEvidence.data
+  const runtimeTrace = runtimeTraceEvidence.data
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
     prevKeeperRef.current = keeper.name
@@ -179,14 +184,14 @@ export function KeeperDetailPage() {
   return html`
     <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
       <div class="sticky top-0 z-20 overflow-hidden rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] backdrop-blur-xl">
-        <div class="flex items-center justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:px-6">
+        <div class="flex flex-col items-stretch justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:flex-row sm:items-center sm:px-6">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}
             titleId=${titleId}
             phaseEnteredAtSec=${phaseEnteredAtSec}
             onClose=${closeKeeperDetail}
           />
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
             <button
               type="button"
               class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
@@ -220,6 +225,8 @@ export function KeeperDetailPage() {
         activityDisplay=${activityDisplay}
         compositeSnapshot=${compositeSnapshot}
         runtimeTrace=${runtimeTrace}
+        compositeEvidence=${compositeEvidence}
+        runtimeTraceEvidence=${runtimeTraceEvidence}
         diagOpen=${diagOpen}
         onDiagToggle=${setDiagOpen}
         checkpointRefreshToken=${checkpointRefreshToken}

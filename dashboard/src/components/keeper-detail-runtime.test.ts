@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import '@testing-library/jest-dom'
 
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
-import type { KeeperRuntimeTraceResponse } from '../api/keeper'
+import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import {
   AllowlistPreview,
   BudgetSourceBadge,
@@ -13,6 +13,7 @@ import {
   budgetSourceLabel,
   budgetSourceTone,
   filterSignalGroups,
+  deriveKeeperLiveTruth,
   resolveAllowlistPreview,
   resolveKeeperCurrentTaskLabel,
 } from './keeper-detail-runtime'
@@ -533,6 +534,92 @@ describe('RuntimeLensSection', () => {
     }
   }
 
+  function compositeFixture(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompositeSnapshot {
+    const base: KeeperCompositeSnapshot = {
+      keeper: 'sangsu',
+      correlation_id: 'keeper:sangsu:1',
+      run_id: 'run-1',
+      ts: 1_778_688_700,
+      phase: 'running',
+      turn_phase: 'idle',
+      decision: { stage: 'undecided' },
+      cascade: { state: 'idle' },
+      compaction: { stage: 'accumulating' },
+      circuit_breaker: { state: 'clean' },
+      measurement: { captured: false },
+      invariants: {
+        phase_turn_alignment: true,
+        no_cascade_before_measurement: true,
+        compaction_atomicity: true,
+        event_priority_monotone: true,
+        phase_derivation_agreement: true,
+      },
+      phase_diagnosis: {
+        current_phase: 'running',
+        derived_phase: 'running',
+        can_execute_turn: true,
+        conditions: {
+          launch_pending: false,
+          fiber_alive: true,
+          heartbeat_healthy: true,
+          turn_healthy: true,
+          context_within_budget: true,
+          context_handoff_needed: false,
+          compaction_active: false,
+          handoff_active: false,
+          operator_paused: false,
+          stop_requested: false,
+          restart_budget_remaining: true,
+          backoff_elapsed: false,
+          guardrail_triggered: false,
+          drain_complete: false,
+          context_overflow: false,
+          compact_retry_exhausted: false,
+          terminal_failure_latched: false,
+        },
+        determining_condition: 'running_fiber_alive',
+        rows: [],
+      },
+      is_live: false,
+      idle_seconds: 117,
+      last_turn_ts: 1_778_688_606,
+      last_outcome: null,
+      execution: {
+        latest_receipt_present: true,
+        recorded_at: '2026-05-13T16:10:14Z',
+        outcome: 'receipt_done',
+        terminal_reason_code: 'completed',
+        operator_disposition: 'pass',
+        operator_disposition_reason: 'healthy',
+        model_used: null,
+        stop_reason: 'completed',
+        tool_contract_result: 'needs_execution_progress',
+        duration_ms: 16000,
+        error: null,
+        cascade: null,
+        tool_surface: {
+          tool_requirement: 'optional',
+          tool_gate_enabled: false,
+          missing_required_tools: [],
+          required_tools: [],
+        },
+      },
+      runtime_attention: {
+        state: 'blocked',
+        needs_attention: true,
+        blocked: true,
+        fiber_stop_requested: false,
+        reason: 'healthy',
+        raw_phase: 'running',
+        is_live: false,
+        source: 'execution_receipt',
+      },
+      recommended_actions: [],
+      fsm_guard_violations: 0,
+    }
+    return { ...base, ...overrides }
+  }
+
   it('renders axis summary, swimlanes, and gap badges', () => {
     render(h(RuntimeLensSection, { trace: runtimeTraceFixture() }))
 
@@ -549,6 +636,61 @@ describe('RuntimeLensSection', () => {
     render(h(RuntimeLensSection, { trace: null }))
 
     expect(screen.getByText('runtime_trace_unavailable')).toBeInTheDocument()
+  })
+
+  it('derives visible live-truth rows from composite and runtime trace evidence', () => {
+    const summary = deriveKeeperLiveTruth({
+      keeper: {
+        name: 'sangsu',
+        status: 'active',
+        keepalive_running: true,
+      },
+      compositeSnapshot: compositeFixture(),
+      runtimeTrace: runtimeTraceFixture(),
+      runtimeResolution: null,
+    })
+
+    expect(summary.headline).toBe('조치 필요')
+    expect(summary.rows.find(row => row.label === '런타임')?.value).toBe('fiber alive')
+    expect(summary.rows.find(row => row.label === '현재 턴')?.value).toBe('no live turn')
+    expect(summary.rows.find(row => row.label === '최신 증거')?.value).toBe('turn #7 finished')
+    expect(summary.rows.find(row => row.label === 'FSM')?.value).toBe('KSM running / KTC idle')
+    expect(summary.rows.find(row => row.label === '차단')?.detail).toContain('needs_execution_progress')
+  })
+
+  it('surfaces runtime resolution warnings in the live-truth summary', () => {
+    const summary = deriveKeeperLiveTruth({
+      keeper: {
+        name: 'sangsu',
+        status: 'active',
+        keepalive_running: true,
+      },
+      compositeSnapshot: compositeFixture({
+        runtime_attention: {
+          state: 'healthy',
+          needs_attention: false,
+          blocked: false,
+          reason: null,
+          raw_phase: 'running',
+          is_live: false,
+          source: 'execution_receipt',
+        },
+      }),
+      runtimeTrace: runtimeTraceFixture(),
+      runtimeResolution: {
+        status: 'warn',
+        warnings: ['Runtime build commit differs from server repo HEAD.'],
+        source_mismatch: true,
+        server_repo_git_commit: '386514c1f9',
+        workspace_git_commit: 'd0add960d7',
+        server_repo_path: { path: '/repo/.worktrees/stale-server' },
+      },
+    })
+
+    expect(summary.tone).toBe('warn')
+    expect(summary.runtimeWarnings).toEqual(['Runtime build commit differs from server repo HEAD.'])
+    expect(summary.runtimeBuildLabel).toBe('386514c1f9 vs workspace d0add960d7')
+    expect(summary.runtimeRepoLabel).toBe('.worktrees/stale-server')
   })
 })
 

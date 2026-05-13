@@ -124,9 +124,8 @@ function OutputPanel() {
 }
 
 function CascadePanel() {
-  // Use MASC_P2.cascadeAudit (array of cascade runs with hops) rather than
-  // MASC_DATA.cascade which is a single object without the required array shape.
-  const cascades = ((window.MASC_P2 && window.MASC_P2.cascadeAudit) || []).slice(0, 6);
+  const D = window.MASC_DATA || {};
+  const cascades = (D.cascade && Array.isArray(D.cascade) ? D.cascade : []).slice(0, 6);
   return (
     <div className="dr-cascade">
       <div className="dr-cascade-bar">
@@ -139,15 +138,15 @@ function CascadePanel() {
           <div key={i} className="dr-csc">
             <div className="dr-csc-h">
               <span className="id">{c.id || ("csc-" + i)}</span>
-              <span className="prompt">{[c.cascade || "(unknown)", c.trigger].filter(Boolean).join(" · ")}</span>
+              <span className="prompt">{c.prompt || "(no prompt)"}</span>
               <span className={"out " + (c.outcome === "ok" ? "ok" : "fail")}>{c.outcome || "—"}</span>
             </div>
             <div className="dr-csc-hops">
               {(c.hops || []).map((h, hi) => (
                 <span key={hi} className={"hop " + (h.status || "")}>
                   <span className="ix">{hi + 1}</span>
-                  <span className="prov">{h.model || h.provider || h.name}</span>
-                  <span className="ms">{h.ms || h.latency_ms || "—"}ms</span>
+                  <span className="prov">{h.provider || h.name}</span>
+                  <span className="ms">{h.latency_ms || h.ms || "—"}ms</span>
                 </span>
               ))}
             </div>
@@ -250,9 +249,7 @@ function Drawer() {
 
   // apply CSS var --h-drawer to document root so the grid can read it
   dUseEffect(() => {
-    // Keep the bar (26px) visible when closed so users can click tabs to open.
-    const CLOSED_H = 26; // matches .drawer.closed min-height in drawer.css
-    const h = drawer.open ? Math.max(120, Math.min(window.innerHeight * 0.8, drawer.height)) : CLOSED_H;
+    const h = drawer.open ? Math.max(120, Math.min(window.innerHeight * 0.8, drawer.height)) : 0;
     document.documentElement.style.setProperty("--h-drawer", h + "px");
     document.body.classList.toggle("drawer-open", drawer.open);
   }, [drawer.open, drawer.height]);
@@ -372,22 +369,9 @@ function Drawer() {
   if (window.__drawerHotkey) return;
   window.__drawerHotkey = true;
 
-  const isEditableTarget = (target) => {
-    const tag = target && target.tagName;
-    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
-      (target && target.isContentEditable) ||
-      (target && target.closest && target.closest("[contenteditable]:not([contenteditable='false'])"));
-  };
-
-  const isDrawerHotkey = (e) => {
-    const altGraph = e.getModifierState && e.getModifierState("AltGraph");
-    return !altGraph && (e.ctrlKey || e.metaKey) && e.code === "Backquote";
-  };
-
-  // ctrl/cmd + physical Backquote toggles open/closed
+  // ctrl/cmd + ` toggles open/closed
   document.addEventListener("keydown", (e) => {
-    if (isDrawerHotkey(e)) {
-      if (isEditableTarget(e.target)) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === "`") {
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("masc-drawer-toggle"));
     }
@@ -396,7 +380,13 @@ function Drawer() {
   // listen for programmatic events (from IDE's drawer hint button etc.)
   window.addEventListener("masc-drawer-toggle", () => {
     if (!window.useCockpitState) return;
-    window.__drawerToggle?.();
+    // bypass hook: read singleton directly via the module-internal __state
+    const ev = window.__cockpit_state || null;
+    // simpler: push a custom postMessage that any mounted Drawer hook will receive via state singleton
+    // we trigger by directly invoking the persist with a flipped open flag
+    const cur = (window.MASC_EXT && window.MASC_EXT.initialState) ? null : null;
+    // Use a global helper installed below
+    if (window.__drawerToggle) window.__drawerToggle();
   });
   window.addEventListener("masc-drawer-set", (e) => {
     if (window.__drawerSet) window.__drawerSet(e.detail || {});

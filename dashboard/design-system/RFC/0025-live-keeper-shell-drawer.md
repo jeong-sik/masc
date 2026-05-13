@@ -12,7 +12,7 @@
 
 ## 1. Motivation
 
-cockpit-kit prototype `Drawer.jsx::TerminalPanel` 의 mock terminal lines (`{ t: "01:42:18", k: "tx", txt: "$ git fetch --all" }` 하드코딩) 을 실제 keeper shell stdout/stderr ring buffer 로 교체. 단일 cockpit 에서 multi-keeper shell 을 동시에 watch (마치 tmux pane).
+cockpit UI Kit prototype `Drawer.jsx::TerminalPanel` (`dashboard/design-system/ui_kits/cockpit/Drawer.jsx`) 의 mock terminal lines (`{ t: "01:42:18", k: "tx", txt: "$ git fetch --all" }` 하드코딩) 을 실제 keeper shell stdout/stderr ring buffer 로 교체. 단일 cockpit 에서 multi-keeper shell 을 동시에 watch (마치 tmux pane).
 
 memory `feedback_keeper-reaction-chain-break-analysis-2026-05-04` 의 9 termination paths + 6 partial recovery 를 실시간 시각으로 본다.
 

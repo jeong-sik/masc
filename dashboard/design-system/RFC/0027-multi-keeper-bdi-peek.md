@@ -90,7 +90,7 @@ placement: RFC 0024 의 single-slot 위치 (`ide-shell.ts` 우측). single-pin c
 
 ## 5. UI density
 
-inspector rail 폭은 cockpit-kit 기본 320px. 4 keeper 동시 표시 시 column layout:
+inspector rail 폭은 cockpit UI Kit 기본 320px. 4 keeper 동시 표시 시 column layout:
 
 | Layout | Trigger | Per-keeper visible |
 |--------|---------|--------------------|

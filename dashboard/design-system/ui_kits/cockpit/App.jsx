@@ -2,15 +2,23 @@
           MASC_DATA, WorkPlane, CommsPlane, ObservePlane, CognitionPlane, IdePlane,
           ViewportBanner, useCockpitState, useLayoutProfile, Drawer */
 const { useState, useCallback, useEffect } = React;
-const useCockpitLayoutProfile = window.useLayoutProfile || function useCockpitLayoutProfileNoop() {
-  return undefined;
-};
 
 function App() {
-  // sync mode/branch with the cockpit-state singleton (URL+localStorage)
-  const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{}, () => {}]);
-  // Always call the same hook-shaped function so hook order stays stable.
-  useCockpitLayoutProfile();
+  // sync mode/branch with the cockpit-state singleton (URL+localStorage).
+  // If the hook is not available we surface that loudly: previously the
+  // fallback was a silent stub which made cockpit state look functional
+  // while every write was dropped on the floor.
+  const [cs, setCs] = (() => {
+    if (window.useCockpitState) return window.useCockpitState();
+    console.error("[App] window.useCockpitState missing — cockpit state hook did not load; mode/branch changes will not persist");
+    return [{}, () => {}];
+  })();
+  // run layout profile — auto-collapses chrome per mode
+  if (window.useLayoutProfile) {
+    window.useLayoutProfile();
+  } else {
+    console.error("[App] window.useLayoutProfile missing — layout auto-collapse disabled");
+  }
   const [mode, setModeRaw] = useState(cs.mode || "Dashboard");
   const [density, setDensity] = useState("normal");
   const [selKeeper, setSelKeeper] = useState("nick0cave");
@@ -28,6 +36,19 @@ function App() {
   const setBranch = useCallback((b) => { setBranchRaw(b); setCs({ branch: b }); }, [setCs]);
 
   const D = window.MASC_DATA;
+  // Without the data layer the cockpit cannot render anything meaningful.
+  // Show a visible error instead of crashing on D.goals.find below.
+  if (!D || !Array.isArray(D.goals)) {
+    return (
+      <div className="app app-error" role="alert" data-error="missing-masc-data">
+        <h1>Cockpit data unavailable</h1>
+        <p>
+          <code>window.MASC_DATA</code> is missing or malformed. Verify the data
+          layer script loaded before App.jsx.
+        </p>
+      </div>
+    );
+  }
   const activeGoal = D.goals.find(g => g.id === selGoal) || D.goals[0];
 
   const toggleKeeper = useCallback((id) => {

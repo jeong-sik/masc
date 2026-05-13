@@ -337,24 +337,7 @@ function KpiStrip() {
   );
   return (
     <div className={"kpi" + (col ? " wx-collapsed" : "")}>
-      <div
-        className="kpi-collapse-tab"
-        onClick={toggle}
-        onKeyDown={(e) => {
-          if (
-            e.target !== e.currentTarget &&
-            e.target.closest &&
-            e.target.closest("a,button,input,textarea,select")
-          ) return;
-          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-            e.preventDefault();
-            toggle();
-          }
-        }}
-        title={col ? "expand KPI" : "collapse KPI"}
-        role="button"
-        tabIndex={0}
-        aria-expanded={!col}>
+      <div className="kpi-collapse-tab" onClick={toggle} title={col ? "expand KPI" : "collapse KPI"}>
         {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : visibleMetricCount + "/" + totalMetricCount) : "▾"}
         {!col && (
           <a className="wx-popout"
@@ -380,10 +363,6 @@ function Lifeline() {
   const [col, toggleLife] = (window.useCollapsed ? window.useCollapsed("lifeline") : [false, () => {}]);
   // Build a heartbeat trace from real keeper events instead of pure sin wave.
   // Each event becomes a peak; baseline runs flat.
-  // Map seed event kinds to lifeline peak levels:
-  //   err → fail (y=2)  |  flag → cascade (y=4)
-  //   note/tool → nudge (y=6)  |  verify → claim (y=8)
-  const _kindMap = { err:"fail", flag:"cascade", note:"nudge", tool:"nudge", verify:"claim" };
   const D = window.MASC_DATA || {};
   const events = (D.events || []).slice(0, 24);
   const N = 120;
@@ -391,7 +370,7 @@ function Lifeline() {
   // Map events to x positions (most recent on right).
   const eventX = events.map((e, i) => Math.floor(N - 1 - (i * (N-2) / Math.max(events.length-1,1))));
   const eventKind = {};
-  events.forEach((e, i) => { eventKind[eventX[i]] = _kindMap[e.kind] || "nudge"; });
+  events.forEach((e, i) => { eventKind[eventX[i]] = e.kind; });
   for (let i = 0; i < N; i++) {
     const x = (i / (N-1)) * 600;
     const base = 12;
@@ -400,34 +379,26 @@ function Lifeline() {
     if (k === "fail")     y = 2;
     else if (k === "cascade") y = 4;
     else if (k === "nudge")   y = 6;
-    else if (k === "claim")   y = 8;
+    else if (k === "claim" || k === "verify") y = 8;
     pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
   const d = "M" + pts.join(" L");
   // Render event markers as small dots.
   const markers = events.slice(0, 8).map((e, i) => ({
     x: (eventX[i] / (N-1)) * 600,
-    kind: _kindMap[e.kind] || "nudge",
+    kind: e.kind,
     keeper: e.keeper,
   }));
   return (
     <div className={"life" + (col ? " wx-collapsed" : "")}>
-      <button
-        type="button"
-        className="life-label"
-        onClick={toggleLife}
-        title={col ? "expand lifeline" : "collapse lifeline"}
-        aria-expanded={!col}
-        aria-controls="cockpit-lifeline-trace"
-        style={{ cursor:"pointer", background:"none", border:0, padding:0 }}>
+      <span className="life-label" onClick={toggleLife} title={col ? "expand lifeline" : "collapse lifeline"} style={{cursor:"pointer"}}>
         {col ? "▸" : "▾"} Lifeline · 60s
-      </button>
-      <div className="life-trace" id="cockpit-lifeline-trace">
+      </span>
+      <div className="life-trace">
         <svg viewBox="0 0 600 20" preserveAspectRatio="none">
           <path d={d} stroke="var(--color-accent-fg)" strokeWidth="1" fill="none" />
           {markers.map((m, i) => (
-            <circle key={i} cx={m.x}
-              cy={m.kind === "fail" ? 2 : m.kind === "cascade" ? 4 : m.kind === "claim" ? 8 : 6} r="1.6"
+            <circle key={i} cx={m.x} cy={m.kind === "fail" ? 2 : m.kind === "cascade" ? 4 : 6} r="1.6"
               fill={m.kind === "fail" ? "var(--err-fg)" : m.kind === "cascade" ? "var(--info-fg)" : m.kind === "nudge" ? "var(--brass-1)" : "var(--ok-fg)"} />
           ))}
         </svg>

@@ -14,19 +14,44 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 - **Rail** — activity feed + cascade trace
 - **Composer** — keeper.claim() input
 - **Status Bar** — build + online providers
+- **Planes / Crew / Drawer / Focus / WidgetSolo / StatusTray** — extended surfaces (multi-plane layout, multi-keeper crew, slide-out drawer, focus overlay, single-widget solo view, status tray)
 
 ## Files
 
+### Entry & styles
 - `index.html` — entry, loads React + Babel + all modules
 - `cockpit.css` — cockpit-specific styles (imports tokens.css + primitives.css)
+- `cockpit-ext.css` / `cockpit-ext.jsx` / `cockpit-ext.js` — extension overlay surfaces
+- `components.css` — component-scoped styles
+- `primitives.css` — primitive-token CSS layer
+- `tokens.generated.css` — generated design-token CSS (output of `pnpm tokens:build`)
+- `drawer.css`, `focus-mode.css`, `status-tray.css`, `widget-solo.css` — surface-specific styles
+
+### Seed data
 - `data.js` — Phase 1 seed data (keepers, goals, tasks, events, providers, cascade)
 - `data-p2.js` — Phase 2 seed data (branches, nudges, board posts, messages, audit, costs, decisions, episodes, autoresearch — sourced from real `.masc/*` records)
+- `data-crew.js` — Phase 3 crew seed data (multi-keeper crew / Planes view)
+
+### App shell
 - `App.jsx` — root layout + state (mode, density, selected keeper/goal)
 - `Chrome.jsx` — `Topbar` · `Ticker` · `KpiStrip` · `Lifeline` (top-of-screen surfaces)
 - `Panels.jsx` — `Sidebar` · `Swimlanes` · `Deck` · `Rail` · `Composer` · `StatusBar` (main work area)
+- `Planes.jsx` — multi-plane (Work / Comms / Observe / Cognition / IDE) layout
+- `CrewPlane.jsx` — Crew plane (multi-keeper inspector grid)
+
+### Surface components
+- `Drawer.jsx` — slide-out drawer (terminal / inspector surfaces; referenced by RFC 0025)
+- `FocusMode.jsx` — focus-mode overlay
+- `StatusTray.jsx` — bottom status tray
+- `WidgetSolo.jsx` — single-widget solo surface
+
+### Shared primitives & component groups
+- `cb-shared.jsx` — shared telemetry primitives (Heartbeat, Sparkline, …); sourced by `src/cb-shared-telemetry-source.test.ts` for telemetry-fabrication guards
+- `cb-group-{d,e,f,h,i,j,k}.jsx` — grouped component sets; each file bundles related components to keep the module count low
 
 ## Notes
 
-- Surfaces are grouped into two JSX files (`Chrome.jsx` and `Panels.jsx`) rather than one file per surface — small, related components share a file to keep the module count low.
+- Surfaces are grouped into shared JSX files (`Chrome.jsx`, `Panels.jsx`, `cb-group-*.jsx`) rather than one file per surface — related components share a file to keep the module count low.
 - All components publish themselves on `window` so Babel-compiled scripts can use them without explicit imports.
-- Seed data in `data.js` and `data-p2.js` mirrors real `.masc/` records (fleet IDs, goal IDs, board posts, decisions, autoresearch loops). For a per-component design library see `../../preview/components.html`.
+- Seed data in `data.js`, `data-p2.js`, and `data-crew.js` mirrors real `.masc/` records (fleet IDs, goal IDs, board posts, decisions, autoresearch loops). For a per-component design library see `../../preview/components.html`.
+- Consolidated from the previously parallel `dashboard/cockpit-kit/` standalone build on 2026-05-13. RFC 0013 references this directory as the migration source for the KpiStrip / Lifeline / Ticker production ports.

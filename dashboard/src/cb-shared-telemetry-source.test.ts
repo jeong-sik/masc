@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const sharedSources = [
-  ['cockpit kit', 'cockpit-kit/cb-shared.jsx'],
+  ['design-system ui kit', 'design-system/ui_kits/cockpit/cb-shared.jsx'],
   ['design-system preview', 'design-system/preview/cb-shared.jsx'],
 ] as const
 

@@ -1500,6 +1500,17 @@ let test_composite_routes_surface_latest_execution_receipt () =
     (execution |> member "cascade" |> member "fallback_reason" |> to_string);
   check int "composite exposes provider attempt count" 2
     (execution |> member "cascade" |> member "attempt_count" |> to_int);
+  check string "composite exposes tool surface lane" "tool_required"
+    (execution |> member "tool_surface" |> member "turn_lane" |> to_string);
+  check string "composite exposes tool surface class" "mixed"
+    (execution |> member "tool_surface" |> member "tool_surface_class"
+     |> to_string);
+  check int "composite exposes visible tool count" 2
+    (execution |> member "tool_surface" |> member "visible_tool_count"
+     |> to_int);
+  check bool "composite exposes tool surface fallback flag" false
+    (execution |> member "tool_surface" |> member "tool_surface_fallback_used"
+     |> to_bool);
   let fleet = run_curl_get ~port ~path:"/api/v1/keepers/composite" () in
   require_status "fleet composite GET returns 200" 200 fleet;
   let fleet_json = Yojson.Safe.from_string fleet.body in

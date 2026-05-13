@@ -151,10 +151,16 @@ function executionReceiptLabel(execution: KeeperCompositeExecution | undefined):
 
 function executionReceiptTitle(execution: KeeperCompositeExecution | undefined): string {
   if (!execution?.latest_receipt_present) return '아직 execution receipt가 없습니다.'
+  const surface = execution.tool_surface
   return [
     execution.recorded_at ? `recorded_at: ${execution.recorded_at}` : '',
     execution.operator_disposition ? `operator: ${execution.operator_disposition}` : '',
     execution.operator_disposition_reason ? `reason: ${execution.operator_disposition_reason}` : '',
+    surface?.tool_requirement ? `tool_requirement: ${surface.tool_requirement}` : '',
+    surface?.turn_lane ? `turn_lane: ${surface.turn_lane}` : '',
+    surface?.tool_surface_class ? `tool_surface: ${surface.tool_surface_class}` : '',
+    typeof surface?.visible_tool_count === 'number' ? `visible_tools: ${surface.visible_tool_count}` : '',
+    surface?.tool_surface_fallback_used === true ? 'tool_surface_fallback: true' : '',
     execution.cascade?.fallback_reason ? `fallback: ${execution.cascade.fallback_reason}` : '',
     execution.error?.kind ? `error: ${execution.error.kind}` : '',
     execution.error?.message_preview ? execution.error.message_preview : '',

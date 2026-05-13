@@ -828,10 +828,15 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           ; ( "tool_requirement"
             , Keeper_agent_tool_surface.tool_requirement_to_yojson
                 receipt.tool_surface.tool_requirement )
+          ; ( "turn_lane"
+            , Keeper_agent_tool_surface.turn_lane_to_yojson
+                receipt.tool_surface.turn_lane )
           ; ( "tool_surface_class"
             , Keeper_agent_tool_surface.tool_surface_class_to_yojson
                 receipt.tool_surface.tool_surface_class )
           ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
+          ; ( "tool_surface_fallback_used"
+            , `Bool receipt.tool_surface.tool_surface_fallback_used )
           ] )
     ; ( "sandbox"
       , `Assoc

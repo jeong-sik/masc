@@ -241,7 +241,7 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
     expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('키퍼 가동률')
-    expect(container.textContent).toContain('1/2 키퍼가 최근 도구 활동을 보였습니다.')
+    expect(container.textContent).toContain('도구 telemetry 확인 1/2 · 활동 1 · 기록 없음 0 · 미확인 1')
     expect(container.textContent).toContain('keeper-alpha')
     expect(container.textContent).toContain('keeper-beta')
     expect(container.textContent).toContain('Keeper 턴 로그')

@@ -25,6 +25,7 @@ import {
   toneForPressure,
   toolSummary,
   summaryCounts,
+  toolTelemetryCoverageDetail,
   buildToolQualityMap,
   buildFleetRows,
   buildRuntimeWarnings,
@@ -486,13 +487,40 @@ describe('summaryCounts', () => {
   it('counts live, hot, warn, stale correctly', () => {
     const rows = [
       makeRow({ name: 'a', keepalive_running: true, context_ratio: 0.1, last_activity_ago_s: 60, tool_calls: 1 }),
-      makeRow({ name: 'b', keepalive_running: true, context_ratio: PRESSURE_HOT_RATIO, last_activity_ago_s: 60, tool_calls: 0, recent_tools: [] }),
-      makeRow({ name: 'c', keepalive_running: false, context_ratio: 0.1, last_activity_ago_s: null, tool_calls: 0, recent_tools: [] }),
+      makeRow({ name: 'b', keepalive_running: true, context_ratio: PRESSURE_HOT_RATIO, last_activity_ago_s: 60, tool_calls: 0, recent_tools: [], tool_activity_known: false }),
+      makeRow({ name: 'c', keepalive_running: false, context_ratio: 0.1, last_activity_ago_s: null, tool_calls: 0, recent_tools: [], tool_activity_known: false }),
     ]
     const counts = summaryCounts(rows)
     expect(counts.live).toBe(2)
     expect(counts.hot).toBe(1)
     expect(counts.toolCovered).toBe(1)
+    expect(counts.toolTelemetryCovered).toBe(1)
+    expect(counts.toolActive).toBe(1)
+    expect(counts.toolQuiet).toBe(0)
+    expect(counts.toolUnknown).toBe(2)
+  })
+
+  it('counts known quiet tool telemetry as covered, not active', () => {
+    const counts = summaryCounts([
+      makeRow({ name: 'quiet', tool_calls: 0, recent_tools: [], tool_activity_known: true }),
+      makeRow({ name: 'unknown', tool_calls: 0, recent_tools: [], tool_activity_known: false }),
+    ])
+
+    expect(counts.toolCovered).toBe(1)
+    expect(counts.toolTelemetryCovered).toBe(1)
+    expect(counts.toolActive).toBe(0)
+    expect(counts.toolQuiet).toBe(1)
+    expect(counts.toolUnknown).toBe(1)
+  })
+
+  it('formats tool telemetry coverage detail for operator summaries', () => {
+    const counts = summaryCounts([
+      makeRow({ name: 'active', tool_calls: 2, recent_tools: ['masc_status'], tool_activity_known: true }),
+      makeRow({ name: 'quiet', tool_calls: 0, recent_tools: [], tool_activity_known: true }),
+      makeRow({ name: 'unknown', tool_calls: 0, recent_tools: [], tool_activity_known: false }),
+    ])
+
+    expect(toolTelemetryCoverageDetail(counts, 3)).toBe('도구 telemetry 확인 2/3 · 활동 1 · 기록 없음 1 · 미확인 1')
   })
 })
 

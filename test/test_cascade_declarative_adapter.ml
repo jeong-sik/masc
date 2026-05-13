@@ -209,6 +209,55 @@ let test_valid_default_profile () =
   check bool "has default profile" true (catalog.default_profile <> None)
 ;;
 
+let test_registered_http_provider_uses_toml_endpoint_without_api_key () =
+  let toml =
+    {|
+[providers.glm-coding]
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+[models.glm-5-turbo]
+max-context = 128000
+api-name = "glm-5-turbo"
+tools-support = true
+
+[glm-coding.glm-5-turbo]
+max-concurrent = 2
+
+[tier.medium]
+members = ["glm-coding.glm-5-turbo"]
+strategy = "failover"
+|}
+  in
+  let catalog = adapt_toml toml in
+  no_errors catalog.errors;
+  let medium =
+    List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+  in
+  match medium.provider_configs with
+  | [ cfg ] ->
+    check
+      bool
+      "keeps registered GLM kind"
+      true
+      (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Glm);
+    check
+      string
+      "uses TOML endpoint"
+      "https://api.z.ai/api/coding/paas/v4"
+      cfg.Llm_provider.Provider_config.base_url;
+    check string "uses model api-name" "glm-5-turbo" cfg.model_id
+  | configs ->
+    fail
+      (Printf.sprintf
+         "expected one resolved provider config, got %d"
+         (List.length configs))
+;;
+
 (* --- Error: unknown provider --- *)
 
 let test_unknown_provider () =
@@ -626,6 +675,10 @@ let () =
         ; test_case "routes" `Quick test_valid_routes
         ; test_case "system targets" `Quick test_valid_system_targets
         ; test_case "default profile" `Quick test_valid_default_profile
+        ; test_case
+            "registered HTTP provider uses TOML endpoint"
+            `Quick
+            test_registered_http_provider_uses_toml_endpoint_without_api_key
         ] )
     ; ( "errors"
       , [ test_case "unknown provider" `Quick test_unknown_provider

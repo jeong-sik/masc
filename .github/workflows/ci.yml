@@ -549,22 +549,16 @@ jobs:
         run: |
           opam exec -- dune build
 
-      - name: Cascade TOML/JSON drift gate
-        # Detects when config/cascade.toml has been edited but
-        # config/cascade.json was not regenerated.  The runtime
-        # auto-materializes JSON from TOML at boot, so a stale
-        # checked-in JSON does not break production — but it
-        # misleads readers and dashboards that read JSON directly
-        # (e.g., dashboard_cascade.ml).  This gate enforces parity
-        # in the repo so every commit stays self-describing.
-        # See: cascade_toml_materializer.ml, dashboard_cascade.ml:309.
+      - name: Cascade TOML validity gate
+        # RFC-0058 §9: config/cascade.toml is the authoring SSOT.
+        # cascade.json is no longer generated or committed, so the old
+        # cascade_materialize CLI is retired. This focused test renders
+        # the TOML in memory, validates the declarative catalog, and
+        # proves config/cascade.json has not reappeared as a tracked
+        # second source of truth.
+        # See: test/test_cascade_config_validity.ml.
         run: |
-          opam exec -- dune exec ./bin/cascade_materialize.exe -- \
-            config/cascade.json
-          if ! git diff --exit-code config/cascade.json; then
-            echo "::error::config/cascade.json is stale relative to config/cascade.toml.  Run 'dune exec ./bin/cascade_materialize.exe -- config/cascade.json' locally and commit the result."
-            exit 1
-          fi
+          opam exec -- dune build @test/runtest-test_cascade_config_validity
 
       - name: Env knob catalog drift gate
         # Detects when lib/config/env_config_*.ml has been edited

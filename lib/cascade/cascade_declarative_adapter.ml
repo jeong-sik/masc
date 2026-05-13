@@ -62,6 +62,16 @@ let find_provider (cfg : cascade_config) (provider_id : string) :
     cascade_provider option =
   List.find_opt (fun (p : cascade_provider) -> p.id = provider_id) cfg.providers
 
+let find_registry_entry (provider_id : string) :
+    Llm_provider.Provider_registry.entry option =
+  let registry = Llm_provider.Provider_registry.default () in
+  match Llm_provider.Provider_registry.find registry provider_id with
+  | Some _ as found -> found
+  | None ->
+    (match resolve_provider_prefix provider_id with
+     | Some cascade_prefix -> Llm_provider.Provider_registry.find registry cascade_prefix
+     | None -> None)
+
 let api_key_of_credential = function
   | Some (Env key) ->
       (match Sys.getenv_opt key with
@@ -70,28 +80,31 @@ let api_key_of_credential = function
   | Some (Inline value) -> value
   | Some (File _) | None -> ""
 
+let provider_kind_for_http_provider (provider : cascade_provider) :
+    Llm_provider.Provider_config.provider_kind option =
+  match provider.api_format with
+  | Ollama_api -> Some Llm_provider.Provider_config.Ollama
+  | Chat_completions_api ->
+    Some
+      (match find_registry_entry provider.id with
+       | Some entry -> entry.Llm_provider.Provider_registry.defaults.kind
+       | None -> Llm_provider.Provider_config.OpenAI_compat)
+  | Messages_api -> None
+
 let provider_config_from_http_provider
     (provider : cascade_provider)
     (spec : cascade_model_spec)
     ~(max_tokens : int option)
     : Llm_provider.Provider_config.t option =
-  match provider.transport, provider.api_format with
-  | Http base_url, Chat_completions_api
-    when Provider_adapter.resolve_adapter_by_cascade_prefix provider.id = None ->
+  match provider.transport, provider_kind_for_http_provider provider with
+  | Http base_url, Some kind ->
       Some
         (Llm_provider.Provider_config.make
-           ~kind:Llm_provider.Provider_config.OpenAI_compat
+           ~kind
            ~model_id:spec.api_name
            ~base_url
            ~api_key:(api_key_of_credential provider.credentials)
-           ?max_tokens
-           ())
-  | Http base_url, Ollama_api ->
-      Some
-        (Llm_provider.Provider_config.make
-           ~kind:Llm_provider.Provider_config.Ollama
-           ~model_id:spec.api_name
-           ~base_url
+           ~max_context:spec.max_context
            ?max_tokens
            ())
   | _ -> None

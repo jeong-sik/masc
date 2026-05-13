@@ -1,12 +1,20 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import type { Keeper, Task } from '../../types'
-import { keepers, tasks } from '../../store'
+import type { Goal, Keeper, Task } from '../../types'
+import { goals, keepers, tasks } from '../../store'
 import { KeeperBadge } from '../keeper-badge'
+import {
+  formatProgressPct,
+  goalPhaseLabel,
+  goalProgressFor,
+  horizonLabel,
+  type GoalProgress,
+} from '../goals/goal-helpers'
 import {
   canonicalKeeperName,
   keeperIdentityKeys,
 } from '../common/keeper-identity'
+import { openIdeContextRouteLink, routeLinksForContext } from './ide-context-lens'
 import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 
 interface IdeKeeperWorkPanelProps {
@@ -17,6 +25,7 @@ interface KeeperWorkSummary {
   readonly displayName: string
   readonly keeper: Keeper | null
   readonly currentTaskId: string | null
+  readonly currentGoalId: string | null
   readonly currentTask: Task | null
   readonly activeTasks: ReadonlyArray<Task>
   readonly activeTaskCount: number
@@ -34,6 +43,12 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   const summary = keeperWorkSummary(keeperName, keepers.value, tasks.value)
   const keeper = summary.keeper
   const currentTask = summary.currentTask
+  const currentGoal = summary.currentGoalId
+    ? goals.value.find(goal => goal.id === summary.currentGoalId) ?? null
+    : null
+  const currentGoalProgress = summary.currentGoalId
+    ? goalProgressFor(summary.currentGoalId)
+    : null
   const attention = Boolean(
     keeper?.needs_attention
     || keeper?.trust?.needs_attention
@@ -68,6 +83,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
         <div class="ide-keeper-work-strip">
           ${WorkMetric('phase', keeper?.phase ?? keeper?.status ?? 'unknown')}
           ${WorkMetric('task', summary.currentTaskId ?? 'none')}
+          ${WorkMetric('goal', summary.currentGoalId ?? 'none')}
           ${WorkMetric('active', String(summary.activeTaskCount))}
         </div>
         ${currentTask
@@ -95,6 +111,20 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
               </div>
             `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
+        ${currentGoal
+          ? GoalProgressCard(currentGoal, currentGoalProgress, summary.currentTaskId)
+          : summary.currentGoalId
+            ? html`
+              <div class="ide-keeper-work-goal" role="status">
+                <div class="ide-keeper-work-card-top">
+                  <span>GOAL PROGRESS</span>
+                  <span>${summary.currentGoalId}</span>
+                </div>
+                <strong>goal row not present in dashboard state</strong>
+                ${GoalRouteLinks(summary.currentGoalId, summary.currentTaskId)}
+              </div>
+            `
+            : null}
         ${RuntimeBlock(summary)}
         ${PresenceIndicator(cursor)}
         ${summary.recentOutput
@@ -109,6 +139,53 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
           : null}
       </div>
     </section>
+  `
+}
+
+function GoalProgressCard(
+  goal: Goal,
+  progress: GoalProgress | null,
+  taskId: string | null,
+) {
+  const pctLabel = progress ? formatProgressPct(progress) : '0%'
+  const pctValue = progress ? Math.round(progress.ratio * 100) : 0
+  return html`
+    <div class="ide-keeper-work-goal" role="status" aria-label=${`Goal ${goal.id} progress ${pctLabel}`}>
+      <div class="ide-keeper-work-card-top">
+        <span>GOAL PROGRESS</span>
+        <span>${horizonLabel(goal.horizon)} · ${goalPhaseLabel(goal.phase)}</span>
+      </div>
+      <strong title=${goal.title}>${goal.title}</strong>
+      <div class="ide-keeper-work-goal-bar" aria-hidden="true">
+        <span style=${{ width: `${pctValue}%` }} />
+      </div>
+      <div class="ide-keeper-work-goal-meta">
+        <span>${progress ? `${progress.done}/${progress.total} tasks` : '0/0 tasks'}</span>
+        <span>${pctLabel}</span>
+        ${goal.metric ? html`<span title=${goal.metric}>${goal.metric}</span>` : null}
+        ${goal.target_value ? html`<span title=${goal.target_value}>target ${goal.target_value}</span>` : null}
+      </div>
+      ${GoalRouteLinks(goal.id, taskId)}
+    </div>
+  `
+}
+
+function GoalRouteLinks(goalId: string, taskId: string | null) {
+  const links = routeLinksForContext({
+    goalId,
+    taskId: taskId ?? undefined,
+  })
+  return html`
+    <div class="ide-keeper-work-links" aria-label="Keeper work planning links">
+      ${links.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          title=${link.evidence}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >${link.label}</button>
+      `)}
+    </div>
   `
 }
 
@@ -158,12 +235,17 @@ export function keeperWorkSummary(
   const currentTask = currentTaskId
     ? activeTasks.find(task => task.id === currentTaskId) ?? null
     : activeTasks[0] ?? null
+  const currentGoalId = firstNonEmpty(
+    currentTask?.goal_id,
+    activeTasks.find(task => task.goal_id)?.goal_id,
+  )
   const trust = keeper?.trust ?? null
   const latestTerminal = trust?.latest_terminal_reason ?? null
   return {
     displayName,
     keeper,
     currentTaskId,
+    currentGoalId,
     currentTask,
     activeTasks,
     activeTaskCount: currentTaskId && activeTasks.length === 0 ? 1 : activeTasks.length,

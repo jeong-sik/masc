@@ -518,6 +518,7 @@
 
 .ide-keeper-work-body,
 .ide-keeper-work-card,
+.ide-keeper-work-goal,
 .ide-keeper-work-runtime {
   display: grid;
   gap: var(--sp-2);
@@ -547,6 +548,7 @@
 .ide-keeper-work-metric span,
 .ide-keeper-work-card-top,
 .ide-keeper-work-card > span,
+.ide-keeper-work-goal-meta,
 .ide-keeper-work-runtime span,
 .ide-keeper-work-empty,
 .ide-keeper-work-output {
@@ -556,6 +558,7 @@
 
 .ide-keeper-work-metric strong,
 .ide-keeper-work-card strong,
+.ide-keeper-work-goal strong,
 .ide-keeper-work-runtime strong {
   min-width: 0;
   overflow: hidden;
@@ -573,6 +576,65 @@
   border-left: 2px solid var(--color-accent-fg);
   border-radius: var(--r-2);
   background: var(--color-bg-elevated);
+}
+
+.ide-keeper-work-goal {
+  padding: var(--sp-2);
+  border: 1px solid color-mix(in srgb, var(--color-accent-fg) 42%, var(--color-border-default));
+  border-left: 2px solid var(--color-status-ok);
+  border-radius: var(--r-2);
+  background: color-mix(in srgb, var(--color-bg-elevated) 94%, var(--color-accent-fg));
+}
+
+.ide-keeper-work-goal-bar {
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: var(--r-0);
+  background: var(--color-bg-hover);
+}
+
+.ide-keeper-work-goal-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-status-ok);
+}
+
+.ide-keeper-work-goal-meta,
+.ide-keeper-work-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.ide-keeper-work-goal-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-keeper-work-links button {
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  color: var(--color-accent-fg);
+  background: transparent;
+  font: var(--type-eyebrow);
+  cursor: pointer;
+}
+
+.ide-keeper-work-links button:hover,
+.ide-keeper-work-links button:focus-visible {
+  border-color: var(--color-accent-fg);
+  background: var(--color-bg-hover);
+}
+
+.ide-keeper-work-links button:focus-visible {
+  outline: 2px solid var(--color-accent-fg);
+  outline-offset: 2px;
 }
 
 .ide-keeper-work-card-top {

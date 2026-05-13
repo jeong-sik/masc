@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { IdeKeeperWorkPanel, keeperWorkSummary } from './ide-keeper-work-panel'
-import { keepers, tasks } from '../../store'
-import type { Keeper, Task } from '../../types'
+import { goals, keepers, tasks } from '../../store'
+import type { Goal, Keeper, Task } from '../../types'
 
 describe('IdeKeeperWorkPanel', () => {
   let container: HTMLDivElement
@@ -13,8 +14,10 @@ describe('IdeKeeperWorkPanel', () => {
 
   afterEach(() => {
     render(null, container)
+    goals.value = []
     keepers.value = []
     tasks.value = []
+    window.location.hash = ''
   })
 
   it('summarizes the selected keeper current task and terminal reason', () => {
@@ -60,7 +63,40 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).toContain('keeper runtime current task')
     expect(container.textContent).not.toContain('no active keeper task')
   })
+
+  it('shows the current task goal progress and links back to planning', () => {
+    keepers.value = [keeperFixture()]
+    goals.value = [goalFixture()]
+    tasks.value = [
+      taskFixture({ goal_id: 'goal-runtime', status: 'claimed' }),
+      taskFixture({ id: 'task-done', title: 'Done task', goal_id: 'goal-runtime', status: 'done' }),
+      taskFixture({ id: 'task-cancelled', title: 'Cancelled task', goal_id: 'goal-runtime', status: 'cancelled' }),
+    ]
+
+    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
+
+    expect(container.textContent).toContain('GOAL PROGRESS')
+    expect(container.textContent).toContain('Runtime goal')
+    expect(container.textContent).toContain('1/2 tasks')
+    expect(container.textContent).toContain('50%')
+    expect(container.textContent).toContain('Goal')
+    expect(container.textContent).toContain('Task')
+
+    fireEvent.click(buttonByText(container, 'Goal'))
+    expect(window.location.hash).toBe('#workspace?section=planning&goal=goal-runtime')
+    fireEvent.click(buttonByText(container, 'Task'))
+    expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-151')
+  })
 })
+
+function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll('button'))
+    .find(candidate => candidate.textContent === text)
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`missing button: ${text}`)
+  }
+  return button
+}
 
 function keeperFixture(): Keeper {
   return {
@@ -99,6 +135,22 @@ function taskFixture(partial: Partial<Task> = {}): Task {
       git_root: '/workspace',
       repo_name: 'masc-mcp',
     },
+    ...partial,
+  }
+}
+
+function goalFixture(partial: Partial<Goal> = {}): Goal {
+  return {
+    id: 'goal-runtime',
+    horizon: 'short',
+    title: 'Runtime goal',
+    metric: 'green CI',
+    target_value: '100%',
+    priority: 1,
+    status: 'active',
+    phase: 'executing',
+    created_at: '2026-05-13T00:00:00Z',
+    updated_at: '2026-05-13T00:00:00Z',
     ...partial,
   }
 }

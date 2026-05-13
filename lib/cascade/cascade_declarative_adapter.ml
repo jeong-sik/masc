@@ -4,9 +4,9 @@
     an {!adapted_catalog} that mirrors the runtime's expected shape.
 
     Resolution chain:
-    - TOML provider.id → normalize → Provider_adapter.resolve_adapter_by_cascade_prefix
-    - adapter.cascade_prefix + model_spec.api_name → "prefix:api_name" string
-    - Cascade_config.parse_model_string → Provider_config.t
+    - TOML provider.id -> normalize -> Provider_adapter.resolve_adapter_by_cascade_prefix
+    - TOML provider metadata + model spec -> Provider_config.t
+    - legacy parser fallback only for providers not yet declared in TOML
 
     @stability Internal *)
 
@@ -62,39 +62,110 @@ let find_provider (cfg : cascade_config) (provider_id : string) :
     cascade_provider option =
   List.find_opt (fun (p : cascade_provider) -> p.id = provider_id) cfg.providers
 
-let api_key_of_credential = function
+let find_registry_entry (provider_id : string) :
+    Llm_provider.Provider_registry.entry option =
+  let registry = Llm_provider.Provider_registry.default () in
+  match Llm_provider.Provider_registry.find registry provider_id with
+  | Some _ as found -> found
+  | None ->
+    (match resolve_provider_prefix provider_id with
+     | Some cascade_prefix -> Llm_provider.Provider_registry.find registry cascade_prefix
+     | None -> None)
+
+let api_key_of_credential ?registry_entry = function
   | Some (Env key) ->
       (match Sys.getenv_opt key with
        | Some value -> value
        | None -> "")
   | Some (Inline value) -> value
-  | Some (File _) | None -> ""
+  | Some (File _) -> ""
+  | None ->
+    (match registry_entry with
+     | Some entry ->
+       let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
+       if env = ""
+       then ""
+       else (
+         (* NDT-OK: credential materialization is the provider boundary; catalog parsing stays deterministic. *)
+         match Sys.getenv_opt env with
+         | Some value -> value
+         | None -> "")
+     | None -> "")
 
-let provider_config_from_http_provider
+let provider_kind_of_cli_provider (provider : cascade_provider) :
+    Llm_provider.Provider_config.provider_kind option =
+  let resolve_kind raw =
+    Llm_provider.Provider_config.provider_kind_of_string raw
+  in
+  match resolve_kind provider.id with
+  | Some kind when Llm_provider.Provider_config.is_subprocess_cli kind ->
+    Some kind
+  | _ ->
+    (match resolve_provider_prefix provider.id with
+     | Some cascade_prefix ->
+       (match resolve_kind cascade_prefix with
+        | Some kind when Llm_provider.Provider_config.is_subprocess_cli kind -> Some kind
+        | _ -> None)
+     | None -> None)
+
+let provider_kind_for_http_provider ?registry_entry (provider : cascade_provider) :
+    Llm_provider.Provider_config.provider_kind option =
+  match provider.api_format with
+  | Ollama_api -> Some Llm_provider.Provider_config.Ollama
+  | Chat_completions_api ->
+    Some
+      (match registry_entry with
+       | Some entry -> entry.Llm_provider.Provider_registry.defaults.kind
+       | None -> Llm_provider.Provider_config.OpenAI_compat)
+  | Messages_api -> None
+
+let request_path_for_http_provider ~registry_entry ~kind ~base_url =
+  let request_path =
+    match registry_entry with
+    | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
+    | None -> Llm_provider.Provider_config.request_path_default_for_kind kind
+  in
+  match kind with
+  | Llm_provider.Provider_config.OpenAI_compat ->
+    Cascade_config.normalize_openai_compat_request_path ~base_url ~request_path
+  | _ -> request_path
+
+let provider_config_from_declared_provider
     (provider : cascade_provider)
     (spec : cascade_model_spec)
     ~(max_tokens : int option)
     : Llm_provider.Provider_config.t option =
-  match provider.transport, provider.api_format with
-  | Http base_url, Chat_completions_api
-    when Provider_adapter.resolve_adapter_by_cascade_prefix provider.id = None ->
-      Some
-        (Llm_provider.Provider_config.make
-           ~kind:Llm_provider.Provider_config.OpenAI_compat
-           ~model_id:spec.api_name
-           ~base_url
-           ~api_key:(api_key_of_credential provider.credentials)
-           ?max_tokens
-           ())
-  | Http base_url, Ollama_api ->
-      Some
-        (Llm_provider.Provider_config.make
-           ~kind:Llm_provider.Provider_config.Ollama
-           ~model_id:spec.api_name
-           ~base_url
-           ?max_tokens
-           ())
-  | _ -> None
+  let registry_entry = find_registry_entry provider.id in
+  match provider.transport with
+  | Http base_url ->
+    (match provider_kind_for_http_provider ?registry_entry provider with
+     | Some kind ->
+       let request_path = request_path_for_http_provider ~registry_entry ~kind ~base_url in
+       Some
+         (Llm_provider.Provider_config.make
+            ~kind
+            ~model_id:spec.api_name
+            ~base_url
+            ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
+            ~request_path
+            ~max_context:spec.max_context
+            ?max_tokens
+            ())
+     | None -> None)
+  | Cli _ ->
+    (match provider_kind_of_cli_provider provider with
+     | Some kind ->
+       Some
+         (Llm_provider.Provider_config.make
+            ~kind
+            ~model_id:spec.api_name
+            ~base_url:""
+            ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
+            ~headers:[]
+            ~max_context:spec.max_context
+            ?max_tokens
+            ())
+     | None -> None)
 
 (* --- Model lookup --- *)
 
@@ -131,7 +202,7 @@ let resolve_binding_config (cfg : cascade_config)
     let result =
       match find_provider cfg binding.provider_id with
       | Some provider ->
-        (match provider_config_from_http_provider provider spec ~max_tokens with
+        (match provider_config_from_declared_provider provider spec ~max_tokens with
          | Some cfg -> Some cfg
          | None -> parse_registered_provider ())
       | None -> parse_registered_provider ()

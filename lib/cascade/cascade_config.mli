@@ -32,6 +32,18 @@ val resolve_auto_model_id : string -> string -> string
 
 (** {1 Model String Parsing} *)
 
+(** Normalize OpenAI-compatible request paths against versioned base URLs.
+
+    When [base_url] already carries a path segment such as [/v1],
+    [request_path] should not repeat that prefix. For example,
+    [base_url = "http://127.0.0.1:18080/v1"] and
+    [request_path = "/v1/chat/completions"] normalize to
+    ["/chat/completions"].
+
+    @since 0.193.9 *)
+val normalize_openai_compat_request_path :
+  base_url:string -> request_path:string -> string
+
 (** Parse a "provider:model_id" string into a {!Llm_provider.Provider_config.t}.
 
     Supported providers are determined by {!Llm_provider.Provider_registry.default}.

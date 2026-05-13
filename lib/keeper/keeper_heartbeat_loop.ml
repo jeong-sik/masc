@@ -279,7 +279,10 @@ let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
 let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
   match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
   | Some entry when Option.is_some entry.current_turn_observation ->
-    (try ignore (Coord.heartbeat ctx.config ~agent_name:meta.agent_name) with
+    (try
+       let _heartbeat = Coord.heartbeat ctx.config ~agent_name:meta.agent_name in
+       ()
+     with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Keeper.warn

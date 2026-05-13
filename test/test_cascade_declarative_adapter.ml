@@ -3,9 +3,11 @@
     Tests the adapter that converts a parsed [cascade_config] into an
     [adapted_catalog] that mirrors the runtime's expected shape.
 
-    The adapter depends on [Provider_adapter.resolve_adapter_by_cascade_prefix]
-    and [Cascade_config.parse_model_string], so tests use provider IDs that
-    exist in the actual provider registry (claude_code, codex_cli, ollama, etc.). *)
+    The adapter resolves declared TOML providers directly into
+    [Provider_config.t] values, falling back to
+    [Cascade_config.parse_model_string] only for legacy providers that are not
+    declared in TOML. Tests use provider IDs from the typed provider-kind
+    surface (claude_code, codex_cli, ollama, etc.). *)
 
 open Alcotest
 open Cascade_declarative_types
@@ -78,12 +80,23 @@ let adapt_toml (toml : string) : adapted_catalog =
                errs)))
 ;;
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+;;
+
 (* --- TOML fixtures ---
 
    Provider IDs must match [Provider_adapter] cascade_prefix values:
    claude_code, codex_cli, gemini_cli, ollama, glm-coding, etc.
 
-   Model api_names must be parseable by [Cascade_config.parse_model_string]. *)
+   Model api_names must be valid runtime model ids for the declared provider. *)
 
 let valid_toml =
   {|
@@ -207,6 +220,195 @@ let test_valid_system_targets () =
 let test_valid_default_profile () =
   let catalog = adapt_toml valid_toml in
   check bool "has default profile" true (catalog.default_profile <> None)
+;;
+
+let test_registered_http_provider_uses_toml_endpoint_without_api_key () =
+  let toml =
+    {|
+[providers.glm-coding]
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+[models.glm-5-turbo]
+max-context = 128000
+api-name = "glm-5-turbo"
+tools-support = true
+
+[glm-coding.glm-5-turbo]
+max-concurrent = 2
+
+[tier.medium]
+members = ["glm-coding.glm-5-turbo"]
+strategy = "failover"
+|}
+  in
+  let catalog = adapt_toml toml in
+  no_errors catalog.errors;
+  let medium =
+    List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+  in
+  match medium.provider_configs with
+  | [ cfg ] ->
+    check
+      bool
+      "keeps registered GLM kind"
+      true
+      (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Glm);
+    check
+      string
+      "uses TOML endpoint"
+      "https://api.z.ai/api/coding/paas/v4"
+      cfg.Llm_provider.Provider_config.base_url;
+    check string "uses model api-name" "glm-5-turbo" cfg.model_id
+  | configs ->
+    fail
+      (Printf.sprintf
+         "expected one resolved provider config, got %d"
+         (List.length configs))
+;;
+
+let test_registered_http_provider_without_credentials_uses_registry_api_key_env () =
+  with_env "ZAI_API_KEY" "zai-review-test-key" (fun () ->
+    let toml =
+      {|
+[providers.glm-coding]
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[models.glm-5-turbo]
+max-context = 128000
+api-name = "glm-5-turbo"
+tools-support = true
+
+[glm-coding.glm-5-turbo]
+max-concurrent = 2
+
+[tier.medium]
+members = ["glm-coding.glm-5-turbo"]
+strategy = "failover"
+|}
+    in
+    let catalog = adapt_toml toml in
+    no_errors catalog.errors;
+    let medium =
+      List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+    in
+    match medium.provider_configs with
+    | [ cfg ] ->
+      check
+        bool
+        "keeps registered GLM kind"
+        true
+        (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Glm);
+      check
+        string
+        "uses TOML endpoint"
+        "https://api.z.ai/api/coding/paas/v4"
+        cfg.Llm_provider.Provider_config.base_url;
+      check string "uses registry api_key_env fallback" "zai-review-test-key" cfg.api_key
+    | configs ->
+      fail
+        (Printf.sprintf
+           "expected one resolved provider config, got %d"
+           (List.length configs)))
+;;
+
+let test_declared_http_provider_v1_endpoint_dedupes_request_path () =
+  let toml =
+    {|
+[providers.local-openai]
+protocol = "openai-http"
+endpoint = "http://127.0.0.1:18080/v1"
+
+[providers.local-openai.credentials]
+type = "env"
+key = "LOCAL_OPENAI_API_KEY"
+
+[models.remote]
+max-context = 4096
+api-name = "remote-model"
+tools-support = true
+
+[local-openai.remote]
+
+[tier.medium]
+members = ["local-openai.remote"]
+strategy = "failover"
+|}
+  in
+  let catalog = adapt_toml toml in
+  no_errors catalog.errors;
+  let medium =
+    List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+  in
+  match medium.provider_configs with
+  | [ cfg ] ->
+    check
+      bool
+      "uses OpenAI-compatible fallback kind"
+      true
+      (cfg.Llm_provider.Provider_config.kind
+       = Llm_provider.Provider_config.OpenAI_compat);
+    check
+      string
+      "keeps versioned TOML endpoint"
+      "http://127.0.0.1:18080/v1"
+      cfg.Llm_provider.Provider_config.base_url;
+    check
+      string
+      "strips duplicated version prefix from request_path"
+      "/chat/completions"
+      cfg.Llm_provider.Provider_config.request_path
+  | configs ->
+    fail
+      (Printf.sprintf
+         "expected one resolved provider config, got %d"
+         (List.length configs))
+;;
+
+let test_cli_provider_resolves_without_runtime_binary () =
+  let toml =
+    {|
+[providers.claude_code]
+protocol = "anthropic-cli"
+command = "__missing_claude_for_adapter_test__"
+
+[models.haiku]
+max-context = 200000
+api-name = "claude-haiku-4-5-20251001"
+tools-support = true
+
+[claude_code.haiku]
+max-concurrent = 1
+
+[tier.primary]
+members = ["claude_code.haiku"]
+strategy = "failover"
+|}
+  in
+  let catalog = adapt_toml toml in
+  no_errors catalog.errors;
+  let primary =
+    List.find (fun (p : adapted_profile) -> p.name = "tier.primary") catalog.profiles
+  in
+  match primary.provider_configs with
+  | [ cfg ] ->
+    check
+      bool
+      "uses CLI provider kind from declarative provider id"
+      true
+      (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Claude_code);
+    check string "uses model api-name" "claude-haiku-4-5-20251001" cfg.model_id;
+    check string "CLI providers do not need an HTTP base URL" "" cfg.base_url
+  | configs ->
+    fail
+      (Printf.sprintf
+         "expected one resolved provider config, got %d"
+         (List.length configs))
 ;;
 
 (* --- Error: unknown provider --- *)
@@ -626,6 +828,22 @@ let () =
         ; test_case "routes" `Quick test_valid_routes
         ; test_case "system targets" `Quick test_valid_system_targets
         ; test_case "default profile" `Quick test_valid_default_profile
+        ; test_case
+            "registered HTTP provider uses TOML endpoint"
+            `Quick
+            test_registered_http_provider_uses_toml_endpoint_without_api_key
+        ; test_case
+            "registered HTTP provider uses registry api_key_env fallback"
+            `Quick
+            test_registered_http_provider_without_credentials_uses_registry_api_key_env
+        ; test_case
+            "declared HTTP provider dedupes request path"
+            `Quick
+            test_declared_http_provider_v1_endpoint_dedupes_request_path
+        ; test_case
+            "CLI provider resolves without runtime binary"
+            `Quick
+            test_cli_provider_resolves_without_runtime_binary
         ] )
     ; ( "errors"
       , [ test_case "unknown provider" `Quick test_unknown_provider

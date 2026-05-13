@@ -59,7 +59,7 @@ function keeperMetrics() {
 }
 
 async function waitFor(assertion: () => boolean, label: string): Promise<void> {
-  for (let i = 0; i < 20; i += 1) {
+  for (let i = 0; i < 100; i += 1) {
     if (assertion()) return
     await new Promise(resolve => setTimeout(resolve, 0))
   }
@@ -228,5 +228,50 @@ describe('CostDashboard route-backed focus behavior', () => {
     expect(window.location.hash).toContain('mode=Observe')
     expect(window.location.hash).toContain('tab=ct-agt')
     await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'keeper metrics')
+  })
+
+  it('pins matching audit ledger rows when the route carries a log id', async () => {
+    apiMocks.fetchAuditLedger.mockResolvedValueOnce({
+      count: 2,
+      entries: [
+        {
+          id: 'audit-unrelated',
+          ts: '2026-05-06T00:00:01Z',
+          actor: 'keeper-alpha',
+          kind: 'tool_call',
+          summary: 'alpha called a tool',
+          severity: 'info',
+        },
+        {
+          id: 'audit-turn-9',
+          ts: '2026-05-06T00:00:02Z',
+          actor: 'keeper-alpha',
+          kind: 'keeper_turn',
+          summary: 'keeper turn completed',
+          severity: 'info',
+          payload: { log_id: 'turn-9' },
+        },
+      ],
+    })
+    window.history.replaceState(null, '', '#monitoring?section=runtime&view=audit&log_id=turn-9')
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'audit', log_id: 'turn-9' },
+      postId: null,
+    }
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+
+    render(h(CostDashboard, { view: 'audit' }), container)
+    await waitFor(
+      () => container.textContent?.includes('log focus · turn-9 · 1 matches pinned') ?? false,
+      'audit log focus banner',
+    )
+
+    const rows = Array.from(container.querySelectorAll('tbody tr'))
+    expect(rows[0]?.textContent).toContain('keeper_turn')
+    expect(rows[1]?.textContent).toContain('tool_call')
+    expect(container.querySelector('[data-testid="audit-log-focus"]')?.textContent).toContain('turn-9')
   })
 })

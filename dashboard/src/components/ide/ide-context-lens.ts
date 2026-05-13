@@ -3,6 +3,7 @@ import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import { navigate } from '../../router'
 import type { TabId } from '../../types'
+import { auditLogRouteParams } from '../cost/cost-types'
 import { KeeperBadge } from '../keeper-badge'
 import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
@@ -769,7 +770,7 @@ export function routeLinksForContext(
       id: `log:${logId}`,
       label: 'Log',
       tab: 'monitoring',
-      params: { section: 'runtime', view: 'audit' },
+      params: auditLogRouteParams(logId),
       evidence: `Log ${logId}`,
     })
   }

@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest"
 import type { AuditEntry } from "../api/dashboard"
 import {
+  auditEntryMatchesLogId,
+  auditLogRouteParams,
   auditRouteParams,
   formatTokens,
   isAuditFocus,
@@ -9,6 +11,7 @@ import {
   isCostView,
   summarizeAuditActors,
   summarizeAuditKinds,
+  prioritizeAuditEntriesByLogId,
   viewModeForCostFocus,
 } from "./cost-dashboard"
 
@@ -91,6 +94,7 @@ describe("audit focus helpers", () => {
     expect(auditRouteParams("ledger")).toEqual({ section: "runtime", view: "audit" })
     expect(auditRouteParams("actor")).toEqual({ section: "runtime", view: "audit", focus: "actor" })
     expect(auditRouteParams("summary")).toEqual({ section: "runtime", view: "audit", focus: "summary" })
+    expect(auditLogRouteParams("turn-9")).toEqual({ section: "runtime", view: "audit", log_id: "turn-9" })
   })
 })
 
@@ -196,6 +200,67 @@ describe("audit summaries", () => {
         info: 0,
         latest: "2026-05-06T00:02:01Z",
       },
+    ])
+  })
+
+  it("detects and pins audit entries related to a focused log id", () => {
+    const logEntries: AuditEntry[] = [
+      {
+        id: "unrelated",
+        ts: "2026-05-06T00:00:01Z",
+        actor: "keeper-alpha",
+        kind: "tool_call",
+        summary: "alpha called a tool",
+        severity: "info",
+      },
+      {
+        id: "audit-turn-9",
+        ts: "2026-05-06T00:00:02Z",
+        actor: "keeper-alpha",
+        kind: "keeper_turn",
+        summary: "keeper turn completed",
+        severity: "info",
+        payload: { refs: [{ log_id: "turn-9" }] },
+      },
+    ]
+
+    expect(auditEntryMatchesLogId(logEntries[0]!, "turn-9")).toBe(false)
+    expect(auditEntryMatchesLogId(logEntries[1]!, "turn-9")).toBe(true)
+    expect(prioritizeAuditEntriesByLogId(logEntries, "turn-9").map(entry => entry.id)).toEqual([
+      "audit-turn-9",
+      "unrelated",
+    ])
+  })
+
+  it("does not let `turn-1` match `turn-10` via substring", () => {
+    // Regression for exact log-id focus: `turn-1` must not pin entries that
+    // only mention `turn-10` or similar ids.
+    const collisionEntries: AuditEntry[] = [
+      {
+        id: "audit-turn-10",
+        ts: "2026-05-14T00:00:01Z",
+        actor: "keeper-alpha",
+        kind: "keeper_turn",
+        summary: "failed at turn-10",
+        severity: "warn",
+        payload: { refs: [{ log_id: "turn-10" }] },
+      },
+      {
+        id: "audit-turn-1",
+        ts: "2026-05-14T00:00:02Z",
+        actor: "keeper-alpha",
+        kind: "keeper_turn",
+        summary: "completed turn-1 cleanly",
+        severity: "info",
+        payload: { refs: [{ log_id: "turn-1" }] },
+      },
+    ]
+
+    expect(auditEntryMatchesLogId(collisionEntries[0]!, "turn-1")).toBe(false)
+    expect(auditEntryMatchesLogId(collisionEntries[1]!, "turn-1")).toBe(true)
+    expect(prioritizeAuditEntriesByLogId(collisionEntries, "turn-1").map(entry => entry.id)).toEqual([
+      "audit-turn-1",
+      "audit-turn-10",
     ])
   })
 })

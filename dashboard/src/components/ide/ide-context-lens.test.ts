@@ -337,7 +337,7 @@ describe('IdeContextLens', () => {
     })
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Log')).toMatchObject({
       tab: 'monitoring',
-      params: { section: 'runtime', view: 'audit' },
+      params: { section: 'runtime', view: 'audit', log_id: 'turn-9' },
     })
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Telemetry')).toMatchObject({
       tab: 'monitoring',
@@ -481,7 +481,7 @@ describe('IdeContextLens', () => {
     expect(model.anchors[0]?.line).toBeUndefined()
   })
 
-  it('does not advertise an unsupported log focus route param', () => {
+  it('routes log context into the runtime audit focus', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_exec_ide.ml',
       annotations: [],
@@ -503,6 +503,6 @@ describe('IdeContextLens', () => {
     })
 
     const logRoute = model.anchors[0]?.route_links?.find(link => link.label === 'Log')
-    expect(logRoute?.params).toEqual({ section: 'runtime', view: 'audit' })
+    expect(logRoute?.params).toEqual({ section: 'runtime', view: 'audit', log_id: 'turn-9' })
   })
 })

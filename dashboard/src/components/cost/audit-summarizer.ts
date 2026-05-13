@@ -82,3 +82,84 @@ export function summarizeAuditKinds(entries: readonly AuditEntry[]): AuditKindSu
     }))
     .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind))
 }
+
+export function auditEntryMatchesLogId(entry: AuditEntry, logId: string | null): boolean {
+  const needle = normalizeLogNeedle(logId)
+  if (!needle) return false
+  // Match policy:
+  //   - `entry.id`: structured identifier, case-insensitive equality.
+  //   - `entry.target`, `entry.summary`: human-readable text, token-boundary
+  //     match so `failed at turn-1` pins the row, but `failed at turn-10`
+  //     does not.
+  //   - `entry.payload`: structured JSON, with string leaves and keys treated
+  //     as identifier values.
+  // Plain `.includes(needle)` would treat `turn-1` as matching `turn-10`.
+  return stringEqualsLogNeedle(entry.id, needle)
+    || [entry.target, entry.summary].some(value => stringMatchesLogNeedleWithBoundary(value, needle))
+    || payloadContainsLogNeedle(entry.payload, needle)
+}
+
+export function prioritizeAuditEntriesByLogId(entries: readonly AuditEntry[], logId: string | null): AuditEntry[] {
+  const needle = normalizeLogNeedle(logId)
+  if (!needle) return [...entries]
+  const matched: AuditEntry[] = []
+  const rest: AuditEntry[] = []
+  for (const entry of entries) {
+    if (auditEntryMatchesLogId(entry, needle)) matched.push(entry)
+    else rest.push(entry)
+  }
+  return [...matched, ...rest]
+}
+
+function normalizeLogNeedle(value: string | null | undefined): string | null {
+  const trimmed = value?.trim().toLowerCase()
+  return trimmed ? trimmed : null
+}
+
+function stringEqualsLogNeedle(value: string | undefined, needle: string): boolean {
+  return typeof value === 'string' && value.trim().toLowerCase() === needle
+}
+
+// Token boundary = anything that is not `[A-Za-z0-9_-]`.  Log ids commonly
+// contain `-` so the canonical word boundary `\b` is too aggressive
+// (`\bturn-1\b` would still match `turn-10` because `-` is a word boundary
+// for `\b`).  We bracket the needle with explicit non-id-character
+// boundaries (or start/end of string) instead.
+const LOG_NEEDLE_ID_CHARS = /[A-Za-z0-9_-]/
+
+function isIdChar(char: string | undefined): boolean {
+  return typeof char === 'string' && LOG_NEEDLE_ID_CHARS.test(char)
+}
+
+function stringMatchesLogNeedleWithBoundary(value: string | undefined, needle: string): boolean {
+  if (typeof value !== 'string' || needle.length === 0) return false
+  const haystack = value.toLowerCase()
+  // Walk every occurrence — a single match with id-char on either side does
+  // not poison sibling matches that are properly bounded.
+  let idx = haystack.indexOf(needle)
+  while (idx >= 0) {
+    const before = idx === 0 ? undefined : haystack[idx - 1]
+    const afterIdx = idx + needle.length
+    const after = afterIdx >= haystack.length ? undefined : haystack[afterIdx]
+    if (!isIdChar(before) && !isIdChar(after)) return true
+    idx = haystack.indexOf(needle, idx + 1)
+  }
+  return false
+}
+
+function payloadContainsLogNeedle(value: unknown, needle: string, depth = 0): boolean {
+  if (depth > 4 || value == null) return false
+  if (typeof value === 'string') return stringEqualsLogNeedle(value, needle)
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).toLowerCase() === needle
+  }
+  if (Array.isArray(value)) {
+    return value.some(item => payloadContainsLogNeedle(item, needle, depth + 1))
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value).some(([key, item]) =>
+      stringEqualsLogNeedle(key, needle) || payloadContainsLogNeedle(item, needle, depth + 1),
+    )
+  }
+  return false
+}

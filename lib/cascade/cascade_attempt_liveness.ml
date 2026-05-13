@@ -67,7 +67,7 @@ type output =
   | Completed
 
 (** Metric recorder — caller (e.g. cascade_attempt_liveness_observer)
-    supplies callbacks for TTFT, TBT, and liveness outcome.
+    supplies callbacks for TTFT seconds, TBT seconds, and liveness outcome.
     Pure FSM stays IO-free; side effects live in the recorder. *)
 type recorder = {
   record_ttft : float -> unit;
@@ -108,8 +108,8 @@ let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
 
   (* Awaiting × chunk(any non-Done): transition to Streaming. *)
   | Awaiting { started_at }, Chunk (_, received_at) ->
-      let ttft_ms = (received_at -. started_at) *. 1000.0 in
-      recorder.record_ttft ttft_ms;
+      let ttft_seconds = received_at -. started_at in
+      recorder.record_ttft ttft_seconds;
       ( Streaming { started_at; last_chunk_at = received_at }
       , Continue )
 
@@ -135,8 +135,8 @@ let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
 
   (* Streaming × chunk(any non-Done): advance last_chunk_at. *)
   | Streaming { started_at; last_chunk_at = prev_last }, Chunk (_, received_at) ->
-      let tbt_ms = (received_at -. prev_last) *. 1000.0 in
-      recorder.record_inter_chunk tbt_ms;
+      let tbt_seconds = received_at -. prev_last in
+      recorder.record_inter_chunk tbt_seconds;
       ( Streaming { started_at; last_chunk_at = received_at }
       , Continue )
 

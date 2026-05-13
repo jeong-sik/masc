@@ -469,7 +469,9 @@ let run
     ) config.event_bus;
     let turns = (Agent_sdk.Agent.state agent).turn_count in
     let trace_ref = Agent_sdk.Agent.last_raw_trace_run agent in
-    Agent_sdk.Agent.close agent;
+    let close_after_success () =
+      close_agent_for_cleanup ~propagate_cancel:false ~config agent
+    in
     let run_validation =
       match trace_ref with
       | Some ref_ ->
@@ -483,6 +485,7 @@ let run
     in
     (match result with
     | Ok response ->
+      close_after_success ();
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
         ~status:Dashboard_oas_bridge.Success response;
@@ -499,6 +502,7 @@ let run
           stop_reason = Completed;
         }
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded r)) ->
+      close_after_success ();
       let partial_response =
         partial_response_of_stop
           ~session_id
@@ -524,6 +528,7 @@ let run
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
       match config.exit_condition_result with
       | Some render ->
+        close_after_success ();
         let stop_reason, response_text_opt = render r.turn in
         let response_text =
           match response_text_opt with
@@ -553,6 +558,7 @@ let run
             stop_reason;
           }
       | None ->
+        close_agent_for_cleanup ~propagate_cancel:false ~config agent;
         Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
@@ -580,6 +586,7 @@ let run
            detail
        | None ->
          Log.Misc.debug "oas_worker: agent errored (no proof): %s" detail);
+      close_agent_for_cleanup ~propagate_cancel:false ~config agent;
       Error err)
   with
   | Eio.Cancel.Cancelled _ as exn ->

@@ -620,18 +620,62 @@ let rejection_of_path ~config_path ~attempted_mtime ~checked_at
 let active_source_state ~config_path =
   Cascade_toml_materializer.source_state ~config_path
 
-let validate_profile_static ~config_path ~required_capability_profile name
+let profile_build_of_declarative_profile
+    ~required_capability_profile
+    (profile : Cascade_declarative_hotpath.profile)
+  =
+  let candidates =
+    List.map
+      (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+         { model_string = candidate.model_string
+         ; provider_cfg = candidate.provider_cfg
+         })
+      profile.candidates
+  in
+  { name = profile.name
+  ; weighted_entries = profile.weighted_entries
+  ; inference_params = profile.inference_params
+  ; api_key_env_overrides = []
+  ; strategy = profile.strategy
+  ; ollama_max_concurrent = profile.ollama_max_concurrent
+  ; cli_max_concurrent = profile.cli_max_concurrent
+  ; candidates
+  ; probes = profile_probes candidates
+  ; required_capability_profile
+  }
+
+let validate_profile_static
+    ?declarative_snapshot
+    ~config_path
+    ~required_capability_profile
+    name
     : (profile_build, profile_rejection) result =
   let weighted_entries =
     Cascade_config_loader.load_profile_weighted ~config_path ~name
   in
   if weighted_entries = [] then
-    Error
-      {
-        name;
-        errors = [ "profile has no non-empty configured candidates" ];
-        probes = [];
-      }
+    match declarative_snapshot with
+    | Some (snapshot : Cascade_declarative_hotpath.decl_snapshot) ->
+      (match
+         List.find_opt
+           (fun (profile : Cascade_declarative_hotpath.profile) ->
+              String.equal profile.name name)
+           snapshot.profiles
+       with
+       | Some profile ->
+         Ok (profile_build_of_declarative_profile ~required_capability_profile profile)
+       | None ->
+         Error
+           { name
+           ; errors = [ "profile has no non-empty configured candidates" ]
+           ; probes = []
+           })
+    | None ->
+      Error
+        { name
+        ; errors = [ "profile has no non-empty configured candidates" ]
+        ; probes = []
+        }
   else
     let inference_params =
       Cascade_config_loader.resolve_inference_params ~config_path ~name
@@ -760,6 +804,14 @@ let validate_path_result ?sw ?net ~config_path () =
                ]
              ~profiles:[])
     | Ok json ->
+        let declarative_result =
+          Cascade_declarative_hotpath.try_load_declarative config_path
+        in
+        let declarative_snapshot =
+          match declarative_result with
+          | Some (Ok snapshot) -> Some snapshot
+          | Some (Error _) | None -> None
+        in
         let profiles = discover_profile_names ~config_path ~json in
         if profiles = [] then
           Error
@@ -841,7 +893,7 @@ let validate_path_result ?sw ?net ~config_path () =
                 |> Option.value ~default:None
               in
               match
-                validate_profile_static ~config_path
+                validate_profile_static ?declarative_snapshot ~config_path
                   ~required_capability_profile name
               with
               | Ok profile -> (profile :: ok_acc, err_acc)
@@ -891,7 +943,7 @@ let validate_path_result ?sw ?net ~config_path () =
 
              Each branch emits a Prometheus counter so operators can
              alert on drift / adapter faults without scraping logs. *)
-          (match Cascade_declarative_hotpath.try_load_declarative config_path with
+          (match declarative_result with
            | Some (Ok decl_snap) ->
              let json_names =
                List.map (fun (p : profile_build) -> p.name)

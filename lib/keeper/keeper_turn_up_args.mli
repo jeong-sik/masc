@@ -16,6 +16,7 @@ type parsed_args =
   ; short_goal_opt : string option
   ; mid_goal_opt : string option
   ; long_goal_opt : string option
+  ; cascade_name_opt : string option
   ; policy_voice_enabled_opt : bool option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option

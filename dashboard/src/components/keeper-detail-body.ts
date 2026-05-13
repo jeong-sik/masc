@@ -48,7 +48,7 @@ import { KeeperActivitySummary } from './keeper-detail-activity-summary'
 import { FsmHub } from './fsm-hub'
 import { currentDashboardActor } from '../api'
 import type { Keeper } from '../types'
-import type { KeeperCompositeSnapshot } from '../api/keeper'
+import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import type { keeperActivityDisplay } from '../lib/keeper-runtime-display'
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 import { KeeperCommsPanel, PlaygroundReposPanel } from './keeper-detail-comms'
@@ -62,6 +62,7 @@ export interface KeeperDetailBodyProps {
   effectiveModel: string
   activityDisplay: ReturnType<typeof keeperActivityDisplay>
   compositeSnapshot: KeeperCompositeSnapshot | null
+  runtimeTrace: KeeperRuntimeTraceResponse | null
   diagOpen: boolean
   onDiagToggle: (open: boolean) => void
   checkpointRefreshToken: number
@@ -84,6 +85,7 @@ export function KeeperDetailBody({
   effectiveModel,
   activityDisplay,
   compositeSnapshot,
+  runtimeTrace,
   diagOpen,
   onDiagToggle,
   checkpointRefreshToken,
@@ -121,6 +123,7 @@ export function KeeperDetailBody({
         mode="detail"
         selectedName=${keeper.name}
         externalSnapshot=${compositeSnapshot}
+        runtimeTrace=${runtimeTrace}
       />
       <${CollapsibleSection} title="Phase State Machine">
         <${KeeperStateDiagramPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />

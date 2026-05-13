@@ -102,6 +102,11 @@ val init : ?cluster_name:string -> base_path:string -> unit -> unit
 val store_dir : unit -> string option
 (** [store_dir ()] returns the initialized durable store directory, if any. *)
 
+val current_log_path : unit -> string option
+(** [current_log_path ()] returns today's JSONL file path for the initialized
+    durable store, if any. The file may not exist yet when no tool call has
+    been appended today. *)
+
 val configured_masc_root : unit -> string option
 (** [configured_masc_root ()] returns the cluster-aware MASC root passed to
     [init], even if the store failed to open. Runtime sidecars use this to

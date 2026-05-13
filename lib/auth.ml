@@ -60,7 +60,9 @@ let write_initial_admin config agent_name =
 let save_private_text_file path content =
   run_blocking_io (fun () ->
     let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc; Open_text ] 0o600 path in
-    Eio_guard.protect
+    (* This body already runs in a systhread; use plain OCaml cleanup so it
+       does not require an Eio fiber context in that systhread. *)
+    Fun.protect
       ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc content));
   chmod path 0o600

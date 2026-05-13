@@ -125,6 +125,47 @@ let sdk_error_of_retry_slot_reacquire_timeout
        })
 ;;
 
+let json_of_string_opt = function
+  | None -> `Null
+  | Some value -> `String value
+;;
+
+let turn_event_bus_manifest_decision (summary : turn_event_bus_summary) =
+  let overflow =
+    match summary.overflow_imminent with
+    | None -> `Null
+    | Some overflow ->
+      `Assoc
+        [
+          ("estimated_tokens", `Int overflow.estimated_tokens);
+          ("limit_tokens", `Int overflow.limit_tokens);
+        ]
+  in
+  let last_compaction =
+    match summary.last_compaction with
+    | None -> `Null
+    | Some compaction ->
+      `Assoc
+        [
+          ("before_tokens", `Int compaction.before_tokens);
+          ("after_tokens", `Int compaction.after_tokens);
+          ("tokens_freed", `Int compaction.tokens_freed);
+          ("phase_hint", `String compaction.phase_hint);
+        ]
+  in
+  `Assoc
+    [
+      ("correlation_id", json_of_string_opt summary.correlation_id);
+      ("run_id", json_of_string_opt summary.run_id);
+      ("caused_by", json_of_string_opt summary.caused_by);
+      ("overflow_imminent", overflow);
+      ( "context_compact_started_count",
+        `Int summary.context_compact_started_count );
+      ("context_compacted_count", `Int summary.context_compacted_count);
+      ("last_compaction", last_compaction);
+    ]
+;;
+
 type turn_tool_event_tracker =
   { pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t
   ; mutable mutating_tools_committed : string list
@@ -303,7 +344,29 @@ let run_keeper_cycle
      stream.  Previously this was [let turn_id = ...] only after several
      pre-dispatch checks (see turn_livelock guard below), leaving silent
      skip paths without a turn correlator. *)
-  let keeper_turn_id = meta.runtime.usage.total_turns in
+  let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+  let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
+    { manifest_keeper_name = meta.name
+    ; manifest_agent_name = Some meta.agent_name
+    ; manifest_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+    ; manifest_generation = Some generation
+    ; manifest_keeper_turn_id = Some keeper_turn_id
+    }
+  in
+  let append_manifest ?status ?decision ?cascade_name ~site event =
+    Keeper_runtime_manifest.make_for_context runtime_manifest_context ~event
+      ?cascade_name ?status ?decision ()
+    |> Keeper_runtime_manifest.append_best_effort ~site config
+  in
+  append_manifest ~site:"turn_started"
+    ~decision:
+      (`Assoc
+        [
+          ( "channel",
+            `String (Keeper_world_observation.channel_to_string channel) );
+          ("usage_total_turns", `Int meta.runtime.usage.total_turns);
+        ])
+    Keeper_runtime_manifest.Turn_started;
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.name
     ~turn_id:keeper_turn_id
@@ -322,6 +385,15 @@ let run_keeper_cycle
   in
   if supervisor_stop_at_entry
   then (
+    append_manifest ~site:"phase_gate_decided"
+      ~status:"cancelled"
+      ~decision:
+        (`Assoc
+          [
+            ("reason", `String "supervisor_stop");
+            ("executable", `Bool false);
+          ])
+      Keeper_runtime_manifest.Phase_gate_decided;
     Log.Keeper.info
       ~keeper_name:meta.name
       ~turn_id:keeper_turn_id
@@ -356,6 +428,16 @@ let run_keeper_cycle
     match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
     | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
       let phase_string = Keeper_state_machine.phase_to_string phase in
+      append_manifest ~site:"phase_gate_decided"
+        ~status:"skipped"
+        ~decision:
+          (`Assoc
+            [
+              ("phase", `String phase_string);
+              ("reason", `String "non_executable_phase");
+              ("executable", `Bool false);
+            ])
+        Keeper_runtime_manifest.Phase_gate_decided;
       Log.Keeper.info
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
@@ -384,6 +466,20 @@ let run_keeper_cycle
     | phase_opt ->
       (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).
          At this point [phase] is executable; blocked phases returned above. *)
+      append_manifest ~site:"phase_gate_decided"
+        ~status:"ok"
+        ~decision:
+          (`Assoc
+            [
+              ( "phase",
+                `String
+                  (match phase_opt with
+                   | Some phase -> Keeper_state_machine.phase_to_string phase
+                   | None -> "missing_default_failing") );
+              ("reason", `String "executable_phase");
+              ("executable", `Bool true);
+            ])
+        Keeper_runtime_manifest.Phase_gate_decided;
       Keeper_turn_fsm.emit_transition
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
@@ -443,6 +539,23 @@ let run_keeper_cycle
             meta.name
             (String.concat ", " routed_labels)
             resolved_cascade;
+        append_manifest ~site:"cascade_routed"
+          ~cascade_name:resolved_cascade
+          ~decision:
+            (`Assoc
+              (Keeper_cascade_engine.manifest_fields
+                 Keeper_cascade_engine.keeper_managed
+               @ [
+                ("base_cascade", `String (cascade_name_of_meta meta));
+                ("effective_cascade", `String routing.effective_cascade);
+                ("resolved_cascade", `String resolved_cascade);
+                ("routing_reason", `String routing.reason);
+                ( "fail_opened",
+                  `Bool
+                    (not (String.equal resolved_cascade routing.effective_cascade))
+                );
+              ]))
+          Keeper_runtime_manifest.Cascade_routed;
         resolved_cascade
       in
       let effective_cascade_name =
@@ -659,7 +772,7 @@ let run_keeper_cycle
                     { kind = sdk_error_kind err; detail = error_message }));
             Error err
           | Ok initial_execution ->
-            let turn_id = meta.runtime.usage.total_turns in
+            let turn_id = keeper_turn_id in
             let model =
               match meta.models with
               | m :: _ -> Some m
@@ -2028,6 +2141,20 @@ let run_keeper_cycle
                     meta.name
                     correlation_id
                 | None -> ());
+               let event_bus_manifest_status =
+                 match turn_event_bus.correlation_id with
+                 | Some _ -> "observed"
+                 | None ->
+                   if turn_event_bus.context_compact_started_count > 0
+                      || turn_event_bus.context_compacted_count > 0
+                      || turn_event_bus.overflow_imminent <> None
+                   then "observed"
+                   else "empty"
+               in
+               append_manifest ~site:"event_bus_correlated"
+                 ~status:event_bus_manifest_status
+                 ~decision:(turn_event_bus_manifest_decision turn_event_bus)
+                 Keeper_runtime_manifest.Event_bus_correlated;
                let run_result =
                  match event_bus_integrity_error_snapshot () with
                  | Some integrity_err -> Error integrity_err

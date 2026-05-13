@@ -19,7 +19,9 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  fetchKeeperRuntimeTrace,
   pauseKeeper,
+  parseKeeperRuntimeTrace,
   resumeKeeper,
   sendKeeperMessageDetailed,
   shutdownKeeper,
@@ -94,6 +96,143 @@ describe('streamKeeperMessage', () => {
     expect(actorHeader).toBe('dashboard-eager-manta')
     expect(actorHeader).not.toContain('%')
     expect(events).toEqual(['RUN_FINISHED'])
+  })
+})
+
+describe('keeper runtime trace', () => {
+  it('parses runtime trace evidence with resilient defaults', () => {
+    const result = parseKeeperRuntimeTrace({
+      keeper: 'sangsu',
+      trace_id: 'trace-1',
+      turn_id: 7,
+      manifest_path: '/tmp/runtime-manifest.jsonl',
+      manifest_path_present: true,
+      manifest_total_rows: 10,
+      manifest_returned_rows: 8,
+      receipt_returned_rows: 1,
+	      turn_identity: {
+        requested_keeper_turn_id: 7,
+        manifest_keeper_turn_ids: [7],
+        receipt_turn_counts: [7],
+        max_oas_turn_count: 3,
+        provider_attempt_started_count: 1,
+        provider_attempt_finished_count: 1,
+        event_bus_correlated_count: 1,
+        memory_injected_count: 1,
+        memory_flushed_count: 1,
+        receipt_appended_count: 1,
+        turn_finished_count: 1,
+	      },
+	      provider_attempts: {
+	        started_count: 1,
+	        finished_count: 1,
+	        terminal_status: 'timeout',
+	        terminal_provider_kind: 'glm',
+	        terminal_model_id: 'glm-5.1',
+	        terminal_error: 'Timeout after 120.0s',
+	        terminal_exception_kind: 'outer_oas_timeout',
+	        attempts: [
+	          {
+	            ts: '2026-05-12T00:00:00Z',
+	            event: 'provider_attempt_finished',
+	            cascade_name: 'coding_plan',
+	            provider_kind: 'glm',
+	            model_id: 'glm-5.1',
+	            status: 'timeout',
+	            error: 'Timeout after 120.0s',
+	            exception_kind: 'outer_oas_timeout',
+	          },
+	        ],
+	      },
+	      event_bus: {
+        event_bus_correlated_count: 1,
+        correlation_ids: ['corr-1'],
+        run_ids: ['run-1'],
+        context_compact_started_count: 1,
+        context_compacted_count: 1,
+      },
+      memory: {
+        memory_injected_count: 1,
+        memory_flush_success_count: 1,
+        episodes_flushed: 2,
+      },
+      health: 'ok',
+      stale_reason: null,
+    })
+
+    expect(result.keeper).toBe('sangsu')
+	    expect(result.turn_identity.provider_lane_resolved_count).toBe(0)
+	    expect(result.turn_identity.provider_attempt_started_count).toBe(1)
+	    expect(result.provider_attempts.terminal_status).toBe('timeout')
+	    expect(result.provider_attempts.terminal_model_id).toBe('glm-5.1')
+	    expect(result.provider_attempts.attempts[0]?.exception_kind).toBe('outer_oas_timeout')
+	    expect(result.event_bus.correlation_ids).toEqual(['corr-1'])
+    expect(result.memory.memory_flushed_count).toBe(0)
+    expect(result.memory.episodes_flushed).toBe(2)
+    expect(result.health).toBe('ok')
+  })
+
+  it('fetches runtime trace evidence with query params', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        keeper: 'keeper sangsu',
+        trace_id: 'trace 1',
+        turn_id: 7,
+        manifest_path: '/tmp/runtime-manifest.jsonl',
+        manifest_path_present: true,
+        manifest_total_rows: 2,
+        manifest_returned_rows: 2,
+        receipt_returned_rows: 1,
+	        turn_identity: {
+          requested_keeper_turn_id: 7,
+          manifest_keeper_turn_ids: [7],
+          max_oas_turn_count: 4,
+          provider_lane_resolved_count: 1,
+          provider_attempt_started_count: 1,
+          provider_attempt_finished_count: 1,
+          event_bus_correlated_count: 1,
+          memory_injected_count: 1,
+          memory_flushed_count: 1,
+          receipt_appended_count: 1,
+          turn_finished_count: 1,
+	        },
+	        provider_attempts: {
+	          started_count: 1,
+	          finished_count: 1,
+	          terminal_status: 'provider_returned',
+	          terminal_model_id: 'mock-model',
+	          attempts: [],
+	        },
+	        event_bus: {
+          event_bus_correlated_count: 1,
+          context_compact_started_count: 0,
+          context_compacted_count: 0,
+        },
+        memory: {
+          memory_injected_count: 1,
+          memory_flushed_count: 1,
+        },
+        health: 'ok',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperRuntimeTrace('keeper sangsu', {
+      traceId: 'trace 1',
+      turnId: 7,
+      limit: 50,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit]
+    expect(url).toBe('/api/v1/keepers/keeper%20sangsu/runtime-trace?trace_id=trace+1&turn_id=7&limit=50')
+    expect(init.method).toBeUndefined()
+	    expect(result.turn_identity.max_oas_turn_count).toBe(4)
+	    expect(result.provider_attempts.terminal_status).toBe('provider_returned')
+	    expect(result.memory.memory_injected_count).toBe(1)
   })
 })
 

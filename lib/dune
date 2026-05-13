@@ -130,6 +130,7 @@
   keeper_agent_memory_episode
   keeper_agent_context
   keeper_oas_checkpoint
+  keeper_cascade_engine
   keeper_turn_driver
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider

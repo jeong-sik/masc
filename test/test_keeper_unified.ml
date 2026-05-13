@@ -24,6 +24,15 @@ module AQ = Masc_mcp.Keeper_approval_queue
 module Keeper_types = Masc_mcp.Keeper_types
 
 let oas_error_cascade_name = Masc_mcp.Keeper_turn_driver.cascade_name_of_string
+let phase_buffer_cascade_name () =
+  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
+    Masc_mcp.Keeper_cascade_profile.Phase_buffer
+;;
+
+let phase_recovery_cascade_name () =
+  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
+    Masc_mcp.Keeper_cascade_profile.Phase_recovery
+;;
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -78,8 +87,8 @@ let () =
   in
   unix_mkdir_p test_config_dir;
   copy_file
-    (Filename.concat base_path "config/cascade.json")
-    (Filename.concat test_config_dir "cascade.json");
+    (Filename.concat base_path "config/cascade.toml")
+    (Filename.concat test_config_dir "cascade.toml");
   Unix.putenv "MASC_BASE_PATH" test_base_path;
   Unix.putenv "MASC_CONFIG_DIR" test_config_dir;
   Masc_mcp.Config_dir_resolver.reset ();
@@ -188,8 +197,8 @@ let prepare_test_config_root base_dir =
   let config_dir = Filename.concat (Filename.concat base_dir ".masc") "config" in
   Keeper_types.mkdir_p config_dir;
   copy_file
-    (Filename.concat (repo_root ()) "config/cascade.json")
-    (Filename.concat config_dir "cascade.json");
+    (Filename.concat (repo_root ()) "config/cascade.toml")
+    (Filename.concat config_dir "cascade.toml");
   config_dir
 ;;
 
@@ -2956,7 +2965,7 @@ let test_unified_turn_runtime_defaults () =
     with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
       check (float 0.01) "unified temp default" 0.4 (KC.keeper_unified_temperature ());
       (* Runtime param default is 65536 (safe fallback).
-       In production, cascade.json overrides to 16384.
+       In production, cascade.toml overrides to 16384.
        This test verifies the runtime default, not cascade-resolved value. *)
       check int "unified max_tokens default" 65536 (KC.keeper_unified_max_tokens ())
       (* max_turns is set in keeper_agent_run.ml from keeper runtime config. *)))
@@ -5282,8 +5291,8 @@ let test_run_keeper_cycle_livelock_block_returns_error () =
        ignore (KR.register ~base_path:base_dir meta.name meta);
        ignore
          (Masc_mcp.Keeper_turn_livelock.guard_and_record_turn_start
-            ~keeper:meta.name
-            ~turn_id:meta.runtime.usage.total_turns
+           ~keeper:meta.name
+           ~turn_id:(meta.runtime.usage.total_turns + 1)
             ~max_attempts:1
             ~stuck_after_sec:1800.0
             ());
@@ -5844,26 +5853,26 @@ let test_decide_local_only_liveness_keeps_explicit_local_only () =
     check
       string
       "legacy local_only alias follows phase-buffer route"
-      KC.local_only_cascade_name
+      (phase_buffer_cascade_name ())
       cascade
   | UT.Probe_local_only_urls _ -> fail "unexpected local-only probe decision"
 ;;
 
-let test_decide_local_only_liveness_requests_deduped_ollama_probe () =
+let test_decide_local_only_liveness_keeps_phase_buffer_route () =
   let label = "ollama:qwen3.6:35b-a3b-mlx-bf16" in
-  let cfg = provider_config_of_label label in
   match
     UT.decide_local_only_liveness
       ~base_cascade:"tool_rerank"
       ~effective_cascade:KC.local_only_cascade_name
       [ label; label ]
   with
-  | UT.Keep_effective_cascade _ -> fail "expected Ollama liveness probe"
-  | UT.Probe_local_only_urls { effective_cascade; fallback_cascade; probeable_base_urls }
-    ->
-    check string "effective cascade" KC.local_only_cascade_name effective_cascade;
-    check string "fallback cascade" "tool_rerank" fallback_cascade;
-    check (list string) "deduped probe URLs" [ cfg.base_url ] probeable_base_urls
+  | UT.Keep_effective_cascade cascade ->
+    check
+      string
+      "phase-buffer route is not probed as a local-only lane"
+      (phase_buffer_cascade_name ())
+      cascade
+  | UT.Probe_local_only_urls _ -> fail "unexpected local-only probe decision"
 ;;
 
 let test_fail_open_local_only_when_probe_fails () =
@@ -5874,7 +5883,11 @@ let test_fail_open_local_only_when_probe_fails () =
       ~effective_cascade:KC.local_only_cascade_name
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
-  check string "falls back to base cascade" "tool_rerank" cascade
+  check
+    string
+    "keeps configured phase-buffer route"
+    (phase_buffer_cascade_name ())
+    cascade
 ;;
 
 let test_fail_open_local_only_preserves_explicit_local_only_base () =
@@ -5892,7 +5905,7 @@ let test_fail_open_local_only_preserves_explicit_local_only_base () =
   check
     string
     "legacy local_only alias follows phase-buffer route"
-    KC.local_only_cascade_name
+    (phase_buffer_cascade_name ())
     cascade
 ;;
 
@@ -5907,7 +5920,7 @@ let test_fail_open_local_only_preserves_healthy_local_only () =
   check
     string
     "healthy ollama keeps phase-buffer route"
-    KC.local_only_cascade_name
+    (phase_buffer_cascade_name ())
     cascade
 ;;
 
@@ -6708,6 +6721,9 @@ let test_summarize_turn_event_bus_extracts_overflow_signal () =
     "correlation id from first event"
     (Some "cid-123")
     summary.correlation_id;
+  check (option string) "run id from first event" (Some "run-1") summary.run_id;
+  check int "no compact started" 0 summary.context_compact_started_count;
+  check int "no compacted" 0 summary.context_compacted_count;
   match summary.overflow_imminent with
   | Some overflow ->
     check int "estimated tokens" 205_000 overflow.estimated_tokens;
@@ -6715,10 +6731,53 @@ let test_summarize_turn_event_bus_extracts_overflow_signal () =
   | None -> fail "expected overflow_imminent summary"
 ;;
 
+let test_summarize_turn_event_bus_extracts_compaction_signal () =
+  let events =
+    [ Agent_sdk.Event_bus.mk_event
+        ~correlation_id:"cid-compact"
+        ~run_id:"run-compact-start"
+        ~caused_by:"parent-run"
+        (Agent_sdk.Event_bus.ContextCompactStarted
+           { agent_name = minimal_meta.name; trigger = "proactive" })
+    ; Agent_sdk.Event_bus.mk_event
+        ~correlation_id:"cid-compact"
+        ~run_id:"run-compact-done"
+        (Agent_sdk.Event_bus.ContextCompacted
+           { agent_name = minimal_meta.name
+           ; before_tokens = 210_000
+           ; after_tokens = 120_000
+           ; phase = "proactive(85%)"
+           })
+    ]
+  in
+  let summary = UT.summarize_turn_event_bus events in
+  check
+    (option string)
+    "compaction correlation"
+    (Some "cid-compact")
+    summary.correlation_id;
+  check (option string) "compaction first run id" (Some "run-compact-start") summary.run_id;
+  check (option string) "compaction caused_by" (Some "parent-run") summary.caused_by;
+  check int "compact started count" 1 summary.context_compact_started_count;
+  check int "compacted count" 1 summary.context_compacted_count;
+  match summary.last_compaction with
+  | Some compaction ->
+    check int "before tokens" 210_000 compaction.before_tokens;
+    check int "after tokens" 120_000 compaction.after_tokens;
+    check int "tokens freed" 90_000 compaction.tokens_freed;
+    check string "phase hint" "proactive(85%)" compaction.phase_hint
+  | None -> fail "expected last compaction summary"
+;;
+
 let test_context_overflow_event_prefers_event_bus_signal () =
   let turn_event_bus : UT.turn_event_bus_summary =
     { correlation_id = Some "cid-123"
+    ; run_id = Some "run-1"
+    ; caused_by = None
     ; overflow_imminent = Some { estimated_tokens = 205_000; limit_tokens = 200_000 }
+    ; context_compact_started_count = 0
+    ; context_compacted_count = 0
+    ; last_compaction = None
     }
   in
   match
@@ -8009,7 +8068,7 @@ let test_degraded_retry_budget_gate_allows_remaining_budget () =
       (oas_timeout_budget_error ())
   with
   | UT.Degraded_retry_allowed retry ->
-    check string "retry cascade" KC.local_recovery_cascade_name retry.next_cascade;
+    check string "retry cascade" (phase_recovery_cascade_name ()) retry.next_cascade;
     check
       string
       "fallback reason"
@@ -8037,7 +8096,7 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
     check
       string
       "retry cascade candidate"
-      KC.local_recovery_cascade_name
+      (phase_recovery_cascade_name ())
       retry.next_cascade;
     check
       string
@@ -8067,7 +8126,7 @@ let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
     check
       string
       "retry cascade candidate"
-      KC.local_recovery_cascade_name
+      (phase_recovery_cascade_name ())
       retry.next_cascade;
     check
       string
@@ -11900,6 +11959,10 @@ let () =
             `Quick
             test_summarize_turn_event_bus_extracts_overflow_signal
         ; test_case
+            "summarize_turn_event_bus extracts compaction signal"
+            `Quick
+            test_summarize_turn_event_bus_extracts_compaction_signal
+        ; test_case
             "context_overflow_event prefers event bus signal"
             `Quick
             test_context_overflow_event_prefers_event_bus_signal
@@ -11954,9 +12017,9 @@ let () =
             `Quick
             test_decide_local_only_liveness_keeps_explicit_local_only
         ; test_case
-            "local_only liveness decision requests deduped probe"
+            "local_only liveness decision keeps phase-buffer route"
             `Quick
-            test_decide_local_only_liveness_requests_deduped_ollama_probe
+            test_decide_local_only_liveness_keeps_phase_buffer_route
         ; test_case
             "local_only fail-open falls back when ollama is down"
             `Quick

@@ -89,6 +89,56 @@ let required_tool_names_for_no_tool_error ~runtime_mcp_policy ~tools =
   in
   List.sort_uniq String.compare names
 
+let dedupe_keep_order values =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | value :: rest ->
+      if List.mem value seen then loop seen acc rest
+      else loop (value :: seen) (value :: acc) rest
+  in
+  loop [] [] values
+
+let materialized_tool_names_after_lane ~effective_tools ~runtime_mcp_policy =
+  let inline_names =
+    List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) effective_tools
+  in
+  let runtime_names =
+    match runtime_mcp_policy with
+    | Some policy -> policy.Llm_provider.Llm_transport.allowed_tool_names
+    | None -> []
+  in
+  dedupe_keep_order (inline_names @ runtime_names)
+
+let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
+  let inline_names =
+    List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) effective_tools
+  in
+  let runtime_names =
+    match runtime_mcp_policy with
+    | Some policy -> policy.Llm_provider.Llm_transport.allowed_tool_names
+    | None -> []
+  in
+  match inline_names <> [], runtime_names <> [], runtime_mcp_policy with
+  | true, true, _ -> "mixed"
+  | true, false, _ -> "inline"
+  | false, true, _ -> "runtime_mcp"
+  | false, false, Some _ -> "runtime_mcp_connect_only"
+  | false, false, None -> "none"
+
+let missing_required_tool_names_after_lane_by_name ~required_tool_names
+    ~materialized_tool_names =
+  required_tool_names
+  |> dedupe_keep_order
+  |> List.filter (fun name -> not (List.mem name materialized_tool_names))
+
+let missing_required_tool_names_after_lane ~required_tool_names ~effective_tools
+    ~runtime_mcp_policy =
+  let materialized_tool_names =
+    materialized_tool_names_after_lane ~effective_tools ~runtime_mcp_policy
+  in
+  missing_required_tool_names_after_lane_by_name ~required_tool_names
+    ~materialized_tool_names
+
 let provider_rejections_for_no_tool_error
     ~keeper_name ?runtime_mcp_policy ~tools
     ~require_tool_choice_support ~require_tool_support provider_cfgs =

@@ -196,6 +196,70 @@ let run_turn
   let approval_mode_effective = ctx.approval_mode_effective in
   let approval_mode_derived = ctx.approval_mode_derived in
   let keeper_oas_context = ctx.keeper_oas_context in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
+    { manifest_keeper_name = meta.name
+    ; manifest_agent_name = Some meta.agent_name
+    ; manifest_trace_id = trace_id
+    ; manifest_generation = Some generation
+    ; manifest_keeper_turn_id = Some (start_turn_count + 1)
+    }
+  in
+  let checkpoint_path =
+    Keeper_checkpoint_store.oas_checkpoint_path ~session_dir:session.session_dir
+      ~session_id:trace_id
+  in
+  let append_manifest ?status ?decision ?keeper_turn_id ?oas_turn_count
+      ?checkpoint_path ?receipt_path ~site event =
+    Keeper_runtime_manifest.make ~keeper_name:meta.name
+      ~agent_name:meta.agent_name ~trace_id ~generation ?keeper_turn_id
+      ?oas_turn_count ~event ~cascade_name:cascade_name_string ?status
+      ?decision ?checkpoint_path ?receipt_path ()
+    |> Keeper_runtime_manifest.append_best_effort ~site config
+  in
+  let digest_text text = Digest.to_hex (Digest.string text) in
+  let digest_message_texts_as_joined messages =
+    let module Hash = Digestif.MD5 in
+    let rec loop ctx = function
+      | [] -> ctx
+      | [ message ] ->
+        Hash.feed_string ctx (Agent_sdk.Types.text_of_message message)
+      | message :: rest ->
+        let ctx =
+          Hash.feed_string ctx (Agent_sdk.Types.text_of_message message)
+        in
+        loop (Hash.feed_string ctx "\n") rest
+    in
+    Hash.(to_hex (get (loop empty messages)))
+  in
+  append_manifest ~site:"checkpoint_loaded"
+    ~keeper_turn_id:(start_turn_count + 1)
+    ~checkpoint_path
+    ~decision:
+      (`Assoc
+        [
+          ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
+          ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
+          ( "pre_dispatch_checkpoint_error",
+            match pre_dispatch_checkpoint_error with
+            | None -> `Null
+            | Some err -> `String (Agent_sdk.Error.to_string err) );
+        ])
+    Keeper_runtime_manifest.Checkpoint_loaded;
+  append_manifest ~site:"context_compacted"
+    ~keeper_turn_id:(start_turn_count + 1)
+    ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
+    ~decision:
+      (`Assoc
+        [
+          ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
+          ( "pre_dispatch_checkpoint_error",
+            match pre_dispatch_checkpoint_error with
+            | None -> `Null
+            | Some err -> `String (Agent_sdk.Error.to_string err) );
+          ("checkpoint_path", `String checkpoint_path);
+        ])
+    Keeper_runtime_manifest.Context_compacted;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      user message append, token estimation — Keeper_run_prompt. *)
   let prompt_ctx =
@@ -217,6 +281,23 @@ let run_turn
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
   let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
+  let history_messages_digest = digest_message_texts_as_joined history_messages in
+  append_manifest ~site:"context_injected"
+    ~keeper_turn_id:(start_turn_count + 1)
+    ~decision:
+      (`Assoc
+        [
+          ("base_system_prompt_digest", `String (digest_text base_system_prompt));
+          ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
+          ("dynamic_context_digest", `String (digest_text dynamic_context));
+          ("memory_context_digest", `String (digest_text memory_context));
+          ("temporal_context_digest", `String (digest_text temporal_context));
+          ("user_message_digest", `String (digest_text user_message));
+          ("history_message_count", `Int (List.length history_messages));
+          ("history_messages_digest", `String history_messages_digest);
+          ("estimated_input_tokens", `Int estimated_input_tokens);
+        ])
+    Keeper_runtime_manifest.Context_injected;
   let actionable_signal =
     match world_observation with
     | None -> false
@@ -257,6 +338,11 @@ let run_turn
       ?max_cost_usd
       ~trajectory_acc
       ~tool_overlay
+      ~runtime_manifest_context
+      ~runtime_manifest_append:
+        (Keeper_runtime_manifest.append_best_effort
+           ~site:"memory_hooks"
+           config)
       ()
   in
   match setup with
@@ -294,6 +380,37 @@ let run_turn
     let reducer = s.Keeper_run_tools.reducer in
     let memory = s.Keeper_run_tools.memory in
     let acc = s.Keeper_run_tools.acc in
+    append_manifest ~site:"tool_surface_selected"
+      ~keeper_turn_id:(start_turn_count + 1)
+      ~decision:
+        (`Assoc
+          [
+            ("turn_lane", `String (turn_lane_to_string acc.tool_surface.turn_lane));
+            ( "tool_surface_class",
+              `String
+                (tool_surface_class_to_string
+                   acc.tool_surface.tool_surface_class) );
+            ( "tool_requirement",
+              `String
+                (tool_requirement_to_string acc.tool_surface.tool_requirement)
+            );
+            ("visible_tool_count", `Int acc.tool_surface.visible_tool_count);
+            ("tool_gate_enabled", `Bool acc.tool_surface.tool_gate_enabled);
+            ( "tool_surface_fallback_used",
+              `Bool acc.tool_surface.tool_surface_fallback_used );
+            ( "required_tool_names",
+              `List
+                (List.map
+                   (fun name -> `String name)
+                   acc.tool_surface.required_tool_names) );
+            ( "missing_required_tool_names",
+              `List
+                (List.map
+                   (fun name -> `String name)
+                   acc.tool_surface.missing_required_tool_names) );
+            ("config_root", `String acc.tool_surface.config_root);
+          ])
+      Keeper_runtime_manifest.Tool_surface_selected;
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in
     let initial_tool_surface_blocker_ref =
@@ -535,8 +652,15 @@ let run_turn
                      ~initial_messages:history_messages
                      ~hooks
                      ~context_reducer:reducer
-                     ~summarizer:Keeper_summarizer.keeper_summarizer
-                     ~memory
+                    ~summarizer:Keeper_summarizer.keeper_summarizer
+                    ~memory
+                    ~runtime_manifest_context
+                    ~runtime_manifest_append:
+                      (Keeper_runtime_manifest.append_best_effort
+                         ~site:"cascade_runtime"
+                         config)
+                    ~runtime_manifest_required_tool_names:
+                      acc.tool_surface.required_tool_names
                        (* Keepers use turn-level retry for transient errors but benefit
                from OAS per-call retry for validation errors (malformed tool
                args). retry_on_validation_error=true lets OAS re-prompt the
@@ -1048,14 +1172,104 @@ let run_turn
                        match
                          Keeper_text_processing.state_snapshot_reply_fallback
                            (Some state_snapshot)
-                       with
-                       | Some fallback ->
-                         Keeper_text_processing.user_visible_reply_text
-                           ~fallback
-                           raw_response_text
-                       | None ->
-                         Keeper_text_processing.user_visible_reply_text raw_response_text
-                     in
+                     with
+                     | Some fallback ->
+                       Keeper_text_processing.user_visible_reply_text
+                         ~fallback
+                         raw_response_text
+                     | None ->
+                       Keeper_text_processing.user_visible_reply_text raw_response_text
+                   in
+                    let state_snapshot_source =
+                      if
+                        Option.is_some
+                          (Keeper_memory_policy.parse_state_snapshot_from_reply
+                             raw_response_text)
+                      then "model_state_block"
+                      else "synthesized"
+                    in
+                    let state_snapshot_sidecar_path =
+                      Filename.concat
+                        (Filename.concat session.session_dir "state-snapshots")
+                        (Printf.sprintf "turn-%06d.json" result.turns)
+                    in
+                    let latest_state_snapshot_sidecar_path =
+                      Filename.concat session.session_dir "state-snapshot.latest.json"
+                    in
+                    let state_snapshot_payload =
+                      `Assoc
+                        [
+                          ("schema_version", `Int 1);
+                          ("ts", `String (Masc_domain.now_iso ()));
+                          ("keeper_name", `String meta.name);
+                          ("agent_name", `String meta.agent_name);
+                          ("trace_id", `String trace_id);
+                          ("generation", `Int generation);
+                          ("oas_turn_count", `Int result.turns);
+                          ( "state_snapshot",
+                            Keeper_memory_policy.keeper_state_snapshot_to_json
+                              state_snapshot );
+                        ]
+                    in
+                    let state_snapshot_sidecar_saved =
+                      let sidecar_dir =
+                        Filename.dirname state_snapshot_sidecar_path
+                      in
+                      (try Fs_compat.mkdir_p sidecar_dir with
+                       | exn ->
+                         Log.Keeper.warn
+                           "keeper:%s state snapshot sidecar dir create failed: %s"
+                           meta.name
+                           (Printexc.to_string exn));
+                      match
+                        Fs_compat.save_file_atomic state_snapshot_sidecar_path
+                          (Yojson.Safe.pretty_to_string state_snapshot_payload)
+                      with
+                      | Ok () -> (
+                        match
+                          Fs_compat.save_file_atomic
+                            latest_state_snapshot_sidecar_path
+                            (Yojson.Safe.pretty_to_string state_snapshot_payload)
+                        with
+                        | Ok () -> true
+                        | Error e ->
+                          Log.Keeper.warn
+                            "keeper:%s latest state snapshot sidecar save failed: %s"
+                            meta.name
+                            e;
+                          false)
+                      | Error e ->
+                        Log.Keeper.warn
+                          "keeper:%s state snapshot sidecar save failed: %s"
+                          meta.name
+                          e;
+                        Prometheus.inc_counter
+                          Keeper_metrics.metric_keeper_checkpoint_failures
+                          ~labels:
+                            [ "keeper", meta.name
+                            ; "site", "state_snapshot_sidecar"
+                            ]
+                          ();
+                        false
+                    in
+                    append_manifest ~site:"state_snapshot_sidecar"
+                      ~keeper_turn_id:(start_turn_count + 1)
+                      ~oas_turn_count:result.turns
+                      ~status:
+                        (if state_snapshot_sidecar_saved then "saved" else "error")
+                      ~decision:
+                        (`Assoc
+                          [
+                            ( "state_snapshot_sidecar_path",
+                              `String state_snapshot_sidecar_path );
+                            ( "latest_state_snapshot_sidecar_path",
+                              `String latest_state_snapshot_sidecar_path );
+                            ( "state_snapshot_sidecar_saved",
+                              `Bool state_snapshot_sidecar_saved );
+                            ( "source",
+                              `String state_snapshot_source );
+                          ])
+                      Keeper_runtime_manifest.State_snapshot_sidecar_saved;
                      receipt_response_text_present_ref := true;
                      let assistant_msg =
                        Agent_sdk.Types.make_message
@@ -1094,7 +1308,23 @@ let run_turn
                               ~session_dir:session.session_dir
                               patched
                           with
-                          | Ok () -> Ok (Some patched)
+                          | Ok () ->
+                            append_manifest ~site:"checkpoint_saved"
+                              ~keeper_turn_id:(start_turn_count + 1)
+                              ~oas_turn_count:result.turns
+                              ~checkpoint_path:
+                                (Keeper_checkpoint_store.oas_checkpoint_path
+                                   ~session_dir:session.session_dir
+                                   ~session_id:patched.session_id)
+                              ~decision:
+                                (`Assoc
+                                  [
+                                    ("session_id", `String patched.session_id);
+                                    ("turns", `Int result.turns);
+                                    ("model", `String model);
+                                  ])
+                              Keeper_runtime_manifest.Checkpoint_saved;
+                            Ok (Some patched)
                           | Error e ->
                             Log.Keeper.error
                               "keeper:%s cascade=%s OAS checkpoint save failed: %s"
@@ -1441,10 +1671,28 @@ let run_turn
                       with
                       | Error e -> Error (Agent_sdk.Error.Internal e)
                       | Ok response_text -> finalize_response_text response_text))))
-       in
-       (match turn_result with
-        | Ok _ -> ()
-        | Error err ->
+	       in
+	       (match turn_result with
+	        | Ok _ -> ()
+	        | Error err ->
+	          let status, exception_kind =
+	            match err with
+	            | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
+	              "timeout", Some "outer_oas_timeout"
+	            | _ -> "error", Some "outer_oas_error"
+	          in
+	          Keeper_runtime_manifest
+	          .append_unfinished_provider_attempt_finished_best_effort
+	            ~site:"keeper_llm_bridge_terminal"
+	            config
+	            runtime_manifest_context
+	            ~status
+	            ~error:(Agent_sdk.Error.to_string err)
+	            ?exception_kind
+	            ());
+	       (match turn_result with
+	        | Ok _ -> ()
+	        | Error err ->
           let turn =
             match !receipt_turn_count_ref with
             | Some turns -> turns
@@ -1556,6 +1804,69 @@ let run_turn
          ; ended_at = receipt_ended_at
          }
        in
+       let receipt_path =
+         Keeper_runtime_manifest.execution_receipt_path_for_today config
+           ~keeper_name:meta.name
+       in
+       let json_string_list values =
+         `List (List.map (fun value -> `String value) values)
+       in
+       let receipt_manifest_decision ?receipt_append_ok () =
+         `Assoc
+           [
+             ( "outcome",
+               `String
+                 (Keeper_execution_receipt.outcome_kind_to_string
+                    receipt.outcome) );
+             ("terminal_reason_code", `String receipt.terminal_reason_code);
+             ( "cascade_name",
+               `String
+                 (Keeper_execution_receipt.cascade_name_to_string
+                    receipt.cascade_name) );
+             ("cascade_attempt_count", `Int receipt.cascade_attempt_count);
+             ("cascade_fallback_applied", `Bool receipt.cascade_fallback_applied);
+             ( "cascade_outcome",
+               `String
+                 (Keeper_execution_receipt.cascade_outcome_to_string
+                    receipt.cascade_outcome) );
+             ("requested_tools", json_string_list receipt.requested_tools);
+             ("reported_tools", json_string_list receipt.reported_tools);
+             ("observed_tools", json_string_list receipt.observed_tools);
+             ("canonical_tools", json_string_list receipt.canonical_tools);
+             ("tools_used", json_string_list receipt.tools_used);
+             ( "receipt_append_ok",
+               match receipt_append_ok with
+               | None -> `Null
+               | Some ok -> `Bool ok );
+           ]
+       in
+       let append_receipt_manifest ?status ?decision ~site event =
+         let status =
+           match status with
+           | Some status -> status
+           | None ->
+             Keeper_execution_receipt.outcome_kind_to_string receipt.outcome
+         in
+         let decision =
+           match decision with
+           | Some decision -> decision
+           | None -> receipt_manifest_decision ()
+         in
+         let tool_call_log_path =
+           match receipt.tools_used with
+           | [] -> None
+           | _ -> Keeper_tool_call_log.current_log_path ()
+         in
+         Keeper_runtime_manifest.make ~ts:receipt.ended_at
+           ~keeper_name:receipt.keeper_name ~agent_name:receipt.agent_name
+           ~trace_id:receipt.trace_id ~generation:receipt.generation
+           ~keeper_turn_id:(start_turn_count + 1) ~event
+           ~cascade_name:
+             (Keeper_execution_receipt.cascade_name_to_string receipt.cascade_name)
+           ?model_id:receipt.model_used ~status ~decision ~receipt_path
+           ?tool_call_log_path ()
+         |> Keeper_runtime_manifest.append_best_effort ~site config
+       in
        (* Tier A2 / Cycle 5: receipt append failure escalates to a
        turn-level Error.
 
@@ -1569,6 +1880,9 @@ let run_turn
        let receipt_append_outcome : (unit, string) result =
          try
            Keeper_execution_receipt.append config receipt;
+           append_receipt_manifest
+             ~site:"receipt_appended"
+             Keeper_runtime_manifest.Receipt_appended;
            Ok ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1672,19 +1986,46 @@ let run_turn
                  task_id_str
                  (Masc_domain.masc_error_to_string err))
        in
-       (match turn_result, receipt_append_outcome with
-        | Error _, _ ->
-          (* Turn already failed; preserve the original error rather than
+       let final_result =
+         match turn_result, receipt_append_outcome with
+         | Error _, _ ->
+           (* Turn already failed; preserve the original error rather than
          masking it with a receipt-lost wrapper. The coverage-gap record
          above keeps the receipt-store side observable. *)
-          turn_result
-        | Ok _, Ok () -> turn_result
-        | Ok _, Error err_msg ->
-          (* Safety escalation: turn-body succeeded but the authoritative
+           turn_result
+         | Ok _, Ok () -> turn_result
+         | Ok _, Error err_msg ->
+           (* Safety escalation: turn-body succeeded but the authoritative
          receipt could not be persisted. Surface a structured internal
          error so the caller's [match turn_result with Ok _ | Error _]
          no longer sees a fictitious success. *)
-          Error
-            (Agent_sdk.Error.Internal
-               (Printf.sprintf "execution_receipt_append_failed: %s" err_msg))))
+           Error
+             (Agent_sdk.Error.Internal
+                (Printf.sprintf "execution_receipt_append_failed: %s" err_msg))
+       in
+       let final_status =
+         match final_result with
+         | Ok _ -> "ok"
+         | Error _ -> "error"
+       in
+       append_receipt_manifest
+         ~site:"turn_finished"
+         ~status:final_status
+         ~decision:
+           (`Assoc
+             [
+               ( "turn_result",
+                 `String
+                   (match turn_result with
+                    | Ok _ -> "ok"
+                    | Error _ -> "error") );
+               ( "receipt_append_ok",
+                 `Bool
+                   (match receipt_append_outcome with
+                    | Ok () -> true
+                    | Error _ -> false) );
+               ("terminal_reason_code", `String terminal_reason_code);
+             ])
+         Keeper_runtime_manifest.Turn_finished;
+       final_result)
 ;;

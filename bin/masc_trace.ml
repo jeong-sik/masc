@@ -11,6 +11,7 @@
       - .masc/tool_calls/<YYYY-MM>/<DD>.jsonl
       - .masc/logs/system_log_<date>.jsonl (post 0a-2 caller adoption)
       - .masc/traces/<keeper>/<trace_id>/
+      - .masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl
 
     Usage:  masc-trace <base-path> <keeper> <turn_id>
     Example: masc-trace ~/me nick0cave 5
@@ -24,16 +25,18 @@ let read_lines path =
   if not (Sys.file_exists path) then []
   else
     let ic = open_in path in
-    let acc = ref [] in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        try
-          while true do
-            acc := input_line ic :: !acc
-          done;
-          assert false
-        with End_of_file -> List.rev !acc)
+    let rec loop acc =
+      match input_line ic with
+      | line -> loop (line :: acc)
+      | exception End_of_file -> List.rev acc
+    in
+    match loop [] with
+    | lines ->
+      close_in_noerr ic;
+      lines
+    | exception exn ->
+      close_in_noerr ic;
+      raise exn
 
 let int_field json key =
   match Yojson.Safe.Util.member key json with `Int n -> Some n | _ -> None
@@ -43,9 +46,21 @@ let string_field json key =
   | `String s -> Some s
   | _ -> None
 
+let decision_int_field json key =
+  Yojson.Safe.Util.member "decision" json |> fun decision ->
+  int_field decision key
+
+let decision_string_field json key =
+  Yojson.Safe.Util.member "decision" json |> fun decision ->
+  string_field decision key
+
 let receipts_dir ~base_path ~keeper =
   List.fold_left Filename.concat base_path
     [ ".masc"; "keepers"; keeper; "execution-receipts" ]
+
+let runtime_manifests_dir ~base_path ~keeper =
+  List.fold_left Filename.concat base_path
+    [ ".masc"; "keepers"; keeper; "runtime-manifests" ]
 
 let logs_dir ~base_path =
   List.fold_left Filename.concat base_path [ ".masc"; "logs" ]
@@ -122,6 +137,134 @@ let dump_receipts ~base_path ~keeper ~turn_id =
           Printf.printf
             "%s [receipt %s] cascade=%s outcome=%s reason=%s\n"
             ended f cascade outcome reason)
+        matches
+
+(** Scan [.masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl]
+    for manifest rows matching [keeper_turn_id].  This is the causal
+    chain source: phase gate, cascade routing, provider attempts, context
+    checkpoints, receipts, and terminal outcome. *)
+let dump_runtime_manifests ~base_path ~keeper ~turn_id =
+  let dir = runtime_manifests_dir ~base_path ~keeper in
+  if not (Sys.file_exists dir) then
+    Printf.eprintf "[masc-trace] no runtime-manifests dir: %s\n" dir
+  else
+    let files =
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
+      |> List.sort compare
+    in
+    let matches =
+      List.concat_map
+        (fun f ->
+          let path = Filename.concat dir f in
+          read_lines path
+          |> List.filter_map (fun line ->
+                 try
+                   let json = Yojson.Safe.from_string line in
+                   let keeper_match =
+                     string_field json "keeper_name" = Some keeper
+                   in
+                   let turn_match =
+                     int_field json "keeper_turn_id" = Some turn_id
+                   in
+                   if keeper_match && turn_match then Some (f, json)
+                   else None
+                 with exn ->
+                   Printf.eprintf
+                     "[masc-trace] warning: skipping malformed line in %s: %s\n"
+                     f (Printexc.to_string exn);
+                   None))
+        files
+    in
+    if matches = [] then
+      Printf.eprintf
+        "[masc-trace] no runtime manifest found for keeper=%s turn_id=%d\n"
+        keeper turn_id
+    else
+      let json_rows = List.map snd matches in
+      let count_event event =
+        json_rows
+        |> List.fold_left
+             (fun count json ->
+               if string_field json "event" = Some event then count + 1
+               else count)
+             0
+      in
+      let max_oas_turn_count =
+        json_rows
+        |> List.filter_map (fun json -> int_field json "oas_turn_count")
+        |> List.fold_left
+             (fun acc value ->
+               match acc with
+               | None -> Some value
+               | Some current -> Some (max current value))
+             None
+      in
+      let event_bus_rows =
+        json_rows
+        |> List.filter (fun json ->
+             string_field json "event" = Some "event_bus_correlated")
+      in
+      let event_bus_correlation =
+        match
+          event_bus_rows
+          |> List.filter_map (fun json ->
+               decision_string_field json "correlation_id")
+        with
+        | first :: _ -> first
+        | [] -> "-"
+      in
+      let sum_event_bus_int key =
+        event_bus_rows
+        |> List.fold_left
+             (fun total json ->
+               total + Option.value (decision_int_field json key) ~default:0)
+             0
+      in
+      Printf.printf
+        "=== turn identity === keeper=%s keeper_turn_id=%d manifest_rows=%d \
+         max_oas_turn_count=%s provider_attempts=%d/%d provider_lanes=%d \
+         checkpoints_saved=%d receipts_appended=%d turn_finished=%d \
+         event_bus=%d correlation_id=%s compaction=%d/%d memory=%d/%d\n"
+        keeper turn_id (List.length matches)
+        (match max_oas_turn_count with
+         | None -> "-"
+         | Some value -> string_of_int value)
+        (count_event "provider_attempt_started")
+        (count_event "provider_attempt_finished")
+        (count_event "provider_lane_resolved")
+        (count_event "checkpoint_saved")
+        (count_event "receipt_appended")
+        (count_event "turn_finished")
+        (List.length event_bus_rows)
+        event_bus_correlation
+        (sum_event_bus_int "context_compact_started_count")
+        (sum_event_bus_int "context_compacted_count")
+        (count_event "memory_injected")
+        (count_event "memory_flushed");
+      List.iter
+        (fun (f, json) ->
+          let ts = Option.value (string_field json "ts") ~default:"-" in
+          let event = Option.value (string_field json "event") ~default:"-" in
+          let status = Option.value (string_field json "status") ~default:"-" in
+          let cascade =
+            Option.value (string_field json "cascade_name") ~default:"-"
+          in
+          let provider =
+            Option.value (string_field json "provider_kind") ~default:"-"
+          in
+          let model =
+            Option.value (string_field json "model_id") ~default:"-"
+          in
+          let decision =
+            match Yojson.Safe.Util.member "decision" json with
+            | `Null -> "{}"
+            | decision_json -> Yojson.Safe.to_string decision_json
+          in
+          Printf.printf
+            "%s [manifest %s] event=%s status=%s cascade=%s provider=%s model=%s decision=%s\n"
+            ts f event status cascade provider model decision)
         matches
 
 (** Scan [.masc/logs/system_log_*.jsonl] for [\[fsm:transition\]]
@@ -343,6 +486,7 @@ let () =
       match int_of_string_opt turn_id_str with
       | Some turn_id ->
           dump_receipts ~base_path ~keeper ~turn_id;
+          dump_runtime_manifests ~base_path ~keeper ~turn_id;
           dump_fsm_transitions ~base_path ~keeper ~turn_id;
           dump_tool_calls ~base_path ~keeper ~turn_id
       | None ->

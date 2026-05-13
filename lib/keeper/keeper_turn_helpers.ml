@@ -293,24 +293,78 @@ let record_pre_dispatch_terminal_observation
     ; ended_at
     }
   in
-  (try Keeper_execution_receipt.append config receipt with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     let error = Printexc.to_string exn in
-     Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_write_meta_failures
-       ~labels:[ "keeper", meta.name; "phase", "receipt_append" ]
-       ();
-     Log.Keeper.warn
-       "keeper:%s pre-dispatch execution_receipt append failed: %s"
-       meta.name
-       error;
-     record_execution_receipt_gap
-       ~config
-       ~meta
-       ~stale_reason:"pre_dispatch_execution_receipt_append_failed"
-       ~error
-       ());
+  let receipt_path =
+    Keeper_runtime_manifest.execution_receipt_path_for_today config
+      ~keeper_name:meta.name
+  in
+  let append_manifest ?status ?decision ~site event =
+    let status =
+      match status with
+      | Some status -> status
+      | None -> Keeper_execution_receipt.outcome_kind_to_string outcome
+    in
+    Keeper_runtime_manifest.make ~ts:ended_at ~keeper_name:meta.name
+      ~agent_name:meta.agent_name ~trace_id ~generation ?keeper_turn_id ~event
+      ~cascade_name:cascade_name_string ~status ?decision ~receipt_path ()
+    |> Keeper_runtime_manifest.append_best_effort ~site config
+  in
+  append_manifest
+    ~site:"pre_dispatch_blocked"
+    ~decision:
+      (`Assoc
+        [
+          ("activity_kind", `String activity_kind);
+          ( "outcome",
+            `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
+          );
+          ("terminal_reason_code", `String terminal_reason_code);
+          ("cascade_name", `String cascade_name_string);
+          ( "error_message",
+            match error_message with
+            | None -> `Null
+            | Some message -> `String message );
+        ])
+    Keeper_runtime_manifest.Pre_dispatch_blocked;
+  let receipt_append_ok =
+    try
+      Keeper_execution_receipt.append config receipt;
+      true
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      let error = Printexc.to_string exn in
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_write_meta_failures
+        ~labels:[ "keeper", meta.name; "phase", "receipt_append" ]
+        ();
+      Log.Keeper.warn
+        "keeper:%s pre-dispatch execution_receipt append failed: %s"
+        meta.name
+        error;
+      record_execution_receipt_gap
+        ~config
+        ~meta
+        ~stale_reason:"pre_dispatch_execution_receipt_append_failed"
+        ~error
+        ();
+      false
+  in
+  if receipt_append_ok then
+    append_manifest
+      ~site:"pre_dispatch_receipt_appended"
+      Keeper_runtime_manifest.Receipt_appended;
+  append_manifest
+    ~site:"pre_dispatch_turn_finished"
+    ~decision:
+      (`Assoc
+        [
+          ( "outcome",
+            `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
+          );
+          ("terminal_reason_code", `String terminal_reason_code);
+          ("receipt_append_ok", `Bool receipt_append_ok);
+        ])
+    Keeper_runtime_manifest.Turn_finished;
   try
     let event =
       Activity_graph.emit

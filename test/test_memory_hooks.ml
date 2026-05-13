@@ -12,6 +12,7 @@ open Alcotest
 
 module Memory_oas_bridge = Masc_mcp.Memory_oas_bridge
 module Memory_hooks = Masc_mcp.Memory_hooks
+module Runtime_manifest = Masc_mcp.Keeper_runtime_manifest
 module P = Masc_mcp.Prometheus
 
 let test_base_path = Filename.temp_dir "masc_memory_hooks_base" ""
@@ -68,6 +69,35 @@ let make_after_turn_event ?(turn = 1) () =
       telemetry = None;
     };
   }
+
+let manifest_context ?(keeper_turn_id = 11) () : Runtime_manifest.turn_context =
+  { manifest_keeper_name = "test_memory_hooks_keeper"
+  ; manifest_agent_name = Some "test_memory_hooks_agent"
+  ; manifest_trace_id = "trace-memory-hooks"
+  ; manifest_generation = Some 3
+  ; manifest_keeper_turn_id = Some keeper_turn_id
+  }
+
+let row_event row = Runtime_manifest.event_kind_to_string row.Runtime_manifest.event
+
+let json_int_member name json =
+  match Yojson.Safe.Util.member name json with
+  | `Int value -> value
+  | `Intlit raw -> Option.value ~default:0 (int_of_string_opt raw)
+  | _ -> 0
+
+let json_bool_member name json =
+  match Yojson.Safe.Util.member name json with
+  | `Bool value -> value
+  | _ -> false
+
+let require_manifest_event event rows =
+  match List.find_opt (fun row -> row.Runtime_manifest.event = event) rows with
+  | Some row -> row
+  | None ->
+    fail
+      ("missing manifest event: "
+       ^ Runtime_manifest.event_kind_to_string event)
 
 (* ── Pure read function tests ──────────────────────────────── *)
 
@@ -378,6 +408,63 @@ let test_after_turn_flush_records_pipeline_metrics () =
        ~labels:procedural_labels ());
   (try Sys.rmdir tmp_dir with _ -> ())
 
+let test_memory_hooks_emit_runtime_manifest_rows () =
+  let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
+  let config = make_test_config ~base_path:tmp_dir in
+  let memory = Agent_sdk.Memory.create () in
+  ignore
+    (Agent_sdk.Memory.store
+       memory
+       ~tier:Agent_sdk.Memory.Long_term
+       "world:manifest"
+       (`Assoc [ "content", `String "Memory hook manifest evidence." ]));
+  let rows = ref [] in
+  let hooks =
+    Memory_hooks.make
+      ~agent_name:"test_manifest"
+      ~config
+      ~memory
+      ~flush_incremental:(fun ~memory:_ ~agent_name:_ -> (2, 1))
+      ~runtime_manifest_context:(manifest_context ())
+      ~runtime_manifest_append:(fun row -> rows := row :: !rows)
+      ()
+  in
+  let before_decision =
+    match hooks.before_turn_params with
+    | Some f -> f (make_before_turn_params_event ~turn:4 ())
+    | None -> fail "before_turn_params hook should be Some"
+  in
+  (match before_decision with
+   | Agent_sdk.Hooks.AdjustParams _ -> ()
+   | _ -> fail "world memory should adjust params");
+  let after_decision =
+    match hooks.after_turn with
+    | Some f -> f (make_after_turn_event ~turn:4 ())
+    | None -> fail "after_turn hook should be Some"
+  in
+  check bool "after_turn returns Continue" true
+    (match after_decision with Agent_sdk.Hooks.Continue -> true | _ -> false);
+  let rows = List.rev !rows in
+  check (list string)
+    "memory manifest events"
+    [ "memory_injected"; "memory_flushed" ]
+    (List.map row_event rows);
+  let injected = require_manifest_event Runtime_manifest.Memory_injected rows in
+  check (option int) "injected keeper turn" (Some 11) injected.keeper_turn_id;
+  check (option int) "injected OAS turn" (Some 4) injected.oas_turn_count;
+  check string "injected status" "injected" injected.status;
+  check bool "memory context present" true
+    (json_bool_member "memory_context_present" injected.decision);
+  check bool "memory context chars recorded" true
+    (json_int_member "memory_context_chars" injected.decision > 0);
+  let flushed = require_manifest_event Runtime_manifest.Memory_flushed rows in
+  check string "flush status" "success" flushed.status;
+  check int "episodes flushed" 2
+    (json_int_member "episodes_flushed" flushed.decision);
+  check int "procedures flushed" 1
+    (json_int_member "procedures_flushed" flushed.decision);
+  (try Sys.rmdir tmp_dir with _ -> ())
+
 (* ── Flush idempotency test ────────────────────────────────── *)
 
 let test_flush_incremental_idempotent () =
@@ -430,6 +517,8 @@ let () =
         test_after_turn_flush_records_pipeline_metrics;
       test_case "after_turn flush failure still continues" `Quick
         test_after_turn_flush_failure_still_continues;
+      test_case "runtime manifest rows emitted" `Quick
+        test_memory_hooks_emit_runtime_manifest_rows;
     ];
     "hook_structure", [
       test_case "hook slots populated correctly" `Quick test_hook_slots_populated;

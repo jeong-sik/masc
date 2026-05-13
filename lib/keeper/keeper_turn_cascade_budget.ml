@@ -26,9 +26,8 @@ let fail_open_rotation_cascades_from_catalog
     ~(keeper_assignable : string list) =
   if catalog_names = [] then None
   else
-    let is_reserved_recovery name =
+    let is_reserved_default name =
       String.equal name (Keeper_config.default_cascade_name ())
-      || String.equal name Keeper_config.local_recovery_cascade_name
     in
     let is_keeper_assignable name =
       List.exists (String.equal name) keeper_assignable
@@ -36,7 +35,7 @@ let fail_open_rotation_cascades_from_catalog
     match
       catalog_names
       |> List.filter (fun name ->
-             is_reserved_recovery name || is_keeper_assignable name)
+             is_reserved_default name || is_keeper_assignable name)
       |> dedupe_keep_order
     with
     | [] -> None
@@ -56,6 +55,12 @@ let next_fail_open_cascade_for_turn
     (err : Agent_sdk.Error.sdk_error) : EC.degraded_retry option =
   let fallback_hint =
     Keeper_cascade_profile.fallback_cascade_for effective_cascade
+  in
+  let rotation_cascades =
+    match tool_requirement, rotation_cascades with
+    | Keeper_agent_tool_surface.Required, Some candidates ->
+      Some (dedupe_keep_order (Keeper_config.default_cascade_name () :: candidates))
+    | _ -> rotation_cascades
   in
   EC.degraded_rotation_after_recoverable_error
     ?rotation_cascades
@@ -421,15 +426,32 @@ type turn_event_bus_overflow = {
   limit_tokens : int;
 }
 
+type turn_event_bus_compaction = {
+  before_tokens : int;
+  after_tokens : int;
+  tokens_freed : int;
+  phase_hint : string;
+}
+
 type turn_event_bus_summary = {
   correlation_id : string option;
+  run_id : string option;
+  caused_by : string option;
   overflow_imminent : turn_event_bus_overflow option;
+  context_compact_started_count : int;
+  context_compacted_count : int;
+  last_compaction : turn_event_bus_compaction option;
 }
 
 let empty_turn_event_bus_summary =
   {
     correlation_id = None;
+    run_id = None;
+    caused_by = None;
     overflow_imminent = None;
+    context_compact_started_count = 0;
+    context_compacted_count = 0;
+    last_compaction = None;
   }
 
 let merge_turn_event_bus_summary
@@ -440,10 +462,26 @@ let merge_turn_event_bus_summary
       (match left.correlation_id with
        | Some _ -> left.correlation_id
        | None -> right.correlation_id);
+    run_id =
+      (match left.run_id with
+       | Some _ -> left.run_id
+       | None -> right.run_id);
+    caused_by =
+      (match left.caused_by with
+       | Some _ -> left.caused_by
+       | None -> right.caused_by);
     overflow_imminent =
       (match right.overflow_imminent with
        | Some _ -> right.overflow_imminent
        | None -> left.overflow_imminent);
+    context_compact_started_count =
+      left.context_compact_started_count + right.context_compact_started_count;
+    context_compacted_count =
+      left.context_compacted_count + right.context_compacted_count;
+    last_compaction =
+      (match right.last_compaction with
+       | Some _ -> right.last_compaction
+       | None -> left.last_compaction);
   }
 
 (** Recover from context overflow by compacting and reducing max_context.
@@ -515,22 +553,53 @@ let summarize_turn_event_bus
         | Some _ -> acc.correlation_id
         | None -> Some evt.meta.correlation_id
       in
+      let run_id =
+        match acc.run_id with
+        | Some _ -> acc.run_id
+        | None -> Some evt.meta.run_id
+      in
+      let caused_by =
+        match acc.caused_by with
+        | Some _ -> acc.caused_by
+        | None -> evt.meta.caused_by
+      in
+      let acc = { acc with correlation_id; run_id; caused_by } in
       match evt.payload with
       | Agent_sdk.Event_bus.ContextOverflowImminent
           { estimated_tokens; limit_tokens; _ } ->
           {
-            correlation_id;
+            acc with
             overflow_imminent =
               Some { estimated_tokens; limit_tokens };
           }
-      | _ -> { acc with correlation_id })
+      | Agent_sdk.Event_bus.ContextCompactStarted _ ->
+          {
+            acc with
+            context_compact_started_count =
+              acc.context_compact_started_count + 1;
+          }
+      | Agent_sdk.Event_bus.ContextCompacted
+          { before_tokens; after_tokens; phase; _ } ->
+          {
+            acc with
+            context_compacted_count = acc.context_compacted_count + 1;
+            last_compaction =
+              Some
+                {
+                  before_tokens;
+                  after_tokens;
+                  tokens_freed = max 0 (before_tokens - after_tokens);
+                  phase_hint = phase;
+                };
+          }
+      | _ -> acc)
     empty_turn_event_bus_summary
     events
 
 let context_overflow_event_of_error
     ~(fallback_tokens : int)
     ?(turn_event_bus : turn_event_bus_summary =
-      { correlation_id = None; overflow_imminent = None })
+      empty_turn_event_bus_summary)
     (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event =
   match turn_event_bus.overflow_imminent with
   | Some { estimated_tokens; limit_tokens } ->

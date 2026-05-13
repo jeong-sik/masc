@@ -7,7 +7,8 @@
     - Translation from [Agent_sdk.Types.sse_event] to
       {!Cascade_attempt_liveness.Stream_chunk.kind}.
     - Tick fiber forked under the caller's [Eio.Switch.t] that polls
-      the FSM at [min(ttft_max, inter_chunk_max) / 4] cadence.
+      the FSM at [min(ttft_max, inter_chunk_max) / 4] cadence and can be
+      stopped explicitly when the provider attempt has already returned.
     - Prometheus counter emission per outcome.
 
     {1 No-kill in Observe mode}
@@ -27,9 +28,11 @@
     {1 Tick fiber lifetime}
 
     The tick fiber is forked under the same [~sw] that owns
-    [Cascade_runner.run]. When the OAS run switch dies (success,
-    error, parent cancellation) the tick fiber dies with it — no
-    explicit teardown is required.
+    [Cascade_runner.run], but a provider can return a terminal error
+    before the streaming FSM sees a terminal event. Callers must invoke
+    {!stop_tick_fiber} on attempt completion before leaving the switch;
+    otherwise a pending no-token tick loop can keep the attempt switch open
+    until its long bootstrap budget expires.
 
     @stability Evolving
     @since 0.190.0 *)
@@ -100,6 +103,12 @@ val start_tick_fiber :
     elided observer construction at the call site. The fiber holds a
     reference to [t] only — no other shared state — and dies with the
     parent switch (Invariant §8 cancellation cleanup). *)
+
+val stop_tick_fiber : t -> unit
+(** Request the tick fiber to stop.
+
+    This is idempotent and cancellation-safe. It does not mutate the FSM
+    outcome; callers still use {!finalize} to emit the observed outcome. *)
 
 val finalize : t -> unit
 (** Emit the [observed_total] counter once with the final outcome

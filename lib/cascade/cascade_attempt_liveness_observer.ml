@@ -22,12 +22,16 @@ type t = {
   state : L.state ref;
   sw_ref : Eio.Switch.t option ref;
   finalized : bool ref;
+  stop_tick_p : unit Eio.Promise.t;
+  stop_tick_r : unit Eio.Promise.u;
+  stop_tick_requested : bool Atomic.t;
 }
 
 let mode (t : t) : Cfg.mode = t.mode
 
 let create ~mode ~budget ~cascade_label ~provider_label ?candidate_key
     ~started_at () =
+  let stop_tick_p, stop_tick_r = Eio.Promise.create () in
   {
     mode;
     budget;
@@ -42,6 +46,9 @@ let create ~mode ~budget ~cascade_label ~provider_label ?candidate_key
     state = ref (L.initial ~started_at);
     sw_ref = ref None;
     finalized = ref false;
+    stop_tick_p;
+    stop_tick_r;
+    stop_tick_requested = Atomic.make false;
   }
 
 let current_state_for_test (t : t) : L.state = !(t.state)
@@ -165,6 +172,10 @@ let prometheus_recorder (t : t) : L.recorder =
     record_liveness_outcome = (fun _ -> ());
   }
 
+let stop_tick_fiber (t : t) : unit =
+  if Atomic.compare_and_set t.stop_tick_requested false true then
+    Eio.Promise.resolve t.stop_tick_r ()
+
 let step_with_event (t : t) (evt : Agent_sdk.Types.sse_event) : unit =
   if L.is_terminal !(t.state) then ()
   else
@@ -187,6 +198,7 @@ let step_with_event (t : t) (evt : Agent_sdk.Types.sse_event) : unit =
           L.step ~recorder:(prometheus_recorder t) t.budget !(t.state) le
         in
         t.state := new_state;
+        if L.is_terminal new_state then stop_tick_fiber t;
         react_to_output t output
 
 let wrap_on_event (t : t)
@@ -239,24 +251,34 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
   | Cfg.Observe | Cfg.Enforce ->
       register_attempt_switch t ~sw;
       let interval = tick_interval_seconds t.budget in
+      let await_tick_or_stop () =
+        Eio.Fiber.first
+          (fun () ->
+             Eio.Time.sleep clock interval;
+             `Tick)
+          (fun () ->
+             Eio.Promise.await t.stop_tick_p;
+             `Stop)
+      in
       Eio.Fiber.fork ~sw (fun () ->
           let rec loop () =
             if L.is_terminal !(t.state) then ()
             else begin
-              (try Eio.Time.sleep clock interval
-               with Eio.Cancel.Cancelled _ as e -> raise e);
-              if L.is_terminal !(t.state) then ()
-              else begin
-                let now = now_seconds () in
-                let new_state, output =
-                  L.step ~recorder:(prometheus_recorder t)
-                    t.budget !(t.state) (L.Tick now)
-                in
-                t.state := new_state;
-                (try react_to_output t output
-                 with Liveness_kill _ as e -> raise e);
-                loop ()
-              end
+              match await_tick_or_stop () with
+              | `Stop -> ()
+              | `Tick ->
+                if L.is_terminal !(t.state) then ()
+                else begin
+                  let now = now_seconds () in
+                  let new_state, output =
+                    L.step ~recorder:(prometheus_recorder t)
+                      t.budget !(t.state) (L.Tick now)
+                  in
+                  t.state := new_state;
+                  (try react_to_output t output
+                   with Liveness_kill _ as e -> raise e);
+                  loop ()
+                end
             end
           in
           try loop () with
@@ -281,6 +303,7 @@ let finalize (t : t) : unit =
   if !(t.finalized) then ()
   else begin
     t.finalized := true;
+    stop_tick_fiber t;
     match t.mode with
     | Cfg.Off -> ()
     | Cfg.Observe | Cfg.Enforce ->

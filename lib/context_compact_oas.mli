@@ -72,7 +72,7 @@ val compact :
   unit ->
   Agent_sdk.Types.message list
 (** [compact ~messages ~strategies ?observation ()] applies the
-    compaction pipeline.  When any [strategy] is {!Dynamic} and
+    OAS-backed compaction pipeline.  When any [strategy] is {!Dynamic} and
     [?observation] is supplied, runtime resolution flattens it.
 
     Logs the resolved strategy names + observation summary at
@@ -148,4 +148,3 @@ val score_message :
     of a single message for context compaction.  Score is in
     [0.0, 1.0].  Pinned for behaviour-tests and for injecting into
     OAS {!Agent_sdk.Context_reducer.importance_scored}. *)
-

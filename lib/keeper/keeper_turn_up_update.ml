@@ -233,15 +233,15 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     long_goal;
     cascade_ref =
       (* RFC-0041 (post-step-4): cascade_ref is the SSOT.
-         TOML cascade_name takes precedence over runtime when present;
-         otherwise preserve the existing keeper's cascade_ref so the
-         dashboard surfaces drift (keeper TOML referencing an unknown
-         cascade name) via the [canonical] column of
-         [Dashboard_cascade.keeper_profile_json].  See #6747. *)
+         An explicit tool arg is an operator reconfiguration request.
+         Otherwise TOML cascade_name takes precedence over runtime when
+         present; otherwise preserve the existing keeper's cascade_ref so
+         dashboard drift remains visible.  See #6747. *)
       (let group =
-         match p.profile_defaults.cascade_name with
-         | Some name -> name
-         | None ->
+         match p.cascade_name_opt, p.profile_defaults.cascade_name with
+         | Some name, _ -> name
+         | None, Some name -> name
+         | None, None ->
            let prev = cascade_name_of_meta old in
            if String.trim prev <> "" then prev
            else (Keeper_config.default_cascade_name ())

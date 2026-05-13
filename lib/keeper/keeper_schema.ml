@@ -311,6 +311,10 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Optional: long-term goal horizon (default: goal).");
         ]);
+        ("cascade_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: keeper-assignable cascade profile. Replaces legacy models/allowed_models/active_model inputs.");
+        ]);
         ("instructions", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");

@@ -122,5 +122,7 @@ val prepare_agent_setup
   -> ?max_cost_usd:float
   -> trajectory_acc:Trajectory.accumulator option
   -> tool_overlay:Agent_sdk.Tool_op.t ref option
+  -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
+  -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> unit
   -> (agent_setup, Agent_sdk.Error.sdk_error) result

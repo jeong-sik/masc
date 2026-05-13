@@ -129,6 +129,7 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
   | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
+  | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
   | Agent_sdk.Error.Agent (ToolRetryExhausted _)
@@ -232,6 +233,9 @@ type degraded_retry =
   ; fallback_reason : degraded_retry_reason
   }
 
+let is_declared_phase_alias raw phase_name =
+  String.equal (String.trim raw) phase_name
+
 let fallback_cascade_for_unavailable_profile
     ~(base_cascade : string)
     ~(effective_cascade : string) : string option =
@@ -256,6 +260,14 @@ let degraded_retry_after_recoverable_error
   let normalized_effective =
     Keeper_cascade_profile.normalize_declared_name effective_cascade
   in
+  let effective_is_declared_local_only =
+    is_declared_phase_alias effective_cascade Keeper_config.local_only_cascade_name
+  in
+  let effective_is_declared_local_recovery =
+    is_declared_phase_alias
+      effective_cascade
+      Keeper_config.local_recovery_cascade_name
+  in
   let local_recovery_retry fallback_reason =
     Some
       {
@@ -264,9 +276,10 @@ let degraded_retry_after_recoverable_error
       }
   in
   if tool_requirement = Required
+     || effective_is_declared_local_only
+     || effective_is_declared_local_recovery
      || String.equal normalized_effective Keeper_config.local_only_cascade_name
-     || String.equal normalized_effective
-          Keeper_config.local_recovery_cascade_name
+     || String.equal normalized_effective Keeper_config.local_recovery_cascade_name
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     local_recovery_retry Hard_quota
@@ -409,7 +422,11 @@ let normalized_cascade_name ~catalog_names name =
   then trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
 
-let required_tool_rotation_candidate ~catalog_names name =
+let required_tool_rotation_candidate
+    ?(allow_local_recovery = false)
+    ~catalog_names
+    name
+  =
   let normalized = normalized_cascade_name ~catalog_names name in
   let routed_local_only_is_distinct =
     not
@@ -418,12 +435,16 @@ let required_tool_rotation_candidate ~catalog_names name =
          (Keeper_config.default_cascade_name ()))
   in
   (* Required-tool turns may still use [local_recovery] when the catalog
-     declares it as a tool-capable fallback profile.  Keep excluding the
-     local-only/buffer lane here: those routes are recovery/control lanes and
-     may not satisfy a required keeper-tool contract. *)
+     declares it as an explicit fallback profile.  Do not take it from generic
+     rotation order: phase recovery and concrete fallback profiles share the
+     historical [local_recovery] spelling, so requiring an explicit hint avoids
+     accidentally sending required-tool turns into a control/recovery lane. *)
   not
     ((routed_local_only_is_distinct
       && String.equal normalized Keeper_config.local_only_cascade_name))
+  && (allow_local_recovery
+      || not
+           (String.equal normalized Keeper_config.local_recovery_cascade_name))
 
 let legacy_degraded_rotation_candidates
     ~catalog_names
@@ -435,7 +456,8 @@ let legacy_degraded_rotation_candidates
   in
   let local_recovery_cascade =
     normalized_cascade_name ~catalog_names
-      Keeper_config.local_recovery_cascade_name
+      (Keeper_cascade_profile.cascade_name_for_use
+         Keeper_cascade_profile.Phase_recovery)
   in
   match tool_requirement with
   | Required -> [ normalized_base; default_cascade ]
@@ -467,20 +489,30 @@ let degraded_rotation_candidates
           ~tool_requirement
     | Some catalog -> normalize_rotation_candidates ~catalog_names catalog
   in
-  let candidates =
+  let fallback_hint_candidate =
     match fallback_hint with
-    | None -> raw_candidates
+    | None -> None
     | Some hint ->
         let trimmed = String.trim hint in
-        if String.equal trimmed "" then raw_candidates
-        else
-          normalize_rotation_candidates ~catalog_names (trimmed :: raw_candidates)
+        if String.equal trimmed "" then None
+        else Some (normalized_cascade_name ~catalog_names trimmed)
+  in
+  let candidates =
+    match fallback_hint_candidate with
+    | None -> raw_candidates
+    | Some hint -> dedupe_keep_order (hint :: raw_candidates)
   in
   candidates
   |> List.filter (fun candidate ->
          (not (String.equal candidate normalized_effective))
          && (tool_requirement <> Required
-             || required_tool_rotation_candidate ~catalog_names candidate))
+             || required_tool_rotation_candidate
+                  ~allow_local_recovery:
+                    (match fallback_hint_candidate with
+                     | Some hint -> String.equal hint candidate
+                     | None -> false)
+                  ~catalog_names
+                  candidate))
 
 let degraded_rotation_after_recoverable_error
     ?rotation_cascades
@@ -688,6 +720,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   (* Other agent error variants. *)
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
+  | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
   | Agent_sdk.Error.Agent (ToolRetryExhausted _)

@@ -112,6 +112,30 @@ let record_pipeline_flush
   record_records ~tier:"episodic" episodes;
   record_records ~tier:"procedural" procedures
 
+let append_runtime_manifest
+    ?runtime_manifest_context
+    ?runtime_manifest_append
+    ?oas_turn_count
+    ?(status = "ok")
+    ?(decision = `Assoc [])
+    event =
+  match runtime_manifest_context, runtime_manifest_append with
+  | Some context, Some append ->
+      let manifest =
+        Keeper_runtime_manifest.make_for_context context ~event ?oas_turn_count
+          ~status ~decision ()
+      in
+      (try append manifest with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.warn
+           "memory_hooks: runtime manifest append callback failed keeper=%s agent=%s event=%s: %s"
+           context.manifest_keeper_name
+           (Option.value ~default:"(unknown)" context.manifest_agent_name)
+           (Keeper_runtime_manifest.event_kind_to_string event)
+           (Printexc.to_string exn))
+  | _ -> ()
+
 (** Create OAS hooks for hook-first memory injection.
 
     @param agent_name Keeper agent name (for procedure/episode lookup)
@@ -140,31 +164,82 @@ let make
     ?(episode_limit = 30)
     ?(procedure_limit = 10)
     ?(flush_incremental = Memory_oas_bridge.flush_incremental)
+    ?runtime_manifest_context
+    ?runtime_manifest_append
     () : Agent_sdk.Hooks.hooks =
   { Agent_sdk.Hooks.empty with
 
     before_turn_params = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.BeforeTurnParams { current_params; _ } ->
+      | Agent_sdk.Hooks.BeforeTurnParams { turn; current_params; _ } ->
         let memory_ctx =
           render_memory_context ~memory ?world_backend ~agent_name ~config
             ~episode_limit ~procedure_limit ()
         in
         (match memory_ctx with
-         | None -> Agent_sdk.Hooks.Continue
+         | None ->
+           append_runtime_manifest
+             ?runtime_manifest_context
+             ?runtime_manifest_append
+             ~oas_turn_count:turn
+             ~status:"skipped"
+             ~decision:
+               (`Assoc
+                 [
+                   ("memory_context_present", `Bool false);
+                   ("episode_limit", `Int episode_limit);
+                   ("procedure_limit", `Int procedure_limit);
+                   ( "existing_extra_system_context_present",
+                     `Bool (Option.is_some current_params.extra_system_context) );
+                   ( "existing_extra_system_context_chars",
+                     `Int
+                       (match current_params.extra_system_context with
+                        | None -> 0
+                        | Some text -> String.length text) );
+                 ])
+             Keeper_runtime_manifest.Memory_injected;
+           Agent_sdk.Hooks.Continue
          | Some mem_text ->
            let extra =
              match current_params.extra_system_context with
              | None -> Some mem_text
              | Some existing -> Some (existing ^ "\n\n" ^ mem_text)
            in
+           append_runtime_manifest
+             ?runtime_manifest_context
+             ?runtime_manifest_append
+             ~oas_turn_count:turn
+             ~status:"injected"
+             ~decision:
+               (`Assoc
+                 [
+                   ("memory_context_present", `Bool true);
+                   ("memory_context_chars", `Int (String.length mem_text));
+                   ( "memory_context_digest",
+                     `String (Digest.to_hex (Digest.string mem_text)) );
+                   ("episode_limit", `Int episode_limit);
+                   ("procedure_limit", `Int procedure_limit);
+                   ( "existing_extra_system_context_present",
+                     `Bool (Option.is_some current_params.extra_system_context) );
+                   ( "existing_extra_system_context_chars",
+                     `Int
+                       (match current_params.extra_system_context with
+                        | None -> 0
+                        | Some text -> String.length text) );
+                   ( "extra_system_context_chars_after",
+                     `Int
+                       (match extra with
+                        | None -> 0
+                        | Some text -> String.length text) );
+                 ])
+             Keeper_runtime_manifest.Memory_injected;
            Agent_sdk.Hooks.AdjustParams
              { current_params with extra_system_context = extra })
       | _ -> Agent_sdk.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.AfterTurn _ ->
+      | Agent_sdk.Hooks.AfterTurn { turn; response } ->
         let started_at = Time_compat.now () in
         (try
            let (ep, pr) = flush_incremental ~memory ~agent_name in
@@ -178,7 +253,21 @@ let make
            if ep > 0 || pr > 0 then
              Log.Keeper.debug
                "memory_hooks: flush_incremental agent=%s episodes=%d procedures=%d"
-               agent_name ep pr
+               agent_name ep pr;
+           append_runtime_manifest
+             ?runtime_manifest_context
+             ?runtime_manifest_append
+             ~oas_turn_count:turn
+             ~status:"success"
+             ~decision:
+               (`Assoc
+                 [
+                   ("episodes_flushed", `Int ep);
+                   ("procedures_flushed", `Int pr);
+                   ("duration_s", `Float duration_s);
+                   ("response_model", `String response.Agent_sdk.Types.model);
+                 ])
+             Keeper_runtime_manifest.Memory_flushed
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -194,6 +283,21 @@ let make
                ~duration_s
                ~episodes:0
                ~procedures:0;
+             append_runtime_manifest
+               ?runtime_manifest_context
+               ?runtime_manifest_append
+               ~oas_turn_count:turn
+               ~status:"error"
+               ~decision:
+                 (`Assoc
+                   [
+                     ("episodes_flushed", `Int 0);
+                     ("procedures_flushed", `Int 0);
+                     ("duration_s", `Float duration_s);
+                     ("error", `String (Printexc.to_string exn));
+                     ("response_model", `String response.Agent_sdk.Types.model);
+                   ])
+               Keeper_runtime_manifest.Memory_flushed;
              Log.Keeper.warn
                "memory_hooks: flush_incremental failed agent=%s: %s"
                agent_name (Printexc.to_string exn));

@@ -16,6 +16,7 @@ let keeper_suffix_shutdown = "/shutdown"
 let keeper_suffix_reset = "/reset"
 let keeper_suffix_clear = "/clear"
 let keeper_suffix_checkpoints = "/checkpoints"
+let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
 let keeper_suffix_bdi_snapshot = "/bdi-snapshot"
 
@@ -259,6 +260,9 @@ let extract_keeper_name_for_suffix req_path suffix =
 let is_keeper_checkpoints_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_checkpoints
 
+let is_keeper_runtime_trace_get_path req_path =
+  keeper_path_ends_with req_path keeper_suffix_runtime_trace
+
 let trim_to_opt (value : string) =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
@@ -409,6 +413,512 @@ let keeper_checkpoint_inventory_json
                 (List.length
                    (Keeper_checkpoint_store.list_checkpoints ~session_dir)) );
           ] )
+
+let json_int_member_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `Int value -> Some value
+  | `Intlit raw -> int_of_string_opt raw
+  | _ -> None
+
+let json_string_member_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `String value -> Some value
+  | _ -> None
+
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+
+let take_last limit values =
+  let len = List.length values in
+  if len <= limit then values
+  else List.filteri (fun idx _ -> idx >= len - limit) values
+
+let unique_present_paths paths =
+  paths
+  |> List.filter_map (fun value ->
+       match value with
+       | Some path when String.trim path <> "" -> Some path
+       | _ -> None)
+  |> Json_util.dedupe_keep_order
+
+let linked_artifact_json ~kind path =
+  `Assoc
+    [
+      ("kind", `String kind);
+      ("path", `String path);
+      ("present", `Bool (Fs_compat.file_exists path));
+      ("file_stat", stat_json_of_path path);
+    ]
+
+let manifest_row_matches ?turn_id keeper_name trace_id
+    (row : Keeper_runtime_manifest.t) =
+  String.equal row.keeper_name keeper_name
+  && String.equal row.trace_id trace_id
+  &&
+  match turn_id with
+  | None -> true
+  | Some wanted -> row.keeper_turn_id = Some wanted
+
+type runtime_manifest_scan =
+  { path : string
+  ; limit : int
+  ; returned_rows : Keeper_runtime_manifest.t Queue.t
+  ; provider_attempt_rows : Keeper_runtime_manifest.t Queue.t
+  ; event_counts : (string, int) Hashtbl.t
+  ; mutable total_rows : int
+  ; mutable has_terminal : bool
+  ; mutable max_oas_turn_count : int option
+  ; mutable keeper_turn_ids : int list
+  ; mutable event_bus_count : int
+  ; mutable event_bus_correlation_ids : string list
+  ; mutable event_bus_run_ids : string list
+  ; mutable context_compact_started_count : int
+  ; mutable context_compacted_count : int
+  ; mutable last_compaction : Yojson.Safe.t option
+  ; mutable memory_injected_count : int
+  ; mutable memory_injected_present_count : int
+  ; mutable memory_flushed_count : int
+  ; mutable memory_flush_success_count : int
+  ; mutable memory_flush_error_count : int
+  ; mutable episodes_flushed : int
+  ; mutable procedures_flushed : int
+  ; mutable provider_started_count : int
+  ; mutable provider_finished_count : int
+  ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
+  }
+
+let make_runtime_manifest_scan ~path ~limit =
+  { path
+  ; limit
+  ; returned_rows = Queue.create ()
+  ; provider_attempt_rows = Queue.create ()
+  ; event_counts = Hashtbl.create 17
+  ; total_rows = 0
+  ; has_terminal = false
+  ; max_oas_turn_count = None
+  ; keeper_turn_ids = []
+  ; event_bus_count = 0
+  ; event_bus_correlation_ids = []
+  ; event_bus_run_ids = []
+  ; context_compact_started_count = 0
+  ; context_compacted_count = 0
+  ; last_compaction = None
+  ; memory_injected_count = 0
+  ; memory_injected_present_count = 0
+  ; memory_flushed_count = 0
+  ; memory_flush_success_count = 0
+  ; memory_flush_error_count = 0
+  ; episodes_flushed = 0
+  ; procedures_flushed = 0
+  ; provider_started_count = 0
+  ; provider_finished_count = 0
+  ; provider_terminal_row = None
+  }
+
+let push_bounded queue limit value =
+  if limit > 0 then (
+    Queue.push value queue;
+    if Queue.length queue > limit then ignore (Queue.pop queue))
+
+let queue_to_list queue =
+  let values = ref [] in
+  Queue.iter (fun value -> values := value :: !values) queue;
+  List.rev !values
+
+let increment_event_count scan event =
+  let key = Keeper_runtime_manifest.event_kind_to_string event in
+  let current = Option.value (Hashtbl.find_opt scan.event_counts key) ~default:0 in
+  Hashtbl.replace scan.event_counts key (current + 1)
+
+let runtime_manifest_scan_event_count scan event =
+  let key = Keeper_runtime_manifest.event_kind_to_string event in
+  Option.value (Hashtbl.find_opt scan.event_counts key) ~default:0
+
+let max_int_opt current value =
+  match current with
+  | None -> Some value
+  | Some existing -> Some (max existing value)
+
+let update_runtime_manifest_scan scan row =
+  scan.total_rows <- scan.total_rows + 1;
+  push_bounded scan.returned_rows scan.limit row;
+  increment_event_count scan row.Keeper_runtime_manifest.event;
+  (match row.Keeper_runtime_manifest.keeper_turn_id with
+   | Some value -> scan.keeper_turn_ids <- value :: scan.keeper_turn_ids
+   | None -> ());
+  (match row.Keeper_runtime_manifest.oas_turn_count with
+   | Some value -> scan.max_oas_turn_count <- max_int_opt scan.max_oas_turn_count value
+   | None -> ());
+  (match row.Keeper_runtime_manifest.event with
+   | Keeper_runtime_manifest.Turn_finished -> scan.has_terminal <- true
+   | Keeper_runtime_manifest.Event_bus_correlated ->
+     let decision = row.Keeper_runtime_manifest.decision in
+     scan.event_bus_count <- scan.event_bus_count + 1;
+     (match json_string_member_opt "correlation_id" decision with
+      | Some value -> scan.event_bus_correlation_ids <- value :: scan.event_bus_correlation_ids
+      | None -> ());
+     (match json_string_member_opt "run_id" decision with
+      | Some value -> scan.event_bus_run_ids <- value :: scan.event_bus_run_ids
+      | None -> ());
+     scan.context_compact_started_count <-
+       scan.context_compact_started_count
+       + Option.value
+           (json_int_member_opt "context_compact_started_count" decision)
+           ~default:0;
+     scan.context_compacted_count <-
+       scan.context_compacted_count
+       + Option.value (json_int_member_opt "context_compacted_count" decision)
+           ~default:0;
+     (match Yojson.Safe.Util.member "last_compaction" decision with
+      | `Assoc _ as obj -> scan.last_compaction <- Some obj
+      | _ -> ())
+   | Keeper_runtime_manifest.Memory_injected ->
+     scan.memory_injected_count <- scan.memory_injected_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "injected"
+     then scan.memory_injected_present_count <- scan.memory_injected_present_count + 1
+   | Keeper_runtime_manifest.Memory_flushed ->
+     let decision = row.Keeper_runtime_manifest.decision in
+     scan.memory_flushed_count <- scan.memory_flushed_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "success"
+     then scan.memory_flush_success_count <- scan.memory_flush_success_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "error"
+     then scan.memory_flush_error_count <- scan.memory_flush_error_count + 1;
+     scan.episodes_flushed <-
+       scan.episodes_flushed
+       + Option.value (json_int_member_opt "episodes_flushed" decision) ~default:0;
+     scan.procedures_flushed <-
+       scan.procedures_flushed
+       + Option.value (json_int_member_opt "procedures_flushed" decision) ~default:0
+   | Keeper_runtime_manifest.Provider_attempt_started ->
+     scan.provider_started_count <- scan.provider_started_count + 1;
+     push_bounded scan.provider_attempt_rows scan.limit row
+   | Keeper_runtime_manifest.Provider_attempt_finished ->
+     scan.provider_finished_count <- scan.provider_finished_count + 1;
+     scan.provider_terminal_row <- Some row;
+     push_bounded scan.provider_attempt_rows scan.limit row
+   | _ -> ())
+
+let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
+  =
+  let path =
+    Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id
+  in
+  let scan = make_runtime_manifest_scan ~path ~limit in
+  Fs_compat.fold_jsonl_lines
+    ~init:()
+    ~f:(fun () ~line_no:_ json ->
+      match Keeper_runtime_manifest.of_json json with
+      | Ok row when manifest_row_matches ?turn_id keeper_name trace_id row ->
+          update_runtime_manifest_scan scan row
+      | Ok _ | Error _ -> ())
+    path;
+  scan
+
+let receipt_row_matches ?turn_id keeper_name trace_id json =
+  let keeper_matches = json_string_member_opt "keeper_name" json = Some keeper_name in
+  let trace_matches = json_string_member_opt "trace_id" json = Some trace_id in
+  let turn_matches =
+    match turn_id with
+    | None -> false
+    | Some wanted -> json_int_member_opt "turn_count" json = Some wanted
+  in
+  keeper_matches && (trace_matches || turn_matches)
+
+let read_receipt_rows ~keeper_name ~trace_id ?turn_id paths =
+  paths
+  |> List.concat_map (fun path ->
+       Fs_compat.fold_jsonl_lines
+         ~init:[]
+         ~f:(fun acc ~line_no:_ json ->
+           if receipt_row_matches ?turn_id keeper_name trace_id json then
+             json :: acc
+           else acc)
+         path
+       |> List.rev)
+
+let unique_ints values =
+  values
+  |> List.sort_uniq Int.compare
+
+let json_int_list values =
+  `List (List.map (fun value -> `Int value) values)
+
+let json_int_opt = function
+  | None -> `Null
+  | Some value -> `Int value
+
+let json_string_list values =
+  `List (List.map (fun value -> `String value) values)
+
+let event_bus_summary_json scan =
+  let correlation_ids =
+    scan.event_bus_correlation_ids
+    |> List.rev
+    |> Json_util.dedupe_keep_order
+  in
+  let run_ids =
+    scan.event_bus_run_ids |> List.rev |> Json_util.dedupe_keep_order
+  in
+  let last_compaction =
+    match scan.last_compaction with
+    | Some value -> value
+    | None -> `Null
+  in
+  `Assoc
+    [
+      ("event_bus_correlated_count", `Int scan.event_bus_count);
+      ("correlation_ids", json_string_list correlation_ids);
+      ("run_ids", json_string_list run_ids);
+      ( "context_compact_started_count",
+        `Int scan.context_compact_started_count );
+      ( "context_compacted_count",
+        `Int scan.context_compacted_count );
+      ("last_compaction", last_compaction);
+    ]
+
+let memory_summary_json scan =
+  `Assoc
+    [
+      ("memory_injected_count", `Int scan.memory_injected_count);
+      ( "memory_injected_present_count",
+        `Int scan.memory_injected_present_count );
+      ("memory_flushed_count", `Int scan.memory_flushed_count);
+      ("memory_flush_success_count", `Int scan.memory_flush_success_count);
+      ("memory_flush_error_count", `Int scan.memory_flush_error_count);
+      ("episodes_flushed", `Int scan.episodes_flushed);
+      ("procedures_flushed", `Int scan.procedures_flushed);
+    ]
+
+let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
+  `Assoc
+    [
+      ("ts", `String row.ts);
+      ("event", `String (Keeper_runtime_manifest.event_kind_to_string row.event));
+      ("cascade_name", json_string_opt row.cascade_name);
+      ("provider_kind", json_string_opt row.provider_kind);
+      ("model_id", json_string_opt row.model_id);
+      ("status", `String row.status);
+      ("error", json_string_opt (json_string_member_opt "error" row.decision));
+      ( "exception_kind",
+        json_string_opt (json_string_member_opt "exception_kind" row.decision) );
+    ]
+
+let provider_attempts_summary_json scan =
+  let attempt_rows = queue_to_list scan.provider_attempt_rows in
+  let terminal = scan.provider_terminal_row in
+  `Assoc
+    [
+      ("started_count", `Int scan.provider_started_count);
+      ("finished_count", `Int scan.provider_finished_count);
+      ( "terminal_status",
+        json_string_opt
+          (Option.map (fun row -> row.Keeper_runtime_manifest.status) terminal) );
+      ( "terminal_provider_kind",
+        json_string_opt
+          (Option.bind terminal (fun row -> row.Keeper_runtime_manifest.provider_kind))
+      );
+      ( "terminal_model_id",
+        json_string_opt
+          (Option.bind terminal (fun row -> row.Keeper_runtime_manifest.model_id))
+      );
+      ( "terminal_error",
+        json_string_opt
+          (Option.bind terminal (fun row ->
+             json_string_member_opt "error" row.Keeper_runtime_manifest.decision))
+      );
+      ( "terminal_exception_kind",
+        json_string_opt
+          (Option.bind terminal (fun row ->
+             json_string_member_opt "exception_kind"
+               row.Keeper_runtime_manifest.decision)) );
+      ("attempts", `List (List.map provider_attempt_row_json attempt_rows));
+    ]
+
+let turn_identity_summary_json ?turn_id scan receipts =
+  let manifest_keeper_turn_ids =
+    scan.keeper_turn_ids
+    |> List.rev
+    |> unique_ints
+  in
+  let receipt_turn_counts =
+    receipts
+    |> List.filter_map (json_int_member_opt "turn_count")
+    |> unique_ints
+  in
+  `Assoc
+    [
+      ( "requested_keeper_turn_id",
+        match turn_id with Some value -> `Int value | None -> `Null );
+      ("manifest_keeper_turn_ids", json_int_list manifest_keeper_turn_ids);
+      ("receipt_turn_counts", json_int_list receipt_turn_counts);
+      ("max_oas_turn_count", json_int_opt scan.max_oas_turn_count);
+      ( "provider_lane_resolved_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_lane_resolved) );
+      ( "provider_attempt_started_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_attempt_started) );
+      ( "provider_attempt_finished_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_attempt_finished) );
+      ( "checkpoint_saved_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Checkpoint_saved) );
+      ( "event_bus_correlated_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Event_bus_correlated) );
+      ( "memory_injected_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Memory_injected) );
+      ( "memory_flushed_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Memory_flushed) );
+      ( "receipt_appended_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Receipt_appended) );
+      ( "turn_finished_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Turn_finished) );
+    ]
+
+let keeper_runtime_trace_json (config : Coord.config) (name : string)
+    ?trace_id ?turn_id ?(limit = 200) ()
+    : [ `OK | `Not_found ] * Yojson.Safe.t =
+  if not (Keeper_config.validate_name name) then
+    ( `Not_found,
+      `Assoc
+        [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ] )
+  else
+    let trace_id_query =
+      match trace_id with
+      | Some value when String.trim value <> "" -> Some (String.trim value)
+      | _ -> None
+    in
+    let missing_trace_id_json =
+      `Assoc
+        [
+          ( "error",
+            `String
+              (Printf.sprintf
+                 "keeper %S not found and trace_id query param was not supplied"
+                 name) );
+        ]
+    in
+    let meta_read_failed_json msg =
+      `Assoc
+        [
+          ("error_kind", `String "keeper_meta_read_failed");
+          ( "error",
+            `String
+              (Printf.sprintf
+                 "keeper %S metadata read failed while resolving runtime trace: %s"
+                 name msg) );
+        ]
+    in
+    let effective_trace_id =
+      match trace_id_query with
+      | Some value -> Ok value
+      | None -> (
+          match Keeper_types.read_meta_resolved config name with
+          | Ok (Some (_, meta)) ->
+              Ok (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          | Ok None -> Error missing_trace_id_json
+          | Error msg -> Error (meta_read_failed_json msg))
+    in
+    match effective_trace_id with
+    | Error json -> (`Not_found, json)
+    | Ok trace_id ->
+        let limit = max 1 (min 500 limit) in
+        let manifest_scan =
+          read_runtime_manifest_scan ~config ~keeper_name:name ~trace_id
+            ?turn_id ~limit ()
+        in
+        let manifest_rows = queue_to_list manifest_scan.returned_rows in
+        let receipt_paths =
+          manifest_rows
+          |> List.map (fun row -> row.Keeper_runtime_manifest.links.receipt_path)
+          |> unique_present_paths
+        in
+        let checkpoint_paths =
+          manifest_rows
+          |> List.map (fun row -> row.Keeper_runtime_manifest.links.checkpoint_path)
+          |> unique_present_paths
+        in
+        let tool_call_log_paths =
+          manifest_rows
+          |> List.map (fun row ->
+               row.Keeper_runtime_manifest.links.tool_call_log_path)
+          |> unique_present_paths
+        in
+        let receipts =
+          read_receipt_rows ~keeper_name:name ~trace_id ?turn_id receipt_paths
+          |> take_last limit
+        in
+        let health, stale_reason =
+          if manifest_scan.total_rows = 0 then ("empty", Some "no_manifest_rows")
+          else if not manifest_scan.has_terminal then
+            ("incomplete", Some "missing_turn_finished")
+          else if receipts = [] then ("partial", Some "no_matching_receipt_rows")
+          else ("ok", None)
+        in
+        ( `OK,
+          `Assoc
+            [
+              ("keeper", `String name);
+              ( "trace_id",
+                `String trace_id );
+              ( "turn_id",
+                match turn_id with
+                | Some value -> `Int value
+                | None -> `Null );
+              ("manifest_path", `String manifest_scan.path);
+              ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_scan.path));
+              ("manifest_total_rows", `Int manifest_scan.total_rows);
+              ("manifest_returned_rows", `Int (List.length manifest_rows));
+              ("receipt_returned_rows", `Int (List.length receipts));
+              ( "turn_identity",
+                turn_identity_summary_json ?turn_id manifest_scan receipts );
+              ("provider_attempts", provider_attempts_summary_json manifest_scan);
+              ("event_bus", event_bus_summary_json manifest_scan);
+              ("memory", memory_summary_json manifest_scan);
+              ("health", `String health);
+              ( "stale_reason",
+                match stale_reason with
+                | Some value -> `String value
+                | None -> `Null );
+              ( "linked_artifacts",
+                `Assoc
+                  [
+                    ( "receipts",
+                      `List
+                        (List.map
+                           (linked_artifact_json ~kind:"execution_receipt")
+                           receipt_paths) );
+                    ( "checkpoints",
+                      `List
+                        (List.map
+                           (linked_artifact_json ~kind:"oas_checkpoint")
+                           checkpoint_paths) );
+                    ( "tool_call_logs",
+                      `List
+                        (List.map
+                           (linked_artifact_json ~kind:"tool_call_log")
+                           tool_call_log_paths) );
+                  ] );
+              ( "manifest_rows",
+                `List (List.map Keeper_runtime_manifest.to_json manifest_rows) );
+              ("receipts", `List receipts);
+            ] )
 
 let handle_keeper_checkpoints_post state req reqd body_str =
   let req_path = Http.Request.path req in
@@ -984,6 +1494,31 @@ let handle_keeper_get_subroutes state req request reqd =
         {|{"error":"keeper name is required"}|} reqd
     else
       let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.room_config name in
+      let status : Httpun.Status.t =
+        match st with `OK -> `OK | `Not_found -> `Not_found
+      in
+      Http.Response.json ~status ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
+  else if ends_with keeper_suffix_runtime_trace then
+    let name = extract_name keeper_suffix_runtime_trace in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let trace_id = Server_utils.query_param req "trace_id" in
+      let turn_id =
+        match Server_utils.query_param req "turn_id" with
+        | Some raw -> int_of_string_opt (String.trim raw)
+        | None -> None
+      in
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:200
+        |> max 1 |> min 500
+      in
+      let st, json =
+        keeper_runtime_trace_json state.Mcp_server.room_config name
+          ?trace_id ?turn_id ~limit ()
+      in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in

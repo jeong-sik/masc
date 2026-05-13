@@ -112,8 +112,30 @@ def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
         "--paginate",
     ])
     if not isinstance(resp, list):
-        return set()
-    return {f["filename"] for f in resp}
+        payload = json.dumps(resp, sort_keys=True)
+        if len(payload) > 1000:
+            payload = payload[:997] + "..."
+        print(
+            f"gh api unexpected PR files payload for #{pr_number}: "
+            f"expected list, got {type(resp).__name__}: {payload}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    files: Set[str] = set()
+    for idx, item in enumerate(resp):
+        if not isinstance(item, dict) or not isinstance(item.get("filename"), str):
+            payload = json.dumps(item, sort_keys=True)
+            if len(payload) > 1000:
+                payload = payload[:997] + "..."
+            print(
+                f"gh api unexpected PR files item for #{pr_number} at index {idx}: "
+                f"{payload}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        files.add(item["filename"])
+    return files
 
 
 def get_recently_merged_prs(

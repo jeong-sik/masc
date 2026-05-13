@@ -56,7 +56,7 @@ Layer 1: [providers.*]     — How to connect (protocol, transport, credentials)
 Layer 2: [models.*]        — What it can do (capabilities, context window)
 Layer 3: [<p>.<m>]         — How much, at what cost (capacity, pricing)
 Layer 4: [<p>.<m>.<a>]     — Per-use overrides (aliases)
-Layer 5: [tier.*] + [tier-group.*] + [routes] — Routing strategy
+Layer 5: [tier.*] + [tier-group.*] + [routes.*] — Routing strategy
 ```
 
 The naming convention IS the reference: `[claude-code.haiku]` implicitly
@@ -371,11 +371,17 @@ fallback = true
 tiers = ["rerank"]
 strategy = "failover"
 
-[routes]
-keeper_turn = "primary"
-governance_judge = "primary"
-scoring = "rerank-only"
-simple_task = "local"
+[routes.keeper_turn]
+target = "tier-group.primary"
+
+[routes.governance_judge]
+target = "tier-group.primary"
+
+[routes.scoring]
+target = "tier-group.rerank-only"
+
+[routes.simple_task]
+target = "tier.local"
 
 [system.governance]
 target = "claude-code.haiku.for-governance"

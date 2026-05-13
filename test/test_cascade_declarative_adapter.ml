@@ -317,6 +317,67 @@ strategy = "failover"
            (List.length configs)))
 ;;
 
+let test_ollama_cloud_http_provider_adds_bearer_auth_header () =
+  with_env "OLLAMA_CLOUD_API_KEY" "ollama-cloud-adapter-test-key" @@ fun () ->
+  with_env "OLLAMA_API_KEY" "fallback-ollama-api-key" @@ fun () ->
+    let toml =
+      {|
+[providers.ollama_cloud]
+protocol = "ollama-http"
+endpoint = "https://ollama.com"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[models.glm-5-1-cloud]
+max-context = 262144
+api-name = "glm-5.1:cloud"
+tools-support = true
+
+[ollama_cloud.glm-5-1-cloud]
+max-concurrent = 1
+
+[tier.coding_plan]
+members = ["ollama_cloud.glm-5-1-cloud"]
+strategy = "failover"
+|}
+    in
+    let catalog = adapt_toml toml in
+    no_errors catalog.errors;
+    let coding_plan =
+      List.find
+        (fun (p : adapted_profile) -> p.name = "tier.coding_plan")
+        catalog.profiles
+    in
+    match coding_plan.provider_configs with
+    | [ cfg ] ->
+      check
+        bool
+        "uses Ollama wire kind"
+        true
+        (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Ollama);
+      check
+        string
+        "uses Ollama Cloud endpoint"
+        "https://ollama.com"
+        cfg.Llm_provider.Provider_config.base_url;
+      check string "uses Ollama chat path" "/api/chat" cfg.request_path;
+      check string "materializes cloud API key" "ollama-cloud-adapter-test-key" cfg.api_key;
+      check
+        bool
+        "Authorization bearer header present"
+        true
+        (List.mem
+           ("Authorization", "Bearer ollama-cloud-adapter-test-key")
+           cfg.headers)
+    | configs ->
+      fail
+        (Printf.sprintf
+           "expected one resolved provider config, got %d"
+           (List.length configs))
+;;
+
 let test_model_capabilities_tool_choice_reaches_provider_config () =
   let toml =
     {|
@@ -883,6 +944,10 @@ let () =
             "registered HTTP provider uses registry api_key_env fallback"
             `Quick
             test_registered_http_provider_without_credentials_uses_registry_api_key_env
+        ; test_case
+            "ollama_cloud HTTP provider adds bearer auth header"
+            `Quick
+            test_ollama_cloud_http_provider_adds_bearer_auth_header
         ; test_case
             "model supports-tool-choice reaches provider config"
             `Quick

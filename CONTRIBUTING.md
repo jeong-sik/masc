@@ -207,6 +207,29 @@ Cross-model review evidence should use direct `sb glm-text` when available. If a
 - Claude API keys are rotated round-robin per heartbeat tick
 - Configuration in `config/cascade.toml`, hot-reloaded by mtime check
 
+### Runtime Lens Boundary (provider/model identity in JSON)
+
+The Runtime Lens redacts provider/model identity at **external** surfaces
+(Prometheus labels, dashboard OAS bridge, provider error envelopes,
+keeper unified metrics redacted variants). It must **NOT** redact at
+**internal observability** surfaces (boot log, audit log,
+operator-facing `Log.*.info`).
+
+Before adding a new `*_to_yojson` function or Prometheus emitter that
+touches provider/model identity, read
+[`docs/architecture/runtime-lens-boundary.md`](docs/architecture/runtime-lens-boundary.md)
+and apply its 3-question decision rule (who reads it / is there a
+`redacted_*` companion / sibling field consistency).
+
+Regression coverage lives in
+`test/test_cascade_catalog_runtime_yojson.ml` — 8 cases across the two
+internal carve-out sites. New internal serializers should add a
+companion test there using the helpers (`assoc_string`, substring
+scanner).
+
+History: #15040 (introduced lens, over-applied) → #15070 (carve-out for
+boot log + audit log) → #15089 (test pins + this section).
+
 ## Reporting Issues
 
 When reporting issues, please include:

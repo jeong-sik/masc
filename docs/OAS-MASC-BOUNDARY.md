@@ -1,9 +1,9 @@
 ---
 status: reference
-last_verified: 2026-05-01
+last_verified: 2026-05-12
 code_refs:
   - lib/masc_oas_bridge.ml
-  - lib/oas_worker.ml
+  - lib/worker_oas.ml
   - lib/verifier_oas.ml
   - lib/memory_oas_bridge.ml
 ---

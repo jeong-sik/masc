@@ -71,17 +71,21 @@ else
   echo "  CHANGELOG already has $NEW_VERSION entry"
 fi
 
-# 5) ROADMAP.md — current package version + latest release
+# 5) ROADMAP.md — current package version + latest changelog entry
 sedi -E "s/^> Current package version: v[^ ]*/> Current package version: v$NEW_VERSION/" \
   "$ROOT_DIR/ROADMAP.md"
-sedi -E "s/^> Latest release: v[^ ]*/> Latest release: v$NEW_VERSION/" \
+sedi -E "s/^> Latest changelog entry: v[^ ]+ \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$/> Latest changelog entry: v$NEW_VERSION ($TODAY)/" \
+  "$ROOT_DIR/ROADMAP.md"
+sedi -E "s/^> Updated: [0-9]{4}-[0-9]{2}-[0-9]{2}$/> Updated: $TODAY/" \
   "$ROOT_DIR/ROADMAP.md"
 echo "  ROADMAP.md updated"
 
-# 6) docs/PRODUCT-OPERATING-PLAN.md — current package version + latest release
+# 6) docs/PRODUCT-OPERATING-PLAN.md — current package version + latest changelog entry
 sedi -E "s/^> Current package version: v[^ ]*/> Current package version: v$NEW_VERSION/" \
   "$ROOT_DIR/docs/PRODUCT-OPERATING-PLAN.md"
-sedi -E "s/^> Latest release: v[^ ]*/> Latest release: v$NEW_VERSION/" \
+sedi -E "s/^> Latest changelog entry: v[^ ]+ \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$/> Latest changelog entry: v$NEW_VERSION ($TODAY)/" \
+  "$ROOT_DIR/docs/PRODUCT-OPERATING-PLAN.md"
+sedi -E "s/^> Updated: [0-9]{4}-[0-9]{2}-[0-9]{2}$/> Updated: $TODAY/" \
   "$ROOT_DIR/docs/PRODUCT-OPERATING-PLAN.md"
 echo "  PRODUCT-OPERATING-PLAN.md updated"
 

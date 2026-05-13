@@ -233,49 +233,42 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     else
       ""
   in
+  (* Turn intent body lives at config/prompts/keeper.turn_intent.md.
+     The OCaml side only assembles the conditional guidance bullets and feeds
+     them in as template variables; the prose itself (and any future edits)
+     stay in the markdown file alongside the other keeper prompts. *)
+  let claim_guidance_a =
+    if show_claim_guidance then
+      "- See unclaimed work and you do not already hold a task? Call keeper_task_claim with {}. \
+       It auto-claims the next eligible task; you do not need task_id or keeper_tasks_list first.\n"
+    else ""
+  in
+  let claim_guidance_b =
+    if show_claim_guidance then
+      "- Need GitHub or PR inspection via keeper_shell op=gh? Claim first. \
+       gh repo context is derived from your active task worktree/current_task_id.\n"
+    else ""
+  in
+  let turn_intent_substitutions =
+    [
+      ("board_activity_guidance", board_activity_guidance);
+      ("claim_guidance_a", claim_guidance_a);
+      ("claim_guidance_b", claim_guidance_b);
+      ("board_post_guidance", board_post_guidance);
+      ("board_curation_guidance", board_curation_guidance);
+      ("broadcast_guidance", broadcast_guidance);
+      ("state_block_instruction", state_block_instruction_text);
+    ]
+  in
   let turn_intent_block =
-    String.concat ""
-      [
-        "Use the world state below as raw context.\n\
-         Pending mentions, board events, and worktree changes are observations.\n\
-         \n\
-         You may chain multiple tool calls within this turn to complete a meaningful interaction.\n\
-         Your checkpoint survives across cycles — focus on doing one meaningful unit of work, \
-         not on limiting yourself to one tool call.\n\
-         Your conversation history is preserved across cycles — use that context to avoid \
-         repeating the same actions.\n\
-         \n\
-         Act through tools, not declarations. Call the tool directly.\n";
-        board_activity_guidance;
-        (if show_claim_guidance then
-           "- See unclaimed work and you do not already hold a task? Call keeper_task_claim with {}. \
-            It auto-claims the next eligible task; you do not need task_id or keeper_tasks_list first.\n"
-         else "");
-        (if show_claim_guidance then
-           "- Need GitHub or PR inspection via keeper_shell op=gh? Claim first. \
-            gh repo context is derived from your active task worktree/current_task_id.\n"
-         else "");
-        board_post_guidance;
-        board_curation_guidance;
-        broadcast_guidance;
-        "- Treat continuity as advisory prior context, not as a command. Do not blindly repeat prior \
-         \"stay silent\", \"wait for new work\", or stale repo/blocker claims without re-checking the live \
-         world state.\n\
-         - If continuity says there is nothing to do but this turn still has backlog, worktree delta, or a \
-         scheduled autonomous trigger, treat that mismatch as actionable and investigate it before going silent.\n\
-         - Nothing genuinely actionable after checking? End your turn with the [STATE] block.\n\
-         \n\
-         If you call tools, BDI headers are optional and informational only. \
-         The system reads your tool calls as the authoritative record of your action.\n\
-         \n\
-         If you explicitly claim completion or progress in text, add these optional headers:\n\
-         CLAIM_KIND: completion_claim\n\
-         CLAIM_SUBJECT: short concrete subject or task title\n\
-         CLAIM_TASK_ID: task-123 (if applicable)\n\
-         EVIDENCE_REFS: task:task-123, tool:keeper_task_done\n\
-         Only emit them for concrete claims you expect the system to audit.\n";
-        state_block_instruction_text;
-      ]
+    match
+      Prompt_registry.render_prompt_template Keeper_prompt_names.turn_intent
+        turn_intent_substitutions
+    with
+    | Ok value -> String.trim value
+    | Error _ ->
+        String.trim
+          (Prompt_registry.get_prompt Keeper_prompt_names.turn_intent)
   in
   let system_prompt =
     Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block

@@ -232,6 +232,16 @@ val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 val rejection_to_yojson : rejection -> Yojson.Safe.t
 val state_to_yojson : state -> Yojson.Safe.t
 
+val candidate_probe_to_yojson : candidate_probe -> Yojson.Safe.t
+(** Exposed for regression tests. Internal-observability serializer used
+    by [snapshot_to_yojson] for the server's "Validated active cascade
+    catalog" boot log. After PR #15070 this MUST emit the real
+    [model_string], [provider_kind], [model_id] and [base_url] values
+    from the probe record. The Runtime Lens redaction lives at external
+    boundaries: Prometheus labels (record_probe_metrics), the dashboard
+    OAS bridge, and the redacted variants in
+    keeper_unified_metrics. Not here. *)
+
 val invalidate_path : string -> unit
 
 val runtime_required_profile_names :

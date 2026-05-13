@@ -26,13 +26,17 @@ module StringSet = Set.Make (String)
 let now_iso () = Masc_domain.now_iso ()
 
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
+  let string_opt_to_json = function
+    | Some value -> `String value
+    | None -> `Null
+  in
   `Assoc
-    [ "model", `String "runtime"
-    ; "display_model", `Null
-    ; "provider_name", `Null
-    ; "display_provider_name", `Null
-    ; "runtime_kind", `String "runtime"
-    ; "expanded_models", `List []
+    [ "model", `String c.model_string
+    ; "display_model", `String c.display_model_string
+    ; "provider_name", string_opt_to_json c.provider_name
+    ; "display_provider_name", string_opt_to_json c.display_provider_name
+    ; "runtime_kind", string_opt_to_json c.runtime_kind
+    ; "expanded_models", `List (List.map (fun value -> `String value) c.expanded_models)
     ; "config_weight", `Int c.config_weight
     ; "effective_weight", `Int c.effective_weight
     ; "success_rate", `Float c.success_rate

@@ -1,6 +1,5 @@
 // CascadeConfigPanel — renders cascade.toml profiles + health tracker state
-// side-by-side so operators can inspect routing order without exposing concrete
-// provider/model identity.
+// side-by-side so operators can inspect routing order and candidate labels.
 //
 // Consumes:
 //   GET /api/v1/cascade/config  — profiles + per-candidate weight/health
@@ -138,7 +137,7 @@ function rawConfigModeSummary(
     primary:
       `현재 active source는 ${sourcePath} 입니다. 원본 cascade.toml 내용은 dashboard API에서 redaction됩니다.`,
     secondary:
-      '프로필, weight, health, validation 상태만 노출되고 provider/model 원문은 OAS-owned runtime data로 남깁니다.',
+      '프로필, 후보 label, weight, health, validation 상태만 노출됩니다.',
     saveLabel: '저장 비활성',
   }
 }
@@ -224,11 +223,33 @@ function validationDescription(status: CascadeValidationStatus): string {
 
 function runtimeKindLabel(kind: string | null | undefined): string | null {
   switch (kind) {
-    case 'cli_agent': return 'CLI(non-interactive)'
-    case 'direct_api': return 'Direct API'
-    case 'local': return '로컬'
+    case 'cli_agent': return 'cli-agent'
+    case 'direct_api': return 'direct-api'
+    case 'local': return 'local'
     default: return null
   }
+}
+
+function candidateWeightLabel(c: CascadeCandidate): string {
+  return c.effective_weight === c.config_weight
+    ? String(c.config_weight)
+    : `${c.config_weight} -> ${c.effective_weight}`
+}
+
+function uniqueNonEmpty(values: readonly string[]): string[] {
+  return Array.from(new Set(values.map(value => value.trim()).filter(Boolean)))
+}
+
+function candidateExpandedSummary(
+  c: CascadeCandidate,
+  displayModel: string,
+): string | null {
+  const expandedModels = uniqueNonEmpty(c.expanded_models ?? [])
+  if (expandedModels.length === 0) return null
+  if (expandedModels.length === 1 && expandedModels[0] === displayModel) return null
+  const visible = expandedModels.slice(0, 3).join(', ')
+  const hidden = expandedModels.length - 3
+  return hidden > 0 ? `${visible} +${hidden}` : visible
 }
 
 function fmtCooldownExpiry(expiresAt: number | null): string {
@@ -349,7 +370,7 @@ function ProfileCard({
   }
 
   return html`
-    <article class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3">
+    <article class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3">
       <header class="flex items-center gap-2 mb-2 flex-wrap">
         <span class="font-semibold text-[var(--color-fg-primary)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
@@ -434,27 +455,56 @@ function ProfileCard({
       ${profile.candidates.length === 0
         ? html`<div class="text-xs text-[var(--color-fg-muted)]">no candidates resolved</div>`
         : html`
-          <ol class="flex flex-col gap-1 text-xs">
+          <ol class="min-w-0 flex flex-col gap-1 text-xs">
             ${profile.candidates.map((c, idx) => {
-              const displayModel = 'runtime'
+              const displayModel = c.display_model ?? c.model
+              const providerLabel = c.display_provider_name ?? c.provider_name
               const runtimeLabel = runtimeKindLabel(c.runtime_kind)
+              const expandedSummary = candidateExpandedSummary(c, displayModel)
               return html`
-              <li class="flex items-start gap-2 py-1 border-b border-[var(--color-border-default)] last:border-b-0">
-                <span class="tabular-nums text-[var(--color-fg-muted)] w-5">${idx + 1}.</span>
-                <${StatusChip} tone=${candidateTone(c)}>
-                  ${c.in_cooldown ? 'cooldown' : formatPct1(c.success_rate)}
-                <//>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <code class="text-[var(--color-fg-primary)]">${displayModel}</code>
+              <li class="grid grid-cols-1 gap-x-2 gap-y-1 py-2 border-b border-[var(--color-border-default)] last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                <div class="flex items-center gap-1.5 self-start">
+                  <span class="tabular-nums text-[var(--color-fg-muted)] w-5">${idx + 1}.</span>
+                  <${StatusChip} tone=${candidateTone(c)} class="shrink-0">
+                    ${c.in_cooldown ? 'cooldown' : formatPct1(c.success_rate)}
+                  <//>
+                </div>
+                <div class="min-w-0 grid gap-1">
+                  <div class="flex min-w-0 items-baseline gap-1.5 flex-wrap">
+                    <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">model</span>
+                    <code class="min-w-0 max-w-full break-all text-[var(--color-fg-primary)]">${displayModel}</code>
+                  </div>
+                  <div class="flex min-w-0 gap-x-3 gap-y-1 flex-wrap text-[var(--color-fg-muted)]">
+                    ${providerLabel
+                      ? html`
+                        <span class="min-w-0">
+                          <span class="text-3xs uppercase tracking-wider">provider</span>
+                          <code class="ml-1 break-all text-[var(--color-fg-primary)]">${providerLabel}</code>
+                        </span>
+                      `
+                      : null}
                     ${runtimeLabel
-                      ? html`<span class="text-[var(--color-fg-muted)]">${runtimeLabel}</span>`
+                      ? html`
+                        <span>
+                          <span class="text-3xs uppercase tracking-wider">runtime</span>
+                          <code class="ml-1 text-[var(--color-fg-primary)]">${runtimeLabel}</code>
+                        </span>
+                      `
+                      : null}
+                    ${expandedSummary
+                      ? html`
+                        <span class="min-w-0">
+                          <span class="text-3xs uppercase tracking-wider">expanded</span>
+                          <code class="ml-1 break-all text-[var(--color-fg-primary)]">${expandedSummary}</code>
+                        </span>
+                      `
                       : null}
                   </div>
                 </div>
-                <span class="tabular-nums text-[var(--color-fg-muted)]">
-                  w ${c.config_weight}${c.effective_weight === c.config_weight ? '' : ` → ${c.effective_weight}`}
-                </span>
+                <div class="flex items-baseline gap-1.5 text-[var(--color-fg-muted)] sm:justify-end sm:text-right">
+                  <span class="text-3xs uppercase tracking-wider">weight</span>
+                  <code class="tabular-nums text-[var(--color-fg-primary)]">${candidateWeightLabel(c)}</code>
+                </div>
               </li>
             `})}
           </ol>
@@ -1152,7 +1202,7 @@ export function CascadeConfigPanel() {
   const slo = current.data?.slo ?? null
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="min-w-0 flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <${Btn} onClick=${() => void loadCascadeData(resource)}>
           새로고침
@@ -1184,7 +1234,7 @@ export function CascadeConfigPanel() {
               )
               return html`
                 <${CascadeValidationBanner} config=${config} />
-                <div class="grid grid-cols-1 gap-3 md:grid-cols-2 mb-3">
+                <div class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 mb-3">
                   <${StatCell}
                     label="프로파일"
                     value=${config.profiles.length}
@@ -1204,7 +1254,7 @@ export function CascadeConfigPanel() {
                 ${config.profiles.length === 0
                   ? html`<${EmptyState}>표시할 유효 cascade profile 이 없습니다.<//>`
                   : html`
-                    <div class="grid gap-3 md:grid-cols-2 mb-3">
+                    <div class="grid min-w-0 gap-3 md:grid-cols-2 mb-3">
                       ${config.profiles.map(p => html`
                         <${ProfileCard}
                           profile=${p}

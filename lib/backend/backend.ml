@@ -168,11 +168,17 @@ module FileSystem = struct
 
   (** {2 Key Validation} *)
 
+  let atomic_tmp_suffix = ".tmp-atomic"
+
+  let is_atomic_tmp_key key = String.ends_with ~suffix:atomic_tmp_suffix key
+
   let validate_key key =
     if String.length key = 0 then
       Error (InvalidKey "Empty key not allowed")
     else if String.contains key '\x00' then
       Error (InvalidKey "NUL byte not allowed")
+    else if is_atomic_tmp_key key then
+      Error (InvalidKey "Reserved atomic temp key suffix")
     else if String.contains key '/' then
       Error (InvalidKey "Slash not allowed (use ':' as separator)")
     else if key.[0] = ':' then
@@ -324,7 +330,7 @@ module FileSystem = struct
           in
           let path = Eio.Path.(t.fs / path_part) in
           let tmp_path =
-            Eio.Path.(t.fs / (path_part ^ ".tmp-atomic"))
+            Eio.Path.(t.fs / (path_part ^ atomic_tmp_suffix))
           in
           try
             _ensure_parent_dir ~log_errors:true path;
@@ -377,8 +383,9 @@ module FileSystem = struct
                  Eio.Path.(path / name) acc)
              acc
     | `Regular_file ->
-        if requested_prefix = ""
-           || starts_with ~prefix:requested_prefix logical_prefix
+        if (not (is_atomic_tmp_key logical_prefix))
+           && (requested_prefix = ""
+               || starts_with ~prefix:requested_prefix logical_prefix)
         then
           logical_prefix :: acc
         else
@@ -565,7 +572,7 @@ module FileSystem = struct
             String.map (function ':' -> '/' | c -> c) key
           in
           let tmp_path =
-            Eio.Path.(t.fs / (path_part ^ ".tmp-atomic"))
+            Eio.Path.(t.fs / (path_part ^ atomic_tmp_suffix))
           in
           let cleanup_tmp () =
             try Eio.Path.unlink tmp_path

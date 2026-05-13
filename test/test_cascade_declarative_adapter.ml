@@ -78,6 +78,17 @@ let adapt_toml (toml : string) : adapted_catalog =
                errs)))
 ;;
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+;;
+
 (* --- TOML fixtures ---
 
    Provider IDs must match [Provider_adapter] cascade_prefix values:
@@ -256,6 +267,52 @@ strategy = "failover"
       (Printf.sprintf
          "expected one resolved provider config, got %d"
          (List.length configs))
+;;
+
+let test_registered_http_provider_without_credentials_uses_registry_api_key_env () =
+  with_env "ZAI_API_KEY" "zai-review-test-key" (fun () ->
+    let toml =
+      {|
+[providers.glm-coding]
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[models.glm-5-turbo]
+max-context = 128000
+api-name = "glm-5-turbo"
+tools-support = true
+
+[glm-coding.glm-5-turbo]
+max-concurrent = 2
+
+[tier.medium]
+members = ["glm-coding.glm-5-turbo"]
+strategy = "failover"
+|}
+    in
+    let catalog = adapt_toml toml in
+    no_errors catalog.errors;
+    let medium =
+      List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+    in
+    match medium.provider_configs with
+    | [ cfg ] ->
+      check
+        bool
+        "keeps registered GLM kind"
+        true
+        (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Glm);
+      check
+        string
+        "uses TOML endpoint"
+        "https://api.z.ai/api/coding/paas/v4"
+        cfg.Llm_provider.Provider_config.base_url;
+      check string "uses registry api_key_env fallback" "zai-review-test-key" cfg.api_key
+    | configs ->
+      fail
+        (Printf.sprintf
+           "expected one resolved provider config, got %d"
+           (List.length configs)))
 ;;
 
 (* --- Error: unknown provider --- *)
@@ -679,6 +736,10 @@ let () =
             "registered HTTP provider uses TOML endpoint"
             `Quick
             test_registered_http_provider_uses_toml_endpoint_without_api_key
+        ; test_case
+            "registered HTTP provider uses registry api_key_env fallback"
+            `Quick
+            test_registered_http_provider_without_credentials_uses_registry_api_key_env
         ] )
     ; ( "errors"
       , [ test_case "unknown provider" `Quick test_unknown_provider

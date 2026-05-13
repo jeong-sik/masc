@@ -72,21 +72,27 @@ let find_registry_entry (provider_id : string) :
      | Some cascade_prefix -> Llm_provider.Provider_registry.find registry cascade_prefix
      | None -> None)
 
-let api_key_of_credential = function
+let api_key_of_credential ?registry_entry = function
   | Some (Env key) ->
       (match Sys.getenv_opt key with
        | Some value -> value
        | None -> "")
   | Some (Inline value) -> value
-  | Some (File _) | None -> ""
+  | Some (File _) -> ""
+  | None ->
+    (match registry_entry with
+     | Some entry ->
+       let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
+       if env = "" then "" else Sys.getenv_opt env |> Option.value ~default:""
+     | None -> "")
 
-let provider_kind_for_http_provider (provider : cascade_provider) :
+let provider_kind_for_http_provider ?registry_entry (provider : cascade_provider) :
     Llm_provider.Provider_config.provider_kind option =
   match provider.api_format with
   | Ollama_api -> Some Llm_provider.Provider_config.Ollama
   | Chat_completions_api ->
     Some
-      (match find_registry_entry provider.id with
+      (match registry_entry with
        | Some entry -> entry.Llm_provider.Provider_registry.defaults.kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api -> None
@@ -96,14 +102,15 @@ let provider_config_from_http_provider
     (spec : cascade_model_spec)
     ~(max_tokens : int option)
     : Llm_provider.Provider_config.t option =
-  match provider.transport, provider_kind_for_http_provider provider with
+  let registry_entry = find_registry_entry provider.id in
+  match provider.transport, provider_kind_for_http_provider ?registry_entry provider with
   | Http base_url, Some kind ->
       Some
         (Llm_provider.Provider_config.make
            ~kind
            ~model_id:spec.api_name
            ~base_url
-           ~api_key:(api_key_of_credential provider.credentials)
+           ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
            ~max_context:spec.max_context
            ?max_tokens
            ())

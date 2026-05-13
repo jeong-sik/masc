@@ -34,9 +34,19 @@ is_integration_forbidden() {
     [[ "$output" == *"gh: Resource not accessible by integration (HTTP 403)"* ]]
 }
 
+escape_workflow_command_data() {
+  local value="${1-}"
+  value="${value//%/%25}"
+  value="${value//$'\r'/%0D}"
+  value="${value//$'\n'/%0A}"
+  printf '%s' "$value"
+}
+
 skip_integration_forbidden() {
   local output="$1"
-  echo "::warning title=Branch protection check unavailable::Could not read ${repo}/${branch} branch protection with this GitHub token; skipping drift check. Details: ${output}"
+  local details
+  details="$(escape_workflow_command_data "$output")"
+  echo "::warning title=Branch protection check unavailable::Could not read ${repo}/${branch} branch protection with this GitHub token; skipping drift check. Details: ${details}"
   exit 0
 }
 

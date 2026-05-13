@@ -879,6 +879,65 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         [ "required_tool_not_materialized"; "context_delta_missing" ]
         gaps)
 
+let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-open-turn" in
+      let trace_id = "trace-runtime-lens-open-turn" in
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+           ~trace_id ~keeper_turn_id:1 ~event:M.Turn_started
+           ~status:"started" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
+           ~trace_id ~keeper_turn_id:1 ~event:M.Turn_finished
+           ~status:"finished" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:02Z" ~keeper_name
+           ~trace_id ~keeper_turn_id:2 ~event:M.Turn_started
+           ~status:"started" ());
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ()
+      in
+      Alcotest.(check string)
+        "runtime lens latest-turn status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let lens = Yojson.Safe.Util.(json |> member "runtime_lens") in
+      let turn_clock = Yojson.Safe.Util.(lens |> member "turn_clock") in
+      Alcotest.(check int)
+        "lens picks max keeper turn"
+        2
+        (json_int_member "keeper_turn_id" turn_clock);
+      Alcotest.(check bool)
+        "latest turn terminal is absent"
+        false
+        (json_bool_member "terminal_event_present" turn_clock);
+      Alcotest.(check string)
+        "latest turn health is incomplete"
+        "incomplete"
+        Yojson.Safe.Util.(json |> member "health" |> to_string);
+      let lifecycle =
+        Yojson.Safe.Util.(lens |> member "axes" |> member "lifecycle")
+      in
+      Alcotest.(check string)
+        "latest turn lifecycle remains open"
+        "open"
+        Yojson.Safe.Util.(lifecycle |> member "terminal_status" |> to_string);
+      let gaps =
+        Yojson.Safe.Util.(
+          lens |> member "gaps" |> to_list
+          |> List.map (fun gap -> gap |> member "code" |> to_string))
+      in
+      Alcotest.(check bool)
+        "latest turn surfaces missing finish gap"
+        true
+        (List.mem "missing_turn_finished" gaps))
+
 let test_runtime_trace_lens_groups_context_memory_swimlane () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -2018,6 +2077,10 @@ let () =
             `Quick test_runtime_trace_api_bounds_rows_but_counts_full_manifest;
           Alcotest.test_case "runtime trace lens summarizes tool axis" `Quick
             test_runtime_trace_lens_summarizes_tool_axis;
+          Alcotest.test_case
+            "runtime trace lens terminal follows latest turn"
+            `Quick
+            test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter;
           Alcotest.test_case
             "runtime trace lens groups context and memory swimlane"
             `Quick

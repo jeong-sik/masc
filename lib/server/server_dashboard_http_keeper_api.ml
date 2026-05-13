@@ -1294,11 +1294,27 @@ let string_contains_substring haystack needle =
     in
     loop 0
 
+let runtime_trace_keeps_provider_attempt_provenance_key = function
+  | "model_source"
+  | "resolved_model_source"
+  | "capability_source"
+  | "fallback_authority"
+  | "provider_source_cascade"
+  | "terminal_model_source"
+  | "terminal_resolved_model_source"
+  | "terminal_capability_source"
+  | "terminal_fallback_authority"
+  | "terminal_provider_source_cascade" ->
+    true
+  | _ -> false
+
 let runtime_trace_redacts_provider_model_key key =
   let key = String.lowercase_ascii key in
-  string_contains_substring key "provider"
-  || string_contains_substring key "model"
-  || String.equal key "configured_labels"
+  (not (runtime_trace_keeps_provider_attempt_provenance_key key))
+  &&
+  (string_contains_substring key "provider"
+   || string_contains_substring key "model"
+   || String.equal key "configured_labels")
 
 let rec runtime_trace_public_json = function
   | `Assoc fields ->

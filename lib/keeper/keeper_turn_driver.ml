@@ -713,7 +713,7 @@ let run_named
         Cascade_legacy_runner.record_cascade ~keeper_name
           ~cascade_name:error_cascade_name
           ~outcome:`Success ~observation:(Some observation) ();
-        on_success ~provider_key:provider_health_key;
+        on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
         Ok result
       | Ok result ->
         (* Response arrived but failed the cascade's [accept] predicate
@@ -743,7 +743,7 @@ let run_named
            Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Success ~observation:(Some observation) ();
-           on_success ~provider_key:provider_health_key;
+           on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
            Ok result
          | Cascade_fsm.Try_next { last_err = new_err } ->
            (* Demoted from WARN to INFO (task-239): cascade will retry the
@@ -796,7 +796,7 @@ let run_named
            Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Success ~observation:(Some observation) ();
-           on_success ~provider_key:provider_health_key;
+           on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
            Ok result)
       | Error sdk_err ->
         let sdk_err =

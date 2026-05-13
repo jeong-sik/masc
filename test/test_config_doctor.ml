@@ -218,7 +218,15 @@ let test_initialized_config_without_cascade_toml_errors () =
     (init_state report.init_state);
   check string "status" "error" (status report.status);
   check bool "warning mentions missing cascade.toml" true
-    (list_contains_substring ~needle:"cascade.toml" report.warnings)
+    (list_contains_substring ~needle:"cascade.toml" report.warnings);
+  check bool "next action bootstraps missing cascade.toml" true
+    (list_contains_substring
+       ~needle:"Create or bootstrap cascade.toml"
+       report.next_actions);
+  check bool "next action avoids broken preset wording" false
+    (list_contains_substring
+       ~needle:"broken cascade preset entries"
+       report.next_actions)
 
 let test_shadowed_explicit_config_dir () =
   with_temp_dir "config-doctor-shadowed" @@ fun dir ->

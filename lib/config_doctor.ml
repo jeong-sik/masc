@@ -109,6 +109,7 @@ let option_field name = function
 
 type cascade_diagnosis = {
   issues : catalog_issue list;
+  missing_source : bool;
 }
 
 let diagnose_cascade_catalog ~active_config_root =
@@ -117,6 +118,7 @@ let diagnose_cascade_catalog ~active_config_root =
   in
   if not (Env_config_core.existing_file config_path) then
     {
+      missing_source = true;
       issues =
         [
           {
@@ -139,7 +141,7 @@ let diagnose_cascade_catalog ~active_config_root =
     in
     let issues = validator_issues in
     if issues = [] then
-      { issues = [] }
+      { issues = []; missing_source = false }
     else
       let error_count =
         issues
@@ -158,9 +160,9 @@ let diagnose_cascade_catalog ~active_config_root =
             error_count
             warn_count;
       } in
-      { issues = summary :: issues }
+      { issues = summary :: issues; missing_source = false }
 
-let cascade_catalog_next_actions ~config_path { issues } =
+let cascade_catalog_next_actions ~config_path { issues; missing_source } =
   if issues = [] then
     []
   else
@@ -168,7 +170,12 @@ let cascade_catalog_next_actions ~config_path { issues } =
       List.exists (fun issue -> issue.severity = Catalog_error) issues
     in
     let primary_action =
-      if has_errors then
+      if missing_source then
+        Printf.sprintf
+          "Create or bootstrap cascade.toml at %s before assigning keepers or \
+           starting the server."
+          config_path
+      else if has_errors then
         Printf.sprintf
           "Fix or disable the broken cascade preset entries in %s before \
            assigning keepers to them."

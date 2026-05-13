@@ -198,14 +198,15 @@ let profile_is_keeper_assignable = function
   | Some false -> false
   | None | Some true -> true
 
-let json_assoc_fields = function
-  | `Assoc fields -> fields
-  | _ -> []
-
 let json_assoc_member key json =
   match json with
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
+
+let json_assoc_table_fields key json =
+  match json_assoc_member key json with
+  | Some (`Assoc fields) -> fields
+  | Some _ | None -> []
 
 let json_bool_field key json =
   match json_assoc_member key json with
@@ -244,17 +245,11 @@ let qualified_name_for_public_names qualified_names public_name =
 
 let catalog_metadata_of_materialized_json json =
   let tier_profiles =
-    json_assoc_member "tier" json
-    |> Option.value ~default:(`Assoc [])
-    |> json_assoc_fields
+    json_assoc_table_fields "tier" json
     |> List.map (fun (name, tier_json) ->
       qualified_tier_name name, json_keeper_assignable_opt tier_json)
   in
-  let tier_group_fields =
-    json_assoc_member "tier-group" json
-    |> Option.value ~default:(`Assoc [])
-    |> json_assoc_fields
-  in
+  let tier_group_fields = json_assoc_table_fields "tier-group" json in
   let tier_group_profiles =
     tier_group_fields
     |> List.map (fun (name, group_json) ->
@@ -293,7 +288,9 @@ let catalog_metadata_of_materialized_json json =
     tier_group_fields
     |> List.concat_map (fun (name, group_json) ->
       let fallback =
-        json_bool_field "fallback" group_json |> Option.value ~default:false
+        match json_bool_field "fallback" group_json with
+        | Some true -> true
+        | Some false | None -> false
       in
       let tiers = json_string_list_field "tiers" group_json in
       if (not fallback) || List.length tiers < 2

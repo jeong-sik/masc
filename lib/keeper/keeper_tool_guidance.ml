@@ -160,7 +160,15 @@ let load_prose key =
     observe_guidance_config_drift
       ~label:key
       ~detail:"prompt resolved to empty; using in-binary fallback prose";
-    Option.value ~default:"" (fallback_prose key))
+    match fallback_prose key with
+    | Some prose -> prose
+    | None ->
+      observe_guidance_config_drift
+        ~label:key
+        ~detail:
+          "no in-binary fallback prose registered for this key; returning \
+           empty string";
+      "")
   else trimmed
 ;;
 

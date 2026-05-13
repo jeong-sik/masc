@@ -201,6 +201,9 @@ let resolve_binding_config (cfg : cascade_config)
       | Some input_cost, Some _ when input_cost > 0.0 -> Some spec.max_context
       | _ -> None
     in
+    let supports_tool_choice_override =
+      supports_tool_choice_override_of_model_spec spec
+    in
     let parse_registered_provider () =
       match resolve_provider_prefix binding.provider_id with
       | None ->
@@ -208,7 +211,10 @@ let resolve_binding_config (cfg : cascade_config)
         None
       | Some cascade_prefix ->
         let model_string = Printf.sprintf "%s:%s" cascade_prefix spec.api_name in
-        Cascade_config.parse_model_string ?max_tokens model_string
+        Cascade_config.parse_model_string
+          ?max_tokens
+          ?supports_tool_choice_override
+          model_string
     in
     let result =
       match find_provider cfg binding.provider_id with

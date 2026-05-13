@@ -20,7 +20,7 @@ import {
 import { replaceRoute, route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
-import { formatTimeAgo } from '../lib/format-time'
+import { formatElapsedCompact, formatTimeAgo } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
 import { Btn } from './btn'
@@ -588,9 +588,35 @@ function condensedStats(items: readonly TelemetryDisplayItem[]) {
   return { groups, groupedEntries, byCategory }
 }
 
+function telemetrySourceStatusParts(src: TelemetrySourceSummary): string[] {
+  const parts: string[] = []
+  if (src.health) {
+    parts.push(src.stale_reason ? `${src.health}: ${src.stale_reason}` : src.health)
+  } else if (src.stale_reason) {
+    parts.push(src.stale_reason)
+  }
+  if (typeof src.latest_age_s === 'number' && Number.isFinite(src.latest_age_s)) {
+    parts.push(`age ${formatElapsedCompact(src.latest_age_s)}`)
+  }
+  if (typeof src.freshness_slo_s === 'number' && Number.isFinite(src.freshness_slo_s)) {
+    parts.push(`SLO ${formatElapsedCompact(src.freshness_slo_s)}`)
+  }
+  return parts
+}
+
+function telemetrySourceProvenanceRows(src: TelemetrySourceSummary): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = []
+  if (src.producer) rows.push({ label: 'producer', value: src.producer })
+  if (src.durable_store) rows.push({ label: 'store', value: src.durable_store })
+  if (src.dashboard_surface) rows.push({ label: 'surface', value: src.dashboard_surface })
+  return rows
+}
+
 function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const meta = sourceMeta(src.source)
   const hasData = src.entry_count > 0
+  const statusParts = telemetrySourceStatusParts(src)
+  const provenanceRows = telemetrySourceProvenanceRows(src)
 
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
@@ -607,6 +633,19 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
       ` : null}
       ${src.exists === false ? html`
         <div class="text-xs text-[var(--color-fg-muted)] italic">store not found</div>
+      ` : null}
+      ${statusParts.length > 0 ? html`
+        <div class="mt-2 text-3xs font-mono text-[var(--color-fg-muted)]">${statusParts.join(' · ')}</div>
+      ` : null}
+      ${provenanceRows.length > 0 ? html`
+        <div class="mt-2 grid gap-1 text-3xs text-[var(--color-fg-disabled)]">
+          ${provenanceRows.map(row => html`
+            <div class="flex min-w-0 gap-1">
+              <span class="shrink-0">${row.label}:</span>
+              <span class="min-w-0 break-all font-mono">${row.value}</span>
+            </div>
+          `)}
+        </div>
       ` : null}
     </div>
   `

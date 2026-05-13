@@ -105,42 +105,49 @@ def merge_commit_already_in_base(
     return status in ("ahead", "identical")
 
 
-def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
-    """Get set of file paths changed in a PR."""
-    resp = _run_gh([
-        f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
-        "--paginate",
-        "--slurp",
-    ])
+def _payload_preview(payload: Any) -> str:
+    rendered = json.dumps(payload, sort_keys=True)
+    if len(rendered) > 1000:
+        return rendered[:997] + "..."
+    return rendered
+
+
+def _pr_file_items(resp: Any, pr_number: int, page: int) -> List[Dict[str, Any]]:
     if not isinstance(resp, list):
-        payload = json.dumps(resp, sort_keys=True)
-        if len(payload) > 1000:
-            payload = payload[:997] + "..."
         print(
-            f"gh api unexpected PR files payload for #{pr_number}: "
-            f"expected list, got {type(resp).__name__}: {payload}",
+            f"gh api unexpected PR files payload for #{pr_number} page {page}: "
+            f"expected list, got {type(resp).__name__}: {_payload_preview(resp)}",
             file=sys.stderr,
         )
         sys.exit(2)
 
-    if all(isinstance(page, list) for page in resp):
-        items = [item for page in resp for item in page]
-    else:
-        items = resp
-
-    files: Set[str] = set()
-    for idx, item in enumerate(items):
+    items: List[Dict[str, Any]] = []
+    for idx, item in enumerate(resp):
         if not isinstance(item, dict) or not isinstance(item.get("filename"), str):
-            payload = json.dumps(item, sort_keys=True)
-            if len(payload) > 1000:
-                payload = payload[:997] + "..."
             print(
-                f"gh api unexpected PR files item for #{pr_number} at index {idx}: "
-                f"{payload}",
+                f"gh api unexpected PR files item for #{pr_number} page {page} "
+                f"at index {idx}: {_payload_preview(item)}",
                 file=sys.stderr,
             )
             sys.exit(2)
-        files.add(item["filename"])
+        items.append(item)
+    return items
+
+
+def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
+    """Get set of file paths changed in a PR."""
+    files: Set[str] = set()
+    page = 1
+    while True:
+        resp = _run_gh(
+            [f"/repos/{owner}/{repo}/pulls/{pr_number}/files?per_page=100&page={page}"]
+        )
+        items = _pr_file_items(resp, pr_number, page)
+        for item in items:
+            files.add(item["filename"])
+        if len(items) < 100:
+            break
+        page += 1
     return files
 
 

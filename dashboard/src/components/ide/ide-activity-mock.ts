@@ -44,10 +44,27 @@ interface ApiActivityResponse {
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
 const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
+const PROGRESS_SURFACES = [
+  ['goal_id', 'Goal'],
+  ['task_id', 'Task'],
+  ['board_post_id', 'Board'],
+  ['pr_id', 'PR'],
+  ['git_ref', 'Git'],
+  ['log_id', 'Log'],
+] as const
 
 const DEFAULT_ROOM_ID = 'run-default'
 type MutableRunActivityContext = {
   -readonly [K in keyof RunActivityContext]?: RunActivityContext[K]
+}
+
+export interface IdeRunProgressSummary {
+  readonly totalEvents: number
+  readonly currentFileEvents: number
+  readonly linkedEvents: number
+  readonly latestAgeLabel: string
+  readonly surfaceCounts: ReadonlyArray<{ readonly label: string; readonly count: number }>
+  readonly keeperCounts: ReadonlyArray<{ readonly keeper_id: string; readonly count: number }>
 }
 
 export interface IdeActivityMockProps {
@@ -239,6 +256,7 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
   const overlay = cursorOverlaySignal.value
   const threadSnapshot = ideConversationThreadSnapshot.value
   const threads = threadSnapshot.filePath === activeFile ? threadSnapshot.threads : []
+  const progress = deriveIdeRunProgressSummary(events, activeFile)
 
   return html`
     <div
@@ -252,6 +270,7 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
         <span>EVENT TIMELINE</span>
         <span>${events.length} events · ${keepers.length} keepers</span>
       </div>
+      <${RunProgressStrip} summary=${progress} />
       <${IdeContextLens}
         filePath=${activeFile}
         annotations=${annotations}
@@ -269,6 +288,82 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
       </ol>
     </div>
   `
+}
+
+export function deriveIdeRunProgressSummary(
+  events: ReadonlyArray<RunActivityEvent>,
+  activeFile: string,
+): IdeRunProgressSummary {
+  const currentFileEvents = activeFile.trim() === ''
+    ? 0
+    : events.filter(event => event.context?.file_path === activeFile).length
+  const linkedEvents = events.filter(event => event.context !== undefined).length
+  const surfaceCounts = PROGRESS_SURFACES.map(([key, label]) => ({
+    label,
+    count: events.filter(event => event.context?.[key]).length,
+  }))
+  const keeperCounts = [...events.reduce((acc, event) => {
+    acc.set(event.keeper_id, (acc.get(event.keeper_id) ?? 0) + 1)
+    return acc
+  }, new Map<string, number>())]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 3)
+    .map(([keeper_id, count]) => ({ keeper_id, count }))
+  return {
+    totalEvents: events.length,
+    currentFileEvents,
+    linkedEvents,
+    latestAgeLabel: latestAgeLabel(events),
+    surfaceCounts,
+    keeperCounts,
+  }
+}
+
+function RunProgressStrip({ summary }: { readonly summary: IdeRunProgressSummary }) {
+  return html`
+    <section class="ide-run-progress" aria-label="Run progress summary">
+      <div class="ide-run-progress-head">
+        <span>RUN PROGRESS</span>
+        <span>${summary.linkedEvents}/${summary.totalEvents} linked</span>
+      </div>
+      <div class="ide-run-progress-stats" role="list" aria-label="Run progress stats">
+        <span role="listitem"><strong>${summary.totalEvents}</strong> events</span>
+        <span role="listitem"><strong>${summary.currentFileEvents}</strong> file</span>
+        <span role="listitem"><strong>${summary.keeperCounts.length}</strong> keepers</span>
+        <span role="listitem">${summary.latestAgeLabel}</span>
+      </div>
+      <div class="ide-run-progress-surfaces" role="list" aria-label="Linked operational surfaces">
+        ${summary.surfaceCounts.map(surface => html`
+          <span role="listitem" data-active=${surface.count > 0 ? 'true' : 'false'}>
+            <span>${surface.label}</span>
+            <span>${surface.count}</span>
+          </span>
+        `)}
+      </div>
+      <div class="ide-run-progress-keepers" aria-label="Top active keepers">
+        ${summary.keeperCounts.length === 0
+          ? html`<span>no keeper activity</span>`
+          : summary.keeperCounts.map(entry => html`
+            <span title=${`${entry.keeper_id}: ${entry.count} events`}>
+              <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" />
+              <span>${entry.count}</span>
+            </span>
+          `)}
+      </div>
+    </section>
+  `
+}
+
+function latestAgeLabel(events: ReadonlyArray<RunActivityEvent>): string {
+  const latest = events[0]
+  if (!latest) return 'idle'
+  const ageMs = Math.max(0, Date.now() - latest.timestamp_ms)
+  const seconds = Math.floor(ageMs / 1000)
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
 }
 
 function ActivityRow(

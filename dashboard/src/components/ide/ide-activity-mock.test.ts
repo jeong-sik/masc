@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { IdeActivityMock } from './ide-activity-mock'
+import { deriveIdeRunProgressSummary, IdeActivityMock } from './ide-activity-mock'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   ideContextFocus.value = null
   activeIdeFile.value = 'package.json'
@@ -20,6 +21,9 @@ describe('IdeActivityMock', () => {
     expect(region?.getAttribute('aria-label')).toBe('EVENT TIMELINE')
     expect(container.textContent).toContain('0 events · 0 keepers')
     expect(container.querySelector('[data-testid="ide-context-lens"]')).not.toBeNull()
+    expect(container.textContent).toContain('RUN PROGRESS')
+    expect(container.textContent).toContain('0/0 linked')
+    expect(container.textContent).toContain('no keeper activity')
   })
 
   it('renders file context from annotation and diff props', () => {
@@ -78,7 +82,12 @@ describe('IdeActivityMock', () => {
       expect(container.textContent).toContain('task task-runtime')
       expect(container.textContent).toContain('PR 15000')
       expect(container.textContent).toContain('1 line anchors')
+      expect(container.textContent).toContain('1/1 linked')
     })
+
+    const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
+      .map(node => node.textContent)
+    expect(surfaces).toEqual(['Goal1', 'Task1', 'Board1', 'PR1', 'Git1', 'Log1'])
 
     const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
     expect(jump?.textContent).toContain('runtime.ml:4')
@@ -92,5 +101,70 @@ describe('IdeActivityMock', () => {
       keeper_id: 'sangsu',
       source_id: 'evt-1',
     })
+  })
+
+  it('derives a compact run progress summary from activity events', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-05T10:01:30Z'))
+
+    const summary = deriveIdeRunProgressSummary([
+      {
+        id: 'evt-1',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'telemetry',
+        timestamp_ms: Date.parse('2026-05-05T10:01:00Z'),
+        context: {
+          file_path: 'lib/runtime.ml',
+          line: 4,
+          goal_id: 'goal-runtime',
+          task_id: 'task-runtime',
+          log_id: 'turn-1',
+        },
+      },
+      {
+        id: 'evt-2',
+        run_id: 'run-default',
+        keeper_id: 'analyst',
+        verb: 'committed',
+        target: 'git:main',
+        timestamp_ms: Date.parse('2026-05-05T10:00:00Z'),
+        context: {
+          git_ref: 'main',
+          pr_id: '15000',
+        },
+      },
+      {
+        id: 'evt-3',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'commented on',
+        target: 'board:post-1',
+        timestamp_ms: Date.parse('2026-05-05T09:59:00Z'),
+        context: {
+          board_post_id: 'post-1',
+        },
+      },
+    ], 'lib/runtime.ml')
+
+    expect(summary).toMatchObject({
+      totalEvents: 3,
+      currentFileEvents: 1,
+      linkedEvents: 3,
+      latestAgeLabel: '30s ago',
+    })
+    expect(summary.surfaceCounts.map(surface => [surface.label, surface.count])).toEqual([
+      ['Goal', 1],
+      ['Task', 1],
+      ['Board', 1],
+      ['PR', 1],
+      ['Git', 1],
+      ['Log', 1],
+    ])
+    expect(summary.keeperCounts).toEqual([
+      { keeper_id: 'sangsu', count: 2 },
+      { keeper_id: 'analyst', count: 1 },
+    ])
   })
 })

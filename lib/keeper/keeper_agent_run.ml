@@ -638,7 +638,6 @@ let run_turn
                    Keeper_turn_driver.run_named
                      ~cascade_name:cascade_name_string
                      ~keeper_name:meta.name
-                     ~model_strings:meta.models
                      ?provider_filter
                      ~require_tool_choice_support
                      ~require_tool_support

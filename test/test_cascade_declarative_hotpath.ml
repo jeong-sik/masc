@@ -38,6 +38,12 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+(* OCaml's stdlib Unix module does not expose [unsetenv] portably (see e.g.
+   test_keeper_toml.ml). The masc_test_deps library carries a C stub that
+   calls the libc [unsetenv], so we use that here to keep Sys.getenv_opt
+   checks distinguishable between "previously unset" and "set but empty". *)
+external test_unsetenv : string -> unit = "masc_test_unsetenv"
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -45,10 +51,7 @@ let with_env name value f =
     ~finally:(fun () ->
       match previous with
       | Some v -> Unix.putenv name v
-      (* Unix.putenv name "" would leave [name] present-but-empty, so
-         Sys.getenv_opt checks that distinguish unset from empty would
-         see a different shape than before with_env ran. *)
-      | None -> Unix.unsetenv name)
+      | None -> test_unsetenv name)
     f
 
 let with_temp_cascade_config toml f =

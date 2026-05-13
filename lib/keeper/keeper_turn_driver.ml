@@ -39,21 +39,13 @@ type provider_attempt_provenance =
   ; provider_source_cascade : string option
   }
 
-let base_provider_attempt_provenance ~uses_direct_model_strings =
-  if uses_direct_model_strings then
-    { model_source = "direct_model_strings"
-    ; resolved_model_source = "direct_model_string"
-    ; capability_source = "provider_config_from_direct_model_string"
-    ; fallback_authority = "direct_model_strings"
-    ; provider_source_cascade = None
-    }
-  else
-    { model_source = "named_cascade"
-    ; resolved_model_source = "cascade_catalog_binding"
-    ; capability_source = "provider_config_from_cascade_catalog"
-    ; fallback_authority = "declared_cascade"
-    ; provider_source_cascade = None
-    }
+let base_provider_attempt_provenance =
+  { model_source = "named_cascade"
+  ; resolved_model_source = "cascade_catalog_binding"
+  ; capability_source = "provider_config_from_cascade_catalog"
+  ; fallback_authority = "declared_cascade"
+  ; provider_source_cascade = None
+  }
 
 let cross_cascade_provider_attempt_provenance ~source_cascade =
   { model_source = "cross_cascade_recovery"
@@ -94,7 +86,6 @@ let runtime_candidate_label = "runtime"
 let run_named
     ~cascade_name
     ?(keeper_name = "")
-    ?model_strings
     ~goal
     ?provider_filter
     ?(require_tool_choice_support = false)
@@ -162,14 +153,7 @@ let run_named
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
   let cascade_name =
-    let trimmed = String.trim cascade_name in
-    if Option.is_some model_strings && trimmed <> "" then trimmed
-    else Keeper_cascade_profile.normalize_declared_name cascade_name
-  in
-  let uses_direct_model_strings =
-    match model_strings with
-    | Some (_ :: _) -> true
-    | _ -> false
+    Keeper_cascade_profile.normalize_declared_name cascade_name
   in
   let error_cascade_name = cascade_name_of_string cascade_name in
   let runtime_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
@@ -182,37 +166,24 @@ let run_named
          ~keeper_name tools
   in
   let configured_labels_result, candidate_cfgs_result, secondary_resolver =
-    match model_strings with
-    | Some ms when ms <> [] ->
-      (* Direct model strings from keeper TOML — skip named preset lookup.
-         MASC passes these strings through without interpretation. PR-9b
-         secondary declarations are a named-cascade feature, so direct
-         model strings must not inherit profile-specific fallback behavior. *)
-      ( Ok ms,
-        Ok
-          (resolve_providers_from_model_strings ?provider_filter
-             ?runtime_mcp_policy
-             ~require_tool_choice_support ~require_tool_support ms),
-        None )
-    | _ ->
-      let named_resolution =
-        Cascade_catalog_runtime
-        .resolve_named_providers_strict_with_secondary_resolver
-          ~sw ~net ?provider_filter ~cascade_name ()
-      in
-      let candidate_cfgs_result =
-        match named_resolution with
-        | Ok resolution -> Ok resolution.providers
-        | Error detail -> Error detail
-      in
-      let secondary_resolver =
-        match named_resolution with
-        | Ok resolution -> Some resolution.secondary_resolver
-        | Error _ -> None
-      in
-      ( Cascade_runtime.models_of_cascade_name_result runtime_cascade_name,
-        candidate_cfgs_result,
-        secondary_resolver )
+    let named_resolution =
+      Cascade_catalog_runtime
+      .resolve_named_providers_strict_with_secondary_resolver
+        ~sw ~net ?provider_filter ~cascade_name ()
+    in
+    let candidate_cfgs_result =
+      match named_resolution with
+      | Ok resolution -> Ok resolution.providers
+      | Error detail -> Error detail
+    in
+    let secondary_resolver =
+      match named_resolution with
+      | Ok resolution -> Some resolution.secondary_resolver
+      | Error _ -> None
+    in
+    ( Cascade_runtime.models_of_cascade_name_result runtime_cascade_name,
+      candidate_cfgs_result,
+      secondary_resolver )
   in
   (match configured_labels_result, candidate_cfgs_result with
    | Error detail, _ | _, Error detail ->
@@ -250,9 +221,7 @@ let run_named
   (* Cross-cascade health-aware fallback: when the current cascade has no
      tool-capable providers after filtering, search all other cascades for
      a healthy tool-capable provider. Depth 1 only (no recursive search). *)
-  let base_attempt_provenance =
-    base_provider_attempt_provenance ~uses_direct_model_strings
-  in
+  let base_attempt_provenance = base_provider_attempt_provenance in
   let provider_attempt_provenance, candidates =
     match candidates with
     | [] ->
@@ -946,12 +915,6 @@ let run_named
   let profile_knob_or_default ~knob ~default resolve =
     match resolve () with
     | Ok value -> Ok value
-    | Error detail when uses_direct_model_strings ->
-        Log.Misc.warn
-          "cascade %s: direct model strings could not load catalog %s (%s); \
-           using direct-call default"
-          cascade_name knob detail;
-        Ok default
     | Error detail ->
         Log.Misc.error "cascade %s: %s" cascade_name detail;
         Error (cascade_catalog_error_to_sdk_error detail)

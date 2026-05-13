@@ -43,15 +43,6 @@ val resolve_cascade_providers :
   (Llm_provider.Provider_config.t list, string) result
 (** Resolve cascade provider configs via MASC Cascade_config. *)
 
-val resolve_providers_from_model_strings :
-  ?provider_filter:string list ->
-  ?require_tool_choice_support:bool ->
-  ?require_tool_support:bool ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  string list ->
-  Llm_provider.Provider_config.t list
-(** Resolve from an explicit model string list (user-declared in keeper TOML). *)
-
 val keeper_agent_name_opt : string -> string option
 (** Derive the agent name from a keeper name; [None] when the name is empty. *)
 

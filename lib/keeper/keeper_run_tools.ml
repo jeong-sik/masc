@@ -1512,6 +1512,10 @@ let prepare_agent_setup
                     computed_surface.is_last_turn;
                 let all_allowed = computed_surface.all_allowed in
                 let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
+                let clear_inherited_strict_tool_choice = function
+                  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> None
+                  | other -> other
+                in
                 let tool_choice =
                   if computed_surface.required_tool_names <> [] && all_allowed <> []
                   then
@@ -1519,16 +1523,17 @@ let prepare_agent_setup
                       (preferred_tool_choice_for_required_tool_names
                          ~required_tool_names:computed_surface.required_tool_names
                          ~allowed_tool_names:all_allowed)
-                  else if computed_surface.is_last_turn
-                  then current_params.tool_choice
-                  else if computed_surface.tool_gate_requested && all_allowed <> []
+                  else if
+                    (not computed_surface.is_last_turn)
+                    && computed_surface.tool_gate_requested
+                    && all_allowed <> []
                   then
                     Some
                       (preferred_tool_choice_for_required_turn
                          ~has_current_task:(keeper_has_owned_active_task ())
                          ~turn_affordances
                          ~allowed_tool_names:all_allowed)
-                  else current_params.tool_choice
+                  else clear_inherited_strict_tool_choice current_params.tool_choice
                 in
                 let turn_completion_contract =
                   match computed_surface.tool_gate_requested, tool_choice with

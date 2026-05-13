@@ -58,23 +58,6 @@ let resolve_cascade_providers
     ~cascade_name
     ()
 
-(** Resolve from an explicit model string list (user-declared in keeper TOML).
-    MASC parses the strings via its local [Cascade_config] and passes the
-    resulting provider configs into OAS execution. *)
-let resolve_providers_from_model_strings
-      ?provider_filter
-      ?(require_tool_choice_support = false)
-      ?(require_tool_support = false)
-      ?runtime_mcp_policy
-      model_strings
-  =
-  Cascade_runtime.resolve_providers_from_model_strings
-    ?provider_filter
-    ?runtime_mcp_policy
-    ~require_tool_choice_support
-    ~require_tool_support
-    model_strings
-
 let keeper_agent_name_opt (keeper_name : string) =
   let keeper_name = String.trim keeper_name in
   if keeper_name = "" then None else Some (Keeper_types.keeper_agent_name keeper_name)

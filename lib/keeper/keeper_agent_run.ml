@@ -648,6 +648,7 @@ let run_turn
                      ~system_prompt:turn_system_prompt
                      ~tools
                      ~compact_ratio:meta.compaction.ratio_gate
+                     ~oas_auto_context_overflow_retry:false
                      ~initial_messages:history_messages
                      ~hooks
                      ~context_reducer:reducer

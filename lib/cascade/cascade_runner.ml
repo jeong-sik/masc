@@ -67,6 +67,7 @@ type config =
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
+  oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
   slot_id : int option;
@@ -349,7 +350,9 @@ let resume_from_checkpoint
       Ok
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
-           ~options ~config:prepared_resume.agent_config ())
+           ~options ~config:prepared_resume.agent_config
+           ~auto_context_overflow_retry:config.oas_auto_context_overflow_retry
+           ())
 
 (* ================================================================ *)
 (* Run                                                               *)

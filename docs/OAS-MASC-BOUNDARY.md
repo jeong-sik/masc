@@ -34,6 +34,7 @@ consumer → MASC-MCP (coordination/orchestration) → OAS (agent runtime)
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | room, board, workflow, policies, operator surfaces |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, tool dispatch, auth/join/policy semantics |
 | 컨텍스트 축약 | `Context_reducer` | 어떤 전략을 언제 적용할지 결정 |
+| ContextOverflow retry | overflow detection, structured error, standalone compact retry | Keeper turn에서 compact+retry 여부와 generation/checkpoint attribution 결정 |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
 | 장기 메모리 프리미티브 | `Memory.t` tiers | institutional memory, pg/jsonl backends, room/task/social semantics |
 | 조율 상태 | 없음 | room, tasks, team sessions, governance, social runtime |
@@ -77,6 +78,7 @@ OAS  ──does not know──→ MASC
 | Area | Status | Notes |
 |------|--------|-------|
 | Context compaction | Partial complete | `context_compact_oas.ml`는 OAS `Context_reducer`를 사용한다. MASC 전체 context system이 OAS `Context.t`로 통합된 것은 아니다. |
+| ContextOverflow retry ownership | Complete for keeper hot path | Standalone OAS agents keep `auto_context_overflow_retry=true`. Keeper dispatch sets it to `false`, so OAS returns structured `ContextOverflow` and MASC's `recover_context_overflow_retry` owns the one-per-keeper-turn retry decision. |
 | Event bus bridge | Complete for current native/custom flow | `oas_event_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |

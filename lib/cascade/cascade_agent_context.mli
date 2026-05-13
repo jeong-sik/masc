@@ -69,6 +69,7 @@ type config = {
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
+  oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
   slot_id : int option;
@@ -79,7 +80,7 @@ type config = {
   cli_transport_overrides :
     Cascade_transport.cli_transport_overrides option;
 }
-(** Per-worker configuration.  47 fields — concrete record because
+(** Per-worker configuration.  48 fields — concrete record because
     callers ({!Cascade_runner}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

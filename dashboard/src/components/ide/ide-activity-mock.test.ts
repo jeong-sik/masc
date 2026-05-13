@@ -4,11 +4,13 @@ import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { deriveIdeRunProgressSummary, IdeActivityMock } from './ide-activity-mock'
 import { activeIdeFile, ideContextFocus } from './ide-state'
+import { lspDiagnosticSnapshot } from './ide-lsp-client'
 
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
   ideContextFocus.value = null
+  lspDiagnosticSnapshot.value = new Map()
   activeIdeFile.value = 'package.json'
   window.location.hash = ''
 })
@@ -51,6 +53,33 @@ describe('IdeActivityMock', () => {
     expect(container.textContent).toContain('runtime.ml')
     expect(container.textContent).toContain('goal goal-runtime')
     expect(container.textContent).toContain('1 changed rows')
+  })
+
+  it('renders current-file LSP diagnostics in the context lens', () => {
+    lspDiagnosticSnapshot.value = new Map([[
+      'lib/runtime.ml',
+      [{
+        file_path: 'lib/runtime.ml',
+        line: 6,
+        severity: 1,
+        source: 'ocamllsp',
+        code: 'type',
+        message: 'Type mismatch in keeper progress projection',
+      }],
+    ]])
+    const container = document.createElement('div')
+
+    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+
+    expect(container.textContent).toContain('Type mismatch in keeper progress projection')
+    expect(container.textContent).toContain('1 line anchors')
+    const button = container.querySelector<HTMLButtonElement>('.ide-context-anchor-action')
+    fireEvent.click(button!)
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 6,
+      surface: 'LSP',
+    })
   })
 
   it('maps activity payload and tags into structured context lens links', async () => {

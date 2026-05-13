@@ -161,6 +161,33 @@ describe('IdeContextLens', () => {
     })
   })
 
+  it('links LSP diagnostics into file line anchors', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diagnostics: [{
+        file_path: 'lib/keeper/keeper_exec_ide.ml',
+        line: 22,
+        severity: 2,
+        source: 'ocamllsp',
+        code: 'type',
+        message: 'This expression has type string but an int was expected.',
+      }],
+      diffRows: [],
+      events: [],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
+    expect(counts.get('lsp')).toBe(1)
+    expect(counts.get('line')).toBe(1)
+    expect(model.anchors[0]).toMatchObject({
+      surface: 'LSP',
+      line: 22,
+      meta: 'warning / ocamllsp / code type',
+    })
+  })
+
   it('omits invalid annotation lines from anchors and focus state', () => {
     const invalidLineAnnotation: IdeAnnotation = {
       ...annotation,

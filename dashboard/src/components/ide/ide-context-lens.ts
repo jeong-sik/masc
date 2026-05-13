@@ -43,6 +43,15 @@ export interface IdeContextAnchor {
   readonly route_links?: ReadonlyArray<IdeContextRouteLink>
 }
 
+export interface IdeContextDiagnostic {
+  readonly file_path: string
+  readonly line: number
+  readonly severity?: number
+  readonly code?: number | string
+  readonly source?: string
+  readonly message: string
+}
+
 export interface IdeContextRouteLink {
   readonly id: string
   readonly label: string
@@ -77,6 +86,7 @@ export interface IdeContextLensInput {
   readonly diffRows: ReadonlyArray<UnifiedDiffRow>
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly threads?: ReadonlyArray<AnchoredThread>
+  readonly diagnostics?: ReadonlyArray<IdeContextDiagnostic>
   readonly overlay: KeeperCursorOverlay
 }
 
@@ -123,6 +133,9 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   const fileAnnotations = input.annotations.filter(annotation =>
     matchesFilePath(annotation.file_path),
   )
+  const fileDiagnostics = (input.diagnostics ?? []).filter(diagnostic =>
+    matchesFilePath(diagnostic.file_path),
+  )
   const activeCursors = [...input.overlay.cursors.values()]
     .filter(cursor => matchesFilePath(cursor.file_path) && cursor.line >= 1)
   const fileThreads = (input.threads ?? []).filter(thread =>
@@ -144,6 +157,9 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   for (const annotation of fileAnnotations) {
     if (annotation.line_start >= 1) activeLines.add(annotation.line_start)
   }
+  for (const diagnostic of fileDiagnostics) {
+    if (diagnostic.line >= 1) activeLines.add(diagnostic.line)
+  }
   for (const cursor of activeCursors) activeLines.add(cursor.line)
   for (const row of changedRows) {
     if (row.newLine !== null && row.newLine >= 1) activeLines.add(row.newLine)
@@ -162,6 +178,7 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   const surfaces = SURFACE_ORDER.map(id => {
     const count = surfaceCount(id, {
       annotations: fileAnnotations,
+      diagnostics: fileDiagnostics,
       activeCursors,
       threads: fileThreads,
       changedLineCount,
@@ -185,6 +202,7 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     anchors: buildAnchors(
       filePath ?? input.filePath,
       fileAnnotations,
+      fileDiagnostics,
       activeCursors,
       fileThreads,
       changedRows,
@@ -202,11 +220,12 @@ export function IdeContextLens({
   diffRows,
   events,
   threads = [],
+  diagnostics = [],
   overlay,
   onAnchorActivate,
   onRouteLinkActivate,
 }: IdeContextLensProps) {
-  const model = deriveIdeContextLens({ filePath, annotations, diffRows, events, threads, overlay })
+  const model = deriveIdeContextLens({ filePath, annotations, diffRows, events, threads, diagnostics, overlay })
   const fileLabel = filePath.split('/').pop() || filePath || 'workspace'
   const activateAnchor = onAnchorActivate ?? activateIdeContextAnchor
   const activateRouteLink = onRouteLinkActivate ?? openIdeContextRouteLink
@@ -326,6 +345,7 @@ function surfaceCount(
   id: IdeContextSurfaceId,
   state: {
     readonly annotations: ReadonlyArray<IdeAnnotation>
+    readonly diagnostics: ReadonlyArray<IdeContextDiagnostic>
     readonly activeCursors: ReadonlyArray<{ readonly keeper_id: string }>
     readonly threads: ReadonlyArray<AnchoredThread>
     readonly changedLineCount: number
@@ -334,7 +354,7 @@ function surfaceCount(
     readonly eventSearchTextByEvent: EventSearchTextMap
   },
 ): number {
-  if (id === 'lsp') return state.annotations.length
+  if (id === 'lsp') return state.annotations.length + state.diagnostics.length
   if (id === 'line') return state.activeLineCount
   if (id === 'keeper') {
     const keepers = new Set(state.events.map(event => event.keeper_id))
@@ -408,13 +428,13 @@ function surfaceCount(
   if (id === 'log') {
     return state.events.length
   }
-  if (id === 'telemetry') return state.events.length + state.changedLineCount + state.annotations.length
+  if (id === 'telemetry') return state.events.length + state.changedLineCount + state.annotations.length + state.diagnostics.length
   return 0
 }
 
 function surfaceEvidence(id: IdeContextSurfaceId, count: number): string {
   if (count <= 0) return `${SURFACE_LABELS[id]} has no current anchor`
-  if (id === 'lsp') return `${count} annotation code lens anchor${plural(count)}`
+  if (id === 'lsp') return `${count} LSP annotation or diagnostic anchor${plural(count)}`
   if (id === 'line') return `${count} line-level anchor${plural(count)}`
   if (id === 'keeper') return `${count} keeper identity link${plural(count)}`
   if (id === 'goal') return `${count} goal reference${plural(count)}`
@@ -434,6 +454,7 @@ function plural(count: number): string {
 function buildAnchors(
   filePath: string,
   annotations: ReadonlyArray<IdeAnnotation>,
+  diagnostics: ReadonlyArray<IdeContextDiagnostic>,
   cursors: ReadonlyArray<{
     readonly keeper_id: string
     readonly line: number
@@ -447,6 +468,21 @@ function buildAnchors(
   eventSearchTextByEvent: EventSearchTextMap,
 ): ReadonlyArray<IdeContextAnchor> {
   const anchors: IdeContextAnchor[] = []
+
+  for (const [index, diagnostic] of diagnostics.slice(0, 2).entries()) {
+    anchors.push({
+      id: `diagnostic-${diagnostic.line}-${diagnostic.source ?? 'lsp'}-${diagnostic.code ?? 'message'}-${index}`,
+      file_path: diagnostic.file_path,
+      surface: 'LSP',
+      label: truncate(diagnostic.message || 'diagnostic', 48),
+      meta: compactMeta([
+        diagnosticSeverityLabel(diagnostic.severity),
+        diagnostic.source ?? null,
+        diagnostic.code !== undefined ? `code ${diagnostic.code}` : null,
+      ]),
+      line: positiveLine(diagnostic.line),
+    })
+  }
 
   for (const annotation of annotations.slice(0, 3)) {
     anchors.push({
@@ -621,6 +657,14 @@ function positiveLine(value: number | null | undefined): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
     ? value
     : undefined
+}
+
+function diagnosticSeverityLabel(severity: number | undefined): string {
+  if (severity === 1) return 'error'
+  if (severity === 2) return 'warning'
+  if (severity === 3) return 'info'
+  if (severity === 4) return 'hint'
+  return 'diagnostic'
 }
 
 function eventContextMeta(event: RunActivityEvent): string {

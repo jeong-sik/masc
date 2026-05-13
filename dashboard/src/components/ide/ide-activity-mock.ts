@@ -14,6 +14,10 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import {
+  lspDiagnosticSnapshot,
+  type LspDiagnosticAnchor,
+} from './ide-lsp-client'
+import {
   focusIdeContextAnchor,
   normalizeIdeContextFilePath,
   normalizeIdeContextLine,
@@ -53,6 +57,7 @@ interface ApiActivityResponse {
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
 const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
+const EMPTY_DIAGNOSTICS: ReadonlyArray<LspDiagnosticAnchor> = []
 const PROGRESS_SURFACES = [
   ['goal_id', 'Goal'],
   ['task_id', 'Task'],
@@ -269,6 +274,10 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
     const unsub = ideConversationThreadSnapshot.subscribe(() => forceRender(tick => tick + 1))
     return () => unsub()
   }, [])
+  useEffect(() => {
+    const unsub = lspDiagnosticSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const events = store.events()
   const keepers = store.knownKeepers()
@@ -276,6 +285,10 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
   const overlay = cursorOverlaySignal.value
   const threadSnapshot = ideConversationThreadSnapshot.value
   const threads = threadSnapshot.filePath === activeFile ? threadSnapshot.threads : []
+  const activeFilePath = normalizeIdeContextFilePath(activeFile)
+  const diagnostics = activeFilePath === null
+    ? EMPTY_DIAGNOSTICS
+    : lspDiagnosticSnapshot.value.get(activeFilePath) ?? EMPTY_DIAGNOSTICS
   const progress = deriveIdeRunProgressSummary(events, activeFile)
 
   return html`
@@ -297,6 +310,7 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
         diffRows=${diffRows}
         events=${events}
         threads=${threads}
+        diagnostics=${diagnostics}
         overlay=${overlay}
       />
       <ol

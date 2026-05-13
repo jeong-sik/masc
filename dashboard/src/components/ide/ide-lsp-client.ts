@@ -14,6 +14,8 @@ import {
   type ViewUpdate,
 } from '@codemirror/view'
 import { StateField, StateEffect, RangeSetBuilder, type Extension } from '@codemirror/state'
+import { signal } from '@preact/signals'
+import { normalizeIdeContextFilePath } from './ide-state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -50,6 +52,17 @@ export interface LspDiagnostic {
   source?: string
   message: string
 }
+
+export interface LspDiagnosticAnchor {
+  readonly file_path: string
+  readonly line: number
+  readonly severity?: number
+  readonly code?: number | string
+  readonly source?: string
+  readonly message: string
+}
+
+export const lspDiagnosticSnapshot = signal<ReadonlyMap<string, ReadonlyArray<LspDiagnosticAnchor>>>(new Map())
 
 export interface SelectedAnnotation {
   readonly id: string
@@ -347,7 +360,7 @@ class LspConnection {
   private initialized = false
 
   constructor(
-    private readonly onDiagnostics: (diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
+    private readonly onDiagnostics: (filePath: string | null, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
     private readonly onError: (err: unknown) => void,
   ) {}
 
@@ -411,7 +424,7 @@ class LspConnection {
         existing.push(diag)
         diagByLine.set(line, existing)
       }
-      this.onDiagnostics(diagByLine)
+      this.onDiagnostics(filePathFromUri(params.uri), diagByLine)
     }
   }
 
@@ -554,6 +567,16 @@ function toFileUri(filePath: string): string {
   return `file://${filePath}`
 }
 
+function filePathFromUri(uri: string | undefined): string | null {
+  if (!uri) return null
+  const rawPath = uri.startsWith('file://') ? uri.slice('file://'.length) : uri
+  try {
+    return normalizeIdeContextFilePath(decodeURIComponent(rawPath))
+  } catch {
+    return normalizeIdeContextFilePath(rawPath)
+  }
+}
+
 function indexByLine<T>(items: ReadonlyArray<T>, getLine: (item: T) => number): Map<number, T[]> {
   const map = new Map<number, T[]>()
   for (const item of items) {
@@ -563,6 +586,53 @@ function indexByLine<T>(items: ReadonlyArray<T>, getLine: (item: T) => number): 
     map.set(line, existing)
   }
   return map
+}
+
+function publishLspDiagnosticSnapshot(
+  filePath: string,
+  diagnostics: ReadonlyMap<number, ReadonlyArray<LspDiagnostic>>,
+): void {
+  const normalizedFilePath = normalizeIdeContextFilePath(filePath)
+  if (normalizedFilePath === null) return
+
+  const anchors: LspDiagnosticAnchor[] = []
+  for (const [line, items] of diagnostics) {
+    for (const diagnostic of items) {
+      anchors.push({
+        file_path: normalizedFilePath,
+        line,
+        severity: diagnostic.severity,
+        code: diagnostic.code,
+        source: diagnostic.source,
+        message: diagnostic.message,
+      })
+    }
+  }
+  anchors.sort((left, right) =>
+    lineSeverityOrder(left) - lineSeverityOrder(right)
+    || left.line - right.line
+    || left.message.localeCompare(right.message),
+  )
+
+  const next = new Map(lspDiagnosticSnapshot.value)
+  if (anchors.length === 0) {
+    next.delete(normalizedFilePath)
+  } else {
+    next.set(normalizedFilePath, anchors)
+  }
+  lspDiagnosticSnapshot.value = next
+}
+
+function clearLspDiagnosticSnapshot(filePath: string): void {
+  const normalizedFilePath = normalizeIdeContextFilePath(filePath)
+  if (normalizedFilePath === null) return
+  const next = new Map(lspDiagnosticSnapshot.value)
+  if (!next.delete(normalizedFilePath)) return
+  lspDiagnosticSnapshot.value = next
+}
+
+function lineSeverityOrder(diagnostic: LspDiagnosticAnchor): number {
+  return diagnostic.severity ?? 99
 }
 
 function languageIdFromPath(filePath: string): string | null {
@@ -613,7 +683,15 @@ const lspViewPlugin = ViewPlugin.fromClass(
       const filePath = view.state.field(lspConfigField).filePath
       this.filePath = filePath
       this.conn = new LspConnection(
-        (diags) => this.dispatch(setDiagnostics.of(diags)),
+        (diagnosticFilePath, diags) => {
+          const filePath = diagnosticFilePath ?? this.filePath
+          publishLspDiagnosticSnapshot(filePath, diags)
+          const normalizedFilePath = normalizeIdeContextFilePath(filePath)
+          const normalizedCurrentFilePath = normalizeIdeContextFilePath(this.filePath)
+          if (normalizedFilePath !== null && normalizedFilePath === normalizedCurrentFilePath) {
+            this.dispatch(setDiagnostics.of(diags))
+          }
+        },
         (err) => console.error('[LSP] connection error:', err),
       )
       this.conn.connect()
@@ -660,7 +738,10 @@ const lspViewPlugin = ViewPlugin.fromClass(
       const effects: StateEffect<unknown>[] = []
       if (lenses.status === 'fulfilled') effects.push(setCodeLenses.of(lenses.value))
       if (hints.status === 'fulfilled') effects.push(setInlayHints.of(hints.value))
-      if (diags.status === 'fulfilled') effects.push(setDiagnostics.of(diags.value))
+      if (diags.status === 'fulfilled') {
+        publishLspDiagnosticSnapshot(fp, diags.value)
+        effects.push(setDiagnostics.of(diags.value))
+      }
       if (effects.length > 0) view.dispatch({ effects })
     }
 
@@ -749,6 +830,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
       if (this.boundHoverLeave) this.view.dom.removeEventListener('mouseleave', this.boundHoverLeave)
       this.conn.notifyDidClose(this.filePath)
       this.conn.dispose()
+      clearLspDiagnosticSnapshot(this.filePath)
     }
 
     private dispatch(...effects: StateEffect<unknown>[]): void {

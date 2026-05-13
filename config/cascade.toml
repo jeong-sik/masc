@@ -761,18 +761,6 @@ strategy = "failover"
 members = ["codex_cli.codex-spark"]
 strategy = "failover"
 
-[tier.tier_fast]
-# Cheap+fast tool-capable cloud models for keeper turns.
-members = [
-  "claude_code.haiku",
-  "codex_cli.codex-spark",
-  "gemini_cli.gemini-flash",
-  "gemini_cli.gemini-flash-lite",
-  "glm-coding.glm-5-turbo",
-  "glm-coding.glm-flashx",
-]
-strategy = "failover"
-
 # ── Tier-Groups (fallback chains) ──────────────────────────────
 
 [tier-group.big_three]
@@ -792,11 +780,6 @@ fallback = true
 
 [tier-group.local_recovery]
 tiers = ["local_recovery", "big_three"]
-strategy = "priority_tier"
-fallback = true
-
-[tier-group.tier_fast]
-tiers = ["tier_fast", "big_three"]
 strategy = "priority_tier"
 fallback = true
 

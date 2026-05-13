@@ -218,6 +218,43 @@ let catalog_entries ?config_path () =
       | Ok entries -> Some entries
       | Error _ -> None)
 
+let declarative_catalog_names_from_json = function
+  | `Assoc fields ->
+      let keys_with_prefix table prefix =
+        match List.assoc_opt table fields with
+        | Some (`Assoc entries) ->
+            List.map (fun (name, _) -> prefix ^ name) entries
+        | _ -> []
+      in
+      keys_with_prefix "tier-group" "tier-group."
+      @ keys_with_prefix "tier" "tier."
+      |> List.sort_uniq String.compare
+  | _ -> []
+
+let declarative_catalog_names ?config_path () =
+  let path_opt =
+    match config_path with
+    | Some path -> Some path
+    | None -> Config_dir_resolver.cascade_path_opt ()
+  in
+  match path_opt with
+  | None -> []
+  | Some path -> (
+      match Cascade_config_loader.load_catalog_source path with
+      | Ok json -> declarative_catalog_names_from_json json
+      | Error _ -> [])
+
+let live_catalog_names ?config_path () =
+  match declarative_catalog_names ?config_path () with
+  | _ :: _ as names -> names
+  | [] ->
+      (match catalog_entries ?config_path () with
+       | Some entries ->
+           List.map
+             (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name)
+             entries
+       | None -> [])
+
 let first_catalog_name entries =
   match entries with
   | (entry : Cascade_config_loader.catalog_entry) :: _ -> Some entry.name
@@ -272,11 +309,8 @@ let cascade_name_for_use ?config_path use =
     |> List.find_map (fun (key, target) ->
            if String.equal key route_key then Some target else None)
   in
-  let entries = Option.value (catalog_entries ?config_path ()) ~default:[] in
-  let catalog_names =
-    List.map (fun (entry : Cascade_config_loader.catalog_entry) -> entry.name) entries
-  in
-  let fallback = fallback_from_entries use entries in
+  let catalog_names = live_catalog_names ?config_path () in
+  let fallback = fallback_name_for_catalog use ~catalog:catalog_names in
   match route_target with
   | Some target when catalog_names = [] ->
       Cascade_metrics.on_route_resolve_fallback ~reason:"catalog_unvalidated";

@@ -586,9 +586,7 @@ val metric_cascade_server_error_skip_total : string
 (** Total cascade fallback_cascade cycles detected during [load_catalog].
     A cycle means a provider stall propagates through every cascade in
     the loop silently for 600s+ without escaping.  Labels: [cascade]
-    (the entry point of the detected cycle).  Discovered during the
-    2026-05-05 fleet-stuck investigation:
-    [default → glm_coding_plan_only → default]. *)
+    (the entry point of the detected cycle). *)
 val metric_cascade_fallback_cycle_detected_total : string
 
 (** Total bootstrap/runtime-catalog provider health probes intentionally

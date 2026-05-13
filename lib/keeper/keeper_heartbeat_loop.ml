@@ -978,30 +978,7 @@ let run_keepalive_unified_turn
            [Live_legacy] always — caller falls through to the existing
            semaphore path. *)
         Keeper_admission_runtime.init_once_from_base_path ~base_path:ctx.config.base_path;
-        (* RFC-0041 Phase B3: proactive cascade item selection.
-           Load cascade_profile from config and select the healthiest
-           available item before turn dispatch. *)
-        let selected_item_opt =
-          let cascade_name = cascade_name_of_meta meta_after_triage in
-          let config_path =
-            Filename.concat ctx.config.base_path ".masc/config/cascade.json"
-          in
-          match
-            Cascade_config_loader.load_cascade_profile ~config_path ~name:cascade_name
-          with
-          | Some profile ->
-            (match
-               Keeper_cascade_selector.select_item_for_turn
-                 ~keeper_name:meta_after_triage.name
-                 ~cascade_profile:profile
-                 ~cascade_ref:meta_after_triage.cascade_ref
-                 ~health_cache:Keeper_health_probe.Healthy
-                 ~last_used_item:None
-             with
-             | Ok pair -> Some pair
-             | Error `No_available_item -> None)
-          | None -> None
-        in
+        let selected_item_opt = None in
         let admission_result =
           Keeper_admission_runtime.decide_live ~keeper_id:meta_after_triage.name
         in

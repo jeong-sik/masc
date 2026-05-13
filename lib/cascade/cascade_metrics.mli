@@ -221,7 +221,7 @@ val on_route_binding_dropped : reason:string -> unit
 val on_weighted_item_dropped : reason:string -> unit
 (** Tick the weighted-item-dropped counter at
     [Cascade_config_loader.parse_weighted_item] when an entry in
-    the legacy [<name>_models] list is silently dropped.
+    a retired flat-profile model list is silently dropped.
     [reason] must be one of [missing_or_empty_model] or
     [invalid_value_type].  Also doubles as an RFC-0066 Phase 4
     migration tracker — 5-layer cascade.toml never hits this
@@ -317,7 +317,7 @@ val on_local_context_clamped : unit -> unit
 val all_cascade_counters : (string * string) list
 (** SSOT list of every cascade counter in this module, paired with
     its Prometheus [help] text.  Used by [register_all] and by the
-    iter-50 coverage test in [test_cascade_toml_materialization]
+    iter-50 cascade TOML validation coverage test
     to enumerate every metric without re-listing them.  Help text
     defaults to the metric name for counters that don't need
     operator-facing description; the iter-44 / iter-48 backfill

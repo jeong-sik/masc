@@ -766,40 +766,27 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         match str "cascade_name" with
         | None -> Ok ()
         | Some raw ->
+            let raw_normalized = String.trim raw |> String.lowercase_ascii in
             let normalized =
               Keeper_cascade_profile.normalize_declared_name raw
               |> String.lowercase_ascii
             in
-            if List.mem normalized reserved_cascade_names then Ok ()
+            if List.mem raw_normalized reserved_cascade_names
+               || List.mem normalized reserved_cascade_names
+            then Ok ()
             else
-              (* #10259: don't collapse to the reserved list when only the
-                 strict materializer fails — fall back to top-level TOML
-                 section names so operator-defined cascades stay valid. *)
-              match
-                Keeper_cascade_profile.catalog_names_with_toml_fallback ()
-              with
-              | Ok (catalog, source) ->
+              match Keeper_cascade_profile.catalog_names_for_validation () with
+              | Ok catalog ->
                   let all_valid =
                     List.sort_uniq String.compare
                       (reserved_cascade_names @ catalog)
                   in
-                  let suffix =
-                    match source with
-                    | Keeper_cascade_profile.Live_catalog -> ""
-                    | Keeper_cascade_profile.Toml_section_fallback
-                        { catalog_error } ->
-                        Printf.sprintf
-                          " [degraded toml-section fallback; live \
-                           catalog unavailable: %s]"
-                          catalog_error
-                  in
                   if not (List.mem normalized all_valid) then
                     Error
                       (Printf.sprintf
-                         "invalid cascade_name '%s' (known: %s)%s"
+                         "invalid cascade_name '%s' (known: %s)"
                          raw
-                         (String.concat ", " all_valid)
-                         suffix)
+                         (String.concat ", " all_valid))
                   (* #10388: keeper_assignable=false cascades must reject
                      at config-load to avoid runtime reconcile failures. *)
                   else if Keeper_cascade_profile.is_system_only_cascade normalized

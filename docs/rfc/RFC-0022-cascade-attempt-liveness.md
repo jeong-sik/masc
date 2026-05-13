@@ -445,7 +445,7 @@ Phase C (default `enforce` everywhere):
 - **Permitted (per-cascade override, added 2026-05-06)**: a cascade
   profile in `config/cascade.toml` may set its own
   `turn_timeout_sec`. Checked-in remote/CLI profiles (`big_three`,
-  `keeper_diverse`, `tier_fast`, `tier_medium`) run at 600 s.
+  `keeper_diverse`, `retired_fast_profile`, `tier_medium`) run at 600 s.
   Operator-populated local-model profiles (not the checked-in
   `[local_recovery]` fallback profile) run at 900 s when they declare
   local providers (for example, `tier_small` with its Ollama entries

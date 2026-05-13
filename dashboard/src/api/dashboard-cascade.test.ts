@@ -116,13 +116,41 @@ describe('dashboard cascade split', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await updateCascadeConfigRaw('[big_three]\nmodels = ["glm-coding:auto"]\n')
+    const sourceText = [
+      '[providers.glm-coding]',
+      'protocol = "openai-http"',
+      'endpoint = "https://api.z.ai/api/coding/paas/v4"',
+      '',
+      '[models.glm-auto]',
+      'api-name = "glm-5-turbo"',
+      'max-context = 128000',
+      'tools-support = true',
+      '',
+      '[glm-coding.glm-auto]',
+      'is-default = true',
+      'max-concurrent = 2',
+      '',
+      '[tier.big_three]',
+      'members = ["glm-coding.glm-auto"]',
+      'strategy = "failover"',
+      '',
+      '[tier-group.big_three]',
+      'tiers = ["big_three"]',
+      'strategy = "priority_tier"',
+      'fallback = true',
+      '',
+      '[routes.keeper_turn]',
+      'target = "tier-group.big_three"',
+      '',
+    ].join('\n')
+
+    await updateCascadeConfigRaw(sourceText)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/config/raw')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
-      source_text: '[big_three]\nmodels = ["glm-coding:auto"]\n',
+      source_text: sourceText,
     }))
   })
 })

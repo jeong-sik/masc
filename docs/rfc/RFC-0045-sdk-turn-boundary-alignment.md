@@ -35,7 +35,7 @@ Backtrace:
   Masc_mcp__Oas_worker_exec.run
 
 [2026-05-08 20:58:52] [INFO] [Keeper] executor: auto-resume blocked;
-    cascade keeper_bound_safe is unhealthy
+    cascade retired_tool_profile is unhealthy
 ```
 
 The keeper went down and `auto-resume blocked` followed.

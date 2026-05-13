@@ -5,7 +5,7 @@
     names — there is no compile-time enum here.  Code that needs to
     know "what profiles are available" reads them through
     {!catalog_names} / {!catalog_names_result} /
-    {!catalog_names_with_toml_fallback}; the boot-time gate at
+    {!catalog_names_for_validation}; the boot-time gate at
     [Cascade_catalog_runtime.validate_path_result] rejects keeper boot
     when the catalog is empty so a missing catalog never reaches the
     helpers below.
@@ -78,34 +78,12 @@ val catalog_names_result : ?config_path:string -> unit -> (string list, string) 
     boundaries can fail loud instead of collapsing catalog drift into an empty
     dynamic profile set. *)
 
-(** Provenance of the names returned by {!catalog_names_with_toml_fallback}. *)
-type catalog_names_source =
-  | Live_catalog
-      (** The full strict catalog ([Cascade_config_loader.load_catalog])
-          succeeded; names are the live, validated catalog entries. *)
-  | Toml_section_fallback of { catalog_error : string }
-      (** Strict catalog load failed but [cascade.toml] was parseable.
-          Names come from the top-level table sections; [catalog_error]
-          is the original loader error so callers can WARN about the
-          degraded mode. *)
+val catalog_names_for_validation :
+  ?config_path:string -> unit -> (string list, string) result
+(** Accept-list source for the keeper cascade-name validator.
 
-val catalog_names_with_toml_fallback :
-  ?config_path:string ->
-  unit ->
-  (string list * catalog_names_source, string) result
-(** #10259 — accept-list source for the keeper cascade-name validator.
-
-    On strict-load success, returns the live catalog names tagged
-    [Live_catalog].  On strict-load failure, falls back to enumerating
-    [cascade.toml]'s top-level table sections (filtering meta-keys
-    starting with ['_']) and tags the result [Toml_section_fallback].
-    Returns [Error _] when neither source produces a non-empty name list.
-    An empty degraded fallback is not a safe success for the validator.
-
-    This decouples the validator's accept list from full strict
-    materialization so a localized field-whitelist regression in the
-    materializer does not silently reject every operator-defined
-    cascade across the fleet. *)
+    Requires the declarative cascade catalog; retired flat-profile TOML and
+    flat-key catalog fallback are intentionally not accepted. *)
 
 val keeper_catalog_names : ?config_path:string -> unit -> string list
 (** Assignable live profile names from {!catalog_names}, filtered by

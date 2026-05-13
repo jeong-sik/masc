@@ -118,6 +118,76 @@ let write_executable_file path contents =
   Unix.chmod path 0o755
 ;;
 
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+;;
+
+let toml_string value = Printf.sprintf "%S" value
+
+let declarative_http_profile_toml ~profile bindings =
+  let entries =
+    bindings
+    |> List.mapi (fun index (model_id, endpoint) ->
+           let provider = Printf.sprintf "%s_provider_%d" profile index in
+           let model = Printf.sprintf "%s_model_%d" profile index in
+           ( Printf.sprintf
+               {|
+[providers.%s]
+protocol = "openai-http"
+endpoint = %s
+|}
+               provider
+               (toml_string endpoint)
+           , Printf.sprintf
+               {|
+[models.%s]
+api-name = %s
+max-context = 4096
+tools-support = true
+streaming = true
+|}
+               model
+               (toml_string model_id)
+           , Printf.sprintf
+               {|
+[%s.%s]
+is-default = true
+max-concurrent = 1
+|}
+               provider
+               model
+           , Printf.sprintf "%s.%s" provider model ))
+  in
+  let provider_toml = List.map (fun (value, _, _, _) -> value) entries in
+  let model_toml = List.map (fun (_, value, _, _) -> value) entries in
+  let binding_toml = List.map (fun (_, _, value, _) -> value) entries in
+  let members = List.map (fun (_, _, _, value) -> value) entries in
+  Printf.sprintf
+    {|
+%s
+%s
+%s
+[tier.%s]
+members = [%s]
+strategy = "failover"
+
+[tier-group.%s]
+tiers = [%s]
+strategy = "priority_tier"
+fallback = true
+|}
+    (String.concat "\n" provider_toml)
+    (String.concat "\n" model_toml)
+    (String.concat "\n" binding_toml)
+    profile
+    (members |> List.map toml_string |> String.concat ", ")
+    profile
+    (toml_string profile)
+;;
+
 let test_process_base_path = ref None
 
 let configure_direct_test_environment () =
@@ -307,17 +377,16 @@ let with_temp_masc_base_path prefix f =
 let seed_raw_token base_path agent_name raw =
   let auth_dir = Auth.auth_dir base_path in
   mkdir_p auth_dir;
-  Auth.save_private_text_file (Filename.concat auth_dir (agent_name ^ ".token")) raw
+  let path = Filename.concat auth_dir (agent_name ^ ".token") in
+  Auth.save_private_text_file path raw
 ;;
 
-let with_temp_masc_config cascade_json f =
+let with_temp_masc_config cascade_toml f =
   let base = temp_dir "test_masc_config" in
   let config_dir = Filename.concat base ".masc/config" in
-  let cascade_path = Filename.concat config_dir "cascade.json" in
+  let cascade_path = Filename.concat config_dir "cascade.toml" in
   mkdir_p config_dir;
-  let oc = open_out cascade_path in
-  output_string oc cascade_json;
-  close_out oc;
+  write_file cascade_path cascade_toml;
   let prev_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   let prev_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let prev_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
@@ -671,10 +740,8 @@ let test_default_config_path () =
   in
   let masc_config_dir = Filename.concat base ".masc/config" in
   mkdir_p masc_config_dir;
-  let cascade_path = Filename.concat masc_config_dir "cascade.json" in
-  let oc = open_out cascade_path in
-  output_string oc "{}";
-  close_out oc;
+  let cascade_path = Filename.concat masc_config_dir "cascade.toml" in
+  write_file cascade_path "";
   (* Save and override MASC_CONFIG_DIR explicitly. *)
   let old_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
@@ -1351,7 +1418,7 @@ let test_fallback_class_labels_resumable_cli_session () =
   let err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = internal_cascade_name "tier_fast"
+         { cascade_name = internal_cascade_name "big_three"
          ; detail =
              "kimi_cli reported a resumable CLI session (exit 1). Resumable session \
               available via -r."
@@ -1385,11 +1452,34 @@ let make_openai_compat_provider_cfg
 
 let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
   with_temp_masc_config
-    {|{
-  "default_api_key_env": {
-    "kimi": "KIMI_API_KEY"
-  }
-}|}
+    {|
+[providers.kimi]
+protocol = "openai-http"
+endpoint = "https://api.moonshot.ai/v1"
+
+[providers.kimi.credentials]
+type = "env"
+key = "KIMI_API_KEY"
+
+[models.kimi-k2]
+api-name = "kimi-k2.5"
+max-context = 131072
+tools-support = true
+streaming = true
+
+[kimi.kimi-k2]
+is-default = true
+max-concurrent = 1
+
+[tier.keeper_unified]
+members = ["kimi.kimi-k2"]
+strategy = "failover"
+
+[tier-group.keeper_unified]
+tiers = ["keeper_unified"]
+strategy = "priority_tier"
+fallback = true
+|}
   @@ fun () ->
   let provider_cfg =
     make_openai_compat_provider_cfg
@@ -1526,16 +1616,9 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
         -> Alcotest.skip ()
     in
     with_temp_masc_config
-      (Printf.sprintf
-         {|{
-  "big_three_models": ["ollama:auto"],
-  "timeout_probe_models": [
-    "custom:slow@%s",
-    "custom:last@%s"
-  ]
-}|}
-         first_url
-         second_url)
+      (declarative_http_profile_toml
+         ~profile:"timeout_probe"
+         [ "slow", first_url; "last", second_url ])
     @@ fun () ->
     (* Disable liveness observer so [outer_wall_for_attempt] passes
        per_provider_timeout_s through unchanged.  With Observe/Enforce
@@ -1606,17 +1689,9 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
     let primary_key = "anthropic_open_13318" in
     let fallback_key = "moonshot_fallback_13318" in
     with_temp_masc_config
-      (Printf.sprintf
-         {|{
-  "breaker_probe_13318_models": [
-    "custom:%s@%s",
-    "custom:%s@%s"
-  ]
-}|}
-         primary_key
-         primary_url
-         fallback_key
-         fallback_url)
+      (declarative_http_profile_toml
+         ~profile:"breaker_probe_13318"
+         [ primary_key, primary_url; fallback_key, fallback_url ])
     @@ fun () ->
     let resolved =
       match
@@ -1728,9 +1803,9 @@ let test_run_named_default_accept_allows_empty_content () =
         -> Alcotest.skip ()
     in
     with_temp_masc_config
-      (Printf.sprintf
-         {|{"empty_content_probe_models":["custom:empty-content@%s"]}|}
-         provider_url)
+      (declarative_http_profile_toml
+         ~profile:"empty_content_probe"
+         [ "empty-content", provider_url ])
     @@ fun () ->
     match
       Keeper_turn_driver.run_named
@@ -1792,10 +1867,9 @@ let test_run_named_accept_rejected_does_not_replay_rejected_checkpoint () =
         -> Alcotest.skip ()
     in
     with_temp_masc_config
-      (Printf.sprintf
-         {|{"accept_replay_probe_models":["custom:rejecting@%s","custom:fallback@%s"]}|}
-         first_url
-         second_url)
+      (declarative_http_profile_toml
+         ~profile:"accept_replay_probe"
+         [ "rejecting", first_url; "fallback", second_url ])
     @@ fun () ->
     match
       Keeper_turn_driver.run_named
@@ -3388,7 +3462,7 @@ let test_keeper_internal_tools_force_materialized_runtime_surface () =
       ~tools
       ~require_tool_choice_support:false
       ~require_tool_support
-      ~label:"tier_fast"
+      ~label:"big_three"
       [ make_gemini_cli_provider_cfg ~model_id:"gemini-3-flash-preview" ()
       ; make_glm_provider_cfg ~model_id:"glm-5-turbo" ()
       ]
@@ -6046,11 +6120,9 @@ let test_run_named_circuit_breaker_skips_open_provider () =
           (healthy mock).  Use the model-id strings as the health-tracker
           provider keys so the circuit-breaker lookup matches exactly. *)
     with_temp_masc_config
-      (Printf.sprintf
-         {|{"cb_probe_models":["custom:%s@http://127.0.0.1:1","custom:%s@%s"]}|}
-         primary_key
-         fallback_key
-         fallback_url)
+      (declarative_http_profile_toml
+         ~profile:"cb_probe"
+         [ primary_key, "http://127.0.0.1:1"; fallback_key, fallback_url ])
     @@ fun () ->
     (* 4. Run the named cascade. *)
     match

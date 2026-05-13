@@ -459,14 +459,13 @@ let update_catalog_builder builder field value =
 
 (* Detect fallback_cascade cycles in a freshly loaded catalog.
 
-   2026-05-05 fleet-stuck root cause: the operator-side cascade.toml
-   declared [default.fallback_cascade = "glm_coding_plan_only"] AND
-   [glm_coding_plan_only.fallback_cascade = "default"].  When the
-   GLM provider stalled, both cascades escalated to each other,
-   producing a silent 600s+ timeout chain with no operator-visible
-   reason.  This helper walks the fallback graph and emits a Prometheus
-   counter + WARN log per cycle entry point so a CI test or operator
-   alert can catch the same shape before it goes live. *)
+   2026-05-05 fleet-stuck root cause: an operator-side cascade.toml
+   declared a two-node fallback cycle.  When the provider stalled, both
+   cascades escalated to each other, producing a silent 600s+ timeout
+   chain with no operator-visible reason.  This helper walks the
+   fallback graph and emits a Prometheus counter + WARN log per cycle
+   entry point so a CI test or operator alert can catch the same shape
+   before it goes live. *)
 let detect_fallback_cycles (entries : catalog_entry list) : string list list =
   let by_name =
     List.fold_left (fun acc e -> StringMap.add e.name e acc) StringMap.empty entries
@@ -1035,109 +1034,10 @@ let resolve_strategy_config_impl ~emit_telemetry ~config_path ~name =
     ; server_error_skip_after = read_int_field json (name ^ "_server_error_skip_after")
     }
 ;;
-
 let resolve_strategy_config ~config_path ~name =
   resolve_strategy_config_impl ~emit_telemetry:true ~config_path ~name
 ;;
 
 let resolve_strategy_config_for_diagnostics ~config_path ~name =
   resolve_strategy_config_impl ~emit_telemetry:false ~config_path ~name
-;;
-
-(* ── RFC-0041: cascade_profile loader ──────────────────────────────── *)
-
-(** Split a "provider:model" string into (provider, model).
-    Returns [None] when the separator is missing. *)
-let provider_model_of_string (s : string) : (string * string) option =
-  match String.split_on_char ':' s with
-  | [ provider; model ] -> Some (provider, model)
-  | _ -> None
-;;
-
-(** Convert a [weighted_entry] (from the flat [<name>_models] wire format
-    emitted by the TOML materializer) into a [Cascade_ref.cascade_item].
-    [timeout_ms] defaults to 30000; [priority] uses the entry's [weight]. *)
-let cascade_item_of_weighted_entry (entry : weighted_entry)
-  : Cascade_ref.cascade_item option
-  =
-  match provider_model_of_string entry.model with
-  | Some (provider, model) ->
-    Some
-      { Cascade_ref.id = entry.model
-      ; provider
-      ; model
-      ; timeout_ms = 30000
-      ; priority = entry.weight
-      }
-  | None -> None
-;;
-
-(** Load a [Cascade_ref.cascade_profile] from the hierarchical
-    [<name>_groups] keys emitted by the TOML materializer when a profile
-    declares a [groups] field (RFC-0041). Each object in the array is
-    parsed through [Cascade_ref.cascade_group_of_json].
-
-    Returns [None] when the key is absent or no groups parse
-    successfully. *)
-let load_cascade_profile_hierarchical ~(config_path : string) ~(name : string)
-  : Cascade_ref.cascade_profile option
-  =
-  match load_catalog_source config_path with
-  | Error _ -> None
-  | Ok json ->
-    let open Yojson.Safe.Util in
-    (match json |> member (name ^ "_groups") with
-     | `List arr ->
-       let groups = List.filter_map Cascade_ref.cascade_group_of_json arr in
-       if groups = [] then None else Some { Cascade_ref.name; groups }
-     | _ -> None)
-;;
-
-(** Load a [Cascade_ref.cascade_profile] from the flat [<name>_models]
-    wire format emitted by the TOML materializer (the default layout when
-    a profile declares a [models] field rather than a [groups] field).
-    Each profile section becomes a single-group profile; [models] become
-    [cascade_item]s and [fallback_cascade] becomes [fallback_group].
-
-    Returns [None] when the profile has no parsable model entries.
-    This is the bridge between the flat [<name>_models] layout and the
-    RFC-0041 hierarchical profile model. *)
-let load_cascade_profile_flat_models ~(config_path : string) ~(name : string)
-  : Cascade_ref.cascade_profile option
-  =
-  let items =
-    load_profile_weighted ~config_path ~name
-    |> List.filter_map cascade_item_of_weighted_entry
-  in
-  if items = []
-  then None
-  else (
-    let fallback_group =
-      match load_catalog ~config_path with
-      | Ok entries ->
-        (match List.find_opt (fun e -> String.equal e.name name) entries with
-         | Some entry -> entry.fallback_cascade
-         | None -> None)
-      | Error _ -> None
-    in
-    Some
-      { Cascade_ref.name
-      ; groups = [ { Cascade_ref.name; items; strategy = Priority; fallback_group } ]
-      })
-;;
-
-(** Load a [Cascade_ref.cascade_profile] from the in-memory JSON view
-    produced by the TOML materializer.
-
-    Tries the hierarchical [<name>_groups] layout first (RFC-0041, opt-in
-    via [groups] field). Falls back to the flat [<name>_models] layout,
-    which is the default wire format for profiles that declare [models].
-
-    Returns [None] when neither layout yields a valid profile. *)
-let load_cascade_profile ~(config_path : string) ~(name : string)
-  : Cascade_ref.cascade_profile option
-  =
-  match load_cascade_profile_hierarchical ~config_path ~name with
-  | Some profile -> Some profile
-  | None -> load_cascade_profile_flat_models ~config_path ~name
 ;;

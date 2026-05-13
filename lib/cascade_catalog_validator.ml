@@ -75,6 +75,20 @@ let assoc_opt key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
 
+let json_string_list_member key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`List values) ->
+          List.filter_map
+            (function
+              | `String value ->
+                  let value = String.trim value in
+                  if String.equal value "" then None else Some value
+              | _ -> None)
+            values
+      | _ -> [])
+  | _ -> []
+
 let profile_names_from_namespace ~prefix = function
   | Some (`Assoc fields) ->
     fields
@@ -106,6 +120,40 @@ let discover_profiles ~config_path =
 
 let discover_profiles_for_diagnostics ~config_path =
   discover_profiles_impl ~emit_telemetry:false ~config_path
+
+let materialized_tier_members json tier_name =
+  match
+    Option.bind (assoc_opt "tier" json) (fun tiers_json ->
+        assoc_opt tier_name tiers_json)
+  with
+  | Some tier_json -> json_string_list_member "members" tier_json
+  | None -> []
+
+let materialized_tier_group_tiers json group_name =
+  match
+    Option.bind (assoc_opt "tier-group" json) (fun groups_json ->
+        assoc_opt group_name groups_json)
+  with
+  | Some group_json -> json_string_list_member "tiers" group_json
+  | None -> []
+
+let materialized_model_specs_for_profile json profile =
+  let tier_group_prefix = "tier-group." in
+  let tier_prefix = "tier." in
+  if String.starts_with ~prefix:tier_group_prefix profile then
+    let group_name =
+      String.sub profile (String.length tier_group_prefix)
+        (String.length profile - String.length tier_group_prefix)
+    in
+    materialized_tier_group_tiers json group_name
+    |> List.concat_map (materialized_tier_members json)
+  else if String.starts_with ~prefix:tier_prefix profile then
+    let tier_name =
+      String.sub profile (String.length tier_prefix)
+        (String.length profile - String.length tier_prefix)
+    in
+    materialized_tier_members json tier_name
+  else []
 
 let model_ids_of_specs (specs : string list) : string list =
   specs
@@ -325,7 +373,8 @@ let profile_from_declarative_snapshot snapshot ~profile =
     snapshot.Cascade_declarative_hotpath.profiles
   |> Option.map runtime_profile_of_declarative_profile
 
-let diagnose_profile ~declarative_snapshot ~emit_telemetry ~config_path ~profile =
+let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry
+    ~config_path ~profile =
   let (_ : bool) = emit_telemetry in
   let snapshot_profile =
     match snapshot_profile_for ~config_path ~profile with
@@ -344,7 +393,7 @@ let diagnose_profile ~declarative_snapshot ~emit_telemetry ~config_path ~profile
       List.map
         (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
         p.weighted_entries
-    | None -> []
+    | None -> materialized_model_specs_for_profile materialized_json profile
   in
   let candidate_model_strings =
     match snapshot_profile with
@@ -433,6 +482,7 @@ let diagnose_catalog_impl ~emit_telemetry ~config_path =
         discover_profiles_from_materialized_json json
         |> List.concat_map (fun profile ->
           diagnose_profile
+            ~materialized_json:json
             ~declarative_snapshot:declarative_diagnostics.snapshot
             ~emit_telemetry ~config_path ~profile)
       in

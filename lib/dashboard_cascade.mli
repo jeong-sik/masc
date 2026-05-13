@@ -47,7 +47,7 @@
     [keeper_profiles] so the UI can show the mismatch.
 
     @since 0.6.0 *)
-val config_json : unit -> Yojson.Safe.t
+val config_json : ?base_path:string -> unit -> Yojson.Safe.t
 
 (** Public profile display name for dashboard surfaces. Declarative
     runtime names such as ["tier.primary"] and ["tier-group.primary"]
@@ -58,10 +58,12 @@ val public_cascade_profile_name : string -> string
 val public_profile_names : string list -> string list
 (** Apply {!public_cascade_profile_name}, then sort and deduplicate. *)
 
-val public_invalid_profiles :
+val invalid_profiles_with_internal_names :
   (string * string list) list -> (string * string list) list
-(** Normalize profile names in validation errors and merge duplicate
-    public names while preserving the associated error messages. *)
+(** Merge validation errors by exact internal profile name. Names such as
+    ["tier.primary"] and ["tier-group.primary"] are intentionally kept
+    distinct; callers may separately apply {!public_cascade_profile_name}
+    only when a display-only label is needed. *)
 
 (** Raw cascade TOML payload from the active resolved config root.
 

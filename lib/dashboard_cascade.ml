@@ -70,9 +70,8 @@ let public_profile_names names =
   names |> List.map public_cascade_profile_name |> List.sort_uniq String.compare
 ;;
 
-let public_invalid_profiles profiles =
+let invalid_profiles_with_internal_names profiles =
   profiles
-  |> List.map (fun (name, errors) -> (public_cascade_profile_name name, errors))
   |> List.fold_left
        (fun acc (name, errors) ->
           let prior =
@@ -111,7 +110,7 @@ let invalid_profiles_of_rejection_json rejection_json =
            Some (name, json_string_list (json_assoc_member "errors" profile_json))
          | _ -> None)
       profiles
-    |> public_invalid_profiles
+    |> invalid_profiles_with_internal_names
   | _ -> []
 ;;
 
@@ -221,7 +220,7 @@ let invalid_profiles_of_config_path = function
   | None -> []
   | Some path ->
     Cascade_catalog_validator.error_messages_by_profile ~config_path:path
-    |> public_invalid_profiles
+    |> invalid_profiles_with_internal_names
 ;;
 
 let validation_summary_json ?config_path () =
@@ -253,7 +252,7 @@ let validation_summary_json ?config_path () =
   | Error rejection -> of_rejection ~status:"invalid" rejection
 ;;
 
-let config_json () =
+let config_json ?base_path () =
   let config_path = Cascade_runtime.cascade_config_path () in
   let source : Cascade_toml_materializer.source_info = source_info ?config_path () in
   let keeper_assignable_names = keeper_assignable_name_set ?config_path () in
@@ -262,7 +261,7 @@ let config_json () =
        Eio.Cancel.Cancelled. Re-raise cancellation; only fall back
        to empty for non-cancel exceptions (e.g. registry not yet
        initialised). *)
-    try Keeper_registry.all () with
+    try Keeper_registry.all ?base_path () with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Keeper.warn

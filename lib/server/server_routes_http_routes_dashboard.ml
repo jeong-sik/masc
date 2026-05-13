@@ -14,7 +14,38 @@ module Keeper_api = Server_dashboard_http_keeper_api
 type cascade_profile_gate = {
   valid_profiles : string list;
   invalid_profiles : (string * string list) list;
+  invalid_assignments : (string * string list) list;
 }
+
+let qualified_profile_candidates name =
+  let trimmed = String.trim name in
+  if String.starts_with ~prefix:"tier-group." trimmed
+     || String.starts_with ~prefix:"tier." trimmed
+  then [ trimmed ]
+  else [ "tier-group." ^ trimmed; "tier." ^ trimmed; trimmed ]
+
+let invalid_assignment_reasons ~known_internal_profiles ~invalid_profiles name =
+  let rec first_declared_candidate = function
+    | [] -> None
+    | candidate :: rest ->
+        if List.mem candidate known_internal_profiles
+        then List.assoc_opt candidate invalid_profiles
+        else if List.mem_assoc candidate invalid_profiles
+        then List.assoc_opt candidate invalid_profiles
+        else first_declared_candidate rest
+  in
+  first_declared_candidate (qualified_profile_candidates name)
+
+let invalid_assignments_for_public_profiles ~known_internal_profiles
+    ~invalid_profiles public_profiles =
+  public_profiles
+  |> List.filter_map (fun public_name ->
+         match
+           invalid_assignment_reasons
+             ~known_internal_profiles ~invalid_profiles public_name
+         with
+         | Some reasons -> Some (public_name, reasons)
+         | None -> None)
 
 let cascade_profile_gate () : cascade_profile_gate =
   let config_path = Cascade_runtime.cascade_config_path () in
@@ -30,41 +61,71 @@ let cascade_profile_gate () : cascade_profile_gate =
           ~config_path:path
   in
   match Cascade_catalog_runtime.known_profile_names () with
-  | Ok validated_profiles ->
+  | Ok raw_validated_profiles ->
       let validated_profiles =
-        Dashboard_cascade.public_profile_names validated_profiles
+        Dashboard_cascade.public_profile_names raw_validated_profiles
       in
       let invalid_profiles =
-        Cascade_catalog_runtime.invalid_profile_errors ()
-        |> Dashboard_cascade.public_invalid_profiles
+        (Cascade_catalog_runtime.invalid_profile_errors ()
+         @ fallback_invalid_profiles)
+        |> Dashboard_cascade.invalid_profiles_with_internal_names
+      in
+      let candidate_profiles =
+        if keeper_profiles = [] then validated_profiles else keeper_profiles
+      in
+      let known_internal_profiles =
+        match config_path with
+        | None -> raw_validated_profiles
+        | Some path ->
+            Cascade_catalog_validator.discover_profiles_for_diagnostics
+              ~config_path:path
+      in
+      let invalid_assignments =
+        invalid_assignments_for_public_profiles
+          ~known_internal_profiles
+          ~invalid_profiles candidate_profiles
       in
       let valid_profiles =
-        let filtered =
-          keeper_profiles
-          |> List.filter (fun profile -> List.mem profile validated_profiles)
-        in
-        if filtered = [] then validated_profiles else filtered
+        candidate_profiles
+        |> List.filter (fun profile ->
+               List.mem profile validated_profiles
+               && not (List.mem_assoc profile invalid_assignments))
       in
-      { valid_profiles; invalid_profiles }
+      { valid_profiles; invalid_profiles; invalid_assignments }
   | Error detail ->
       Log.Keeper.warn
         "cascade_profile_gate: validated runtime snapshot unavailable: %s"
         detail;
       let invalid_profiles =
-        Dashboard_cascade.public_invalid_profiles fallback_invalid_profiles
+        Dashboard_cascade.invalid_profiles_with_internal_names
+          fallback_invalid_profiles
       in
-      let invalid_names = List.map fst invalid_profiles in
+      let known_internal_profiles =
+        match config_path with
+        | None -> []
+        | Some path ->
+            Cascade_catalog_validator.discover_profiles_for_diagnostics
+              ~config_path:path
+      in
+      let invalid_assignments =
+        invalid_assignments_for_public_profiles
+          ~known_internal_profiles ~invalid_profiles keeper_profiles
+      in
+      let invalid_names = List.map fst invalid_assignments in
       let valid_profiles =
         keeper_profiles
         |> List.filter (fun profile -> not (List.mem profile invalid_names))
       in
-      { valid_profiles; invalid_profiles }
+      { valid_profiles; invalid_profiles; invalid_assignments }
 
 let available_cascade_profiles () : string list =
   (cascade_profile_gate ()).valid_profiles
 
 let invalid_cascade_profiles () : (string * string list) list =
   (cascade_profile_gate ()).invalid_profiles
+
+let invalid_cascade_assignment_profiles () : (string * string list) list =
+  (cascade_profile_gate ()).invalid_assignments
 
 let telemetry_summary_cache_key ~base_path ~masc_root =
   let digest = Digest.string (base_path ^ "\000" ^ masc_root) |> Digest.to_hex in
@@ -1379,7 +1440,7 @@ and add_autoresearch_routes router =
                  reqd
              | Some name, Some cascade ->
                let known = available_cascade_profiles () in
-               let invalid = invalid_cascade_profiles () in
+               let invalid = invalid_cascade_assignment_profiles () in
                (match List.assoc_opt cascade invalid with
                 | Some reasons ->
                   Http.Response.json ~status:`Conflict ~request:req

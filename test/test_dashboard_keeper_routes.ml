@@ -1179,7 +1179,49 @@ let test_available_cascade_profiles_filter_invalid_catalog_entries () =
     (Routes.available_cascade_profiles ());
   let invalid = Routes.invalid_cascade_profiles () in
   check bool "invalid preset is surfaced separately" true
-    (List.mem_assoc "broken" invalid)
+    (List.mem_assoc "tier.broken" invalid
+     || List.mem_assoc "tier-group.broken" invalid)
+;;
+
+let test_invalid_profile_projection_keeps_internal_names () =
+  with_mock_model @@ fun valid_model ->
+  let model_id, endpoint = split_model_spec valid_model in
+  let cascade_toml =
+    Printf.sprintf
+      {|[providers.custom]
+protocol = "openai-http"
+endpoint = %S
+
+[models.mock]
+api-name = %S
+max-context = 128000
+tools-support = true
+
+[custom.mock]
+
+[tier.primary]
+members = ["missing_provider.fake"]
+
+[tier.good]
+members = ["custom.mock"]
+
+[tier-group.primary]
+tiers = ["good"]
+
+[routes.keeper_turn]
+target = "tier-group.primary"
+|}
+      endpoint model_id
+  in
+  with_temp_config_root cascade_toml @@ fun config_root ->
+  with_config_dir config_root @@ fun () ->
+  check bool "valid tier-group public name remains assignable" true
+    (List.mem "primary" (Routes.available_cascade_profiles ()));
+  let invalid = Routes.invalid_cascade_profiles () in
+  check bool "invalid tier keeps qualified name" true
+    (List.mem_assoc "tier.primary" invalid);
+  check bool "valid tier-group is not conflated with invalid tier" false
+    (List.mem_assoc "tier-group.primary" invalid)
 ;;
 
 let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
@@ -1201,7 +1243,8 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
   check bool "invalid profile omitted from assignable list" false
     (List.mem "broken" profiles);
   check bool "invalid profile is surfaced in payload" true
-    (List.mem "broken" invalid_profiles);
+    (List.mem "tier.broken" invalid_profiles
+     || List.mem "tier-group.broken" invalid_profiles);
   let assign_invalid_result =
     run_curl_post
       ~body:
@@ -1786,6 +1829,10 @@ let () =
             "merge keeper trace lines includes internal history"
             `Quick
             test_merge_keeper_trace_lines_includes_internal_history
+        ; test_case
+            "invalid profile projection keeps internal names"
+            `Quick
+            test_invalid_profile_projection_keeps_internal_names
         ] )
     ]
 ;;

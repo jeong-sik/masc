@@ -243,6 +243,7 @@ type operator_disposition_reason =
   | Reason_degraded_retry
   | Reason_cascade_fallback
   | Reason_provider_runtime_error
+  | Reason_internal_error
   | Reason_tool_required_unsatisfied
   | Reason_turn_livelock_blocked
   | Reason_cancelled

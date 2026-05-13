@@ -193,6 +193,19 @@ let test_provider_failure_not_reported_as_tool_unsatisfied () =
   check_disp "provider failure before tool use" r "pause_human" "provider_runtime_error"
 ;;
 
+let test_internal_error_not_unmapped () =
+  let r =
+    mk_receipt
+      ~outcome:`Error
+      ~cascade_outcome:Cascade_completed
+      ~terminal_reason_code:"internal_error"
+      ~tool_contract_result:Contract_satisfied_completion
+      ~error_kind:(Some (R.error_kind_of_string "internal"))
+      ()
+  in
+  check_disp "internal error" r "pause_human" "internal_error"
+;;
+
 let test_preflight_config_failure_not_reported_as_tool_unsatisfied () =
   let r =
     mk_receipt
@@ -607,6 +620,10 @@ let () =
             "provider failure before tool use -> provider_runtime_error"
             `Quick
             test_provider_failure_not_reported_as_tool_unsatisfied
+        ; test_case
+            "internal error -> pause_human"
+            `Quick
+            test_internal_error_not_unmapped
         ; test_case
             "config failure before tool use -> preflight_config_error"
             `Quick

@@ -83,7 +83,13 @@ let api_key_of_credential ?registry_entry = function
     (match registry_entry with
      | Some entry ->
        let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
-       if env = "" then "" else Sys.getenv_opt env |> Option.value ~default:""
+       if env = ""
+       then ""
+       else (
+         (* NDT-OK: credential materialization is the provider boundary; catalog parsing stays deterministic. *)
+         match Sys.getenv_opt env with
+         | Some value -> value
+         | None -> "")
      | None -> "")
 
 let provider_kind_for_http_provider ?registry_entry (provider : cascade_provider) :

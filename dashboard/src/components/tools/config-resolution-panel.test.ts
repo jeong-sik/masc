@@ -138,6 +138,9 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('env override')
     expect(container.textContent).toContain('Resolved config child is missing: keepers')
     expect(container.textContent).toContain('cascade.toml')
+    expect(container.textContent).toContain('TOML-only')
+    expect(container.textContent).toContain('authoring=runtime')
+    expect(container.textContent).toContain('repo seed not active')
     expect(container.textContent).toContain('root-relative')
     expect(container.textContent).toContain('under config root')
     expect(container.textContent).not.toContain('/tmp/runtime/config/cascade.toml')
@@ -285,6 +288,27 @@ describe('ConfigResolutionPanel', () => {
 
     expect(container.textContent).toContain('local .masc')
     expect(container.textContent).toContain('/tmp/project/.masc/config')
+  })
+
+  it('calls out repo fallback config roots separately from copied runtime roots', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        resolution=${{
+          status: 'ready',
+          warnings: [],
+          config_root: { path: '/tmp/project/config', exists: true, source: 'cwd' },
+          cascade_authoring: { path: '/tmp/project/config/cascade.toml', exists: true, source: 'cwd' },
+          cascade: { path: '/tmp/project/config/cascade.toml', exists: true, source: 'cwd' },
+          prompts: { path: '/tmp/project/config/prompts', exists: true, source: 'cwd' },
+          keepers: { path: '/tmp/project/config/keepers', exists: true, source: 'cwd' },
+          personas: { path: '/tmp/project/config/personas', exists: true, source: 'cwd' },
+        }}
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('repo config active')
+    expect(container.textContent).not.toContain('repo seed not active')
   })
 })
 

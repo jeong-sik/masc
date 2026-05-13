@@ -522,6 +522,15 @@ describe('summaryCounts', () => {
 
     expect(toolTelemetryCoverageDetail(counts, 3)).toBe('도구 telemetry 확인 2/3 · 활동 1 · 기록 없음 1 · 미확인 1')
   })
+
+  it('counts explicit zero-tool telemetry as covered', () => {
+    const counts = summaryCounts([
+      makeRow({ recent_tools: [], tool_calls: 0, tool_activity_known: true }),
+      makeRow({ recent_tools: [], tool_calls: 0, tool_activity_known: false }),
+    ])
+
+    expect(counts.toolCovered).toBe(1)
+  })
 })
 
 describe('buildToolQualityMap', () => {

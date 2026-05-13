@@ -24,7 +24,7 @@ import {
   type AuditReplayEvent,
 } from './audit-replay-slider'
 import { publishIdeConversationThreads } from './ide-context-bridge'
-import { activeIdeFile, focusIdeContextAnchor } from './ide-state'
+import { activeIdeFile, focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
@@ -336,15 +336,22 @@ function postToAnchoredThread(post: BoardPost): AnchoredThread | null {
 
 function anchorFromPost(post: BoardPost): AnchoredThread['anchor'] | null {
   const text = `${post.title ?? ''}\n${post.body ?? ''}`
-  const lineRef = text.match(/(?:^|\s)([A-Za-z0-9_./-]+\.[A-Za-z0-9_]+):([1-9][0-9]*)\b/)
+  const lineRef = text.match(/(?:^|\s)([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_]+):([1-9][0-9]*)\b/)
   if (!lineRef) return null
+  const filePath = normalizePostAnchorFilePath(lineRef[1]!)
+  if (!filePath) return null
   const line = lineRef?.[2] ? Number.parseInt(lineRef[2], 10) : null
   return {
-    file_path: lineRef[1]!,
+    file_path: filePath,
     line_start: line,
     line_end: line,
     symbol_hint: symbolHintFromText(text),
   }
+}
+
+function normalizePostAnchorFilePath(rawFilePath: string): string | null {
+  const withoutDotPrefix = rawFilePath.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '')
+  return normalizeIdeContextFilePath(withoutDotPrefix)
 }
 
 function symbolHintFromText(text: string): string | undefined {

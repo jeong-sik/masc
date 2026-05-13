@@ -46,9 +46,27 @@ describe('IdeConversationRailMock', () => {
         comment_count: 0,
         created_at_iso: '2026-05-05T10:01:00Z',
       },
+      {
+        id: 'thread-windows-path',
+        title: 'Review ./lib\\runtime.ml:43',
+        body: 'question about normalized file path',
+        author_identity: 'scholar',
+        votes: 0,
+        comment_count: 1,
+        created_at_iso: '2026-05-05T10:02:00Z',
+      },
+      {
+        id: 'thread-absolute-path',
+        title: 'Review /workspace/lib/runtime.ml:44',
+        body: 'should not anchor unsafe absolute paths',
+        author_identity: 'scholar',
+        votes: 0,
+        comment_count: 1,
+        created_at_iso: '2026-05-05T10:03:00Z',
+      },
     ])
 
-    expect(threads).toHaveLength(1)
+    expect(threads).toHaveLength(2)
     expect(threads[0]).toMatchObject({
       id: 'thread-line',
       anchor: {
@@ -58,6 +76,15 @@ describe('IdeConversationRailMock', () => {
         symbol_hint: 'fn:run',
       },
       reply_count: 2,
+    })
+    expect(threads[1]).toMatchObject({
+      id: 'thread-windows-path',
+      anchor: {
+        file_path: 'lib/runtime.ml',
+        line_start: 43,
+        line_end: 43,
+      },
+      reply_count: 1,
     })
   })
 

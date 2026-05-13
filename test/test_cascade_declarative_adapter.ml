@@ -317,6 +317,59 @@ strategy = "failover"
            (List.length configs)))
 ;;
 
+let test_declared_http_provider_v1_endpoint_dedupes_request_path () =
+  let toml =
+    {|
+[providers.local-openai]
+protocol = "openai-http"
+endpoint = "http://127.0.0.1:18080/v1"
+
+[providers.local-openai.credentials]
+type = "env"
+key = "LOCAL_OPENAI_API_KEY"
+
+[models.remote]
+max-context = 4096
+api-name = "remote-model"
+tools-support = true
+
+[local-openai.remote]
+
+[tier.medium]
+members = ["local-openai.remote"]
+strategy = "failover"
+|}
+  in
+  let catalog = adapt_toml toml in
+  no_errors catalog.errors;
+  let medium =
+    List.find (fun (p : adapted_profile) -> p.name = "tier.medium") catalog.profiles
+  in
+  match medium.provider_configs with
+  | [ cfg ] ->
+    check
+      bool
+      "uses OpenAI-compatible fallback kind"
+      true
+      (cfg.Llm_provider.Provider_config.kind
+       = Llm_provider.Provider_config.OpenAI_compat);
+    check
+      string
+      "keeps versioned TOML endpoint"
+      "http://127.0.0.1:18080/v1"
+      cfg.Llm_provider.Provider_config.base_url;
+    check
+      string
+      "strips duplicated version prefix from request_path"
+      "/chat/completions"
+      cfg.Llm_provider.Provider_config.request_path
+  | configs ->
+    fail
+      (Printf.sprintf
+         "expected one resolved provider config, got %d"
+         (List.length configs))
+;;
+
 let test_cli_provider_resolves_without_runtime_binary () =
   let toml =
     {|
@@ -783,6 +836,10 @@ let () =
             "registered HTTP provider uses registry api_key_env fallback"
             `Quick
             test_registered_http_provider_without_credentials_uses_registry_api_key_env
+        ; test_case
+            "declared HTTP provider dedupes request path"
+            `Quick
+            test_declared_http_provider_v1_endpoint_dedupes_request_path
         ; test_case
             "CLI provider resolves without runtime binary"
             `Quick

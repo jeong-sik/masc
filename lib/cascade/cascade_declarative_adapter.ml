@@ -119,6 +119,17 @@ let provider_kind_for_http_provider ?registry_entry (provider : cascade_provider
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api -> None
 
+let request_path_for_http_provider ~registry_entry ~kind ~base_url =
+  let request_path =
+    match registry_entry with
+    | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
+    | None -> Llm_provider.Provider_config.request_path_default_for_kind kind
+  in
+  match kind with
+  | Llm_provider.Provider_config.OpenAI_compat ->
+    Cascade_config.normalize_openai_compat_request_path ~base_url ~request_path
+  | _ -> request_path
+
 let provider_config_from_declared_provider
     (provider : cascade_provider)
     (spec : cascade_model_spec)
@@ -129,12 +140,14 @@ let provider_config_from_declared_provider
   | Http base_url ->
     (match provider_kind_for_http_provider ?registry_entry provider with
      | Some kind ->
+       let request_path = request_path_for_http_provider ~registry_entry ~kind ~base_url in
        Some
          (Llm_provider.Provider_config.make
             ~kind
             ~model_id:spec.api_name
             ~base_url
             ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
+            ~request_path
             ~max_context:spec.max_context
             ?max_tokens
             ())

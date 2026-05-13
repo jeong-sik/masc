@@ -7,7 +7,7 @@ import { KeeperBadge } from '../keeper-badge'
 import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import type { RunActivityEvent } from './run-activity-store'
-import { focusIdeContextAnchor } from './ide-state'
+import { focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
 
 type SurfaceStatus = 'linked' | 'quiet'
 
@@ -117,19 +117,22 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
 const MAX_CONTEXT_ROUTE_LINKS = 9
 
 export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLensModel {
+  const filePath = normalizeIdeContextFilePath(input.filePath)
+  const matchesFilePath = (value: string): boolean =>
+    filePath !== null && normalizeIdeContextFilePath(value) === filePath
   const fileAnnotations = input.annotations.filter(annotation =>
-    annotation.file_path === input.filePath,
+    matchesFilePath(annotation.file_path),
   )
   const activeCursors = [...input.overlay.cursors.values()]
-    .filter(cursor => cursor.file_path === input.filePath && cursor.line >= 1)
+    .filter(cursor => matchesFilePath(cursor.file_path) && cursor.line >= 1)
   const fileThreads = (input.threads ?? []).filter(thread =>
-    thread.anchor.file_path === input.filePath,
+    matchesFilePath(thread.anchor.file_path),
   )
   const fileEvents = input.events.filter(event => {
     const eventFile = event.context?.file_path
     const eventLine = event.context?.line
     if (eventLine !== undefined && eventFile === undefined) return false
-    return eventFile === undefined || eventFile === input.filePath
+    return eventFile === undefined || matchesFilePath(eventFile)
   })
   const eventSearchTextByEvent = new Map<RunActivityEvent, string>(
     fileEvents.map(event => [event, eventSearchText(event)]),
@@ -152,7 +155,7 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     if (end !== null && end >= 1) activeLines.add(end)
   }
   for (const event of fileEvents) {
-    const line = eventLineForFile(event, input.filePath)
+    const line = eventLineForFile(event, filePath ?? input.filePath)
     if (line !== undefined) activeLines.add(line)
   }
 
@@ -180,7 +183,7 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     linkedCount: surfaces.filter(surface => surface.status === 'linked').length,
     surfaces,
     anchors: buildAnchors(
-      input.filePath,
+      filePath ?? input.filePath,
       fileAnnotations,
       activeCursors,
       fileThreads,
@@ -603,7 +606,11 @@ function eventLineForFile(event: RunActivityEvent, filePath: string): number | u
   const line = event.context?.line
   if (line === undefined) return undefined
   const eventFile = event.context?.file_path
-  return eventFile === filePath ? positiveLine(line) : undefined
+  if (eventFile === undefined) return undefined
+  const normalizedFilePath = normalizeIdeContextFilePath(filePath)
+  return normalizedFilePath !== null && normalizeIdeContextFilePath(eventFile) === normalizedFilePath
+    ? positiveLine(line)
+    : undefined
 }
 
 function cachedEventSearchText(event: RunActivityEvent, values: EventSearchTextMap): string {

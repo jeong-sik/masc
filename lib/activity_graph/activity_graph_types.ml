@@ -214,7 +214,24 @@ let tag_context_pair raw =
     in
     if value = "" then None else Some (key, value)
 
+let normalize_context_file_path_opt = function
+  | None -> None
+  | Some value ->
+    let normalized =
+      value |> String.trim
+      |> String.map (function
+        | '\\' -> '/'
+        | c -> c)
+    in
+    if normalized = "" then None else Some normalized
+
 let tag_file_value value =
+  let value =
+    value |> String.trim
+    |> String.map (function
+      | '\\' -> '/'
+      | c -> c)
+  in
   match String.rindex_opt value ':' with
   | Some index when index > 0 && index < String.length value - 1 ->
     let suffix =
@@ -233,6 +250,7 @@ let derive_context_from_payload payload fields =
     json_string_non_empty_opt "file_path" payload
     |> fun value -> first_some value (json_string_non_empty_opt "path" payload)
     |> fun value -> first_some value (json_string_non_empty_opt "file" payload)
+    |> normalize_context_file_path_opt
   in
   let line =
     json_positive_int_opt "line" payload

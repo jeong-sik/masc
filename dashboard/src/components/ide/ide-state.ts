@@ -51,13 +51,13 @@ export function focusIdeContextAnchor(
   }
 }
 
-function normalizeIdeContextLine(value: number | undefined): number | undefined {
+export function normalizeIdeContextLine(value: number | undefined): number | undefined {
   return Number.isSafeInteger(value) && value !== undefined && value >= 1
     ? value
     : undefined
 }
 
-function normalizeIdeContextFilePath(value: string): string | null {
+export function normalizeIdeContextFilePath(value: string): string | null {
   const filePath = value.trim().replace(/\\/g, '/')
   if (filePath === '' || filePath.startsWith('/') || /^[A-Za-z]:\//.test(filePath)) {
     return null

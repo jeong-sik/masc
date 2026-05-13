@@ -195,6 +195,77 @@ describe('IdeActivityMock', () => {
       .map(link => link.textContent)).toEqual(['Log', 'Telemetry', 'Keeper'])
   })
 
+  it('normalizes derived file paths and hides unsafe context jumps', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        events: [
+          {
+            seq: 1,
+            ts_ms: 100,
+            ts_iso: '2026-05-05T10:00:00Z',
+            room_id: 'run-default',
+            kind: 'telemetry.turn',
+            actor: { kind: 'keeper', id: 'sangsu' },
+            subject: { kind: 'log', id: 'turn-1' },
+            payload: {
+              file_path: ' lib\\runtime.ml ',
+              line: 4,
+              log_id: 'turn-1',
+            },
+            tags: [],
+          },
+          {
+            seq: 2,
+            ts_ms: 90,
+            ts_iso: '2026-05-05T10:00:01Z',
+            room_id: 'run-default',
+            kind: 'telemetry.turn',
+            actor: { kind: 'keeper', id: 'sangsu' },
+            subject: { kind: 'log', id: 'turn-2' },
+            payload: {
+              line: 7,
+              log_id: 'turn-2',
+            },
+            tags: ['file:lib\\runtime.ml:7'],
+          },
+          {
+            seq: 3,
+            ts_ms: 80,
+            ts_iso: '2026-05-05T10:00:02Z',
+            room_id: 'run-default',
+            kind: 'telemetry.turn',
+            actor: { kind: 'keeper', id: 'sangsu' },
+            subject: { kind: 'log', id: 'turn-3' },
+            payload: {
+              file_path: '/workspace/lib/runtime.ml',
+              line: 9,
+              log_id: 'turn-3',
+            },
+            tags: [],
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('3 events')
+    })
+
+    const jumps = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-context-jump')]
+    expect(jumps.map(jump => jump.textContent)).toEqual(['↗ runtime.ml:4', '↗ runtime.ml:7'])
+
+    fireEvent.click(jumps[0]!)
+    expect(activeIdeFile.value).toBe('lib/runtime.ml')
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 4,
+      source_id: 'evt-1',
+    })
+  })
+
   it('derives a compact run progress summary from activity events', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-05T10:01:30Z'))

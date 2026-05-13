@@ -354,6 +354,61 @@ describe('IdeContextLens', () => {
     expect(model.anchors).toEqual([])
   })
 
+  it('normalizes file paths before matching current-file lens inputs', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [{
+        ...annotation,
+        id: 'ann-backslash',
+        file_path: ' lib\\keeper\\keeper_exec_ide.ml ',
+      }],
+      diffRows: [],
+      events: [{
+        id: 'evt-backslash',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'telemetry',
+        timestamp_ms: 400,
+        context: {
+          file_path: 'lib\\keeper\\keeper_exec_ide.ml',
+          line: 27,
+          log_id: 'turn-9',
+        },
+      }],
+      threads: [{
+        ...thread,
+        id: 'thread-backslash',
+        anchor: {
+          ...thread.anchor,
+          file_path: 'lib\\keeper\\keeper_exec_ide.ml',
+        },
+      }],
+      overlay: {
+        ...overlay,
+        cursors: new Map([[
+          'sangsu',
+          {
+            ...overlay.cursors.get('sangsu')!,
+            file_path: 'lib\\keeper\\keeper_exec_ide.ml',
+          },
+        ]]),
+      },
+    })
+
+    const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
+    expect(counts.get('lsp')).toBe(1)
+    expect(counts.get('keeper')).toBe(2)
+    expect(counts.get('log')).toBe(1)
+    expect(model.activeLineCount).toBe(3)
+    expect(model.anchors.map(anchor => anchor.id)).toEqual([
+      'annotation-ann-backslash',
+      'cursor-sangsu-12',
+      'thread-thread-backslash',
+      'event-evt-backslash',
+    ])
+  })
+
   it('does not turn unscoped event lines into current-file anchors', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_exec_ide.ml',

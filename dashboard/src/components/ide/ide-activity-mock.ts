@@ -13,7 +13,11 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide-context-lens'
-import { focusIdeContextAnchor } from './ide-state'
+import {
+  focusIdeContextAnchor,
+  normalizeIdeContextFilePath,
+  normalizeIdeContextLine,
+} from './ide-state'
 import {
   createRunActivityStore,
   type RunActivityContext,
@@ -151,7 +155,8 @@ function mergePayloadContext(next: MutableRunActivityContext, payload: unknown):
   const filePath = stringValue(record.file_path)
     ?? stringValue(record.path)
     ?? stringValue(record.file)
-  if (filePath) next.file_path = filePath
+  const normalizedFilePath = filePath ? normalizeIdeContextFilePath(filePath) : null
+  if (normalizedFilePath) next.file_path = normalizedFilePath
   const line = positiveInteger(record.line)
     ?? positiveInteger(record.line_start)
     ?? positiveInteger(record.lineno)
@@ -190,7 +195,8 @@ function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void 
   if (key === 'file') {
     const match = value.match(/^(.+?)(?::([1-9][0-9]*))?$/)
     const path = match?.[1]
-    if (path) next.file_path = path
+    const normalizedPath = path ? normalizeIdeContextFilePath(path) : null
+    if (normalizedPath) next.file_path = normalizedPath
     if (match?.[2]) next.line = Number.parseInt(match[2], 10)
     return
   }
@@ -308,9 +314,13 @@ export function deriveIdeRunProgressSummary(
   events: ReadonlyArray<RunActivityEvent>,
   activeFile: string,
 ): IdeRunProgressSummary {
-  const currentFileEvents = activeFile.trim() === ''
+  const activeFilePath = normalizeIdeContextFilePath(activeFile)
+  const currentFileEvents = activeFilePath === null
     ? 0
-    : events.filter(event => event.context?.file_path === activeFile).length
+    : events.filter(event =>
+      event.context?.file_path !== undefined
+      && normalizeIdeContextFilePath(event.context.file_path) === activeFilePath,
+    ).length
   const linkedEvents = events.filter(event => event.context !== undefined).length
   const surfaceCounts: Array<{ readonly label: string; readonly count: number }> = PROGRESS_SURFACES.map(([key, label]) => ({
     label,
@@ -399,9 +409,9 @@ function ActivityRow(
   const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
   const eventContextFile = item.context?.file_path
-  const eventFocusFile = eventContextFile?.trim() ?? ''
-  const eventFocusLine = item.context?.line
-  const hasEventContextFocus = eventFocusFile !== ''
+  const eventFocusFile = eventContextFile === undefined ? null : normalizeIdeContextFilePath(eventContextFile)
+  const eventFocusLine = normalizeIdeContextLine(item.context?.line)
+  const hasEventContextFocus = eventFocusFile !== null
   const routeLinks = routeLinksForContext({
     goalId: item.context?.goal_id,
     taskId: item.context?.task_id,

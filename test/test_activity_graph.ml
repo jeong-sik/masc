@@ -105,6 +105,41 @@ let test_events_json_derives_ide_context () =
       check string "context log" "turn-9"
         (context |> member "log_id" |> to_string))
 
+let test_events_json_normalizes_ide_context_file_paths () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-payload")
+           ~tags:[]
+           ~payload:
+             (`Assoc
+                [
+                  ("file_path", `String " lib\\payload.ml ");
+                  ("line", `Int 12);
+                ])
+           ());
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-tag")
+           ~tags:[ "file: lib\\tag.ml:27" ]
+           ~payload:(`Assoc [])
+           ());
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let open Yojson.Safe.Util in
+      match json |> member "events" |> to_list with
+      | [ payload_event; tag_event ] ->
+        let payload_context = payload_event |> member "context" in
+        let tag_context = tag_event |> member "context" in
+        check string "payload file path normalized" "lib/payload.ml"
+          (payload_context |> member "file_path" |> to_string);
+        check string "tag file path normalized" "lib/tag.ml"
+          (tag_context |> member "file_path" |> to_string);
+        check int "tag line kept" 27 (tag_context |> member "line" |> to_int)
+      | events ->
+        fail (Printf.sprintf "expected two events, got %d" (List.length events)))
+
 let test_events_json_ignores_invalid_derived_pr_number () =
   with_config (fun config ->
       ignore
@@ -415,6 +450,8 @@ let () =
           test_case "emit and list events" `Quick test_emit_and_list_events;
           test_case "events json derives IDE context" `Quick
             test_events_json_derives_ide_context;
+          test_case "events json normalizes IDE context file paths" `Quick
+            test_events_json_normalizes_ide_context_file_paths;
           test_case "events json ignores invalid derived PR number" `Quick
             test_events_json_ignores_invalid_derived_pr_number;
           test_case "emit sanitizes invalid utf8 before persisting" `Quick

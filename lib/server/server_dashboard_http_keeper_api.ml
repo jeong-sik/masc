@@ -769,11 +769,14 @@ let first_int_opt values =
   List.find_map (fun value -> value) values
 
 let runtime_lens_tool_surface_parts scan =
+  (* sound-partial: allow absent runtime-lens decisions as empty evidence while
+     preserving explicit decision payloads when the scanner emits them. *)
   let tool_decision =
     match scan.latest_tool_surface_decision with
     | Some decision -> decision
     | None -> `Assoc []
   in
+  (* sound-partial: allow absent lane decision as empty evidence. *)
   let lane_decision =
     match scan.latest_provider_lane_decision with
     | Some decision -> decision

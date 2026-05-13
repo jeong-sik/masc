@@ -1599,6 +1599,8 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
         [ "agent", `String (public_runtime_lane_label m.model_id)
         ; "in_tok", `Int (Option.value ~default:0 m.total_input_tokens)
         ; "out_tok", `Int (Option.value ~default:0 m.total_output_tokens)
+        (* sound-partial: allow missing cost in legacy rows; absence means zero
+           observed spend, not a provider/model routing choice. *)
         ; "cost", `Float (Option.value ~default:0.0 m.total_cost_usd)
         ; "p50_ms", opt_float m.p50_latency_ms
         ; "p95_ms", opt_float m.p95_latency_ms

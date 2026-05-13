@@ -151,7 +151,7 @@ describe('RuntimePanel', () => {
     expect(chips.length).toBe(10)
     expect(chips[0]?.textContent).toBe('전체')
     expect(chips[1]?.textContent).toBe('Cascade')
-    expect(chips[2]?.textContent).toBe('프로바이더')
+    expect(chips[2]?.textContent).toBe('런타임')
     expect(chips[3]?.textContent).toBe('비용 / 지연')
     expect(chips[4]?.textContent).toBe('감사')
     expect(chips[5]?.textContent).toBe('휴리스틱')

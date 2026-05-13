@@ -61,11 +61,12 @@ export function resolveKeeperCurrentTaskLabel(
 
 // ── Shared row component ─────────────────────────────────
 
-function SignalRow({ label, value }: { label: string; value: string | number }) {
+function SignalRow({ label, value, title }: { label: string; value: string | number; title?: string }) {
+  const valueText = String(value)
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
-      <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
-      <span class="text-xs font-medium text-[var(--color-fg-secondary)]">${value}</span>
+    <div class="flex items-center justify-between gap-3 py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] min-w-0">
+      <span class="text-xs text-[var(--color-fg-muted)] shrink-0">${label}</span>
+      <span class="text-xs font-medium text-[var(--color-fg-secondary)] text-right truncate min-w-0" title=${title ?? valueText}>${valueText}</span>
     </div>
   `
 }
@@ -906,6 +907,31 @@ function formatLensList(values: string[], emptyLabel = 'none'): string {
   return `${values.slice(0, 3).join(', ')} +${values.length - 3}`
 }
 
+function runtimeTraceProviderTerminal(trace: KeeperRuntimeTraceResponse): string {
+  const provider = trace.provider_attempts
+  const status = compactToken(provider.terminal_status, 'unknown')
+  return provider.terminal_exception_kind
+    ? `${status} / ${provider.terminal_exception_kind}`
+    : status
+}
+
+function runtimeTraceEventIds(trace: KeeperRuntimeTraceResponse): string {
+  const eventBus = trace.event_bus
+  return [
+    `corr ${formatLensList(eventBus.correlation_ids)}`,
+    `run ${formatLensList(eventBus.run_ids)}`,
+  ].join(' · ')
+}
+
+function runtimeTraceMemoryEvidence(trace: KeeperRuntimeTraceResponse): string {
+  const memory = trace.memory
+  return [
+    `inj ${memory.memory_injected_present_count}/${memory.memory_injected_count}`,
+    `flush ${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`,
+    `ep/proc ${memory.episodes_flushed}/${memory.procedures_flushed}`,
+  ].join(' · ')
+}
+
 function lensGapTone(severity: string): StatusChipTone {
   switch (severity) {
     case 'bad':
@@ -989,7 +1015,14 @@ export function RuntimeLensSection({
         <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
         <${SignalRow} label="context compaction" value=${`${context.context_compacted_count}/${context.context_compact_started_count}`} />
         <${SignalRow} label="memory flush" value=${`${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`} />
-        <${SignalRow} label="manifest rows" value=${clock.manifest_total_rows} />
+        <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />
+        <${SignalRow} label="manifest rows" value=${`${trace.manifest_returned_rows}/${trace.manifest_total_rows}`} />
+        <${SignalRow} label="receipt rows" value=${trace.receipt_returned_rows} />
+        <${SignalRow} label="provider attempts" value=${`${trace.provider_attempts.started_count}/${trace.provider_attempts.finished_count}`} />
+        <${SignalRow} label="provider terminal" value=${runtimeTraceProviderTerminal(trace)} />
+        <${SignalRow} label="event ids" value=${runtimeTraceEventIds(trace)} />
+        <${SignalRow} label="memory evidence" value=${runtimeTraceMemoryEvidence(trace)} />
+        <${SignalRow} label="stale reason" value=${compactToken(trace.stale_reason, 'none')} />
       </div>
 
       <div class="flex flex-wrap gap-1.5 min-w-0" data-testid="runtime-lens-gaps">

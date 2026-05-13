@@ -7,6 +7,7 @@ const keeperTone = { "nick0cave":"brass", "masc-improver":"ok", "sangsu":"info",
 const statusColor = s => ({ running:"running", ok:"ok", pending:"info", fail:"err", stalled:"stalled", idle:"idle", queued:"queued", done:"done", active:"active" }[s] || "idle");
 const activateOnKey = (handler) => (e) => {
   if (e.target !== e.currentTarget) return;
+  if (e.repeat) return;
   if (e.key === "Enter" || e.key === " ") {
     e.preventDefault();
     handler();

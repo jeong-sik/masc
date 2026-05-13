@@ -14,7 +14,7 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 - **Rail** — activity feed + cascade trace
 - **Composer** — keeper.claim() input
 - **Status Bar** — build + online providers
-- **Planes / Crew / Drawer / Focus / WidgetSolo / StatusTray** — extended surfaces (multi-plane layout, multi-keeper crew, slide-out drawer, focus overlay, single-widget solo view, status tray)
+- **Planes / Crew / Drawer / Focus / WidgetSolo / StatusTray** — extended surfaces (multi-plane layout with a reachable Crew mode, multi-keeper crew, slide-out drawer, focus overlay, single-widget solo view, status tray)
 
 ## Files
 

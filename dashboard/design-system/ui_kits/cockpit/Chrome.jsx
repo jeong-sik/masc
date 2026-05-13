@@ -1,7 +1,7 @@
 /* global React, MASC_P2 */
 const { useState, useMemo, useEffect, useRef } = React;
 
-const PLANES = ["Dashboard", "Work", "Comms", "Observe", "Cognition", "IDE"];
+const PLANES = ["Dashboard", "Work", "Comms", "Observe", "Cognition", "Crew", "IDE"];
 
 // ============== Topbar ==============
 function Topbar({ goal, goals, mode, setMode, density, setDensity, branch, setBranch }) {

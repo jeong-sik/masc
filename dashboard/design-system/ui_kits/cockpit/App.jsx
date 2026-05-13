@@ -83,6 +83,7 @@ function App() {
     if (mode === "Comms")     return <div className="center"><CommsPlane {...ctx}/></div>;
     if (mode === "Observe")   return <div className="center"><ObservePlane {...ctx}/></div>;
     if (mode === "Cognition") return <div className="center"><CognitionPlane {...ctx}/></div>;
+    if (mode === "Crew")      return <div className="center"><CrewPlane {...ctx}/></div>;
     if (mode === "IDE")       return <div className="center"><IdePlane {...ctx}/></div>;
     return <div className="center"></div>;
   };

@@ -840,6 +840,13 @@ function updateAuditFocusParam(focus: AuditChip): void {
   replaceRoute('monitoring', auditRouteParams(focus))
 }
 
+function clearAuditLogFocusParam(): void {
+  const params: Record<string, string> = { ...route.value.params, section: 'runtime', view: 'audit' }
+  delete params.log
+  delete params.log_id
+  replaceRoute('monitoring', params)
+}
+
 function AuditFocusRail({ focus, count }: { focus: AuditFocus | null; count: number }) {
   const active: AuditChip = focus ?? 'ledger'
   return html`
@@ -990,6 +997,11 @@ function AuditLedgerTable({ entries, logId }: { entries: AuditEntry[]; logId: st
 
 function AuditLedgerBoard({ entries, count, focus, logId }: { entries: AuditEntry[]; count: number; focus: AuditFocus | null; logId: string | null }) {
   const focusedEntries = logId ? entries.filter(entry => auditEntryMatchesLogId(entry, logId)) : []
+  const focusLabel = focusedEntries.length > 0
+    ? (focus === null
+        ? `${focusedEntries.length} matches pinned`
+        : `${focusedEntries.length} matches`)
+    : 'no match in loaded ledger'
   return html`
     <section class="flex flex-col gap-4" aria-label="Audit ledger">
       <div class="flex flex-col items-start gap-2 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
@@ -997,13 +1009,32 @@ function AuditLedgerBoard({ entries, count, focus, logId }: { entries: AuditEntr
         <${AuditFocusRail} focus=${focus} count=${count} />
       </div>
       ${logId ? html`
-        <div class=${`rounded-[var(--r-1)] border px-3 py-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] ${focusedEntries.length > 0 ? 'border-[var(--brass-3)] bg-[var(--accent-12)] text-[var(--brass-1)]' : 'border-card-border/60 bg-[var(--backdrop-deep)] text-text-muted'}`} data-testid="audit-log-focus">
-          ${focusedEntries.length > 0
-            ? (focus === null
-                ? `log focus · ${logId} · ${focusedEntries.length} matches pinned`
-                : `log focus · ${logId} · ${focusedEntries.length} matches`)
-            : `log focus miss · ${logId} · showing latest entries`}
-        </div>
+        <section
+          class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+          data-testid="audit-log-focus"
+          aria-label="Audit log route focus"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+                ROUTE FOCUS
+              </div>
+              <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
+                <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                  LOG ${logId}
+                </span>
+                <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${focusLabel}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+              onClick=${clearAuditLogFocusParam}
+            >
+              CLEAR
+            </button>
+          </div>
+        </section>
       ` : null}
 
       ${focus === 'actor'

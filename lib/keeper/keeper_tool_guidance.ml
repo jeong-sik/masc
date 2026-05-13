@@ -26,6 +26,11 @@ type hint =
   ; description : string
   }
 
+type hint_inventory =
+  { hints : hint list
+  ; config_drift_marker : string option
+  }
+
 let web_fetch_timeout_placeholder = "{{web_fetch_timeout}}"
 let web_fetch_timeout_re = Str.regexp_string web_fetch_timeout_placeholder
 
@@ -42,6 +47,13 @@ let observe_guidance_config_drift ~label ~detail =
   Log.Keeper.warn "keeper tool guidance config drift: %s: %s" label detail
 ;;
 
+let tool_hints_config_drift_marker =
+  "Keeper tool guidance config drift: missing or malformed \
+   config/prompts/keeper.tool_hints.toml. Preferred tool examples were \
+   withheld; use only active runtime tool schemas and ask the operator to \
+   restore the tool hints file."
+;;
+
 let hints_toml_path () =
   let dir =
     match Prompt_registry.get_markdown_dir () with
@@ -56,15 +68,18 @@ let load_hints () =
   try
     let doc = Otoml.Parser.from_file path in
     let entries = Otoml.find doc (Otoml.get_array Fun.id) [ "hints" ] in
-    List.map
-      (fun entry ->
-        { name = Otoml.find entry Otoml.get_string [ "name" ]
-        ; call =
-            substitute_web_fetch_timeout
-              (Otoml.find entry Otoml.get_string [ "call" ])
-        ; description = Otoml.find entry Otoml.get_string [ "description" ]
-        })
-      entries
+    { hints =
+        List.map
+          (fun entry ->
+            { name = Otoml.find entry Otoml.get_string [ "name" ]
+            ; call =
+                substitute_web_fetch_timeout
+                  (Otoml.find entry Otoml.get_string [ "call" ])
+            ; description = Otoml.find entry Otoml.get_string [ "description" ]
+            })
+          entries
+    ; config_drift_marker = None
+    }
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -72,14 +87,14 @@ let load_hints () =
       ~label:"keeper.tool_hints"
       ~detail:
         (Printf.sprintf "%s: %s" path (Printexc.to_string exn));
-    []
+    { hints = []; config_drift_marker = Some tool_hints_config_drift_marker }
 ;;
 
 (* Deferred until first use so module load does not require the TOML file to
    exist at link time (e.g. for executables that never render keeper prompts).
    First [Lazy.force] must be sequentially serialized — masc-mcp's Eio
    single-domain model satisfies this. *)
-let hints : hint list Lazy.t = lazy (load_hints ())
+let hint_inventory : hint_inventory Lazy.t = lazy (load_hints ())
 
 let fallback_prose key =
   if String.equal key Keeper_prompt_names.tool_preferred_header
@@ -136,9 +151,8 @@ let load_prose key =
     match Prompt_registry.render_prompt_template key [] with
     | Ok value -> value
     | Error msg ->
+      observe_guidance_config_drift ~label:key ~detail:msg;
       let fallback = Prompt_registry.get_prompt key in
-      if String.trim fallback = "" then
-        observe_guidance_config_drift ~label:key ~detail:msg;
       fallback
   in
   let trimmed = String.trim raw in
@@ -154,15 +168,22 @@ let allowed_lookup allowed_tool_names =
 
 let allowed_hints ~allowed_tool_names =
   let allowed = allowed_lookup allowed_tool_names in
-  List.filter (fun hint -> Hashtbl.mem allowed hint.name) (Lazy.force hints)
+  List.filter
+    (fun hint -> Hashtbl.mem allowed hint.name)
+    (Lazy.force hint_inventory).hints
 ;;
 
 let line_of_hint hint = Printf.sprintf "  - %s - %s" hint.call hint.description
 
 let render_preferred_tools ~allowed_tool_names =
+  let config_drift_marker = (Lazy.force hint_inventory).config_drift_marker in
   let lines = allowed_hints ~allowed_tool_names |> List.map line_of_hint in
   match lines with
-  | [] -> load_prose Keeper_prompt_names.tool_preferred_empty
+  | [] ->
+    (match config_drift_marker with
+     | Some marker ->
+       marker ^ "\n" ^ load_prose Keeper_prompt_names.tool_preferred_empty
+     | None -> load_prose Keeper_prompt_names.tool_preferred_empty)
   | _ ->
     let header = load_prose Keeper_prompt_names.tool_preferred_header in
     header ^ "\n" ^ String.concat "\n" lines

@@ -321,26 +321,55 @@ Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다
 
 ### 7.1 config/cascade.toml 구조
 
-JSON 파일로 cascade별 설정을 정의한다. 기본 키 패턴은
-`{cascade_name}_models`이며, catalog discovery는
-`Cascade_config_loader`가 알고 있는 recognized per-cascade 키 집합
-(`_models`, `_temperature`, `_max_tokens`, `_strategy`, ...)을 기준으로
-이뤄진다.
+`cascade.toml`은 RFC-0058 선언형 cascade catalog의 유일한 런타임
+소스다. Catalog discovery는 TOML의 선언형 namespace를 materialize한
+검증 결과에서 수행하며, legacy flat JSON catalog 키는 사용하지 않는다.
 
-```json
-{
-  "default_models": ["llama:qwen3.5", "glm:glm-5.1"],
-  "keeper_turn_models": ["llama:qwen3.5", "glm:glm-5.1"],
-  "briefing_models": ["llama:qwen3.5", "glm:glm-5.1", "gemini:gemini-3.1-pro-preview"],
-  "auto_responder_claude_models": ["claude:sonnet", "glm:glm-5.1"],
-  "keeper_unified_temperature": 0.4,
-  "keeper_unified_max_tokens": 2048
-}
+구조는 다섯 레이어로 나뉜다.
+
+| 레이어 | TOML namespace | 역할 |
+|--------|----------------|------|
+| Provider | `[providers.<id>]` | transport/protocol/credential 정의 |
+| Model | `[models.<id>]` | provider-neutral model metadata/capability 정의 |
+| Binding | `[<provider>.<model>]` | provider-model 결합, capacity, pricing |
+| Alias | `[<provider>.<model>.<alias>]` | 호출 목적별 temperature/max-output override |
+| Tier/Route | `[tier.*]`, `[tier-group.*]`, `[routes.*]` | 실행 후보 묶음, fallback chain, logical route |
+
+```toml
+[providers.codex_cli]
+protocol = "openai-cli"
+command = "codex"
+is-non-interactive = true
+
+[models.codex-spark]
+api-name = "gpt-5.3-codex-spark"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[codex_cli.codex-spark]
+is-default = true
+max-concurrent = 1
+
+[tier.primary]
+members = ["codex_cli.codex-spark"]
+strategy = "failover"
+
+[tier-group.primary]
+tiers = ["primary"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.primary"
 ```
 
 ### 7.2 모델 식별자 형식
 
-`{provider}:{model_id}` 형식.
+Tier member는 `<provider_id>.<model_id>` 또는
+`<provider_id>.<model_id>.<alias>` 형식의 선언형 binding identifier를
+사용한다. Runtime adapter는 검증된 binding을 provider별 실행 spec으로
+변환한다.
 
 - checked-in repo defaults는 explicit label을 사용한다.
 - `auto`는 provider-specific runtime convenience일 수 있지만, repo에 커밋되는 cascade 기본값으로는 권장하지 않는다.
@@ -361,58 +390,77 @@ JSON 파일로 cascade별 설정을 정의한다. 기본 키 패턴은
 
 ### 7.3 Per-cascade 추론 파라미터
 
-`{cascade_name}_temperature`, `{cascade_name}_max_tokens` 키로 cascade별 온도와 토큰 수를 오버라이드할 수 있다. 미설정 시 호출자 기본값 사용.
+Temperature/max-output 같은 호출 목적별 override는 alias 레이어에 둔다.
+미설정 시 호출자 기본값 또는 provider/model capability 기본값을 사용한다.
+
+```toml
+[claude_code.haiku.for-scoring]
+temperature = 0.1
+max-output = 1024
+```
 
 ### 7.3.1 Keeper assignability metadata
 
-`{cascade_name}_keeper_assignable`는 dashboard/cascade manager가 keeper에
-할당 가능한 profile인지 명시하는 bool metadata다. 기본값은 `true`.
+`keeper-assignable`은 dashboard/cascade manager가 keeper에 할당 가능한
+profile인지 명시하는 bool metadata다. `tier` 또는 `tier-group`에 선언할
+수 있으며 기본값은 `true`.
 
 - `true` 또는 미설정: keeper assignment dropdown에 노출 가능
 - `false`: system-only profile. cascade manager에는 보이지만 keeper에는 할당 불가
 
-예: `tool_rerank_keeper_assignable = false`
+예:
+
+```toml
+[tier-group.scoring]
+tiers = ["scoring", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+keeper-assignable = false
+```
 
 ### 7.4 Pluggable Strategy (Phase A~B, #7606/#7611)
 
-각 cascade는 `{cascade_name}_strategy` 키로 provider 선택 전략을 지정할 수 있다. 미설정 시 `failover`(= backward-compatible linear fallback, `max_cycles=1`)로 동작한다.
+각 `tier` 또는 `tier-group`은 `strategy` 키로 provider 선택 전략을
+지정한다. 미설정 시 `failover`로 동작한다.
 
 | 전략 | 키 값 | 설명 |
 |------|-------|------|
-| S1 Failover | `failover` | 입력 순서 유지, 재시도 없음 (기본값) |
+| S1 Failover | `failover` | members 입력 순서 유지 |
 | S2 Capacity-aware | `capacity_aware` | endpoint capacity == 0인 provider 필터링, cycle 반복 |
 | S3 Weighted random | `weighted_random` | `config_weight × success_rate` 기반 가중 셔플 |
 | S4 Circuit-breaker cycling | `circuit_breaker_cycling` | S2 + `is_in_cooldown` 제외 + exponential backoff |
-| S5 Priority tier | `priority_tier` | tier별 그룹 진행. cycle `n` → tier `n` (마지막 tier에 clamp) |
-| S6 Sticky | `sticky` | `(keeper, cascade)` 단위로 첫 성공 provider를 `sticky_ttl_ms`동안 고정 |
-| S7 Round-robin | `round_robin` | per-cascade cursor 기반 회전 |
+| S5 Priority tier | `priority_tier` | tier-group의 `tiers` 순서대로 fallback |
+| S6 Sticky | `sticky` | `(keeper, profile)` 단위로 첫 성공 provider를 TTL 동안 고정 |
+| S7 Round-robin | `round_robin` | profile cursor 기반 회전 |
 
-관련 튜닝 키:
+관련 선언형 키:
 
 | 키 | 타입 | 기본값 | 적용 전략 |
 |-----|------|--------|-----------|
-| `{name}_max_cycles` | int | 1 | 모든 전략 (S4는 3 권장) |
-| `{name}_backoff_base_ms` | int | 500 | S2 이상에서 cycle>0 시 적용 |
-| `{name}_backoff_cap_ms` | int | 10_000 | backoff 상한 |
-| `{name}_tiers` | `string list list` | `[]` | S5만 사용. 예: `[["ollama:qwen3"], ["gemini_cli:auto"]]` |
-| `{name}_sticky_ttl_ms` | int | `300_000`(5분) | S6만 사용. 0 이하 → affinity 비활성화 |
+| `members` | string list | `[]` | tier 후보 binding/alias 목록 |
+| `tiers` | string list | `[]` | tier-group fallback chain |
+| `fallback` | bool | `false` | tier-group fallback hint 노출 |
+| `strategy` | string | `failover` | tier/tier-group provider 선택 |
+| `keeper-assignable` | bool | `true` | keeper 할당 가능 여부 |
 
-Unknown strategy 값은 warn + `failover` fallback (keeper 시작은 막지 않는다).
+Unknown strategy 값은 catalog validation error로 취급한다.
 
 ### 7.5 Client Capacity (Phase A/C3, #7606/#7623)
 
-ollama HTTP 및 CLI provider(Claude_code / Gemini_cli / Codex_cli)는 endpoint slot API가 없어 **클라이언트 측 semaphore**로 throttling한다. 각 keeper 호출 전에 slot을 시도 획득하고, 실패 시 전략 filter가 해당 provider를 건너뛴다.
+Provider-model binding은 `max-concurrent`로 client-side capacity를
+선언한다. endpoint slot API가 없는 CLI provider(Claude Code / Gemini
+CLI / Codex CLI)는 이 값으로 semaphore를 구성한다. 각 keeper 호출 전에
+slot을 시도 획득하고, 실패 시 strategy filter가 해당 binding을 건너뛴다.
 
-기본 동시성 = 1. 두 keeper가 같은 cascade를 동시에 호출하면 두 번째는 자동으로 다음 provider fallback.
+`max-concurrent`는 binding 레이어에서 필수다. 두 keeper가 같은 binding을
+동시에 호출하면 두 번째 호출은 자동으로 다음 provider fallback 후보를
+시도한다.
 
-| 키 | 타입 | 기본값 | Env override |
-|-----|------|--------|-------------|
-| `{name}_ollama_max_concurrent` | int | 1 | `MASC_OLLAMA_MAX_CONCURRENT` |
-| `{name}_cli_max_concurrent` | int | 1 | `MASC_CLI_MAX_CONCURRENT` |
-
-우선순위: per-cascade 키 > env var > 1 (min clamp 1).
-
-CLI sentinel key는 내부적으로 `cli:claude_code` / `cli:gemini_cli` / `cli:codex_cli` 형태로 registry에 등록된다. 대시보드 `/api/v1/cascade/client_capacity`에서 현재 이용률 확인 가능.
+```toml
+[codex_cli.codex-spark]
+is-default = true
+max-concurrent = 1
+```
 
 `gemini_cli:auto`, `codex_cli:auto`, `claude_code:auto`는 cascade 파싱 시 concrete 후보 목록으로 확장된다. Gemini CLI는 기본적으로 Flash/Lite 우선, Pro 후순위의 quota-aware 순서를 사용한다. Codex CLI는 기본적으로 `gpt-5.2`에서 시작해 `gpt-5.4`로 올라가는 지원 후보만 사용하며, `gpt-5.3-codex-spark`와 `gpt-5.4-mini` 같은 fast 후보도 로테이션에 포함한다. 2026-04-21 기준 ChatGPT-backed Codex CLI 실호출에서는 `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2-codex`가 모두 400 unsupported를 반환해 기본 목록에서 제외한다. Claude Code는 비용과 조직별 model policy 차이가 커서 기본값을 `auto` 1개로 유지하며, 운영자가 `MASC_CLAUDE_CODE_AUTO_MODELS`를 설정할 때만 여러 후보로 로테이션한다.
 
@@ -426,19 +474,26 @@ capacity 조회 순서: `Cascade_throttle` (llama-server /slots 기반) → `Cas
 
 ### 7.7 예시
 
-```json
-{
-  "keeper_unified_models": [
-    "glm-coding:auto",
-    "ollama:qwen3.5:35b-a3b-nvfp4",
-    "gemini_cli:auto"
-  ],
-  "keeper_unified_strategy": "circuit_breaker_cycling",
-  "keeper_unified_max_cycles": 3,
-  "keeper_unified_backoff_base_ms": 500,
-  "keeper_unified_ollama_max_concurrent": 1,
-  "keeper_unified_cli_max_concurrent": 1
-}
+```toml
+[glm-coding.glm-flashx]
+is-default = false
+max-concurrent = 2
+
+[gemini_cli.gemini-flash]
+is-default = true
+max-concurrent = 1
+
+[tier.tier_medium]
+members = ["glm-coding.glm-flashx", "gemini_cli.gemini-flash"]
+strategy = "failover"
+
+[tier-group.tier_medium]
+tiers = ["tier_medium", "primary"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.moderate_task]
+target = "tier-group.tier_medium"
 ```
 
 ---
@@ -572,4 +627,4 @@ dir-local local-dev에서는 `.masc/`가 target 디렉토리 내부를 가리키
 
 ### 12.6 모델 실행
 
-모델 선택은 `cascade.toml`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고, `Cascade_runtime`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.
+모델 선택은 `cascade.toml`이 유일한 권위다. keeper_meta의 `cascade_name` (기본 `"primary"`)이 keeper-assignable profile을 지정하고, `Cascade_runtime`가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.

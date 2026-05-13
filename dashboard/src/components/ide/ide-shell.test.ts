@@ -49,6 +49,7 @@ vi.mock('./ide-conversation-rail-mock', () => ({
 import { IdeShell } from './ide-shell'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
@@ -116,6 +117,8 @@ describe('IdeShell', () => {
     vi.unstubAllGlobals()
     window.location.hash = ''
     route.value = { tab: 'overview', params: {}, postId: null }
+    activeIdeFile.value = 'package.json'
+    ideContextFocus.value = null
     clearTraces()
   })
 
@@ -141,6 +144,54 @@ describe('IdeShell', () => {
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Time')
     expect(container.textContent).toContain('Approve')
+  })
+
+  it('hydrates current file and line focus from IDE route params', async () => {
+    route.value = {
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib\\runtime.ml',
+        line: '42',
+        surface: 'Task',
+        label: 'Runtime task',
+        source_id: 'task:runtime',
+        keeper: 'sangsu',
+      },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 42,
+      surface: 'Task',
+      label: 'Runtime task',
+      source_id: 'task:runtime',
+      keeper_id: 'sangsu',
+    })
+  })
+
+  it('rejects unsafe IDE route file focus params', async () => {
+    route.value = {
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: '/workspace/lib/runtime.ml',
+        line: '42',
+      },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(activeIdeFile.value).toBe('package.json')
+    expect(ideContextFocus.value).toBeNull()
   })
 
   it('renders toolbar lanes that can collapse independently on narrow screens', () => {

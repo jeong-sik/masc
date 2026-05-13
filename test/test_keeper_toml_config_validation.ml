@@ -221,6 +221,7 @@ members = ["ollama.qwen3-small"]
 strategy = "failover"
 
 [tier.scoring]
+keeper-assignable = false
 members = ["ollama.qwen3"]
 strategy = "failover"
 
@@ -233,6 +234,7 @@ fallback = true
 tiers = ["scoring"]
 strategy = "priority_tier"
 fallback = false
+keeper-assignable = false
 
 [routes.keeper_turn]
 target = "tier-group.primary"

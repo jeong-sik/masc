@@ -137,17 +137,6 @@ let public_name_of_tier name = strip_declarative_profile_prefix ("tier." ^ name)
 let public_name_of_target target =
   strip_declarative_profile_prefix (String.trim target)
 
-let system_only_route_key key =
-  match logical_use_of_string_opt key with
-  | Some Governance_judge | Some Operator_judge | Some Tool_rerank_use -> true
-  | Some Keeper_turn | Some Phase_recovery | Some Phase_buffer
-  | Some Tool_required | Some Cross_verifier | Some Verifier
-  | Some Autoresearch | Some Adversarial_reviewer | Some Auto_responder
-  | Some Routing | Some Openai_compat | Some Persona_generation
-  | Some Provider_benchmark | Some Simple_task | Some Moderate_task
-  | Some Complex_task -> false
-  | None -> false
-
 let catalog_metadata_result ?config_path () =
   let path_opt =
     match config_path with
@@ -182,13 +171,34 @@ let catalog_metadata_result ?config_path () =
           let public_names =
             tier_names @ tier_group_names |> List.sort_uniq String.compare
           in
+          let profile_assignability =
+            (cfg.tiers
+             |> List.map (fun (tier : Cascade_declarative_types.cascade_tier) ->
+                    (public_name_of_tier tier.name, tier.keeper_assignable)))
+            @
+            (cfg.tier_groups
+             |> List.map
+                  (fun (group : Cascade_declarative_types.cascade_tier_group) ->
+                    ( public_name_of_target ("tier-group." ^ group.name)
+                    , group.keeper_assignable )))
+          in
+          let profile_is_keeper_assignable name =
+            not
+              (List.exists
+                 (fun (profile_name, assignable) ->
+                   String.equal profile_name name
+                   && Option.equal Bool.equal assignable (Some false))
+                 profile_assignability)
+          in
           let keeper_assignable_names =
             cfg.routes
             |> List.filter_map
                  (fun (route : Cascade_declarative_types.cascade_route) ->
-                   if system_only_route_key route.name then None
-                   else Some (public_name_of_target route.target))
-            |> List.filter (fun name -> List.mem name public_names)
+                   let target = public_name_of_target route.target in
+                   if List.mem target public_names
+                      && profile_is_keeper_assignable target
+                   then Some target
+                   else None)
             |> List.sort_uniq String.compare
           in
           let system_names =

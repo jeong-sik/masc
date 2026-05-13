@@ -863,81 +863,28 @@ let order_weighted_entries
     in
     weighted_shuffle ~rand_int effective
 
-let json_assoc_member key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`Assoc nested) -> Some nested
-      | _ -> None)
-  | _ -> None
-
-let json_string_member key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) -> Some value
-      | _ -> None)
-  | _ -> None
-
-let json_string_list_member key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`List values) ->
-          Some
-            (List.filter_map
-               (function
-                 | `String value when String.trim value <> "" ->
-                     Some (String.trim value)
-                 | _ -> None)
-               values)
-      | _ -> None)
-  | _ -> None
-
 let normalize_decl_provider_id provider_id =
   String.trim provider_id
   |> String.lowercase_ascii
   |> String.map (fun c -> if c = '-' then '_' else c)
 
-let provider_cascade_prefix root provider_id =
-  let adapter_opt =
-    match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-    | Some _ as adapter -> adapter
-    | None ->
-        Provider_adapter.resolve_adapter_by_cascade_prefix
-          (normalize_decl_provider_id provider_id)
-  in
-  match adapter_opt with
+let provider_cascade_prefix provider_id =
+  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
   | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
   | None ->
-      let protocol =
-        Option.bind (json_assoc_member "providers" root) (fun providers ->
-            Option.bind
-              (json_assoc_member provider_id (`Assoc providers))
-              (fun provider -> json_string_member "protocol" (`Assoc provider)))
-      in
-      (match protocol with
-       | Some "openai-http" ->
-           Some
-             (Provider_adapter.cascade_prefix_of_provider_kind
-                Llm_provider.Provider_config.OpenAI_compat)
-       | Some "ollama-http" ->
-           Some
-             (Provider_adapter.cascade_prefix_of_provider_kind
-                Llm_provider.Provider_config.Ollama)
-      | _ -> None)
+      Provider_adapter.resolve_adapter_by_cascade_prefix
+        (normalize_decl_provider_id provider_id)
+      |> Option.map Provider_adapter.cascade_prefix_of_adapter
 
-let model_api_name root model_id =
-  Option.bind (json_assoc_member "models" root) (fun models ->
-      Option.bind (json_assoc_member model_id (`Assoc models)) (fun model ->
-          match json_string_member "api-name" (`Assoc model) with
-          | Some value -> Some value
-          | None -> (
-              match json_string_member "model-name" (`Assoc model) with
-              | Some value -> Some value
-              | None -> Some model_id)))
+let model_api_name (cfg : Cascade_declarative_types.cascade_config) model_id =
+  Cascade_declarative_types.model_of_id cfg model_id
+  |> Option.map (fun (model : Cascade_declarative_types.cascade_model_spec) ->
+         model.api_name)
 
-let weighted_entry_of_member root member =
+let weighted_entry_of_member cfg member =
   match String.split_on_char '.' (String.trim member) with
   | provider_id :: model_id :: _ -> (
-      match provider_cascade_prefix root provider_id, model_api_name root model_id with
+      match provider_cascade_prefix provider_id, model_api_name cfg model_id with
       | Some prefix, Some api_name ->
           Some
             {
@@ -950,13 +897,16 @@ let weighted_entry_of_member root member =
       | _ -> None)
   | _ -> None
 
-let tier_members root tier_name =
-  Option.bind (json_assoc_member "tier" root) (fun tiers ->
-      Option.bind (json_assoc_member tier_name (`Assoc tiers)) (fun tier ->
-          json_string_list_member "members" (`Assoc tier)))
+let tier_members (cfg : Cascade_declarative_types.cascade_config) tier_name =
+  cfg.tiers
+  |> List.find_opt
+       (fun (tier : Cascade_declarative_types.cascade_tier) ->
+         String.equal tier.name tier_name)
+  |> Option.map (fun (tier : Cascade_declarative_types.cascade_tier) ->
+         tier.members)
   |> Option.value ~default:[]
 
-let configured_weighted_entries_from_root root ~name =
+let configured_weighted_entries_from_config cfg ~name =
   let trimmed = String.trim name in
   let candidates =
     if String.starts_with ~prefix:"tier-group." trimmed
@@ -969,20 +919,21 @@ let configured_weighted_entries_from_root root ~name =
       let group_name =
         String.sub profile_name 11 (String.length profile_name - 11)
       in
-      Option.bind (json_assoc_member "tier-group" root) (fun groups ->
-          Option.bind (json_assoc_member group_name (`Assoc groups)) (fun group ->
-              json_string_list_member "tiers" (`Assoc group)))
-      |> Option.map (fun tiers ->
-             tiers
-             |> List.concat_map (tier_members root)
-             |> List.filter_map (weighted_entry_of_member root))
+      cfg.tier_groups
+      |> List.find_opt
+           (fun (group : Cascade_declarative_types.cascade_tier_group) ->
+             String.equal group.name group_name)
+      |> Option.map (fun (group : Cascade_declarative_types.cascade_tier_group) ->
+             group.tiers
+             |> List.concat_map (tier_members cfg)
+             |> List.filter_map (weighted_entry_of_member cfg))
     else if String.starts_with ~prefix:"tier." profile_name then
       let tier_name =
         String.sub profile_name 5 (String.length profile_name - 5)
       in
       Some
-        (tier_members root tier_name
-         |> List.filter_map (weighted_entry_of_member root))
+        (tier_members cfg tier_name
+         |> List.filter_map (weighted_entry_of_member cfg))
     else None
   in
   candidates
@@ -993,9 +944,9 @@ let configured_weighted_entries_from_root root ~name =
   |> Option.value ~default:[]
 
 let configured_weighted_entries ~config_path ~name =
-  match Cascade_config_loader.load_catalog_source config_path with
+  match Cascade_declarative_parser.parse_file config_path with
   | Error _ -> []
-  | Ok root -> configured_weighted_entries_from_root root ~name
+  | Ok cfg -> configured_weighted_entries_from_config cfg ~name
 
 let resolve_model_strings_traced_with
     ~rand_int ?config_path ~name ~defaults () =

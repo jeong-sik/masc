@@ -111,6 +111,7 @@ keep-alive = "5m"
 num-ctx = 32768
 
 [tier.rerank]
+keeper-assignable = false
 members = ["claude-code.haiku.for-scoring"]
 strategy = "failover"
 
@@ -127,6 +128,7 @@ strategy = "failover"
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 fallback = true
+keeper-assignable = true
 
 [routes.default]
 target = "tier-group.primary"
@@ -233,6 +235,8 @@ let test_layer5_tiers () =
        "rerank members"
        [ "claude-code.haiku.for-scoring" ]
        t.members;
+     check (option bool) "rerank keeper_assignable" (Some false)
+       t.keeper_assignable;
      check
        string
        "rerank strategy"
@@ -259,6 +263,7 @@ let test_layer5_tier_groups () =
   | Some g ->
     check (list string) "tiers" [ "primary"; "local" ] g.tiers;
     check bool "fallback" true g.fallback;
+    check (option bool) "keeper_assignable" (Some true) g.keeper_assignable;
     check
       string
       "strategy"

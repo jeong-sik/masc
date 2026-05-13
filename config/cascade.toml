@@ -728,6 +728,7 @@ strategy = "failover"
 [tier.scoring]
 # System-only short-output tier for rerank/scoring calls.
 # Members are aliases (Layer 4) with reduced max-output.
+keeper-assignable = false
 members = [
   "codex_cli.codex-spark.for-scoring",
   "claude_code.haiku.for-scoring",
@@ -736,6 +737,7 @@ strategy = "failover"
 
 [tier.governance]
 # System-only baseline for governance / judge calls.
+keeper-assignable = false
 members = ["claude_code.haiku.for-governance"]
 strategy = "failover"
 
@@ -753,6 +755,7 @@ strategy = "failover"
 [tier.__safe_lane]
 # System-only baseline tier (RFC-0027 PR-4). Last-resort fallback
 # target that satisfies every capability profile. Not keeper-assignable.
+keeper-assignable = false
 members = ["kimi_cli.kimi-coding"]
 strategy = "failover"
 
@@ -787,11 +790,13 @@ fallback = true
 tiers = ["scoring", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
+keeper-assignable = false
 
 [tier-group.governance]
 tiers = ["governance", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
+keeper-assignable = false
 
 # ── Routes (logical usage → tier-group) ────────────────────────
 #

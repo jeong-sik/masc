@@ -594,6 +594,12 @@ let parse_scoring_params (tbl : Otoml.t) : cascade_scoring_params option =
   | _ -> None
 ;;
 
+let keeper_assignable_opt tbl =
+  match Otoml.find_opt tbl Otoml.get_boolean [ "keeper-assignable" ] with
+  | Some _ as value -> value
+  | None -> Otoml.find_opt tbl Otoml.get_boolean [ "keeper_assignable" ]
+;;
+
 let parse_tier (name : string) (tbl : Otoml.t) : (cascade_tier, parse_error list) result =
   let path = Printf.sprintf "tier.%s" name in
   let members =
@@ -621,6 +627,7 @@ let parse_tier (name : string) (tbl : Otoml.t) : (cascade_tier, parse_error list
       ; cycle_policy
       ; sticky_ttl_ms
       ; scoring_params
+      ; keeper_assignable = keeper_assignable_opt tbl
       }
 ;;
 
@@ -668,7 +675,7 @@ let parse_tier_group (name : string) (tbl : Otoml.t)
   | Error e -> Error (error (path ^ ".strategy") e)
   | Ok strategy ->
     let fallback = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "fallback" ] in
-    Ok { name; tiers; strategy; fallback }
+    Ok { name; tiers; strategy; fallback; keeper_assignable = keeper_assignable_opt tbl }
 ;;
 
 let parse_tier_groups (toml : Otoml.t)

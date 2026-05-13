@@ -71,7 +71,11 @@ let public_invalid_profiles profiles =
   |> List.map (fun (name, errors) -> (public_cascade_profile_name name, errors))
   |> List.fold_left
        (fun acc (name, errors) ->
-          let prior = Option.value (List.assoc_opt name acc) ~default:[] in
+          let prior =
+            match List.assoc_opt name acc with
+            | Some prior -> prior
+            | None -> []
+          in
           (name, prior @ errors) :: List.remove_assoc name acc)
        []
   |> List.map (fun (name, errors) -> (name, List.sort_uniq String.compare errors))

@@ -966,12 +966,15 @@ let configured_weighted_entries_from_materialized_json json ~name =
          |> List.filter_map (weighted_entry_of_materialized_member json))
     else None
   in
-  candidates
-  |> List.find_map (fun candidate ->
-         match resolve_profile candidate with
-         | Some (_ :: _ as entries) -> Some entries
-         | Some [] | None -> None)
-  |> Option.value ~default:[]
+  match
+    candidates
+    |> List.find_map (fun candidate ->
+           match resolve_profile candidate with
+           | Some (_ :: _ as entries) -> Some entries
+           | Some [] | None -> None)
+  with
+  | Some entries -> entries
+  | None -> []
 
 let resolve_model_strings_traced_with
     ~rand_int ?config_path ~name ~defaults () =

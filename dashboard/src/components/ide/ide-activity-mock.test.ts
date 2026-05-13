@@ -10,6 +10,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   ideContextFocus.value = null
   activeIdeFile.value = 'package.json'
+  window.location.hash = ''
 })
 
 describe('IdeActivityMock', () => {
@@ -89,6 +90,21 @@ describe('IdeActivityMock', () => {
     const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
       .map(node => node.textContent)
     expect(surfaces).toEqual(['Goal1', 'Task1', 'Board1', 'Comment1', 'PR1', 'Git1', 'Log1', 'Telemetry1'])
+
+    const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
+    expect(activityRouteLinks.map(link => link.textContent)).toEqual([
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+    fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log')
 
     const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
     expect(jump?.textContent).toContain('runtime.ml:4')

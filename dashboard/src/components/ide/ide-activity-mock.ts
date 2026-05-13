@@ -7,7 +7,12 @@ import { KeeperBadge } from '../keeper-badge'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
-import { IdeContextLens } from './ide-context-lens'
+import {
+  IdeContextLens,
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 import { focusIdeContextAnchor } from './ide-state'
 import {
   createRunActivityStore,
@@ -400,6 +405,17 @@ function ActivityRow(
   const eventContextFilePath = eventContextFile?.trim() ?? ''
   const hasEventContextFocus = eventFocusFile.trim() !== ''
     && (eventContextFilePath !== '' || eventFocusLine !== undefined)
+  const routeLinks = routeLinksForContext({
+    goalId: item.context?.goal_id,
+    taskId: item.context?.task_id,
+    boardPostId: item.context?.board_post_id,
+    commentId: item.context?.comment_id,
+    prId: item.context?.pr_id,
+    gitRef: item.context?.git_ref,
+    logId: item.context?.log_id,
+    keeperId: item.keeper_id,
+    telemetry: true,
+  })
 
   return html`
     <li
@@ -461,6 +477,11 @@ function ActivityRow(
             ↗ ${shortContextPath(eventFocusFile, eventFocusLine)}
           </button>
         ` : null}
+        ${routeLinks.length > 0 ? html`
+          <div class="ide-activity-route-links" aria-label="Activity operational links">
+            ${routeLinks.map(link => ActivityRouteLink(link))}
+          </div>
+        ` : null}
         ${hasFocus ? html`
           <span style=${{
             fontSize: 'var(--fs-10)',
@@ -475,6 +496,21 @@ function ActivityRow(
         ` : null}
       </div>
     </li>
+  `
+}
+
+function ActivityRouteLink(link: IdeContextRouteLink) {
+  return html`
+    <button
+      key=${link.id}
+      type="button"
+      class="ide-activity-route-link"
+      title=${link.evidence}
+      aria-label=${`Open ${link.evidence}`}
+      onClick=${() => openIdeContextRouteLink(link)}
+    >
+      ${link.label}
+    </button>
   `
 }
 

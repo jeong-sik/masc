@@ -51,6 +51,18 @@ export interface IdeContextRouteLink {
   readonly evidence: string
 }
 
+export interface IdeContextRouteContext {
+  readonly goalId?: string
+  readonly taskId?: string
+  readonly boardPostId?: string
+  readonly commentId?: string
+  readonly prId?: string
+  readonly gitRef?: string
+  readonly logId?: string
+  readonly keeperId?: string
+  readonly telemetry?: boolean
+}
+
 export interface IdeContextLensModel {
   readonly linkedCount: number
   readonly surfaces: ReadonlyArray<IdeContextSurface>
@@ -292,7 +304,7 @@ function activateIdeContextAnchor(anchor: IdeContextAnchor): void {
   })
 }
 
-function openIdeContextRouteLink(link: IdeContextRouteLink): void {
+export function openIdeContextRouteLink(link: IdeContextRouteLink): void {
   navigate(link.tab, link.params)
 }
 
@@ -627,17 +639,9 @@ function compactMeta(values: ReadonlyArray<string | null>): string {
   return values.filter((value): value is string => Boolean(value)).join(' / ')
 }
 
-function routeLinksForContext(context: {
-  readonly goalId?: string
-  readonly taskId?: string
-  readonly boardPostId?: string
-  readonly commentId?: string
-  readonly prId?: string
-  readonly gitRef?: string
-  readonly logId?: string
-  readonly keeperId?: string
-  readonly telemetry?: boolean
-}): ReadonlyArray<IdeContextRouteLink> {
+export function routeLinksForContext(
+  context: IdeContextRouteContext,
+): ReadonlyArray<IdeContextRouteLink> {
   const links: IdeContextRouteLink[] = []
   const add = (link: IdeContextRouteLink): void => {
     if (links.some(existing => existing.id === link.id)) return

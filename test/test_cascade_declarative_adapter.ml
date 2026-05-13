@@ -501,6 +501,7 @@ let test_alias_parent_missing () =
           ; cycle_policy = None
           ; sticky_ttl_ms = None
           ; scoring_params = None
+          ; keeper_assignable = None
           }
         ]
     ; tier_groups = []
@@ -766,6 +767,7 @@ let test_duplicate_routes () =
           ; cycle_policy = None
           ; sticky_ttl_ms = None
           ; scoring_params = None
+          ; keeper_assignable = None
           }
         ]
     ; tier_groups = []

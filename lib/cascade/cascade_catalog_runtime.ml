@@ -432,13 +432,23 @@ let record_probe_metrics (profiles : profile_snapshot list) =
         profile.probes)
     profiles
 
+(* JSON serialization for the boot-log snapshot. This is an internal
+   observability surface (server_runtime_bootstrap.ml's "Validated active
+   cascade catalog: ..." log line), NOT an external API or dashboard
+   surface. The Runtime Lens redaction (#15040) intentionally erases
+   provider identity at external boundaries — Prometheus labels via
+   [record_probe_metrics] are still redacted and pinned by
+   test_keeper_hooks_oas_telemetry.ml. But the boot log needs real values
+   so operators can verify which providers/models were loaded into the
+   catalog at startup; without that, a misconfigured cascade.toml is
+   indistinguishable from a healthy one in the log. *)
 let candidate_probe_to_yojson (probe : candidate_probe) =
   `Assoc
     [
-      ("model_string", `String public_runtime_model_label);
-      ("provider_kind", `String public_runtime_provider_label);
-      ("model_id", `String public_runtime_model_label);
-      ("base_url", `String "");
+      ("model_string", `String probe.model_string);
+      ("provider_kind", `String probe.provider_kind);
+      ("model_id", `String probe.model_id);
+      ("base_url", `String probe.base_url);
       ( "status",
         match probe.status with
         | Probe_ok -> `String "ok"

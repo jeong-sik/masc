@@ -35,6 +35,7 @@ import {
   type KeeperPresenceSnapshot,
   type KeeperPresenceStatus,
 } from './keeper-presence-store'
+import { openIdeContextRouteLink, type IdeContextRouteLink } from './ide-context-lens'
 import { ideContextFocus, type IdeContextFocus } from './ide-state'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -166,23 +167,22 @@ export function IdeEditor({
           ${lines.length} lines · ownership · ${keepers.length} keepers · ${activeLayerKinds.length} layers
         </span>
         ${currentFileFocus ? html`
-          <span
+          <div
             role="status"
+            class="ide-editor-context-focus"
             data-testid="ide-context-focus-status"
             title=${currentFileFocus.file_path}
-            style=${{
-              minWidth: 0,
-              maxWidth: '220px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              color: 'var(--color-accent-fg)',
-              flexShrink: 1,
-            }}
           >
-            Focused ${currentFileFocus.line !== undefined ? `L${currentFileFocus.line}` : currentFileFocus.surface}
-            · ${currentFileFocus.label}
-          </span>
+            <span class="ide-editor-context-focus-label">
+              Focused ${currentFileFocus.line !== undefined ? `L${currentFileFocus.line}` : currentFileFocus.surface}
+              · ${currentFileFocus.label}
+            </span>
+            ${currentFileFocus.route_links && currentFileFocus.route_links.length > 0 ? html`
+              <span class="ide-editor-context-route-links" aria-label="Focused context operational links">
+                ${currentFileFocus.route_links.map(link => EditorContextRouteLink(link))}
+              </span>
+            ` : null}
+          </div>
         ` : null}
         ${activeCursors.length > 0 ? html`
           <ul
@@ -244,6 +244,21 @@ export function IdeEditor({
             />`
       }
     </div>
+  `
+}
+
+function EditorContextRouteLink(link: IdeContextRouteLink) {
+  return html`
+    <button
+      key=${link.id}
+      type="button"
+      class="ide-editor-context-route-link"
+      title=${link.evidence}
+      aria-label=${`Open ${link.evidence}`}
+      onClick=${() => openIdeContextRouteLink(link)}
+    >
+      ${link.label}
+    </button>
   `
 }
 

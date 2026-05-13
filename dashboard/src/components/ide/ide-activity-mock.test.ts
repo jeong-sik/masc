@@ -118,6 +118,17 @@ describe('IdeActivityMock', () => {
       keeper_id: 'sangsu',
       source_id: 'evt-1',
     })
+    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
   })
 
   it('ignores non-positive numeric payload ids when deriving context links', async () => {
@@ -151,6 +162,37 @@ describe('IdeActivityMock', () => {
         .map(node => node.textContent)
       expect(surfaces).toEqual(['Goal0', 'Task0', 'Board0', 'Comment0', 'PR0', 'Git0', 'Log1', 'Telemetry1'])
     })
+  })
+
+  it('does not focus the active file for unscoped activity lines', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        events: [{
+          seq: 1,
+          ts_ms: 100,
+          ts_iso: '2026-05-05T10:00:00Z',
+          room_id: 'run-default',
+          kind: 'telemetry.turn',
+          actor: { kind: 'keeper', id: 'sangsu' },
+          subject: { kind: 'log', id: 'turn-1' },
+          payload: {
+            line: 42,
+            log_id: 'turn-1',
+          },
+          tags: [],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('telemetry.turn')
+    })
+    expect(container.querySelector('.ide-activity-context-jump')).toBeNull()
+    expect([...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
+      .map(link => link.textContent)).toEqual(['Log', 'Telemetry', 'Keeper'])
   })
 
   it('derives a compact run progress summary from activity events', () => {

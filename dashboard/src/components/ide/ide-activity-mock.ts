@@ -298,7 +298,7 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
       >
         ${events.length === 0
           ? html`<li class="ide-rail-empty">no recent activity</li>`
-          : events.map(item => ActivityRow(item, presence, overlay, activeFile))}
+          : events.map(item => ActivityRow(item, presence, overlay))}
       </ol>
     </div>
   `
@@ -387,7 +387,6 @@ function ActivityRow(
   item: RunActivityEvent,
   presence: KeeperPresenceSnapshot | null,
   overlay: KeeperCursorOverlay,
-  activeFile: string,
 ) {
   const hue = keeperHueIndex(item.keeper_id)
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
@@ -400,11 +399,9 @@ function ActivityRow(
   const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
   const eventContextFile = item.context?.file_path
-  const eventFocusFile = eventContextFile ?? activeFile
+  const eventFocusFile = eventContextFile?.trim() ?? ''
   const eventFocusLine = item.context?.line
-  const eventContextFilePath = eventContextFile?.trim() ?? ''
-  const hasEventContextFocus = eventFocusFile.trim() !== ''
-    && (eventContextFilePath !== '' || eventFocusLine !== undefined)
+  const hasEventContextFocus = eventFocusFile !== ''
   const routeLinks = routeLinksForContext({
     goalId: item.context?.goal_id,
     taskId: item.context?.task_id,
@@ -472,6 +469,7 @@ function ActivityRow(
               label: item.detail ?? `${item.verb} ${item.target}`,
               source_id: item.id,
               keeper_id: item.keeper_id,
+              route_links: routeLinks,
             })}
           >
             ↗ ${shortContextPath(eventFocusFile, eventFocusLine)}

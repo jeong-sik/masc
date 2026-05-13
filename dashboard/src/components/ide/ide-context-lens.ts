@@ -301,6 +301,7 @@ function activateIdeContextAnchor(anchor: IdeContextAnchor): void {
     label: anchor.label,
     source_id: anchor.id,
     keeper_id: anchor.keeper_id,
+    route_links: anchor.route_links,
   })
 }
 

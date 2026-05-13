@@ -11,8 +11,17 @@
  */
 
 import { signal } from '@preact/signals'
+import type { TabId } from '../../types'
 
 export const activeIdeFile = signal<string>('package.json')
+
+export interface IdeContextFocusRouteLink {
+  readonly id: string
+  readonly label: string
+  readonly tab: TabId
+  readonly params: Record<string, string>
+  readonly evidence: string
+}
 
 export interface IdeContextFocus {
   readonly file_path: string
@@ -21,6 +30,7 @@ export interface IdeContextFocus {
   readonly label: string
   readonly source_id: string
   readonly keeper_id?: string
+  readonly route_links?: ReadonlyArray<IdeContextFocusRouteLink>
   readonly activated_at_ms: number
 }
 

@@ -19,6 +19,7 @@ describe('IdeEditor', () => {
   afterEach(() => {
     render(null, container)
     ideContextFocus.value = null
+    window.location.hash = ''
   })
 
   it('syncs CodeMirror when file content loads after initial mount', async () => {
@@ -221,6 +222,22 @@ describe('IdeEditor', () => {
       label: 'task task-runtime',
       source_id: 'event-1',
       keeper_id: 'sangsu',
+      route_links: [
+        {
+          id: 'task:task-runtime',
+          label: 'Task',
+          tab: 'workspace',
+          params: { section: 'planning', view: 'default', task: 'task-runtime' },
+          evidence: 'Task task-runtime',
+        },
+        {
+          id: 'telemetry:event-log',
+          label: 'Telemetry',
+          tab: 'monitoring',
+          params: { section: 'fleet-health', view: 'event-log' },
+          evidence: 'Fleet telemetry event log',
+        },
+      ],
     })
 
     await waitFor(() => {
@@ -228,5 +245,9 @@ describe('IdeEditor', () => {
         .toContain('Focused L2')
       expect(container.querySelector('.cm-masc-context-focus')).not.toBeNull()
     })
+    const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-editor-context-route-link')]
+    expect(routeLinks.map(link => link.textContent)).toEqual(['Task', 'Telemetry'])
+    fireEvent.click(routeLinks.find(link => link.textContent === 'Telemetry')!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log')
   })
 })

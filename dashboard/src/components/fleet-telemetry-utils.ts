@@ -690,11 +690,7 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
     && row.tool_calls <= 0
     && row.recent_tools.length === 0,
   ).length
-  const toolTelemetryCovered = rows.filter(row =>
-    row.tool_activity_known
-    || row.tool_calls > 0
-    || row.recent_tools.length > 0,
-  ).length
+  const toolTelemetryCovered = rows.filter(row => row.tool_activity_known).length
   const toolUnknown = Math.max(0, rows.length - toolTelemetryCovered)
   const hot = rows.filter(row => row.keepalive_running && row.context_ratio >= PRESSURE_HOT_RATIO).length
   const warn = rows.filter(row =>

@@ -770,12 +770,6 @@ let run_keeper_cycle
                let current_turn_blocker_info = ref None in
                let event_bus_drain_cancel = ref None in
                let turn_event_bus_mu = Eio.Mutex.create () in
-               let mark_paused_after_overflow ~run_meta ~reason =
-                 let paused_meta =
-                   pause_keeper_for_overflow ~config ~meta:run_meta ~reason
-                 in
-                 paused_meta_override := Some paused_meta
-               in
                (* Side-effect tracking is driven by the OAS Event_bus (ToolCalled +
          ToolCompleted) rather than MASC-side observers. Pairing is by
          tool_name order within the per-turn subscription, which is safe
@@ -1172,7 +1166,6 @@ let run_keeper_cycle
                                  ~attempt
                                  ~is_retry
                                  ~allow_degraded_wall_clock_retry_budget
-                                 ~overflow_retry_used
                                  ~attempted_cascades
                          =
                          let execution_cascade_name =
@@ -1605,7 +1598,6 @@ let run_keeper_cycle
                                       ~attempt:1
                                       ~is_retry:true
                                       ~allow_degraded_wall_clock_retry_budget:true
-                                      ~overflow_retry_used
                                       ~attempted_cascades:
                                         (next_execution_cascade_name :: attempted_cascades)
                                   in
@@ -1756,110 +1748,49 @@ let run_keeper_cycle
                                  ~attempt:(attempt + 1)
                                  ~is_retry:true
                                  ~allow_degraded_wall_clock_retry_budget:false
-                                 ~overflow_retry_used
                                  ~attempted_cascades
                              | No_degraded_retry when EC.is_context_overflow err ->
                                let current_turn_event_bus =
                                  drain_turn_event_bus ~site:"context_overflow_capture" ()
                                in
-                               dispatch_keeper_phase_event
-                                 ~config
-                                 ~keeper_name:meta.name
-                                 (context_overflow_event_of_error
-                                    ~fallback_tokens:execution.max_context
-                                    ~turn_event_bus:current_turn_event_bus
-                                    err);
-                               if not overflow_retry_used
-                               then (
-                                 match
-                                   recover_context_overflow_retry
-                                     ~meta:run_meta
-                                     ~base_dir
-                                     ~max_cascade_context:execution.max_context
-                                     ~error:err
-                                 with
-                                 | Some retry_plan ->
-                                   Keeper_registry.set_turn_phase
-                                     ~base_path:config.base_path
-                                     meta.name
-                                     Keeper_registry.(Packed Turn_compacting);
-                                   (* SDK boundary classification: [EC.is_context_overflow err]
-                           was already true above, so the typed klass is fixed.
-                           Stamp the typed [blocker_info] so downstream consumers
-                           (rollover gate) reason over [klass] instead of
-                           substring-matching the [detail] field — keeper layer
-                           treats provider/model as opaque aliases. *)
-                                   current_turn_blocker_info
-                                   := Some
-                                        { klass = Sdk_token_budget_exceeded
-                                        ; detail = Agent_sdk.Error.to_string err
-                                        };
-                                   dispatch_keeper_phase_event
-                                     ~config
-                                     ~keeper_name:meta.name
-                                     Keeper_state_machine.Compaction_started;
-                                   Prometheus.inc_counter
-                                     Keeper_metrics.metric_keeper_fsm_edge_transitions
-                                     ~labels:[ "edge", "kmc_to_ksm_compact_completed" ]
-                                     ();
-                                   dispatch_keeper_phase_event
-                                     ~config
-                                     ~keeper_name:meta.name
-                                     (Keeper_state_machine.Compaction_completed
-                                        { before_tokens =
-                                            retry_plan.compaction.before_tokens
-                                        ; after_tokens =
-                                            retry_plan.compaction.after_tokens
-                                        });
-                                   Keeper_registry.prepare_turn_retry_after_compaction
-                                     ~base_path:config.base_path
-                                     meta.name;
-                                   let retry_meta =
-                                     if
-                                       retry_plan.retry_generation
-                                       = run_meta.runtime.generation
-                                     then run_meta
-                                     else
-                                       map_runtime
-                                         (fun rt ->
-                                            { rt with
-                                              generation = retry_plan.retry_generation
-                                            })
-                                         run_meta
-                                   in
-                                   let retry_execution =
-                                     { execution with
-                                       max_context = retry_plan.retry_max_context
-                                     }
-                                   in
-                                   Eio.Fiber.yield ();
-                                   retry_loop
-                                     ~run_meta:retry_meta
-                                     ~execution:retry_execution
-                                     ~run_generation:retry_plan.retry_generation
-                                     ~attempt:1
-                                     ~is_retry:true
-                                     ~allow_degraded_wall_clock_retry_budget:false
-                                     ~overflow_retry_used:true
-                                     ~attempted_cascades
-                                 | None ->
-                                   mark_paused_after_overflow
-                                     ~run_meta
-                                     ~reason:"auto_compact_recovery_unavailable";
-                                   Keeper_registry.set_turn_phase
-                                     ~base_path:config.base_path
-                                     meta.name
-                                     Keeper_registry.(Packed Turn_finalizing);
-                                   Error err)
-                               else (
-                                 mark_paused_after_overflow
-                                   ~run_meta
-                                   ~reason:"overflow_persisted_after_auto_compact_retry";
-                                 Keeper_registry.set_turn_phase
-                                   ~base_path:config.base_path
-                                   meta.name
-                                   Keeper_registry.(Packed Turn_finalizing);
-                                 Error err)
+                               let overflow_event =
+                                 context_overflow_event_of_error
+                                   ~fallback_tokens:execution.max_context
+                                   ~turn_event_bus:current_turn_event_bus
+                                   err
+                               in
+                               (* OAS owns transcript mutation, emergency compaction,
+                                  and context-overflow retry for the agent run. If
+                                  overflow is still returned here, MASC records the
+                                  typed blocker and lets the normal terminal
+                                  receipt/finalizing path carry the failure; it must
+                                  not compact checkpoints or re-dispatch the agent
+                                  turn from the keeper layer. *)
+                               current_turn_blocker_info
+                               := Some
+                                    { klass = Sdk_token_budget_exceeded
+                                    ; detail =
+                                        Keeper_state_machine.event_to_string
+                                          overflow_event
+                                        ^ ": "
+                                        ^ Agent_sdk.Error.to_string err
+                                    };
+                               Prometheus.inc_counter
+                                 Keeper_metrics.metric_keeper_oas_execution_errors
+                                 ~labels:
+                                   [ "keeper", meta.name
+                                   ; "phase",
+                                     Oas_execution_error_phase.(
+                                       to_label Context_overflow_after_oas_retry)
+                                   ]
+                                 ();
+                               Log.Keeper.warn
+                                 "%s: OAS returned context overflow after its owned retry \
+                                  path; MASC will not compact/retry at keeper layer: %s"
+                                 meta.name
+                                 (short_preview (Agent_sdk.Error.to_string err));
+                               mark_terminal_error err;
+                               Error err
                              | No_degraded_retry ->
                                mark_terminal_error err;
                                Error err)
@@ -1876,7 +1807,6 @@ let run_keeper_cycle
                               ~attempt:1
                               ~is_retry:false
                               ~allow_degraded_wall_clock_retry_budget:false
-                              ~overflow_retry_used:false
                               ~attempted_cascades:
                                 [ KCP.runtime_name_to_string
                                     initial_execution.cascade_name

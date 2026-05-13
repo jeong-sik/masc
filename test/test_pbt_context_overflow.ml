@@ -1,4 +1,4 @@
-(** Property-based tests for context overflow detection and recovery.
+(** Property-based tests for context overflow detection and boundary handling.
 
     Verifies structural invariants of the compaction-budget fix:
 
@@ -10,19 +10,19 @@
       is_context_overflow(TokenBudgetExceeded {kind≠"Input"}) = false
       for ALL non-"Input" kind strings.
 
-    Property 3 (Recovery consistency):
-      Every error accepted by is_context_overflow yields a positive
-      limit from the recovery path.
+    Property 3 (Limit attribution):
+      Every error accepted by is_context_overflow has a positive
+      structured or fallback limit for blocker attribution.
 
     Property 4 (Structural absence):
       keeper_agent_run source does NOT contain ~max_input_tokens.
 
     Property 5 (Reducer integration):
-      keeper_agent_run source contains cap_message_tokens in the
+      keeper_run_tools source contains cap_message_tokens in the
       keeper reducer chain, ordered before repair_dangling_tool_calls.
 
     Property 6 (Reducer hardening):
-      keeper_agent_run source contains the keeper-local
+      keeper_run_tools source contains the keeper-local
       repair_broken_tool_call_pairs reducer after repair_dangling_tool_calls. *)
 
 module UT = Masc_mcp.Keeper_unified_turn
@@ -83,9 +83,9 @@ let prop_non_input_budget_never_detected =
     (QCheck.make gen_non_input_budget_error)
     (fun err -> not (EC.is_context_overflow err))
 
-let prop_recovery_yields_positive_limit =
+let prop_overflow_attribution_yields_positive_limit =
   QCheck.Test.make ~count:200
-    ~name:"every overflow error yields positive limit in recovery"
+    ~name:"every overflow error yields positive limit for attribution"
     (QCheck.make gen_context_overflow_error)
     (fun err ->
       let limit = match err with
@@ -164,7 +164,7 @@ let test_cap_message_tokens_integration () =
         in
         ascend (Sys.getcwd ())
   in
-  let target = Filename.concat repo_root "lib/keeper/keeper_agent_run.ml" in
+  let target = Filename.concat repo_root "lib/keeper/keeper_run_tools.ml" in
   if not (Sys.file_exists target) then
     ()
   else begin
@@ -184,7 +184,7 @@ let test_cap_message_tokens_integration () =
       find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
     in
     Alcotest.(check bool)
-      "keeper_agent_run.ml must integrate cap_message_tokens before repair_dangling_tool_calls"
+      "keeper_run_tools.ml must integrate cap_message_tokens before repair_dangling_tool_calls"
       true
       (match cap_pos, repair_pos with
        | Some cap_pos, Some repair_pos -> cap_pos < repair_pos
@@ -217,7 +217,7 @@ let test_pair_repair_integration () =
         in
         ascend (Sys.getcwd ())
   in
-  let target = Filename.concat repo_root "lib/keeper/keeper_agent_run.ml" in
+  let target = Filename.concat repo_root "lib/keeper/keeper_run_tools.ml" in
   if not (Sys.file_exists target) then
     ()
   else begin
@@ -241,7 +241,7 @@ let test_pair_repair_integration () =
       | None -> None
     in
     Alcotest.(check bool)
-      "keeper_agent_run.ml must integrate local pair repair after repair_dangling_tool_calls"
+      "keeper_run_tools.ml must integrate local pair repair after repair_dangling_tool_calls"
       true
       (match repair_pos, local_pos with
        | Some repair_pos, Some local_pos -> repair_pos < local_pos
@@ -259,15 +259,9 @@ let test_pair_repair_integration () =
          | Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
          | _ -> false *)
 
-   val recover_context_overflow_retry :
-     meta:keeper_meta -> base_dir:string ->
-     max_cascade_context:int -> error:Error.sdk_error ->
-     overflow_retry_plan option
-   (*@ plan = recover_context_overflow_retry ~meta ~base_dir ~max_cascade_context ~error
-       requires is_context_overflow error
-       ensures match plan with
-         | Some p -> p.retry_max_context > 0
-         | None -> true *)
+   Keeper turns leave compact+retry to OAS. MASC may classify a structured
+   overflow as a typed blocker, but it must not recover an OAS checkpoint and
+   re-dispatch the same agent turn from the keeper layer.
 *)
 
 (* ── Runner ──────────────────────────────────────────────── *)
@@ -277,7 +271,7 @@ let () =
     List.map QCheck_alcotest.to_alcotest [
       prop_input_budget_always_detected;
       prop_non_input_budget_never_detected;
-      prop_recovery_yields_positive_limit;
+      prop_overflow_attribution_yields_positive_limit;
     ]
   in
   Alcotest.run "pbt_context_overflow" [

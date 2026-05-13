@@ -86,11 +86,14 @@ export function summarizeAuditKinds(entries: readonly AuditEntry[]): AuditKindSu
 export function auditEntryMatchesLogId(entry: AuditEntry, logId: string | null): boolean {
   const needle = normalizeLogNeedle(logId)
   if (!needle) return false
-  // `entry.id` is a structured identifier so demand exact (case-insensitive)
-  // equality — otherwise log id `turn-1` would also match `turn-10`.  For
-  // human-facing free text (`target`, `summary`) and payload contents we
-  // accept token-boundary matches so a sentence like `failed at turn-1`
-  // still pins the row but `failed at turn-10` does not.
+  // Match policy:
+  //   - `entry.id`: structured identifier, case-insensitive equality.
+  //   - `entry.target`, `entry.summary`: human-readable text, token-boundary
+  //     match so `failed at turn-1` pins the row, but `failed at turn-10`
+  //     does not.
+  //   - `entry.payload`: structured JSON, with string leaves and keys treated
+  //     as identifier values.
+  // Plain `.includes(needle)` would treat `turn-1` as matching `turn-10`.
   return stringEqualsLogNeedle(entry.id, needle)
     || [entry.target, entry.summary].some(value => stringMatchesLogNeedleWithBoundary(value, needle))
     || payloadContainsLogNeedle(entry.payload, needle)
@@ -124,14 +127,24 @@ function stringEqualsLogNeedle(value: string | undefined, needle: string): boole
 // boundaries (or start/end of string) instead.
 const LOG_NEEDLE_ID_CHARS = /[A-Za-z0-9_-]/
 
+function isIdChar(char: string | undefined): boolean {
+  return typeof char === 'string' && LOG_NEEDLE_ID_CHARS.test(char)
+}
+
 function stringMatchesLogNeedleWithBoundary(value: string | undefined, needle: string): boolean {
-  if (typeof value !== 'string') return false
+  if (typeof value !== 'string' || needle.length === 0) return false
   const haystack = value.toLowerCase()
-  const idx = haystack.indexOf(needle)
-  if (idx < 0) return false
-  const before = idx === 0 ? '' : haystack[idx - 1]
-  const after = idx + needle.length >= haystack.length ? '' : haystack[idx + needle.length]
-  return !LOG_NEEDLE_ID_CHARS.test(before) && !LOG_NEEDLE_ID_CHARS.test(after)
+  // Walk every occurrence — a single match with id-char on either side does
+  // not poison sibling matches that are properly bounded.
+  let idx = haystack.indexOf(needle)
+  while (idx >= 0) {
+    const before = idx === 0 ? undefined : haystack[idx - 1]
+    const afterIdx = idx + needle.length
+    const after = afterIdx >= haystack.length ? undefined : haystack[afterIdx]
+    if (!isIdChar(before) && !isIdChar(after)) return true
+    idx = haystack.indexOf(needle, idx + 1)
+  }
+  return false
 }
 
 function payloadContainsLogNeedle(value: unknown, needle: string, depth = 0): boolean {

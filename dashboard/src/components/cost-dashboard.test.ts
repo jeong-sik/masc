@@ -231,4 +231,36 @@ describe("audit summaries", () => {
       "unrelated",
     ])
   })
+
+  it("does not let `turn-1` match `turn-10` via substring", () => {
+    // Regression for exact log-id focus: `turn-1` must not pin entries that
+    // only mention `turn-10` or similar ids.
+    const collisionEntries: AuditEntry[] = [
+      {
+        id: "audit-turn-10",
+        ts: "2026-05-14T00:00:01Z",
+        actor: "keeper-alpha",
+        kind: "keeper_turn",
+        summary: "failed at turn-10",
+        severity: "warn",
+        payload: { refs: [{ log_id: "turn-10" }] },
+      },
+      {
+        id: "audit-turn-1",
+        ts: "2026-05-14T00:00:02Z",
+        actor: "keeper-alpha",
+        kind: "keeper_turn",
+        summary: "completed turn-1 cleanly",
+        severity: "info",
+        payload: { refs: [{ log_id: "turn-1" }] },
+      },
+    ]
+
+    expect(auditEntryMatchesLogId(collisionEntries[0]!, "turn-1")).toBe(false)
+    expect(auditEntryMatchesLogId(collisionEntries[1]!, "turn-1")).toBe(true)
+    expect(prioritizeAuditEntriesByLogId(collisionEntries, "turn-1").map(entry => entry.id)).toEqual([
+      "audit-turn-1",
+      "audit-turn-10",
+    ])
+  })
 })

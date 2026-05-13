@@ -19,6 +19,8 @@ import {
   lineNumberExt,
   blameExtensions,
   keeperLineSelectExt,
+  contextFocusLineExt,
+  focusEditorContextLine,
   pushOwnership,
   internalDocumentSync,
   syntaxHighlightExt,
@@ -33,6 +35,7 @@ import {
   type KeeperPresenceSnapshot,
   type KeeperPresenceStatus,
 } from './keeper-presence-store'
+import { ideContextFocus, type IdeContextFocus } from './ide-state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -96,6 +99,7 @@ export function IdeEditor({
   useEffect(() => ownershipStore.subscribe(() => forceRender(tick => tick + 1)), [ownershipStore])
   useEffect(() => cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1)), [])
   useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1)), [])
+  useEffect(() => ideContextFocus.subscribe(() => forceRender(tick => tick + 1)), [])
 
   const document = documentStore.document()
   const lines = documentStore.lines()
@@ -103,6 +107,8 @@ export function IdeEditor({
   const keepers = ownershipStore.knownKeepers()
   const overlay = cursorOverlaySignal.value
   const presence = globalPresenceSnapshot.value
+  const contextFocus = ideContextFocus.value
+  const currentFileFocus = contextFocus?.file_path === document.file_path ? contextFocus : null
   const activeCursors = keepersWithCursorInFile(overlay.cursors, document.file_path)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
   const currentDiffRows = diffRows()
@@ -144,6 +150,25 @@ export function IdeEditor({
         <span style=${{ marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ${lines.length} lines · ownership · ${keepers.length} keepers · ${activeLayerKinds.length} layers
         </span>
+        ${currentFileFocus ? html`
+          <span
+            role="status"
+            data-testid="ide-context-focus-status"
+            title=${currentFileFocus.file_path}
+            style=${{
+              minWidth: 0,
+              maxWidth: '220px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: 'var(--color-accent-fg)',
+              flexShrink: 1,
+            }}
+          >
+            Focused ${currentFileFocus.line !== undefined ? `L${currentFileFocus.line}` : currentFileFocus.surface}
+            · ${currentFileFocus.label}
+          </span>
+        ` : null}
         ${activeCursors.length > 0 ? html`
           <ul
             role="status"
@@ -200,6 +225,7 @@ export function IdeEditor({
               showBlame=${activeView === 'blame'}
               keepers=${keepers}
               onKeeperLineSelect=${onKeeperLineSelect}
+              contextFocus=${currentFileFocus}
             />`
       }
     </div>
@@ -483,6 +509,7 @@ function CodeMirrorEditor({
   showBlame,
   keepers,
   onKeeperLineSelect,
+  contextFocus,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
@@ -490,6 +517,7 @@ function CodeMirrorEditor({
   readonly keepers: ReadonlyArray<string>
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
   readonly annotations?: ReadonlyArray<IdeAnnotation>
+  readonly contextFocus?: IdeContextFocus | null
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
@@ -523,6 +551,7 @@ function CodeMirrorEditor({
           lang,
           lspExtension({ filePath: mountDocument.file_path }),
           keeperCursorExtension(),
+          contextFocusLineExt(),
           EditorView.updateListener.of((update) => {
             const sel = getSelectedAnnotation(update.view)
             if (sel !== prevAnnRef.current) {
@@ -579,6 +608,23 @@ function CodeMirrorEditor({
     if (!view || !ready || !showBlame) return
     pushOwnership(view, ownership)
   }, [ownership, ready, showBlame])
+
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready) return
+    if (!contextFocus || contextFocus.file_path !== documentStore.document().file_path) {
+      focusEditorContextLine(view, undefined)
+      return
+    }
+    focusEditorContextLine(view, contextFocus.line)
+  }, [
+    contextFocus?.activated_at_ms,
+    contextFocus?.file_path,
+    contextFocus?.line,
+    document.file_path,
+    documentStore,
+    ready,
+  ])
 
   // Subscribe to store changes for re-render
   const [, forceRender] = useState(0)

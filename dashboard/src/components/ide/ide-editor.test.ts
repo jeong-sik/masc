@@ -5,16 +5,20 @@ import { fireEvent, waitFor } from '@testing-library/preact'
 import { currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
+import { activeIdeFile, focusIdeContextAnchor, ideContextFocus } from './ide-state'
 
 describe('IdeEditor', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
     container = document.createElement('div')
+    activeIdeFile.value = 'package.json'
+    ideContextFocus.value = null
   })
 
   afterEach(() => {
     render(null, container)
+    ideContextFocus.value = null
   })
 
   it('syncs CodeMirror when file content loads after initial mount', async () => {
@@ -187,5 +191,42 @@ describe('IdeEditor', () => {
 
     expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
       .toContain('1 note')
+  })
+
+  it('shows and highlights the focused context line from the shared IDE signal', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst task = runtime + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-content')).not.toBeNull()
+    })
+
+    focusIdeContextAnchor({
+      file_path: 'runtime.ts',
+      line: 2,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      keeper_id: 'sangsu',
+    })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-context-focus-status"]')?.textContent)
+        .toContain('Focused L2')
+      expect(container.querySelector('.cm-masc-context-focus')).not.toBeNull()
+    })
   })
 })

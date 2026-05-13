@@ -1,5 +1,5 @@
 import { signal, effect } from '@preact/signals'
-import { activeIdeFile } from './ide-shell'
+import { activeIdeFile } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
 import { selectedTask } from '../goals/task-detail-selection'
 import {

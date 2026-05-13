@@ -8,6 +8,7 @@ import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import { IdeContextLens } from './ide-context-lens'
+import { focusIdeContextAnchor } from './ide-state'
 import {
   createRunActivityStore,
   type RunActivityContext,
@@ -264,7 +265,7 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
       >
         ${events.length === 0
           ? html`<li class="ide-rail-empty">no recent activity</li>`
-          : events.map(item => ActivityRow(item, presence, overlay))}
+          : events.map(item => ActivityRow(item, presence, overlay, activeFile))}
       </ol>
     </div>
   `
@@ -274,6 +275,7 @@ function ActivityRow(
   item: RunActivityEvent,
   presence: KeeperPresenceSnapshot | null,
   overlay: KeeperCursorOverlay,
+  activeFile: string,
 ) {
   const hue = keeperHueIndex(item.keeper_id)
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
@@ -285,6 +287,12 @@ function ActivityRow(
   // don't show `filename:0` placeholders.
   const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
+  const eventContextFile = item.context?.file_path
+  const eventFocusFile = eventContextFile ?? activeFile
+  const eventFocusLine = item.context?.line
+  const eventContextFilePath = eventContextFile?.trim() ?? ''
+  const hasEventContextFocus = eventFocusFile.trim() !== ''
+    && (eventContextFilePath !== '' || eventFocusLine !== undefined)
 
   return html`
     <li
@@ -328,6 +336,24 @@ function ActivityRow(
           ` : null}
         </span>
         ${item.detail ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${item.detail}</span>` : null}
+        ${hasEventContextFocus ? html`
+          <button
+            type="button"
+            class="ide-activity-context-jump"
+            aria-label=${activityContextLabel(item, eventFocusFile, eventFocusLine)}
+            title=${activityContextTitle(eventFocusFile, eventFocusLine)}
+            onClick=${() => focusIdeContextAnchor({
+              file_path: eventFocusFile,
+              line: eventFocusLine,
+              surface: activityContextSurface(item),
+              label: item.detail ?? `${item.verb} ${item.target}`,
+              source_id: item.id,
+              keeper_id: item.keeper_id,
+            })}
+          >
+            ↗ ${shortContextPath(eventFocusFile, eventFocusLine)}
+          </button>
+        ` : null}
         ${hasFocus ? html`
           <span style=${{
             fontSize: 'var(--fs-10)',
@@ -343,6 +369,34 @@ function ActivityRow(
       </div>
     </li>
   `
+}
+
+function activityContextSurface(item: RunActivityEvent): string {
+  if (item.context?.pr_id) return 'PR'
+  if (item.context?.board_post_id) return 'Board'
+  if (item.context?.goal_id) return 'Goal'
+  if (item.context?.task_id) return 'Task'
+  if (item.context?.git_ref) return 'Git'
+  if (item.context?.log_id) return 'Log'
+  return 'Activity'
+}
+
+function activityContextLabel(
+  item: RunActivityEvent,
+  filePath: string,
+  line: number | undefined,
+): string {
+  const suffix = line !== undefined ? ` line ${line}` : ''
+  return `Focus ${activityContextSurface(item)} context ${filePath}${suffix}`
+}
+
+function activityContextTitle(filePath: string, line: number | undefined): string {
+  return line !== undefined ? `${filePath}:${line}` : filePath
+}
+
+function shortContextPath(filePath: string, line: number | undefined): string {
+  const fileLabel = filePath.split('/').pop() || filePath
+  return line !== undefined ? `${fileLabel}:${line}` : fileLabel
 }
 
 function formatActivityTime(ms: number): string {

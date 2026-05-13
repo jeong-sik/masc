@@ -5,6 +5,7 @@ import { KeeperBadge } from '../keeper-badge'
 import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import type { RunActivityEvent } from './run-activity-store'
+import { focusIdeContextAnchor } from './ide-state'
 
 type SurfaceStatus = 'linked' | 'quiet'
 
@@ -31,6 +32,7 @@ export interface IdeContextSurface {
 
 export interface IdeContextAnchor {
   readonly id: string
+  readonly file_path: string
   readonly surface: string
   readonly label: string
   readonly meta: string
@@ -53,6 +55,10 @@ export interface IdeContextLensInput {
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly threads?: ReadonlyArray<AnchoredThread>
   readonly overlay: KeeperCursorOverlay
+}
+
+export interface IdeContextLensProps extends IdeContextLensInput {
+  readonly onAnchorActivate?: (anchor: IdeContextAnchor) => void
 }
 
 const SURFACE_LABELS: Readonly<Record<IdeContextSurfaceId, string>> = {
@@ -155,9 +161,11 @@ export function IdeContextLens({
   events,
   threads = [],
   overlay,
-}: IdeContextLensInput) {
+  onAnchorActivate,
+}: IdeContextLensProps) {
   const model = deriveIdeContextLens({ filePath, annotations, diffRows, events, threads, overlay })
   const fileLabel = filePath.split('/').pop() || filePath || 'workspace'
+  const activateAnchor = onAnchorActivate ?? activateIdeContextAnchor
 
   return html`
     <section
@@ -192,28 +200,58 @@ export function IdeContextLens({
       <ol class="ide-context-anchor-list" aria-label="Current file anchors">
         ${model.anchors.length === 0
           ? html`<li class="ide-context-anchor-empty">no linked anchors on this file yet</li>`
-          : model.anchors.map(anchor => ContextAnchorRow(anchor))}
+          : model.anchors.map(anchor => ContextAnchorRow(anchor, activateAnchor))}
       </ol>
     </section>
   `
 }
 
-function ContextAnchorRow(anchor: IdeContextAnchor) {
+function ContextAnchorRow(
+  anchor: IdeContextAnchor,
+  onAnchorActivate: (anchor: IdeContextAnchor) => void,
+) {
   return html`
     <li class="ide-context-anchor-row">
       <span class="ide-context-anchor-surface">${anchor.surface}</span>
-      <div class="ide-context-anchor-main">
+      <button
+        type="button"
+        class="ide-context-anchor-main ide-context-anchor-action"
+        aria-label=${contextAnchorAriaLabel(anchor)}
+        title=${contextAnchorTitle(anchor)}
+        onClick=${() => onAnchorActivate(anchor)}
+      >
         <span class="ide-context-anchor-label">
           ${anchor.line !== undefined ? html`<span>L${anchor.line}</span>` : null}
           <span>${anchor.label}</span>
         </span>
         <span class="ide-context-anchor-meta">${anchor.meta}</span>
-      </div>
+      </button>
       ${anchor.keeper_id
         ? html`<${KeeperBadge} id=${anchor.keeper_id} variant="sigil" size="sm" />`
         : null}
     </li>
   `
+}
+
+function activateIdeContextAnchor(anchor: IdeContextAnchor): void {
+  focusIdeContextAnchor({
+    file_path: anchor.file_path,
+    line: anchor.line,
+    surface: anchor.surface,
+    label: anchor.label,
+    source_id: anchor.id,
+    keeper_id: anchor.keeper_id,
+  })
+}
+
+function contextAnchorAriaLabel(anchor: IdeContextAnchor): string {
+  const line = anchor.line !== undefined ? ` line ${anchor.line}` : ''
+  return `Focus ${anchor.surface}${line}: ${anchor.label}`
+}
+
+function contextAnchorTitle(anchor: IdeContextAnchor): string {
+  const line = anchor.line !== undefined ? `:${anchor.line}` : ''
+  return `${anchor.file_path}${line}`
 }
 
 function surfaceCount(
@@ -311,6 +349,7 @@ function buildAnchors(
   for (const annotation of annotations.slice(0, 3)) {
     anchors.push({
       id: `annotation-${annotation.id}`,
+      file_path: annotation.file_path,
       surface: annotation.kind,
       label: truncate(annotation.content || 'annotation', 48),
       meta: compactMeta([
@@ -326,6 +365,7 @@ function buildAnchors(
   for (const cursor of cursors.slice(0, 2)) {
     anchors.push({
       id: `cursor-${cursor.keeper_id}-${cursor.line}`,
+      file_path: filePath,
       surface: 'Line',
       label: cursor.tool_name ?? cursor.focus_mode,
       meta: compactMeta([
@@ -340,6 +380,7 @@ function buildAnchors(
   for (const thread of threads.slice(0, 2)) {
     anchors.push({
       id: `thread-${thread.id}`,
+      file_path: thread.anchor.file_path,
       surface: thread.kind.toUpperCase(),
       label: truncate(thread.body, 48),
       meta: compactMeta([
@@ -357,6 +398,7 @@ function buildAnchors(
     const deletions = changedRows.filter(row => row.kind === 'delete').length
     anchors.push({
       id: 'git-diff-summary',
+      file_path: filePath,
       surface: 'Git',
       label: `${additions} add / ${deletions} delete`,
       meta: 'working diff for current file',
@@ -368,6 +410,7 @@ function buildAnchors(
     const contextMeta = eventContextMeta(event)
     anchors.push({
       id: `event-${event.id}`,
+      file_path: event.context?.file_path ?? filePath,
       surface: surfaceFromEvent(event),
       label: truncate(`${event.verb} ${event.target}`, 48),
       meta: truncate(contextMeta || event.detail || `keeper ${event.keeper_id}`, 60),

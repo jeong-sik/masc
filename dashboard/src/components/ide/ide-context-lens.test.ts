@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { deriveIdeContextLens, IdeContextLens } from './ide-context-lens'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import type { RunActivityEvent } from './run-activity-store'
+import { ideContextFocus } from './ide-state'
 
 const annotation: IdeAnnotation = {
   id: 'ann-1',
@@ -129,6 +131,34 @@ describe('IdeContextLens', () => {
     expect(container.textContent).toContain('11/11 linked')
     expect(container.textContent).toContain('keeper_exec_ide.ml')
     expect(container.textContent).toContain('goal goal-ide')
+  })
+
+  it('publishes focused file and line when an anchor is clicked', () => {
+    const container = document.createElement('div')
+    ideContextFocus.value = null
+
+    render(
+      h(IdeContextLens, {
+        filePath: 'lib/keeper/keeper_exec_ide.ml',
+        annotations: [annotation],
+        diffRows: [],
+        events: [],
+        overlay: { ...overlay, cursors: new Map() },
+      }),
+      container,
+    )
+
+    const button = container.querySelector<HTMLButtonElement>('.ide-context-anchor-action')
+    expect(button).not.toBeNull()
+    fireEvent.click(button!)
+
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/keeper/keeper_exec_ide.ml',
+      line: 12,
+      surface: 'Comment',
+      source_id: 'annotation-ann-1',
+      keeper_id: 'sangsu',
+    })
   })
 
   it('links conversation threads into board, comment, keeper, and line context', () => {

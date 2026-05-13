@@ -1,4 +1,4 @@
-import { EditorView, GutterMarker, gutter, lineNumbers, type ViewUpdate } from '@codemirror/view'
+import { Decoration, EditorView, GutterMarker, gutter, lineNumbers, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { Annotation, EditorState, Extension, StateField, StateEffect } from '@codemirror/state'
 import {
   defaultHighlightStyle,
@@ -110,6 +110,10 @@ export function themeExt(): Extension {
     },
     '.cm-selectionBackground': {
       background: 'transparent !important',
+    },
+    '.cm-line.cm-masc-context-focus': {
+      background: 'color-mix(in srgb, var(--color-accent-fg) 12%, transparent)',
+      boxShadow: 'inset 2px 0 0 var(--color-accent-fg)',
     },
   })
 }
@@ -235,6 +239,53 @@ export function keeperLineSelectExt(
       return false
     },
   })
+}
+
+// ── Context focus highlight ───────────────────────────────────────
+
+const setContextFocusLine = StateEffect.define<number | null>()
+
+const contextFocusLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none
+  },
+  update(value, tr) {
+    const mapped = value.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (!effect.is(setContextFocusLine)) continue
+      const lineNumber = effect.value
+      if (lineNumber === null || lineNumber < 1 || lineNumber > tr.state.doc.lines) {
+        return Decoration.none
+      }
+      const line = tr.state.doc.line(lineNumber)
+      return Decoration.set([
+        Decoration.line({ class: 'cm-masc-context-focus' }).range(line.from),
+      ])
+    }
+    return mapped
+  },
+  provide: field => EditorView.decorations.from(field),
+})
+
+export function contextFocusLineExt(): Extension {
+  return contextFocusLineField
+}
+
+export function focusEditorContextLine(view: EditorView, lineNumber: number | undefined): boolean {
+  if (lineNumber === undefined || lineNumber < 1 || lineNumber > view.state.doc.lines) {
+    view.dispatch({ effects: [setContextFocusLine.of(null)] })
+    return false
+  }
+  const line = view.state.doc.line(lineNumber)
+  view.dispatch({
+    selection: { anchor: line.from },
+    effects: [
+      setContextFocusLine.of(lineNumber),
+      EditorView.scrollIntoView(line.from, { y: 'center' }),
+    ],
+  })
+  view.focus()
+  return true
 }
 
 // ── Language support (dynamic import) ─────────────────────────────

@@ -13,3 +13,28 @@
 import { signal } from '@preact/signals'
 
 export const activeIdeFile = signal<string>('package.json')
+
+export interface IdeContextFocus {
+  readonly file_path: string
+  readonly line?: number
+  readonly surface: string
+  readonly label: string
+  readonly source_id: string
+  readonly keeper_id?: string
+  readonly activated_at_ms: number
+}
+
+export const ideContextFocus = signal<IdeContextFocus | null>(null)
+
+export function focusIdeContextAnchor(
+  anchor: Omit<IdeContextFocus, 'activated_at_ms'>,
+): void {
+  const filePath = anchor.file_path.trim()
+  if (filePath === '') return
+  activeIdeFile.value = filePath
+  ideContextFocus.value = {
+    ...anchor,
+    file_path: filePath,
+    activated_at_ms: Date.now(),
+  }
+}

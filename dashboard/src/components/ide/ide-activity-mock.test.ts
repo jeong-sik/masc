@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { waitFor } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { IdeActivityMock } from './ide-activity-mock'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  ideContextFocus.value = null
+  activeIdeFile.value = 'package.json'
 })
 
 describe('IdeActivityMock', () => {
@@ -75,6 +78,19 @@ describe('IdeActivityMock', () => {
       expect(container.textContent).toContain('task task-runtime')
       expect(container.textContent).toContain('PR 15000')
       expect(container.textContent).toContain('1 line anchors')
+    })
+
+    const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
+    expect(jump?.textContent).toContain('runtime.ml:4')
+    fireEvent.click(jump!)
+
+    expect(activeIdeFile.value).toBe('lib/runtime.ml')
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 4,
+      surface: 'PR',
+      keeper_id: 'sangsu',
+      source_id: 'evt-1',
     })
   })
 })

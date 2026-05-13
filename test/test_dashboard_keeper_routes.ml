@@ -1309,13 +1309,14 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   write_keeper_toml_fixture ~config_root ~keeper_name:seeded_keeper_name;
   with_seeded_server
     ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
-  @@ fun ~port ~config:_ ~admin_token ~keeper_name ->
+  @@ fun ~port ~config ~admin_token ~keeper_name ->
   check string "fixture keeper name" seeded_keeper_name keeper_name;
   let boot_path = Printf.sprintf "/api/v1/keepers/%s/boot" keeper_name in
   let boot_result =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper" 200 boot_result;
+  wait_for_boot_receipt_side_effects config ~keeper_name;
   let before =
     run_curl_get ~port ~path:"/api/v1/cascade/config" ()
   in

@@ -1,7 +1,7 @@
 /* global React, MASC_P2 */
 const { useState, useMemo, useEffect, useRef } = React;
 
-const PLANES = ["Dashboard", "Work", "Comms", "Observe", "Cognition", "IDE"];
+const PLANES = ["Dashboard", "Work", "Comms", "Observe", "Cognition", "Crew", "IDE"];
 
 // ============== Topbar ==============
 function Topbar({ goal, goals, mode, setMode, density, setDensity, branch, setBranch }) {
@@ -306,6 +306,17 @@ function kpiCollect(D) {
 // ============== KPI Strip ==============
 const VISIBLE_KPI_LIMIT = 5;
 
+// Sibling helper for keyboard activation on role="button" divs. Mirrors the
+// definition in Panels.jsx; duplicated locally so KpiStrip does not depend on
+// script load order (Panels.jsx loads after Chrome.jsx in index.html).
+const kpiActivateOnKey = (handler) => (e) => {
+  if (e.target !== e.currentTarget) return;
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    handler();
+  }
+};
+
 function KpiStrip() {
   const [col, toggle] = (window.useCollapsed ? window.useCollapsed("kpi") : [false, () => {}]);
   const stats = kpiCollect(window.MASC_DATA || {});
@@ -340,21 +351,12 @@ function KpiStrip() {
       <div
         className="kpi-collapse-tab"
         onClick={toggle}
-        onKeyDown={(e) => {
-          if (
-            e.target !== e.currentTarget &&
-            e.target.closest &&
-            e.target.closest("a,button,input,textarea,select")
-          ) return;
-          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-            e.preventDefault();
-            toggle();
-          }
-        }}
-        title={col ? "expand KPI" : "collapse KPI"}
+        onKeyDown={kpiActivateOnKey(toggle)}
         role="button"
         tabIndex={0}
-        aria-expanded={!col}>
+        aria-label={col ? "expand KPI" : "collapse KPI"}
+        aria-expanded={!col}
+        title={col ? "expand KPI" : "collapse KPI"}>
         {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : visibleMetricCount + "/" + totalMetricCount) : "▾"}
         {!col && (
           <a className="wx-popout"
@@ -376,14 +378,35 @@ function KpiStrip() {
 }
 
 // ============== Lifeline ==============
+const normalizeLifeKind = kind => ({
+  err: "fail",
+  fail: "fail",
+  flag: "cascade",
+  cascade: "cascade",
+  tool: "nudge",
+  note: "nudge",
+  nudge: "nudge",
+  claim: "claim",
+  verify: "verify",
+}[kind] || "nudge");
+const lifeKindY = kind => (
+  kind === "fail" ? 2 :
+  kind === "cascade" ? 4 :
+  kind === "nudge" ? 6 :
+  kind === "claim" || kind === "verify" ? 8 :
+  6
+);
+const lifeKindColor = kind => (
+  kind === "fail" ? "var(--err-fg)" :
+  kind === "cascade" ? "var(--info-fg)" :
+  kind === "nudge" ? "var(--brass-1)" :
+  "var(--ok-fg)"
+);
+
 function Lifeline() {
   const [col, toggleLife] = (window.useCollapsed ? window.useCollapsed("lifeline") : [false, () => {}]);
   // Build a heartbeat trace from real keeper events instead of pure sin wave.
   // Each event becomes a peak; baseline runs flat.
-  // Map seed event kinds to lifeline peak levels:
-  //   err → fail (y=2)  |  flag → cascade (y=4)
-  //   note/tool → nudge (y=6)  |  verify → claim (y=8)
-  const _kindMap = { err:"fail", flag:"cascade", note:"nudge", tool:"nudge", verify:"claim" };
   const D = window.MASC_DATA || {};
   const events = (D.events || []).slice(0, 24);
   const N = 120;
@@ -391,23 +414,20 @@ function Lifeline() {
   // Map events to x positions (most recent on right).
   const eventX = events.map((e, i) => Math.floor(N - 1 - (i * (N-2) / Math.max(events.length-1,1))));
   const eventKind = {};
-  events.forEach((e, i) => { eventKind[eventX[i]] = _kindMap[e.kind] || "nudge"; });
+  events.forEach((e, i) => { eventKind[eventX[i]] = normalizeLifeKind(e.kind); });
   for (let i = 0; i < N; i++) {
     const x = (i / (N-1)) * 600;
     const base = 12;
     let y = base + Math.sin(i * 0.18) * 0.5;
     const k = eventKind[i];
-    if (k === "fail")     y = 2;
-    else if (k === "cascade") y = 4;
-    else if (k === "nudge")   y = 6;
-    else if (k === "claim")   y = 8;
+    if (k) y = lifeKindY(k);
     pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
   const d = "M" + pts.join(" L");
   // Render event markers as small dots.
   const markers = events.slice(0, 8).map((e, i) => ({
     x: (eventX[i] / (N-1)) * 600,
-    kind: _kindMap[e.kind] || "nudge",
+    kind: normalizeLifeKind(e.kind),
     keeper: e.keeper,
   }));
   return (
@@ -416,19 +436,17 @@ function Lifeline() {
         type="button"
         className="life-label"
         onClick={toggleLife}
-        title={col ? "expand lifeline" : "collapse lifeline"}
         aria-expanded={!col}
-        aria-controls="cockpit-lifeline-trace"
-        style={{ cursor:"pointer", background:"none", border:0, padding:0 }}>
+        aria-controls="life-trace"
+        title={col ? "expand lifeline" : "collapse lifeline"}>
         {col ? "▸" : "▾"} Lifeline · 60s
       </button>
-      <div className="life-trace" id="cockpit-lifeline-trace">
+      <div className="life-trace" id="life-trace">
         <svg viewBox="0 0 600 20" preserveAspectRatio="none">
           <path d={d} stroke="var(--color-accent-fg)" strokeWidth="1" fill="none" />
           {markers.map((m, i) => (
-            <circle key={i} cx={m.x}
-              cy={m.kind === "fail" ? 2 : m.kind === "cascade" ? 4 : m.kind === "claim" ? 8 : 6} r="1.6"
-              fill={m.kind === "fail" ? "var(--err-fg)" : m.kind === "cascade" ? "var(--info-fg)" : m.kind === "nudge" ? "var(--brass-1)" : "var(--ok-fg)"} />
+            <circle key={i} cx={m.x} cy={lifeKindY(m.kind)} r="1.6"
+              fill={lifeKindColor(m.kind)} />
           ))}
         </svg>
       </div>

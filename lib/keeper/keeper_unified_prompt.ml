@@ -151,17 +151,21 @@ let resolve_turn_intent_block substitutions =
       else
         rendered
   | Error msg ->
-      observe_turn_intent_render_failure msg;
       let raw =
         String.trim (Prompt_registry.get_prompt Keeper_prompt_names.turn_intent)
       in
       if String.equal raw "" then
-        fallback_turn_intent_block "raw prompt was empty after render failure"
+        fallback_turn_intent_block
+          (Printf.sprintf "%s; raw prompt was empty after render failure" msg)
       else if contains_template_placeholder raw then
         fallback_turn_intent_block
-          "raw prompt still contained template placeholders after render failure"
-      else
-        raw
+          (Printf.sprintf
+             "%s; raw prompt still contained template placeholders after render \
+              failure"
+             msg)
+      else (
+        observe_turn_intent_render_failure msg;
+        raw)
 
 let autonomous_trigger_lines
     ~(decision : Keeper_world_observation.keeper_cycle_decision)

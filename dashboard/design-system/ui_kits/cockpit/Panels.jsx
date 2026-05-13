@@ -60,7 +60,7 @@ function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal,
         role="button"
         tabIndex={0}
         aria-label="Expand sidebar"
-        aria-expanded="false"
+        aria-expanded={false}
         title="expand sidebar">
         <div className="wx-rail-vlabel">FLEET · GOALS</div>
       </aside>

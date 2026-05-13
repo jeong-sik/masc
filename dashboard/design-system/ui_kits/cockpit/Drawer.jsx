@@ -124,8 +124,11 @@ function OutputPanel() {
 }
 
 function CascadePanel() {
-  const D = window.MASC_DATA || {};
-  const cascades = (D.cascade && Array.isArray(D.cascade) ? D.cascade : []).slice(0, 6);
+  // Cascade run history lives in MASC_P2.cascadeAudit; MASC_DATA.cascade is a
+  // single-object summary used elsewhere and would always evaluate to "no
+  // cascades yet" here.  Match the schema used by cb-group-{f,k}.jsx.
+  const P2 = window.MASC_P2 || {};
+  const cascades = (Array.isArray(P2.cascadeAudit) ? P2.cascadeAudit : []).slice(0, 6);
   return (
     <div className="dr-cascade">
       <div className="dr-cascade-bar">
@@ -138,14 +141,14 @@ function CascadePanel() {
           <div key={i} className="dr-csc">
             <div className="dr-csc-h">
               <span className="id">{c.id || ("csc-" + i)}</span>
-              <span className="prompt">{c.prompt || "(no prompt)"}</span>
+              <span className="prompt">{c.trigger || c.prompt || c.cascade || "(no prompt)"}</span>
               <span className={"out " + (c.outcome === "ok" ? "ok" : "fail")}>{c.outcome || "—"}</span>
             </div>
             <div className="dr-csc-hops">
               {(c.hops || []).map((h, hi) => (
                 <span key={hi} className={"hop " + (h.status || "")}>
                   <span className="ix">{hi + 1}</span>
-                  <span className="prov">{h.provider || h.name}</span>
+                  <span className="prov">{h.model || h.provider || h.name || "—"}</span>
                   <span className="ms">{h.latency_ms || h.ms || "—"}ms</span>
                 </span>
               ))}
@@ -369,9 +372,18 @@ function Drawer() {
   if (window.__drawerHotkey) return;
   window.__drawerHotkey = true;
 
-  // ctrl/cmd + ` toggles open/closed
+  // ctrl/cmd + ` toggles open/closed.  Skip when the user is typing in an
+  // editable surface so the hotkey does not hijack backtick entry inside
+  // inputs/textareas/contenteditable nodes (e.g. Markdown code spans).
+  const isEditableTarget = (target) => {
+    if (!target || target.nodeType !== 1) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  };
   document.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "`") {
+      if (isEditableTarget(e.target)) return;
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("masc-drawer-toggle"));
     }

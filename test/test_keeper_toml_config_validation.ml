@@ -396,7 +396,7 @@ let test_resolve_model_strings_reads_declarative_profile () =
 let test_cascade_profile_metadata_from_toml () =
   with_temp_config_dir minimal_cascade_profile_metadata_toml
   @@ fun ~config_root:_ ~cascade_path:_ ->
-  check (list string) "keeper assignable catalog" ["primary"]
+  check (list string) "keeper assignable catalog" ["backup"; "primary"]
     (Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ());
   check bool "rerank route is system-only" true
     (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "llm_rerank");
@@ -404,6 +404,113 @@ let test_cascade_profile_metadata_from_toml () =
     (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "scoring");
   check (option string) "primary fallback hint" (Some "backup")
     (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for "primary")
+
+let test_cascade_name_accepts_unrouted_assignable_catalog_entry () =
+  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  @@ fun ~config_root:_ ~cascade_path:_ ->
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"backup\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> ()
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "unrouted keeper-assignable catalog entry should be accepted: %s"
+           e)
+
+let test_fallback_cascade_preserves_qualified_source_profile () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.mid]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.slow]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.primary]
+tiers = ["mid", "slow"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.alt]
+tiers = ["primary", "mid"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.primary"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  check (option string) "public primary resolves as tier-group.primary"
+    (Some "slow")
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for
+       ~config_path:cascade_path "primary");
+  check (option string) "qualified tier.primary keeps tier edge"
+    (Some "mid")
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for
+       ~config_path:cascade_path "tier.primary")
+
+let test_catalog_validator_surfaces_adapter_errors () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[tier.broken]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[routes.keeper_turn]
+target = "tier.broken"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  let issues =
+    Masc_mcp.Cascade_catalog_validator.diagnose_catalog
+      ~config_path:cascade_path
+  in
+  let has_adapter_error =
+    List.exists
+      (fun (issue : Masc_mcp.Cascade_catalog_validator.issue) ->
+         match issue.severity with
+         | Masc_mcp.Cascade_catalog_validator.Catalog_warn -> false
+         | Masc_mcp.Cascade_catalog_validator.Catalog_error ->
+             contains
+               ~needle:"Declarative cascade adapter error"
+               issue.message
+             && contains ~needle:"Binding_resolution_failed" issue.message)
+      issues
+  in
+  check bool "adapter error is surfaced as catalog error" true has_adapter_error
 
 let test_cascade_name_rejects_system_only_catalog_entry () =
   with_temp_config_dir minimal_cascade_profile_metadata_toml
@@ -546,6 +653,12 @@ let () =
             test_resolve_model_strings_reads_declarative_profile;
           test_case "derives profile metadata from cascade.toml" `Quick
             test_cascade_profile_metadata_from_toml;
+          test_case "accepts unrouted assignable catalog entry" `Quick
+            test_cascade_name_accepts_unrouted_assignable_catalog_entry;
+          test_case "fallback preserves qualified source profile" `Quick
+            test_fallback_cascade_preserves_qualified_source_profile;
+          test_case "surfaces declarative adapter errors" `Quick
+            test_catalog_validator_surfaces_adapter_errors;
           test_case "rejects system-only catalog entry" `Quick
             test_cascade_name_rejects_system_only_catalog_entry;
           test_case "accepts dispatch tool_access preset" `Quick

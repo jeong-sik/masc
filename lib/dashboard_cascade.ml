@@ -66,6 +66,10 @@ let public_cascade_profile_name name =
     name
 ;;
 
+let public_profile_names names =
+  names |> List.map public_cascade_profile_name |> List.sort_uniq String.compare
+;;
+
 let public_invalid_profiles profiles =
   profiles
   |> List.map (fun (name, errors) -> (public_cascade_profile_name name, errors))

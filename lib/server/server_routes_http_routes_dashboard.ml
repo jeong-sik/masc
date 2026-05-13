@@ -16,36 +16,6 @@ type cascade_profile_gate = {
   invalid_profiles : (string * string list) list;
 }
 
-let public_cascade_profile_name name =
-  let tier_group_prefix = "tier-group." in
-  let tier_prefix = "tier." in
-  if String.starts_with ~prefix:tier_group_prefix name then
-    String.sub name (String.length tier_group_prefix)
-      (String.length name - String.length tier_group_prefix)
-  else if String.starts_with ~prefix:tier_prefix name then
-    String.sub name (String.length tier_prefix)
-      (String.length name - String.length tier_prefix)
-  else
-    name
-
-let public_profile_names names =
-  names |> List.map public_cascade_profile_name |> List.sort_uniq String.compare
-
-let public_invalid_profiles profiles =
-  profiles
-  |> List.map (fun (name, errors) -> (public_cascade_profile_name name, errors))
-  |> List.fold_left
-       (fun acc (name, errors) ->
-         let prior =
-           match List.assoc_opt name acc with
-           | Some prior -> prior
-           | None -> []
-         in
-         (name, prior @ errors) :: List.remove_assoc name acc)
-       []
-  |> List.map (fun (name, errors) -> (name, List.sort_uniq String.compare errors))
-  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
-
 let cascade_profile_gate () : cascade_profile_gate =
   let config_path = Cascade_runtime.cascade_config_path () in
   let keeper_profiles =
@@ -61,9 +31,12 @@ let cascade_profile_gate () : cascade_profile_gate =
   in
   match Cascade_catalog_runtime.known_profile_names () with
   | Ok validated_profiles ->
-      let validated_profiles = public_profile_names validated_profiles in
+      let validated_profiles =
+        Dashboard_cascade.public_profile_names validated_profiles
+      in
       let invalid_profiles =
-        Cascade_catalog_runtime.invalid_profile_errors () |> public_invalid_profiles
+        Cascade_catalog_runtime.invalid_profile_errors ()
+        |> Dashboard_cascade.public_invalid_profiles
       in
       let valid_profiles =
         let filtered =
@@ -77,7 +50,9 @@ let cascade_profile_gate () : cascade_profile_gate =
       Log.Keeper.warn
         "cascade_profile_gate: validated runtime snapshot unavailable: %s"
         detail;
-      let invalid_profiles = public_invalid_profiles fallback_invalid_profiles in
+      let invalid_profiles =
+        Dashboard_cascade.public_invalid_profiles fallback_invalid_profiles
+      in
       let invalid_names = List.map fst invalid_profiles in
       let valid_profiles =
         keeper_profiles

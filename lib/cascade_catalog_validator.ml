@@ -40,10 +40,36 @@ let split_provider_model (s : string) : (string * string) option =
         in
         if model_id = "" then None else Some (provider_name, model_id)
 
-let declarative_snapshot_for_config_path config_path =
-  match Cascade_declarative_hotpath.try_load_declarative config_path with
-  | Some (Ok snapshot) -> Some snapshot
-  | Some (Error _) | None -> None
+type declarative_diagnostics = {
+  snapshot : Cascade_declarative_hotpath.decl_snapshot option;
+  adapter_errors : Cascade_declarative_adapter.adapter_error list;
+}
+
+let declarative_diagnostics_for_config_path config_path =
+  match Cascade_declarative_parser.parse_file config_path with
+  | Error _ -> { snapshot = None; adapter_errors = [] }
+  | Ok cfg ->
+      let catalog = Cascade_declarative_adapter.adapt_config cfg in
+      {
+        snapshot =
+          Cascade_declarative_hotpath.adapted_catalog_to_snapshot
+            ~source_path:config_path catalog;
+        adapter_errors = catalog.errors;
+      }
+
+let adapter_error_issues ~config_path errors =
+  errors
+  |> List.map Cascade_declarative_adapter.show_adapter_error
+  |> List.sort_uniq String.compare
+  |> List.map (fun message ->
+         {
+           profile = None;
+           severity = Catalog_error;
+           message =
+             Printf.sprintf
+               "Declarative cascade adapter error in %s: %s"
+               config_path message;
+         })
 
 let assoc_opt key = function
   | `Assoc fields -> List.assoc_opt key fields
@@ -270,41 +296,47 @@ let snapshot_profile_for ~config_path ~profile =
          snapshot.profiles
      | _ -> None)
 
-let diagnose_profile ~emit_telemetry ~config_path ~profile =
+let runtime_profile_of_declarative_profile
+    (p : Cascade_declarative_hotpath.profile) =
+  let candidates =
+    List.map
+      (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+         { Cascade_catalog_runtime.model_string = candidate.model_string
+         ; provider_cfg = candidate.provider_cfg
+         })
+      p.candidates
+  in
+  { Cascade_catalog_runtime.name = p.name
+  ; weighted_entries = p.weighted_entries
+  ; inference_params = p.inference_params
+  ; api_key_env_overrides = []
+  ; strategy = p.strategy
+  ; ollama_max_concurrent = p.ollama_max_concurrent
+  ; cli_max_concurrent = p.cli_max_concurrent
+  ; candidates
+  ; probes = []
+  ; required_capability_profile = None
+  }
+
+let profile_from_declarative_snapshot snapshot ~profile =
+  List.find_opt
+    (fun (p : Cascade_declarative_hotpath.profile) ->
+       String.equal p.name profile)
+    snapshot.Cascade_declarative_hotpath.profiles
+  |> Option.map runtime_profile_of_declarative_profile
+
+let diagnose_profile ~declarative_snapshot ~emit_telemetry ~config_path ~profile =
   let (_ : bool) = emit_telemetry in
   let snapshot_profile =
     match snapshot_profile_for ~config_path ~profile with
     | Some _ as value -> value
     | None ->
-      (match declarative_snapshot_for_config_path config_path with
-       | None -> None
-       | Some snapshot ->
-         List.find_opt
-           (fun (p : Cascade_declarative_hotpath.profile) ->
-              String.equal p.name profile)
-           snapshot.profiles
-         |> Option.map
-              (fun (p : Cascade_declarative_hotpath.profile) ->
-                 let candidates =
-                   List.map
-                     (fun (candidate : Cascade_declarative_hotpath.candidate) ->
-                        { Cascade_catalog_runtime.model_string =
-                            candidate.model_string
-                        ; provider_cfg = candidate.provider_cfg
-                        })
-                     p.candidates
-                 in
-                 { Cascade_catalog_runtime.name = p.name
-                 ; weighted_entries = p.weighted_entries
-                 ; inference_params = p.inference_params
-                 ; api_key_env_overrides = []
-                 ; strategy = p.strategy
-                 ; ollama_max_concurrent = p.ollama_max_concurrent
-                 ; cli_max_concurrent = p.cli_max_concurrent
-                 ; candidates
-                 ; probes = []
-                 ; required_capability_profile = None
-                 }))
+      (match declarative_snapshot with
+       | Some snapshot -> profile_from_declarative_snapshot snapshot ~profile
+       | None ->
+           let diagnostics = declarative_diagnostics_for_config_path config_path in
+           Option.bind diagnostics.snapshot (fun snapshot ->
+             profile_from_declarative_snapshot snapshot ~profile))
   in
   let model_specs =
     match snapshot_profile with
@@ -394,9 +426,19 @@ let diagnose_catalog_impl ~emit_telemetry ~config_path =
         };
       ]
   | Ok json ->
-      discover_profiles_from_materialized_json json
-      |> List.concat_map (fun profile ->
-        diagnose_profile ~emit_telemetry ~config_path ~profile)
+      let declarative_diagnostics =
+        declarative_diagnostics_for_config_path config_path
+      in
+      let profile_issues =
+        discover_profiles_from_materialized_json json
+        |> List.concat_map (fun profile ->
+          diagnose_profile
+            ~declarative_snapshot:declarative_diagnostics.snapshot
+            ~emit_telemetry ~config_path ~profile)
+      in
+      adapter_error_issues
+        ~config_path declarative_diagnostics.adapter_errors
+      @ profile_issues
 
 let diagnose_catalog ~config_path =
   diagnose_catalog_impl ~emit_telemetry:true ~config_path

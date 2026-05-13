@@ -21,7 +21,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class AxisRisk:
         )
 
 
-def _run_gh(args: List[str]) -> dict:
+def _run_gh(args: List[str]) -> Any:
     """Run gh cli and return JSON output."""
     result = subprocess.run(
         ["gh", "api"] + args,

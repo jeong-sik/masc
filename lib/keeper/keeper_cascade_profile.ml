@@ -46,9 +46,14 @@ type runtime_name = Cascade_ref.runtime_name = Runtime_name of string
 
 let runtime_name_to_string = Cascade_ref.runtime_name_to_string
 
+let tier_group_prefix = "tier-group."
+let tier_prefix = "tier."
+
+let is_qualified_profile_name name =
+  String.starts_with ~prefix:tier_group_prefix name
+  || String.starts_with ~prefix:tier_prefix name
+
 let strip_declarative_profile_prefix name =
-  let tier_group_prefix = "tier-group." in
-  let tier_prefix = "tier." in
   if String.starts_with ~prefix:tier_group_prefix name then
     String.sub name (String.length tier_group_prefix)
       (String.length name - String.length tier_group_prefix)
@@ -56,6 +61,9 @@ let strip_declarative_profile_prefix name =
     String.sub name (String.length tier_prefix)
       (String.length name - String.length tier_prefix)
   else name
+
+let qualified_tier_name name = tier_prefix ^ name
+let qualified_tier_group_name name = tier_group_prefix ^ name
 
 let public_names_of_declarative_snapshot snapshot =
   Cascade_declarative_hotpath.decl_snapshot_profile_names snapshot
@@ -126,16 +134,26 @@ let catalog_names_for_validation ?config_path () =
   | Some path -> declarative_public_catalog_names ~config_path:path ()
 
 type catalog_metadata = {
+  qualified_names : string list;
   public_names : string list;
   keeper_assignable_names : string list;
   system_names : string list;
   fallback_hints : (string * string) list;
 }
 
-let public_name_of_tier name = strip_declarative_profile_prefix ("tier." ^ name)
-
 let public_name_of_target target =
   strip_declarative_profile_prefix (String.trim target)
+
+let profile_is_keeper_assignable = function
+  | Some false -> false
+  | None | Some true -> true
+
+let qualified_name_for_public meta public_name =
+  let group_name = qualified_tier_group_name public_name in
+  let tier_name = qualified_tier_name public_name in
+  if List.mem group_name meta.qualified_names then group_name
+  else if List.mem tier_name meta.qualified_names then tier_name
+  else public_name
 
 let catalog_metadata_result ?config_path () =
   let path_opt =
@@ -157,47 +175,34 @@ let catalog_metadata_result ?config_path () =
           in
           Error ("declarative cascade catalog invalid: " ^ rendered)
       | Ok cfg ->
-          let tier_names =
+          let tier_profiles =
             cfg.tiers
             |> List.map (fun (tier : Cascade_declarative_types.cascade_tier) ->
-                   public_name_of_tier tier.name)
+                   (qualified_tier_name tier.name, tier.keeper_assignable))
           in
-          let tier_group_names =
+          let tier_group_profiles =
             cfg.tier_groups
             |> List.map
                  (fun (group : Cascade_declarative_types.cascade_tier_group) ->
-                   public_name_of_target ("tier-group." ^ group.name))
+                    ( qualified_tier_group_name group.name
+                    , group.keeper_assignable ))
+          in
+          let profile_assignability = tier_profiles @ tier_group_profiles in
+          let qualified_names =
+            profile_assignability
+            |> List.map fst
+            |> List.sort_uniq String.compare
           in
           let public_names =
-            tier_names @ tier_group_names |> List.sort_uniq String.compare
-          in
-          let profile_assignability =
-            (cfg.tiers
-             |> List.map (fun (tier : Cascade_declarative_types.cascade_tier) ->
-                    (public_name_of_tier tier.name, tier.keeper_assignable)))
-            @
-            (cfg.tier_groups
-             |> List.map
-                  (fun (group : Cascade_declarative_types.cascade_tier_group) ->
-                    ( public_name_of_target ("tier-group." ^ group.name)
-                    , group.keeper_assignable )))
-          in
-          let profile_is_keeper_assignable name =
-            not
-              (List.exists
-                 (fun (profile_name, assignable) ->
-                   String.equal profile_name name
-                   && Option.equal Bool.equal assignable (Some false))
-                 profile_assignability)
+            qualified_names
+            |> List.map strip_declarative_profile_prefix
+            |> List.sort_uniq String.compare
           in
           let keeper_assignable_names =
-            cfg.routes
-            |> List.filter_map
-                 (fun (route : Cascade_declarative_types.cascade_route) ->
-                   let target = public_name_of_target route.target in
-                   if List.mem target public_names
-                      && profile_is_keeper_assignable target
-                   then Some target
+            profile_assignability
+            |> List.filter_map (fun (qualified_name, assignable) ->
+                   if profile_is_keeper_assignable assignable
+                   then Some (strip_declarative_profile_prefix qualified_name)
                    else None)
             |> List.sort_uniq String.compare
           in
@@ -209,18 +214,19 @@ let catalog_metadata_result ?config_path () =
           let fallback_hints =
             cfg.tier_groups
             |> List.concat_map
-                 (fun (group : Cascade_declarative_types.cascade_tier_group) ->
+                (fun (group : Cascade_declarative_types.cascade_tier_group) ->
                    if (not group.fallback) || List.length group.tiers < 2
                    then []
                    else
                      let group_name =
-                       public_name_of_target ("tier-group." ^ group.name)
+                       qualified_tier_group_name group.name
                      in
                      let tier_edges =
                        let rec loop acc = function
                          | current :: ((next :: _) as rest) ->
                              loop
-                               ((public_name_of_tier current, public_name_of_tier next)
+                               (( qualified_tier_name current
+                                , qualified_tier_name next )
                                 :: acc)
                                rest
                          | [] | [_] -> List.rev acc
@@ -229,29 +235,30 @@ let catalog_metadata_result ?config_path () =
                      in
                      match group.tiers with
                      | _first :: next :: _ ->
-                         (group_name, public_name_of_tier next) :: tier_edges
+                         (group_name, qualified_tier_name next) :: tier_edges
                      | [] | [_] -> tier_edges)
             |> List.filter (fun (source, target) ->
                    (not (String.equal source target))
-                   && List.mem source public_names
-                   && List.mem target public_names)
+                   && List.mem source qualified_names
+                   && List.mem target qualified_names)
           in
           Ok
             {
+              qualified_names;
               public_names;
               keeper_assignable_names;
               system_names;
               fallback_hints;
             })
 
-let normalized_query_name ?config_path raw =
+let routed_query_target ?config_path raw =
   let trimmed = String.trim raw in
-  let routed =
-    match logical_use_of_string_opt trimmed with
-    | Some use -> cascade_name_for_use ?config_path use
-    | None -> trimmed
-  in
-  public_name_of_target routed
+  match logical_use_of_string_opt trimmed with
+  | Some use -> cascade_name_for_use ?config_path use
+  | None -> trimmed
+
+let normalized_query_name ?config_path raw =
+  routed_query_target ?config_path raw |> public_name_of_target
 
 let is_system_only_cascade raw =
   let name = normalized_query_name raw in
@@ -261,9 +268,8 @@ let is_system_only_cascade raw =
 
 let keeper_catalog_names ?config_path () =
   match catalog_metadata_result ?config_path () with
-  | Ok meta when meta.keeper_assignable_names <> [] ->
-      meta.keeper_assignable_names
-  | Ok _ | Error _ -> catalog_names ?config_path ()
+  | Ok meta -> meta.keeper_assignable_names
+  | Error _ -> catalog_names ?config_path ()
 
 let system_catalog_names ?config_path () =
   match catalog_metadata_result ?config_path () with
@@ -276,26 +282,33 @@ let logged_invalid_fallback : (string * string, unit) Hashtbl.t =
   Hashtbl.create 4
 
 let fallback_cascade_for ?config_path name =
-  let trimmed_name = normalized_query_name ?config_path name in
-  if String.equal trimmed_name "" then None
+  let public_name = normalized_query_name ?config_path name in
+  if String.equal public_name "" then None
   else
     match catalog_metadata_result ?config_path () with
     | Error _ -> None
     | Ok meta -> (
-        match List.assoc_opt trimmed_name meta.fallback_hints with
+        let qualified_name =
+          let routed = routed_query_target ?config_path name |> String.trim in
+          if is_qualified_profile_name routed
+          then routed
+          else qualified_name_for_public meta public_name
+        in
+        match List.assoc_opt qualified_name meta.fallback_hints with
         | None -> None
-        | Some target ->
-            if String.equal target trimmed_name then None
-            else if List.mem target meta.public_names then Some target
+        | Some qualified_target ->
+            let target = public_name_of_target qualified_target in
+            if String.equal target public_name then None
+            else if List.mem qualified_target meta.qualified_names then Some target
             else begin
               Cascade_metrics.on_fallback_hint_invalid ();
-              let key = (trimmed_name, target) in
+              let key = (qualified_name, qualified_target) in
               if not (Hashtbl.mem logged_invalid_fallback key) then begin
                 Hashtbl.add logged_invalid_fallback key ();
                 Log.Misc.warn
                   "[CascadeConfig] profile %s declares fallback hint %s \
                    which is not in the live catalog; ignoring hint"
-                  trimmed_name target
+                  qualified_name qualified_target
               end;
               None
             end)

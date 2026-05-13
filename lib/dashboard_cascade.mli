@@ -49,6 +49,20 @@
     @since 0.6.0 *)
 val config_json : unit -> Yojson.Safe.t
 
+(** Public profile display name for dashboard surfaces. Declarative
+    runtime names such as ["tier.primary"] and ["tier-group.primary"]
+    are rendered as ["primary"] for operator-facing JSON and route
+    payloads. *)
+val public_cascade_profile_name : string -> string
+
+val public_profile_names : string list -> string list
+(** Apply {!public_cascade_profile_name}, then sort and deduplicate. *)
+
+val public_invalid_profiles :
+  (string * string list) list -> (string * string list) list
+(** Normalize profile names in validation errors and merge duplicate
+    public names while preserving the associated error messages. *)
+
 (** Raw cascade TOML payload from the active resolved config root.
 
     Shape:

@@ -90,11 +90,26 @@ let load_hints () =
     { hints = []; config_drift_marker = Some tool_hints_config_drift_marker }
 ;;
 
-(* Deferred until first use so module load does not require the TOML file to
-   exist at link time (e.g. for executables that never render keeper prompts).
-   First [Lazy.force] must be sequentially serialized — masc-mcp's Eio
-   single-domain model satisfies this. *)
-let hint_inventory : hint_inventory Lazy.t = lazy (load_hints ())
+(* Cache *successful* loads only.  A persistent [Lazy.t] would freeze a
+   transient startup-time failure (partial mount, operator fix-in-place,
+   etc.) for the lifetime of the process — operators restoring the TOML
+   would never see the hints reappear until a restart.  Instead we keep a
+   ref that records the last successful inventory; on each access we re-run
+   [load_hints] when no cached success exists, which lets recovery happen
+   automatically the next render after the file becomes valid.  Single-Eio-
+   domain serialization makes the ref safe without a mutex; TOML parse cost
+   on a broken file is the same as the alarm itself (~ms). *)
+let hint_inventory_cache : hint_inventory option ref = ref None
+
+let get_hint_inventory () =
+  match !hint_inventory_cache with
+  | Some inv when Option.is_none inv.config_drift_marker -> inv
+  | _ ->
+    let inv = load_hints () in
+    if Option.is_none inv.config_drift_marker
+    then hint_inventory_cache := Some inv;
+    inv
+;;
 
 let fallback_prose key =
   if String.equal key Keeper_prompt_names.tool_preferred_header
@@ -182,13 +197,13 @@ let allowed_hints ~allowed_tool_names =
   let allowed = allowed_lookup allowed_tool_names in
   List.filter
     (fun hint -> Hashtbl.mem allowed hint.name)
-    (Lazy.force hint_inventory).hints
+    (get_hint_inventory ()).hints
 ;;
 
 let line_of_hint hint = Printf.sprintf "  - %s - %s" hint.call hint.description
 
 let render_preferred_tools ~allowed_tool_names =
-  let config_drift_marker = (Lazy.force hint_inventory).config_drift_marker in
+  let config_drift_marker = (get_hint_inventory ()).config_drift_marker in
   let lines = allowed_hints ~allowed_tool_names |> List.map line_of_hint in
   match lines with
   | [] ->

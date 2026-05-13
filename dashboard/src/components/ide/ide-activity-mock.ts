@@ -220,7 +220,8 @@ function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void 
     const match = value.match(/^(.+?)(?::([1-9][0-9]*))?$/)
     const path = match?.[1]
     const normalizedPath = path ? normalizeIdeContextFilePath(path) : null
-    if (normalizedPath) next.file_path = normalizedPath
+    if (!normalizedPath) return
+    next.file_path = normalizedPath
     if (match?.[2]) next.line = Number.parseInt(match[2], 10)
     return
   }

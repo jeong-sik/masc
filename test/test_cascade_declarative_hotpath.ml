@@ -17,6 +17,12 @@ module Adapter = Masc_mcp.Cascade_declarative_adapter
 module Hotpath = Masc_mcp.Cascade_declarative_hotpath
 module Cascade_strategy = Masc_mcp.Cascade_strategy
 
+(* OCaml stdlib's Unix module does not expose [unsetenv] in 5.4.1; use the
+   shared C stub wired through [masc_test_deps] (test/deps/test_env_stubs.c),
+   following the existing pattern in test_board_moderation.ml and
+   test_cascade_attempt_liveness_config.ml. *)
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 (* --- Helpers --- *)
 
 let adapt_toml (toml : string) : Adapter.adapted_catalog =
@@ -48,7 +54,7 @@ let with_env name value f =
       (* Unix.putenv name "" would leave [name] present-but-empty, so
          Sys.getenv_opt checks that distinguish unset from empty would
          see a different shape than before with_env ran. *)
-      | None -> Unix.unsetenv name)
+      | None -> unsetenv name)
     f
 
 let with_temp_cascade_config toml f =

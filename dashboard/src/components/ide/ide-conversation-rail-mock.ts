@@ -24,7 +24,7 @@ import {
   type AuditReplayEvent,
 } from './audit-replay-slider'
 import { publishIdeConversationThreads } from './ide-context-bridge'
-import { activeIdeFile } from './ide-state'
+import { activeIdeFile, focusIdeContextAnchor } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
@@ -264,6 +264,7 @@ export function IdeConversationRailMock() {
               nextFocusedId => setFocusedId(focusedId === nextFocusedId ? null : nextFocusedId),
               entries,
               overlay,
+              activeFile,
             ))}
       </ol>
     </div>
@@ -365,6 +366,7 @@ function ReplayRailCard(
   onFocus: (id: string) => void,
   entries: ReadonlyArray<KeeperPresenceEntry>,
   overlay: KeeperCursorOverlay,
+  activeFile: string,
 ) {
   if (item.source === 'thread') {
     return PostCard(
@@ -373,6 +375,7 @@ function ReplayRailCard(
       () => onFocus(item.post.id),
       entries,
       overlay,
+      activeFile,
     )
   }
   if (item.source === 'decision') {
@@ -387,6 +390,7 @@ function PostCard(
   onFocus: () => void,
   entries: ReadonlyArray<KeeperPresenceEntry>,
   overlay: KeeperCursorOverlay,
+  activeFile: string,
 ) {
   const kind = boardKindFromPost(post)
   const kindColor = KIND_TOKEN[kind]
@@ -399,6 +403,8 @@ function PostCard(
   const cursor = overlay.cursors.get(post.author_identity)
   const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
+  const thread = postToAnchoredThread(post, activeFile)
+  const anchor = thread?.anchor ?? null
 
   return html`
     <li class="ide-rail-item">
@@ -406,7 +412,18 @@ function PostCard(
         class="ide-conversation-card"
         type="button"
         aria-current=${focused ? 'true' : undefined}
-        onClick=${onFocus}
+        onClick=${() => {
+          onFocus()
+          if (!anchor) return
+          focusIdeContextAnchor({
+            file_path: anchor.file_path,
+            line: anchor.line_start ?? undefined,
+            surface: KIND_LABEL[kind],
+            label: bodyText || post.title || 'board thread',
+            source_id: `thread-${post.id}`,
+            keeper_id: post.author_identity || undefined,
+          })
+        }}
         style=${{
           '--ide-conversation-bg': focused ? 'var(--color-bg-muted)' : 'var(--color-bg-elevated)',
           borderLeft: `2px solid ${keeperColor}`,

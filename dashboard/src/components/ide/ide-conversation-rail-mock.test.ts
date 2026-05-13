@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { waitFor } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { IdeConversationRailMock, postsToAnchoredThreads, replayRailItems } from './ide-conversation-rail-mock'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  activeIdeFile.value = 'package.json'
+  ideContextFocus.value = null
 })
 
 describe('IdeConversationRailMock', () => {
@@ -185,6 +188,51 @@ describe('IdeConversationRailMock', () => {
     expect(container.textContent).not.toContain('new thread body')
     expect(container.textContent).not.toContain('turn_completed')
     expect(container.textContent).not.toContain('big_three')
+
+    render(null, container)
+  })
+
+  it('focuses the editor line when a line-anchored board thread is clicked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/v1/board')) {
+        return new Response(JSON.stringify([{
+          id: 'thread-line',
+          title: 'Review lib/runtime.ml:42',
+          body: 'question fn:run about this line',
+          author_identity: 'scholar',
+          votes: 0,
+          comment_count: 2,
+          created_at_iso: '2026-05-05T10:00:00Z',
+        }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
+        return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+        return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response('{}', { status: 404 })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeConversationRailMock, {}), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('question fn:run about this line')
+    })
+
+    const card = container.querySelector<HTMLButtonElement>('.ide-conversation-card')
+    expect(card).not.toBeNull()
+    fireEvent.click(card!)
+
+    expect(activeIdeFile.value).toBe('lib/runtime.ml')
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 42,
+      surface: 'QUESTION',
+      source_id: 'thread-thread-line',
+      keeper_id: 'scholar',
+    })
 
     render(null, container)
   })

@@ -155,10 +155,109 @@ let with_temp_toml content f =
     (fun () -> f path)
 
 let write_file path contents =
+  let rec mkdir_p path =
+    if path = "" || path = "." || path = "/" then
+      ()
+    else if Sys.file_exists path then
+      ()
+    else begin
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o755
+    end
+  in
+  mkdir_p (Filename.dirname path);
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc contents)
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some value -> Unix.putenv key value
+      | None -> Unix.putenv key "")
+    f
+
+let minimal_cascade_profile_metadata_toml = {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[models.qwen3-small]
+api-name = "qwen3:1.7b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[ollama.qwen3-small]
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.backup]
+members = ["ollama.qwen3-small"]
+strategy = "failover"
+
+[tier.scoring]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.primary]
+tiers = ["primary", "backup"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.scoring]
+tiers = ["scoring"]
+strategy = "priority_tier"
+fallback = false
+
+[routes.keeper_turn]
+target = "tier-group.primary"
+
+[routes.llm_rerank]
+target = "tier-group.scoring"
+|}
+
+let with_temp_config_dir cascade_toml f =
+  let dir = Filename.temp_file "keeper_cascade_config_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let config_root = Filename.concat dir "config" in
+  let cascade_path = Filename.concat config_root "cascade.toml" in
+  write_file cascade_path cascade_toml;
+  let reset () =
+    Masc_mcp.Config_dir_resolver.reset ();
+    Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ()
+  in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
+      reset ();
+      Fun.protect ~finally:reset (fun () -> f ~config_root ~cascade_path))
 
 let repo_config_dir () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -280,6 +379,43 @@ let test_cascade_name_accepts_catalog_entry () =
       (* If catalog is unavailable, skip rather than fail *)
       if catalog = [] then ()
       else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
+
+let test_resolve_model_strings_reads_declarative_profile () =
+  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  @@ fun ~config_root:_ ~cascade_path ->
+  let models =
+    Masc_mcp.Cascade_config.resolve_model_strings
+      ~config_path:cascade_path ~name:"primary" ~defaults:["fallback"] ()
+  in
+  check (list string) "primary group models"
+    ["ollama:qwen3:8b"; "ollama:qwen3:1.7b"]
+    models
+
+let test_cascade_profile_metadata_from_toml () =
+  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  @@ fun ~config_root:_ ~cascade_path:_ ->
+  check (list string) "keeper assignable catalog" ["primary"]
+    (Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ());
+  check bool "rerank route is system-only" true
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "llm_rerank");
+  check bool "scoring catalog entry is system-only" true
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "scoring");
+  check (option string) "primary fallback hint" (Some "backup")
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for "primary")
+
+let test_cascade_name_rejects_system_only_catalog_entry () =
+  with_temp_config_dir minimal_cascade_profile_metadata_toml
+  @@ fun ~config_root:_ ~cascade_path:_ ->
+  let result =
+    with_temp_toml
+      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"scoring\"\n"
+      KTP.load_keeper_toml
+  in
+  match result with
+  | Ok _ -> fail "system-only cascade_name should be rejected"
+  | Error e ->
+      check bool "error mentions system-only" true
+        (contains ~needle:"system-only" e)
 
 let test_tool_access_accepts_dispatch () =
   let result =
@@ -404,6 +540,12 @@ let () =
             test_cascade_name_accepts_tool_lane_without_catalog;
           test_case "accepts live catalog entry" `Quick
             test_cascade_name_accepts_catalog_entry;
+          test_case "resolves declarative profile model strings" `Quick
+            test_resolve_model_strings_reads_declarative_profile;
+          test_case "derives profile metadata from cascade.toml" `Quick
+            test_cascade_profile_metadata_from_toml;
+          test_case "rejects system-only catalog entry" `Quick
+            test_cascade_name_rejects_system_only_catalog_entry;
           test_case "accepts dispatch tool_access preset" `Quick
             test_tool_access_accepts_dispatch;
         ] );

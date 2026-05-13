@@ -121,7 +121,21 @@ let diagnose_cascade_catalog ~active_config_root =
     Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
   in
   if not (Env_config_core.existing_file config_path) then
-    { issues = []; fallback_cycles = [] }
+    {
+      issues =
+        [
+          {
+            profile = None;
+            severity = Catalog_error;
+            message =
+              Printf.sprintf
+                "Cascade catalog source is missing: %s. Runtime cascade \
+                 resolution requires cascade.toml."
+                config_path;
+          };
+        ];
+      fallback_cycles = [];
+    }
   else
     let profiles =
       Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path

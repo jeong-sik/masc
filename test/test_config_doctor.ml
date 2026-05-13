@@ -205,6 +205,21 @@ let test_initialized_local_base_config () =
   check bool "keeper runtime optional" false report.keeper_runtime_toml_present;
   check (list string) "no warnings" [] report.warnings
 
+let test_initialized_config_without_cascade_toml_errors () =
+  with_temp_dir "config-doctor-no-cascade" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  mkdir_p (Filename.concat config_root "personas");
+  let report =
+    Config_doctor.analyze_with
+      (make_inputs ~cwd:dir ~base_path_input:base_path ())
+  in
+  check string "init_state" "initialized"
+    (init_state report.init_state);
+  check string "status" "error" (status report.status);
+  check bool "warning mentions missing cascade.toml" true
+    (list_contains_substring ~needle:"cascade.toml" report.warnings)
+
 let test_shadowed_explicit_config_dir () =
   with_temp_dir "config-doctor-shadowed" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -415,6 +430,9 @@ let () =
              test_missing_init_without_explicit_config;
            test_case "initialized local base config" `Quick
              test_initialized_local_base_config;
+           test_case "initialized config without cascade.toml errors"
+             `Quick
+             test_initialized_config_without_cascade_toml_errors;
            test_case "shadowed explicit config dir" `Quick
              test_shadowed_explicit_config_dir;
            test_case "analyze_live surfaces sandbox preflight failure"

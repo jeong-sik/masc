@@ -85,6 +85,41 @@ let invalid_profiles_with_internal_names profiles =
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 ;;
 
+let qualified_profile_candidates name =
+  let trimmed = String.trim name in
+  if String.starts_with ~prefix:"tier-group." trimmed
+     || String.starts_with ~prefix:"tier." trimmed
+  then [ trimmed ]
+  else [ "tier-group." ^ trimmed; "tier." ^ trimmed; trimmed ]
+;;
+
+let invalid_assignment_reasons ~known_internal_profiles ~invalid_profiles name =
+  let rec first_declared_candidate = function
+    | [] -> None
+    | candidate :: rest ->
+      if List.mem candidate known_internal_profiles
+      then List.assoc_opt candidate invalid_profiles
+      else if List.mem_assoc candidate invalid_profiles
+      then List.assoc_opt candidate invalid_profiles
+      else first_declared_candidate rest
+  in
+  first_declared_candidate (qualified_profile_candidates name)
+;;
+
+let invalid_assignments_for_public_profiles ~known_internal_profiles
+    ~invalid_profiles public_profiles =
+  public_profiles
+  |> List.filter_map (fun public_name ->
+    match
+      invalid_assignment_reasons
+        ~known_internal_profiles
+        ~invalid_profiles
+        public_name
+    with
+    | Some reasons -> Some (public_name, reasons)
+    | None -> None)
+;;
+
 let json_assoc_member key = function
   | `Assoc fields -> Option.value (List.assoc_opt key fields) ~default:`Null
   | _ -> `Null
@@ -209,13 +244,6 @@ let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t
        ~cascade_name:(Keeper_types.cascade_name_of_meta entry.meta))
 ;;
 
-let invalid_name_set = function
-  | None -> StringSet.empty
-  | Some path ->
-    Cascade_catalog_validator.error_messages_by_profile ~config_path:path
-    |> List.fold_left (fun acc (name, _reasons) -> StringSet.add name acc) StringSet.empty
-;;
-
 let invalid_profiles_of_config_path = function
   | None -> []
   | Some path ->
@@ -301,15 +329,26 @@ let config_json ?base_path () =
   let profiles =
     match Cascade_catalog_runtime.known_profile_names () with
     | Ok names -> List.filter_map (profile_json_runtime ~keeper_assignable_names) names
-    | Error detail ->
-      Log.Keeper.warn "dashboard cascade config: validated catalog unavailable: %s" detail;
-      let invalid_names = invalid_name_set config_path in
-      let add_profile_name (acc, seen) name =
-        let canonical = Keeper_cascade_profile.canonicalize name in
-        if StringSet.mem canonical invalid_names || StringSet.mem canonical seen
-        then acc, seen
-        else canonical :: acc, StringSet.add canonical seen
-      in
+  | Error detail ->
+    Log.Keeper.warn "dashboard cascade config: validated catalog unavailable: %s" detail;
+    let invalid_profiles = invalid_profiles_of_config_path config_path in
+    let known_internal_profiles =
+      match config_path with
+      | None -> []
+      | Some path ->
+        Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path:path
+    in
+    let add_profile_name (acc, seen) name =
+      let canonical = Keeper_cascade_profile.canonicalize name in
+      if StringSet.mem canonical seen
+         || Option.is_some
+              (invalid_assignment_reasons
+                 ~known_internal_profiles
+                 ~invalid_profiles
+                 canonical)
+      then acc, seen
+      else canonical :: acc, StringSet.add canonical seen
+    in
       let acc_after_catalog, seen_after_catalog =
         List.fold_left
           add_profile_name

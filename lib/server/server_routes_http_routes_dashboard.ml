@@ -17,36 +17,6 @@ type cascade_profile_gate = {
   invalid_assignments : (string * string list) list;
 }
 
-let qualified_profile_candidates name =
-  let trimmed = String.trim name in
-  if String.starts_with ~prefix:"tier-group." trimmed
-     || String.starts_with ~prefix:"tier." trimmed
-  then [ trimmed ]
-  else [ "tier-group." ^ trimmed; "tier." ^ trimmed; trimmed ]
-
-let invalid_assignment_reasons ~known_internal_profiles ~invalid_profiles name =
-  let rec first_declared_candidate = function
-    | [] -> None
-    | candidate :: rest ->
-        if List.mem candidate known_internal_profiles
-        then List.assoc_opt candidate invalid_profiles
-        else if List.mem_assoc candidate invalid_profiles
-        then List.assoc_opt candidate invalid_profiles
-        else first_declared_candidate rest
-  in
-  first_declared_candidate (qualified_profile_candidates name)
-
-let invalid_assignments_for_public_profiles ~known_internal_profiles
-    ~invalid_profiles public_profiles =
-  public_profiles
-  |> List.filter_map (fun public_name ->
-         match
-           invalid_assignment_reasons
-             ~known_internal_profiles ~invalid_profiles public_name
-         with
-         | Some reasons -> Some (public_name, reasons)
-         | None -> None)
-
 let cascade_profile_gate () : cascade_profile_gate =
   let config_path = Cascade_runtime.cascade_config_path () in
   let keeper_profiles =
@@ -81,7 +51,7 @@ let cascade_profile_gate () : cascade_profile_gate =
               ~config_path:path
       in
       let invalid_assignments =
-        invalid_assignments_for_public_profiles
+        Dashboard_cascade.invalid_assignments_for_public_profiles
           ~known_internal_profiles
           ~invalid_profiles candidate_profiles
       in
@@ -108,7 +78,7 @@ let cascade_profile_gate () : cascade_profile_gate =
               ~config_path:path
       in
       let invalid_assignments =
-        invalid_assignments_for_public_profiles
+        Dashboard_cascade.invalid_assignments_for_public_profiles
           ~known_internal_profiles ~invalid_profiles keeper_profiles
       in
       let invalid_names = List.map fst invalid_assignments in

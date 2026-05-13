@@ -65,6 +65,17 @@ val invalid_profiles_with_internal_names :
     distinct; callers may separately apply {!public_cascade_profile_name}
     only when a display-only label is needed. *)
 
+val invalid_assignments_for_public_profiles :
+  known_internal_profiles:string list ->
+  invalid_profiles:(string * string list) list ->
+  string list ->
+  (string * string list) list
+(** Match public keeper-facing profile names against internal invalid-profile
+    diagnostics using runtime profile preference order.  For an unqualified
+    name such as ["primary"], ["tier-group.primary"] is checked before
+    ["tier.primary"] so a valid preferred tier-group is not rejected because a
+    lower-priority tier with the same public name is invalid. *)
+
 (** Raw cascade TOML payload from the active resolved config root.
 
     Shape:

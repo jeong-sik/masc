@@ -7,8 +7,9 @@ val on_phase_override : phase:string -> from_cascade:string -> to_cascade:string
 
 val on_profile_discovery : path:string -> unit
 (** Tick the profile discovery counter.  [path] must be one of
-    [declarative], [declarative_error], [declarative_missing].
-    See [cascade_catalog_runtime.ml] [discover_profile_names]. *)
+    [declarative], [declarative_error], [declarative_missing],
+    [declarative_parse_error].  See [cascade_catalog_runtime.ml]
+    [discover_profile_names]. *)
 
 val on_declarative_parse_error : unit -> unit
 (** Tick the declarative parse error counter once per discovery call

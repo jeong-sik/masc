@@ -777,6 +777,19 @@ let append_execution_receipt
     (Masc_mcp.Keeper_execution_receipt.to_json receipt)
 ;;
 
+let wait_for_boot_receipt_side_effects config ~keeper_name =
+  let deadline = Unix.gettimeofday () +. 2.0 in
+  let rec loop () =
+    match Masc_mcp.Keeper_execution_receipt.latest_json config keeper_name with
+    | Some _ -> Unix.sleepf 0.1
+    | None when Unix.gettimeofday () < deadline ->
+      Unix.sleepf 0.05;
+      loop ()
+    | None -> ()
+  in
+  loop ()
+;;
+
 let with_seeded_server ?(env_overrides = []) f =
   let run_with_env_overrides env_overrides =
     let exe = find_main_eio_exe () in
@@ -1224,6 +1237,31 @@ target = "tier-group.primary"
     (List.mem_assoc "tier-group.primary" invalid)
 ;;
 
+let test_invalid_assignment_matching_prefers_runtime_qualified_profile () =
+  let invalid_tier =
+    Masc_mcp.Dashboard_cascade.invalid_assignments_for_public_profiles
+      ~known_internal_profiles:[ "tier-group.primary"; "tier.primary" ]
+      ~invalid_profiles:[ "tier.primary", [ "tier is invalid" ] ]
+      [ "primary" ]
+  in
+  check
+    (list (pair string (list string)))
+    "valid preferred tier-group is not rejected by invalid tier"
+    []
+    invalid_tier;
+  let invalid_group =
+    Masc_mcp.Dashboard_cascade.invalid_assignments_for_public_profiles
+      ~known_internal_profiles:[ "tier-group.primary"; "tier.primary" ]
+      ~invalid_profiles:[ "tier-group.primary", [ "group is invalid" ] ]
+      [ "primary" ]
+  in
+  check
+    (list (pair string (list string)))
+    "invalid preferred tier-group rejects public assignment"
+    [ "primary", [ "group is invalid" ] ]
+    invalid_group
+;;
+
 let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
   with_mock_model @@ fun valid_model ->
   with_temp_config_root
@@ -1406,6 +1444,7 @@ let test_composite_routes_surface_latest_execution_receipt () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
+  wait_for_boot_receipt_side_effects config ~keeper_name;
   append_execution_receipt config ~keeper_name;
   let per_keeper_path =
     Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name
@@ -1456,6 +1495,7 @@ let test_composite_routes_surface_runtime_recommended_actions () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
+  wait_for_boot_receipt_side_effects config ~keeper_name;
   append_execution_receipt ~tool_contract_result:Contract_missing_required_tool_use
     ~tools_used:[] config ~keeper_name;
   let path = Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name in
@@ -1559,6 +1599,7 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
+  wait_for_boot_receipt_side_effects config ~keeper_name;
   append_execution_receipt ~tool_contract_result:Contract_satisfied_execution
     ~tools_used:[ "keeper_fs_read" ]
     ~cascade_fallback_applied:false
@@ -1833,6 +1874,10 @@ let () =
             "invalid profile projection keeps internal names"
             `Quick
             test_invalid_profile_projection_keeps_internal_names
+        ; test_case
+            "invalid assignment matching prefers runtime qualified profile"
+            `Quick
+            test_invalid_assignment_matching_prefers_runtime_qualified_profile
         ] )
     ]
 ;;

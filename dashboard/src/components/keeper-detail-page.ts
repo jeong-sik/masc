@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useState, useRef, useEffect } from 'preact/hooks'
-import { route } from '../router'
+import { replaceRoute, route } from '../router'
 import { keepers } from '../store'
 import { selectKeeper } from '../keeper-runtime'
 import { loadKeeperConfig } from './keeper-config-panel'
@@ -42,6 +42,55 @@ const CLOSE_BUTTON_FOCUS_CLASS = ringFocusClasses({
   offset: 2,
   offsetSurface: 'page',
 })
+
+function clearKeeperRouteFocus(): void {
+  const params: Record<string, string> = { ...route.value.params, section: 'agents' }
+  delete params.agent
+  delete params.keeper
+  replaceRoute('monitoring', params)
+}
+
+function KeeperRouteFocusPanel({
+  keeperName,
+  status,
+  agentName,
+}: {
+  keeperName: string
+  status: string
+  agentName?: string | null
+}) {
+  return html`
+    <section
+      class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      data-testid="keeper-route-focus"
+      aria-label="Keeper route focus"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+            ROUTE FOCUS
+          </div>
+          <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
+            <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+              KEEPER ${keeperName}
+            </span>
+            <span class="font-mono text-3xs text-[var(--color-fg-muted)]">status ${status}</span>
+            ${agentName ? html`
+              <span class="font-mono text-3xs text-[var(--color-fg-muted)]">agent ${agentName}</span>
+            ` : null}
+          </div>
+        </div>
+        <button
+          type="button"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          onClick=${clearKeeperRouteFocus}
+        >
+          CLEAR
+        </button>
+      </div>
+    </section>
+  `
+}
 
 export function KeeperDetailPage() {
   const keeperName =
@@ -182,7 +231,7 @@ export function KeeperDetailPage() {
   }
 
   return html`
-    <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
+    <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8" data-route-focused-keeper=${keeper.name}>
       <div class="sticky top-0 z-20 overflow-hidden rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] backdrop-blur-xl">
         <div class="flex flex-col items-stretch justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:flex-row sm:items-center sm:px-6">
           <${KeeperDetailHeaderInfo}
@@ -215,6 +264,12 @@ export function KeeperDetailPage() {
           </div>
         </div>
       </div>
+
+      <${KeeperRouteFocusPanel}
+        keeperName=${keeper.name}
+        status=${effectiveStatus}
+        agentName=${keeper.agent_name ?? keeper.agent?.name ?? null}
+      />
 
       <${KeeperDetailBody}
         keeper=${keeper}

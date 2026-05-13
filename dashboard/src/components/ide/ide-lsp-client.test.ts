@@ -36,6 +36,13 @@ describe('resolveLspDiagnosticFilePath', () => {
     )).toBeNull()
   })
 
+})
+
+describe('clearLspDiagnosticSnapshot', () => {
+  afterEach(() => {
+    lspDiagnosticSnapshot.value = new Map()
+  })
+
   it('clears only the normalized diagnostic snapshot for the previous file', () => {
     lspDiagnosticSnapshot.value = new Map([
       [

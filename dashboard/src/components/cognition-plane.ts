@@ -8,7 +8,14 @@ import { KeeperCognitionInspector } from './keeper-cognition-inspector'
 import { KeeperTokenStats } from './keeper-token-stats'
 import { MemorySubsystems } from './memory-subsystems'
 
-type CognitionView = 'overview' | 'keeper' | 'token-stats' | 'decisions' | 'memory' | 'autoresearch'
+type CognitionView =
+  | 'overview'
+  | 'keeper'
+  | 'token-stats'
+  | 'decisions'
+  | 'memory'
+  | 'episodes'
+  | 'autoresearch'
 
 const COGNITION_VIEWS: CognitionView[] = [
   'overview',
@@ -16,6 +23,7 @@ const COGNITION_VIEWS: CognitionView[] = [
   'token-stats',
   'decisions',
   'memory',
+  'episodes',
   'autoresearch',
 ]
 
@@ -25,6 +33,7 @@ const VIEW_CHIPS: Array<{ key: CognitionView; label: string; title?: string }> =
   { key: 'token-stats', label: 'Token Stats' },
   { key: 'decisions', label: 'Decisions' },
   { key: 'memory', label: 'Memory' },
+  { key: 'episodes', label: 'Episodes' },
   { key: 'autoresearch', label: 'Autoresearch' },
 ]
 
@@ -67,7 +76,9 @@ export function CognitionPlane() {
       ` : view === 'decisions' ? html`
         <${KeeperDecisionsStream} />
       ` : view === 'memory' ? html`
-        <${MemorySubsystems} />
+        <${MemorySubsystems} focus=${route.value.params.focus} />
+      ` : view === 'episodes' ? html`
+        <${MemorySubsystems} focus="episodes" />
       ` : view === 'autoresearch' ? html`
         <${Autoresearch} />
       ` : html`

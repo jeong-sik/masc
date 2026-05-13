@@ -28,12 +28,29 @@ fi
 
 endpoint="repos/${repo}/branches/${branch}/protection"
 
+is_integration_forbidden() {
+  local output="$1"
+  [[ "$output" == *"Resource not accessible by integration"* ]] || [[ "$output" == *'"status":"403"'* ]]
+}
+
+skip_integration_forbidden() {
+  local output="$1"
+  echo "::warning title=Branch protection check unavailable::Could not read ${repo}/${branch} branch protection with this GitHub token; skipping drift check. Details: ${output}"
+  exit 0
+}
+
 if ! enforce_admins="$(gh api "$endpoint" --jq '.enforce_admins.enabled' 2>&1)"; then
+  if is_integration_forbidden "$enforce_admins"; then
+    skip_integration_forbidden "$enforce_admins"
+  fi
   echo "::error title=Branch protection check failed::Could not read ${repo}/${branch} branch protection: ${enforce_admins}"
   exit 1
 fi
 
 if ! contexts="$(gh api "$endpoint" --jq '.required_status_checks.contexts[]?' 2>&1)"; then
+  if is_integration_forbidden "$contexts"; then
+    skip_integration_forbidden "$contexts"
+  fi
   echo "::error title=Branch protection check failed::Could not read required status contexts for ${repo}/${branch}: ${contexts}"
   exit 1
 fi

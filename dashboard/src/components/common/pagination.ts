@@ -8,6 +8,7 @@ import { html } from 'htm/preact'
 import type { ComponentChild } from 'preact'
 import { useCallback, useMemo } from 'preact/hooks'
 import { ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-preact'
+import { ringFocusClasses } from './ring'
 import { useControllableState } from './use-controllable-state'
 
 type PageItem = number | 'ellipsis-start' | 'ellipsis-end'
@@ -49,7 +50,7 @@ const PAGE_BUTTON_CLS = [
   'font-mono text-2xs tabular-nums text-[var(--color-fg-secondary)]',
   'transition-colors duration-[var(--t-fast)]',
   'hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)]',
+  ringFocusClasses({ tone: 'accent-medium', width: 2 }),
   'disabled:cursor-not-allowed disabled:text-[var(--color-fg-disabled)] disabled:hover:bg-[var(--color-bg-surface)]',
 ].join(' ')
 const PAGE_BUTTON_ACTIVE_CLS = [
@@ -65,7 +66,7 @@ const CURSOR_BUTTON_CLS = [
   'text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]',
   'transition-colors duration-[var(--t-fast)]',
   'hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)]',
+  ringFocusClasses({ tone: 'accent-medium', width: 2 }),
   'disabled:cursor-not-allowed disabled:text-[var(--color-fg-disabled)] disabled:hover:bg-transparent',
 ].join(' ')
 

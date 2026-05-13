@@ -385,7 +385,15 @@ function Drawer() {
     // Match the physical backquote key, not the produced character. Layouts
     // with dead keys (e.g. several European keyboards) emit e.key === "Dead"
     // for the backquote key, which broke the advertised Ctrl/Cmd+` toggle.
-    if ((e.ctrlKey || e.metaKey) && e.code === "Backquote") {
+    // Skip when AltGraph is active: on Windows/Linux international layouts
+    // AltGr reports as Ctrl+Alt, so AltGr+Backquote is a legitimate
+    // locale-character entry sequence — hijacking it with preventDefault
+    // would regress text input.
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.code === "Backquote" &&
+      !e.getModifierState("AltGraph")
+    ) {
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("masc-drawer-toggle"));

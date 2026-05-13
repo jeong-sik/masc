@@ -140,12 +140,12 @@ check-closure: check-all
 # spec set that `check-all` walks; verified by the `check-matrix-coverage`
 # target which fails if anything drifts out of sync.  Tuning:
 #
-#   keeper-state-machine   ~10 min  (51 cfgs, dominated by 3 slow KSM specs)
+#   keeper-state-machine   ~4 min   (34 cfgs, dominated by KSM specs)
 #   masc-ecosystem         ~6 min   (MASCEcosystem 352s)
 #   social-and-state-prod  ~3 min   (SocialStateCap 180s top)
-#   others (14 dirs)       ~1 min   (everything not above)
+#   others (14 dirs)       ~7 min   (incl. KeeperStaleKilled 182s + MemoryCompaction 181s)
 #
-# Wall-clock fan-out reduces TLA+ Main from ~22 min monolithic to ~10 min.
+# Wall-clock fan-out reduces TLA+ Main from ~22 min monolithic to ~7-8 min.
 
 SOCIAL_DIRS := social-state-cap state-product
 check-social: CLEAN_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call clean_cfgs_in,$(d)/))
@@ -166,6 +166,8 @@ check-matrix-coverage: SHELL := /bin/bash
 check-matrix-coverage:
 	@set -euo pipefail; \
 	all_sorted=$$(find . -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort -u); \
+	dups=$$(printf '%s\n' $(SHARD_DIRS_ALL) | sort | uniq -d); \
+	if [ -n "$$dups" ]; then echo "::error::Dirs listed in more than one shard:"; echo "$$dups"; exit 1; fi; \
 	shard_sorted=$$(printf '%s\n' $(SHARD_DIRS_ALL) | sort -u); \
 	missing=$$(comm -23 <(printf '%s\n' "$$all_sorted") <(printf '%s\n' "$$shard_sorted")); \
 	extra=$$(comm -13 <(printf '%s\n' "$$all_sorted") <(printf '%s\n' "$$shard_sorted")); \

@@ -132,7 +132,9 @@ let test_model_field_stored () =
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
-      ~model:"glm-4-9b" ();
+      ~model:"glm-4-9b"
+      ~cascade_profile:"local_qwen3_27b_only"
+      ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
@@ -140,7 +142,10 @@ let test_model_field_stored () =
       (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str);
     Alcotest.(check (option string)) "model redacted to runtime"
       (Some "runtime")
-      (Safe_ops.json_string_opt "model" (List.hd entries)))
+      (Safe_ops.json_string_opt "model" (List.hd entries));
+    Alcotest.(check (option string)) "cascade profile stored"
+      (Some "local_qwen3_27b_only")
+      (Safe_ops.json_string_opt "cascade_profile" (List.hd entries)))
 
 let test_policy_denied_structured_error_gets_semantic_failure () =
   with_tmp_log (fun () ->
@@ -236,6 +241,9 @@ let test_turn_context_fields_stored () =
       (Safe_ops.json_int ~default:0 "turn" entry);
     Alcotest.(check int) "keeper_turn_id field" 7
       (Safe_ops.json_int ~default:0 "keeper_turn_id" entry);
+    Alcotest.(check (option string)) "cascade_profile field"
+      (Some "tool_use_strict")
+      (Safe_ops.json_string_opt "cascade_profile" entry);
     Alcotest.(check (option string)) "task_id field"
       (Some "task-runtime-trust")
       (Safe_ops.json_string_opt "task_id" entry);
@@ -275,6 +283,9 @@ let test_turn_context_fields_stored () =
       Yojson.Safe.Util.(
         runtime_contract |> member "missing_required_tools" |> to_list
         |> List.map to_string);
+    Alcotest.(check (option string)) "runtime_contract cascade_profile"
+      (Some "tool_use_strict")
+      (Safe_ops.json_string_opt "cascade_profile" runtime_contract);
     let action_radius = Yojson.Safe.Util.member "action_radius" entry in
     Alcotest.(check (option string)) "action_radius tool"
       (Some "masc_status")
@@ -492,14 +503,16 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~success:true ~duration_ms:2.0
       ~model:"glm-5.1" ~lane:"tool_required"
       ~tool_choice:"required"
-      ~thinking_enabled:false ~thinking_budget:1024 ();
+      ~thinking_enabled:false ~thinking_budget:1024
+      ~cascade_profile:"primary" ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k2" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"error: {\"ok\":false,\"error\":\"boom\"}"
       ~success:false ~duration_ms:3.0
       ~model:"qwen3.5-27b-unified" ~lane:"retry"
       ~tool_choice:"auto"
-      ~thinking_enabled:true ~thinking_budget:4096 ();
+      ~thinking_enabled:true ~thinking_budget:4096
+      ~cascade_profile:"local_qwen3_27b_only" ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
     Alcotest.(check (option string)) "sampling mode present"
       (Some "recent_n")
@@ -527,15 +540,22 @@ let test_dashboard_aggregate_groups_runtime_fields () =
     Alcotest.(check bool) "latest age present" true
       (Safe_ops.json_float_opt "latest_age_s" summary |> Option.is_some);
     let by_model = Yojson.Safe.Util.member "by_model" summary in
+    let by_cascade = Yojson.Safe.Util.member "by_cascade" summary in
     let by_lane = Yojson.Safe.Util.member "by_lane" summary in
     let by_thinking = Yojson.Safe.Util.member "by_thinking_mode" summary in
     let by_tool_choice = Yojson.Safe.Util.member "by_tool_choice" summary in
     let runtime_bucket = find_bucket "runtime" by_model in
+    let primary_cascade_bucket = find_bucket "primary" by_cascade in
+    let local_cascade_bucket = find_bucket "local_qwen3_27b_only" by_cascade in
     let retry_bucket = find_bucket "retry" by_lane in
     let enabled_bucket = find_bucket "enabled" by_thinking in
     let auto_bucket = find_bucket "auto" by_tool_choice in
     Alcotest.(check int) "runtime bucket calls" 2
       (Safe_ops.json_int ~default:0 "calls" runtime_bucket);
+    Alcotest.(check int) "primary cascade bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" primary_cascade_bucket);
+    Alcotest.(check int) "local cascade bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" local_cascade_bucket);
     Alcotest.(check int) "retry bucket calls" 1
       (Safe_ops.json_int ~default:0 "calls" retry_bucket);
     Alcotest.(check int) "enabled thinking calls" 1

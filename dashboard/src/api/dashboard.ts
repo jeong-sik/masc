@@ -262,6 +262,7 @@ export type ToolQualityResponse = {
   success_rate: number
   by_tool: ToolQualityToolStat[]
   by_keeper: ToolQualityKeeperStat[]
+  by_cascade?: ToolQualityKeeperStat[]
   failure_categories: ToolQualityFailureCategory[]
   hourly_trend?: ToolQualityHourlyPoint[]
 }

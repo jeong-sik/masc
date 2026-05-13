@@ -37,6 +37,17 @@ const payloadWithMissingToolMetrics = {
   ],
 }
 
+const payloadWithCascadeBuckets = {
+  ...payload,
+  by_cascade: [
+    {
+      name: 'local_qwen3_27b_only',
+      calls: 7,
+      success_pct: 100,
+    },
+  ],
+}
+
 function okJson<T>(body: T) {
   return {
     ok: true,
@@ -136,6 +147,21 @@ describe('ToolQualityPanel', () => {
     expect(container.textContent).toContain('m:example')
     expect(container.textContent).toContain('0.0k')
     expect(container.textContent).not.toContain('오류:')
+  })
+
+  it('renders cascade buckets separately from the redacted runtime model lane', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithCascadeBuckets))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('캐스케이드별')
+    expect(container.textContent).toContain('local_qwen3_27b_only')
   })
 
   it('replaces a stale in-flight request with the newest refresh', async () => {

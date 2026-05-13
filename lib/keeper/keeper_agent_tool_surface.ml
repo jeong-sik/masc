@@ -250,7 +250,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
   |> List.filter_map turn_affordance_of_string
   |> List.concat_map (function
        | Board_curation ->
-         [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
+         [ "keeper_board_curation_submit" ]
        | Board_post_or_comment
        | Message_sweep
        | Reply_in_room
@@ -364,7 +364,14 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   else if (not has_current_task)
      && has_task_claim_affordance turn_affordances
      && progress_tool_available "keeper_task_claim"
-  then Agent_sdk.Types.Tool "keeper_task_claim"
+  then
+    (* Runtime MCP transports may report the correct call as
+       [mcp__masc__keeper_task_claim]. OAS exact-tool contracts compare
+       raw provider names before MASC canonicalizes them, so exact
+       [Tool "keeper_task_claim"] can reject a valid claim. Keep the
+       turn tool-required and let MASC validate the canonical observed
+       tool names after execution. *)
+    Agent_sdk.Types.Any
   else if has_turn_affordance Task_audit turn_affordances
           && progress_tool_available "keeper_tasks_audit"
   then Agent_sdk.Types.Tool "keeper_tasks_audit"

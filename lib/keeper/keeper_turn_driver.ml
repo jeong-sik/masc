@@ -868,7 +868,18 @@ let run_named
               Cascade_legacy_runner.record_fallback_event capture
                 ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label
                 ~reason:(class_label ^ Agent_sdk.Error.to_string sdk_err);
-              try_cascade ?resume_checkpoint:next_resume rest new_err
+              let retry_resume_checkpoint =
+                if sdk_error_is_server_rejected_parse_error sdk_err then (
+                  Log.Misc.info
+                    "[cascade-fallback] cascade %s: %s server rejected the \
+                     resumed request body; dropping resume checkpoint for \
+                     next provider"
+                    cascade_name runtime_candidate_label;
+                  None)
+                else
+                  next_resume
+              in
+              try_cascade ?resume_checkpoint:retry_resume_checkpoint rest new_err
             | Cascade_fsm.Exhausted _ ->
               let observation =
                 Cascade_legacy_runner.cascade_observation_with_metrics

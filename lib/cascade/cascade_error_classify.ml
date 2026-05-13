@@ -599,6 +599,57 @@ let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
      with Yojson.Json_error _ -> None)
   | _ -> None
 
+let substring_matches_at ~(needle : string) (haystack : string) start_idx =
+  let needle_len = String.length needle in
+  if start_idx < 0 || start_idx + needle_len > String.length haystack
+  then false
+  else
+    let rec loop i =
+      if i >= needle_len then true
+      else if String.unsafe_get needle i <> String.unsafe_get haystack (start_idx + i)
+      then false
+      else loop (i + 1)
+    in
+    loop 0
+
+let string_contains_substring ~(needle : string) (haystack : string) =
+  if String.equal needle "" then true
+  else
+    let max_start = String.length haystack - String.length needle in
+    let rec loop i =
+      if i > max_start then false
+      else if substring_matches_at ~needle haystack i then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
+  match err with
+  | Agent_sdk.Error.Api (InvalidRequest { message }) ->
+    let lower = String.lowercase_ascii message in
+    (string_contains_substring ~needle:"can't find closing" lower
+     || string_contains_substring ~needle:"find end of" lower)
+    || string_contains_substring ~needle:"unexpected character in json" lower
+    || string_contains_substring ~needle:"unterminated" lower
+    || string_contains_substring ~needle:"parse error" lower
+  | Agent_sdk.Error.Api
+      ( RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | NotFound _
+      | ContextOverflow _
+      | NetworkError _
+      | Timeout _ )
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> false
+
 let config_for_label
     ~(name : string)
     ~(model_label : string)

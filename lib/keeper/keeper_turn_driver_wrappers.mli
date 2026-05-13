@@ -56,6 +56,7 @@ val run_named_with_masc_tools :
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
+  ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?memory:Agent_sdk.Memory.t ->

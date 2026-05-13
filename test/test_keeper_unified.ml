@@ -10438,12 +10438,12 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
       ~allowed_tool_names
   in
   (match choose () with
-   | Agent_sdk.Types.Tool name ->
-     check string "forces claim tool first" "keeper_task_claim" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Tool keeper_task_claim, got %s"
+          "expected Any for claim turn to avoid raw require_specific_tool \
+           MCP-prefix mismatches, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match choose ~has_current_task:true () with
    | Agent_sdk.Types.Any -> ()

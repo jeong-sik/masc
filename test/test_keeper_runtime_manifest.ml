@@ -1015,11 +1015,9 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
             ~finally:Masc_mcp.Keeper_tool_call_log.reset_for_testing
             (fun () ->
               Masc_mcp.Keeper_tool_call_log.init ~base_path:base_dir ();
-	              let meta =
-	                make_meta ~name:"runtime-manifest-provider-timeout" ()
-	              in
-	              let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
-	              let session_base_dir = Filename.concat base_dir "sessions" in
+              let meta = make_meta ~name:"runtime-manifest-provider-timeout" () in
+              let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+              let session_base_dir = Filename.concat base_dir "sessions" in
               Fs_compat.mkdir_p session_base_dir;
               let model_string =
                 Printf.sprintf "custom:slow-timeout@%s" base_url
@@ -1071,7 +1069,29 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                 true
                 (Sys.file_exists manifest_path);
               let rows = parsed_manifest_rows manifest_path in
-              ignore (require_manifest_event M.Provider_attempt_started rows);
+              let started_row =
+                require_manifest_event M.Provider_attempt_started rows
+              in
+              Alcotest.(check (option string))
+                "direct model attempt records model source"
+                (Some "direct_model_strings")
+                (json_string_member_opt "model_source" started_row.M.decision);
+              Alcotest.(check (option string))
+                "direct model attempt records resolved model source"
+                (Some "direct_model_string")
+                (json_string_member_opt
+                   "resolved_model_source"
+                   started_row.M.decision);
+              Alcotest.(check (option string))
+                "direct model attempt records capability source"
+                (Some "provider_config_from_direct_model_string")
+                (json_string_member_opt
+                   "capability_source"
+                   started_row.M.decision);
+              Alcotest.(check (option string))
+                "direct model attempt records fallback authority"
+                (Some "direct_model_strings")
+                (json_string_member_opt "fallback_authority" started_row.M.decision);
               let finished_row =
                 require_manifest_event M.Provider_attempt_finished rows
               in
@@ -1079,39 +1099,47 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                 "provider timeout closes attempt"
                 "timeout"
                 finished_row.M.status;
-	              Alcotest.(check (option string))
-	                "provider timeout records exception kind"
-	                (Some "outer_oas_timeout")
-	                (json_string_member_opt "exception_kind" finished_row.M.decision);
-	              Alcotest.(check bool)
-	                "provider timeout records timeout error"
-	                true
-	                (match json_string_member_opt "error" finished_row.M.decision with
-	                 | Some error -> contains_substring error "Timeout after"
-	                 | None -> false);
-	              let status, api_json =
-	                Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
-	                  config meta.name ~trace_id ~turn_id:keeper_turn_id ()
-	              in
-	              Alcotest.(check string)
-	                "timeout runtime trace status"
-	                "ok"
-	                (match status with `OK -> "ok" | `Not_found -> "not_found");
-	              let provider_attempts =
-	                Yojson.Safe.Util.(api_json |> member "provider_attempts")
-	              in
-	              Alcotest.(check (option string))
-	                "timeout provider attempts summary terminal status"
-	                (Some "timeout")
-	                (json_string_member_opt
-	                   "terminal_status"
-	                   provider_attempts);
-	              Alcotest.(check (option string))
-	                "timeout provider attempts summary exception"
-	                (Some "outer_oas_timeout")
-	                (json_string_member_opt
-	                   "terminal_exception_kind"
-	                   provider_attempts))))
+              Alcotest.(check (option string))
+                "provider timeout records exception kind"
+                (Some "outer_oas_timeout")
+                (json_string_member_opt "exception_kind" finished_row.M.decision);
+              Alcotest.(check bool)
+                "provider timeout records timeout error"
+                true
+                (match json_string_member_opt "error" finished_row.M.decision with
+                 | Some error -> contains_substring error "Timeout after"
+                 | None -> false);
+              let status, api_json =
+                Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+                  config meta.name ~trace_id ~turn_id:keeper_turn_id ()
+              in
+              Alcotest.(check string)
+                "timeout runtime trace status"
+                "ok"
+                (match status with `OK -> "ok" | `Not_found -> "not_found");
+              let provider_attempts =
+                Yojson.Safe.Util.(api_json |> member "provider_attempts")
+              in
+              Alcotest.(check (option string))
+                "timeout provider attempts summary terminal status"
+                (Some "timeout")
+                (json_string_member_opt "terminal_status" provider_attempts);
+              Alcotest.(check (option string))
+                "timeout provider attempts summary exception"
+                (Some "outer_oas_timeout")
+                (json_string_member_opt
+                   "terminal_exception_kind"
+                   provider_attempts);
+              Alcotest.(check (option string))
+                "timeout provider attempts summary model source"
+                (Some "direct_model_strings")
+                (json_string_member_opt "terminal_model_source" provider_attempts);
+              Alcotest.(check (option string))
+                "timeout provider attempts summary fallback authority"
+                (Some "direct_model_strings")
+                (json_string_member_opt
+                   "terminal_fallback_authority"
+                   provider_attempts))))
 
 let test_state_sidecar_hydrates_checkpoint_continuity () =
   let module KMP = Masc_mcp.Keeper_memory_policy in

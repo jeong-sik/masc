@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { formatPct1 } from '../lib/format-number'
+import { formatDuration } from '../lib/format-time'
 import { ActionButton } from './common/button'
 import { CollapsibleSection } from './common/collapsible'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
@@ -15,11 +16,13 @@ import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { toolCategory } from './tool-call-shared'
 import type { Keeper } from '../types'
 import type {
+  KeeperCompositeSnapshot,
   KeeperRuntimeLensLane,
   KeeperRuntimeTraceResponse,
 } from '../api/keeper'
-import { serverStatus } from '../store'
+import { serverStatus, shellRuntimeResolution } from '../store'
 import { operatorSnapshot } from '../operator-store'
+import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 import {
   allowlistEmptyState,
   auditMetadataState,
@@ -63,6 +66,338 @@ function SignalRow({ label, value }: { label: string; value: string | number }) 
     <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
       <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
       <span class="text-xs font-medium text-[var(--color-fg-secondary)]">${value}</span>
+    </div>
+  `
+}
+
+interface KeeperLiveTruthRuntimeInput {
+  status?: string | null
+  warnings?: string[]
+  source_mismatch?: boolean
+  server_repo_path?: { path?: string | null } | null
+  server_repo_git_commit?: string | null
+  workspace_git_commit?: string | null
+  build?: {
+    commit?: string | null
+    started_at?: string | null
+  } | null
+}
+
+export interface KeeperLiveTruthRow {
+  label: string
+  value: string
+  detail: string
+  tone: StatusChipTone
+}
+
+export interface KeeperLiveTruthSummary {
+  headline: string
+  headlineDetail: string
+  tone: StatusChipTone
+  rows: KeeperLiveTruthRow[]
+  runtimeWarnings: string[]
+  runtimeBuildLabel: string | null
+  runtimeRepoLabel: string | null
+}
+
+function compactToken(value: string | null | undefined, fallback = 'unknown'): string {
+  const text = value?.trim()
+  return text ? text : fallback
+}
+
+function shortCommit(value: string | null | undefined): string | null {
+  const text = value?.trim()
+  return text ? text.slice(0, 10) : null
+}
+
+function isIdleTurnPhase(value: string | null | undefined): boolean {
+  const normalized = value?.trim().toLowerCase()
+  return !normalized || normalized === 'idle' || normalized === 'stable' || normalized === 'offline'
+}
+
+function runtimeWarningList(runtimeResolution: KeeperLiveTruthRuntimeInput | null | undefined): string[] {
+  if (!runtimeResolution) return []
+  const warnings = Array.isArray(runtimeResolution.warnings)
+    ? runtimeResolution.warnings.filter((warning): warning is string => warning.trim() !== '')
+    : []
+  if (runtimeResolution.source_mismatch && warnings.length === 0) {
+    return ['Runtime source mismatch detected.']
+  }
+  return warnings
+}
+
+function terminalEventLabel(trace: KeeperRuntimeTraceResponse | null): {
+  value: string
+  detail: string
+  tone: StatusChipTone
+} {
+  if (!trace) {
+    return {
+      value: 'trace unavailable',
+      detail: 'runtime_trace evidence not loaded',
+      tone: 'neutral',
+    }
+  }
+  const clock = trace.runtime_lens.turn_clock
+  const keeperTurn = clock.keeper_turn_id ?? trace.turn_identity.requested_keeper_turn_id ?? trace.turn_id
+  const turnLabel = keeperTurn == null ? 'turn unknown' : `turn #${keeperTurn}`
+  const terminal = clock.terminal_event_present ? compactToken(clock.terminal_event, 'terminal present') : 'terminal missing'
+  const gapCount = trace.runtime_lens.gaps.length
+  const terminalTone: StatusChipTone =
+    gapCount > 0
+      ? 'warn'
+      : !clock.terminal_event_present
+        ? 'warn'
+        : terminal === 'turn_finished'
+          ? 'ok'
+          : 'info'
+  const detailParts = [
+    `oas ${clock.max_oas_turn_count ?? '-'}`,
+    `manifest ${clock.manifest_total_rows}`,
+    `health ${compactToken(trace.health)}`,
+    gapCount > 0 ? `${gapCount} lens gap${gapCount === 1 ? '' : 's'}` : 'no lens gaps',
+  ]
+  return {
+    value: `${turnLabel} ${terminal === 'turn_finished' ? 'finished' : terminal}`,
+    detail: detailParts.join(' · '),
+    tone: terminalTone,
+  }
+}
+
+export function deriveKeeperLiveTruth({
+  keeper,
+  compositeSnapshot,
+  runtimeTrace,
+  runtimeResolution,
+}: {
+  keeper: Keeper
+  compositeSnapshot: KeeperCompositeSnapshot | null
+  runtimeTrace: KeeperRuntimeTraceResponse | null
+  runtimeResolution?: KeeperLiveTruthRuntimeInput | null
+}): KeeperLiveTruthSummary {
+  const linkedState = linkedRuntimeState(keeper)
+  const phase = compactToken(compositeSnapshot?.phase ?? keeper.phase ?? keeper.status)
+  const turnPhase = compactToken(compositeSnapshot?.turn_phase ?? keeper.pipeline_stage)
+  const fiberAlive =
+    compositeSnapshot?.phase_diagnosis?.conditions.fiber_alive
+    ?? keeper.keepalive_running
+    ?? keeper.presence_keepalive
+    ?? (linkedState !== 'offline')
+  const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(compositeSnapshot?.turn_phase)
+  const blocked =
+    compositeSnapshot?.runtime_attention?.blocked === true
+    || compositeSnapshot?.runtime_attention?.needs_attention === true
+    || Boolean(keeper.runtime_blocker_class)
+  const stopRequested =
+    compositeSnapshot?.runtime_attention?.fiber_stop_requested === true
+    || compositeSnapshot?.phase_diagnosis?.conditions.stop_requested === true
+  const traceEvidence = terminalEventLabel(runtimeTrace)
+  const warnings = runtimeWarningList(runtimeResolution)
+  const headline =
+    stopRequested
+      ? '종료 신호'
+      : blocked
+        ? '조치 필요'
+        : fiberAlive && activeTurn
+          ? '턴 진행 중'
+          : fiberAlive
+            ? '대기 중'
+            : runtimeTrace
+              ? '실행 미확인'
+              : '증거 부족'
+  const tone: StatusChipTone =
+    stopRequested
+      ? 'bad'
+      : blocked || warnings.length > 0
+        ? 'warn'
+        : fiberAlive && activeTurn
+          ? 'ok'
+          : fiberAlive
+            ? 'neutral'
+            : runtimeTrace
+              ? 'warn'
+              : 'neutral'
+
+  const idleLabel =
+    typeof compositeSnapshot?.idle_seconds === 'number'
+      ? `${formatDuration(compositeSnapshot.idle_seconds)} idle`
+      : typeof keeper.last_turn_ago_s === 'number'
+        ? `${formatDuration(keeper.last_turn_ago_s)} since turn`
+        : 'idle age unknown'
+  const runtimeReason =
+    compactToken(
+      compositeSnapshot?.runtime_attention?.reason
+      ?? keeper.runtime_blocker_summary
+      ?? keeper.attention_reason
+      ?? null,
+      'no blocker reason',
+    )
+  const toolContract = compactToken(compositeSnapshot?.execution?.tool_contract_result ?? null, 'tool contract unknown')
+  const guardCount = compositeSnapshot?.fsm_guard_violations ?? 0
+  const invariantFailed = compositeSnapshot
+    ? Object.values(compositeSnapshot.invariants).some(value => value === false)
+    : false
+  const runtimeCommit =
+    shortCommit(runtimeResolution?.server_repo_git_commit)
+    ?? shortCommit(runtimeResolution?.build?.commit)
+  const workspaceCommit = shortCommit(runtimeResolution?.workspace_git_commit)
+  const runtimeBuildLabel = runtimeCommit
+    ? workspaceCommit && workspaceCommit !== runtimeCommit
+      ? `${runtimeCommit} vs workspace ${workspaceCommit}`
+      : runtimeCommit
+    : null
+  const runtimeRepoLabel = runtimeResolution?.server_repo_path?.path
+    ? runtimeResolution.server_repo_path.path.split('/').slice(-2).join('/')
+    : null
+
+  return {
+    headline,
+    headlineDetail: [
+      `phase ${phase}`,
+      `turn ${turnPhase}`,
+      fiberAlive ? 'fiber alive' : 'fiber not proven',
+      activeTurn ? 'live turn' : 'no live turn',
+    ].join(' · '),
+    tone,
+    runtimeWarnings: warnings,
+    runtimeBuildLabel,
+    runtimeRepoLabel,
+    rows: [
+      {
+        label: '런타임',
+        value: fiberAlive ? 'fiber alive' : 'fiber not proven',
+        detail: `roster ${keeper.status} · linked ${linkedState}`,
+        tone: fiberAlive ? 'ok' : 'warn',
+      },
+      {
+        label: '현재 턴',
+        value: activeTurn ? `${turnPhase} live` : 'no live turn',
+        detail: `${compositeSnapshot ? (compositeSnapshot.is_live === true ? 'is_live=true' : 'is_live=false') : 'is_live=unknown'} · ${turnPhase} · ${idleLabel}`,
+        tone: activeTurn ? 'ok' : 'neutral',
+      },
+      {
+        label: '최신 증거',
+        value: traceEvidence.value,
+        detail: traceEvidence.detail,
+        tone: traceEvidence.tone,
+      },
+      {
+        label: 'FSM',
+        value: `KSM ${phase} / KTC ${turnPhase}`,
+        detail: `${guardCount} guard violations · ${invariantFailed ? 'invariant fail' : 'invariants ok'}`,
+        tone: guardCount > 0 || invariantFailed ? 'bad' : 'ok',
+      },
+      {
+        label: '차단',
+        value: blocked ? compactToken(compositeSnapshot?.runtime_attention?.state, 'blocked') : 'none',
+        detail: `${runtimeReason} · ${toolContract}`,
+        tone: blocked ? 'warn' : 'ok',
+      },
+    ],
+  }
+}
+
+function EvidenceStamp({
+  label,
+  evidence,
+}: {
+  label: string
+  evidence: Pick<KeeperDetailEvidenceState<unknown>, 'refreshedAtMs' | 'error' | 'loading'>
+}) {
+  const state = evidence.error
+    ? 'error'
+    : evidence.refreshedAtMs
+      ? 'fresh'
+      : evidence.loading
+        ? 'loading'
+        : 'missing'
+  const tone: StatusChipTone =
+    state === 'fresh' ? 'ok' : state === 'error' ? 'warn' : 'neutral'
+  return html`
+    <span class="inline-flex min-w-0 items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
+      <${StatusChip} tone=${tone} uppercase=${false}>${label}<//>
+      ${evidence.refreshedAtMs
+        ? html`<${TimeAgo} timestamp=${evidence.refreshedAtMs} />`
+        : html`<span>${state}</span>`}
+      ${evidence.error ? html`<span class="truncate text-[var(--color-status-warn)]">${evidence.error}</span>` : null}
+    </span>
+  `
+}
+
+export function KeeperLiveTruthPanel({
+  keeper,
+  compositeSnapshot,
+  runtimeTrace,
+  compositeEvidence,
+  runtimeTraceEvidence,
+}: {
+  keeper: Keeper
+  compositeSnapshot: KeeperCompositeSnapshot | null
+  runtimeTrace: KeeperRuntimeTraceResponse | null
+  compositeEvidence: KeeperDetailEvidenceState<KeeperCompositeSnapshot>
+  runtimeTraceEvidence: KeeperDetailEvidenceState<KeeperRuntimeTraceResponse>
+}) {
+  const runtimeResolution = shellRuntimeResolution.value
+  const summary = deriveKeeperLiveTruth({
+    keeper,
+    compositeSnapshot,
+    runtimeTrace,
+    runtimeResolution,
+  })
+  const headlineParts = summary.headlineDetail.split(' · ').filter(Boolean)
+  const firstWarning = summary.runtimeWarnings[0] ?? null
+  const extraWarningCount = Math.max(0, summary.runtimeWarnings.length - 1)
+
+  return html`
+    <div
+      class="w-full max-w-[calc(100vw-3rem)] rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4 lg:max-w-none"
+      data-testid="keeper-live-truth"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Live truth</div>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <${StatusChip} tone=${summary.tone} uppercase=${false}>${summary.headline}<//>
+            ${headlineParts.map(part => html`
+              <span class="inline-flex max-w-full rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-secondary)]">
+                ${part}
+              </span>
+            `)}
+          </div>
+        </div>
+        <div class="flex min-w-0 flex-wrap justify-start gap-2 sm:justify-end">
+          <${EvidenceStamp} label="composite" evidence=${compositeEvidence} />
+          <${EvidenceStamp} label="trace" evidence=${runtimeTraceEvidence} />
+        </div>
+      </div>
+
+      ${firstWarning ? html`
+        <div class="mt-3 flex min-w-0 flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-xs text-[var(--color-fg-secondary)]">
+          <${StatusChip} tone="warn" uppercase=${false}>runtime warning<//>
+          <span class="min-w-0 flex-1 truncate">${firstWarning}</span>
+          ${extraWarningCount > 0 ? html`<span class="text-3xs text-[var(--color-fg-muted)]">+${extraWarningCount}</span>` : null}
+        </div>
+      ` : null}
+
+      <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        ${summary.rows.map(row => html`
+          <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.label}</span>
+              <${StatusChip} tone=${row.tone} uppercase=${false}>${row.tone}<//>
+            </div>
+            <div class="mt-1 truncate text-sm font-medium text-[var(--color-fg-primary)]" title=${row.value}>${row.value}</div>
+            <div class="mt-1 truncate text-3xs text-[var(--color-fg-muted)]" title=${row.detail}>${row.detail}</div>
+          </div>
+        `)}
+      </div>
+
+      ${(summary.runtimeBuildLabel || summary.runtimeRepoLabel) ? html`
+        <div class="mt-3 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
+          ${summary.runtimeBuildLabel ? html`<span class="font-mono">build ${summary.runtimeBuildLabel}</span>` : null}
+          ${summary.runtimeRepoLabel ? html`<span class="font-mono">repo ${summary.runtimeRepoLabel}</span>` : null}
+        </div>
+      ` : null}
     </div>
   `
 }

@@ -17,6 +17,7 @@ import {
   TraitsList,
 } from './keeper-detail-panels'
 import {
+  KeeperLiveTruthPanel,
   RuntimeLensSection,
   RuntimeSignals,
   TurnBudgetSection,
@@ -54,6 +55,7 @@ import type { keeperActivityDisplay } from '../lib/keeper-runtime-display'
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 import { KeeperCommsPanel, PlaygroundReposPanel } from './keeper-detail-comms'
 import { KeeperClearContextDialog } from './keeper-detail-lifecycle'
+import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 
 export interface KeeperDetailBodyProps {
   keeper: Keeper
@@ -64,6 +66,8 @@ export interface KeeperDetailBodyProps {
   activityDisplay: ReturnType<typeof keeperActivityDisplay>
   compositeSnapshot: KeeperCompositeSnapshot | null
   runtimeTrace: KeeperRuntimeTraceResponse | null
+  compositeEvidence: KeeperDetailEvidenceState<KeeperCompositeSnapshot>
+  runtimeTraceEvidence: KeeperDetailEvidenceState<KeeperRuntimeTraceResponse>
   diagOpen: boolean
   onDiagToggle: (open: boolean) => void
   checkpointRefreshToken: number
@@ -87,6 +91,8 @@ export function KeeperDetailBody({
   activityDisplay,
   compositeSnapshot,
   runtimeTrace,
+  compositeEvidence,
+  runtimeTraceEvidence,
   diagOpen,
   onDiagToggle,
   checkpointRefreshToken,
@@ -118,6 +124,14 @@ export function KeeperDetailBody({
           eyebrow="상태 개요"
           title="운영 상태 개요"
         >
+      <${KeeperLiveTruthPanel}
+        keeper=${keeper}
+        compositeSnapshot=${compositeSnapshot}
+        runtimeTrace=${runtimeTrace}
+        compositeEvidence=${compositeEvidence}
+        runtimeTraceEvidence=${runtimeTraceEvidence}
+      />
+
       ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
       ${'' /* RFC-0046 §7 #2: share useKeeperComposite with FsmHub to dedup the /composite poll */}
       <${FsmHub}

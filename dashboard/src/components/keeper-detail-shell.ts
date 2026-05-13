@@ -74,10 +74,10 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
   ])
 
   return html`
-    <div class="flex items-center gap-1.5">
+    <div class="flex min-w-0 items-center gap-1.5">
       <select
         aria-label="Cascade 프로필 선택"
-        class="py-0.5 px-1 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border border-[var(--color-border-default)] cursor-pointer"
+        class="min-w-0 max-w-full py-0.5 px-1 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border border-[var(--color-border-default)] cursor-pointer"
         title=${invalidProfiles.length > 0
           ? `Cascade 프로필\n\n비활성화된 잘못된 프로필:\n${invalidSummary}`
           : 'Cascade 프로필'}
@@ -176,7 +176,7 @@ export function KeeperDetailHeaderInfo({
   onClose: () => void
 }) {
   return html`
-    <div class="flex min-w-0 items-start gap-4">
+    <div class="flex min-w-0 flex-wrap items-start gap-4">
       <button
         type="button"
         onClick=${onClose}
@@ -186,7 +186,7 @@ export function KeeperDetailHeaderInfo({
         목록
       </button>
       <div class="size-12 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
-      <div class="flex flex-col gap-0.5">
+      <div class="flex min-w-[12rem] flex-1 flex-col gap-0.5">
         <${SectionLabel}>모니터링 / 에이전트 / 키퍼 상세</${SectionLabel}>
         <div class="mt-1 flex flex-wrap items-center gap-2.5">
           <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>

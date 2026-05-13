@@ -974,7 +974,10 @@ let run_keeper_cycle
                      Eio.Cancel.sub (fun cc ->
                        event_bus_drain_cancel := Some cc;
                        let rec loop () =
-                         try ignore (drain_turn_event_bus ~site:"background_poll" ()) with
+                         try
+                           let _summary = drain_turn_event_bus ~site:"background_poll" () in
+                           ()
+                         with
                          | Eio.Cancel.Cancelled _ as e -> raise e
                          | exn ->
                            Log.Keeper.warn

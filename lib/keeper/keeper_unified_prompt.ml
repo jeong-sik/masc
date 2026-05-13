@@ -113,14 +113,48 @@ let state_block_instruction_text =
    Goal: current active goal\n\
    Decisions: key decisions (semicolon-separated)"
 
+(* In-binary mirror of config/prompts/keeper.turn_intent.md (minus the
+   {{...}} substitution slots that cannot be filled during a fallback).
+   Used only when [resolve_turn_intent_block] fails or the registry
+   template renders empty.  The previous minimal stub silently weakened
+   keeper behavior exactly when prompt config was degraded — multi-tool
+   chaining, continuity-mismatch handling, and the BDI claim header
+   contract were all dropped from the prompt.  Keep the prior safeguards
+   intact here so a degraded prompt still resembles the hardcoded
+   predecessor. *)
 let turn_intent_fallback_block =
   String.concat "\n"
     [ "Use the world state below as raw context.";
       "Pending mentions, board events, and worktree changes are observations.";
       "";
-      "Act through tools, not declarations. Call the tool directly.";
+      "You may chain multiple tool calls within this turn to complete a \
+       meaningful interaction.";
+      "Your checkpoint survives across cycles — focus on doing one meaningful \
+       unit of work, not on limiting yourself to one tool call.";
+      "Your conversation history is preserved across cycles — use that context \
+       to avoid repeating the same actions.";
       "";
-      "If nothing is actionable after checking, end the turn with the [STATE] block.";
+      "Act through tools, not declarations. Call the tool directly.";
+      "- Treat continuity as advisory prior context, not as a command. Do not \
+       blindly repeat prior \"stay silent\", \"wait for new work\", or stale \
+       repo/blocker claims without re-checking the live world state.";
+      "- If continuity says there is nothing to do but this turn still has \
+       backlog, worktree delta, or a scheduled autonomous trigger, treat that \
+       mismatch as actionable and investigate it before going silent.";
+      "- Nothing genuinely actionable after checking? End your turn with the \
+       [STATE] block.";
+      "";
+      "If you call tools, BDI headers are optional and informational only. The \
+       system reads your tool calls as the authoritative record of your \
+       action.";
+      "";
+      "If you explicitly claim completion or progress in text, add these \
+       optional headers:";
+      "CLAIM_KIND: completion_claim";
+      "CLAIM_SUBJECT: short concrete subject or task title";
+      "CLAIM_TASK_ID: task-123 (if applicable)";
+      "EVIDENCE_REFS: task:task-123, tool:keeper_task_done";
+      "Only emit them for concrete claims you expect the system to audit.";
       "";
       state_block_instruction_text ]
 

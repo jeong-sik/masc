@@ -152,6 +152,27 @@ describe('keeper runtime trace', () => {
         memory_flush_success_count: 1,
         episodes_flushed: 2,
       },
+      linked_artifacts: {
+        receipts: [
+          {
+            kind: 'execution_receipt',
+            path: '/tmp/receipt.jsonl',
+            present: true,
+            file_stat: { size: 120 },
+          },
+        ],
+        checkpoints: [
+          {
+            kind: 'oas_checkpoint',
+            path: '/tmp/checkpoint.json',
+            present: false,
+            file_stat: null,
+          },
+        ],
+        tool_call_logs: [],
+      },
+      manifest_rows: [{ event: 'Turn_started', trace_id: 'trace-1' }],
+      receipts: [{ terminal_reason_code: 'completed' }],
       health: 'ok',
       stale_reason: null,
     })
@@ -164,6 +185,10 @@ describe('keeper runtime trace', () => {
 	    expect(result.event_bus.correlation_ids).toEqual(['corr-1'])
     expect(result.memory.memory_flushed_count).toBe(0)
     expect(result.memory.episodes_flushed).toBe(2)
+    expect(result.linked_artifacts.receipts[0]?.path).toBe('/tmp/receipt.jsonl')
+    expect(result.linked_artifacts.checkpoints[0]?.present).toBe(false)
+    expect(result.manifest_rows[0]?.event).toBe('Turn_started')
+    expect(result.receipts[0]?.terminal_reason_code).toBe('completed')
     expect(result.health).toBe('ok')
   })
 

@@ -767,6 +767,19 @@ export interface KeeperRuntimeLens {
   gaps: KeeperRuntimeLensGap[]
 }
 
+export interface KeeperRuntimeTraceLinkedArtifact {
+  kind: string
+  path: string
+  present: boolean
+  file_stat: Record<string, unknown> | null
+}
+
+export interface KeeperRuntimeTraceLinkedArtifacts {
+  receipts: KeeperRuntimeTraceLinkedArtifact[]
+  checkpoints: KeeperRuntimeTraceLinkedArtifact[]
+  tool_call_logs: KeeperRuntimeTraceLinkedArtifact[]
+}
+
 export interface KeeperRuntimeTraceResponse {
   keeper: string
   trace_id: string
@@ -781,6 +794,9 @@ export interface KeeperRuntimeTraceResponse {
   event_bus: KeeperRuntimeTraceEventBusSummary
   memory: KeeperRuntimeTraceMemorySummary
   runtime_lens: KeeperRuntimeLens
+  linked_artifacts: KeeperRuntimeTraceLinkedArtifacts
+  manifest_rows: Record<string, unknown>[]
+  receipts: Record<string, unknown>[]
   health: string
   stale_reason: string | null
 }
@@ -820,6 +836,35 @@ function stringListField(raw: Record<string, unknown>, key: string): string[] {
   const value = raw[key]
   if (!Array.isArray(value)) return []
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+function recordListField(raw: Record<string, unknown>, key: string): Record<string, unknown>[] {
+  const value = raw[key]
+  if (!Array.isArray(value)) return []
+  return value.filter(isRecord)
+}
+
+function parseRuntimeTraceLinkedArtifact(raw: unknown): KeeperRuntimeTraceLinkedArtifact {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    kind: stringField(obj, 'kind'),
+    path: stringField(obj, 'path'),
+    present: obj.present === true,
+    file_stat: isRecord(obj.file_stat) ? obj.file_stat : null,
+  }
+}
+
+function parseRuntimeTraceLinkedArtifacts(raw: unknown): KeeperRuntimeTraceLinkedArtifacts {
+  const obj = isRecord(raw) ? raw : {}
+  const parseList = (key: string) => {
+    const value = obj[key]
+    return Array.isArray(value) ? value.map(parseRuntimeTraceLinkedArtifact) : []
+  }
+  return {
+    receipts: parseList('receipts'),
+    checkpoints: parseList('checkpoints'),
+    tool_call_logs: parseList('tool_call_logs'),
+  }
 }
 
 function parseRuntimeTraceTurnIdentity(raw: unknown): KeeperRuntimeTraceTurnIdentity {
@@ -1058,6 +1103,9 @@ export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceRespons
     event_bus: parseRuntimeTraceEventBus(raw.event_bus),
     memory: parseRuntimeTraceMemory(raw.memory),
     runtime_lens: parseRuntimeLens(raw.runtime_lens, traceId),
+    linked_artifacts: parseRuntimeTraceLinkedArtifacts(raw.linked_artifacts),
+    manifest_rows: recordListField(raw, 'manifest_rows'),
+    receipts: recordListField(raw, 'receipts'),
     health: stringField(raw, 'health') || 'unknown',
     stale_reason: nullableStringField(raw, 'stale_reason'),
   }

@@ -166,12 +166,127 @@ let test_no_runtime_placeholder_when_identity_is_real () =
     "no Runtime Lens placeholder leaked into identity fields" false
     contains_placeholder
 
+(* ───────────────────────────────────────────────────────────────────
+   Companion coverage: Cascade_legacy_runner.cascade_observation_to_json
+   pins the same Runtime Lens carve-out for the audit-log surface
+   (second site fixed in PR #15070's second commit f567e57272). The
+   non-redacted serializer must emit real model_id / model_label on
+   attempts and fallback events; the redacted variant for keeper
+   external metrics lives in Keeper_unified_metrics.
+   ─────────────────────────────────────────────────────────────────── *)
+
+module LR = Cascade_legacy_runner
+module KP = Keeper_cascade_profile
+
+let mk_attempt ~model_id ~model_label : LR.cascade_attempt =
+  {
+    attempt_index = 0;
+    model_id;
+    model_label = Some model_label;
+    latency_ms = Some 42;
+    error = None;
+  }
+
+let mk_fallback_event ~from_id ~to_id : LR.cascade_fallback_event =
+  {
+    from_model_id = from_id;
+    from_model_label = Some (from_id ^ "/label");
+    to_model_id = to_id;
+    to_model_label = Some (to_id ^ "/label");
+    reason = "capability_gate";
+  }
+
+let mk_observation ?(attempts = []) ?(fallback_events = []) () :
+    LR.cascade_observation =
+  {
+    cascade_name = KP.runtime_name_of_string "tier.test_observation_real_id";
+    strategy = Some "failover";
+    configured_labels = [ "Edit"; "Write" ];
+    candidate_models = [ "claude_code.claude-auto"; "ollama_cloud.qwen3.5" ];
+    primary_model = Some "claude_code.claude-auto";
+    selected_model = Some "ollama_cloud.qwen3.5";
+    selected_model_raw = Some "qwen3.5";
+    selected_index = Some 1;
+    fallback_hops = Some 1;
+    fallback_applied = true;
+    attempts;
+    fallback_events;
+    attempt_details_available = true;
+    attempt_details_source = "oas_metrics_callbacks";
+  }
+
+let nth_attempt_model_id json idx =
+  let attempts = Yojson.Safe.Util.member "attempts" json in
+  let attempt = List.nth (Yojson.Safe.Util.to_list attempts) idx in
+  assoc_string "model_id" attempt
+
+let test_observation_attempts_emit_real_model_id () =
+  let attempt0 =
+    mk_attempt ~model_id:"ollama_cloud.ollama-cloud-deepseek-v4-pro"
+      ~model_label:"deepseek-v4-pro:cloud"
+  in
+  let attempt1 =
+    mk_attempt ~model_id:"claude_code.claude-auto" ~model_label:"auto"
+  in
+  let obs = mk_observation ~attempts:[ attempt0; attempt1 ] () in
+  let json = LR.cascade_observation_to_json obs in
+  Alcotest.(check string)
+    "attempt[0].model_id real"
+    "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+    (nth_attempt_model_id json 0);
+  Alcotest.(check string)
+    "attempt[1].model_id real" "claude_code.claude-auto"
+    (nth_attempt_model_id json 1)
+
+let test_observation_fallback_events_emit_real_ids () =
+  let event =
+    mk_fallback_event ~from_id:"claude_code.claude-auto"
+      ~to_id:"ollama_cloud.qwen3.5"
+  in
+  let obs = mk_observation ~fallback_events:[ event ] () in
+  let json = LR.cascade_observation_to_json obs in
+  let events = Yojson.Safe.Util.member "fallback_events" json in
+  let event0 = List.hd (Yojson.Safe.Util.to_list events) in
+  Alcotest.(check string)
+    "fallback.from_model_id real" "claude_code.claude-auto"
+    (assoc_string "from_model_id" event0);
+  Alcotest.(check string)
+    "fallback.to_model_id real" "ollama_cloud.qwen3.5"
+    (assoc_string "to_model_id" event0)
+
+let test_observation_no_runtime_placeholder () =
+  let attempt = mk_attempt ~model_id:"distinct.model" ~model_label:"distinct" in
+  let event =
+    mk_fallback_event ~from_id:"distinct.from" ~to_id:"distinct.to"
+  in
+  let obs =
+    mk_observation ~attempts:[ attempt ] ~fallback_events:[ event ] ()
+  in
+  let text = Yojson.Safe.to_string (LR.cascade_observation_to_json obs) in
+  let contains s sub =
+    let nlen = String.length sub and slen = String.length s in
+    let rec loop i =
+      i + nlen <= slen && (String.sub s i nlen = sub || loop (i + 1))
+    in
+    loop 0
+  in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool)
+        (Printf.sprintf "no placeholder substring %s" needle)
+        false (contains text needle))
+    [
+      "\"model_id\":\"runtime\"";
+      "\"from_model_id\":\"runtime\"";
+      "\"to_model_id\":\"runtime\"";
+    ]
+
 let case name f = Alcotest.test_case name `Quick f
 
 let () =
-  Alcotest.run "Cascade_catalog_runtime.candidate_probe_to_yojson"
+  Alcotest.run "Cascade catalog runtime YOJSON"
     [
-      ( "real identity",
+      ( "candidate_probe real identity",
         [
           case "Probe_ok emits real identity"
             test_probe_ok_real_identity;
@@ -182,9 +297,18 @@ let () =
           case "Probe_skipped emits real identity"
             test_probe_skipped_real_identity;
         ] );
-      ( "anti-regression",
+      ( "candidate_probe anti-regression",
         [
           case "no Runtime Lens placeholder in identity fields"
             test_no_runtime_placeholder_when_identity_is_real;
+        ] );
+      ( "cascade_observation audit-log real identity",
+        [
+          case "attempts[*].model_id is real"
+            test_observation_attempts_emit_real_model_id;
+          case "fallback_events[*].from/to_model_id is real"
+            test_observation_fallback_events_emit_real_ids;
+          case "no runtime placeholder for model identity"
+            test_observation_no_runtime_placeholder;
         ] );
     ]

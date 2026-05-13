@@ -43,6 +43,36 @@ Keeper continuity is releaseable as an advanced feature only when all of the fol
 
 If any gate is missing, the feature remains internal or validation-only.
 
+### Quantitative Gate
+
+For production promotion, attach the output of:
+
+```bash
+scripts/keeper-production-readiness-gate.py \
+  --base-path <runtime-base-path> \
+  --keeper <keeper-name> \
+  --output .release-evidence/keeper-production-readiness.json
+```
+
+Minimum thresholds:
+
+- terminal turns: `>= 3`
+- successful turns: `>= 3`
+- receipt coverage: `100%`
+- checkpoint coverage for successful provider turns: `100%`
+- provider attempt closure: `100%`
+- event-bus correlation coverage: `100%`
+- memory-injection coverage: `100%`
+- tool-log coverage when tools are used: `100%`
+- timestamp parse coverage: `100%`
+- missing linked artifacts: `0`
+- timestamp/order violations: `0`
+- dangling provider attempts: `0`
+- max evidence span per turn: `<= 600 seconds`
+
+These are release thresholds, not debugging hints.  Any missing metric or
+unevaluated gate keeps continuity out of the production-ready bucket.
+
 For this runbook, `diagnosis closed` means all of the following:
 
 - one root-cause bucket from the diagnosis RFC (`H1`-`H4`) is selected

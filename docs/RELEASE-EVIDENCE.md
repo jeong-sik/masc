@@ -22,6 +22,7 @@ code_refs:
 - MCP handshake: `initialize` + `tools/list` raw capture 저장
 - repo coordination read path: `masc_status` raw capture 저장
 - dashboard read paths: `/api/v1/dashboard/mission`, `/api/v1/dashboard/namespace-truth` raw capture 저장
+- quantitative readiness: `docs/PRODUCTION-READINESS-GATES.md`의 release artifact, keeper turn evidence, performance SLO, OAS pin/boundary gate 결과를 함께 첨부
 - raw evidence: headers/body/json 정규화본 + `server.log`
 
 이 bundle이 없으면 최신 release/main에 대해 production claim을 하지 않는다.
@@ -58,11 +59,13 @@ make release-evidence
 - 실제 binary가 부팅되고 `/health`를 제공하는지
 - MCP public surface가 최소 handshake를 만족하는지
 - dashboard read model이 최소 조회 경로에서 깨지지 않는지
+- `docs/PRODUCTION-READINESS-GATES.md` 결과가 첨부된 경우, keeper turn evidence chain과 OAS pin/boundary가 정량 기준을 만족하는지
 
 ## What This Does Not Prove
 
 - 외부 배포 환경의 auth/secret/network 설정
 - env-specific deployment smoke
 - operator bearer-token workflow의 현장 구성
+- 첨부되지 않은 performance SLO 또는 keeper continuity scenario
 
 이 부분은 별도 deploy/runbook evidence가 있어야 한다. 즉 local release bundle은 baseline proof이고, environment proof를 대체하지 않는다.

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -104,6 +105,80 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             self.assertEqual(summary.status, "FAIL")
             self.assertTrue(
                 any("order_violations" in failure for failure in summary.failures)
+            )
+
+    def test_missing_provider_attempt_rows_fail_closure_gate(self):
+        tmp, root, keeper, trace = self.make_fixture()
+        with tmp:
+            manifest = (
+                root
+                / ".masc"
+                / "keepers"
+                / keeper
+                / "runtime-manifests"
+                / f"{trace}.jsonl"
+            )
+            rows = [
+                json.loads(line)
+                for line in manifest.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            rows = [
+                row
+                for row in rows
+                if not (
+                    row.get("keeper_turn_id") == 1
+                    and row.get("event")
+                    in {"provider_attempt_started", "provider_attempt_finished"}
+                )
+            ]
+            manifest.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            summary = self.evaluate(root, keeper, trace)
+
+            self.assertEqual(summary.status, "FAIL")
+            self.assertLess(summary.derived["provider_closure_pct"], 100.0)
+            self.assertTrue(
+                any(
+                    "provider_closure_pct" in failure
+                    for failure in summary.failures
+                )
+            )
+
+    def test_missing_timestamp_fails_coverage_gate(self):
+        tmp, root, keeper, trace = self.make_fixture()
+        with tmp:
+            manifest = (
+                root
+                / ".masc"
+                / "keepers"
+                / keeper
+                / "runtime-manifests"
+                / f"{trace}.jsonl"
+            )
+            rows = [
+                json.loads(line)
+                for line in manifest.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            rows[0].pop("ts", None)
+            manifest.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            summary = self.evaluate(root, keeper, trace)
+
+            self.assertEqual(summary.status, "FAIL")
+            self.assertLess(summary.derived["timestamp_coverage_pct"], 100.0)
+            self.assertTrue(
+                any(
+                    "timestamp_coverage_pct" in failure
+                    for failure in summary.failures
+                )
             )
 
 

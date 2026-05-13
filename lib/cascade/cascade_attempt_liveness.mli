@@ -175,9 +175,10 @@ type output =
   | Completed
       (** Attempt succeeded. *)
 
-(** Metric recorder — caller supplies callbacks for TTFT, TBT, and
-    liveness outcome observation.  [null_recorder] is the default so
-    the pure FSM stays IO-free unless a caller explicitly wires metrics. *)
+(** Metric recorder — caller supplies callbacks for TTFT seconds, TBT
+    seconds, and liveness outcome observation.  [null_recorder] is the
+    default so the pure FSM stays IO-free unless a caller explicitly
+    wires metrics. *)
 type recorder = {
   record_ttft : float -> unit;
   record_inter_chunk : float -> unit;

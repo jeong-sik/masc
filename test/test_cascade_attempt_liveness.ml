@@ -33,6 +33,28 @@ let check_output =
 let budget : L.budget =
   { ttft_max = 30.0; inter_chunk_max = 20.0; attempt_wall_max = 180.0 }
 
+let test_recorder_receives_seconds_not_milliseconds () =
+  let ttft = ref None in
+  let inter_chunk = ref None in
+  let recorder : L.recorder =
+    {
+      record_ttft = (fun seconds -> ttft := Some seconds);
+      record_inter_chunk = (fun seconds -> inter_chunk := Some seconds);
+      record_liveness_outcome = (fun _ -> ());
+    }
+  in
+  let s = L.initial ~started_at:10.0 in
+  let s', _ =
+    L.step ~recorder budget s (L.Chunk (C.Answer_delta, 12.5))
+  in
+  let _s'', _ =
+    L.step ~recorder budget s' (L.Chunk (C.Answer_delta, 13.75))
+  in
+  Alcotest.(check (option (float 0.0001)))
+    "TTFT recorded in seconds" (Some 2.5) !ttft;
+  Alcotest.(check (option (float 0.0001)))
+    "inter-chunk recorded in seconds" (Some 1.25) !inter_chunk
+
 (* ──────────────────────── §4.5 decision table ──────────────────────── *)
 
 let test_awaiting_chunk_any_to_streaming () =
@@ -256,6 +278,8 @@ let () =
     [
       ( "decision_table",
         [
+          case "recorder receives seconds, not milliseconds"
+            test_recorder_receives_seconds_not_milliseconds;
           case "Awaiting × chunk(any) → Streaming"
             test_awaiting_chunk_any_to_streaming;
           case "Awaiting × Tick(t≥ttft) → Failed No_first_token"

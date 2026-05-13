@@ -91,7 +91,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: 'Monitor',
     icon: 'monitoring',
-    description: 'Fleet storylines, agents, runtime, and telemetry',
+    description: 'Fleet storylines and runtime telemetry',
     defaultTab: 'monitoring',
     defaultParams: { section: 'journey' },
     tabs: ['monitoring'],
@@ -165,7 +165,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'journey',
       label: 'Journey Map',
-      description: 'Task, run, contract, keeper, thinking, memory, turn, life, and cascade in one flow.',
+      description: 'Unified execution flow across lifecycle stages.',
       params: { section: 'journey' },
     },
     {
@@ -187,25 +187,25 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'cognition',
       label: 'Cognition',
-      description: 'Keeper BDI, token load, memory, decisions, and autoresearch loops.',
+      description: 'Keeper cognition and resource state.',
       params: { section: 'cognition' },
     },
     {
       id: 'runtime',
       label: 'Cascade',
-      description: 'Provider health, capacity, routing, cost, latency, and inspector views.',
+      description: 'Provider routing health and cost.',
       params: { section: 'runtime' },
     },
     {
       id: 'goal-loop',
       label: 'GOAL LOOP',
-      description: 'Observe, Orient, Decide, Act, and Verify runtime status.',
+      description: 'Runtime progress through the goal loop.',
       params: { section: 'goal-loop' },
     },
     {
       id: 'fleet-health',
       label: 'Fleet Telemetry',
-      description: 'Event log, keeper comparison, tool quality, governance, and attribution signals.',
+      description: 'Fleet-wide signal aggregation and comparison.',
       params: { section: 'fleet-health' },
     },
   ],

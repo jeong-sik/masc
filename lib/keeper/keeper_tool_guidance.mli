@@ -11,11 +11,6 @@ type hint =
   ; description : string
   }
 
-(** Curated affordance hints (name + call template + description) for
-    every keeper-preferred tool. Filtered at render time by the
-    keeper's active tool-name allowlist. *)
-val hints : hint list
-
 (** Build a hashtable lookup of allowed tool names. Used internally
     by [allowed_hints] but exposed for callers that want to reuse the
     same allowed set. *)

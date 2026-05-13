@@ -409,6 +409,26 @@ let test_auto_models_use_declared_policy () =
           (Adapter.auto_models_for_cascade_prefix "gemini_cli"))))
 ;;
 
+let test_zai_default_model_fallback_uses_oas_catalog () =
+  with_env "ZAI_DEFAULT_MODEL" None (fun () ->
+    with_env "ZAI_AUTO_MODELS" (Some "glm-custom,glm-second") (fun () ->
+      check
+        (option string)
+        "glm default follows OAS catalog/env order"
+        (Some "glm-custom")
+        (Adapter.default_model_id_for_cascade_prefix "glm")));
+  with_env "ZAI_CODING_DEFAULT_MODEL" None (fun () ->
+    with_env
+      "ZAI_CODING_AUTO_MODELS"
+      (Some "glm-coding-custom,glm-coding-second")
+      (fun () ->
+         check
+           (option string)
+           "glm-coding default follows OAS catalog/env order"
+           (Some "glm-coding-custom")
+           (Adapter.default_model_id_for_cascade_prefix "glm-coding")))
+;;
+
 let test_runtime_mcp_header_support_uses_declared_policy () =
   let kimi_cli_cfg =
     Llm_provider.Provider_config.make
@@ -964,6 +984,10 @@ let () =
             "declared auto model policy"
             `Quick
             test_auto_models_use_declared_policy
+        ; test_case
+            "zai default model fallback uses oas catalog"
+            `Quick
+            test_zai_default_model_fallback_uses_oas_catalog
         ; test_case
             "declared runtime MCP header policy"
             `Quick

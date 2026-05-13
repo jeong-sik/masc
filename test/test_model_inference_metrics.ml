@@ -280,9 +280,9 @@ let test_untrusted_usage_excluded_from_aggregates () =
     let path = make_keeper_dir base "meter" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry ~model:"llama:qwen3.5-27b" ~ts:(ts -. 10.0)
+      success_entry ~model:"llama:qwen3.5-coder" ~ts:(ts -. 10.0)
         ~input_tokens:100 ~output_tokens:20 ~latency_ms:1000 ();
-      success_entry ~model:"llama:qwen3.5-27b" ~ts:(ts -. 5.0)
+      success_entry ~model:"llama:qwen3.5-coder" ~ts:(ts -. 5.0)
         ~input_tokens:1_721_506 ~output_tokens:900 ~latency_ms:1000
         ~usage_trust:"untrusted"
         ~usage_anomaly_reasons:["input_tokens_gt_1m"] ();
@@ -513,7 +513,7 @@ let test_coverage_diagnostics_survive_aggregation () =
     let path = make_keeper_dir base "coverage_diag" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_usage ~model:"glm-coding-plan:glm-5"
+      success_entry_without_usage ~model:"glm-coding:glm-5"
         ~ts:(ts -. 5.0)
         ~provider:"glm-coding"
         ~turn_lane:"text_only"
@@ -581,13 +581,13 @@ let test_costs_jsonl_backfills_wall_tok_per_sec () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let ts = now_unix () in
     write_costs base [
-      cost_entry ~model:"qwen3.6:27b-coding-nvfp4" ~ts
+      cost_entry ~model:"qwen3.6-coding-nvfp4" ~ts
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:250 ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
     check string "cost model"
-      "ollama:qwen3.6:27b-coding-nvfp4" s.model_id;
+      "ollama:qwen3.6-coding-nvfp4" s.model_id;
     check int "one cost entry" 1 s.entry_count;
     check (option (float 0.001)) "wall tok/sec from cost latency"
       (Some 200.0) s.avg_tok_per_sec;
@@ -599,7 +599,7 @@ let test_costs_jsonl_zero_latency_is_missing () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let ts = now_unix () in
     write_costs base [
-      cost_entry ~model:"qwen3.6:27b-coding-nvfp4" ~ts
+      cost_entry ~model:"qwen3.6-coding-nvfp4" ~ts
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:0 ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -629,11 +629,11 @@ let test_costs_jsonl_dedupes_matching_decision_sample () =
     let path = make_keeper_dir base "dedupe" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry ~model:"ollama:qwen3.6:27b-coding-nvfp4" ~ts
+      success_entry ~model:"ollama:qwen3.6-coding-nvfp4" ~ts
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:500 ();
     ];
     write_costs base [
-      cost_entry ~model:"ollama:qwen3.6:27b-coding-nvfp4" ~ts
+      cost_entry ~model:"ollama:qwen3.6-coding-nvfp4" ~ts
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:250 ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in

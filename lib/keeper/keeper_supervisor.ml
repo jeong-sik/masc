@@ -2341,8 +2341,8 @@ let liveness_recovery_scan (ctx : _ context) =
     bound for the current fiber, so a restart must not immediately mark
     old-but-freshly-booted keepers stuck, while long-running frozen
     keepers still trip the detector.  The [entry.started_at] fallback
-    also catches the "never_started" case (e.g. [glm-coding-plan] in the
-    production sample) without a separate code path.
+    also catches the "never_started" case in the production sample without
+    a separate code path.
 
     Returns [None] when not stuck.  Pure: no I/O, no global state. *)
 let detect_alive_but_stuck

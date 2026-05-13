@@ -26,7 +26,7 @@ code_refs:
 | `llama` | `local` | `none` | `LLAMA_SERVER_URL` OpenAI-compatible local runtime |
 | `ollama` | `local` | `none` | `OLLAMA_DEFAULT_MODEL` env; bare `ollama` requires explicit model |
 | `glm` | `direct_api` | `api_key` (`ZAI_API_KEY`) | current Z.ai direct path |
-| `glm-coding` | `direct_api` | `api_key` (`ZAI_API_KEY`) | Z.ai coding-plan direct path |
+| `glm-coding` | `direct_api` | `api_key` (`ZAI_API_KEY`) | Z.ai coding endpoint direct path |
 | `claude-api` | `direct_api` | `api_key` (`ANTHROPIC_API_KEY`) | direct Anthropic API |
 | `codex-api` | `direct_api` | `api_key` (`OPENAI_API_KEY`) | direct OpenAI/Codex-family API |
 | `gemini-api` | `direct_api` | `vertex_adc` first, `GEMINI_API_KEY` fallback | canonical Gemini direct path |
@@ -72,7 +72,7 @@ code_refs:
   - Z.ai general direct path
   - requires `ZAI_API_KEY`
 - `glm-coding:<model>`
-  - Z.ai coding-plan direct path
+  - Z.ai coding endpoint direct path
   - requires `ZAI_API_KEY`
 
 `gemini-api` Vertex path uses:

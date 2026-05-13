@@ -128,7 +128,7 @@ let response_format_of_provider provider =
   match canonical with
   | "codex-api"
   | "glm-api"
-  | "glm-coding-plan"
+  | "glm-coding"
   | "kimi-api"
   | "openrouter"
   | "ollama"

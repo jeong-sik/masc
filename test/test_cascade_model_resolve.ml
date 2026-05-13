@@ -91,7 +91,7 @@ let test_glm_coding_auto_models_default_order () =
   with_clean_env (fun () ->
     check
       (list string)
-      "glm-coding:auto expands to coding-plan order"
+      "glm-coding:auto expands to coding endpoint order"
       [ "glm-5.1"; "glm-5"; "glm-5-turbo"; "glm-4.7"; "glm-4.5-air" ]
       (R.glm_coding_auto_models ()))
 ;;
@@ -355,7 +355,7 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
     check
       string
       "third call rotates to gemini provider"
-      "gemini_cli:gemini-3-flash-preview"
+      "gemini_cli:gemini-3.1-pro-preview"
       (List.hd third);
     check
       string

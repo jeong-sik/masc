@@ -86,11 +86,13 @@ export function summarizeAuditKinds(entries: readonly AuditEntry[]): AuditKindSu
 export function auditEntryMatchesLogId(entry: AuditEntry, logId: string | null): boolean {
   const needle = normalizeLogNeedle(logId)
   if (!needle) return false
-  return [
-    entry.id,
-    entry.target,
-    entry.summary,
-  ].some(value => stringContainsLogNeedle(value, needle))
+  // `entry.id` is a structured identifier so demand exact (case-insensitive)
+  // equality — otherwise log id `turn-1` would also match `turn-10`.  For
+  // human-facing free text (`target`, `summary`) and payload contents we
+  // accept token-boundary matches so a sentence like `failed at turn-1`
+  // still pins the row but `failed at turn-10` does not.
+  return stringEqualsLogNeedle(entry.id, needle)
+    || [entry.target, entry.summary].some(value => stringMatchesLogNeedleWithBoundary(value, needle))
     || payloadContainsLogNeedle(entry.payload, needle)
 }
 
@@ -111,13 +113,30 @@ function normalizeLogNeedle(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
-function stringContainsLogNeedle(value: string | undefined, needle: string): boolean {
-  return typeof value === 'string' && value.toLowerCase().includes(needle)
+function stringEqualsLogNeedle(value: string | undefined, needle: string): boolean {
+  return typeof value === 'string' && value.trim().toLowerCase() === needle
+}
+
+// Token boundary = anything that is not `[A-Za-z0-9_-]`.  Log ids commonly
+// contain `-` so the canonical word boundary `\b` is too aggressive
+// (`\bturn-1\b` would still match `turn-10` because `-` is a word boundary
+// for `\b`).  We bracket the needle with explicit non-id-character
+// boundaries (or start/end of string) instead.
+const LOG_NEEDLE_ID_CHARS = /[A-Za-z0-9_-]/
+
+function stringMatchesLogNeedleWithBoundary(value: string | undefined, needle: string): boolean {
+  if (typeof value !== 'string') return false
+  const haystack = value.toLowerCase()
+  const idx = haystack.indexOf(needle)
+  if (idx < 0) return false
+  const before = idx === 0 ? '' : haystack[idx - 1]
+  const after = idx + needle.length >= haystack.length ? '' : haystack[idx + needle.length]
+  return !LOG_NEEDLE_ID_CHARS.test(before) && !LOG_NEEDLE_ID_CHARS.test(after)
 }
 
 function payloadContainsLogNeedle(value: unknown, needle: string, depth = 0): boolean {
   if (depth > 4 || value == null) return false
-  if (typeof value === 'string') return stringContainsLogNeedle(value, needle)
+  if (typeof value === 'string') return stringEqualsLogNeedle(value, needle)
   if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value).toLowerCase() === needle
   }
@@ -126,7 +145,7 @@ function payloadContainsLogNeedle(value: unknown, needle: string, depth = 0): bo
   }
   if (typeof value === 'object') {
     return Object.entries(value).some(([key, item]) =>
-      stringContainsLogNeedle(key, needle) || payloadContainsLogNeedle(item, needle, depth + 1),
+      stringEqualsLogNeedle(key, needle) || payloadContainsLogNeedle(item, needle, depth + 1),
     )
   }
   return false

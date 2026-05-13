@@ -999,7 +999,9 @@ function AuditLedgerBoard({ entries, count, focus, logId }: { entries: AuditEntr
       ${logId ? html`
         <div class=${`rounded-[var(--r-1)] border px-3 py-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] ${focusedEntries.length > 0 ? 'border-[var(--brass-3)] bg-[var(--accent-12)] text-[var(--brass-1)]' : 'border-card-border/60 bg-[var(--backdrop-deep)] text-text-muted'}`} data-testid="audit-log-focus">
           ${focusedEntries.length > 0
-            ? `log focus · ${logId} · ${focusedEntries.length} matches pinned`
+            ? (focus === null
+                ? `log focus · ${logId} · ${focusedEntries.length} matches pinned`
+                : `log focus · ${logId} · ${focusedEntries.length} matches`)
             : `log focus miss · ${logId} · showing latest entries`}
         </div>
       ` : null}

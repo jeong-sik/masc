@@ -181,8 +181,11 @@ describe('PlanningPanel', () => {
 
     render(html`<${PlanningPanel} />`)
 
-    expect(screen.getByTestId('planning-route-focus')).toBeTruthy()
-    expect(screen.getByText('goal goal-runtime')).toBeTruthy()
+    const focus = screen.getByTestId('planning-route-focus')
+    expect(focus).toBeTruthy()
+    expect(focus.getAttribute('data-route-focused-goal')).toBe('goal-runtime')
+    expect(focus.textContent).toContain('ROUTE FOCUS')
+    expect(screen.getByText('GOAL goal-runtime')).toBeTruthy()
     expect(screen.getByText('Runtime context goal')).toBeTruthy()
     expect(screen.getByText('active')).toBeTruthy()
   })
@@ -205,8 +208,11 @@ describe('PlanningPanel', () => {
 
     render(html`<${PlanningPanel} />`)
 
-    expect(screen.getByTestId('planning-route-focus')).toBeTruthy()
-    expect(screen.getByText('task task-runtime')).toBeTruthy()
+    const focus = screen.getByTestId('planning-route-focus')
+    expect(focus).toBeTruthy()
+    expect(focus.getAttribute('data-route-focused-task')).toBe('task-runtime')
+    expect(focus.textContent).toContain('ROUTE FOCUS')
+    expect(screen.getByText('TASK task-runtime')).toBeTruthy()
     expect(screen.getByText('Runtime context task')).toBeTruthy()
     expect(screen.getByText('@sangsu')).toBeTruthy()
     await waitFor(() => {
@@ -228,7 +234,7 @@ describe('PlanningPanel', () => {
     }
 
     render(html`<${PlanningPanel} />`)
-    fireEvent.click(screen.getByRole('button', { name: 'clear' }))
+    fireEvent.click(screen.getByRole('button', { name: 'CLEAR' }))
 
     expect(routeSignal.value.params).toEqual({
       section: 'planning',

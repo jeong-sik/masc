@@ -152,11 +152,15 @@ let load_prose key =
     | Ok value -> value
     | Error msg ->
       observe_guidance_config_drift ~label:key ~detail:msg;
-      let fallback = Prompt_registry.get_prompt key in
-      fallback
+      Prompt_registry.get_prompt key
   in
   let trimmed = String.trim raw in
-  if String.equal trimmed "" then Option.value ~default:"" (fallback_prose key)
+  if String.equal trimmed ""
+  then (
+    observe_guidance_config_drift
+      ~label:key
+      ~detail:"prompt resolved to empty; using in-binary fallback prose";
+    Option.value ~default:"" (fallback_prose key))
   else trimmed
 ;;
 

@@ -6,7 +6,7 @@
     same allowed-name set.
 
     The hint inventory and prose blocks live in config/prompts/:
-      - keeper.tool_hints.toml         — 17 hint records (loaded once via otoml)
+      - keeper.tool_hints.toml         — 17 hint records (loaded on first use via otoml)
       - keeper.tool_preferred_header.md
       - keeper.tool_preferred_empty.md
       - keeper.tool_workflow_gh_full.md
@@ -15,7 +15,11 @@
       - keeper.tool_unknown_guard.md
 
     The only runtime substitution is masc_web_fetch's default timeout: TOML
-    carries `{{web_fetch_timeout}}`, replaced at load time. *)
+    carries `{{web_fetch_timeout}}`, replaced at load time.
+
+    Missing or malformed config raises [Failure] with the offending path so
+    deployment drift surfaces immediately instead of silently rendering blank
+    guidance to the model. *)
 
 type hint =
   { name : string
@@ -24,13 +28,11 @@ type hint =
   }
 
 let web_fetch_timeout_placeholder = "{{web_fetch_timeout}}"
+let web_fetch_timeout_re = Str.regexp_string web_fetch_timeout_placeholder
 
 let substitute_web_fetch_timeout s =
   let value = string_of_int Tool_misc_web_fetch.default_timeout_sec in
-  Str.global_replace
-    (Str.regexp_string web_fetch_timeout_placeholder)
-    value
-    s
+  Str.global_replace web_fetch_timeout_re value s
 ;;
 
 let hints_toml_path () =
@@ -44,7 +46,20 @@ let hints_toml_path () =
 
 let load_hints () =
   let path = hints_toml_path () in
-  let doc = Otoml.Parser.from_file path in
+  let doc =
+    try Otoml.Parser.from_file path with
+    | Sys_error msg ->
+      failwith
+        (Printf.sprintf
+           "keeper_tool_guidance: cannot read TOML at %s: %s. Verify the file \
+            ships with the binary (config/prompts/keeper.tool_hints.toml)."
+           path msg)
+    | Otoml.Parse_error (_, msg) ->
+      failwith
+        (Printf.sprintf
+           "keeper_tool_guidance: malformed TOML at %s: %s"
+           path msg)
+  in
   let entries = Otoml.find doc (Otoml.get_array Fun.id) [ "hints" ] in
   List.map
     (fun entry ->
@@ -63,10 +78,23 @@ let load_hints () =
    single-domain model satisfies this. *)
 let hints : hint list Lazy.t = lazy (load_hints ())
 
+(* Empty prose is treated as a deployment error: a missing markdown file
+   would otherwise silently drop guard text (e.g. render_unknown_tool_guard)
+   into "" and the LLM would receive no warning. Fail loud at first use. *)
 let load_prose key =
-  match Prompt_registry.render_prompt_template key [] with
-  | Ok value -> String.trim value
-  | Error _ -> String.trim (Prompt_registry.get_prompt key)
+  let raw =
+    match Prompt_registry.render_prompt_template key [] with
+    | Ok value -> value
+    | Error _ -> Prompt_registry.get_prompt key
+  in
+  let trimmed = String.trim raw in
+  if trimmed = "" then
+    failwith
+      (Printf.sprintf
+         "keeper_tool_guidance: prompt %S resolved to empty. Verify \
+          config/prompts/%s.md exists and is non-empty."
+         key key)
+  else trimmed
 ;;
 
 let allowed_lookup allowed_tool_names =

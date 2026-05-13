@@ -1,5 +1,5 @@
 # Keeper tool guidance hints.
-# Loaded by lib/keeper/keeper_tool_guidance.ml via otoml at startup.
+# Loaded by lib/keeper/keeper_tool_guidance.ml via otoml on first use (lazy).
 # Order is significant — render_preferred_tools preserves it.
 # Substitution: {{web_fetch_timeout}} -> Tool_misc_web_fetch.default_timeout_sec at load time.
 

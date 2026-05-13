@@ -16,8 +16,9 @@ type hint =
     same allowed set. *)
 val allowed_lookup : string list -> (string, unit) Hashtbl.t
 
-(** Filter [hints] down to those whose [name] is in
-    [allowed_tool_names]. *)
+(** Filter the curated hint inventory down to those whose [name] is
+    in [allowed_tool_names]. The inventory is loaded from
+    [config/prompts/keeper.tool_hints.toml] on first use. *)
 val allowed_hints : allowed_tool_names:string list -> hint list
 
 (** Render a single [hint] as a bullet line for prompt embedding. *)

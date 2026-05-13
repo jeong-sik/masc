@@ -17,8 +17,10 @@ type cascade_execution = {
 }
 
 val fail_open_rotation_cascades_from_catalog :
+  ?excluded_targets:string list ->
   catalog_names:string list ->
   keeper_assignable:string list ->
+  unit ->
   string list option
 
 val active_fail_open_rotation_cascades : unit -> string list option

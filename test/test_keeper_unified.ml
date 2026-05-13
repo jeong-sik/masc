@@ -6537,6 +6537,7 @@ let test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable
       ~catalog_names:
         [ KC.default_cascade_name (); KC.local_recovery_cascade_name; "ollama_only" ]
       ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
+      ()
   in
   check
     (option (list string))
@@ -6551,6 +6552,7 @@ let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
       ~catalog_names:
         [ "ollama_only"; KC.local_recovery_cascade_name; KC.default_cascade_name () ]
       ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
+      ()
   in
   check
     (option (list string))
@@ -6559,11 +6561,37 @@ let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
     rotation
 ;;
 
+let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () =
+  let rotation =
+    UT.fail_open_rotation_cascades_from_catalog
+      ~excluded_targets:[ "tier.ollama_cloud_primary" ]
+      ~catalog_names:
+        [
+          KC.default_cascade_name ();
+          "ollama_cloud_primary";
+          "coding_plan";
+        ]
+      ~keeper_assignable:
+        [
+          KC.default_cascade_name ();
+          "ollama_cloud_primary";
+          "coding_plan";
+        ]
+      ()
+  in
+  check
+    (option (list string))
+    "catalog-derived rotation excludes non-keeper route targets"
+    (Some [ KC.default_cascade_name (); "coding_plan" ])
+    rotation
+;;
+
 let test_fail_open_rotation_cascades_from_catalog_empty_when_unresolved () =
   let rotation =
     UT.fail_open_rotation_cascades_from_catalog
       ~catalog_names:[]
       ~keeper_assignable:[ KC.default_cascade_name () ]
+      ()
   in
   check
     (option (list string))
@@ -6577,6 +6605,7 @@ let test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candi
     UT.fail_open_rotation_cascades_from_catalog
       ~catalog_names:[ "experimental_only" ]
       ~keeper_assignable:[]
+      ()
   in
   check
     (option (list string))
@@ -12216,6 +12245,10 @@ let () =
             "catalog rotation preserves catalog order"
             `Quick
             test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order
+        ; test_case
+            "catalog rotation excludes non-keeper route targets"
+            `Quick
+            test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes
         ; test_case
             "unresolved catalog keeps legacy rotation fallback"
             `Quick

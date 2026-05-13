@@ -208,8 +208,10 @@ val fail_open_local_only_when_unavailable
     preserved while retaining only reserved recovery profiles and
     keeper-assignable profiles. *)
 val fail_open_rotation_cascades_from_catalog
-  :  catalog_names:string list
+  :  ?excluded_targets:string list
+  -> catalog_names:string list
   -> keeper_assignable:string list
+  -> unit
   -> string list option
 
 (** Resolve the next cascade to try after an auto-recoverable failure.

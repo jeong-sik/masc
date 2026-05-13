@@ -426,6 +426,35 @@ let normalize_declared_name (raw : string) : string =
     | Some use -> cascade_name_for_use use
     | None -> trimmed
 
+let keeper_runtime_route_uses =
+  [ Keeper_turn; Phase_recovery; Phase_buffer; Tool_required ]
+
+let is_keeper_runtime_route_use use =
+  List.exists (( = ) use) keeper_runtime_route_uses
+
+let route_target_public_name ?config_path use =
+  try Some (cascade_name_for_use ?config_path use |> public_name_of_target)
+  with Failure _ -> None
+
+let normalize_keeper_runtime_declared_name ?config_path raw =
+  let normalized = normalize_declared_name raw in
+  let public_name = public_name_of_target normalized in
+  let keeper_route_targets =
+    keeper_runtime_route_uses
+    |> List.filter_map (route_target_public_name ?config_path)
+    |> List.sort_uniq String.compare
+  in
+  let non_keeper_route_targets =
+    Cascade_routes.all_logical_uses
+    |> List.filter (fun use -> not (is_keeper_runtime_route_use use))
+    |> List.filter_map (route_target_public_name ?config_path)
+    |> List.sort_uniq String.compare
+  in
+  if List.mem public_name non_keeper_route_targets
+     && not (List.mem public_name keeper_route_targets)
+  then cascade_name_for_use ?config_path Keeper_turn
+  else normalized
+
 let resolve_live_with_catalog ~catalog raw =
   let trimmed = String.trim raw in
   let normalized =

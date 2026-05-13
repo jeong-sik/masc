@@ -217,7 +217,7 @@ let selected_model_of_meta = function
     (match nonempty_trimmed meta.runtime.usage.last_model_used with
      | Some _ as selected_model -> selected_model
      | None ->
-       (match meta.models with
+       (match Keeper_model_labels.configured_model_labels_of_meta meta with
         | model :: _ -> nonempty_trimmed model
         | [] -> None))
 ;;

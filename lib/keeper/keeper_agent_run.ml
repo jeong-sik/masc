@@ -536,9 +536,12 @@ let run_turn
        tools are bound. *)
        if keeper_oas_context.claude_mcp_config = None
        then (
+         let configured_model_labels =
+           Keeper_model_labels.configured_model_labels_of_meta meta
+         in
          let uses_cli_missing_sync =
            Cascade_runtime_candidate.labels_require_runtime_mcp_header_sync
-             meta.models
+             configured_model_labels
          in
          if uses_cli_missing_sync
          then
@@ -597,7 +600,7 @@ let run_turn
                  ~user_message
              in
              let model_id =
-               match meta.models with
+               match Keeper_model_labels.configured_model_labels_of_meta meta with
                | m :: _ -> m
                | [] -> "auto"
              in

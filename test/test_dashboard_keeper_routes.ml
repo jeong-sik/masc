@@ -584,6 +584,29 @@ let keeper_profile_cascade_name body keeper_name =
   | None -> fail ("keeper profile missing from cascade config: " ^ keeper_name)
 ;;
 
+let cascade_profile_first_candidate body profile_name =
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string body in
+  let rows = json |> member "profiles" |> to_list in
+  match
+    List.find_opt
+      (fun row -> row |> member "name" |> to_string = profile_name)
+      rows
+  with
+  | None -> fail ("cascade profile missing from config: " ^ profile_name)
+  | Some row -> (
+      match row |> member "candidates" |> to_list with
+      | candidate :: _ -> candidate
+      | [] -> fail ("cascade profile has no candidates: " ^ profile_name))
+;;
+
+let candidate_string_field field candidate =
+  let open Yojson.Safe.Util in
+  match candidate |> member field with
+  | `String value -> value
+  | _ -> fail ("candidate string field missing: " ^ field)
+;;
+
 let make_keeper_meta_json ?(name = "route_shadow_demo") ?(paused = true) () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -1324,6 +1347,14 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   check string "dashboard starts with seeded meta cascade"
     Masc_mcp.(Keeper_config.default_cascade_name ())
     (keeper_profile_cascade_name before.body keeper_name);
+  let candidate = cascade_profile_first_candidate before.body "primary" in
+  check bool "dashboard cascade config keeps candidate model label" true
+    (contains_substr "custom:mock@" (candidate_string_field "model" candidate));
+  check bool "dashboard cascade config keeps display model label" true
+    (contains_substr "custom:mock@" (candidate_string_field "display_model" candidate));
+  check string "dashboard cascade config keeps provider label"
+    "custom"
+    (candidate_string_field "provider_name" candidate);
   let assign_result =
     run_curl_post
       ~body:

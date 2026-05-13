@@ -361,6 +361,13 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
     return html`<div class="text-2xs text-[var(--color-fg-disabled)]">Keeper 데이터 없음.</div>`
   }
 
+  const runtimeModelLabel = (model: string): string =>
+    model === 'runtime' ? 'runtime lane' : model
+  const runtimeModelTitle = (model: string): string =>
+    model === 'runtime'
+      ? 'provider/model identity is redacted; use cascade and attempts details below'
+      : model
+
   return html`
     <div class="overflow-x-auto">
       <table class="w-full text-2xs" aria-label="키퍼 텔레메트리 현황">
@@ -484,7 +491,12 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 valueClass="text-[var(--color-fg-disabled)]"
               />
               <td class="py-1.5 text-right text-3xs text-[var(--color-fg-disabled)]">
-                <div class="font-mono text-[var(--color-fg-secondary)]">${row.model}</div>
+                <div
+                  class="font-mono text-[var(--color-fg-secondary)]"
+                  title=${runtimeModelTitle(row.model)}
+                >
+                  ${runtimeModelLabel(row.model)}
+                </div>
                 ${row.cascade_label
                   ? html`<div class="max-w-56 truncate" title=${row.cascade_label}>cascade ${row.cascade_label}</div>`
                   : null}

@@ -17,3 +17,4 @@ val tool_workflow_gh_full : string
 val tool_workflow_gh_no_pr : string
 val tool_workflow_gh_minimal : string
 val tool_unknown_guard : string
+val recovery_block : string

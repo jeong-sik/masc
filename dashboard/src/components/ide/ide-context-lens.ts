@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
+import { navigate } from '../../router'
+import type { TabId } from '../../types'
 import { KeeperBadge } from '../keeper-badge'
 import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
@@ -38,6 +40,15 @@ export interface IdeContextAnchor {
   readonly meta: string
   readonly line?: number
   readonly keeper_id?: string
+  readonly route_links?: ReadonlyArray<IdeContextRouteLink>
+}
+
+export interface IdeContextRouteLink {
+  readonly id: string
+  readonly label: string
+  readonly tab: TabId
+  readonly params: Record<string, string>
+  readonly evidence: string
 }
 
 export interface IdeContextLensModel {
@@ -59,6 +70,7 @@ export interface IdeContextLensInput {
 
 export interface IdeContextLensProps extends IdeContextLensInput {
   readonly onAnchorActivate?: (anchor: IdeContextAnchor) => void
+  readonly onRouteLinkActivate?: (link: IdeContextRouteLink) => void
 }
 
 const SURFACE_LABELS: Readonly<Record<IdeContextSurfaceId, string>> = {
@@ -162,10 +174,12 @@ export function IdeContextLens({
   threads = [],
   overlay,
   onAnchorActivate,
+  onRouteLinkActivate,
 }: IdeContextLensProps) {
   const model = deriveIdeContextLens({ filePath, annotations, diffRows, events, threads, overlay })
   const fileLabel = filePath.split('/').pop() || filePath || 'workspace'
   const activateAnchor = onAnchorActivate ?? activateIdeContextAnchor
+  const activateRouteLink = onRouteLinkActivate ?? openIdeContextRouteLink
 
   return html`
     <section
@@ -200,7 +214,7 @@ export function IdeContextLens({
       <ol class="ide-context-anchor-list" aria-label="Current file anchors">
         ${model.anchors.length === 0
           ? html`<li class="ide-context-anchor-empty">no linked anchors on this file yet</li>`
-          : model.anchors.map(anchor => ContextAnchorRow(anchor, activateAnchor))}
+          : model.anchors.map(anchor => ContextAnchorRow(anchor, activateAnchor, activateRouteLink))}
       </ol>
     </section>
   `
@@ -209,23 +223,42 @@ export function IdeContextLens({
 function ContextAnchorRow(
   anchor: IdeContextAnchor,
   onAnchorActivate: (anchor: IdeContextAnchor) => void,
+  onRouteLinkActivate: (link: IdeContextRouteLink) => void,
 ) {
   return html`
     <li class="ide-context-anchor-row">
       <span class="ide-context-anchor-surface">${anchor.surface}</span>
-      <button
-        type="button"
-        class="ide-context-anchor-main ide-context-anchor-action"
-        aria-label=${contextAnchorAriaLabel(anchor)}
-        title=${contextAnchorTitle(anchor)}
-        onClick=${() => onAnchorActivate(anchor)}
-      >
-        <span class="ide-context-anchor-label">
-          ${anchor.line !== undefined ? html`<span>L${anchor.line}</span>` : null}
-          <span>${anchor.label}</span>
-        </span>
-        <span class="ide-context-anchor-meta">${anchor.meta}</span>
-      </button>
+      <div class="ide-context-anchor-content">
+        <button
+          type="button"
+          class="ide-context-anchor-main ide-context-anchor-action"
+          aria-label=${contextAnchorAriaLabel(anchor)}
+          title=${contextAnchorTitle(anchor)}
+          onClick=${() => onAnchorActivate(anchor)}
+        >
+          <span class="ide-context-anchor-label">
+            ${anchor.line !== undefined ? html`<span>L${anchor.line}</span>` : null}
+            <span>${anchor.label}</span>
+          </span>
+          <span class="ide-context-anchor-meta">${anchor.meta}</span>
+        </button>
+        ${anchor.route_links && anchor.route_links.length > 0 ? html`
+          <div class="ide-context-route-links" aria-label="Operational links">
+            ${anchor.route_links.map(link => html`
+              <button
+                key=${link.id}
+                type="button"
+                class="ide-context-route-link"
+                title=${link.evidence}
+                aria-label=${`Open ${link.evidence}`}
+                onClick=${() => onRouteLinkActivate(link)}
+              >
+                ${link.label}
+              </button>
+            `)}
+          </div>
+        ` : null}
+      </div>
       ${anchor.keeper_id
         ? html`<${KeeperBadge} id=${anchor.keeper_id} variant="sigil" size="sm" />`
         : null}
@@ -242,6 +275,10 @@ function activateIdeContextAnchor(anchor: IdeContextAnchor): void {
     source_id: anchor.id,
     keeper_id: anchor.keeper_id,
   })
+}
+
+function openIdeContextRouteLink(link: IdeContextRouteLink): void {
+  navigate(link.tab, link.params)
 }
 
 function contextAnchorAriaLabel(anchor: IdeContextAnchor): string {
@@ -359,6 +396,11 @@ function buildAnchors(
       ]),
       line: annotation.line_start,
       keeper_id: annotation.keeper_id,
+      route_links: routeLinksForContext({
+        goalId: annotation.goal_id ?? undefined,
+        taskId: annotation.task_id ?? undefined,
+        keeperId: annotation.keeper_id,
+      }),
     })
   }
 
@@ -374,6 +416,7 @@ function buildAnchors(
       ]),
       line: cursor.line,
       keeper_id: cursor.keeper_id,
+      route_links: routeLinksForContext({ keeperId: cursor.keeper_id }),
     })
   }
 
@@ -390,6 +433,10 @@ function buildAnchors(
       ]),
       line: thread.anchor.line_start ?? undefined,
       keeper_id: thread.author_keeper_id,
+      route_links: routeLinksForContext({
+        boardPostId: thread.id,
+        keeperId: thread.author_keeper_id,
+      }),
     })
   }
 
@@ -403,6 +450,7 @@ function buildAnchors(
       label: `${additions} add / ${deletions} delete`,
       meta: 'working diff for current file',
       line: firstChangedLine(changedRows),
+      route_links: routeLinksForContext({ gitRef: 'HEAD' }),
     })
   }
 
@@ -416,6 +464,15 @@ function buildAnchors(
       meta: truncate(contextMeta || event.detail || `keeper ${event.keeper_id}`, 60),
       line: eventLineForFile(event, filePath),
       keeper_id: event.keeper_id,
+      route_links: routeLinksForContext({
+        goalId: event.context?.goal_id,
+        taskId: event.context?.task_id,
+        boardPostId: event.context?.board_post_id,
+        prId: event.context?.pr_id,
+        gitRef: event.context?.git_ref,
+        logId: event.context?.log_id,
+        keeperId: event.keeper_id,
+      }),
     })
   }
 
@@ -507,6 +564,98 @@ function firstChangedLine(rows: ReadonlyArray<UnifiedDiffRow>): number | undefin
 
 function compactMeta(values: ReadonlyArray<string | null>): string {
   return values.filter((value): value is string => Boolean(value)).join(' / ')
+}
+
+function routeLinksForContext(context: {
+  readonly goalId?: string
+  readonly taskId?: string
+  readonly boardPostId?: string
+  readonly prId?: string
+  readonly gitRef?: string
+  readonly logId?: string
+  readonly keeperId?: string
+}): ReadonlyArray<IdeContextRouteLink> {
+  const links: IdeContextRouteLink[] = []
+  const add = (link: IdeContextRouteLink): void => {
+    if (links.some(existing => existing.id === link.id)) return
+    links.push(link)
+  }
+  const goalId = cleanId(context.goalId)
+  if (goalId) {
+    add({
+      id: `goal:${goalId}`,
+      label: 'Goal',
+      tab: 'workspace',
+      params: { section: 'planning', goal: goalId },
+      evidence: `Goal ${goalId}`,
+    })
+  }
+  const taskId = cleanId(context.taskId)
+  if (taskId) {
+    add({
+      id: `task:${taskId}`,
+      label: 'Task',
+      tab: 'workspace',
+      params: { section: 'planning', view: 'default', task: taskId },
+      evidence: `Task ${taskId}`,
+    })
+  }
+  const boardPostId = cleanId(context.boardPostId)
+  if (boardPostId) {
+    add({
+      id: `board:${boardPostId}`,
+      label: 'Board',
+      tab: 'workspace',
+      params: { section: 'board', post: boardPostId },
+      evidence: `Board post ${boardPostId}`,
+    })
+  }
+  const prId = cleanId(context.prId)
+  if (prId) {
+    add({
+      id: `pr:${prId}`,
+      label: 'PR',
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph', pr: prId },
+      evidence: `PR ${prId}`,
+    })
+  }
+  const gitRef = cleanId(context.gitRef)
+  if (gitRef) {
+    add({
+      id: `git:${gitRef}`,
+      label: 'Git',
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph', ref: gitRef },
+      evidence: `Git ${gitRef}`,
+    })
+  }
+  const logId = cleanId(context.logId)
+  if (logId) {
+    add({
+      id: `log:${logId}`,
+      label: 'Log',
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'audit', log: logId },
+      evidence: `Log ${logId}`,
+    })
+  }
+  const keeperId = cleanId(context.keeperId)
+  if (keeperId && keeperId !== 'system') {
+    add({
+      id: `keeper:${keeperId}`,
+      label: 'Keeper',
+      tab: 'monitoring',
+      params: { section: 'agents', view: 'keepers', keeper: keeperId },
+      evidence: `Keeper ${keeperId}`,
+    })
+  }
+  return links.slice(0, 4)
+}
+
+function cleanId(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
 }
 
 function truncate(value: string, maxLength: number): string {

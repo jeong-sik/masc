@@ -161,6 +161,33 @@ describe('IdeContextLens', () => {
     })
   })
 
+  it('renders operational route links for linked goal, task, and keeper context', () => {
+    const activated: unknown[] = []
+    const container = document.createElement('div')
+
+    render(
+      h(IdeContextLens, {
+        filePath: 'lib/keeper/keeper_exec_ide.ml',
+        annotations: [annotation],
+        diffRows: [],
+        events: [],
+        overlay: { ...overlay, cursors: new Map() },
+        onRouteLinkActivate: link => activated.push(link),
+      }),
+      container,
+    )
+
+    const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-route-link')]
+    expect(links.map(link => link.textContent)).toEqual(['Goal', 'Task', 'Keeper'])
+
+    fireEvent.click(links[0]!)
+    expect(activated[0]).toMatchObject({
+      id: 'goal:goal-ide',
+      tab: 'workspace',
+      params: { section: 'planning', goal: 'goal-ide' },
+    })
+  })
+
   it('links conversation threads into board, comment, keeper, and line context', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_exec_ide.ml',
@@ -223,5 +250,11 @@ describe('IdeContextLens', () => {
       keeper_id: 'sangsu',
     })
     expect(model.anchors[0]?.meta).toContain('goal goal-ide')
+    expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
+      'Goal',
+      'Task',
+      'Board',
+      'PR',
+    ])
   })
 })

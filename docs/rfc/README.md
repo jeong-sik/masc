@@ -112,6 +112,10 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Draft | (pending #14714) | depends on RFC-0036 Phase A, extends RFC-0006 Phase B-2 |
 | 0071 | Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern | Draft | #14881 2026-05-12 | body written by this PR; lib/core/dune reference (#14888) realized. Related RFC-0042, RFC-0068. |
 | 0072 | Type-encoded keeper sub-FSM transitions (cascade + turn_phase) | Draft | 2026-05-12 | follows PR #14887 + #14893 decision-axis precedent. |
+| 0073 | Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure | Draft | (this PR) | Tool readiness package — RFC-0073/0074/0075/0076 coordinated. |
+| 0074 | Sandbox & Credential Auto-provision per Keeper Preset | Draft | (this PR) | follows RFC-0073 probe — closes gap that probe diagnoses. |
+| 0075 | Keeper Tools Smoke — Exhaustive Dispatch Coverage Regression Gate | Draft | (this PR) | follows RFC-0071/0072 exhaustive-match precedent for tool dispatch. |
+| 0076 | Tool Readiness Notification Channel — Typed Event Ledger Surface | Draft | (this PR) | follows RFC-0073/0074 — streams readiness state transitions. |
 | 0077 | Write-side silent failure — typed propagation | Draft | 2026-05-14 | symmetric counterpart to RFC-0044 (read-side); covers 20 grandfathered write/create sites in lib/keeper/. Originally claimed 0073, renumbered after #15064 0073-0076 package landed. |
 | 0078 | RFC Number Reservation Ledger + CI Collision Guard | Draft | 2026-05-14 | introduces `docs/rfc/.next-number` ledger + `rfc-number-collision-check` workflow |
 | 0079 | Log row typed encoder + silent-drop removal | Draft | 2026-05-14 | typed `Ring.entry` (level/source closed sums), `Entry_decode_error` raise, drops raw_level/normalized_level/legacy_classified/dropped_entries; supersedes #15170 |

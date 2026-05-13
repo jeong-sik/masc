@@ -24,6 +24,17 @@ const RUN_ACTIVITY_VERB_SET = new Set<string>(RUN_ACTIVITY_VERBS)
 
 export type RunActivityVerb = (typeof RUN_ACTIVITY_VERBS)[number]
 
+export interface RunActivityContext {
+  readonly file_path?: string
+  readonly line?: number
+  readonly goal_id?: string
+  readonly task_id?: string
+  readonly board_post_id?: string
+  readonly pr_id?: string
+  readonly git_ref?: string
+  readonly log_id?: string
+}
+
 export interface RunActivityEvent {
   readonly id: string
   readonly run_id: string
@@ -32,6 +43,9 @@ export interface RunActivityEvent {
   readonly target: string
   readonly timestamp_ms: number
   readonly detail?: string
+  readonly kind?: string
+  readonly tags?: ReadonlyArray<string>
+  readonly context?: RunActivityContext
 }
 
 export interface RunActivityStore {
@@ -125,6 +139,9 @@ function validEventForRun(event: unknown, runId: string): event is RunActivityEv
   if (!hasNonEmptyString(event, 'target')) return false
   if (!isRunActivityVerb(event.verb)) return false
   if (event.detail !== undefined && typeof event.detail !== 'string') return false
+  if (event.kind !== undefined && typeof event.kind !== 'string') return false
+  if (event.tags !== undefined && !isStringArray(event.tags)) return false
+  if (event.context !== undefined && !isRunActivityContext(event.context)) return false
   return Number.isFinite(event.timestamp_ms)
 }
 
@@ -135,6 +152,31 @@ function isRecord(value: unknown): value is UnknownRecord {
 function hasNonEmptyString(record: UnknownRecord, key: string): boolean {
   const value = record[key]
   return typeof value === 'string' && value.trim() !== ''
+}
+
+function isStringArray(value: unknown): value is ReadonlyArray<string> {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
+
+function isRunActivityContext(value: unknown): value is RunActivityContext {
+  if (!isRecord(value)) return false
+  return optionalNonEmptyString(value.file_path)
+    && optionalPositiveInteger(value.line)
+    && optionalNonEmptyString(value.goal_id)
+    && optionalNonEmptyString(value.task_id)
+    && optionalNonEmptyString(value.board_post_id)
+    && optionalNonEmptyString(value.pr_id)
+    && optionalNonEmptyString(value.git_ref)
+    && optionalNonEmptyString(value.log_id)
+}
+
+function optionalNonEmptyString(value: unknown): boolean {
+  return value === undefined || (typeof value === 'string' && value.trim() !== '')
+}
+
+function optionalPositiveInteger(value: unknown): boolean {
+  return value === undefined
+    || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1)
 }
 
 function isRunActivityVerb(value: unknown): value is RunActivityVerb {

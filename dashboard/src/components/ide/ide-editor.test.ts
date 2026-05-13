@@ -153,4 +153,39 @@ describe('IdeEditor', () => {
     expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
       .toContain('Trace')
   })
+
+  it('counts loaded annotations in the notes overlay summary', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['notes']),
+        annotations: [{
+          id: 'ann-1',
+          file_path: 'runtime.ts',
+          line_start: 1,
+          line_end: 1,
+          keeper_id: 'sangsu',
+          kind: 'Comment',
+          content: 'Keep this task linked to the line',
+          goal_id: 'goal-1',
+          task_id: 'task-1',
+          created_at_ms: 1,
+          updated_at_ms: 1,
+        }],
+      }),
+      container,
+    )
+
+    expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
+      .toContain('1 note')
+  })
 })

@@ -216,7 +216,8 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     ownershipStore,
     fileTreeStore,
     diffRows: () => diffRowsSignal.value,
-    subscribeDiffRows: diffRowsSignal.subscribe as (listener: () => void) => () => void,
+    subscribeDiffRows: (listener: () => void) =>
+      diffRowsSignal.subscribe(listener),
     workspaceSource: () => workspaceSourceSignal.value,
     // Wrap [Signal.subscribe] in an arrow so [this] stays bound when
     // the property is destructured by callers (the [as (listener: () =>

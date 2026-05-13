@@ -37,8 +37,39 @@ describe('createRunActivityStore', () => {
     expect(s.append({ ...event({}), keeper_id: null })).toBe(false)
     expect(s.append({ ...event({}), verb: 'deleted' })).toBe(false)
     expect(s.append(event({ timestamp_ms: Number.NaN }))).toBe(false)
+    expect(s.append({ ...event({}), kind: { bad: true } })).toBe(false)
+    expect(s.append({ ...event({}), tags: ['ok', 1] })).toBe(false)
+    expect(s.append({ ...event({}), context: { line: 0 } })).toBe(false)
+    expect(s.append({ ...event({}), context: { pr_id: '' } })).toBe(false)
     expect(s.append(event({ id: 'ok' }))).toBe(true)
     expect(s.events().map(item => item.id)).toEqual(['ok'])
+  })
+
+  it('preserves structured context links on valid activity events', () => {
+    const s = createRunActivityStore(runId)
+    s.seed([
+      event({
+        id: 'with-context',
+        context: {
+          file_path: 'lib/runtime.ml',
+          line: 42,
+          goal_id: 'goal-runtime',
+          task_id: 'task-runtime',
+          board_post_id: 'post-1',
+          pr_id: '15000',
+          git_ref: 'main',
+          log_id: 'turn-7',
+        },
+      }),
+    ])
+
+    expect(s.events()[0]?.context).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 42,
+      goal_id: 'goal-runtime',
+      task_id: 'task-runtime',
+      pr_id: '15000',
+    })
   })
 
   it('filters malformed seeded public input', () => {
@@ -49,6 +80,7 @@ describe('createRunActivityStore', () => {
       { ...event({ id: 'missing-keeper' }), keeper_id: null },
       { ...event({ id: 'bad-verb' }), verb: 'deleted' },
       { ...event({ id: 'bad-detail' }), detail: { lines: 3 } },
+      { ...event({ id: 'bad-tags' }), tags: ['ok', null] },
     ])
 
     expect(s.events().map(item => item.id)).toEqual(['ok'])

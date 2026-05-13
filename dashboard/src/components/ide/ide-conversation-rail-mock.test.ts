@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { IdeConversationRailMock, replayRailItems } from './ide-conversation-rail-mock'
+import { IdeConversationRailMock, postsToAnchoredThreads, replayRailItems } from './ide-conversation-rail-mock'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -21,6 +21,48 @@ describe('IdeConversationRailMock', () => {
     expect(container.textContent).toContain('REACTION THREAD')
     expect(container.textContent).toContain('0')
     expect(container.textContent).toContain('no conversation activity')
+  })
+
+  it('normalizes board posts into current-file anchored threads', () => {
+    const threads = postsToAnchoredThreads([
+      {
+        id: 'thread-line',
+        title: 'Review lib/runtime.ml:42',
+        body: 'question fn:run about this line',
+        author_identity: 'scholar',
+        votes: 0,
+        comment_count: 2,
+        created_at_iso: '2026-05-05T10:00:00Z',
+      },
+      {
+        id: 'thread-file',
+        title: 'File-level note',
+        body: 'looks good',
+        author_identity: 'sangsu',
+        votes: 1,
+        comment_count: 0,
+        created_at_iso: '2026-05-05T10:01:00Z',
+      },
+    ], 'dashboard/src/app.ts')
+
+    expect(threads[0]).toMatchObject({
+      id: 'thread-line',
+      anchor: {
+        file_path: 'lib/runtime.ml',
+        line_start: 42,
+        line_end: 42,
+        symbol_hint: 'fn:run',
+      },
+      reply_count: 2,
+    })
+    expect(threads[1]).toMatchObject({
+      id: 'thread-file',
+      anchor: {
+        file_path: 'dashboard/src/app.ts',
+        line_start: null,
+        line_end: null,
+      },
+    })
   })
 
   it('orders thread, decision, and cascade replay items on one timeline', () => {

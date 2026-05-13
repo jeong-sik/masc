@@ -1,11 +1,16 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
+import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
+import type { UnifiedDiffRow } from '../../api/workspace'
 import { KeeperBadge } from '../keeper-badge'
+import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
+import { IdeContextLens } from './ide-context-lens'
 import {
   createRunActivityStore,
+  type RunActivityContext,
   type RunActivityEvent,
   type RunActivityVerb,
 } from './run-activity-store'
@@ -35,16 +40,28 @@ interface ApiActivityResponse {
 }
 
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
+const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
+const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
 
 const DEFAULT_ROOM_ID = 'run-default'
+type MutableRunActivityContext = {
+  -readonly [K in keyof RunActivityContext]?: RunActivityContext[K]
+}
+
+export interface IdeActivityMockProps {
+  readonly activeFile?: string
+  readonly annotations?: ReadonlyArray<IdeAnnotation>
+  readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
+  readonly children?: unknown
+}
 
 function verbFromKind(kind: string): RunActivityVerb {
   const tail = kind.includes(".") ? kind.slice(kind.lastIndexOf(".") + 1) : kind
   return FALLBACK_VERB_MAP[tail] ?? DEFAULT_VERB
 }
 
-function targetFromSubject(subject: ApiActivityEvent['subject']): string {
-  if (!subject) return ''
+function targetFromSubject(subject: ApiActivityEvent['subject'], kind: string): string {
+  if (!subject) return kind
   return `${subject.kind}:${subject.id}`
 }
 
@@ -67,8 +84,11 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
     timestamp_ms: event.ts_ms,
     keeper_id: event.actor?.id ?? 'system',
     verb: verbFromKind(event.kind),
-    target: targetFromSubject(event.subject),
+    target: targetFromSubject(event.subject, event.kind),
     detail: detailFromPayload(event.payload, event.kind),
+    kind: event.kind,
+    tags: event.tags ?? [],
+    context: contextFromPayloadAndTags(event.payload, event.tags ?? []),
   }
 }
 
@@ -89,7 +109,94 @@ async function fetchActivityEvents(): Promise<{ events: ReadonlyArray<RunActivit
   }
 }
 
-export function IdeActivityMock() {
+function contextFromPayloadAndTags(
+  payload: unknown,
+  tags: ReadonlyArray<string>,
+): RunActivityContext | undefined {
+  const next: MutableRunActivityContext = {}
+  mergePayloadContext(next, payload)
+  for (const tag of tags) mergeTagContext(next, tag)
+  return Object.keys(next).length === 0 ? undefined : next
+}
+
+function mergePayloadContext(next: MutableRunActivityContext, payload: unknown): void {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return
+  const record = payload as Record<string, unknown>
+  const filePath = stringValue(record.file_path)
+    ?? stringValue(record.path)
+    ?? stringValue(record.file)
+  if (filePath) next.file_path = filePath
+  const line = positiveInteger(record.line)
+    ?? positiveInteger(record.line_start)
+    ?? positiveInteger(record.lineno)
+  if (line !== undefined) next.line = line
+  const goalId = stringValue(record.goal_id)
+  if (goalId) next.goal_id = goalId
+  const taskId = stringValue(record.task_id)
+  if (taskId) next.task_id = taskId
+  const boardPostId = stringValue(record.board_post_id) ?? stringValue(record.post_id)
+  if (boardPostId) next.board_post_id = boardPostId
+  const prId = stringValue(record.pr_id)
+    ?? stringValue(record.pull_request)
+    ?? numberString(record.pr_number)
+  if (prId) next.pr_id = prId
+  const gitRef = stringValue(record.git_ref)
+    ?? stringValue(record.commit)
+    ?? stringValue(record.branch)
+  if (gitRef) next.git_ref = gitRef
+  const logId = stringValue(record.log_id)
+  if (logId) next.log_id = logId
+}
+
+function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void {
+  const tag = rawTag.trim()
+  if (tag === '') return
+  const separator = tag.indexOf(':')
+  if (separator <= 0) return
+  const key = tag.slice(0, separator).trim().toLowerCase()
+  const value = tag.slice(separator + 1).trim()
+  if (value === '') return
+
+  if (key === 'file') {
+    const match = value.match(/^(.+?)(?::([1-9][0-9]*))?$/)
+    const path = match?.[1]
+    if (path) next.file_path = path
+    if (match?.[2]) next.line = Number.parseInt(match[2], 10)
+    return
+  }
+  if (key === 'line') {
+    const line = Number.parseInt(value, 10)
+    if (Number.isSafeInteger(line) && line >= 1) next.line = line
+    return
+  }
+  if (key === 'goal') next.goal_id = value
+  else if (key === 'task') next.task_id = value
+  else if (key === 'board' || key === 'post') next.board_post_id = value
+  else if (key === 'pr' || key === 'pull_request' || key === 'review') next.pr_id = value
+  else if (key === 'git' || key === 'commit' || key === 'branch') next.git_ref = value
+  else if (key === 'log' || key === 'telemetry') next.log_id = value
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+}
+
+function numberString(value: unknown): string | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : undefined
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? value
+    : undefined
+}
+
+export function IdeActivityMock(props: IdeActivityMockProps = {}) {
+  const {
+    activeFile = '',
+    annotations = EMPTY_ANNOTATIONS,
+    diffRows = EMPTY_DIFF_ROWS,
+  } = props
   const store = useMemo(() => {
     const store = createRunActivityStore(DEFAULT_ROOM_ID)
     store.seed(EMPTY_ACTIVITY)
@@ -119,11 +226,17 @@ export function IdeActivityMock() {
     const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
     return () => unsub()
   }, [])
+  useEffect(() => {
+    const unsub = ideConversationThreadSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const events = store.events()
   const keepers = store.knownKeepers()
   const presence = globalPresenceSnapshot.value
   const overlay = cursorOverlaySignal.value
+  const threadSnapshot = ideConversationThreadSnapshot.value
+  const threads = threadSnapshot.filePath === activeFile ? threadSnapshot.threads : []
 
   return html`
     <div
@@ -137,6 +250,14 @@ export function IdeActivityMock() {
         <span>EVENT TIMELINE</span>
         <span>${events.length} events · ${keepers.length} keepers</span>
       </div>
+      <${IdeContextLens}
+        filePath=${activeFile}
+        annotations=${annotations}
+        diffRows=${diffRows}
+        events=${events}
+        threads=${threads}
+        overlay=${overlay}
+      />
       <ol
         class="ide-rail-list ide-activity-list"
       >

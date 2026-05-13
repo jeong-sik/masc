@@ -103,6 +103,26 @@ describe('monitoring navigation labels', () => {
     expect(labelFor('cognition')).toBe('Cognition')
   })
 
+  it('keeps monitoring descriptions concise instead of comma-heavy domain lists', () => {
+    const sections = visibleSectionItemsForTab('monitoring')
+    const descriptions = Object.fromEntries(sections.map(item => [item.id, item.description]))
+
+    expect(descriptions).toMatchObject({
+      journey: 'Unified execution flow across lifecycle stages.',
+      agents: 'Live runtime-backed roster and process state.',
+      cognition: 'Keeper cognition and resource state.',
+      runtime: 'Provider routing health and cost.',
+      'goal-loop': 'Runtime progress through the goal loop.',
+      'fleet-health': 'Fleet-wide signal aggregation and comparison.',
+    })
+
+    for (const item of sections) {
+      const wordCount = item.description.split(/\s+/).filter(Boolean).length
+      expect(wordCount).toBeLessThanOrEqual(7)
+      expect(item.description.split(',').length).toBeLessThanOrEqual(2)
+    }
+  })
+
   it('does not expose sessions section (removed in Phase 0 of RFC-MASC-006)', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)

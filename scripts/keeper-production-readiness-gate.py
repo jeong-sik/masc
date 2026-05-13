@@ -234,10 +234,9 @@ def evaluate(
     for manifest in manifest_files:
         for row in iter_jsonl(manifest):
             metrics.manifest_rows += 1
-            if "ts" in row:
-                metrics.timestamp_rows += 1
-                if parse_ts(row.get("ts")) is not None:
-                    metrics.parseable_timestamp_rows += 1
+            metrics.timestamp_rows += 1
+            if parse_ts(row.get("ts")) is not None:
+                metrics.parseable_timestamp_rows += 1
             keeper = str(row.get("keeper_name") or manifest.parent.parent.name)
             trace = str(row.get("trace_id") or manifest.stem)
             turn = row.get("keeper_turn_id")
@@ -267,7 +266,7 @@ def evaluate(
 
         started_count = len(event_rows(rows, "provider_attempt_started"))
         finished_count = len(event_rows(rows, "provider_attempt_finished"))
-        if provider and finished_count >= started_count:
+        if provider and started_count > 0 and finished_count >= started_count:
             metrics.provider_closed_turns += 1
         if provider and finished_count < started_count:
             metrics.dangling_provider_attempts += started_count - finished_count

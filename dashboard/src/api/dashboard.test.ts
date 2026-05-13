@@ -1236,7 +1236,7 @@ describe('fetchCostLatency', () => {
     const rawResponse = {
       perAgent: [
         {
-          agent: 'unlatenced-model',
+          agent: 'runtime_lane_7',
           in_tok: 100,
           out_tok: 50,
           cost: 0.01,
@@ -1270,7 +1270,7 @@ describe('fetchCostLatency', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/cost-latency?window=60')
     expect(result.p50).toBeNull()
     expect(result.p95).toBeNull()
-    expect(result.perAgent[0]?.agent).toBe('runtime_lane_1')
+    expect(result.perAgent[0]?.agent).toBe('runtime_lane_7')
     expect(result.perAgent[0]?.p50_ms).toBeNull()
     expect(result.perAgent[0]?.p95_ms).toBeNull()
     expect(result.matrix.providers).toEqual(['runtime'])

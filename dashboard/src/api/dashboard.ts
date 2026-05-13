@@ -3058,12 +3058,12 @@ export interface CostLatencyResponse {
   generated_at: number
 }
 
-function decodeCostPerAgentRow(raw: unknown, index: number): CostPerAgentRow | null {
+function decodeCostPerAgentRow(raw: unknown): CostPerAgentRow | null {
   if (!isRecord(raw)) return null
   const agent = asString(raw.agent)
   if (!agent) return null
   return {
-    agent: runtimeLaneLabel(index),
+    agent,
     in_tok: asNumber(raw.in_tok) ?? 0,
     out_tok: asNumber(raw.out_tok) ?? 0,
     cost: asNumber(raw.cost) ?? 0,
@@ -3104,7 +3104,7 @@ function decodeCostLatencyResponse(raw: unknown): CostLatencyResponse | null {
   if (!matrix) return null
   return {
     perAgent: asRecordArray(raw.perAgent)
-      .map((row, index) => decodeCostPerAgentRow(row, index))
+      .map(row => decodeCostPerAgentRow(row))
       .filter((r): r is CostPerAgentRow => r !== null),
     matrix,
     latencyBuckets: Array.isArray(raw.latencyBuckets)

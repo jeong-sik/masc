@@ -13,7 +13,7 @@ import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
 import { PanelCard } from './common/panel-card'
 import { ProgressBar } from './common/progress-bar'
-import { sourceHealthClass, freshnessText } from './common/source-health'
+import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
 import { StatusChip } from './common/status-chip'
 
 // ── Types ─────────────────────────────────────────────
@@ -26,6 +26,7 @@ interface TelemetryState extends TelemetryFreshnessMetadata {
 }
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
+  const gap = coverageGapDisplay(data)
   return html`
     <div class="text-3xs text-[var(--color-fg-disabled)]">
       <span class="font-mono">${data.source ?? 'trajectory_tool_call'}</span>
@@ -36,6 +37,12 @@ function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
       ${typeof data.entry_count === 'number' ? html`
         <span class="mx-1" aria-hidden="true">·</span>
         <span>${data.entry_count.toLocaleString()} rows</span>
+      ` : null}
+      ${gap ? html`
+        <div class="mt-1 font-mono text-[var(--color-status-warn)]">${gap.summary}</div>
+        ${gap.details.length > 0 ? html`
+          <div class="mt-0.5 break-all font-mono text-[var(--color-fg-muted)]">${gap.details.join(' · ')}</div>
+        ` : null}
       ` : null}
     </div>
   `
@@ -171,6 +178,8 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         stale_reason: data.stale_reason,
         entry_count: data.entry_count,
         exists: data.exists,
+        coverage_gaps: data.coverage_gaps,
+        coverage_gap_count: data.coverage_gap_count,
         tools: data.tools,
         timeline: data.timeline,
         totalEntries: data.total_entries,

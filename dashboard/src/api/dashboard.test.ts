@@ -5,6 +5,8 @@ import {
   fetchDashboardGoalDetail,
   fetchDashboardGoalsTree,
   fetchDashboardTools,
+  fetchKeeperToolCalls,
+  fetchKeeperToolStats,
   fetchDashboardMemory,
   fetchCostLatency,
   fetchKeeperConfig,
@@ -85,6 +87,96 @@ describe('fetchDashboardShell', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+  })
+})
+
+describe('keeper tool telemetry fetchers', () => {
+  it('preserves tool-stats coverage gap rows', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        window_hours: 24,
+        total_entries: 0,
+        source: 'trajectory_tool_call',
+        health: 'coverage_gap',
+        stale_reason: 'trajectory_append_failed',
+        coverage_gaps: [
+          {
+            schema: 'masc.telemetry_coverage_gap.v1',
+            ts: 1_777_100_000,
+            ts_iso: '2026-05-14T00:00:00Z',
+            source: 'trajectory_tool_call',
+            producer: 'keeper_hooks_oas.post_tool_use',
+            durable_store: '.masc/keepers/keeper-alpha/trajectories',
+            dashboard_surface: '/api/v1/keepers/:name/tool-stats',
+            stale_reason: 'trajectory_append_failed',
+            keeper_name: 'keeper-alpha',
+            trace_id: 'trace-tool-stats-gap',
+            error: 'append denied',
+          },
+        ],
+        tools: [],
+        timeline: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolStats('keeper-alpha')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/tool-stats')
+    expect(result.coverage_gap_count).toBe(1)
+    expect(result.coverage_gaps?.[0]).toMatchObject({
+      producer: 'keeper_hooks_oas.post_tool_use',
+      durable_store: '.masc/keepers/keeper-alpha/trajectories',
+      dashboard_surface: '/api/v1/keepers/:name/tool-stats',
+      stale_reason: 'trajectory_append_failed',
+      trace_id: 'trace-tool-stats-gap',
+      error: 'append denied',
+    })
+  })
+
+  it('preserves tool-call coverage gap rows', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 0,
+        source: 'tool_call_io',
+        health: 'coverage_gap',
+        stale_reason: 'tool_call_io_append_failed',
+        coverage_gaps: [
+          {
+            schema: 'masc.telemetry_coverage_gap.v1',
+            source: 'tool_call_io',
+            producer: 'keeper_tool_call_log.append',
+            durable_store: '.masc/tool_calls',
+            dashboard_surface: '/api/v1/keepers/:name/tool-calls',
+            stale_reason: 'tool_call_io_append_failed',
+            keeper_name: 'keeper-alpha',
+            trace_id: 'trace-tool-call-gap',
+          },
+        ],
+        entries: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/tool-calls')
+    expect(result.coverage_gap_count).toBe(1)
+    expect(result.coverage_gaps?.[0]).toMatchObject({
+      producer: 'keeper_tool_call_log.append',
+      durable_store: '.masc/tool_calls',
+      dashboard_surface: '/api/v1/keepers/:name/tool-calls',
+      stale_reason: 'tool_call_io_append_failed',
+      trace_id: 'trace-tool-call-gap',
+    })
   })
 })
 

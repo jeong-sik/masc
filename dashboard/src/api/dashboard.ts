@@ -2376,9 +2376,45 @@ export type TelemetryFreshnessMetadata = {
   stale_reason?: string | null
   entry_count?: number
   exists?: boolean
+  coverage_gaps?: TelemetryCoverageGap[]
+  coverage_gap_count?: number
+}
+
+export type TelemetryCoverageGap = {
+  schema?: string
+  ts?: number
+  ts_iso?: string | null
+  source?: string
+  producer?: string
+  durable_store?: string
+  dashboard_surface?: string
+  stale_reason?: string
+  keeper_name?: string | null
+  trace_id?: string | null
+  error?: string | null
+}
+
+function decodeTelemetryCoverageGap(raw: unknown): TelemetryCoverageGap | null {
+  if (!isRecord(raw)) return null
+  return {
+    schema: asString(raw.schema),
+    ts: asNumber(raw.ts),
+    ts_iso: asNullableString(raw.ts_iso),
+    source: asString(raw.source),
+    producer: asString(raw.producer),
+    durable_store: asString(raw.durable_store),
+    dashboard_surface: asString(raw.dashboard_surface),
+    stale_reason: asString(raw.stale_reason),
+    keeper_name: asNullableString(raw.keeper_name),
+    trace_id: asNullableString(raw.trace_id),
+    error: asNullableString(raw.error),
+  }
 }
 
 function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): TelemetryFreshnessMetadata {
+  const coverageGaps = asRecordArray(raw.coverage_gaps)
+    .map(decodeTelemetryCoverageGap)
+    .filter((gap): gap is TelemetryCoverageGap => gap !== null)
   return {
     source: asString(raw.source),
     producer: asString(raw.producer),
@@ -2392,6 +2428,8 @@ function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): Telemet
     stale_reason: asNullableString(raw.stale_reason),
     entry_count: asNumber(raw.entry_count),
     exists: asBoolean(raw.exists),
+    coverage_gaps: coverageGaps,
+    coverage_gap_count: asNumber(raw.coverage_gap_count, coverageGaps.length),
   }
 }
 

@@ -1692,7 +1692,44 @@ let test_tool_calls_route_surfaces_coverage_gap_health () =
     (json |> member "health" |> to_string);
   check string "route surfaces coverage gap stale reason"
     "tool_call_io_append_failed"
-    (json |> member "stale_reason" |> to_string)
+    (json |> member "stale_reason" |> to_string);
+  check int "route surfaces coverage gap rows" 1
+    (json |> member "coverage_gaps" |> to_list |> List.length)
+;;
+
+let test_tool_stats_route_surfaces_coverage_gap_rows () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
+  let masc_root = Masc_mcp.Coord.masc_root_dir config in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_mcp.Telemetry_coverage_gap.record
+    ~masc_root
+    ~source:"trajectory_tool_call"
+    ~producer:"keeper_hooks_oas.post_tool_use"
+    ~durable_store:(Filename.concat masc_root "trajectories")
+    ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
+    ~stale_reason:"trajectory_append_failed"
+    ~keeper_name
+    ~trace_id:"trace-tool-stats-gap"
+    ();
+  let result =
+    run_curl_get ~port
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/tool-stats" keeper_name)
+      ()
+  in
+  require_status "tool stats GET returns 200" 200 result;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string result.body in
+  check string "route surfaces trajectory source" "trajectory_tool_call"
+    (json |> member "source" |> to_string);
+  check string "route surfaces tool stats coverage gap health" "coverage_gap"
+    (json |> member "health" |> to_string);
+  check string "route surfaces tool stats stale reason"
+    "trajectory_append_failed"
+    (json |> member "stale_reason" |> to_string);
+  check int "route surfaces tool stats coverage gap rows" 1
+    (json |> member "coverage_gaps" |> to_list |> List.length)
 ;;
 
 let test_merge_keeper_trace_lines_includes_internal_history () =
@@ -1899,6 +1936,10 @@ let () =
             "tool calls route surfaces coverage gap health"
             `Slow
             test_tool_calls_route_surfaces_coverage_gap_health
+        ; test_case
+            "tool stats route surfaces coverage gap rows"
+            `Slow
+            test_tool_stats_route_surfaces_coverage_gap_rows
         ; test_case
             "dashboard dev token rotates legacy dashboard-dev owner"
             `Quick

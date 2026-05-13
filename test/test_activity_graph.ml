@@ -140,6 +140,52 @@ let test_events_json_normalizes_ide_context_file_paths () =
       | events ->
         fail (Printf.sprintf "expected two events, got %d" (List.length events)))
 
+let test_events_json_omits_unsafe_ide_context_file_paths () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-absolute")
+           ~tags:[]
+           ~payload:
+             (`Assoc
+                [
+                  ("file_path", `String "/workspace/lib/payload.ml");
+                  ("line", `Int 12);
+                ])
+           ());
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-drive")
+           ~tags:[ "file:C:\\workspace\\lib\\tag.ml:27" ]
+           ~payload:(`Assoc [])
+           ());
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-traversal")
+           ~tags:[ "file:lib/../tag.ml:31" ]
+           ~payload:(`Assoc [])
+           ());
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let open Yojson.Safe.Util in
+      match json |> member "events" |> to_list with
+      | [ payload_event; drive_event; traversal_event ] ->
+        List.iter
+          (fun event ->
+            check bool "unsafe file path omitted" true
+              (event |> member "context" |> member "file_path" |> fun value ->
+               value = `Null))
+          [ payload_event; drive_event; traversal_event ];
+        check int "line survives without unsafe payload file path" 12
+          (payload_event |> member "context" |> member "line" |> to_int);
+        check int "line survives without unsafe tag file path" 27
+          (drive_event |> member "context" |> member "line" |> to_int)
+      | events ->
+        fail
+          (Printf.sprintf "expected three events, got %d" (List.length events)))
+
 let test_events_json_ignores_invalid_derived_pr_number () =
   with_config (fun config ->
       ignore
@@ -452,6 +498,8 @@ let () =
             test_events_json_derives_ide_context;
           test_case "events json normalizes IDE context file paths" `Quick
             test_events_json_normalizes_ide_context_file_paths;
+          test_case "events json omits unsafe IDE context file paths" `Quick
+            test_events_json_omits_unsafe_ide_context_file_paths;
           test_case "events json ignores invalid derived PR number" `Quick
             test_events_json_ignores_invalid_derived_pr_number;
           test_case "emit sanitizes invalid utf8 before persisting" `Quick

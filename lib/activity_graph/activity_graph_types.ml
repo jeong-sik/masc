@@ -217,13 +217,29 @@ let tag_context_pair raw =
 let normalize_context_file_path_opt = function
   | None -> None
   | Some value ->
-    let normalized =
+    let normalize_slashes value =
       value |> String.trim
       |> String.map (function
-        | '\\' -> '/'
-        | c -> c)
+           | '\\' -> '/'
+           | c -> c)
     in
-    if normalized = "" then None else Some normalized
+    let is_windows_drive_path value =
+      String.length value >= 3
+      &&
+      let drive = value.[0] in
+      ((drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z'))
+      && value.[1] = ':' && value.[2] = '/'
+    in
+    let normalized = normalize_slashes value in
+    if
+      normalized = ""
+      || String.starts_with ~prefix:"/" normalized
+      || is_windows_drive_path normalized
+      || (normalized |> String.split_on_char '/'
+         |> List.exists (fun segment ->
+                segment = "" || segment = "." || segment = ".."))
+    then None
+    else Some normalized
 
 let tag_file_value value =
   let value =
@@ -240,10 +256,9 @@ let tag_file_value value =
     (match int_of_string_opt suffix with
      | Some line when line >= 1 ->
        let file_path = String.sub value 0 index |> String.trim in
-       if file_path = "" then (None, Some line)
-       else (Some file_path, Some line)
-     | _ -> (Some value, None))
-  | _ -> (Some value, None)
+       (normalize_context_file_path_opt (Some file_path), Some line)
+     | _ -> (normalize_context_file_path_opt (Some value), None))
+  | _ -> (normalize_context_file_path_opt (Some value), None)
 
 let derive_context_from_payload payload fields =
   let file_path =

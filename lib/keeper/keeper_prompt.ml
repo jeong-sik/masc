@@ -30,13 +30,28 @@ let missing_critical_prompt_anchors prompt =
       if String_util.contains_substring prompt needle then None else Some name)
     critical_prompt_anchors
 
-(* Recovery fallback content lives at config/prompts/keeper.recovery_block.md
-   so the anchors (<continuity>, PR merge rules, State block template, <world>)
-   are managed alongside the other keeper prompts. String.trim drops the
-   training newline the markdown file carries so the appended block matches
-   the pre-externalization byte layout. *)
+let critical_prompt_recovery_block_fallback =
+  String.concat "\n"
+    [ "<continuity>";
+      "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
+      "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
+      "State block template: non-direct keeper turns must end with [STATE]...[/STATE] containing DONE, NEXT, Goal, and Decisions.";
+      "</continuity>";
+      "";
+      "<world>";
+      "Recovery guard: act from the configured base path and active runtime tool schema; do not invent paths, repos, PRs, tasks, or tools.";
+      "</world>" ]
+
+(* Recovery fallback content normally lives at
+   config/prompts/keeper.recovery_block.md so operators can edit it with the
+   other prompts. Keep the in-code fallback because this guard must still work
+   when prompt file loading is exactly what degraded. *)
 let critical_prompt_recovery_block () =
-  String.trim (Prompt_registry.get_prompt Keeper_prompt_names.recovery_block)
+  let from_registry =
+    String.trim (Prompt_registry.get_prompt Keeper_prompt_names.recovery_block)
+  in
+  if String.equal from_registry "" then critical_prompt_recovery_block_fallback
+  else from_registry
 
 let state_block_output_guard_text =
   "Output guard: this turn uses runtime-managed continuity. Do not output raw [STATE] or [/STATE] blocks in visible text; the runtime will synthesize and persist state metadata when needed."

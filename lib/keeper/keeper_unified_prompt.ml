@@ -113,6 +113,56 @@ let state_block_instruction_text =
    Goal: current active goal\n\
    Decisions: key decisions (semicolon-separated)"
 
+let turn_intent_fallback_block =
+  String.concat "\n"
+    [ "Use the world state below as raw context.";
+      "Pending mentions, board events, and worktree changes are observations.";
+      "";
+      "Act through tools, not declarations. Call the tool directly.";
+      "";
+      "If nothing is actionable after checking, end the turn with the [STATE] block.";
+      "";
+      state_block_instruction_text ]
+
+let contains_template_placeholder text =
+  String_util.contains_substring text "{{"
+  || String_util.contains_substring text "}}"
+
+let observe_turn_intent_render_failure message =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_prompt_failures
+    ~labels:[("prompt", Keeper_prompt_names.turn_intent)]
+    ();
+  Log.Keeper.warn "turn_intent prompt render degraded: %s" message
+
+let fallback_turn_intent_block reason =
+  observe_turn_intent_render_failure reason;
+  turn_intent_fallback_block
+
+let resolve_turn_intent_block substitutions =
+  match
+    Prompt_registry.render_prompt_template Keeper_prompt_names.turn_intent
+      substitutions
+  with
+  | Ok value ->
+      let rendered = String.trim value in
+      if String.equal rendered "" then
+        fallback_turn_intent_block "rendered prompt was empty"
+      else
+        rendered
+  | Error msg ->
+      observe_turn_intent_render_failure msg;
+      let raw =
+        String.trim (Prompt_registry.get_prompt Keeper_prompt_names.turn_intent)
+      in
+      if String.equal raw "" then
+        fallback_turn_intent_block "raw prompt was empty after render failure"
+      else if contains_template_placeholder raw then
+        fallback_turn_intent_block
+          "raw prompt still contained template placeholders after render failure"
+      else
+        raw
+
 let autonomous_trigger_lines
     ~(decision : Keeper_world_observation.keeper_cycle_decision)
     ~(observation : Keeper_world_observation.world_observation) : string list =
@@ -261,14 +311,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     ]
   in
   let turn_intent_block =
-    match
-      Prompt_registry.render_prompt_template Keeper_prompt_names.turn_intent
-        turn_intent_substitutions
-    with
-    | Ok value -> String.trim value
-    | Error _ ->
-        String.trim
-          (Prompt_registry.get_prompt Keeper_prompt_names.turn_intent)
+    resolve_turn_intent_block turn_intent_substitutions
   in
   let system_prompt =
     Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block

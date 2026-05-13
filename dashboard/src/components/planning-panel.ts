@@ -5,12 +5,14 @@
 
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { replaceRoute, route } from '../router'
-import { coordinationFsmSnapshot } from '../store'
+import { coordinationFsmSnapshot, goals, tasks } from '../store'
 import { FilterChips } from './common/filter-chips'
 import { Planning } from './goals'
 import { GoalTree } from './goals/goal-tree'
 import { PlanningFocusPanel } from './planning-focus-panel'
+import { openTaskDetail } from './goals/task-detail-state'
 import type {
   DashboardCoordinationFsmEvidence,
   DashboardCoordinationFsmRefs,
@@ -37,12 +39,13 @@ const VIEW_CHIPS: Array<{ key: PlanningView; label: string }> = [
 ]
 
 function updateViewParam(view: PlanningView): void {
-  replaceRoute(
-    'workspace',
-    view === 'goal-tree'
-      ? { section: 'planning' }
-      : { section: 'planning', view },
-  )
+  const params: Record<string, string> = { ...route.value.params, section: 'planning' }
+  if (view === 'goal-tree') {
+    delete params.view
+  } else {
+    params.view = view
+  }
+  replaceRoute('workspace', params)
 }
 
 function coordinationCount(
@@ -81,6 +84,75 @@ function evidenceLabel(evidence: DashboardCoordinationFsmEvidence): string {
   const source = evidence.source ?? 'evidence'
   const kind = evidence.kind ? `/${evidence.kind}` : ''
   return `${source}${kind}`
+}
+
+function cleanRouteFocusId(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : null
+}
+
+function clearPlanningRouteFocus(): void {
+  const params: Record<string, string> = { ...route.value.params, section: 'planning' }
+  delete params.goal
+  delete params.task
+  replaceRoute('workspace', params)
+}
+
+function PlanningRouteFocusPanel() {
+  const params = route.value.params as Record<string, string | undefined>
+  const goalId = cleanRouteFocusId(params.goal)
+  const taskId = cleanRouteFocusId(params.task)
+  const goal = goalId ? goals.value.find(item => item.id === goalId) ?? null : null
+  const task = taskId ? tasks.value.find(item => item.id === taskId) ?? null : null
+
+  useEffect(() => {
+    if (task) openTaskDetail(task)
+  }, [task])
+
+  if (!goalId && !taskId) return null
+
+  return html`
+    <section
+      class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      data-testid="planning-route-focus"
+      aria-label="Planning route focus"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
+            route focus
+          </div>
+          <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-text-body">
+            ${goalId ? html`
+              <span class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                goal ${goalId}
+              </span>
+              <span class="min-w-0 truncate text-sm font-semibold text-text-strong">
+                ${goal?.title ?? 'goal not loaded'}
+              </span>
+              ${goal?.status ? html`<span class="font-mono text-3xs text-text-muted">${goal.status}</span>` : null}
+            ` : null}
+            ${taskId ? html`
+              <span class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                task ${taskId}
+              </span>
+              <span class="min-w-0 truncate text-sm font-semibold text-text-strong">
+                ${task?.title ?? 'task not loaded'}
+              </span>
+              ${task?.assignee ? html`<span class="font-mono text-3xs text-text-muted">@${task.assignee}</span>` : null}
+            ` : null}
+          </div>
+        </div>
+        <button
+          type="button"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-text-muted transition-colors hover:border-[var(--color-border-strong)] hover:text-text-strong"
+          onClick=${clearPlanningRouteFocus}
+        >
+          clear
+        </button>
+      </div>
+    </section>
+  `
 }
 
 function CoordinationEvidenceRow({ evidence }: { evidence: DashboardCoordinationFsmEvidence }) {
@@ -198,6 +270,7 @@ export function PlanningPanel() {
         size="sm"
         tone="accent"
       />
+      <${PlanningRouteFocusPanel} />
       <${CoordinationHealthPanel} />
       <${PlanningFocusPanel} />
       ${view === 'goal-tree'

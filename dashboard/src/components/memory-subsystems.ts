@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
@@ -17,10 +17,37 @@ import { formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { openAgentDetail } from './agent-detail-state'
-import { ringFocusClasses } from './common/ring'
+import { ringFocusClasses, ringSelectClasses } from './common/ring'
 
 const REFRESH_MS = 30_000
 
+type MemorySubsystemsFocus = 'entries' | 'episodes'
+
+export interface MemorySubsystemsProps {
+  readonly focus?: string
+}
+
+export function normalizeMemorySubsystemsFocus(focus?: string): MemorySubsystemsFocus | null {
+  const value = focus?.trim().toLowerCase()
+  return value === 'entries' || value === 'episodes' ? value : null
+}
+
+function memoryFocusTargetClasses(focused: boolean): string {
+  const base = ringFocusClasses({
+    visible: false,
+    tone: 'accent-medium',
+    width: 2,
+    offset: 2,
+    offsetSurface: 'page',
+  })
+  if (!focused) return `scroll-mt-24 ${base}`
+  return `scroll-mt-24 rounded-[var(--r-1)] ${base} ${ringSelectClasses({
+    tone: 'accent-medium',
+    width: 2,
+    offset: 2,
+    offsetSurface: 'page',
+  })}`
+}
 
 export const ARCHITECTURE_FLOW = `graph LR
     subgraph Keeper["키퍼 턴"]
@@ -567,13 +594,18 @@ export function MemoryEntriesPanel({
   `
 }
 
-export function MemorySubsystems() {
+export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
   const resource = useManagedAsyncResource<MemorySubsystemsResponse>(null)
 
   const keeperFilter = useSignal<string>('')
   const outcomeFilter = useSignal<string>('')
   const searchQuery = useSignal<string>('')
   const synapseQuery = useSignal<string>('')
+  const memoryKindFilter = useSignal<string>('all')
+  const normalizedFocus = normalizeMemorySubsystemsFocus(focus)
+  const entriesSectionRef = useRef<HTMLElement | null>(null)
+  const episodesSectionRef = useRef<HTMLElement | null>(null)
+  const appliedFocusRef = useRef<MemorySubsystemsFocus | null>(null)
 
   useEffect(() => {
     const run = () => {
@@ -583,6 +615,7 @@ export function MemorySubsystems() {
           keeper: keeperFilter.value || undefined,
           outcome: outcomeFilter.value || undefined,
           q: searchQuery.value || undefined,
+          includeMemoryEntries: normalizedFocus === 'entries',
           signal,
         }),
       )
@@ -593,9 +626,26 @@ export function MemorySubsystems() {
       resource.cancel()
       cleanup()
     }
-  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, resource])
+  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, normalizedFocus, resource])
 
   const { loading, error, data } = resource.state.value
+
+  useEffect(() => {
+    if (!normalizedFocus) {
+      appliedFocusRef.current = null
+      return
+    }
+    if (loading || !data || appliedFocusRef.current === normalizedFocus) return
+    const target =
+      normalizedFocus === 'entries'
+        ? entriesSectionRef.current
+        : episodesSectionRef.current
+    if (!target) return
+    target.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    target.focus({ preventScroll: true })
+    appliedFocusRef.current = normalizedFocus
+  }, [normalizedFocus, loading, data])
+
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
   if (error && !data)
     return html`<div class="p-4 text-[var(--bad-light)]">오류: ${error}</div>`
@@ -608,6 +658,14 @@ export function MemorySubsystems() {
     [synapses, synapseQueryValue],
   )
   const isSynapseFiltering = synapseQueryValue.trim() !== ''
+  const entries = data?.memory_entries?.items ?? []
+  const totalEntries = data?.memory_entries?.total ?? entries.length
+  const filteredEntries = data?.memory_entries?.filtered ?? entries.length
+  const knownMemoryKinds = data?.filters?.memory_kinds ?? Array.from(new Set(entries.map(e => e.kind))).sort()
+  const visibleEntries = useMemo(
+    () => filterMemoryEntries(entries, memoryKindFilter.value),
+    [entries, memoryKindFilter.value],
+  )
   const episodes = data?.episodes?.items ?? []
   const totalEpisodes = data?.episodes?.total ?? 0
   const filteredTotal = data?.episodes?.filtered ?? episodes.length
@@ -643,6 +701,7 @@ export function MemorySubsystems() {
     : episodes
 
   const showArch = useSignal(false)
+  const showMemoryEntries = normalizedFocus === 'entries' || data?.memory_entries !== undefined
 
   return html`
     <div class="space-y-6">
@@ -676,6 +735,30 @@ export function MemorySubsystems() {
             : null
         }
       </section>
+
+      ${
+        showMemoryEntries
+          ? html`
+              <div
+                ref=${entriesSectionRef}
+                tabIndex=${-1}
+                data-memory-focus-target="entries"
+                class=${memoryFocusTargetClasses(normalizedFocus === 'entries')}
+              >
+                <${MemoryEntriesPanel}
+                  entries=${entries}
+                  visibleEntries=${visibleEntries}
+                  total=${totalEntries}
+                  filtered=${filteredEntries}
+                  knownKinds=${knownMemoryKinds}
+                  activeKind=${memoryKindFilter.value}
+                  onKindChange=${(kind: string) => { memoryKindFilter.value = kind }}
+                  focused=${normalizedFocus === 'entries'}
+                />
+              </div>
+            `
+          : null
+      }
 
       <!-- Hebbian Synapses -->
       <section aria-label="Hebbian 시냅스 그래프">
@@ -752,7 +835,13 @@ export function MemorySubsystems() {
       </section>
 
       <!-- Episodes -->
-      <section aria-label="에피소드 기록">
+      <section
+        ref=${episodesSectionRef}
+        tabIndex=${-1}
+        data-memory-focus-target="episodes"
+        aria-label="에피소드 기록"
+        class=${memoryFocusTargetClasses(normalizedFocus === 'episodes')}
+      >
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 class="text-base font-semibold text-[var(--color-fg-muted)]">에피소드 기록</h3>
           <span class="text-xs text-[var(--color-fg-muted)]">

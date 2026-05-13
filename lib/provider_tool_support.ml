@@ -22,24 +22,12 @@ let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
     below) can avoid re-resolving for the same provider.
 
     Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
-    Kimi CLI) use runtime MCP for tool invocation, not inline
-    function-calling. The OAS base capabilities for CLI kinds may disagree
-    on [supports_runtime_mcp_tools] (e.g. Gemini CLI defaults to [false]
-    in OAS — see [Provider_adapter] gemini-cli row: MCP servers are read
-    only from [~/.gemini/settings.json] / project [.gemini/settings.json]
-    with no [--mcp-config] flag, so masc-mcp's per-keeper request-scoped
-    policies cannot be injected per invocation). This override forces all
-    CLI runtimes to the same contract: disable inline tools, enable
-    runtime MCP. *)
+    Kimi CLI) do not expose inline function-calling to this gate. Runtime MCP
+    support remains adapter/OAS-owned because not every CLI can consume
+    request-scoped MCP policy; Gemini CLI is the known false case. *)
 let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
   if is_cli
-  then
-    { caps with
-      supports_tools = false
-    ; supports_tool_choice = false
-    ; supports_runtime_mcp_tools = true
-    ; supports_runtime_tool_events = true
-    }
+  then { caps with supports_tools = false; supports_tool_choice = false }
   else caps
 ;;
 
@@ -65,7 +53,21 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
       | Some override -> override
       | None -> caps)
   in
-  let caps = normalize_cli_caps_when ~is_cli caps in
+  let caps =
+    if is_cli
+    then
+      let runtime_mcp_lane =
+        Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
+        || Provider_adapter
+           .requires_per_keeper_bridging_for_bound_actor_tools_for_config
+             provider_cfg
+      in
+      { (normalize_cli_caps_when ~is_cli caps) with
+        supports_runtime_mcp_tools = runtime_mcp_lane
+      ; supports_runtime_tool_events = runtime_mcp_lane
+      }
+    else caps
+  in
   match provider_cfg.supports_tool_choice_override with
   | Some supports_tool_choice -> { caps with supports_tool_choice }
   | None -> caps
@@ -115,6 +117,23 @@ let provider_supports_runtime_mcp_http_header
   Provider_adapter.accepts_runtime_mcp_http_header_for_config provider_cfg key
 ;;
 
+let header_key_present headers key =
+  let wanted = String.lowercase_ascii (String.trim key) in
+  List.exists
+    (fun (candidate, _) ->
+      String.equal wanted (String.lowercase_ascii (String.trim candidate)))
+    headers
+;;
+
+let provider_supports_bridged_authorization_header provider_cfg headers key =
+  String.equal "authorization" (String.lowercase_ascii (String.trim key))
+  && Provider_adapter
+     .requires_per_keeper_bridging_for_bound_actor_tools_for_config
+       provider_cfg
+  && header_key_present headers "x-masc-agent-name"
+  && header_key_present headers "x-masc-keeper-name"
+;;
+
 let runtime_mcp_policy_requires_unsupported_http_headers
       (provider_cfg : Llm_provider.Provider_config.t)
       (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
@@ -124,7 +143,12 @@ let runtime_mcp_policy_requires_unsupported_http_headers
       | Llm_provider.Llm_transport.Http_server { headers; _ } ->
         List.exists
           (fun (key, _) ->
-             not (provider_supports_runtime_mcp_http_header provider_cfg key))
+             not
+               (provider_supports_runtime_mcp_http_header provider_cfg key
+                || provider_supports_bridged_authorization_header
+                     provider_cfg
+                     headers
+                     key))
           headers
       | _ -> false)
     policy.servers

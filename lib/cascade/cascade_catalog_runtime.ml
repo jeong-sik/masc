@@ -1253,11 +1253,45 @@ let direct_candidate_providers (profile : profile_snapshot) =
     (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
     profile.candidates
 
-let prefer_direct_candidates_when_entry_parse_drops
+let direct_candidate_providers_ordered_by_entries
     (profile : profile_snapshot)
-    (parsed : Llm_provider.Provider_config.t list) =
-  let direct = direct_candidate_providers profile in
-  if direct <> [] && List.length parsed < List.length direct then direct else parsed
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  match profile.candidates with
+  | [] -> []
+  | candidates ->
+    let remaining = ref candidates in
+    let take_candidate model_string =
+      let rec loop prefix = function
+        | [] -> None
+        | (candidate : candidate_runtime) :: rest
+          when String.equal candidate.model_string model_string ->
+          remaining := List.rev_append prefix rest;
+          Some candidate.provider_cfg
+        | candidate :: rest -> loop (candidate :: prefix) rest
+      in
+      loop [] !remaining
+    in
+    let ordered =
+      List.filter_map
+        (fun (entry : Cascade_config_loader.weighted_entry) ->
+           take_candidate entry.model)
+        ordered_entries
+    in
+    if List.length ordered = List.length candidates
+    then ordered
+    else direct_candidate_providers profile
+
+let provider_configs_of_ordered_entries
+    ~(profile : profile_snapshot)
+    ~(cascade_name : string)
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  match direct_candidate_providers_ordered_by_entries profile ordered_entries with
+  | [] ->
+    Cascade_config.parse_weighted_entries
+      ~api_key_env_overrides:profile.api_key_env_overrides
+      ~cascade_name
+      ordered_entries
+  | direct -> direct
 
 let resolve_named_providers ?sw ?net ?clock ?provider_filter
     ?(require_tool_choice_support = false)
@@ -1281,11 +1315,10 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
           profile.weighted_entries
       in
       let parsed_declared_providers =
-        Cascade_config.parse_weighted_entries
-             ~api_key_env_overrides:profile.api_key_env_overrides
-             ~cascade_name:normalized
+        provider_configs_of_ordered_entries
+          ~profile
+          ~cascade_name:normalized
           ordered_entries
-        |> prefer_direct_candidates_when_entry_parse_drops profile
       in
       let filtered_declared_providers =
         Cascade_config.apply_provider_filter
@@ -1354,11 +1387,10 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
           profile.weighted_entries
       in
       let parsed_declared_providers =
-        Cascade_config.parse_weighted_entries
-             ~api_key_env_overrides:profile.api_key_env_overrides
-             ~cascade_name:normalized
+        provider_configs_of_ordered_entries
+          ~profile
+          ~cascade_name:normalized
           ordered_entries
-        |> prefer_direct_candidates_when_entry_parse_drops profile
       in
       let filtered_declared_providers =
         match Cascade_config.apply_provider_filter_strict
@@ -1445,32 +1477,31 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
           profile.weighted_entries
       in
       let parsed_pairs =
-        ordered_entries
-        |> List.filter_map
-             (fun (entry : Cascade_config_loader.weighted_entry) ->
-                match
-                  Cascade_config.parse_weighted_entry_with_drop_metric
-                    ~api_key_env_overrides:profile.api_key_env_overrides
-                    ~cascade:normalized
-                    entry
-                with
-                | None -> None
-                | Some primary ->
-                    Some
-                      ( primary,
-                        parse_secondary_from_entry
-                          ~api_key_env_overrides:
-                            profile.api_key_env_overrides
-                          ~cascade:normalized
-                          entry ))
-      in
-      let parsed_pairs =
         let direct_pairs =
-          direct_candidate_providers profile |> List.map (fun cfg -> cfg, None)
+          direct_candidate_providers_ordered_by_entries profile ordered_entries
+          |> List.map (fun cfg -> cfg, None)
         in
-        if direct_pairs <> [] && List.length parsed_pairs < List.length direct_pairs
-        then direct_pairs
-        else parsed_pairs
+        match direct_pairs with
+        | _ :: _ -> direct_pairs
+        | [] ->
+            ordered_entries
+            |> List.filter_map
+                 (fun (entry : Cascade_config_loader.weighted_entry) ->
+                    match
+                      Cascade_config.parse_weighted_entry_with_drop_metric
+                        ~api_key_env_overrides:profile.api_key_env_overrides
+                        ~cascade:normalized
+                        entry
+                    with
+                    | None -> None
+                    | Some primary ->
+                        Some
+                          ( primary,
+                            parse_secondary_from_entry
+                              ~api_key_env_overrides:
+                                profile.api_key_env_overrides
+                              ~cascade:normalized
+                              entry ))
       in
       let primaries = List.map fst parsed_pairs in
       (match
@@ -1546,6 +1577,9 @@ let resolve_secondary_provider_for_primary ?sw ?net ?clock
   match lookup_active_profile ?sw ?net ?clock cascade_name with
   | Error _ -> None
   | Ok (_snapshot, _normalized, profile) ->
+      if direct_candidate_providers profile <> [] then
+        None
+      else
       let same_kind_model
           (cfg : Llm_provider.Provider_config.t) =
         cfg.kind = primary.kind

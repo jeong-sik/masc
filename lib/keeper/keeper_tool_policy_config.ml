@@ -219,6 +219,20 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
   { allowed_orgs; denied_repos; default_depth;
     clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
+let tool_schema_names schemas =
+  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
+
+let is_known_runtime_policy_tool name =
+  Tool_dispatch.is_registered name
+  || List.mem name (Keeper_tool_registry.keeper_internal_candidate_tool_names)
+  || List.mem name (Keeper_tool_registry.effective_core_tools ())
+  || List.mem name Keeper_tool_registry.keeper_admin_dispatched_tools
+  || List.mem name (tool_schema_names Tool_shard.all_keeper_tool_schemas)
+  || Tool_catalog_surfaces.is_on_surface Tool_catalog_surfaces.Public_mcp name
+  || Tool_catalog_surfaces.is_on_surface Tool_catalog_surfaces.Spawned_agent name
+  || Tool_catalog_surfaces.is_on_surface Tool_catalog_surfaces.Local_worker name
+  || Tool_catalog_surfaces.is_on_surface Tool_catalog_surfaces.Admin name
+
 (* Shortcut: if the caller's [base_path] already points at a project root
    that has [base_path/config/tool_policy.toml], prefer that directly.
    This is the common case when callers pass the result of
@@ -290,36 +304,22 @@ let load ~base_path : (t, string) result =
         (match all_errors with
         | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
-          (* Validate that all tool names in groups/masc_groups/presets are registered.
-             Skip shard-backed groups (resolved at runtime) and MASC tools (injected). *)
+          (* Validate static tool groups against the keeper-facing runtime
+             universe, not only [Tool_dispatch].  Keeper-local tools, shard
+             schemas, injected MASC tools, and SDK-provided helpers such as
+             [extend_turns] are materialized outside the public dispatch table. *)
           let unknown_tools =
             Hashtbl.fold (fun group_name (group : group_source) acc ->
               match group with
               | Static tools ->
-                  List.filter (fun t -> not (Tool_dispatch.is_registered t)) tools
+                  List.filter (fun t -> not (is_known_runtime_policy_tool t)) tools
                   |> List.rev_map (fun t ->
                     Printf.sprintf "groups.%s: tool '%s' is not registered" group_name t)
                   |> List.rev_append acc
               | Shard_ref _ -> acc
             ) groups []
           in
-          let unknown_masc_tools =
-            Hashtbl.fold (fun group_name tools acc ->
-              List.filter (fun t -> not (Tool_dispatch.is_registered t)) tools
-              |> List.rev_map (fun t ->
-                Printf.sprintf "masc_groups.%s: tool '%s' is not registered" group_name t)
-              |> List.rev_append acc
-            ) masc_groups []
-          in
-          let unknown_preset_tools =
-            Hashtbl.fold (fun preset_name (def : preset_def) acc ->
-              List.filter (fun t -> not (Tool_dispatch.is_registered t)) def.masc_tools
-              |> List.rev_map (fun t ->
-                Printf.sprintf "presets.%s.masc_tools: tool '%s' is not registered" preset_name t)
-              |> List.rev_append acc
-            ) presets []
-          in
-          let all_tool_errors = unknown_tools @ unknown_masc_tools @ unknown_preset_tools in
+          let all_tool_errors = unknown_tools in
           (match all_tool_errors with
           | _ :: _ ->
               Log.Keeper.warn "tool_policy_config: %d unknown tools in %s" (List.length all_tool_errors) path;

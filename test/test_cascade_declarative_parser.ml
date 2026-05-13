@@ -480,6 +480,11 @@ let test_api_format_of_protocol () =
     (api_format_of_protocol "openai-http" = Ok Chat_completions_api);
   check
     bool
+    "openai-cli"
+    true
+    (api_format_of_protocol "openai-cli" = Ok Chat_completions_api);
+  check
+    bool
     "google-cli"
     true
     (api_format_of_protocol "google-cli" = Ok Chat_completions_api);

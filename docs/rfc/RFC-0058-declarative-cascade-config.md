@@ -148,6 +148,7 @@ never by provider name.
 | `"anthropic-http"` | `Messages_api` | `Messages_api_adapter` | Anthropic Messages |
 | `"google-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Google format |
 | `"ollama-http"` | `Ollama_api` | `Ollama_api_adapter` | Ollama native |
+| `"openai-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | OpenAI-compatible CLI |
 | `"openai-http"` | `Chat_completions_api` | `Chat_completions_api_adapter` | OpenAI format |
 | `"kimi-cli"` | `Chat_completions_api` | `Kimi_cli_adapter` | Kimi format |
 

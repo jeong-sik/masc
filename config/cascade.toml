@@ -32,7 +32,7 @@ tolerates-bound-actor-fallback = true
 
 [providers.codex_cli]
 display-name = "OpenAI Codex CLI"
-protocol = "openai-http"
+protocol = "openai-cli"
 command = "codex"
 is-non-interactive = true
 

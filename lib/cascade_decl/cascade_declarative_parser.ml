@@ -23,13 +23,14 @@ let add_errors acc more = acc @ more
 let api_format_of_protocol (s : string) : (cascade_api_format, string) result =
   match s with
   | "anthropic-cli" | "anthropic-http" -> Ok Messages_api
-  | "openai-http" | "google-cli" | "kimi-cli" -> Ok Chat_completions_api
+  | "openai-cli" | "openai-http" | "google-cli" | "kimi-cli" ->
+    Ok Chat_completions_api
   | "ollama-http" -> Ok Ollama_api
   | _ ->
     Error
       (Printf.sprintf
          "unknown protocol %S: expected one of anthropic-cli, anthropic-http, \
-          openai-http, google-cli, kimi-cli, ollama-http"
+          openai-cli, openai-http, google-cli, kimi-cli, ollama-http"
          s)
 ;;
 

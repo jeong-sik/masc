@@ -214,6 +214,7 @@
         test_observability_redact
         test_observability_provider_contracts
         test_config_doctor
+        test_cascade_config_validity
         test_cascade_routes_decoder
         test_cascade_declarative_parser
         test_cascade_declarative_validator
@@ -453,6 +454,7 @@
           test_observability_redact
           test_observability_provider_contracts
           test_config_doctor
+          test_cascade_config_validity
           test_cascade_routes_decoder
           test_cascade_declarative_parser
           test_cascade_declarative_validator

@@ -129,8 +129,7 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   }
   for (const cursor of activeCursors) activeLines.add(cursor.line)
   for (const row of changedRows) {
-    const line = row.newLine ?? row.oldLine
-    if (line !== null && line >= 1) activeLines.add(line)
+    if (row.newLine !== null && row.newLine >= 1) activeLines.add(row.newLine)
   }
   for (const thread of fileThreads) {
     const start = thread.anchor.line_start
@@ -589,7 +588,7 @@ function eventLineForFile(event: RunActivityEvent, filePath: string): number | u
   const line = event.context?.line
   if (line === undefined) return undefined
   const eventFile = event.context?.file_path
-  return eventFile === undefined || eventFile === filePath ? positiveLine(line) : undefined
+  return eventFile === filePath ? positiveLine(line) : undefined
 }
 
 function cachedEventSearchText(event: RunActivityEvent, values: EventSearchTextMap): string {
@@ -618,8 +617,8 @@ function eventContextMeta(event: RunActivityEvent): string {
 }
 
 function firstChangedLine(rows: ReadonlyArray<UnifiedDiffRow>): number | undefined {
-  const row = rows.find(candidate => candidate.newLine !== null || candidate.oldLine !== null)
-  return row?.newLine ?? row?.oldLine ?? undefined
+  const row = rows.find(candidate => candidate.newLine !== null && candidate.newLine >= 1)
+  return row?.newLine ?? undefined
 }
 
 function compactMeta(values: ReadonlyArray<string | null>): string {

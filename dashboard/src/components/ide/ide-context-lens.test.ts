@@ -107,7 +107,7 @@ describe('IdeContextLens', () => {
       'log',
       'telemetry',
     ]))
-    expect(model.activeLineCount).toBe(2)
+    expect(model.activeLineCount).toBe(1)
     expect(model.changedLineCount).toBe(2)
     expect(model.anchors.map(anchor => anchor.surface)).toContain('Git')
   })
@@ -352,6 +352,54 @@ describe('IdeContextLens', () => {
     expect(model.linkedCount).toBe(0)
     expect(model.activeLineCount).toBe(0)
     expect(model.anchors).toEqual([])
+  })
+
+  it('does not turn unscoped event lines into current-file anchors', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diffRows: [],
+      events: [{
+        id: 'evt-line-only',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'telemetry',
+        timestamp_ms: 400,
+        context: {
+          line: 27,
+          goal_id: 'goal-ide',
+          log_id: 'turn-9',
+        },
+      }],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    const lineSurface = model.surfaces.find(surface => surface.id === 'line')
+    expect(lineSurface?.count).toBe(0)
+    expect(model.anchors[0]).toMatchObject({
+      surface: 'Goal',
+      file_path: 'lib/keeper/keeper_exec_ide.ml',
+    })
+    expect(model.anchors[0]?.line).toBeUndefined()
+  })
+
+  it('does not advertise delete-only diff rows as editor-focusable lines', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diffRows: [{ kind: 'delete', oldLine: 13, newLine: null, text: '-let old = ...' }],
+      events: [],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    expect(model.changedLineCount).toBe(1)
+    expect(model.activeLineCount).toBe(0)
+    expect(model.anchors[0]).toMatchObject({
+      id: 'git-diff-summary',
+      surface: 'Git',
+    })
+    expect(model.anchors[0]?.line).toBeUndefined()
   })
 
   it('does not advertise an unsupported log focus route param', () => {

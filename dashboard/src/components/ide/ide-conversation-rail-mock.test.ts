@@ -26,7 +26,7 @@ describe('IdeConversationRailMock', () => {
     expect(container.textContent).toContain('no conversation activity')
   })
 
-  it('normalizes board posts into current-file anchored threads', () => {
+  it('normalizes explicit board post file references into anchored threads', () => {
     const threads = postsToAnchoredThreads([
       {
         id: 'thread-line',
@@ -48,6 +48,7 @@ describe('IdeConversationRailMock', () => {
       },
     ], 'dashboard/src/app.ts')
 
+    expect(threads).toHaveLength(1)
     expect(threads[0]).toMatchObject({
       id: 'thread-line',
       anchor: {
@@ -58,14 +59,21 @@ describe('IdeConversationRailMock', () => {
       },
       reply_count: 2,
     })
-    expect(threads[1]).toMatchObject({
-      id: 'thread-file',
-      anchor: {
-        file_path: 'dashboard/src/app.ts',
-        line_start: null,
-        line_end: null,
-      },
-    })
+  })
+
+  it('does not reanchor generic board posts when the active file changes', () => {
+    const posts = [{
+      id: 'thread-generic',
+      title: 'File-level note',
+      body: 'looks good',
+      author_identity: 'sangsu',
+      votes: 1,
+      comment_count: 0,
+      created_at_iso: '2026-05-05T10:01:00Z',
+    }]
+
+    expect(postsToAnchoredThreads(posts, 'dashboard/src/app.ts')).toEqual([])
+    expect(postsToAnchoredThreads(posts, 'lib/runtime.ml')).toEqual([])
   })
 
   it('orders thread, decision, and cascade replay items on one timeline', () => {

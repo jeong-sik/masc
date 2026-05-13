@@ -273,10 +273,9 @@ export function IdeConversationRailMock() {
 
 export function postsToAnchoredThreads(
   posts: ReadonlyArray<BoardPost>,
-  activeFile: string,
 ): ReadonlyArray<AnchoredThread> {
   return posts
-    .map(post => postToAnchoredThread(post, activeFile))
+    .map(postToAnchoredThread)
     .filter((thread): thread is AnchoredThread => thread !== null)
 }
 
@@ -319,10 +318,11 @@ function replayEventsForItems(items: ReadonlyArray<ReplayRailItem>): AuditReplay
   }))
 }
 
-function postToAnchoredThread(post: BoardPost, activeFile: string): AnchoredThread | null {
+function postToAnchoredThread(post: BoardPost): AnchoredThread | null {
   const createdMs = parseIsoToMs(post.created_at_iso)
   if (!Number.isFinite(createdMs)) return null
-  const anchor = anchorFromPost(post, activeFile)
+  const anchor = anchorFromPost(post)
+  if (!anchor) return null
   return {
     id: post.id,
     kind: boardKindFromPost(post),
@@ -335,12 +335,13 @@ function postToAnchoredThread(post: BoardPost, activeFile: string): AnchoredThre
   }
 }
 
-function anchorFromPost(post: BoardPost, activeFile: string): AnchoredThread['anchor'] {
+function anchorFromPost(post: BoardPost): AnchoredThread['anchor'] | null {
   const text = `${post.title ?? ''}\n${post.body ?? ''}`
   const lineRef = text.match(/(?:^|\s)([A-Za-z0-9_./-]+\.[A-Za-z0-9_]+):([1-9][0-9]*)\b/)
+  if (!lineRef) return null
   const line = lineRef?.[2] ? Number.parseInt(lineRef[2], 10) : null
   return {
-    file_path: lineRef?.[1] ?? activeFile,
+    file_path: lineRef[1],
     line_start: line,
     line_end: line,
     symbol_hint: symbolHintFromText(text),
@@ -403,7 +404,7 @@ function PostCard(
   const cursor = overlay.cursors.get(post.author_identity)
   const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
-  const thread = postToAnchoredThread(post, activeFile)
+  const thread = postToAnchoredThread(post)
   const anchor = thread?.anchor ?? null
 
   return html`

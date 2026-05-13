@@ -340,17 +340,12 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : ke
            unclaimed_tasks)
     in
     let failed =
-      List.length
-        (List.filter
-           (fun (t : Masc_domain.task) ->
-              match t.task_status with
-              | Masc_domain.Cancelled _ -> true
-              | Masc_domain.Todo
-              | Masc_domain.Claimed _
-              | Masc_domain.InProgress _
-              | Masc_domain.AwaitingVerification _
-              | Masc_domain.Done _ -> false)
-           backlog.tasks)
+      (* "Failed" here means still-auditable active work. Terminal Cancelled
+         tasks are historical evidence, not a reason to wake every keeper. *)
+      Coord.audit_orphan_tasks config
+      |> List.map fst
+      |> List.filter claim_scope_filter
+      |> List.length
     in
     let pending_verification =
       List.length

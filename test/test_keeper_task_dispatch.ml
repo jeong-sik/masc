@@ -1096,7 +1096,12 @@ let test_claim_no_eligible_scoped_reports_scope_truth () =
       bool
       "message preserves active scope"
       true
-      (contains_substring message "within active_goal_ids"))
+      (contains_substring message "within active_goal_ids");
+    check
+      bool
+      "message explains scope repair"
+      true
+      (contains_substring message "update the goal scope"))
 ;;
 
 let test_claim_skips_required_tools_without_access () =

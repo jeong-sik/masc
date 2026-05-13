@@ -116,9 +116,16 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
       claim_goal_scope.Keeper_runtime_contract.mode
       excluded_count
   | None ->
+    let scope_hint =
+      match claim_goal_scope.Keeper_runtime_contract.mode with
+      | "active_goal_ids" ->
+        " Global backlog may be outside this keeper's active_goal_ids or blocked by its tool policy; update the goal scope or create/link an eligible scoped task before retrying."
+      | _ -> ""
+    in
     Printf.sprintf
-      "ACTION: Stop task-checking — blocked/excluded=%d."
+      "ACTION: Stop task-checking — blocked/excluded=%d.%s"
       excluded_count
+      scope_hint
 ;;
 
 let find_task_goal_id config task_id =

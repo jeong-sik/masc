@@ -65,9 +65,17 @@ let strip_declarative_profile_prefix name =
 let qualified_tier_name name = tier_prefix ^ name
 let qualified_tier_group_name name = tier_group_prefix ^ name
 
-let public_names_of_declarative_snapshot snapshot =
+let qualified_names_of_declarative_snapshot snapshot =
   Cascade_declarative_hotpath.decl_snapshot_profile_names snapshot
+  |> List.sort_uniq String.compare
+
+let public_names_of_declarative_snapshot snapshot =
+  qualified_names_of_declarative_snapshot snapshot
   |> List.map strip_declarative_profile_prefix
+  |> List.sort_uniq String.compare
+
+let lookup_names_of_qualified_names names =
+  (names @ List.map strip_declarative_profile_prefix names)
   |> List.sort_uniq String.compare
 
 let declarative_public_catalog_names ?config_path () =
@@ -82,6 +90,33 @@ let declarative_public_catalog_names ?config_path () =
       match Cascade_declarative_hotpath.try_load_declarative path with
       | Some (Ok snapshot) ->
           let names = public_names_of_declarative_snapshot snapshot in
+          if names = []
+          then Error "declarative cascade catalog contains no profiles"
+          else Ok names
+      | Some (Error errors) ->
+          let rendered =
+            errors
+            |> List.map Cascade_declarative_adapter.show_adapter_error
+            |> String.concat "; "
+          in
+          Error ("declarative cascade catalog invalid: " ^ rendered)
+      | None -> Error "cascade.toml is not a declarative cascade catalog")
+
+let declarative_catalog_lookup_names ?config_path () =
+  let path_opt =
+    match config_path with
+    | Some path -> Some path
+    | None -> Config_dir_resolver.cascade_path_opt ()
+  in
+  match path_opt with
+  | None -> Error "cascade catalog path is not resolved"
+  | Some path -> (
+      match Cascade_declarative_hotpath.try_load_declarative path with
+      | Some (Ok snapshot) ->
+          let names =
+            qualified_names_of_declarative_snapshot snapshot
+            |> lookup_names_of_qualified_names
+          in
           if names = []
           then Error "declarative cascade catalog contains no profiles"
           else Ok names
@@ -123,6 +158,20 @@ let catalog_names_result ?config_path () =
               |> List.sort_uniq String.compare)
        | Ok _ | Error _ -> declarative_public_catalog_names ())
 
+let catalog_lookup_names ?config_path () =
+  match config_path with
+  | Some _ ->
+      (match declarative_catalog_lookup_names ?config_path () with
+       | Ok names -> names
+       | Error _ -> [])
+  | None ->
+      (match Cascade_catalog_runtime.known_profile_names () with
+       | Ok names when names <> [] -> lookup_names_of_qualified_names names
+       | Ok _ | Error _ ->
+           (match declarative_catalog_lookup_names () with
+            | Ok names -> names
+            | Error _ -> []))
+
 let catalog_names_for_validation ?config_path () =
   let path_opt =
     match config_path with
@@ -131,12 +180,13 @@ let catalog_names_for_validation ?config_path () =
   in
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
-  | Some path -> declarative_public_catalog_names ~config_path:path ()
+  | Some path -> declarative_catalog_lookup_names ~config_path:path ()
 
 type catalog_metadata = {
   qualified_names : string list;
   public_names : string list;
   keeper_assignable_names : string list;
+  system_qualified_names : string list;
   system_names : string list;
   fallback_hints : (string * string) list;
 }
@@ -205,6 +255,14 @@ let catalog_metadata_result ?config_path () =
             |> List.map strip_declarative_profile_prefix
             |> List.sort_uniq String.compare
           in
+          let system_qualified_names =
+            profile_assignability
+            |> List.filter_map (fun (name, assignable) ->
+                   if profile_is_keeper_assignable assignable
+                   then None
+                   else Some name)
+            |> List.sort_uniq String.compare
+          in
           let keeper_assignable_names =
             public_names
             |> List.filter (fun public_name ->
@@ -256,6 +314,7 @@ let catalog_metadata_result ?config_path () =
               qualified_names;
               public_names;
               keeper_assignable_names;
+              system_qualified_names;
               system_names;
               fallback_hints;
             })
@@ -270,9 +329,14 @@ let normalized_query_name ?config_path raw =
   routed_query_target ?config_path raw |> public_name_of_target
 
 let is_system_only_cascade raw =
-  let name = normalized_query_name raw in
+  let routed = routed_query_target raw |> String.trim in
+  let public_name = public_name_of_target routed in
   match catalog_metadata_result () with
-  | Ok meta -> List.mem name meta.system_names
+  | Ok meta ->
+      if is_qualified_profile_name routed then
+        List.mem routed meta.system_qualified_names
+      else
+        List.mem public_name meta.system_names
   | Error _ -> false
 
 let keeper_catalog_names ?config_path () =
@@ -362,7 +426,7 @@ let resolve_live_with_catalog ~catalog raw =
   end
 
 let resolve_live ?config_path raw =
-  resolve_live_with_catalog ~catalog:(catalog_names ?config_path ()) raw
+  resolve_live_with_catalog ~catalog:(catalog_lookup_names ?config_path ()) raw
 
 let canonicalize (raw : string) : string =
   canonicalize_with_catalog ~catalog:(catalog_names ()) raw

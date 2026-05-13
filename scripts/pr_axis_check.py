@@ -110,6 +110,7 @@ def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
     resp = _run_gh([
         f"/repos/{owner}/{repo}/pulls/{pr_number}/files",
         "--paginate",
+        "--slurp",
     ])
     if not isinstance(resp, list):
         payload = json.dumps(resp, sort_keys=True)
@@ -122,8 +123,13 @@ def get_pr_files(pr_number: int, owner: str, repo: str) -> Set[str]:
         )
         sys.exit(2)
 
+    if all(isinstance(page, list) for page in resp):
+        items = [item for page in resp for item in page]
+    else:
+        items = resp
+
     files: Set[str] = set()
-    for idx, item in enumerate(resp):
+    for idx, item in enumerate(items):
         if not isinstance(item, dict) or not isinstance(item.get("filename"), str):
             payload = json.dumps(item, sort_keys=True)
             if len(payload) > 1000:

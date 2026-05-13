@@ -481,11 +481,32 @@ keeper-assignable = false
 target = "tier-group.primary"
 |}
   in
-  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path:_ ->
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   check bool "preferred tier-group controls public assignability" false
     (List.mem "primary" (Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ()));
   check bool "preferred tier-group is system-only" true
     (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "primary");
+  check bool "qualified tier remains assignable" false
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "tier.primary");
+  check bool "qualified tier-group remains system-only" true
+    (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "tier-group.primary");
+  check string "qualified tier resolves without fallback" "tier.primary"
+    (Masc_mcp.Keeper_cascade_profile.resolve_live
+       ~config_path:cascade_path "tier.primary");
+  check string "qualified tier-group resolves without fallback" "tier-group.primary"
+    (Masc_mcp.Keeper_cascade_profile.resolve_live
+       ~config_path:cascade_path "tier-group.primary");
+  (match
+     with_temp_toml
+       "[keeper]\nname = \"testkeeper\"\ncascade_name = \"tier.primary\"\n"
+       KTP.load_keeper_toml
+   with
+   | Ok _ -> ()
+   | Error e ->
+       fail
+         (Printf.sprintf
+            "explicit qualified tier.primary should be accepted: %s"
+            e));
   let result =
     with_temp_toml
       "[keeper]\nname = \"testkeeper\"\ncascade_name = \"primary\"\n"

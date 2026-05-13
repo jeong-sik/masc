@@ -109,11 +109,6 @@ let option_field name = function
 
 type cascade_diagnosis = {
   issues : catalog_issue list;
-  fallback_cycles : string list list;
-  (** Cycles surface as warning issues inside [issues] for the
-      flat warnings list, but we keep the raw list here so
-      {!cascade_catalog_next_actions} can emit a cycle-specific
-      operator action distinct from the degraded-metadata one. *)
 }
 
 let diagnose_cascade_catalog ~active_config_root =
@@ -134,7 +129,6 @@ let diagnose_cascade_catalog ~active_config_root =
                 config_path;
           };
         ];
-      fallback_cycles = [];
     }
   else
     let profiles =
@@ -143,10 +137,9 @@ let diagnose_cascade_catalog ~active_config_root =
     let validator_issues =
       Cascade_catalog_validator.diagnose_catalog_for_diagnostics ~config_path
     in
-    let fallback_cycles = [] in
     let issues = validator_issues in
     if issues = [] then
-      { issues = []; fallback_cycles }
+      { issues = [] }
     else
       let error_count =
         issues
@@ -165,9 +158,9 @@ let diagnose_cascade_catalog ~active_config_root =
             error_count
             warn_count;
       } in
-      { issues = summary :: issues; fallback_cycles }
+      { issues = summary :: issues }
 
-let cascade_catalog_next_actions ~config_path { issues; fallback_cycles } =
+let cascade_catalog_next_actions ~config_path { issues } =
   if issues = [] then
     []
   else

@@ -83,7 +83,10 @@ val catalog_names_for_validation :
 (** Accept-list source for the keeper cascade-name validator.
 
     Requires the declarative cascade catalog; retired flat-profile TOML and
-    flat-key catalog fallback are intentionally not accepted. *)
+    flat-key catalog fallback are intentionally not accepted.  Includes both
+    public names, such as [primary], and qualified declarative names, such as
+    [tier.primary] / [tier-group.primary], so explicit keeper assignments do
+    not collapse to the public route target. *)
 
 val keeper_catalog_names : ?config_path:string -> unit -> string list
 (** Assignable live profile names from {!catalog_names}, filtered by
@@ -118,8 +121,9 @@ val resolve_live_with_catalog : catalog:string list -> string -> string
 (** Resolves a keeper-declared cascade against an explicit live catalog.
 
     Names already present in the catalog pass through; logical route
-    aliases collapse via [routes]; otherwise the input is returned
-    trimmed and the catalog membership is the caller's responsibility. *)
+    aliases collapse via [routes]; otherwise the keeper-turn fallback is used.
+    Callers that accept qualified declarative names must pass a lookup catalog
+    containing those qualified names, not only display/public names. *)
 
 val resolve_live : ?config_path:string -> string -> string
 (** Like {!resolve_live_with_catalog}, but reads the active catalog from the

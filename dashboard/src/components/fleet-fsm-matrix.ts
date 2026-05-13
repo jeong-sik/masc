@@ -258,6 +258,7 @@ function isIdleComposite(snapshot: KeeperCompositeSnapshot): boolean {
 
 function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   const execution = snapshot.execution
+  const surface = execution?.tool_surface
   const parts: string[] = []
   if (!snapshot.is_live) parts.push('is_live=false')
   if (execution?.operator_disposition) {
@@ -271,6 +272,24 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   }
   if (execution?.tool_contract_result) {
     parts.push(`tool=${execution.tool_contract_result}`)
+  }
+  if (surface?.tool_requirement) {
+    parts.push(`tool_requirement=${surface.tool_requirement}`)
+  }
+  if (surface?.turn_lane) {
+    parts.push(`turn_lane=${surface.turn_lane}`)
+  }
+  if (surface?.tool_surface_class) {
+    parts.push(`tool_surface=${surface.tool_surface_class}`)
+  }
+  if (typeof surface?.visible_tool_count === 'number') {
+    parts.push(`visible_tools=${surface.visible_tool_count}`)
+  }
+  if (surface?.tool_surface_fallback_used === true) {
+    parts.push('tool_surface_fallback=true')
+  }
+  if (surface?.tool_gate_enabled === false) {
+    parts.push('tool_gate=false')
   }
   if (execution?.error?.kind) {
     parts.push(`error=${execution.error.kind}`)
@@ -475,6 +494,12 @@ export function buildRuntimeAssistPrompt(
       tool_contract_result: snapshot.execution.tool_contract_result,
       required_tools: snapshot.execution.tool_surface?.required_tools ?? [],
       missing_required_tools: snapshot.execution.tool_surface?.missing_required_tools ?? [],
+      tool_requirement: snapshot.execution.tool_surface?.tool_requirement ?? null,
+      turn_lane: snapshot.execution.tool_surface?.turn_lane ?? null,
+      tool_surface_class: snapshot.execution.tool_surface?.tool_surface_class ?? null,
+      visible_tool_count: snapshot.execution.tool_surface?.visible_tool_count ?? null,
+      tool_gate_enabled: snapshot.execution.tool_surface?.tool_gate_enabled ?? null,
+      tool_surface_fallback_used: snapshot.execution.tool_surface?.tool_surface_fallback_used ?? null,
       error_kind: snapshot.execution.error?.kind ?? null,
       error_preview: snapshot.execution.error?.message_preview ?? null,
     })

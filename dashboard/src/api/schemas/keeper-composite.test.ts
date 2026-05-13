@@ -158,7 +158,11 @@ describe('parseKeeperCompositeSnapshot', () => {
         },
         tool_surface: {
           tool_requirement: 'required',
+          turn_lane: 'tool_required',
+          tool_surface_class: 'runtime_mcp',
+          visible_tool_count: 2,
           tool_gate_enabled: true,
+          tool_surface_fallback_used: false,
           missing_required_tools: ['keeper_task_claim'],
           required_tools: ['keeper_task_claim'],
         },
@@ -168,6 +172,10 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.execution?.latest_receipt_present).toBe(true)
     expect(result.execution?.terminal_reason_code).toBe('config_error')
     expect(result.execution?.cascade?.fallback_reason).toBe('turn_timeout')
+    expect(result.execution?.tool_surface?.turn_lane).toBe('tool_required')
+    expect(result.execution?.tool_surface?.tool_surface_class).toBe('runtime_mcp')
+    expect(result.execution?.tool_surface?.visible_tool_count).toBe(2)
+    expect(result.execution?.tool_surface?.tool_surface_fallback_used).toBe(false)
     expect(result.execution?.error?.message_preview).toContain('fallback_cascade')
   })
 

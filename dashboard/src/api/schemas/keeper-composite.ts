@@ -155,7 +155,11 @@ const KeeperCompositeExecutionSchema = object({
   tool_surface: nullable(
     object({
       tool_requirement: nullable(string()),
+      turn_lane: optional(nullable(string())),
+      tool_surface_class: optional(nullable(string())),
+      visible_tool_count: optional(nullable(number())),
       tool_gate_enabled: nullable(boolean()),
+      tool_surface_fallback_used: optional(nullable(boolean())),
       missing_required_tools: array(string()),
       required_tools: array(string()),
     }),

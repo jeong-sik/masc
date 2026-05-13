@@ -685,13 +685,34 @@ let compact_receipt_cascade_json receipt =
 ;;
 
 let compact_receipt_tool_surface_json receipt =
-  match json_member "tool_surface" receipt with
+  let surface =
+    match json_member "tool_surface" receipt with
+    | `Assoc _ as surface -> surface
+    | _ -> json_member "tool_contract" receipt
+  in
+  match surface with
   | `Assoc _ as surface ->
+    let tool_requirement = json_string "tool_requirement" surface in
+    let turn_lane =
+      match json_string "turn_lane" surface, tool_requirement with
+      | Some value, _ -> Some value
+      | None, Some "required" -> Some "tool_required"
+      | None, Some "optional" -> Some "tool_optional"
+      | None, Some "no_tools" -> Some "text_only"
+      | None, _ -> None
+    in
     `Assoc
-      [ ( "tool_requirement"
-        , Json_util.string_opt_to_json (json_string "tool_requirement" surface) )
+      [ "tool_requirement", Json_util.string_opt_to_json tool_requirement
+      ; "turn_lane", Json_util.string_opt_to_json turn_lane
+      ; ( "tool_surface_class"
+        , Json_util.string_opt_to_json (json_string "tool_surface_class" surface) )
+      ; ( "visible_tool_count"
+        , Json_util.int_opt_to_json (json_int "visible_tool_count" surface) )
       ; ( "tool_gate_enabled"
         , Json_util.bool_opt_to_json (json_bool "tool_gate_enabled" surface) )
+      ; ( "tool_surface_fallback_used"
+        , Json_util.bool_opt_to_json
+            (json_bool "tool_surface_fallback_used" surface) )
       ; ( "missing_required_tools"
         , Json_util.json_string_list
             (Json_util.get_string_list surface "missing_required_tools") )

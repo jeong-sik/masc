@@ -424,6 +424,21 @@ let test_broadcast_payload_carries_turn_diagnostics () =
     "missing required tools"
     [ "keeper_shell" ]
     (string_list_member "missing_required_tools" contract);
+  check
+    string
+    "turn lane"
+    "tool_required"
+    (contract |> U.member "turn_lane" |> U.to_string);
+  check
+    string
+    "tool surface class"
+    "mixed"
+    (contract |> U.member "tool_surface_class" |> U.to_string);
+  check
+    bool
+    "tool surface fallback flag"
+    false
+    (contract |> U.member "tool_surface_fallback_used" |> U.to_bool);
   check string "stop reason" "completed" (payload |> U.member "stop_reason" |> U.to_string);
   check bool "broadcast model_used redacted" true (payload |> U.member "model_used" = `Null)
 ;;

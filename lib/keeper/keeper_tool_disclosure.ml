@@ -164,14 +164,34 @@ let final_keeper_tool_names
       ~(allowed_tool_names : string list)
   : string list
   =
-  merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
-  |> List.map canonical_name
+  let allowed_tool_names =
+    allowed_tool_names |> List.map canonical_name |> Keeper_types.dedupe_keep_order
+  in
+  let reported_tool_names = List.map canonical_name reported_tool_names in
+  let observed_tool_names = List.map canonical_name observed_tool_names in
+  let tool_names =
+    match observed_tool_names with
+    | [] -> reported_tool_names
+    | _ :: _ ->
+      let observed = Hashtbl.create (List.length observed_tool_names) in
+      List.iter
+        (fun tool_name -> Hashtbl.replace observed tool_name ())
+        observed_tool_names;
+      observed_tool_names
+      @ List.filter
+          (fun tool_name -> not (Hashtbl.mem observed tool_name))
+          reported_tool_names
+  in
+  tool_names
   |> List.filter (fun tool_name -> List.mem tool_name allowed_tool_names)
 ;;
 
 let unexpected_tool_names ~(allowed_tool_names : string list) ~(tool_names : string list)
   : string list
   =
+  let allowed_tool_names =
+    allowed_tool_names |> List.map canonical_name |> Keeper_types.dedupe_keep_order
+  in
   let allowed = Hashtbl.create (List.length allowed_tool_names) in
   let seen = Hashtbl.create (List.length tool_names) in
   List.iter (fun tool_name -> Hashtbl.replace allowed tool_name ()) allowed_tool_names;

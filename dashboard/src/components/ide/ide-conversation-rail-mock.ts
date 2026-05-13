@@ -175,7 +175,7 @@ export function IdeConversationRailMock() {
   }, [threadStore])
   useEffect(() => {
     threadStore.reset(activeFile)
-    threadStore.seed(postsToAnchoredThreads(posts, activeFile))
+    threadStore.seed(postsToAnchoredThreads(posts))
     publishIdeConversationThreads(threadStore.filePath(), threadStore.visibleThreads())
   }, [activeFile, posts, threadStore])
   useEffect(() => {
@@ -264,7 +264,6 @@ export function IdeConversationRailMock() {
               nextFocusedId => setFocusedId(focusedId === nextFocusedId ? null : nextFocusedId),
               entries,
               overlay,
-              activeFile,
             ))}
       </ol>
     </div>
@@ -341,7 +340,7 @@ function anchorFromPost(post: BoardPost): AnchoredThread['anchor'] | null {
   if (!lineRef) return null
   const line = lineRef?.[2] ? Number.parseInt(lineRef[2], 10) : null
   return {
-    file_path: lineRef[1],
+    file_path: lineRef[1]!,
     line_start: line,
     line_end: line,
     symbol_hint: symbolHintFromText(text),
@@ -367,7 +366,6 @@ function ReplayRailCard(
   onFocus: (id: string) => void,
   entries: ReadonlyArray<KeeperPresenceEntry>,
   overlay: KeeperCursorOverlay,
-  activeFile: string,
 ) {
   if (item.source === 'thread') {
     return PostCard(
@@ -376,7 +374,6 @@ function ReplayRailCard(
       () => onFocus(item.post.id),
       entries,
       overlay,
-      activeFile,
     )
   }
   if (item.source === 'decision') {
@@ -391,7 +388,6 @@ function PostCard(
   onFocus: () => void,
   entries: ReadonlyArray<KeeperPresenceEntry>,
   overlay: KeeperCursorOverlay,
-  activeFile: string,
 ) {
   const kind = boardKindFromPost(post)
   const kindColor = KIND_TOKEN[kind]

@@ -46,7 +46,7 @@ describe('IdeConversationRailMock', () => {
         comment_count: 0,
         created_at_iso: '2026-05-05T10:01:00Z',
       },
-    ], 'dashboard/src/app.ts')
+    ])
 
     expect(threads).toHaveLength(1)
     expect(threads[0]).toMatchObject({
@@ -72,8 +72,9 @@ describe('IdeConversationRailMock', () => {
       created_at_iso: '2026-05-05T10:01:00Z',
     }]
 
-    expect(postsToAnchoredThreads(posts, 'dashboard/src/app.ts')).toEqual([])
-    expect(postsToAnchoredThreads(posts, 'lib/runtime.ml')).toEqual([])
+    expect(postsToAnchoredThreads(posts)).toEqual([])
+    activeIdeFile.value = 'lib/runtime.ml'
+    expect(postsToAnchoredThreads(posts)).toEqual([])
   })
 
   it('orders thread, decision, and cascade replay items on one timeline', () => {

@@ -112,6 +112,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Draft | (pending #14714) | depends on RFC-0036 Phase A, extends RFC-0006 Phase B-2 |
 | 0071 | Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern | Draft | #14881 2026-05-12 | body written by this PR; lib/core/dune reference (#14888) realized. Related RFC-0042, RFC-0068. |
 | 0072 | Type-encoded keeper sub-FSM transitions (cascade + turn_phase) | Draft | 2026-05-12 | follows PR #14887 + #14893 decision-axis precedent. |
+| 0073 | Write-side silent failure — typed propagation | Draft | 2026-05-14 | symmetric counterpart to RFC-0044 (read-side); covers 20 grandfathered write/create sites in lib/keeper/. |
 | 0078 | RFC Number Reservation Ledger + CI Collision Guard | Draft | 2026-05-14 | introduces `docs/rfc/.next-number` ledger + `rfc-number-collision-check` workflow |
 | 0079 | Log row typed encoder + silent-drop removal | Draft | 2026-05-14 | typed `Ring.entry` (level/source closed sums), `Entry_decode_error` raise, drops raw_level/normalized_level/legacy_classified/dropped_entries; supersedes #15170 |
 

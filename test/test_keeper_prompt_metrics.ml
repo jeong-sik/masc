@@ -43,6 +43,11 @@ let () =
   Prompt_registry.set_markdown_dir prompts_dir;
   Masc_mcp.Prompt_defaults.init ()
 
+let restore_prompt_registry () =
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
+  Masc_mcp.Prompt_defaults.init ()
+
 (* ── Fixture: realistic keeper prompt components ──────── *)
 
 let base_system_prompt =
@@ -241,6 +246,22 @@ let test_prompt_recovery_guard_restores_missing_anchors () =
   check bool "recovery state template present" true
     (has_in prompt "State block template");
   check bool "recovery world anchor present" true (has_in prompt "<world>")
+
+let test_prompt_recovery_guard_uses_code_fallback_when_registry_empty () =
+  Prompt_registry.clear ();
+  Fun.protect ~finally:restore_prompt_registry (fun () ->
+      let prompt =
+        KP.ensure_critical_prompt_anchors
+          "You are imseonghan, a keeper agent.\nWill: keep going."
+      in
+      check bool "fallback continuity anchor present" true
+        (has_in prompt "<continuity>");
+      check bool "fallback PR merge rules present" true
+        (has_in prompt "PR merge rules");
+      check bool "fallback state template present" true
+        (has_in prompt "State block template");
+      check bool "fallback world anchor present" true
+        (has_in prompt "<world>"))
 
 let test_state_block_guard_is_runtime_managed_not_absolute_never () =
   let guard = KP.state_block_output_guard_text in
@@ -450,6 +471,9 @@ let () =
             test_keeper_prompt_preserves_snapshot_delta_anchors;
           test_case "prompt recovery guard restores missing anchors" `Quick
             test_prompt_recovery_guard_restores_missing_anchors;
+          test_case "prompt recovery guard survives empty registry value"
+            `Quick
+            test_prompt_recovery_guard_uses_code_fallback_when_registry_empty;
           test_case "state block guard is runtime-managed" `Quick
             test_state_block_guard_is_runtime_managed_not_absolute_never;
           test_case "unified state instruction respects turn-level guard" `Quick

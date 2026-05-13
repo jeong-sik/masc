@@ -30,7 +30,7 @@ let missing_critical_prompt_anchors prompt =
       if String_util.contains_substring prompt needle then None else Some name)
     critical_prompt_anchors
 
-let critical_prompt_recovery_block =
+let critical_prompt_recovery_block_fallback =
   String.concat "\n"
     [ "<continuity>";
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
@@ -41,6 +41,36 @@ let critical_prompt_recovery_block =
       "<world>";
       "Recovery guard: act from the configured base path and active runtime tool schema; do not invent paths, repos, PRs, tasks, or tools.";
       "</world>" ]
+
+(* Recovery fallback content normally lives at
+   config/prompts/keeper.recovery_block.md so operators can edit it with the
+   other prompts. Keep the in-code fallback because this guard must still work
+   when prompt file loading is exactly what degraded.
+
+   The registry version is trusted only when it carries all required anchors:
+   an operator who accidentally edits out [<continuity>] or [PR merge rules]
+   would otherwise produce a non-empty block that [ensure_critical_prompt_anchors]
+   appends without restoring the missing safeguard — a silent regression vs the
+   previous hardcoded path. Drift triggers the existing prompt failure counter
+   plus a warn so the operator hears about it. *)
+let critical_prompt_recovery_block () =
+  let from_registry =
+    String.trim (Prompt_registry.get_prompt Keeper_prompt_names.recovery_block)
+  in
+  if String.equal from_registry "" then critical_prompt_recovery_block_fallback
+  else
+    match missing_critical_prompt_anchors from_registry with
+    | [] -> from_registry
+    | missing ->
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_prompt_failures
+          ~labels:[("prompt", "keeper.recovery_block.anchors")]
+          ();
+        Log.Keeper.warn
+          "critical_prompt_recovery_block: registry text missing anchors (%s); \
+           using in-code fallback to preserve safeguards"
+          (String.concat "," missing);
+        critical_prompt_recovery_block_fallback
 
 let state_block_output_guard_text =
   "Output guard: this turn uses runtime-managed continuity. Do not output raw [STATE] or [/STATE] blocks in visible text; the runtime will synthesize and persist state metadata when needed."
@@ -57,7 +87,7 @@ let ensure_critical_prompt_anchors prompt =
         "build_keeper_system_prompt: critical prompt anchors missing (%s); \
          appending recovery guard"
         (String.concat "," missing);
-      prompt ^ "\n\n" ^ critical_prompt_recovery_block
+      prompt ^ "\n\n" ^ critical_prompt_recovery_block ()
 
 (** Format an *allowlist* for prompt rendering.  An empty allowlist means
     the gate is OFF (any account-accessible repo is permitted), so we

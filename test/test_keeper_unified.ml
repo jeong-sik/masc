@@ -2124,6 +2124,19 @@ let test_prompt_contains_goal () =
      has_goal)
 ;;
 
+let test_turn_intent_uses_fallback_when_registry_value_empty () =
+  Prompt_registry.clear ();
+  Fun.protect ~finally:restore_prompt_registry (fun () ->
+    let sys, _user =
+      UP.build_prompt ~base_path:"/test" ~meta:minimal_meta
+        ~observation:base_observation ()
+    in
+    check bool "fallback keeps world-state instruction" true
+      (contains_substring sys "Use the world state below as raw context");
+    check bool "fallback keeps state instruction" true
+      (contains_substring sys "For non-direct keeper turns"))
+;;
+
 let test_prompt_mentions_extend_turns_guidance () =
   let sys, _user =
     UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation ()
@@ -10974,9 +10987,13 @@ let () =
         ; test_case "with goals" `Quick test_observation_with_goals
         ; test_case "economic modes" `Quick test_observation_economic_modes
         ] )
-    ; ( "unified_prompt"
+  ; ( "unified_prompt"
       , [ test_case "contains identity" `Quick test_prompt_contains_identity
         ; test_case "contains goal" `Quick test_prompt_contains_goal
+        ; test_case
+            "turn intent survives empty registry value"
+            `Quick
+            test_turn_intent_uses_fallback_when_registry_value_empty
         ; test_case
             "mentions extend_turns guidance"
             `Quick

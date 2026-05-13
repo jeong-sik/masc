@@ -153,6 +153,15 @@ let csv_items raw =
   |> List.filter (fun s -> s <> "")
 ;;
 
+let env_csv_models ~getenv ~env_var ~defaults =
+  match env_value_opt ~getenv env_var with
+  | Some raw ->
+    (match csv_items raw with
+     | [] -> Some (defaults, None)
+     | items -> Some (items, Some env_var))
+  | None -> Some (defaults, None)
+;;
+
 let no_tool_http_headers =
   { supports_runtime_mcp_http_headers = false
   ; requires_per_keeper_bridging_for_bound_actor_tools = false
@@ -674,25 +683,37 @@ let resolve_adapter_by_cascade_prefix label =
     direct_adapters
 ;;
 
-let resolve_auto_models ?getenv (policy : model_policy) =
+let resolve_auto_models_with_source ?(getenv = Sys.getenv_opt) (policy : model_policy) =
   match policy.auto_models with
   | No_auto_models -> None
-  | Zai_general_auto_models -> Some (Llm_provider.Zai_catalog.glm_auto_models ())
-  | Zai_coding_auto_models -> Some (Llm_provider.Zai_catalog.glm_coding_auto_models ())
+  | Zai_general_auto_models ->
+    env_csv_models
+      ~getenv
+      ~env_var:"ZAI_AUTO_MODELS"
+      ~defaults:(Llm_provider.Zai_catalog.glm_auto_models ())
+  | Zai_coding_auto_models ->
+    env_csv_models
+      ~getenv
+      ~env_var:"ZAI_CODING_AUTO_MODELS"
+      ~defaults:(Llm_provider.Zai_catalog.glm_coding_auto_models ())
   | Env_csv_or_default { env_var; defaults; prefer_default_model_env } ->
-    (match env_value_opt ?getenv env_var with
+    (match env_value_opt ~getenv env_var with
      | Some raw ->
        (match csv_items raw with
-        | [] -> Some defaults
-        | items -> Some items)
+        | [] -> Some (defaults, None)
+        | items -> Some (items, Some env_var))
      | None when prefer_default_model_env ->
        (match policy.default_model_env with
         | Some default_env ->
-          (match env_value_opt ?getenv default_env with
-           | Some model_id -> Some [ model_id ]
-           | None -> Some defaults)
-        | None -> Some defaults)
-     | None -> Some defaults)
+          (match env_value_opt ~getenv default_env with
+           | Some model_id -> Some ([ model_id ], Some default_env)
+           | None -> Some (defaults, None))
+        | None -> Some (defaults, None))
+     | None -> Some (defaults, None))
+;;
+
+let resolve_auto_models ?getenv policy =
+  resolve_auto_models_with_source ?getenv policy |> Option.map fst
 ;;
 
 let first_auto_model_default ?getenv policy =
@@ -733,6 +754,14 @@ let auto_models_for_cascade_prefix ?getenv provider_name =
   match resolve_adapter_by_cascade_prefix provider_name with
   | Some adapter when adapter.model_policy.expand_auto ->
     resolve_auto_models ?getenv adapter.model_policy
+  | Some _ -> None
+  | None -> None
+;;
+
+let auto_models_for_cascade_prefix_with_source ?getenv provider_name =
+  match resolve_adapter_by_cascade_prefix provider_name with
+  | Some adapter when adapter.model_policy.expand_auto ->
+    resolve_auto_models_with_source ?getenv adapter.model_policy
   | Some _ -> None
   | None -> None
 ;;

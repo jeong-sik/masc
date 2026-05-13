@@ -429,6 +429,34 @@ let test_zai_default_model_fallback_uses_oas_catalog () =
            (Adapter.default_model_id_for_cascade_prefix "glm-coding")))
 ;;
 
+let test_zai_auto_models_respect_injected_getenv () =
+  let getenv = function
+    | "ZAI_AUTO_MODELS" -> Some "glm-injected,glm-second"
+    | "ZAI_CODING_AUTO_MODELS" -> Some "glm-coding-injected,glm-coding-second"
+    | _ -> None
+  in
+  check
+    (option (list string))
+    "glm auto list follows injected env"
+    (Some [ "glm-injected"; "glm-second" ])
+    (Adapter.auto_models_for_cascade_prefix ~getenv "glm");
+  check
+    (option string)
+    "glm default follows injected auto list"
+    (Some "glm-injected")
+    (Adapter.default_model_id_for_cascade_prefix ~getenv "glm");
+  check
+    (option (list string))
+    "glm-coding auto list follows injected env"
+    (Some [ "glm-coding-injected"; "glm-coding-second" ])
+    (Adapter.auto_models_for_cascade_prefix ~getenv "glm-coding");
+  check
+    (option string)
+    "glm-coding default follows injected auto list"
+    (Some "glm-coding-injected")
+    (Adapter.default_model_id_for_cascade_prefix ~getenv "glm-coding")
+;;
+
 let test_runtime_mcp_header_support_uses_declared_policy () =
   let kimi_cli_cfg =
     Llm_provider.Provider_config.make
@@ -988,6 +1016,10 @@ let () =
             "zai default model fallback uses oas catalog"
             `Quick
             test_zai_default_model_fallback_uses_oas_catalog
+        ; test_case
+            "zai auto models respect injected getenv"
+            `Quick
+            test_zai_auto_models_respect_injected_getenv
         ; test_case
             "declared runtime MCP header policy"
             `Quick

@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -60,7 +61,7 @@ sys.modules[spec.name] = goal_loop_completion_audit
 spec.loader.exec_module(goal_loop_completion_audit)
 
 
-def complete_status() -> dict[str, object]:
+def complete_status() -> dict[str, Any]:
     return {
         "phases": {
             "orient": {
@@ -124,7 +125,7 @@ def complete_status() -> dict[str, object]:
     }
 
 
-def blocked_status() -> dict[str, object]:
+def blocked_status() -> dict[str, Any]:
     status = json.loads(json.dumps(complete_status()))
     audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
     audit_catalog["status"] = "INCOMPLETE"
@@ -215,7 +216,7 @@ def blocked_status() -> dict[str, object]:
     return status
 
 
-def strict_catalog_only_blocked_status() -> dict[str, object]:
+def strict_catalog_only_blocked_status() -> dict[str, Any]:
     status = json.loads(json.dumps(complete_status()))
     audit_catalog = status["phases"]["orient"]["summary"]["audit_catalog"]
     audit_catalog["status"] = "INCOMPLETE"
@@ -224,7 +225,7 @@ def strict_catalog_only_blocked_status() -> dict[str, object]:
     return status
 
 
-def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, object]:
+def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "corpus_id": "synthetic-goal-loop-strict-row-corpus",
@@ -254,7 +255,7 @@ def synthetic_strict_row_corpus(row_count: int = 206) -> dict[str, object]:
     }
 
 
-def blocked_verify_pipeline() -> dict[str, object]:
+def blocked_verify_pipeline() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "status": "BLOCKED",
@@ -285,7 +286,7 @@ def blocked_verify_pipeline() -> dict[str, object]:
     }
 
 
-def passing_verify_pipeline() -> dict[str, object]:
+def passing_verify_pipeline() -> dict[str, Any]:
     gates = [
         {
             "gate_id": gate_id,
@@ -1181,6 +1182,66 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         self.assertIn("keeper_rows", warmup_evidence["invalid_reasons"])
         self.assertIn("max_observed_warmup_sec", warmup_evidence["invalid_reasons"])
         self.assertIn("bounded_by_max_delay", warmup_evidence["invalid_reasons"])
+
+    def test_completion_audit_rejects_duplicate_required_keeper_names(self) -> None:
+        warmup_fairness = json.loads(
+            AUTOBOOT_WARMUP_FAIRNESS_FIXTURE.read_text(encoding="utf-8")
+        )
+        required_names = warmup_fairness["required_keeper_names"]
+        assert isinstance(required_names, list)
+        required_names[1] = required_names[0]
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            complete_status(),
+            autoboot_warmup_fairness=warmup_fairness,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        warmup_evidence = by_id["autoboot_warmup_fairness_complete"].evidence
+        self.assertIn(
+            "duplicate_required_keeper_names",
+            warmup_evidence["invalid_reasons"],
+        )
+        self.assertEqual(
+            warmup_evidence["duplicate_required_keeper_names"],
+            [required_names[0]],
+        )
+
+    def test_completion_audit_rejects_non_last_late_keeper_check(self) -> None:
+        warmup_fairness = json.loads(
+            AUTOBOOT_WARMUP_FAIRNESS_FIXTURE.read_text(encoding="utf-8")
+        )
+        keeper_rows = warmup_fairness["keeper_rows"]
+        assert isinstance(keeper_rows, list)
+        first_row = next(
+            (
+                row
+                for row in keeper_rows
+                if isinstance(row, dict) and row.get("boot_position") == 0
+            ),
+            None,
+        )
+        assert isinstance(first_row, dict)
+        late_check = warmup_fairness["late_keeper_check"]
+        assert isinstance(late_check, dict)
+        late_check["keeper_name"] = first_row["keeper_name"]
+        late_check["boot_position"] = first_row["boot_position"]
+        late_check["warmup_sec"] = first_row["warmup_sec"]
+        late_check["claimed_linear_warmup_sec"] = 60
+
+        audit = goal_loop_completion_audit.build_completion_audit(
+            complete_status(),
+            autoboot_warmup_fairness=warmup_fairness,
+        )
+
+        self.assertEqual(audit.status, "BLOCKED")
+        by_id = {item.criterion_id: item for item in audit.criteria}
+        warmup_evidence = by_id["autoboot_warmup_fairness_complete"].evidence
+        self.assertIn("late_keeper_last_position", warmup_evidence["invalid_reasons"])
+        self.assertIn(
+            "late_keeper_last_keeper_name", warmup_evidence["invalid_reasons"]
+        )
 
     def test_completion_audit_rejects_invalid_closeout_prompt_sources(
         self,

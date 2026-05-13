@@ -1193,6 +1193,12 @@ def autoboot_warmup_fairness_evidence(
     rows_raw = warmup_fairness.get("keeper_rows", [])
     rows = rows_raw if isinstance(rows_raw, list) else []
     required_keeper_names = string_list(warmup_fairness.get("required_keeper_names"))
+    required_seen: set[str] = set()
+    duplicate_required_keeper_names: set[str] = set()
+    for keeper_name in required_keeper_names:
+        if keeper_name in required_seen:
+            duplicate_required_keeper_names.add(keeper_name)
+        required_seen.add(keeper_name)
 
     invalid_reasons: list[str] = []
 
@@ -1270,6 +1276,7 @@ def autoboot_warmup_fairness_evidence(
     missing_keeper_names = sorted(required_names - present_names)
     unexpected_keeper_names = sorted(present_names - required_names)
     require(bool(required_keeper_names), "required_keeper_names")
+    require(not duplicate_required_keeper_names, "duplicate_required_keeper_names")
     require(not duplicate_keeper_names, "duplicate_keeper_names")
     require(not missing_keeper_names, "missing_keeper_names")
     require(not unexpected_keeper_names, "unexpected_keeper_names")
@@ -1326,6 +1333,27 @@ def autoboot_warmup_fairness_evidence(
         if isinstance(late_row, dict)
         else None
     )
+    late_last_position = (
+        len(required_keeper_names) - 1 if required_keeper_names else None
+    )
+    late_last_row = (
+        next(
+            (
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and as_strict_int(row.get("boot_position")) == late_last_position
+            ),
+            None,
+        )
+        if late_last_position is not None
+        else None
+    )
+    late_last_keeper_name = (
+        as_nonempty_str(late_last_row.get("keeper_name"))
+        if isinstance(late_last_row, dict)
+        else None
+    )
     expected_linear_warmup = (
         base_warmup + late_boot_position * stagger_window
         if base_warmup is not None
@@ -1335,6 +1363,8 @@ def autoboot_warmup_fairness_evidence(
     )
     require(late_keeper_name in present_names, "late_keeper_check.keeper_name")
     require(late_boot_position == late_row_position, "late_keeper_position")
+    require(late_boot_position == late_last_position, "late_keeper_last_position")
+    require(late_keeper_name == late_last_keeper_name, "late_keeper_last_keeper_name")
     require(
         as_strict_int(late.get("warmup_sec")) == late_warmup,
         "late_keeper_warmup_sec",
@@ -1410,6 +1440,7 @@ def autoboot_warmup_fairness_evidence(
         "required_keeper_names": required_keeper_names,
         "missing_keeper_names": missing_keeper_names,
         "unexpected_keeper_names": unexpected_keeper_names,
+        "duplicate_required_keeper_names": sorted(duplicate_required_keeper_names),
         "duplicate_keeper_names": sorted(duplicate_keeper_names),
         "row_errors": row_errors,
         "boot_positions": sorted(boot_positions),
@@ -1417,6 +1448,8 @@ def autoboot_warmup_fairness_evidence(
         "distinct_warmups": distinct_warmups,
         "linear_sequence_detected": linear_sequence_detected,
         "late_keeper_name": late_keeper_name,
+        "late_keeper_expected_last_name": late_last_keeper_name,
+        "late_keeper_expected_last_position": late_last_position,
         "late_keeper_warmup_sec": late_warmup,
         "late_keeper_claimed_linear_warmup_sec": claimed_linear_warmup,
         "ordering_replay_status": ordering.get("status"),

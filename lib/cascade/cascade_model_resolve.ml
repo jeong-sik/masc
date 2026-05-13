@@ -71,10 +71,17 @@ let default_resolution_from_policy
       ~requested_model_id
   =
   let catalog_default () =
-    match Provider_adapter.auto_models_for_cascade_prefix ?getenv provider_name with
-    | Some (resolved_model_id :: _) ->
-      { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
-    | Some [] | None -> unresolved_auto requested_model_id
+    match
+      Provider_adapter.auto_models_for_cascade_prefix_with_source ?getenv provider_name
+    with
+    | Some (resolved_model_id :: _, source_env) ->
+      let provenance =
+        match source_env with
+        | Some env_var -> Env_default env_var
+        | None -> Hardcoded_default
+      in
+      { requested_model_id; resolved_model_id; provenance }
+    | Some ([], _) | None -> unresolved_auto requested_model_id
   in
   match policy.default_model_env with
   | Some env_var ->

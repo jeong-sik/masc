@@ -218,6 +218,24 @@ let test_cascade_model_resolve_env_default_provenance () =
     (Model_resolve.Env_default "GEMINI_DEFAULT_MODEL")
     resolved.provenance
 
+let test_cascade_model_resolve_auto_models_env_provenance () =
+  let getenv = function
+    | "ZAI_AUTO_MODELS" -> Some "glm-custom,glm-second"
+    | _ -> None
+  in
+  let resolved =
+    Model_resolve.resolve_auto_model
+      ~getenv
+      "glm"
+      (Model_resolve.model_selector_of_string "auto")
+  in
+  check string "glm auto env list default" "glm-custom" resolved.resolved_model_id;
+  check
+    resolution_provenance
+    "auto-model env provenance"
+    (Model_resolve.Env_default "ZAI_AUTO_MODELS")
+    resolved.provenance
+
 let test_cascade_model_resolve_discovery_provenance () =
   let resolved =
     Model_resolve.resolve_auto_model
@@ -356,6 +374,8 @@ let () =
             test_cascade_model_resolve_hardcoded_default_provenance;
           test_case "cascade env default provenance" `Quick
             test_cascade_model_resolve_env_default_provenance;
+          test_case "cascade auto-model env provenance" `Quick
+            test_cascade_model_resolve_auto_models_env_provenance;
           test_case "cascade discovery provenance" `Quick
             test_cascade_model_resolve_discovery_provenance;
           test_case "cascade unresolved auto provenance" `Quick

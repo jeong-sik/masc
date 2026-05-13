@@ -276,6 +276,12 @@ val auto_models_for_cascade_prefix
   -> string
   -> string list option
 
+(** Resolve declared auto-model expansion and the env var that supplied it, when any. *)
+val auto_models_for_cascade_prefix_with_source
+  :  ?getenv:(string -> string option)
+  -> string
+  -> (string list * string option) option
+
 (** Returns true if the provider uses runtime discovery (e.g. live /props probe). *)
 val requires_discovery : string -> bool
 

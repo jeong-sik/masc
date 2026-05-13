@@ -198,6 +198,36 @@ let profile_is_keeper_assignable = function
   | Some false -> false
   | None | Some true -> true
 
+let json_assoc_fields = function
+  | `Assoc fields -> fields
+  | _ -> []
+
+let json_assoc_member key json =
+  match json with
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let json_bool_field key json =
+  match json_assoc_member key json with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+
+let json_string_list_field key json =
+  match json_assoc_member key json with
+  | Some (`List values) ->
+      values
+      |> List.filter_map (function
+        | `String value ->
+            let trimmed = String.trim value in
+            if String.equal trimmed "" then None else Some trimmed
+        | _ -> None)
+  | _ -> []
+
+let json_keeper_assignable_opt json =
+  match json_bool_field "keeper-assignable" json with
+  | Some _ as value -> value
+  | None -> json_bool_field "keeper_assignable" json
+
 let qualified_name_for_public meta public_name =
   let group_name = qualified_tier_group_name public_name in
   let tier_name = qualified_tier_name public_name in
@@ -212,6 +242,94 @@ let qualified_name_for_public_names qualified_names public_name =
   else if List.mem tier_name qualified_names then tier_name
   else public_name
 
+let catalog_metadata_of_materialized_json json =
+  let tier_profiles =
+    json_assoc_member "tier" json
+    |> Option.value ~default:(`Assoc [])
+    |> json_assoc_fields
+    |> List.map (fun (name, tier_json) ->
+      qualified_tier_name name, json_keeper_assignable_opt tier_json)
+  in
+  let tier_group_fields =
+    json_assoc_member "tier-group" json
+    |> Option.value ~default:(`Assoc [])
+    |> json_assoc_fields
+  in
+  let tier_group_profiles =
+    tier_group_fields
+    |> List.map (fun (name, group_json) ->
+      qualified_tier_group_name name, json_keeper_assignable_opt group_json)
+  in
+  let profile_assignability = tier_profiles @ tier_group_profiles in
+  let qualified_names =
+    profile_assignability |> List.map fst |> List.sort_uniq String.compare
+  in
+  let public_names =
+    qualified_names
+    |> List.map strip_declarative_profile_prefix
+    |> List.sort_uniq String.compare
+  in
+  let system_qualified_names =
+    profile_assignability
+    |> List.filter_map (fun (name, assignable) ->
+      if profile_is_keeper_assignable assignable then None else Some name)
+    |> List.sort_uniq String.compare
+  in
+  let keeper_assignable_names =
+    public_names
+    |> List.filter (fun public_name ->
+      let qualified_name =
+        qualified_name_for_public_names qualified_names public_name
+      in
+      match List.assoc_opt qualified_name profile_assignability with
+      | Some assignable -> profile_is_keeper_assignable assignable
+      | None -> true)
+  in
+  let system_names =
+    public_names
+    |> List.filter (fun name -> not (List.mem name keeper_assignable_names))
+  in
+  let fallback_hints =
+    tier_group_fields
+    |> List.concat_map (fun (name, group_json) ->
+      let fallback =
+        json_bool_field "fallback" group_json |> Option.value ~default:false
+      in
+      let tiers = json_string_list_field "tiers" group_json in
+      if (not fallback) || List.length tiers < 2
+      then []
+      else (
+        let group_name = qualified_tier_group_name name in
+        let tier_edges =
+          let rec loop acc = function
+            | current :: ((next :: _) as rest) ->
+                loop
+                  ((qualified_tier_name current, qualified_tier_name next)
+                   :: acc)
+                  rest
+            | [] | [_] -> List.rev acc
+          in
+          loop [] tiers
+        in
+        match tiers with
+        | _first :: next :: _ ->
+            (group_name, qualified_tier_name next) :: tier_edges
+        | [] | [_] -> tier_edges))
+    |> List.filter (fun (source, target) ->
+      (not (String.equal source target))
+      && List.mem source qualified_names
+      && List.mem target qualified_names)
+  in
+  Ok
+    {
+      qualified_names;
+      public_names;
+      keeper_assignable_names;
+      system_qualified_names;
+      system_names;
+      fallback_hints;
+    }
+
 let catalog_metadata_result ?config_path () =
   let path_opt =
     match config_path with
@@ -221,103 +339,9 @@ let catalog_metadata_result ?config_path () =
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
   | Some path -> (
-      match Cascade_declarative_parser.parse_file path with
-      | Error errors ->
-          let rendered =
-            errors
-            |> List.map
-                 (fun (e : Cascade_declarative_parser.parse_error) ->
-                   Printf.sprintf "%s: %s" e.path e.message)
-            |> String.concat "; "
-          in
-          Error ("declarative cascade catalog invalid: " ^ rendered)
-      | Ok cfg ->
-          let tier_profiles =
-            cfg.tiers
-            |> List.map (fun (tier : Cascade_declarative_types.cascade_tier) ->
-                   (qualified_tier_name tier.name, tier.keeper_assignable))
-          in
-          let tier_group_profiles =
-            cfg.tier_groups
-            |> List.map
-                 (fun (group : Cascade_declarative_types.cascade_tier_group) ->
-                    ( qualified_tier_group_name group.name
-                    , group.keeper_assignable ))
-          in
-          let profile_assignability = tier_profiles @ tier_group_profiles in
-          let qualified_names =
-            profile_assignability
-            |> List.map fst
-            |> List.sort_uniq String.compare
-          in
-          let public_names =
-            qualified_names
-            |> List.map strip_declarative_profile_prefix
-            |> List.sort_uniq String.compare
-          in
-          let system_qualified_names =
-            profile_assignability
-            |> List.filter_map (fun (name, assignable) ->
-                   if profile_is_keeper_assignable assignable
-                   then None
-                   else Some name)
-            |> List.sort_uniq String.compare
-          in
-          let keeper_assignable_names =
-            public_names
-            |> List.filter (fun public_name ->
-                   let qualified_name =
-                     qualified_name_for_public_names qualified_names public_name
-                   in
-                   match List.assoc_opt qualified_name profile_assignability with
-                   | Some assignable -> profile_is_keeper_assignable assignable
-                   | None -> true)
-          in
-          let system_names =
-            public_names
-            |> List.filter (fun name ->
-                   not (List.mem name keeper_assignable_names))
-          in
-          let fallback_hints =
-            cfg.tier_groups
-            |> List.concat_map
-                (fun (group : Cascade_declarative_types.cascade_tier_group) ->
-                   if (not group.fallback) || List.length group.tiers < 2
-                   then []
-                   else
-                     let group_name =
-                       qualified_tier_group_name group.name
-                     in
-                     let tier_edges =
-                       let rec loop acc = function
-                         | current :: ((next :: _) as rest) ->
-                             loop
-                               (( qualified_tier_name current
-                                , qualified_tier_name next )
-                                :: acc)
-                               rest
-                         | [] | [_] -> List.rev acc
-                       in
-                       loop [] group.tiers
-                     in
-                     match group.tiers with
-                     | _first :: next :: _ ->
-                         (group_name, qualified_tier_name next) :: tier_edges
-                     | [] | [_] -> tier_edges)
-            |> List.filter (fun (source, target) ->
-                   (not (String.equal source target))
-                   && List.mem source qualified_names
-                   && List.mem target qualified_names)
-          in
-          Ok
-            {
-              qualified_names;
-              public_names;
-              keeper_assignable_names;
-              system_qualified_names;
-              system_names;
-              fallback_hints;
-            })
+      match Cascade_config_loader.load_catalog_source_for_diagnostics path with
+      | Error msg -> Error ("declarative cascade catalog invalid: " ^ msg)
+      | Ok json -> catalog_metadata_of_materialized_json json)
 
 let routed_query_target ?config_path raw =
   let trimmed = String.trim raw in

@@ -26,6 +26,8 @@ describe('ide-state', () => {
 
   it.each([
     '/absolute/path.ts',
+    'C:/repo/src/runtime.ts',
+    'D:\\repo\\src\\runtime.ts',
     'src/../runtime.ts',
     './runtime.ts',
     'src//runtime.ts',

@@ -41,7 +41,9 @@ export function focusIdeContextAnchor(
 
 function normalizeIdeContextFilePath(value: string): string | null {
   const filePath = value.trim().replace(/\\/g, '/')
-  if (filePath === '' || filePath.startsWith('/')) return null
+  if (filePath === '' || filePath.startsWith('/') || /^[A-Za-z]:\//.test(filePath)) {
+    return null
+  }
   const segments = filePath.split('/')
   if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) {
     return null

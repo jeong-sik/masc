@@ -61,9 +61,9 @@ val parse_model_string :
   ?num_ctx:int ->
   string -> Llm_provider.Provider_config.t option
 (** [api_key_env_overrides] defaults to [[]]. When non-empty, it overrides
-    the registry default API key env var for matching providers; see
-    {!parse_model_strings} for format details. Empty-string entries fall
-    through to the next level of the resolution chain.
+    the registry default API key env var for matching providers. Entries map
+    provider names, or ["*"] for all providers, to env var names. Empty-string
+    entries fall through to the next level of the resolution chain.
 
     [supports_tool_choice_override] is forwarded to
     {!Llm_provider.Provider_config.make}. [None] leaves the per-kind default
@@ -192,22 +192,6 @@ val expand_weighted_auto_entries :
     @since 0.151.0 RFC-0027 PR-9b dual-track lookup needs the expanded
     entries to match a parsed primary [Provider_config] back to its
     weighted entry (and therefore to its [secondary] declaration). *)
-
-(** Parse multiple model strings, skipping unavailable ones.
-    Internally calls {!expand_auto_models} before parsing.
-
-    When [api_key_env_overrides] is provided, it overrides the default
-    API key env var for matching providers. The list maps provider names
-    (or ["*"] for all) to env var names. Used by cascade execution paths
-    to apply per-cascade key configuration from cascade.toml.
-
-    @since 0.122.0 api_key_env_overrides parameter added *)
-val parse_model_strings :
-  ?temperature:float ->
-  ?max_tokens:int ->
-  ?system_prompt:string ->
-  ?api_key_env_overrides:(string * string) list ->
-  string list -> Llm_provider.Provider_config.t list
 
 (** {1 Cascade Config Loading} *)
 
@@ -526,9 +510,10 @@ val local_capacity_for_selections :
   local_capacity
 (** Query local endpoint capacity for cascade selection strings.
 
-    Each selection string is resolved through the same path as
-    [complete_named]: named profile lookup, then model string parsing.
-    Only local endpoints are considered; cloud providers are ignored.
+    Each selection string is resolved through the materialized TOML catalog:
+    named profile lookup, then its declared provider endpoints. Direct legacy
+    model-string parsing is intentionally not a fallback. Only local endpoints
+    are considered; cloud providers are ignored.
 
     Probes endpoints not yet in the throttle table via {!Discovery}
     (~10ms on localhost), populating the table as a side-effect.

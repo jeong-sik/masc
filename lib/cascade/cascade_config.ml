@@ -633,17 +633,6 @@ let parse_model_string_result
       Ok (make_registry_config ~temperature ~max_tokens ?system_prompt
             ~provider_name ~model_id entry)
 
-let parse_model_strings
-    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
-    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
-    ?system_prompt ?(api_key_env_overrides = [])
-    (strs : string list) : Llm_provider.Provider_config.t list =
-  let expanded = expand_auto_models strs in
-  List.filter_map
-    (parse_model_string ~temperature ~max_tokens ?system_prompt
-       ~api_key_env_overrides)
-    expanded
-
 (* Health filtering (extracted to Cascade_health_filter) *)
 let is_local_provider = Cascade_health_filter.is_local_provider
 let filter_healthy_strict = Cascade_health_filter.filter_healthy_strict
@@ -989,6 +978,71 @@ let materialized_tier_group_tiers json group_name =
         json_assoc_opt group_name groups_json)
   with
   | Some group_json -> json_string_list_member "tiers" group_json
+  | None -> []
+
+let materialized_provider_cascade_prefix json provider_id =
+  match direct_provider_cascade_prefix provider_id with
+  | Some _ as prefix -> prefix
+  | None ->
+    (match registry_provider_prefix provider_id with
+     | Some _ as prefix -> prefix
+     | None ->
+       let protocol =
+         materialized_provider_protocol json provider_id
+         |> Option.map (fun protocol ->
+                String.trim protocol |> String.lowercase_ascii)
+       in
+       Option.bind protocol Provider_adapter.cascade_prefix_of_declarative_protocol)
+
+let materialized_member_local_endpoint json member =
+  match String.split_on_char '.' (String.trim member) with
+  | provider_id :: _model_id :: _ ->
+    let provider_id = String.trim provider_id in
+    (match materialized_provider_cascade_prefix json provider_id with
+     | Some prefix when Provider_adapter.is_local_provider prefix ->
+       (match materialized_provider_endpoint json provider_id with
+        | Some endpoint ->
+          let endpoint = String.trim endpoint in
+          if endpoint = "" then None else Some endpoint
+        | None -> None)
+     | Some _ | None -> None)
+  | _ -> None
+
+let materialized_tier_local_endpoints json tier_name =
+  materialized_tier_members json tier_name
+  |> List.filter_map (materialized_member_local_endpoint json)
+
+let configured_local_endpoints_from_materialized_json json ~name =
+  let trimmed = String.trim name in
+  let candidates =
+    if String.starts_with ~prefix:"tier-group." trimmed
+       || String.starts_with ~prefix:"tier." trimmed
+    then [ trimmed ]
+    else [ trimmed; "tier-group." ^ trimmed; "tier." ^ trimmed ]
+  in
+  let resolve_profile profile_name =
+    if String.starts_with ~prefix:"tier-group." profile_name then
+      let group_name =
+        String.sub profile_name 11 (String.length profile_name - 11)
+      in
+      Some
+        (materialized_tier_group_tiers json group_name
+         |> List.concat_map (materialized_tier_local_endpoints json))
+    else if String.starts_with ~prefix:"tier." profile_name then
+      let tier_name =
+        String.sub profile_name 5 (String.length profile_name - 5)
+      in
+      Some (materialized_tier_local_endpoints json tier_name)
+    else None
+  in
+  match
+    candidates
+    |> List.find_map (fun candidate ->
+           match resolve_profile candidate with
+           | Some (_ :: _ as endpoints) -> Some endpoints
+           | Some [] | None -> None)
+  with
+  | Some endpoints -> endpoints
   | None -> []
 
 let configured_weighted_entries_from_materialized_json json ~name =
@@ -1339,27 +1393,31 @@ let empty_capacity = {
 }
 
 let local_capacity_for_selections ~sw ~net ?config_path selections =
-  (* 1. Resolve each selection through the same path as complete_named *)
-  let model_strings =
-    selections
-    |> List.concat_map (fun s ->
-         resolve_model_strings ?config_path ~name:s ~defaults:[s] ())
-    |> expand_model_strings_for_execution
-    |> List.sort_uniq String.compare
-  in
-  (* 2. Parse to provider configs *)
-  let providers = parse_model_strings model_strings in
-  (* 3. Filter to local providers *)
   let local_urls =
-    providers
-    |> List.filter is_local_provider
-    |> List.map (fun (cfg : Llm_provider.Provider_config.t) -> cfg.base_url)
-    |> List.sort_uniq String.compare
+    match config_path with
+    | None -> []
+    | Some path ->
+      (match Cascade_config_loader.load_catalog_source path with
+       | Error _ -> []
+       | Ok json ->
+         selections
+         |> List.concat_map (fun s ->
+                match configured_local_endpoints_from_materialized_json json ~name:s with
+                | _ :: _ as urls -> urls
+                | [] ->
+                  let fallback_profile =
+                    Cascade_routes.cascade_name_for_use
+                      ~config_path:path
+                      Cascade_routes.Keeper_turn
+                  in
+                  configured_local_endpoints_from_materialized_json
+                    json
+                    ~name:fallback_profile)
+         |> List.sort_uniq String.compare)
   in
   if local_urls = [] then
     empty_capacity
   else begin
-    (* 4. Probe endpoints not yet in throttle table (cold start) *)
     let need_probe =
       List.filter (fun url -> Cascade_throttle.lookup url = None) local_urls
     in
@@ -1367,7 +1425,6 @@ let local_capacity_for_selections ~sw ~net ?config_path selections =
       let statuses = Llm_provider.Discovery.discover ~sw ~net ~endpoints:need_probe in
       Cascade_throttle.populate statuses
     end;
-    (* 5. Aggregate capacity from throttle table *)
     let infos =
       List.filter_map (fun url -> Cascade_throttle.capacity url) local_urls
     in

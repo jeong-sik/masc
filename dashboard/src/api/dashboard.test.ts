@@ -11,6 +11,7 @@ import {
   fetchKeeperCostMetrics,
   fetchKeeperDecisions,
   fetchMemorySubsystems,
+  fetchRuntimeProviders,
   fetchRuntimeModelMetrics,
   fetchTlcResults,
   fetchToolQuality,
@@ -1068,6 +1069,50 @@ describe('fetchKeeperConfig', () => {
   })
 })
 
+describe('fetchRuntimeProviders', () => {
+  it('preserves stable provider lane IDs emitted by the API', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        updated_at: '2026-05-13T13:00:00Z',
+        summary: {
+          providers: 1,
+          local_models: 0,
+          cloud_models: 1,
+          cli_models: 0,
+        },
+        providers: [
+          {
+            provider: 'runtime_lane_deadbeef1234',
+            kind: 'runtime',
+            runtime_kind: 'cloud',
+            status: 'available',
+            available: true,
+            supports_single_agent_run: true,
+            model_count: 1,
+            source: 'runtime',
+            discovery: {
+              healthy: true,
+              ctx_size: 200000,
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeProviders()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/providers')
+    expect(result.providers[0]?.provider).toBe('runtime_lane_deadbeef1234')
+    expect(result.providers[0]?.kind).toBe('runtime')
+    expect(result.providers[0]?.runtime_kind).toBe('cloud')
+    expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
+  })
+})
+
 describe('fetchRuntimeModelMetrics', () => {
   it('preserves null telemetry fields instead of coercing them to zero', async () => {
     const rawResponse = {
@@ -1077,7 +1122,7 @@ describe('fetchRuntimeModelMetrics', () => {
       total_error_entries: 0,
       models: [
         {
-          model_id: 'kimi_cli:kimi-for-coding',
+          model_id: 'runtime_lane_a1b2c3d4e5f6',
           entry_count: 1,
           success_count: 1,
           usage_sample_count: 0,
@@ -1138,7 +1183,7 @@ describe('fetchRuntimeModelMetrics', () => {
     const result = await fetchRuntimeModelMetrics()
     const metric = result.models[0]!
 
-    expect(metric.model_id).toBe('runtime_lane_1')
+    expect(metric.model_id).toBe('runtime_lane_a1b2c3d4e5f6')
     expect(metric.provider).toBeNull()
     expect(metric.usage_sample_count).toBe(0)
     expect(metric.telemetry_sample_count).toBe(0)
@@ -1246,7 +1291,7 @@ describe('fetchCostLatency', () => {
       ],
       matrix: {
         providers: ['local'],
-        models: ['unlatenced-model'],
+        models: ['runtime_lane_7'],
         grid: [[0.01]],
       },
       latencyBuckets: [],
@@ -1274,6 +1319,6 @@ describe('fetchCostLatency', () => {
     expect(result.perAgent[0]?.p50_ms).toBeNull()
     expect(result.perAgent[0]?.p95_ms).toBeNull()
     expect(result.matrix.providers).toEqual(['runtime'])
-    expect(result.matrix.models).toEqual(['runtime_lane_1'])
+    expect(result.matrix.models).toEqual(['runtime_lane_7'])
   })
 })

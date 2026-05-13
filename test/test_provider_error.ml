@@ -4,6 +4,7 @@ module Oas = Agent_sdk
 module Prom = Masc_mcp.Prometheus
 module Retry = Llm_provider.Retry
 module OWN = Masc_mcp.Keeper_turn_driver
+module Provider_metric = Masc_mcp.Cascade_attempt_fsm
 
 let cascade_name raw = OWN.cascade_name_of_string raw
 
@@ -18,7 +19,7 @@ let expect_some = function
 
 let counter_for ~kind ~provider ~cascade_name ~capacity_scope =
   Prom.metric_value_or_zero
-    OWN.provider_error_total_metric
+    Provider_metric.provider_error_total_metric
     ~labels:
       [ "kind", kind
       ; "provider", provider
@@ -249,7 +250,7 @@ let test_provider_error_preserves_legacy_health_decisions () =
 ;;
 
 let test_provider_error_metric_name_stable () =
-  check string "metric name" "masc_provider_error_total" OWN.provider_error_total_metric
+  check string "metric name" "masc_provider_error_total" Provider_metric.provider_error_total_metric
 ;;
 
 let test_emit_sdk_provider_error_metric_rate_limit () =

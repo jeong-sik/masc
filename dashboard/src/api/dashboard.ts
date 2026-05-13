@@ -675,12 +675,12 @@ function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderD
   }
 }
 
-function decodeRuntimeProviderSnapshot(raw: unknown, index: number): DashboardRuntimeProviderSnapshot | null {
+function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSnapshot | null {
   if (!isRecord(raw)) return null
   const provider = asString(raw.provider)
   if (!provider) return null
   return {
-    provider: runtimeLaneLabel(index),
+    provider,
     kind: 'runtime',
     runtime_kind: asNullableString(raw.runtime_kind),
     auth_kind: asNullableString(raw.auth_kind),
@@ -716,12 +716,12 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
   }
 }
 
-function decodeRuntimeModelMetric(raw: unknown, index: number): DashboardRuntimeModelMetric | null {
+function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | null {
   if (!isRecord(raw)) return null
   const modelId = asString(raw.model_id)
   if (!modelId) return null
   return {
-    model_id: runtimeLaneLabel(index),
+    model_id: modelId,
     provider: null,
     entry_count: asNumber(raw.entry_count) ?? null,
     avg_tok_per_sec: asNumber(raw.avg_tok_per_sec) ?? null,
@@ -829,7 +829,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
           }))
       : null,
     models: asRecordArray(raw.models)
-      .map((metric, index) => decodeRuntimeModelMetric(metric, index))
+      .map(metric => decodeRuntimeModelMetric(metric))
       .filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),
   }
 }
@@ -3086,7 +3086,9 @@ function decodeCostMatrix(raw: unknown): CostMatrix | null {
     rawModels.length,
     rawGrid.reduce((max, row) => Math.max(max, row.length), 0),
   )
-  const models = Array.from({ length: colCount }, (_, index) => runtimeLaneLabel(index))
+  const models = Array.from({ length: colCount }, (_, index) =>
+    rawModels[index] ?? runtimeLaneLabel(index),
+  )
   const providers = colCount > 0 || asStringArray(raw.providers).length > 0 ? ['runtime'] : []
   const grid = providers.length === 0
     ? []

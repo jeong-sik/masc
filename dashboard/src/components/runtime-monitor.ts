@@ -299,10 +299,6 @@ function recentEntryDetail(
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
-function runtimeMetricLabel(index: number): string {
-  return `runtime ${index + 1}`
-}
-
 type RecentEntry = NonNullable<DashboardRuntimeModelMetric['recent_entries']>[number]
 
 const recentEntryColumns: TableColumn<RecentEntry>[] = [
@@ -419,11 +415,11 @@ export function RuntimeMonitor() {
         </div>
         <div class="flex flex-col gap-3">
           ${(providers?.providers ?? []).length > 0
-            ? providers?.providers.map((provider, index) => html`
+            ? providers?.providers.map(provider => html`
                 <article class="p-4 rounded-[var(--r-1)] border border-card-border bg-card/40 backdrop-blur-sm shadow-[var(--shadow-1)] flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
-                      <strong class="text-sm text-text-strong">${runtimeMetricLabel(index)}</strong>
+                      <strong class="text-sm text-text-strong">${provider.provider}</strong>
                       <span class="text-xs text-text-muted">${provider.runtime_kind ?? 'runtime'}</span>
                     </div>
                     <${StatusChip}
@@ -481,7 +477,7 @@ export function RuntimeMonitor() {
           : null}
         <div class="flex flex-col gap-3">
           ${(metrics?.models ?? []).length > 0
-            ? sortModelMetricsByUrgency(filterModelMetrics(metrics?.models ?? [], modelSearch.value)).map((metric, index) => {
+            ? sortModelMetricsByUrgency(filterModelMetrics(metrics?.models ?? [], modelSearch.value)).map(metric => {
                 const isFailing = (metric.error_count ?? 0) > 0
                 const hasCoverageGap =
                   metric.coverage_status === 'none'
@@ -493,8 +489,9 @@ export function RuntimeMonitor() {
                 } else if (hasCoverageGap) {
                   articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--status-warn)]/5 backdrop-blur-sm shadow-[var(--shadow-1)] flex flex-col gap-2'
                 }
+                const runtimeLabel = metric.model_id
                 const ariaLabel = isFailing
-                  ? `Runtime failing: ${runtimeMetricLabel(index)}, ${metric.error_count ?? 0} errors out of ${metric.entry_count ?? 0}`
+                  ? `Runtime failing: ${runtimeLabel}, ${metric.error_count ?? 0} errors out of ${metric.entry_count ?? 0}`
                   : undefined
                 return html`
                 <article
@@ -505,7 +502,7 @@ export function RuntimeMonitor() {
                 >
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
-                      <strong class="text-sm text-text-strong">${runtimeMetricLabel(index)}</strong>
+                      <strong class="text-sm text-text-strong">${runtimeLabel}</strong>
                       <span class="text-xs text-text-muted">entries ${formatNumber(metric.entry_count)} · fallback ${formatNumber(metric.fallback_count)}</span>
                       ${metricCoverageText(metric)
                         ? html`<span class="text-2xs ${hasCoverageGap ? 'text-[var(--status-warn)]' : 'text-[var(--color-fg-muted)]'}">${metricCoverageText(metric)}</span>`

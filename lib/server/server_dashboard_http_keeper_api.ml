@@ -770,10 +770,14 @@ let first_int_opt values =
 
 let runtime_lens_tool_surface_parts scan =
   let tool_decision =
-    Option.value scan.latest_tool_surface_decision ~default:(`Assoc [])
+    match scan.latest_tool_surface_decision with
+    | Some decision -> decision
+    | None -> `Assoc []
   in
   let lane_decision =
-    Option.value scan.latest_provider_lane_decision ~default:(`Assoc [])
+    match scan.latest_provider_lane_decision with
+    | Some decision -> decision
+    | None -> `Assoc []
   in
   let requested_tools =
     json_string_list_member "requested_tool_names" lane_decision

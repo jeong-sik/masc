@@ -306,6 +306,19 @@ let provider_opt_of_fields ~(model : string) (fields : (string * Yojson.Safe.t) 
   None
 ;;
 
+let private_provider_hint_of_fields (fields : (string * Yojson.Safe.t) list) =
+  let read key =
+    match List.assoc_opt key fields with
+    | Some (`String raw) ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+    | _ -> None
+  in
+  match read "provider_kind" with
+  | Some _ as provider_kind -> provider_kind
+  | None -> read "provider"
+;;
+
 let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
   let ts = Safe_ops.json_float_opt "ts_unix" json |> Option.value ~default:0.0 in
   if ts < since_unix
@@ -542,8 +555,21 @@ let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
 ;;
 
 let canonical_cost_model_id ~(provider : string option) model =
-  let _ = provider in
-  model
+  let provider_key =
+    match provider with
+    | None -> None
+    | Some raw ->
+      (match Llm_provider.Provider_kind.of_string raw with
+       | Some kind -> Some (Llm_provider.Provider_kind.to_string kind)
+       | None ->
+         let trimmed = String.trim raw in
+         if String.equal trimmed "" then None else Some (String.lowercase_ascii trimmed))
+  in
+  match provider_key with
+  | None -> model
+  | Some provider_key ->
+    let prefix = provider_key ^ ":" in
+    if String.starts_with ~prefix model then model else prefix ^ model
 ;;
 
 let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
@@ -563,7 +589,11 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
          json_string_field_opt "model" fields |> Option.value ~default:"unknown"
        in
        let provider = provider_opt_of_fields ~model:raw_model fields in
-       let model = canonical_cost_model_id ~provider raw_model in
+       let model =
+         canonical_cost_model_id
+           ~provider:(private_provider_hint_of_fields fields)
+           raw_model
+       in
        let usage_missing =
          json_bool_field_opt "usage_missing" fields |> Option.value ~default:false
        in
@@ -1264,7 +1294,10 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min : model_bucketed list =
 (* ── JSON serialization ─────────────────────────────────── *)
 
 let public_runtime_label = "runtime"
-let public_runtime_lane_label index = Printf.sprintf "runtime_lane_%d" (index + 1)
+
+let public_runtime_lane_label model_key =
+  let digest = Digest.string model_key |> Digest.to_hex in
+  "runtime_lane_" ^ String.sub digest 0 12
 
 let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
   let opt_float = function
@@ -1403,10 +1436,10 @@ let to_json (agg : aggregate) : Yojson.Safe.t =
     ; "latency_buckets", `List (List.map latency_bucket_to_json agg.latency_buckets)
     ; ( "models"
       , `List
-          (List.mapi
-             (fun index stats ->
+          (List.map
+             (fun stats ->
                 model_stats_to_json
-                  ~model_label:(public_runtime_lane_label index)
+                  ~model_label:(public_runtime_lane_label stats.model_id)
                   stats)
              agg.models) )
     ]
@@ -1550,21 +1583,20 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
   let entries = read_all_entries ~base_path ~since_unix in
   let model_stats_list = aggregate_by_model entries in
-  let indexed_model_stats = List.mapi (fun index stats -> index, stats) model_stats_list in
   (* per-agent rows — sorted by cost descending, skip zero-signal rows *)
   let per_agent =
-    indexed_model_stats
-    |> List.filter (fun (_, (m : model_stats)) ->
+    model_stats_list
+    |> List.filter (fun (m : model_stats) ->
       Option.value ~default:0.0 m.total_cost_usd > 0.0
       || Option.value ~default:0 m.total_input_tokens > 0
       || Option.value ~default:0 m.total_output_tokens > 0)
-    |> List.sort (fun (_, a) (_, b) ->
+    |> List.sort (fun a b ->
       Float.compare
         (Option.value ~default:0.0 b.total_cost_usd)
         (Option.value ~default:0.0 a.total_cost_usd))
-    |> List.map (fun (index, (m : model_stats)) ->
+    |> List.map (fun (m : model_stats) ->
       `Assoc
-        [ "agent", `String (public_runtime_lane_label index)
+        [ "agent", `String (public_runtime_lane_label m.model_id)
         ; "in_tok", `Int (Option.value ~default:0 m.total_input_tokens)
         ; "out_tok", `Int (Option.value ~default:0 m.total_output_tokens)
         ; "cost", `Float (Option.value ~default:0.0 m.total_cost_usd)
@@ -1574,7 +1606,9 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
   in
   (* Public matrix keeps cost shape without exporting provider/model identities. *)
   let providers = if model_stats_list = [] then [] else [ public_runtime_label ] in
-  let model_ids = List.mapi (fun index _ -> public_runtime_lane_label index) model_stats_list in
+  let model_ids =
+    List.map (fun (stats : model_stats) -> public_runtime_lane_label stats.model_id) model_stats_list
+  in
   let grid =
     match providers with
     | [] -> []
@@ -1582,7 +1616,12 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
       [ `List
           (List.map
              (fun (m : model_stats) ->
-                `Float (Option.value ~default:0.0 m.total_cost_usd))
+                let cost =
+                  match m.total_cost_usd with
+                  | Some value -> value
+                  | None -> 0.0
+                in
+                `Float cost)
              model_stats_list)
       ]
   in

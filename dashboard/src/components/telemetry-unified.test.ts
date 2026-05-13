@@ -262,11 +262,31 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('operation op-route')
     expect(container.textContent).toContain('worker_run wr-route')
     expect(container.textContent).toContain('focus turn-9')
+    expect(container.querySelector('[data-testid="telemetry-route-focus"]')).not.toBeNull()
+    expect(container.textContent).toContain('SESSION sess-route')
+    expect(container.textContent).toContain('OPERATION op-route')
+    expect(container.textContent).toContain('WORKER wr-route')
+    expect(container.textContent).toContain('QUERY turn-9')
+    expect(container.textContent).toContain('1 focused item')
     const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="엔트리 텍스트 검색"]')
     expect(searchInput?.value).toBe('turn-9')
     expect(container.textContent).toContain('검색 매치 1건')
     expect(container.textContent).toContain('turn-9-evidence')
     expect(container.textContent).not.toContain('keeper-other')
+    expect(container.querySelectorAll('[data-route-focused-telemetry="true"]')).toHaveLength(1)
+
+    const clearButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.includes('CLEAR'))
+    expect(clearButton).not.toBeUndefined()
+    await act(async () => {
+      clearButton!.click()
+    })
+
+    expect(window.location.hash).toContain('#monitoring?section=fleet-health&view=event-log')
+    expect(window.location.hash).not.toContain('session_id=')
+    expect(window.location.hash).not.toContain('operation_id=')
+    expect(window.location.hash).not.toContain('worker_run_id=')
+    expect(window.location.hash).not.toContain('q=')
   })
 
   it('renders a telemetry entry raw JSON copy action', async () => {

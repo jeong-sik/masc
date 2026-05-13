@@ -42,20 +42,38 @@ let split_provider_model (s : string) : (string * string) option =
 
 type declarative_diagnostics = {
   snapshot : Cascade_declarative_hotpath.decl_snapshot option;
+  parse_errors : Cascade_declarative_parser.parse_error list;
   adapter_errors : Cascade_declarative_adapter.adapter_error list;
 }
 
 let declarative_diagnostics_for_config_path config_path =
   match Cascade_declarative_parser.parse_file config_path with
-  | Error _ -> { snapshot = None; adapter_errors = [] }
+  | Error errors -> { snapshot = None; parse_errors = errors; adapter_errors = [] }
   | Ok cfg ->
       let catalog = Cascade_declarative_adapter.adapt_config cfg in
       {
         snapshot =
           Cascade_declarative_hotpath.adapted_catalog_to_snapshot
             ~source_path:config_path catalog;
+        parse_errors = [];
         adapter_errors = catalog.errors;
       }
+
+let parse_error_issues ~config_path errors =
+  errors
+  |> List.map
+       (fun (error : Cascade_declarative_parser.parse_error) ->
+          Printf.sprintf "%s: %s" error.path error.message)
+  |> List.sort_uniq String.compare
+  |> List.map (fun message ->
+         {
+           profile = None;
+           severity = Catalog_error;
+           message =
+             Printf.sprintf
+               "Declarative cascade parse error in %s: %s"
+               config_path message;
+         })
 
 let adapter_error_issues ~config_path errors =
   errors
@@ -486,6 +504,8 @@ let diagnose_catalog_impl ~emit_telemetry ~config_path =
             ~declarative_snapshot:declarative_diagnostics.snapshot
             ~emit_telemetry ~config_path ~profile)
       in
+      parse_error_issues ~config_path declarative_diagnostics.parse_errors
+      @
       adapter_error_issues
         ~config_path declarative_diagnostics.adapter_errors
       @ profile_issues

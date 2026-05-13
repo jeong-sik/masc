@@ -154,12 +154,32 @@ let install_snapshot_for_tests ~source_path ~profile_names =
 type declarative_catalog_info = {
   declarative_snapshot : Cascade_declarative_hotpath.decl_snapshot option;
   declarative_profile_names : string list;
+  declarative_parse_errors : Cascade_declarative_parser.parse_error list;
   declarative_errors : Cascade_declarative_adapter.adapter_error list;
 }
 
+let render_declarative_parse_error
+    (error : Cascade_declarative_parser.parse_error) =
+  Printf.sprintf
+    "declarative cascade parse error at %s: %s"
+    error.path
+    error.message
+
+let render_declarative_adapter_error error =
+  Printf.sprintf
+    "declarative cascade adapter error: %s"
+    (Cascade_declarative_adapter.show_adapter_error error)
+
 let load_declarative_catalog_info ~config_path =
   match Cascade_declarative_parser.parse_file config_path with
-  | Error _ -> None
+  | Error errors ->
+      Some
+        {
+          declarative_snapshot = None;
+          declarative_profile_names = [];
+          declarative_parse_errors = errors;
+          declarative_errors = [];
+        }
   | Ok cfg ->
       let catalog = Cascade_declarative_adapter.adapt_config cfg in
       let snapshot =
@@ -177,6 +197,7 @@ let load_declarative_catalog_info ~config_path =
         {
           declarative_snapshot = snapshot;
           declarative_profile_names = profile_names;
+          declarative_parse_errors = [];
           declarative_errors = catalog.errors;
         }
 
@@ -185,6 +206,17 @@ let load_declarative_catalog_info ~config_path =
    reading [cascade.toml] as the sole SSOT (RFC-0058 §9.4). *)
 let discover_profile_names ~config_path ~json : string list =
   match load_declarative_catalog_info ~config_path with
+  | Some { declarative_parse_errors = errors; _ } when errors <> [] ->
+      ignore json;
+      Cascade_metrics.on_declarative_parse_error ();
+      List.iter
+        (fun err ->
+          Log.Misc.warn
+            "[CascadeProfileDiscovery] declarative parse error: %s"
+            (render_declarative_parse_error err))
+        errors;
+      Cascade_metrics.on_profile_discovery ~path:"declarative_parse_error";
+      []
   | Some { declarative_profile_names = names; declarative_errors = []; _ } ->
       Cascade_metrics.on_profile_discovery ~path:"declarative";
       names
@@ -209,7 +241,7 @@ let discover_profile_names ~config_path ~json : string list =
         (fun err ->
           Log.Misc.warn
             "[CascadeProfileDiscovery] declarative parse error: %s"
-            (Cascade_declarative_adapter.show_adapter_error err))
+            (render_declarative_adapter_error err))
         errs;
       Cascade_metrics.on_profile_discovery ~path:"declarative_error";
       names
@@ -724,11 +756,25 @@ let validate_path_result ?sw ?net ~config_path () =
           | Some { declarative_snapshot = Some snapshot; _ } -> Some snapshot
           | Some { declarative_snapshot = None; _ } | None -> None
         in
+        let declarative_parse_errors =
+          match declarative_info with
+          | Some { declarative_parse_errors; _ } -> declarative_parse_errors
+          | None -> []
+        in
         let declarative_errors =
           match declarative_info with
           | Some { declarative_errors; _ } -> declarative_errors
           | None -> []
         in
+        let fatal_declarative_errors =
+          List.map render_declarative_parse_error declarative_parse_errors
+          @ List.map render_declarative_adapter_error declarative_errors
+        in
+        if fatal_declarative_errors <> [] then
+          Error
+            (rejection_of_path ~config_path:source_path ~attempted_mtime
+               ~checked_at ~errors:fatal_declarative_errors ~profiles:[])
+        else
         let profiles = discover_profile_names ~config_path ~json in
         if profiles = [] then
           Error

@@ -459,6 +459,11 @@ val endpoint_url_of_adapter : adapter -> string option
     MASC cascade prefix. *)
 val cascade_prefix_of_provider_kind : Llm_provider.Provider_config.provider_kind -> string
 
+(** Resolve RFC-0058 declarative protocol strings (for example
+    ["openai-http"] or ["anthropic-cli"]) to the adapter registry's cascade
+    prefix. *)
+val cascade_prefix_of_declarative_protocol : string -> string option
+
 (** {1 Gemini Auth} *)
 
 val gemini_direct_available : unit -> bool

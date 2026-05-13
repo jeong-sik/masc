@@ -1856,6 +1856,23 @@ let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provide
   | None -> cn
 ;;
 
+let provider_kind_of_declarative_protocol raw =
+  match normalize_label raw with
+  | "anthropic-cli" -> Some Llm_provider.Provider_config.Claude_code
+  | "anthropic-http" -> Some Llm_provider.Provider_config.Anthropic
+  | "openai-cli" -> Some Llm_provider.Provider_config.Codex_cli
+  | "openai-http" -> Some Llm_provider.Provider_config.OpenAI_compat
+  | "google-cli" -> Some Llm_provider.Provider_config.Gemini_cli
+  | "kimi-cli" -> Some Llm_provider.Provider_config.Kimi_cli
+  | "ollama-http" -> Some Llm_provider.Provider_config.Ollama
+  | _ -> None
+;;
+
+let cascade_prefix_of_declarative_protocol raw =
+  provider_kind_of_declarative_protocol raw
+  |> Option.map cascade_prefix_of_provider_kind
+;;
+
 (** Resolve auth detail for any provider by canonical name or alias.
     Gemini-specific Vertex ADC vs API Key logic is internal. *)
 let auth_detail_of_provider provider =

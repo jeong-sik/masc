@@ -272,6 +272,19 @@ let test_layer5_tier_groups () =
   | None -> failwith "missing primary tier group"
 ;;
 
+let test_keeper_assignable_duplicate_keys_rejected () =
+  let toml =
+    {|
+[tier.t]
+members = []
+keeper-assignable = true
+keeper_assignable = false
+|}
+  in
+  let errs = is_error (parse_string toml) in
+  has_error_at "tier.t.keeper-assignable" errs
+;;
+
 let test_routes () =
   let cfg = ok_config (parse_string full_toml) in
   check int "routes" 1 (List.length cfg.routes);
@@ -1446,6 +1459,10 @@ let () =
     ; ( "layer5_tiers"
       , [ test_case "tiers" `Quick test_layer5_tiers
         ; test_case "tier groups" `Quick test_layer5_tier_groups
+        ; test_case
+            "duplicate keeper assignability keys rejected"
+            `Quick
+            test_keeper_assignable_duplicate_keys_rejected
         ] )
     ; ( "routes"
       , [ test_case "routes" `Quick test_routes

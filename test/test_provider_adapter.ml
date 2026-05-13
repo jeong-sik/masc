@@ -92,6 +92,28 @@ let test_cascade_prefix_of_provider_kind_keeps_adapter_mapping () =
     (Adapter.cascade_prefix_of_provider_kind Llm_provider.Provider_config.Codex_cli)
 ;;
 
+let test_declarative_protocol_resolves_via_adapter_boundary () =
+  let check_protocol protocol expected =
+    check
+      (option string)
+      protocol
+      (Some expected)
+      (Adapter.cascade_prefix_of_declarative_protocol protocol)
+  in
+  check_protocol "anthropic-cli" "claude_code";
+  check_protocol "anthropic-http" "claude";
+  check_protocol "openai-cli" "codex_cli";
+  check_protocol "openai-http" "openai";
+  check_protocol "google-cli" "gemini_cli";
+  check_protocol "kimi-cli" "kimi_cli";
+  check_protocol "ollama-http" "ollama";
+  check
+    (option string)
+    "unknown protocol"
+    None
+    (Adapter.cascade_prefix_of_declarative_protocol "unknown-http")
+;;
+
 let test_auth_env_keys_of_provider_kind_defaults () =
   check
     (list string)
@@ -938,6 +960,10 @@ let () =
             "cascade prefix keeps adapter mapping"
             `Quick
             test_cascade_prefix_of_provider_kind_keeps_adapter_mapping
+        ; test_case
+            "declarative protocol resolves via adapter boundary"
+            `Quick
+            test_declarative_protocol_resolves_via_adapter_boundary
         ; test_case
             "provider kind auth env defaults"
             `Quick

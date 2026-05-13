@@ -155,6 +155,13 @@ let qualified_name_for_public meta public_name =
   else if List.mem tier_name meta.qualified_names then tier_name
   else public_name
 
+let qualified_name_for_public_names qualified_names public_name =
+  let group_name = qualified_tier_group_name public_name in
+  let tier_name = qualified_tier_name public_name in
+  if List.mem group_name qualified_names then group_name
+  else if List.mem tier_name qualified_names then tier_name
+  else public_name
+
 let catalog_metadata_result ?config_path () =
   let path_opt =
     match config_path with
@@ -199,12 +206,14 @@ let catalog_metadata_result ?config_path () =
             |> List.sort_uniq String.compare
           in
           let keeper_assignable_names =
-            profile_assignability
-            |> List.filter_map (fun (qualified_name, assignable) ->
-                   if profile_is_keeper_assignable assignable
-                   then Some (strip_declarative_profile_prefix qualified_name)
-                   else None)
-            |> List.sort_uniq String.compare
+            public_names
+            |> List.filter (fun public_name ->
+                   let qualified_name =
+                     qualified_name_for_public_names qualified_names public_name
+                   in
+                   match List.assoc_opt qualified_name profile_assignability with
+                   | Some assignable -> profile_is_keeper_assignable assignable
+                   | None -> true)
           in
           let system_names =
             public_names

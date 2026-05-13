@@ -868,14 +868,6 @@ let normalize_decl_provider_id provider_id =
   |> String.lowercase_ascii
   |> String.map (fun c -> if c = '-' then '_' else c)
 
-let provider_cascade_prefix provider_id =
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-  | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
-  | None ->
-      Provider_adapter.resolve_adapter_by_cascade_prefix
-        (normalize_decl_provider_id provider_id)
-      |> Option.map Provider_adapter.cascade_prefix_of_adapter
-
 let json_assoc_opt key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
@@ -884,6 +876,65 @@ let json_string_member key json =
   match json_assoc_opt key json with
   | Some (`String value) -> Some value
   | _ -> None
+
+let materialized_provider_json json provider_id =
+  match
+    Option.bind (json_assoc_opt "providers" json) (fun providers_json ->
+        json_assoc_opt provider_id providers_json)
+  with
+  | Some _ as provider_json -> provider_json
+  | None -> None
+
+let materialized_provider_protocol json provider_id =
+  match materialized_provider_json json provider_id with
+  | Some provider_json -> json_string_member "protocol" provider_json
+  | None -> None
+
+let materialized_provider_endpoint json provider_id =
+  match materialized_provider_json json provider_id with
+  | Some provider_json -> json_string_member "endpoint" provider_json
+  | None -> None
+
+let direct_provider_cascade_prefix provider_id =
+  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
+  | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
+  | None ->
+    Provider_adapter.resolve_adapter_by_cascade_prefix
+      (normalize_decl_provider_id provider_id)
+    |> Option.map Provider_adapter.cascade_prefix_of_adapter
+
+let registry_provider_prefix provider_id =
+  match Llm_provider.Provider_registry.find default_registry provider_id with
+  | Some _ -> Some provider_id
+  | None ->
+    let normalized = normalize_decl_provider_id provider_id in
+    (match Llm_provider.Provider_registry.find default_registry normalized with
+     | Some _ -> Some normalized
+     | None -> None)
+
+let openai_compatible_custom_model json provider_id api_name =
+  match materialized_provider_endpoint json provider_id with
+  | Some endpoint when String.trim endpoint <> "" ->
+    Some (Printf.sprintf "custom:%s@%s" api_name (String.trim endpoint))
+  | _ -> None
+
+let materialized_member_model_string json provider_id api_name =
+  match direct_provider_cascade_prefix provider_id with
+  | Some prefix -> Some (Printf.sprintf "%s:%s" prefix api_name)
+  | None ->
+    (match registry_provider_prefix provider_id with
+     | Some prefix -> Some (Printf.sprintf "%s:%s" prefix api_name)
+     | None ->
+       let protocol =
+         materialized_provider_protocol json provider_id
+         |> Option.map (fun protocol -> String.trim protocol |> String.lowercase_ascii)
+       in
+       match protocol with
+       | Some "openai-http" -> openai_compatible_custom_model json provider_id api_name
+       | Some protocol ->
+         Provider_adapter.cascade_prefix_of_declarative_protocol protocol
+         |> Option.map (fun prefix -> Printf.sprintf "%s:%s" prefix api_name)
+       | None -> None)
 
 let json_string_list_member key json =
   match json_assoc_opt key json with
@@ -908,20 +959,20 @@ let materialized_model_api_name json model_id =
 let weighted_entry_of_materialized_member json member =
   match String.split_on_char '.' (String.trim member) with
   | provider_id :: model_id :: _ -> (
-      match
-        ( provider_cascade_prefix provider_id
-        , materialized_model_api_name json model_id )
-      with
-      | Some prefix, Some api_name ->
+      match materialized_model_api_name json model_id with
+      | Some api_name -> (
+        match materialized_member_model_string json provider_id api_name with
+        | Some model ->
           Some
             {
-              Cascade_config_loader.model = Printf.sprintf "%s:%s" prefix api_name;
+              Cascade_config_loader.model = model;
               weight = 1;
               supports_tool_choice = None;
               secondary = None;
               secondary_supports_tool_choice = None;
             }
-      | _ -> None)
+        | None -> None)
+      | None -> None)
   | _ -> None
 
 let materialized_tier_members json tier_name =

@@ -5,6 +5,7 @@ import { fireEvent, waitFor } from '@testing-library/preact'
 import { deriveIdeRunProgressSummary, IdeActivityMock } from './ide-activity-mock'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
+import { goals, tasks } from '../../store'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -12,6 +13,8 @@ afterEach(() => {
   ideContextFocus.value = null
   lspDiagnosticSnapshot.value = new Map()
   activeIdeFile.value = 'package.json'
+  goals.value = []
+  tasks.value = []
   window.location.hash = ''
 })
 
@@ -160,6 +163,63 @@ describe('IdeActivityMock', () => {
     ])
   })
 
+  it('renders active run goal progress from activity goal and task links', async () => {
+    goals.value = [{
+      id: 'goal-runtime',
+      horizon: 'short',
+      title: 'Runtime goal',
+      metric: 'green CI',
+      target_value: 'merged',
+      priority: 1,
+      status: 'active',
+      phase: 'executing',
+      created_at: '2026-05-05T09:00:00Z',
+      updated_at: '2026-05-05T09:30:00Z',
+    }]
+    tasks.value = [
+      { id: 'task-runtime-a', title: 'Done runtime task', goal_id: 'goal-runtime', status: 'done' },
+      { id: 'task-runtime-b', title: 'Open runtime task', goal_id: 'goal-runtime', status: 'in_progress' },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        events: [{
+          seq: 1,
+          ts_ms: 100,
+          ts_iso: '2026-05-05T10:00:00Z',
+          room_id: 'run-default',
+          kind: 'telemetry.turn',
+          actor: { kind: 'keeper', id: 'sangsu' },
+          subject: { kind: 'task', id: 'task-runtime-b' },
+          payload: {
+            goal_id: 'goal-runtime',
+            task_id: 'task-runtime-b',
+            log_id: 'turn-1',
+          },
+          tags: [],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('GOAL TRACK')
+      expect(container.textContent).toContain('Runtime goal')
+      expect(container.textContent).toContain('1/2 tasks')
+      expect(container.textContent).toContain('50%')
+    })
+
+    const goalLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-goal-links button')]
+    expect(goalLinks.map(link => link.textContent)).toEqual(['Goal', 'Task'])
+
+    fireEvent.click(goalLinks[0]!)
+    expect(window.location.hash).toBe('#workspace?section=planning&goal=goal-runtime')
+
+    fireEvent.click(goalLinks[1]!)
+    expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-runtime-b')
+  })
+
   it('ignores non-positive numeric payload ids when deriving context links', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({
@@ -299,12 +359,12 @@ describe('IdeActivityMock', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-05T10:01:30Z'))
 
-    const summary = deriveIdeRunProgressSummary([
+    const events = [
       {
         id: 'evt-1',
         run_id: 'run-default',
         keeper_id: 'sangsu',
-        verb: 'noted',
+        verb: 'noted' as const,
         target: 'telemetry',
         timestamp_ms: Date.parse('2026-05-05T10:01:00Z'),
         context: {
@@ -319,7 +379,7 @@ describe('IdeActivityMock', () => {
         id: 'evt-2',
         run_id: 'run-default',
         keeper_id: 'analyst',
-        verb: 'committed',
+        verb: 'committed' as const,
         target: 'git:main',
         timestamp_ms: Date.parse('2026-05-05T10:00:00Z'),
         context: {
@@ -331,7 +391,7 @@ describe('IdeActivityMock', () => {
         id: 'evt-3',
         run_id: 'run-default',
         keeper_id: 'sangsu',
-        verb: 'commented on',
+        verb: 'commented on' as const,
         target: 'board:post-1',
         timestamp_ms: Date.parse('2026-05-05T09:59:00Z'),
         context: {
@@ -339,7 +399,25 @@ describe('IdeActivityMock', () => {
           comment_id: 'comment-1',
         },
       },
-    ], 'lib/runtime.ml')
+    ]
+    const summary = deriveIdeRunProgressSummary(
+      events,
+      'lib/runtime.ml',
+      [{
+        id: 'goal-runtime',
+        horizon: 'short',
+        title: 'Runtime goal',
+        priority: 1,
+        status: 'active',
+        phase: 'executing',
+        created_at: '2026-05-05T09:00:00Z',
+        updated_at: '2026-05-05T09:30:00Z',
+      }],
+      [
+        { id: 'task-runtime', title: 'Runtime task', goal_id: 'goal-runtime', status: 'done' },
+        { id: 'task-followup', title: 'Runtime follow-up', goal_id: 'goal-runtime', status: 'todo' },
+      ],
+    )
 
     expect(summary).toMatchObject({
       totalEvents: 3,
@@ -347,6 +425,13 @@ describe('IdeActivityMock', () => {
       linkedEvents: 3,
       keeperTotalCount: 2,
       latestAgeLabel: '30s ago',
+      activeGoal: {
+        goalId: 'goal-runtime',
+        taskId: 'task-runtime',
+        title: 'Runtime goal',
+        progress: { done: 1, total: 2, ratio: 0.5 },
+        progressLabel: '50%',
+      },
     })
     expect(summary.surfaceCounts.map(surface => [surface.label, surface.count])).toEqual([
       ['Goal', 1],

@@ -337,7 +337,13 @@ function Deck({ tasks, goals, providers, cascade }) {
 function RailSectHead({ id, label, count, right, onCollapseAll, popoutId }) {
   const [col, toggle] = _useCol(id);
   return (
-    <div className="rail-sect-h sx" onClick={toggle} role="button" aria-expanded={!col}>
+    <div
+      className="rail-sect-h sx"
+      onClick={toggle}
+      onKeyDown={activateOnKey(toggle)}
+      role="button"
+      tabIndex={0}
+      aria-expanded={!col}>
       <span className="sx-chev">{col ? "▸" : "▾"}</span>
       <span className="sx-lbl">{label}</span>
       {count != null && <span className="count">{count}</span>}
@@ -366,7 +372,15 @@ function Rail({ events, cascade }) {
   const [colRail, toggleRail] = _useCol("rail");
   if (colRail) {
     return (
-      <aside className="rail wx-collapsed" onClick={toggleRail} title="expand activity rail">
+      <aside
+        className="rail wx-collapsed"
+        onClick={toggleRail}
+        onKeyDown={activateOnKey(toggleRail)}
+        role="button"
+        tabIndex={0}
+        aria-label="Expand activity rail"
+        aria-expanded={false}
+        title="expand activity rail">
         <div className="wx-rail-vlabel">ACTIVITY · NUDGES</div>
       </aside>
     );

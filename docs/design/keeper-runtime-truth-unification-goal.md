@@ -168,7 +168,7 @@ Implemented in this branch:
   Routes that resolve only to providers without inline `tool_choice` or runtime
   MCP are reported as `error` before a keeper turn reaches runtime failure.
 - OAS pin is bumped to `v0.193.9` /
-  `836171deb30c0d2840398be6d30b4dc5b98b13bc`, with `dune-project`,
+  `c4a538bd12471ff73970fabe1412f16d028d94fb`, with `dune-project`,
   `masc_mcp.opam`, docs, and `scripts/oas-api-surface.json` regenerated from
   that pinned OAS checkout.
 
@@ -211,7 +211,7 @@ Latest-main live evidence:
   (`HEAD` merge-base with `origin/main` is
   `429cf1c47cc1f69c8ba55f88491017cde53117c5`).
 - Current OAS pin matches the OAS turn-durability review head at
-  `836171deb30c0d2840398be6d30b4dc5b98b13bc` (`v0.193.9`).
+  `c4a538bd12471ff73970fabe1412f16d028d94fb` (`v0.193.9`).
 - Bootstrap-only isolated run:
   `/private/tmp/keeper-runtime-truth-live-20260512-bootstrap9`
   classified `PASS`; phase log shows active keepalive and room presence.

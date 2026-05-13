@@ -98,6 +98,12 @@ let () =
   Masc_mcp.Prompt_defaults.init ()
 ;;
 
+let restore_prompt_registry () =
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
+  Masc_mcp.Prompt_defaults.init ()
+;;
+
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_unified_" "" in
   Unix.unlink dir;
@@ -2956,6 +2962,23 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (source_file_contains
        "lib/keeper/keeper_agent_run.ml"
        "Use keeper_bash, keeper_shell, keeper_fs_read")
+;;
+
+let test_tool_guidance_guard_falls_back_when_prompt_registry_empty () =
+  let module Guidance = Masc_mcp.Keeper_tool_guidance in
+  Prompt_registry.clear ();
+  Fun.protect ~finally:restore_prompt_registry (fun () ->
+    let guard = Guidance.render_unknown_tool_guard () in
+    check
+      bool
+      "fallback guard preserves server-managed lifecycle warning"
+      true
+      (contains_substring guard "masc_heartbeat");
+    check
+      bool
+      "fallback guard preserves public alias warning"
+      true
+      (contains_substring guard "masc_board_list"))
 ;;
 
 (* ---------- Config tests ---------- *)
@@ -11193,6 +11216,10 @@ let () =
             "work discovery nudge uses registered tool schemas"
             `Quick
             test_work_discovery_nudge_uses_registered_keeper_tool_schemas
+        ; test_case
+            "tool guidance guard falls back when prompt registry empty"
+            `Quick
+            test_tool_guidance_guard_falls_back_when_prompt_registry_empty
         ; test_case "prefers silence guidance" `Quick test_prompt_prefers_silence_guidance
         ; test_case
             "sanitize_text_utf8 replaces control chars"

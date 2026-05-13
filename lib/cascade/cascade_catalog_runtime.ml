@@ -231,11 +231,11 @@ let discover_profile_names ~config_path ~json : string list =
              end
              else true)
       |> List.sort_uniq String.compare
-  | Some { declarative_profile_names = names; declarative_errors = errs; _ } ->
+  | Some { declarative_errors = errs; _ } ->
       (* Declarative parser ran but produced adapter errors.  Do not fall
          through to the retired flat TOML reader: cascade.toml is now
-         declarative-only, so adapter errors are surfaced while the valid
-         subset remains available for partial validation. *)
+         declarative-only, so adapter errors are fail-closed instead of
+         returning a partial profile set. *)
       Cascade_metrics.on_declarative_parse_error ();
       List.iter
         (fun err ->
@@ -244,7 +244,7 @@ let discover_profile_names ~config_path ~json : string list =
             (render_declarative_adapter_error err))
         errs;
       Cascade_metrics.on_profile_discovery ~path:"declarative_error";
-      names
+      []
   | None ->
       ignore json;
       Cascade_metrics.on_profile_discovery ~path:"declarative_missing";

@@ -3,9 +3,11 @@
     Tests the adapter that converts a parsed [cascade_config] into an
     [adapted_catalog] that mirrors the runtime's expected shape.
 
-    The adapter depends on [Provider_adapter.resolve_adapter_by_cascade_prefix]
-    and [Cascade_config.parse_model_string], so tests use provider IDs that
-    exist in the actual provider registry (claude_code, codex_cli, ollama, etc.). *)
+    The adapter resolves declared TOML providers directly into
+    [Provider_config.t] values, falling back to
+    [Cascade_config.parse_model_string] only for legacy providers that are not
+    declared in TOML. Tests use provider IDs from the typed provider-kind
+    surface (claude_code, codex_cli, ollama, etc.). *)
 
 open Alcotest
 open Cascade_declarative_types
@@ -94,7 +96,7 @@ let with_env name value f =
    Provider IDs must match [Provider_adapter] cascade_prefix values:
    claude_code, codex_cli, gemini_cli, ollama, glm-coding, etc.
 
-   Model api_names must be parseable by [Cascade_config.parse_model_string]. *)
+   Model api_names must be valid runtime model ids for the declared provider. *)
 
 let valid_toml =
   {|
@@ -313,6 +315,47 @@ strategy = "failover"
         (Printf.sprintf
            "expected one resolved provider config, got %d"
            (List.length configs)))
+;;
+
+let test_cli_provider_resolves_without_runtime_binary () =
+  let toml =
+    {|
+[providers.claude_code]
+protocol = "anthropic-cli"
+command = "__missing_claude_for_adapter_test__"
+
+[models.haiku]
+max-context = 200000
+api-name = "claude-haiku-4-5-20251001"
+tools-support = true
+
+[claude_code.haiku]
+max-concurrent = 1
+
+[tier.primary]
+members = ["claude_code.haiku"]
+strategy = "failover"
+|}
+  in
+  let catalog = adapt_toml toml in
+  no_errors catalog.errors;
+  let primary =
+    List.find (fun (p : adapted_profile) -> p.name = "tier.primary") catalog.profiles
+  in
+  match primary.provider_configs with
+  | [ cfg ] ->
+    check
+      bool
+      "uses CLI provider kind from declarative provider id"
+      true
+      (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Claude_code);
+    check string "uses model api-name" "claude-haiku-4-5-20251001" cfg.model_id;
+    check string "CLI providers do not need an HTTP base URL" "" cfg.base_url
+  | configs ->
+    fail
+      (Printf.sprintf
+         "expected one resolved provider config, got %d"
+         (List.length configs))
 ;;
 
 (* --- Error: unknown provider --- *)
@@ -740,6 +783,10 @@ let () =
             "registered HTTP provider uses registry api_key_env fallback"
             `Quick
             test_registered_http_provider_without_credentials_uses_registry_api_key_env
+        ; test_case
+            "CLI provider resolves without runtime binary"
+            `Quick
+            test_cli_provider_resolves_without_runtime_binary
         ] )
     ; ( "errors"
       , [ test_case "unknown provider" `Quick test_unknown_provider

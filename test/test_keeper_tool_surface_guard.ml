@@ -21,6 +21,27 @@ let test_unexpected_tool_names_reports_foreign_surface () =
        ~tool_names:[ "keeper_task_claim"; "Skill"; "Bash"; "Skill"; "Agent" ])
 ;;
 
+let test_unexpected_tool_names_accepts_public_alias_surface () =
+  check
+    (list string)
+    "public alias accepts internal handler"
+    []
+    (KTD.unexpected_tool_names
+       ~allowed_tool_names:[ "Bash"; "Read"; "masc_board_post" ]
+       ~tool_names:[ "keeper_bash"; "keeper_fs_read"; "keeper_board_post" ])
+;;
+
+let test_final_keeper_tool_names_accepts_public_alias_surface () =
+  check
+    (list string)
+    "public alias keeps canonical internal tool"
+    [ "keeper_bash" ]
+    (KTD.final_keeper_tool_names
+       ~reported_tool_names:[ "mcp__masc__Bash" ]
+       ~observed_tool_names:[ "keeper_bash" ]
+       ~allowed_tool_names:[ "Bash" ])
+;;
+
 (* #8471 partial tolerance: mixed turn (valid + unexpected) must not
    hard-fail — the valid tool call is real work and should survive. *)
 let test_has_valid_tool_call_true_when_mixed () =
@@ -151,6 +172,14 @@ let () =
             "reports foreign surface"
             `Quick
             test_unexpected_tool_names_reports_foreign_surface
+        ; test_case
+            "accepts public alias surface"
+            `Quick
+            test_unexpected_tool_names_accepts_public_alias_surface
+        ; test_case
+            "final names accept public alias surface"
+            `Quick
+            test_final_keeper_tool_names_accepts_public_alias_surface
         ] )
     ; ( "partial_tolerance"
       , [ test_case

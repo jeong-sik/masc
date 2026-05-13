@@ -314,6 +314,15 @@ let diagnose_profile ~emit_telemetry ~config_path ~profile =
         p.weighted_entries
     | None -> []
   in
+  let candidate_model_strings =
+    match snapshot_profile with
+    | Some (p : Cascade_catalog_runtime.profile_build) ->
+      List.map
+        (fun (candidate : Cascade_catalog_runtime.candidate_runtime) ->
+          candidate.model_string)
+        p.candidates
+    | None -> []
+  in
   let required_profile_opt =
     match snapshot_profile with
     | Some (p : Cascade_catalog_runtime.profile_build) ->
@@ -333,6 +342,12 @@ let diagnose_profile ~emit_telemetry ~config_path ~profile =
            match Cascade_config.parse_model_string_result spec with
            | Ok _ -> None
            | Error msg when is_provider_unavailable_error msg -> None
+           (* Declarative provider bindings can materialize to runtime-only
+              provider keys that are already represented by validated
+              provider_cfg candidates. Do not reclassify those as invalid. *)
+           | Error _
+             when List.exists (String.equal spec) candidate_model_strings ->
+               None
            | Error msg -> Some (spec, msg))
   in
   let invalid_model_issue =

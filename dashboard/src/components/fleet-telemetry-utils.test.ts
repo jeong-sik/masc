@@ -21,6 +21,7 @@ import {
   formatActivity,
   formatActivitySignal,
   numericAge,
+  sourceDetail,
   toneForToolSuccess,
   toneForPressure,
   toolSummary,
@@ -123,6 +124,30 @@ describe('normalizeModelText', () => {
 
   it('returns trimmed text for valid models', () => {
     expect(normalizeModelText(' claude-sonnet-4-6 ')).toBe('claude-sonnet-4-6')
+  })
+})
+
+describe('sourceDetail', () => {
+  it('includes telemetry source provenance and freshness metadata', () => {
+    const detail = sourceDetail({
+      source: 'tool_metric',
+      entry_count: 7,
+      exists: true,
+      latest_age_s: 42,
+      health: 'stale',
+      stale_reason: 'freshness_slo_exceeded',
+      freshness_slo_s: 300,
+      producer: 'Telemetry_unified.summary_json',
+      durable_store: '.masc/tool_metrics/YYYY-MM/DD.jsonl',
+      dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+    })
+
+    expect(detail).toContain('last 42s ago')
+    expect(detail).toContain('stale: freshness_slo_exceeded')
+    expect(detail).toContain('SLO 5m 0s')
+    expect(detail).toContain('producer Telemetry_unified.summary_json')
+    expect(detail).toContain('store .masc/tool_metrics/YYYY-MM/DD.jsonl')
+    expect(detail).toContain('surface /api/v1/dashboard/telemetry/summary')
   })
 })
 

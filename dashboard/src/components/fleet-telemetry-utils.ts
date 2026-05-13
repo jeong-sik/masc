@@ -575,6 +575,18 @@ export function sourceDetail(source: TelemetrySourceSummary): string {
   if (source.health) {
     parts.push(source.stale_reason ? `${source.health}: ${source.stale_reason}` : source.health)
   }
+  if (typeof source.freshness_slo_s === 'number' && Number.isFinite(source.freshness_slo_s)) {
+    parts.push(`SLO ${formatElapsedCompact(source.freshness_slo_s)}`)
+  }
+  if (source.producer) {
+    parts.push(`producer ${source.producer}`)
+  }
+  if (source.durable_store) {
+    parts.push(`store ${source.durable_store}`)
+  }
+  if (source.dashboard_surface) {
+    parts.push(`surface ${source.dashboard_surface}`)
+  }
 
   return parts.join(' · ')
 }

@@ -64,6 +64,12 @@ const telemetrySummaryResponse: TelemetrySummaryResponse = {
       entry_count: 200,
       keeper_count: 2,
       exists: true,
+      producer: 'Telemetry_unified.summary_json',
+      durable_store: '.masc/metrics/keeper.jsonl',
+      dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+      freshness_slo_s: 300,
+      latest_age_s: 42,
+      health: 'ok',
     },
     {
       source: 'tool_metric',
@@ -247,6 +253,9 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Keeper 턴 로그')
     expect(container.textContent).toContain('실패 분류')
     expect(container.textContent).toContain('함대 통제실')
+    expect(container.textContent).toContain('Telemetry_unified.summary_json')
+    expect(container.textContent).toContain('.masc/metrics/keeper.jsonl')
+    expect(container.textContent).toContain('/api/v1/dashboard/telemetry/summary')
   }, 60_000)
 
   it('renders readiness cards, attention events, and keeper goal or sandbox badges', async () => {

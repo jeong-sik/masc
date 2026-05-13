@@ -29,6 +29,13 @@ const baseSummary: TelemetrySummaryResponse = {
       entry_count: 1,
       keeper_count: 1,
       exists: true,
+      producer: 'Telemetry_unified.summary_json',
+      durable_store: '.masc/tool_metrics/YYYY-MM/DD.jsonl',
+      dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+      freshness_slo_s: 300,
+      latest_age_s: 45,
+      health: 'stale',
+      stale_reason: 'freshness_slo_exceeded',
     },
   ],
   total_entries: 1,
@@ -206,6 +213,10 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Auto-refresh 30s')
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
+    expect(container.textContent).toContain('freshness_slo_exceeded')
+    expect(container.textContent).toContain('Telemetry_unified.summary_json')
+    expect(container.textContent).toContain('.masc/tool_metrics/YYYY-MM/DD.jsonl')
+    expect(container.textContent).toContain('/api/v1/dashboard/telemetry/summary')
 
     // MASC Store Diagnosis cards (live state)
     expect(container.textContent).toContain('키퍼 현황 (실시간)')

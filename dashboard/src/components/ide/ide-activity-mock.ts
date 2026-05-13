@@ -563,6 +563,11 @@ function ActivityRow(
   const eventFocusLine = normalizeIdeContextLine(item.context?.line)
   const hasEventContextFocus = eventFocusFile !== null
   const routeLinks = routeLinksForContext({
+    filePath: eventFocusFile ?? undefined,
+    line: eventFocusLine,
+    surface: activityContextSurface(item),
+    label: item.detail ?? `${item.verb} ${item.target}`,
+    sourceId: item.id,
     goalId: item.context?.goal_id,
     taskId: item.context?.task_id,
     boardPostId: item.context?.board_post_id,

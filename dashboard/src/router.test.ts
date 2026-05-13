@@ -109,6 +109,28 @@ describe('navigate', () => {
     expect(route.value.params.branch).toBe('main')
   })
 
+  it('preserves IDE context surface params on Code routes', () => {
+    navigate('code', {
+      section: 'ide-shell',
+      view: 'source',
+      file: 'lib/runtime.ml',
+      line: '42',
+      surface: 'Task',
+      source_id: 'task:runtime',
+    })
+
+    expect(route.value.tab).toBe('code')
+    expect(route.value.params).toMatchObject({
+      section: 'ide-shell',
+      view: 'source',
+      file: 'lib/runtime.ml',
+      line: '42',
+      surface: 'Task',
+      source_id: 'task:runtime',
+    })
+    expect(window.location.hash).toContain('surface=Task')
+  })
+
   it('keeps explicit production sections stronger than cockpit mode aliases', () => {
     window.location.hash = '#monitoring?section=runtime&mode=Cognition'
     window.dispatchEvent(new HashChangeEvent('hashchange'))

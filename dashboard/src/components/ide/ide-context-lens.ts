@@ -8,7 +8,7 @@ import { KeeperBadge } from '../keeper-badge'
 import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { KeeperCursorOverlay } from './keeper-cursor-overlay'
 import type { RunActivityEvent } from './run-activity-store'
-import { focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
+import { focusIdeContextAnchor, normalizeIdeContextFilePath, normalizeIdeContextLine } from './ide-state'
 
 type SurfaceStatus = 'linked' | 'quiet'
 
@@ -62,6 +62,11 @@ export interface IdeContextRouteLink {
 }
 
 export interface IdeContextRouteContext {
+  readonly filePath?: string
+  readonly line?: number
+  readonly surface?: string
+  readonly label?: string
+  readonly sourceId?: string
   readonly goalId?: string
   readonly taskId?: string
   readonly boardPostId?: string
@@ -131,7 +136,7 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
   'telemetry',
 ]
 const MAX_CONTEXT_ANCHORS = 6
-const MAX_CONTEXT_ROUTE_LINKS = 9
+const MAX_CONTEXT_ROUTE_LINKS = 10
 
 export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLensModel {
   const filePath = normalizeIdeContextFilePath(input.filePath)
@@ -517,6 +522,11 @@ function buildAnchors(
       line: positiveLine(annotation.line_start),
       keeper_id: annotation.keeper_id,
       route_links: routeLinksForContext({
+        filePath: annotation.file_path,
+        line: positiveLine(annotation.line_start),
+        surface: annotation.kind,
+        label: truncate(annotation.content || 'annotation', 48),
+        sourceId: `annotation-${annotation.id}`,
         goalId: annotation.goal_id ?? undefined,
         taskId: annotation.task_id ?? undefined,
         keeperId: annotation.keeper_id,
@@ -536,7 +546,14 @@ function buildAnchors(
       ]),
       line: cursor.line,
       keeper_id: cursor.keeper_id,
-      route_links: routeLinksForContext({ keeperId: cursor.keeper_id }),
+      route_links: routeLinksForContext({
+        filePath,
+        line: cursor.line,
+        surface: 'Line',
+        label: cursor.tool_name ?? cursor.focus_mode,
+        sourceId: `cursor-${cursor.keeper_id}-${cursor.line}`,
+        keeperId: cursor.keeper_id,
+      }),
     })
   }
 
@@ -554,6 +571,11 @@ function buildAnchors(
       line: positiveLine(thread.anchor.line_start),
       keeper_id: thread.author_keeper_id,
       route_links: routeLinksForContext({
+        filePath: thread.anchor.file_path,
+        line: positiveLine(thread.anchor.line_start),
+        surface: thread.kind.toUpperCase(),
+        label: truncate(thread.body, 48),
+        sourceId: `thread-${thread.id}`,
         boardPostId: thread.id,
         keeperId: thread.author_keeper_id,
       }),
@@ -570,7 +592,14 @@ function buildAnchors(
       label: `${additions} add / ${deletions} delete`,
       meta: 'working diff for current file',
       line: positiveLine(firstChangedLine(changedRows)),
-      route_links: routeLinksForContext({ gitRef: 'HEAD' }),
+      route_links: routeLinksForContext({
+        filePath,
+        line: positiveLine(firstChangedLine(changedRows)),
+        surface: 'Git',
+        label: 'working diff for current file',
+        sourceId: 'git-diff-summary',
+        gitRef: 'HEAD',
+      }),
     })
   }
 
@@ -585,6 +614,11 @@ function buildAnchors(
       line: eventLineForFile(event, filePath),
       keeper_id: event.keeper_id,
       route_links: routeLinksForContext({
+        filePath: event.context?.file_path ?? filePath,
+        line: eventLineForFile(event, filePath),
+        surface: surfaceFromEvent(event, eventSearchTextByEvent),
+        label: truncate(event.detail || `${event.verb} ${event.target}`, 48),
+        sourceId: `event-${event.id}`,
         goalId: event.context?.goal_id,
         taskId: event.context?.task_id,
         boardPostId: event.context?.board_post_id,
@@ -728,6 +762,31 @@ export function routeLinksForContext(
     if (links.some(existing => existing.id === link.id)) return
     links.push(link)
   }
+  const keeperId = cleanId(context.keeperId)
+  const filePath = context.filePath ? normalizeIdeContextFilePath(context.filePath) : null
+  if (filePath) {
+    const line = normalizeIdeContextLine(context.line)
+    const params: Record<string, string> = {
+      section: 'ide-shell',
+      view: 'source',
+      file: filePath,
+    }
+    if (line !== undefined) params.line = String(line)
+    const surface = cleanId(context.surface)
+    if (surface) params.surface = surface
+    const label = cleanId(context.label)
+    if (label) params.label = label
+    const sourceId = cleanId(context.sourceId)
+    if (sourceId) params.source_id = sourceId
+    if (keeperId && keeperId !== 'system') params.keeper = keeperId
+    add({
+      id: `code:${filePath}${line !== undefined ? `:${line}` : ''}`,
+      label: 'Code',
+      tab: 'code',
+      params,
+      evidence: `Code ${filePath}${line !== undefined ? `:${line}` : ''}`,
+    })
+  }
   const goalId = cleanId(context.goalId)
   if (goalId) {
     add({
@@ -831,7 +890,6 @@ export function routeLinksForContext(
         : 'Fleet telemetry event log',
     })
   }
-  const keeperId = cleanId(context.keeperId)
   if (keeperId && keeperId !== 'system') {
     add({
       id: `keeper:${keeperId}`,

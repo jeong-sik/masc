@@ -167,8 +167,8 @@ Implemented in this branch:
   `keeper_turn`/`tool_required` routes for forced required-tool capability.
   Routes that resolve only to providers without inline `tool_choice` or runtime
   MCP are reported as `error` before a keeper turn reaches runtime failure.
-- OAS pin is bumped to `v0.193.8` /
-  `7885ff316cfd64a3ed7d7550186b64141214b801`, with `dune-project`,
+- OAS pin is bumped to `v0.193.9` /
+  `836171deb30c0d2840398be6d30b4dc5b98b13bc`, with `dune-project`,
   `masc_mcp.opam`, docs, and `scripts/oas-api-surface.json` regenerated from
   that pinned OAS checkout.
 
@@ -177,7 +177,7 @@ Latest verification:
 - `git fetch origin main`
 - `git fetch origin main` in `../oas`
 - `./scripts/check-oas-pin.sh`
-- `opam list --installed agent_sdk` -> `agent_sdk 0.193.8`
+- `opam list --installed agent_sdk` -> `agent_sdk 0.193.9`
 - `scripts/dune-local.sh build test/test_cascade_attempt_liveness_observer.exe test/test_ci_hardening_source.exe test/test_keeper_runtime_manifest.exe test/test_keeper_terminal_reason.exe test/test_keeper_sdk_error_typed_bridge.exe test/test_keeper_unified.exe bin/main_eio.exe`
 - `./_build/default/test/test_cascade_attempt_liveness_observer.exe` (11 tests; tick-fiber pending-stop regression now completes in 0.003s)
 - `./_build/default/test/test_ci_hardening_source.exe test source_guard 37`
@@ -210,8 +210,8 @@ Latest-main live evidence:
   `429cf1c47cc1f69c8ba55f88491017cde53117c5`
   (`HEAD` merge-base with `origin/main` is
   `429cf1c47cc1f69c8ba55f88491017cde53117c5`).
-- Current OAS pin matches fetched OAS `origin/main` at
-  `7885ff316cfd64a3ed7d7550186b64141214b801` (`v0.193.8`).
+- Current OAS pin matches the OAS turn-durability review head at
+  `836171deb30c0d2840398be6d30b4dc5b98b13bc` (`v0.193.9`).
 - Bootstrap-only isolated run:
   `/private/tmp/keeper-runtime-truth-live-20260512-bootstrap9`
   classified `PASS`; phase log shows active keepalive and room presence.

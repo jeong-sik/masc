@@ -1,5 +1,5 @@
 (* Keeper_turn_cascade_budget — cascade execution types, fail-open rotation,
-   OAS timeout budget resolution, context overflow recovery, keeper pause/resume
+   OAS timeout budget resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
@@ -7,11 +7,6 @@
 open Keeper_types
 open Keeper_exec_context
 module EC = Keeper_error_classify
-
-(* Absolute floor for context overflow retry when the API does not report
-   the actual token limit.  Prevents retrying with an unreasonably small
-   context window. *)
-let fallback_context_overflow_floor_tokens = 4096
 
 type cascade_execution = {
   cascade_name : Keeper_cascade_profile.runtime_name;
@@ -415,12 +410,6 @@ let next_fail_open_cascade_for_turn_with_budget
       then Degraded_retry_allowed retry
       else Degraded_retry_budget_exhausted retry
 
-type overflow_retry_plan = {
-  retry_max_context : int;
-  retry_generation : int;
-  compaction : compaction_event;
-}
-
 type turn_event_bus_overflow = {
   estimated_tokens : int;
   limit_tokens : int;
@@ -483,66 +472,6 @@ let merge_turn_event_bus_summary
        | Some _ -> right.last_compaction
        | None -> left.last_compaction);
   }
-
-(** Recover from context overflow by compacting and reducing max_context.
-
-    Extracts the token limit directly from the structured [ContextOverflow]
-    error instead of re-parsing stringified error messages.
-    No local token-budget math -- OAS owns context budgeting.
-    MASC only decides whether to compact and retry.
-
-    @boundary-contract
-    - MASC owns: "compact & retry?" decision (at most once per turn),
-      extracting the limit from OAS structured errors, generation tracking.
-    - OAS owns: context overflow detection, ContextOverflow/TokenBudgetExceeded
-      error emission, checkpoint compaction algorithm, token budget enforcement.
-    - Neither may: MASC must not invent token limits or run its own budget
-      math; OAS must not auto-retry on overflow (MASC needs to decide). *)
-let recover_context_overflow_retry
-    ~(meta : keeper_meta)
-    ~(base_dir : string)
-    ~(max_cascade_context : int)
-    ~(error : Agent_sdk.Error.sdk_error) : overflow_retry_plan option =
-  let actual_limit =
-    match error with
-    | Agent_sdk.Error.Api (ContextOverflow { limit = Some limit; _ }) -> limit
-    | Agent_sdk.Error.Agent (TokenBudgetExceeded { limit; _ }) -> limit
-    | _ ->
-      (* Overflow detected but limit not available -- use 80% of cascade max
-         as a conservative fallback, with an absolute floor. *)
-      max fallback_context_overflow_floor_tokens (max_cascade_context * 4 / 5)
-  in
-  let retry_max_context =
-    if max_cascade_context <= 0 then actual_limit
-    else min max_cascade_context actual_limit
-  in
-  let model = Keeper_exec_context.checkpoint_model_of_meta meta in
-  match
-    Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
-      ~base_dir ~meta ~model
-      ~primary_model_max_tokens:retry_max_context
-  with
-  | Some recovery ->
-      Log.Keeper.warn
-        "%s: context overflow retry -- compacted checkpoint (%d->%d tokens, max_context=%d, generation=%d)"
-        meta.name recovery.compaction.before_tokens
-        recovery.compaction.after_tokens
-        retry_max_context recovery.turn_generation;
-      Some
-        {
-          retry_max_context;
-          retry_generation = recovery.turn_generation;
-          compaction = recovery.compaction;
-        }
-  | None ->
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_checkpoint_failures
-        ~labels:[("keeper", meta.name); ("phase", "overflow_recovery_unavailable")]
-        ();
-      Log.Keeper.warn
-        "%s: context overflow detected but checkpoint recovery unavailable: %s"
-        meta.name (short_preview (Agent_sdk.Error.to_string error));
-      None
 
 let summarize_turn_event_bus
     (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =

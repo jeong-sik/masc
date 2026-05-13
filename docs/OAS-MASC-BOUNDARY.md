@@ -1,11 +1,13 @@
 ---
 status: reference
-last_verified: 2026-05-13
+last_verified: 2026-05-14
 code_refs:
   - lib/masc_oas_bridge.ml
   - lib/worker_oas.ml
   - lib/verifier_oas.ml
   - lib/memory_oas_bridge.ml
+  - lib/keeper/keeper_context_core.ml
+  - lib/keeper/keeper_memory_policy.ml
 ---
 
 # OAS-MASC Boundary Contract
@@ -34,7 +36,7 @@ consumer → MASC-MCP (coordination/orchestration) → OAS (agent runtime)
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | room, board, workflow, policies, operator surfaces |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, tool dispatch, auth/join/policy semantics |
 | 컨텍스트 축약 | `Context_reducer` | 어떤 전략을 언제 적용할지 결정 |
-| ContextOverflow retry | overflow detection, structured error, standalone compact retry | Keeper turn에서 compact+retry 여부와 generation/checkpoint attribution 결정 |
+| ContextOverflow retry | overflow detection, structured error, standalone/keeper compact retry | 최종 overflow 결과를 keeper state, receipt, operator surfaces에 attribution |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
 | 장기 메모리 프리미티브 | `Memory.t` tiers | institutional memory, pg/jsonl backends, room/task/social semantics |
 | 조율 상태 | 없음 | room, tasks, team sessions, governance, social runtime |
@@ -78,11 +80,11 @@ OAS  ──does not know──→ MASC
 | Area | Status | Notes |
 |------|--------|-------|
 | Context compaction | Partial complete | `context_compact_oas.ml`는 OAS `Context_reducer`를 사용한다. MASC 전체 context system이 OAS `Context.t`로 통합된 것은 아니다. |
-| ContextOverflow retry ownership | Complete for keeper hot path | Standalone OAS agents keep `auto_context_overflow_retry=true`. Keeper dispatch sets it to `false`, so OAS returns structured `ContextOverflow` and MASC's `recover_context_overflow_retry` owns the one-per-keeper-turn retry decision. |
+| ContextOverflow retry ownership | Complete for keeper hot path | Keeper dispatch keeps `auto_context_overflow_retry=true`, so OAS owns transcript mutation, emergency compaction, and retry. If OAS still returns structured `ContextOverflow`, MASC records the typed blocker and terminal receipt without compacting checkpoints or re-dispatching the agent turn. |
 | Event bus bridge | Complete for current native/custom flow | `oas_event_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
-| Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
+| Checkpoint integration | Mostly complete, sidecar debt remains | OAS checkpoint is used in shared worker/runtime paths. New keeper checkpoint writes keep continuity state out of `working_context`: `patch_checkpoint_last_assistant` strips visible `[STATE]`, stores replay metadata on the assistant message, and clears `Checkpoint.working_context`. Compatibility readers still accept legacy structured sidecars, and feature-flagged autonomous/resilience/multimodal adapters may store neutral sidecar metadata in `working_context`. |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
 | Team-session swarm | Removed | `lib/team_session/` module purged; MASC no longer owns a session orchestration surface. OAS Swarm Runner is the sole substrate; consumers drive swarm runs via OAS primitives directly. |
 | Provider/model identity ownership | OAS-owned | MASC resolves logical `cascade_name` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. Legacy `allowed_providers` inputs are ignored |
@@ -94,12 +96,12 @@ OAS  ──does not know──→ MASC
 | `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
 | `lib/context_compact_oas.ml` | Acceptable but lossy | Runtime compaction delegates to OAS, but message-importance heuristics still depend on MASC text markers |
 | `lib/memory_oas_bridge.ml` | Acceptable | Consumer-side adapter; imperative seeding removed in RFC-MASC-004 Phase 2, hook-first injection is now the sole path |
-| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Boundary violation | Keeper still owns duplicate runtime state via `working_context` and relies on raw text markers such as `[STATE]` |
+| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Mostly correct with adapter sidecar debt | Keeper no longer stores continuity runtime state in checkpoint `working_context` on new writes; replay state is assistant-message metadata plus sidecar-file fallback. Remaining debt is limited to MASC adapter sidecars (`autonomous_meta`, `resilience_meta`, `multimodal_artifacts`/`workspace_meta`) and legacy `[STATE]` parse compatibility. |
 
 ## Open Structural Gaps
 
-- keeper runtime still uses a MASC-owned `working_context` wrapper around OAS context/checkpoint primitives
-- keeper continuity still leaks domain semantics through raw message text (`[STATE]`, goal/memory markers)
+- keeper runtime still has a small MASC-owned `working_context` facade around OAS context/checkpoint primitives for token observation, checkpoint loading, and adapter compatibility; this facade must remain read-only with respect to OAS-owned runtime transcript state.
+- keeper continuity no longer writes new `[STATE]` replay state into checkpoint `working_context`, but prompt/fallback paths still understand raw message text markers (`[STATE]`, goal/memory markers) for compatibility and recovery.
 - `memory_oas_bridge.ml` imperative seeding fully removed (RFC-MASC-004 Phase 2-3); hook-first is the sole path
 - runtime-health signaling still relies on a narrow boolean `resource_check` callback instead of a structured probe
 - proof-store and `oas-runtime` filesystem layout must stay behind thin adapters instead of being reconstructed ad hoc
@@ -232,9 +234,9 @@ These stay in MASC:
 ## Priority Order
 
 1. **P1 — keeper runtime state ownership**
-   - shrink the MASC-owned `working_context` role until OAS owns runtime context/checkpoint state
+   - keep new continuity state out of checkpoint `working_context`; reduce or externalize the remaining adapter sidecars when their feature-flagged owners grow stable storage
 2. **P2 — marker/text leakage**
-   - reduce dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
+   - reduce remaining prompt/fallback dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
 3. **P3 — team-session bridge fidelity** — Resolved (2026-04, team_session module purged; OAS Swarm Runner is sole substrate)
    - MASC team-session surface removed; coordination needs served via board posts + keeper FSM, swarm runs driven through OAS directly
 4. **P4 — memory bridge hardening** — Resolved (2026-04-13, PR #6795 Phase 1 + Phase 2)

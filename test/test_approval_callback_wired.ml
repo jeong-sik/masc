@@ -200,13 +200,13 @@ let test_run_named_sites_pass_approval () =
         true (file_matches path "~approval:"))
     run_named_sites
 
-let test_keeper_dispatch_disables_oas_overflow_retry () =
+let test_keeper_dispatch_enables_oas_overflow_retry () =
   let root = repo_root () in
   let rel_path = "lib/keeper/keeper_agent_run.ml" in
   let path = Filename.concat root rel_path in
   let source = read_file path in
   let marker = "Keeper_turn_driver.run_named" in
-  let flag = "~oas_auto_context_overflow_retry:false" in
+  let flag = "~oas_auto_context_overflow_retry:true" in
   let rec search pos =
     try
       let idx = Str.search_forward (Str.regexp_string marker) source pos in
@@ -224,7 +224,7 @@ let test_keeper_dispatch_disables_oas_overflow_retry () =
   in
   Alcotest.(check bool)
     (Printf.sprintf
-       "%s: keeper dispatch must keep OAS overflow auto-retry disabled"
+       "%s: keeper dispatch must keep OAS overflow auto-retry enabled"
        rel_path)
     true (search 0)
 
@@ -249,7 +249,7 @@ let () =
           Alcotest.test_case "run_named call sites pass ~approval"
             `Quick test_run_named_sites_pass_approval;
           Alcotest.test_case
-            "keeper dispatch disables OAS overflow auto-retry"
-            `Quick test_keeper_dispatch_disables_oas_overflow_retry;
+            "keeper dispatch enables OAS overflow auto-retry"
+            `Quick test_keeper_dispatch_enables_oas_overflow_retry;
         ] );
     ]

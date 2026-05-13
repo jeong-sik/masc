@@ -1,5 +1,5 @@
 (* Keeper_turn_cascade_budget — cascade execution types, fail-open rotation,
-   OAS timeout budget resolution, context overflow recovery, keeper pause/resume
+   OAS timeout budget resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 
    Public sub-module included by [Keeper_unified_turn]. *)
@@ -147,12 +147,6 @@ val next_fail_open_cascade_for_turn_with_budget :
   Agent_sdk.Error.sdk_error ->
   degraded_retry_budget_decision
 
-type overflow_retry_plan = {
-  retry_max_context : int;
-  retry_generation : int;
-  compaction : compaction_event;
-}
-
 type turn_event_bus_overflow = {
   estimated_tokens : int;
   limit_tokens : int;
@@ -179,13 +173,6 @@ val empty_turn_event_bus_summary : turn_event_bus_summary
 
 val merge_turn_event_bus_summary :
   turn_event_bus_summary -> turn_event_bus_summary -> turn_event_bus_summary
-
-val recover_context_overflow_retry :
-  meta:keeper_meta ->
-  base_dir:string ->
-  max_cascade_context:int ->
-  error:Agent_sdk.Error.sdk_error ->
-  overflow_retry_plan option
 
 val summarize_turn_event_bus :
   Agent_sdk.Event_bus.event list -> turn_event_bus_summary

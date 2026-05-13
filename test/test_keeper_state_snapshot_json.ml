@@ -11,6 +11,17 @@
 module KMP = Masc_mcp.Keeper_memory_policy
 module KCC = Masc_mcp.Keeper_context_core
 
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > text_len then false
+    else if String.sub text idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
 (* ── Round-trip tests ────────────────────────────────────────────── *)
 
 let make_snapshot
@@ -162,6 +173,54 @@ let test_patch_stores_replay_metadata_and_clears_working_context () =
            Alcotest.(check (option string)) "goal from metadata" (Some "Fix CI") snap.goal;
            Alcotest.(check (option string)) "done from metadata" (Some "All green") snap.done_summary)
 
+let test_patch_drops_legacy_state_working_context_sidecar () =
+  let legacy_sidecar =
+    KMP.structured_working_context_of_snapshot
+      (make_snapshot
+         ~goal:(Some "stale sidecar")
+         ~progress:None
+         ~done_summary:None
+         ~next_summary:None
+         ~next_items:[]
+         ~decisions:[]
+         ~open_questions:[]
+         ~constraints:[]
+         ())
+  in
+  let response_text =
+    "New answer.\n[STATE]\nGoal: fresh metadata\nDONE: Stored in metadata\n[/STATE]"
+  in
+  let cp =
+    make_test_checkpoint
+      ~working_context:(Some legacy_sidecar)
+      ~response_text
+      ()
+  in
+  let patched =
+    KCC.patch_checkpoint_last_assistant cp
+      ~session_id:"new-session"
+      ~response_text
+  in
+  Alcotest.(check bool)
+    "legacy state sidecar cleared from working_context"
+    true
+    (patched.working_context = None);
+  match List.rev patched.messages with
+  | [] -> Alcotest.fail "patched checkpoint has no messages"
+  | last :: _ ->
+      let text = Agent_sdk.Types.text_of_message last in
+      Alcotest.(check bool)
+        "visible checkpoint text is state-free"
+        false
+        (contains_substring text "[STATE]");
+      (match KMP.snapshot_of_message_metadata last with
+       | None -> Alcotest.fail "assistant message metadata missing replay snapshot"
+       | Some snap ->
+           Alcotest.(check (option string))
+             "fresh metadata wins"
+             (Some "fresh metadata")
+             snap.goal)
+
 let test_patch_without_state_block_keeps_text_and_no_metadata () =
   let response_text = "I did some work but no state block." in
   let cp = make_test_checkpoint ~response_text () in
@@ -223,6 +282,7 @@ let () =
       ( "patch_checkpoint",
         [
           Alcotest.test_case "stores replay metadata and clears wc" `Quick test_patch_stores_replay_metadata_and_clears_working_context;
+          Alcotest.test_case "drops legacy state sidecar from wc" `Quick test_patch_drops_legacy_state_working_context_sidecar;
           Alcotest.test_case "no [STATE] keeps text and no metadata" `Quick test_patch_without_state_block_keeps_text_and_no_metadata;
         ] );
       ( "dual_source",

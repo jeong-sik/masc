@@ -1888,6 +1888,28 @@ let test_required_tool_lane_matrix_materialization () =
            ~effective_tools ~runtime_mcp_policy))
     cases
 
+let test_required_tool_lane_unavailable_is_tool_support_config_error () =
+  let module FT = Masc_mcp.Keeper_turn_driver_helpers in
+  match
+    FT.required_tool_lane_unavailable_error ~lane:"runtime_mcp"
+      ~missing_required_tools:[ "masc_code_git" ]
+      ~materialized_tools:[ "keeper_pr_list"; "keeper_board_post" ]
+  with
+  | Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail }) ->
+    Alcotest.(check string) "field" "tool_support" field;
+    Alcotest.(check bool)
+      "detail includes lane"
+      true
+      (contains_substring detail "lane=runtime_mcp");
+    Alcotest.(check bool)
+      "detail includes missing tool"
+      true
+      (contains_substring detail "missing_required_tools=[masc_code_git]")
+  | err ->
+    Alcotest.failf
+      "expected tool_support InvalidConfig, got %s"
+      (Agent_sdk.Error.to_string err)
+
 let test_keeper_cascade_engine_boundary () =
   let module E = Masc_mcp.Keeper_cascade_engine in
   let engine = E.keeper_managed in
@@ -2158,6 +2180,9 @@ let () =
             test_required_tool_lane_missing_names;
           Alcotest.test_case "required tool lane matrix materializes tools"
             `Quick test_required_tool_lane_matrix_materialization;
+          Alcotest.test_case
+            "required tool lane mismatch is cascade-recoverable"
+            `Quick test_required_tool_lane_unavailable_is_tool_support_config_error;
           Alcotest.test_case "keeper cascade engine boundary is typed"
             `Quick test_keeper_cascade_engine_boundary;
           Alcotest.test_case "keeper hot path avoids OAS Complete_cascade"

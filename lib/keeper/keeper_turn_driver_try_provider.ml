@@ -200,13 +200,10 @@ let run_try_provider
         Keeper_runtime_manifest.Provider_lane_resolved;
       if missing_required_tool_names <> [] then
         Error
-          (Agent_sdk.Error.Internal
-             (Printf.sprintf
-                "required_tool_lane_unavailable: lane=%s \
-                 missing_required_tools=[%s] materialized_tools=[%s]"
-                resolved_lane
-                (String.concat ", " missing_required_tool_names)
-                (String.concat ", " materialized_tool_names)))
+          (Keeper_turn_driver_helpers.required_tool_lane_unavailable_error
+             ~lane:resolved_lane
+             ~missing_required_tools:missing_required_tool_names
+             ~materialized_tools:materialized_tool_names)
       else
         Ok
           { (Cascade_runtime_candidate.default_config

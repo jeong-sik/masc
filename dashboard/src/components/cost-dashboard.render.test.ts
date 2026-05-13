@@ -265,13 +265,24 @@ describe('CostDashboard route-backed focus behavior', () => {
 
     render(h(CostDashboard, { view: 'audit' }), container)
     await waitFor(
-      () => container.textContent?.includes('log focus · turn-9 · 1 matches pinned') ?? false,
+      () => container.textContent?.includes('LOG turn-9') ?? false,
       'audit log focus banner',
     )
 
     const rows = Array.from(container.querySelectorAll('tbody tr'))
     expect(rows[0]?.textContent).toContain('keeper_turn')
     expect(rows[1]?.textContent).toContain('tool_call')
-    expect(container.querySelector('[data-testid="audit-log-focus"]')?.textContent).toContain('turn-9')
+    const focus = container.querySelector('[data-testid="audit-log-focus"]')
+    expect(focus?.textContent).toContain('ROUTE FOCUS')
+    expect(focus?.textContent).toContain('1 matches pinned')
+
+    const clear = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'CLEAR') as HTMLButtonElement | undefined
+    expect(clear).toBeTruthy()
+    clear?.click()
+    expect(route.value.params).toEqual({
+      section: 'runtime',
+      view: 'audit',
+    })
   })
 })

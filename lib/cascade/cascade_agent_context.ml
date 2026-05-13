@@ -344,7 +344,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; max_cost_usd = effective_max_cost_usd
     ; yield_on_tool = config.yield_on_tool
     ; context_compact_ratio = config.compact_ratio
-    ; auto_context_overflow_retry = config.oas_auto_context_overflow_retry
     ; priority = config.priority
     ; exit_condition = config.exit_condition
     }

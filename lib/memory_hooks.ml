@@ -129,8 +129,9 @@ let append_runtime_manifest
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Keeper.warn
-           "memory_hooks: runtime manifest append callback failed agent=%s event=%s: %s"
+           "memory_hooks: runtime manifest append callback failed keeper=%s agent=%s event=%s: %s"
            context.manifest_keeper_name
+           (Option.value ~default:"(unknown)" context.manifest_agent_name)
            (Keeper_runtime_manifest.event_kind_to_string event)
            (Printexc.to_string exn))
   | _ -> ()

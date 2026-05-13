@@ -15,6 +15,7 @@ type event_kind =
   | Provider_attempt_finished
   | Context_injected
   | Context_compacted
+  | State_snapshot_sidecar_saved
   | Event_bus_correlated
   | Memory_injected
   | Memory_flushed

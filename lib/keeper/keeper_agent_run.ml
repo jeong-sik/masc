@@ -218,6 +218,20 @@ let run_turn
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in
   let digest_text text = Digest.to_hex (Digest.string text) in
+  let digest_message_texts_as_joined messages =
+    let module Hash = Digestif.MD5 in
+    let rec loop ctx = function
+      | [] -> ctx
+      | [ message ] ->
+        Hash.feed_string ctx (Agent_sdk.Types.text_of_message message)
+      | message :: rest ->
+        let ctx =
+          Hash.feed_string ctx (Agent_sdk.Types.text_of_message message)
+        in
+        loop (Hash.feed_string ctx "\n") rest
+    in
+    Hash.(to_hex (get (loop empty messages)))
+  in
   append_manifest ~site:"checkpoint_loaded"
     ~keeper_turn_id:(start_turn_count + 1)
     ~checkpoint_path
@@ -267,11 +281,7 @@ let run_turn
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
   let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
-  let history_text =
-    history_messages
-    |> List.map Agent_sdk.Types.text_of_message
-    |> String.concat "\n"
-  in
+  let history_messages_digest = digest_message_texts_as_joined history_messages in
   append_manifest ~site:"context_injected"
     ~keeper_turn_id:(start_turn_count + 1)
     ~decision:
@@ -284,7 +294,7 @@ let run_turn
           ("temporal_context_digest", `String (digest_text temporal_context));
           ("user_message_digest", `String (digest_text user_message));
           ("history_message_count", `Int (List.length history_messages));
-          ("history_messages_digest", `String (digest_text history_text));
+          ("history_messages_digest", `String history_messages_digest);
           ("estimated_input_tokens", `Int estimated_input_tokens);
         ])
     Keeper_runtime_manifest.Context_injected;
@@ -1259,7 +1269,7 @@ let run_turn
                             ( "source",
                               `String state_snapshot_source );
                           ])
-                      Keeper_runtime_manifest.Context_injected;
+                      Keeper_runtime_manifest.State_snapshot_sidecar_saved;
                      receipt_response_text_present_ref := true;
                      let assistant_msg =
                        Agent_sdk.Types.make_message

@@ -585,10 +585,7 @@ let run
            detail
        | None ->
          Log.Misc.debug "oas_worker: agent errored (no proof): %s" detail);
-      Log.Misc.warn
-        "oas_worker %s: skipping Agent.close after terminal provider error so the error can \
-         propagate to caller"
-        config.name;
+      close_agent_for_cleanup ~propagate_cancel:false ~config agent;
       Error err)
   with
   | Eio.Cancel.Cancelled _ as exn ->

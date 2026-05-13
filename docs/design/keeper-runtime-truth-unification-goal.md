@@ -18,9 +18,9 @@ Implemented in this branch:
   `pre_dispatch_blocked`, `tool_surface_selected`,
   `provider_lane_resolved`, `provider_attempt_started`,
   `provider_attempt_finished`, `context_injected`, `context_compacted`,
-  `event_bus_correlated`, `memory_injected`, `memory_flushed`,
-  `checkpoint_loaded`, `checkpoint_saved`, `receipt_appended`, and
-  `turn_finished`.
+  `state_snapshot_sidecar_saved`, `event_bus_correlated`,
+  `memory_injected`, `memory_flushed`, `checkpoint_loaded`,
+  `checkpoint_saved`, `receipt_appended`, and `turn_finished`.
 - Provider-lane manifest decisions now record requested tools, required tools,
   materialized tools, missing required tools, resolved lane, effective inline
   tool count, and runtime MCP policy presence.
@@ -29,8 +29,9 @@ Implemented in this branch:
 - Successful provider turns now persist structured keeper state snapshots to:
   - `<session_dir>/state-snapshots/turn-000001.json`
   - `<session_dir>/state-snapshot.latest.json`
-- Context manifest rows record prompt/context/history digests and link the
-  structured state snapshot sidecars after the provider run.
+- Context manifest rows record prompt/context/history digests. A dedicated
+  `state_snapshot_sidecar_saved` row links the structured state snapshot
+  sidecars after the provider run.
 - `Keeper_cascade_engine` now encodes the keeper cascade boundary as a typed
   value: MASC owns named-cascade provider iteration and hands OAS a
   single-provider agent run per attempt.
@@ -517,6 +518,7 @@ Suggested event kinds:
 - `provider_attempt_finished`
 - `context_injected`
 - `context_compacted`
+- `state_snapshot_sidecar_saved`
 - `checkpoint_loaded`
 - `checkpoint_saved`
 - `receipt_appended`

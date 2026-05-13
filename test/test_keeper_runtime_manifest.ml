@@ -812,6 +812,7 @@ let test_successful_provider_turn_links_runtime_artifacts () =
               M.Provider_lane_resolved;
               M.Provider_attempt_finished;
               M.Checkpoint_saved;
+              M.State_snapshot_sidecar_saved;
               M.Receipt_appended;
               M.Turn_finished;
             ];
@@ -864,7 +865,7 @@ let test_successful_provider_turn_links_runtime_artifacts () =
           let state_row =
             rows
             |> List.find_opt (fun row ->
-              row.M.event = M.Context_injected
+              row.M.event = M.State_snapshot_sidecar_saved
               && Option.is_some
                    (json_string_member_opt
                       "state_snapshot_sidecar_path"
@@ -1234,6 +1235,7 @@ let test_wired_manifest_sites () =
         [
           "Keeper_runtime_manifest.Context_compacted";
           "Keeper_runtime_manifest.Context_injected";
+          "Keeper_runtime_manifest.State_snapshot_sidecar_saved";
           "Keeper_runtime_manifest.Checkpoint_loaded";
           "Keeper_runtime_manifest.Tool_surface_selected";
           "Keeper_runtime_manifest.Checkpoint_saved";

@@ -11,6 +11,7 @@ type event_kind =
   | Provider_attempt_finished
   | Context_injected
   | Context_compacted
+  | State_snapshot_sidecar_saved
   | Event_bus_correlated
   | Memory_injected
   | Memory_flushed
@@ -65,6 +66,7 @@ let all_event_kinds =
     Provider_attempt_finished;
     Context_injected;
     Context_compacted;
+    State_snapshot_sidecar_saved;
     Event_bus_correlated;
     Memory_injected;
     Memory_flushed;
@@ -85,6 +87,7 @@ let event_kind_to_string = function
   | Provider_attempt_finished -> "provider_attempt_finished"
   | Context_injected -> "context_injected"
   | Context_compacted -> "context_compacted"
+  | State_snapshot_sidecar_saved -> "state_snapshot_sidecar_saved"
   | Event_bus_correlated -> "event_bus_correlated"
   | Memory_injected -> "memory_injected"
   | Memory_flushed -> "memory_flushed"
@@ -104,6 +107,7 @@ let event_kind_of_string = function
   | "provider_attempt_finished" -> Some Provider_attempt_finished
   | "context_injected" -> Some Context_injected
   | "context_compacted" -> Some Context_compacted
+  | "state_snapshot_sidecar_saved" -> Some State_snapshot_sidecar_saved
   | "event_bus_correlated" -> Some Event_bus_correlated
   | "memory_injected" -> Some Memory_injected
   | "memory_flushed" -> Some Memory_flushed

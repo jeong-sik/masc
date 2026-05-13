@@ -17,7 +17,7 @@ import {
   sharedTelemetrySummary,
   sharedTelemetrySummaryError,
 } from './fleet-data-core'
-import { route } from '../router'
+import { replaceRoute, route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatTimeAgo } from '../lib/format-time'
@@ -62,6 +62,13 @@ interface TelemetryState {
 const sourceMeta = telemetrySourceMeta
 
 type TelemetryCondensedCategory = 'heartbeat' | 'polling'
+
+interface TelemetryRouteFocus {
+  readonly sessionId: string | null
+  readonly operationId: string | null
+  readonly workerRunId: string | null
+  readonly query: string | null
+}
 
 export type TelemetryDisplayItem =
   | {
@@ -168,6 +175,42 @@ function telemetryScopeBadges(entry: TelemetryEntry): string[] {
     compactId(normalizeText(entry.operation_id), 'OP'),
     compactId(normalizeText(entry.worker_run_id), 'WR'),
   ].filter((value): value is string => Boolean(value))
+}
+
+function telemetryRouteFocusFromParams(
+  params: Record<string, string | undefined>,
+): TelemetryRouteFocus | null {
+  const focus = {
+    sessionId: normalizeText(params.session_id),
+    operationId: normalizeText(params.operation_id),
+    workerRunId: normalizeText(params.worker_run_id),
+    query: normalizeText(params.q),
+  }
+  return focus.sessionId || focus.operationId || focus.workerRunId || focus.query
+    ? focus
+    : null
+}
+
+function clearTelemetryRouteFocus(): void {
+  const params: Record<string, string> = {
+    ...route.value.params,
+    section: 'fleet-health',
+    view: 'event-log',
+  }
+  delete params.session_id
+  delete params.operation_id
+  delete params.worker_run_id
+  delete params.q
+  replaceRoute('monitoring', params)
+}
+
+function telemetryRouteFocusBadges(focus: TelemetryRouteFocus): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  return [
+    focus.sessionId ? { label: 'SESSION', value: focus.sessionId } : null,
+    focus.operationId ? { label: 'OPERATION', value: focus.operationId } : null,
+    focus.workerRunId ? { label: 'WORKER', value: focus.workerRunId } : null,
+    focus.query ? { label: 'QUERY', value: focus.query } : null,
+  ].filter((value): value is { readonly label: string; readonly value: string } => value !== null)
 }
 
 function telemetryToolName(entry: TelemetryEntry): string | null {
@@ -358,19 +401,35 @@ export function filterTelemetryDisplayItems(
   if (trimmed === '') return items
   const needle = trimmed.toLowerCase()
 
-  const haystackForItem = (item: TelemetryDisplayItem): string => {
-    if (item.kind === 'entry') {
-      const source = typeof item.entry.source === 'string' ? item.entry.source : ''
-      const preview = entryPreview(item.entry)
-      const badges = telemetryScopeBadges(item.entry).join(' ')
-      return `${source} ${preview} ${badges}`
-    }
-    const sources = item.sourceKeys.join(' ')
-    const badges = item.scopeBadges.join(' ')
-    return `${sources} ${item.label} ${badges}`
-  }
+  return items.filter(item => telemetryDisplayItemHaystack(item).toLowerCase().includes(needle))
+}
 
-  return items.filter(item => haystackForItem(item).toLowerCase().includes(needle))
+function telemetryEntryHaystack(entry: TelemetryEntry): string {
+  const source = typeof entry.source === 'string' ? entry.source : ''
+  const preview = entryPreview(entry)
+  const badges = telemetryScopeBadges(entry).join(' ')
+  return `${source} ${preview} ${badges}`
+}
+
+function telemetryDisplayItemHaystack(item: TelemetryDisplayItem): string {
+  if (item.kind === 'entry') return telemetryEntryHaystack(item.entry)
+  const sources = item.sourceKeys.join(' ')
+  const badges = item.scopeBadges.join(' ')
+  const previews = item.entries.map(entry => entryPreview(entry)).join(' ')
+  return `${sources} ${item.label} ${badges} ${previews}`
+}
+
+function telemetryEntryMatchesRouteFocus(entry: TelemetryEntry, focus: TelemetryRouteFocus): boolean {
+  if (focus.sessionId && normalizeText(entry.session_id) !== focus.sessionId) return false
+  if (focus.operationId && normalizeText(entry.operation_id) !== focus.operationId) return false
+  if (focus.workerRunId && normalizeText(entry.worker_run_id) !== focus.workerRunId) return false
+  if (focus.query && !telemetryEntryHaystack(entry).toLowerCase().includes(focus.query.toLowerCase())) return false
+  return true
+}
+
+function telemetryDisplayItemMatchesRouteFocus(item: TelemetryDisplayItem, focus: TelemetryRouteFocus): boolean {
+  if (item.kind === 'entry') return telemetryEntryMatchesRouteFocus(item.entry, focus)
+  return item.entries.some(entry => telemetryEntryMatchesRouteFocus(entry, focus))
 }
 
 export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): TelemetryDisplayItem[] {
@@ -553,17 +612,21 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   `
 }
 
-function EntryRow({ entry }: { entry: TelemetryEntry }) {
+function EntryRow({ entry, routeFocused = false }: { entry: TelemetryEntry; routeFocused?: boolean }) {
   const expanded = useSignal(false)
   const meta = sourceMeta(entry.source)
   const ts = entryTimestamp(entry)
   const success = entry.success as boolean | undefined
   const scopeBadges = telemetryScopeBadges(entry)
   const rawJson = JSON.stringify(entry, null, 2)
+  const focusedClasses = routeFocused
+    ? 'border-l-2 border-l-[var(--color-brass-1)] bg-[var(--color-brass-soft)]'
+    : ''
 
   return html`
     <div
-      class="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors"
+      class=${`border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors ${focusedClasses}`}
+      data-route-focused-telemetry=${routeFocused ? 'true' : undefined}
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <div class="flex items-center gap-1">
@@ -627,17 +690,21 @@ ${rawJson}</pre>
   `
 }
 
-function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group' }> }) {
+function GroupRow({ item, routeFocused = false }: { item: Extract<TelemetryDisplayItem, { kind: 'group' }>; routeFocused?: boolean }) {
   const expanded = useSignal(false)
   const meta = CONDENSED_CATEGORY_META[item.category]
   const latestPreview = entryPreview(item.entries[0] as TelemetryEntry)
   const sourceIcons = uniqueStrings(item.sourceKeys.map(source => sourceMeta(source).icon))
   const contentId = `telemetry-group-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   const rawJson = JSON.stringify(item.entries, null, 2)
+  const focusedClasses = routeFocused
+    ? 'border-l-2 border-l-[var(--color-brass-1)] bg-[var(--color-brass-soft)]'
+    : 'bg-[var(--color-bg-panel-alt)]'
 
   return html`
     <div
-      class="border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] hover:bg-[var(--color-bg-hover)] transition-colors"
+      class=${`border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors ${focusedClasses}`}
+      data-route-focused-telemetry=${routeFocused ? 'true' : undefined}
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <div class="flex items-center gap-1">
@@ -711,6 +778,49 @@ ${rawJson}</pre>
         ` : null}
       </div>
     </div>
+  `
+}
+
+function TelemetryRouteFocusPanel({
+  focus,
+  matchCount,
+}: {
+  focus: TelemetryRouteFocus | null
+  matchCount: number
+}) {
+  if (!focus) return null
+  const badges = telemetryRouteFocusBadges(focus)
+  return html`
+    <section
+      class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      data-testid="telemetry-route-focus"
+      aria-label="Telemetry route focus"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+            ROUTE FOCUS
+          </div>
+          <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
+            ${badges.map(badge => html`
+              <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                ${badge.label} ${badge.value}
+              </span>
+            `)}
+            <span class="font-mono text-3xs text-[var(--color-fg-muted)]">
+              ${matchCount.toLocaleString()} focused item${matchCount === 1 ? '' : 's'}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          onClick=${clearTelemetryRouteFocus}
+        >
+          CLEAR
+        </button>
+      </div>
+    </section>
   `
 }
 
@@ -871,6 +981,21 @@ export function TelemetryUnified() {
     () => filterTelemetryDisplayItems(allDisplayItems, entrySearchQuery),
     [allDisplayItems, entrySearchQuery],
   )
+  const routeFocus = useMemo(
+    () => telemetryRouteFocusFromParams(route.value.params as Record<string, string | undefined>),
+    [
+      route.value.params.session_id,
+      route.value.params.operation_id,
+      route.value.params.worker_run_id,
+      route.value.params.q,
+    ],
+  )
+  const routeFocusedItemKeys = useMemo(() => {
+    if (!routeFocus) return new Set<string>()
+    return new Set(displayItems
+      .filter(item => telemetryDisplayItemMatchesRouteFocus(item, routeFocus))
+      .map(item => item.key))
+  }, [displayItems, routeFocus])
   const isFilteringEntries = entrySearchQuery.trim() !== ''
   const condensed = useMemo(() => condensedStats(displayItems), [displayItems])
 
@@ -888,6 +1013,8 @@ export function TelemetryUnified() {
       </div>
 
       <${OasHealthChip} />
+
+      <${TelemetryRouteFocusPanel} focus=${routeFocus} matchCount=${routeFocusedItemKeys.size} />
 
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
@@ -1025,8 +1152,8 @@ export function TelemetryUnified() {
         <div class="max-h-150 overflow-y-auto">
           ${displayItems.length > 0
             ? displayItems.map(item => item.kind === 'group'
-              ? html`<${GroupRow} key=${item.key} item=${item} />`
-              : html`<${EntryRow} key=${item.key} entry=${item.entry} />`)
+              ? html`<${GroupRow} key=${item.key} item=${item} routeFocused=${routeFocusedItemKeys.has(item.key)} />`
+              : html`<${EntryRow} key=${item.key} entry=${item.entry} routeFocused=${routeFocusedItemKeys.has(item.key)} />`)
             : isFilteringEntries && allDisplayItems.length > 0
               ? html`<div class="px-4 py-6 text-sm text-[var(--color-fg-muted)]">필터 결과 없음 (${allDisplayItems.length} items)</div>`
               : html`<div class="px-4 py-6 text-sm text-[var(--color-fg-muted)]">선택한 scope에 해당하는 MASC telemetry entry가 없습니다.</div>`}

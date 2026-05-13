@@ -1253,11 +1253,53 @@ let direct_candidate_providers (profile : profile_snapshot) =
     (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
     profile.candidates
 
-let prefer_direct_candidates_when_entry_parse_drops
+let direct_candidate_providers_ordered_by_entries
     (profile : profile_snapshot)
-    (parsed : Llm_provider.Provider_config.t list) =
-  let direct = direct_candidate_providers profile in
-  if direct <> [] && List.length parsed < List.length direct then direct else parsed
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  match profile.candidates with
+  | [] -> []
+  | candidates ->
+    (* Index candidates by [model_string] into per-key FIFO queues so we
+       drain them in declaration order; same model_string may appear
+       multiple times in a profile (e.g. priority duplicates), and the
+       runtime hot path treats this function as O(n) total work. *)
+    let index : (string, candidate_runtime Queue.t) Hashtbl.t =
+      Hashtbl.create (List.length candidates)
+    in
+    List.iter
+      (fun (candidate : candidate_runtime) ->
+         let q =
+           match Hashtbl.find_opt index candidate.model_string with
+           | Some q -> q
+           | None ->
+             let q = Queue.create () in
+             Hashtbl.add index candidate.model_string q;
+             q
+         in
+         Queue.add candidate q)
+      candidates;
+    let take_candidate model_string =
+      match Hashtbl.find_opt index model_string with
+      | Some q when not (Queue.is_empty q) ->
+        let candidate = Queue.pop q in
+        Some candidate.provider_cfg
+      | _ -> None
+    in
+    let ordered =
+      List.filter_map
+        (fun (entry : Cascade_config_loader.weighted_entry) ->
+           take_candidate entry.model)
+        ordered_entries
+    in
+    if List.length ordered = List.length candidates
+    then ordered
+    else direct_candidate_providers profile
+
+let provider_configs_of_ordered_entries
+    ~(profile : profile_snapshot)
+    ~cascade_name:_
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  direct_candidate_providers_ordered_by_entries profile ordered_entries
 
 let resolve_named_providers ?sw ?net ?clock ?provider_filter
     ?(require_tool_choice_support = false)
@@ -1281,11 +1323,10 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
           profile.weighted_entries
       in
       let parsed_declared_providers =
-        Cascade_config.parse_weighted_entries
-             ~api_key_env_overrides:profile.api_key_env_overrides
-             ~cascade_name:normalized
+        provider_configs_of_ordered_entries
+          ~profile
+          ~cascade_name:normalized
           ordered_entries
-        |> prefer_direct_candidates_when_entry_parse_drops profile
       in
       let filtered_declared_providers =
         Cascade_config.apply_provider_filter
@@ -1354,11 +1395,10 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
           profile.weighted_entries
       in
       let parsed_declared_providers =
-        Cascade_config.parse_weighted_entries
-             ~api_key_env_overrides:profile.api_key_env_overrides
-             ~cascade_name:normalized
+        provider_configs_of_ordered_entries
+          ~profile
+          ~cascade_name:normalized
           ordered_entries
-        |> prefer_direct_candidates_when_entry_parse_drops profile
       in
       let filtered_declared_providers =
         match Cascade_config.apply_provider_filter_strict
@@ -1406,23 +1446,6 @@ let provider_filter_allows_single ~provider_filter ~label provider =
       | Ok [ _ ] -> true
       | Ok _ | Error _ -> false
 
-let parse_secondary_from_entry ~api_key_env_overrides ~cascade
-    (entry : Cascade_config_loader.weighted_entry) =
-  match entry.secondary with
-  | None -> None
-  | Some secondary ->
-      let secondary_entry : Cascade_config_loader.weighted_entry =
-        {
-          model = secondary;
-          weight = 1;
-          supports_tool_choice = entry.secondary_supports_tool_choice;
-          secondary = None;
-          secondary_supports_tool_choice = None;
-        }
-      in
-      Cascade_config.parse_weighted_entry_with_drop_metric
-        ~api_key_env_overrides ~cascade secondary_entry
-
 let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
     ?provider_filter ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
@@ -1445,32 +1468,11 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
           profile.weighted_entries
       in
       let parsed_pairs =
-        ordered_entries
-        |> List.filter_map
-             (fun (entry : Cascade_config_loader.weighted_entry) ->
-                match
-                  Cascade_config.parse_weighted_entry_with_drop_metric
-                    ~api_key_env_overrides:profile.api_key_env_overrides
-                    ~cascade:normalized
-                    entry
-                with
-                | None -> None
-                | Some primary ->
-                    Some
-                      ( primary,
-                        parse_secondary_from_entry
-                          ~api_key_env_overrides:
-                            profile.api_key_env_overrides
-                          ~cascade:normalized
-                          entry ))
-      in
-      let parsed_pairs =
         let direct_pairs =
-          direct_candidate_providers profile |> List.map (fun cfg -> cfg, None)
+          direct_candidate_providers_ordered_by_entries profile ordered_entries
+          |> List.map (fun cfg -> cfg, None)
         in
-        if direct_pairs <> [] && List.length parsed_pairs < List.length direct_pairs
-        then direct_pairs
-        else parsed_pairs
+        direct_pairs
       in
       let primaries = List.map fst parsed_pairs in
       (match
@@ -1519,82 +1521,16 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
              in
              Ok { providers; secondary_resolver })
 
-(** RFC-0027 PR-9b dual-track resolution. The [primary] argument is one
-    of the providers returned by {!resolve_named_providers}; we walk the
-    cascade's parsed weighted entries and, for the entry whose parsed
-    {!Llm_provider.Provider_config.t} matches [primary] by [(kind,
-    model_id)], read its [secondary] field. When present, the secondary
-    string is wrapped in a synthesised {!Cascade_config_loader.weighted_entry}
-    (preserving [secondary_supports_tool_choice] -> [supports_tool_choice]
-    if set) and parsed via {!Cascade_config.parse_weighted_entry_with_drop_metric},
-    which applies the cascade api_key_env_overrides and ticks the
-    iter-6 candidate-drop counter on parse failure. Returns [None] when:
-    - the cascade has no entries with a secondary,
-    - no entry's primary parse matches [primary],
-    - or secondary parsing yields no provider (unregistered/unavailable
-      scheme, invalid syntax).
-    The function never raises; observability for swap success/failure
-    flows through the unified
-    [Llm_metric_bridge.emit_fallback_triggered ~kind:"dual_track_swap"]
-    counter that the caller in [oas_worker_named_cascade] increments —
-    successful swaps tag [~detail:"swapped"], secondary rejections tag
-    [~detail:<filter_rejection_reason>]. (#13097 review: removed stale
-    [cascade_secondary_swap_total] reference; that name was never
-    registered, the unified counter is the SSOT.) *)
+(** Deprecated compatibility hook for RFC-0027 PR-9b dual-track resolution.
+    Declarative cascade execution now carries typed [Provider_config] candidates
+    from TOML materialization. Runtime no longer re-parses weighted-entry model
+    strings to recover secondary providers; callers that need secondaries should
+    consume the precomputed resolver from
+    {!resolve_named_providers_strict_with_secondary_resolver}. *)
 let resolve_secondary_provider_for_primary ?sw ?net ?clock
     ~cascade_name ~(primary : Llm_provider.Provider_config.t) () =
-  match lookup_active_profile ?sw ?net ?clock cascade_name with
-  | Error _ -> None
-  | Ok (_snapshot, _normalized, profile) ->
-      let same_kind_model
-          (cfg : Llm_provider.Provider_config.t) =
-        cfg.kind = primary.kind
-        && String.trim cfg.model_id = String.trim primary.model_id
-      in
-      let synth_secondary_entry
-          (entry : Cascade_config_loader.weighted_entry)
-          (secondary : string) : Cascade_config_loader.weighted_entry =
-        {
-          model = secondary;
-          weight = 1;
-          supports_tool_choice = entry.secondary_supports_tool_choice;
-          secondary = None;
-          secondary_supports_tool_choice = None;
-        }
-      in
-      let try_entry (entry : Cascade_config_loader.weighted_entry) =
-        match entry.secondary with
-        | None -> None
-        | Some secondary ->
-            (* Confirm this entry's primary parses to the same provider
-               we were called with. We compare on the parsed
-               Provider_config rather than on raw strings to handle
-               provider:auto expansion (e.g. claude_code:auto could
-               expand to several model strings, and the primary we got
-               carries the resolved model_id). *)
-            let primary_parsed =
-              Cascade_config.parse_weighted_entry_with_drop_metric
-                ~api_key_env_overrides:profile.api_key_env_overrides
-                ~cascade:cascade_name
-                entry
-            in
-            (match primary_parsed with
-             | Some parsed when same_kind_model parsed ->
-                 Cascade_config.parse_weighted_entry_with_drop_metric
-                   ~api_key_env_overrides:profile.api_key_env_overrides
-                   ~cascade:cascade_name
-                   (synth_secondary_entry entry secondary)
-             | _ -> None)
-      in
-      (* Expand provider:auto entries without a rotation scope: this legacy
-         lookup may be called after live provider resolution, so it must not
-         consume round-robin state just to answer a secondary lookup. New
-         execution paths use [resolve_named_providers_strict_with_secondary_resolver]
-         to precompute secondaries from the same ordered snapshot. *)
-      let expanded =
-        expand_weighted_entries ~cascade:cascade_name profile.weighted_entries
-      in
-      List.find_map try_entry expanded
+  let _ = sw, net, clock, cascade_name, primary in
+  None
 
 let resolve_inference_params ?sw ?net ?clock ~name () =
   match lookup_active_profile ?sw ?net ?clock name with

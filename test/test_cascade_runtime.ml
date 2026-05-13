@@ -71,7 +71,7 @@ let runtime_mcp_policy_with_headers =
           {
             name = "masc";
             url = "http://127.0.0.1:8935/mcp";
-            headers = [ ("x-masc-agent-name", "keeper-sangsu-agent") ];
+            headers = [ ("authorization", "Bearer test-token") ];
           };
       ];
     allowed_server_names = [ "masc" ];

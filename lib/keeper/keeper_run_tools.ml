@@ -517,6 +517,18 @@ let prepare_agent_setup
       base
       (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
   in
+  let allowed_public_alias_for_internal internal_name =
+    List.find_map
+      (fun public_name ->
+         match Keeper_tool_alias.route public_name with
+         | Some route
+           when String.equal route.internal_name internal_name
+                && Keeper_tool_policy.StringSet.mem public_name universe_set
+                && Keeper_tool_policy.StringSet.mem public_name allowed_exec_set ->
+           Some public_name
+         | _ -> None)
+      (Keeper_tool_alias.public_names ())
+  in
   let max_tools_per_turn =
     if is_retry
     then Keeper_config.keeper_retry_max_tools_per_turn ()
@@ -576,13 +588,19 @@ let prepare_agent_setup
        | None -> [])
   in
   let validate_allow_list ~turn raw =
-    let raw = raw in
     let validated, dropped_names =
-      List.partition
-        (fun n ->
-           Keeper_tool_policy.StringSet.mem n universe_set
-           && Keeper_tool_policy.StringSet.mem n allowed_exec_set)
+      List.fold_right
+        (fun n (validated, dropped_names) ->
+           if
+             Keeper_tool_policy.StringSet.mem n universe_set
+             && Keeper_tool_policy.StringSet.mem n allowed_exec_set
+           then n :: validated, dropped_names
+           else
+             match allowed_public_alias_for_internal n with
+             | Some public_name -> public_name :: validated, dropped_names
+             | None -> validated, n :: dropped_names)
         raw
+        ([], [])
     in
     let dropped = List.length dropped_names in
     if dropped > 0
@@ -1099,8 +1117,9 @@ let prepare_agent_setup
           let chunks =
             List.filter_map
               (fun src ->
+                 let src = String.trim src |> String.lowercase_ascii in
                  match src with
-                 | "stale_tasks" | "unclaimed_tasks" ->
+                 | "unclaimed_tasks" ->
                    (try
                       let backlog = Coord.read_backlog config in
                       let unclaimed =
@@ -1138,6 +1157,14 @@ let prepare_agent_setup
                         ~callback:"work_discovery_nudge"
                         exn;
                       None)
+                 | "stale_tasks" ->
+                   Some
+                     "**Stale task audit requested:** inspect stale/orphan task state with \
+                      visible task-audit tools before claiming new work."
+                 | "board_cleanup" ->
+                   Some
+                     "**Board cleanup requested:** inspect stale board posts and use visible \
+                      board cleanup or curation tools when there is safe cleanup work."
                  | _ -> None)
               sources
           in

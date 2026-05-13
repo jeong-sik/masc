@@ -10,7 +10,7 @@
 
 type adapter_error =
   | Provider_not_found of string
-  (** TOML provider id does not map to any known cascade_prefix. *)
+  (** Binding references a TOML provider id that is not declared. *)
   | Model_not_found of string
   (** Model id referenced by a binding has no matching [models.*] entry. *)
   | Binding_resolution_failed of string

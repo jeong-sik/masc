@@ -32,6 +32,45 @@ let adapt_toml (toml : string) : Adapter.adapted_catalog =
 let no_errors (errs : Adapter.adapter_error list) =
   check int "no errors" 0 (List.length errs)
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      (* Unix.putenv name "" would leave [name] present-but-empty, so
+         Sys.getenv_opt checks that distinguish unset from empty would
+         see a different shape than before with_env ran. *)
+      | None -> Unix.unsetenv name)
+    f
+
+let with_temp_cascade_config toml f =
+  let root = Filename.temp_file "cascade-hotpath-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let config_dir = Filename.concat root "config" in
+  Unix.mkdir config_dir 0o700;
+  write_file (Filename.concat config_dir "cascade.toml") toml;
+  let cleanup () =
+    Masc_mcp.Config_dir_resolver.reset ();
+    Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+    (try Sys.remove (Filename.concat config_dir "cascade.toml") with _ -> ());
+    (try Unix.rmdir config_dir with _ -> ());
+    (try Unix.rmdir root with _ -> ())
+  in
+  Masc_mcp.Config_dir_resolver.reset ();
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  Fun.protect
+    ~finally:cleanup
+    (fun () -> with_env "MASC_CONFIG_DIR" config_dir f)
+
 let get_snapshot (toml : string) : Hotpath.decl_snapshot =
   let catalog = adapt_toml toml in
   no_errors catalog.errors;
@@ -255,6 +294,75 @@ let test_decl_snapshot_profile_names_is_sorted_and_unique () =
   let deduped = List.sort_uniq String.compare names in
   check int "names are deduplicated" (List.length deduped) (List.length names)
 
+let test_runtime_resolution_uses_direct_declarative_provider_config () =
+  let toml =
+    {|
+[providers.ollama_cloud]
+protocol = "ollama-http"
+endpoint = "https://ollama.com"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[models.ollama-cloud-default]
+api-name = "glm-5.1"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.ollama-cloud-default.capabilities]
+supports-tool-choice = true
+supports-native-streaming = true
+
+[ollama_cloud.ollama-cloud-default]
+max-concurrent = 1
+
+[tier.ollama_cloud_primary]
+members = ["ollama_cloud.ollama-cloud-default"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["ollama_cloud_primary"]
+strategy = "failover"
+fallback = false
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+|}
+  in
+  with_env "OLLAMA_CLOUD_API_KEY" "test-token" @@ fun () ->
+  with_temp_cascade_config toml @@ fun () ->
+  match
+    Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      ~cascade_name:"tier-group.coding_plan"
+      ()
+  with
+  | Error err -> fail err
+  | Ok [ cfg ] ->
+    check string "provider kind" "ollama"
+      (Llm_provider.Provider_config.string_of_provider_kind cfg.kind);
+    check string "cloud base url preserved" "https://ollama.com" cfg.base_url;
+    check string "native request path preserved" "/api/chat" cfg.request_path;
+    check string "resolved credential preserved" "test-token" cfg.api_key;
+    check
+      (option bool)
+      "tool-choice override preserved"
+      (Some true)
+      cfg.supports_tool_choice_override;
+    check bool "required tool gate accepts direct cfg" true
+      (Masc_mcp.Provider_tool_support.supports_required_tool_use
+         ~require_tool_choice_support:true
+         ~require_tool_support:true
+         cfg)
+  | Ok cfgs ->
+    fail
+      (Printf.sprintf
+         "expected one provider config, got %d"
+         (List.length cfgs))
+
 (* --- Test suite --- *)
 
 let () =
@@ -286,5 +394,12 @@ let () =
           "decl_snapshot_profile_names sorted+unique"
           `Quick
           test_decl_snapshot_profile_names_is_sorted_and_unique;
+      ];
+      "runtime",
+      [
+        test_case
+          "runtime resolution uses direct declarative Provider_config"
+          `Quick
+          test_runtime_resolution_uses_direct_declarative_provider_config;
       ];
     ]

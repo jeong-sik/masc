@@ -182,16 +182,14 @@ let runtime_mcp_http_headers =
    what the cascade filter consults to decide whether such bridging is in
    place for a given keeper before admitting codex_cli for runtime MCP.
 
-   OAS Codex transport additionally converts [Authorization: Bearer ...] into
-   [bearer_token_env_var] so the token is carried via subprocess env rather
-   than argv.  The MASC identity headers are non-secret routing labels.
+   The MASC identity headers are non-secret routing labels.
    [identity_runtime_mcp_header_keys] enumerates the keys accepted via this
-   carve-out even with [supports_runtime_mcp_http_headers = false]. *)
+   carve-out even with [supports_runtime_mcp_http_headers = false]. Bearer
+   auth remains stripped by the provider-specific runtime policy normalizer. *)
 let codex_cli_tool_policy =
   { supports_runtime_mcp_http_headers = false
   ; requires_per_keeper_bridging_for_bound_actor_tools = true
-  ; identity_runtime_mcp_header_keys =
-      [ "authorization"; "x-masc-agent-name"; "x-masc-keeper-name" ]
+  ; identity_runtime_mcp_header_keys = [ "x-masc-agent-name"; "x-masc-keeper-name" ]
   ; argv_prompt_preflight = true
   ; uses_anthropic_caching = false
   ; max_turns_per_attempt = None

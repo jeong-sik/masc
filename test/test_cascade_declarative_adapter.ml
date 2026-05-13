@@ -4,10 +4,10 @@
     [adapted_catalog] that mirrors the runtime's expected shape.
 
     The adapter resolves declared TOML providers directly into
-    [Provider_config.t] values, falling back to
-    [Cascade_config.parse_model_string] only for legacy providers that are not
-    declared in TOML. Tests use provider IDs from the typed provider-kind
-    surface (claude_code, codex_cli, ollama, etc.). *)
+    [Provider_config.t] values. Undeclared legacy provider bindings fail closed
+    instead of re-parsing synthetic provider:model strings. Tests use provider
+    IDs from the typed provider-kind surface (claude_code, codex_cli, ollama,
+    etc.). *)
 
 open Alcotest
 open Cascade_declarative_types
@@ -465,10 +465,6 @@ strategy = "failover"
 let test_unknown_provider () =
   let toml =
     {|
-[providers.nonexistent]
-protocol = "anthropic-cli"
-command = "x"
-
 [models.haiku]
 max-context = 200000
 api-name = "claude-haiku-4-5-20251001"

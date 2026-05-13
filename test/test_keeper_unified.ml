@@ -10282,11 +10282,21 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   nonempty "Work_discovery" Surface.Work_discovery;
   nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta;
   check
-    (list string)
+    bool
     "board_curation force-includes submit tool"
-    [ "keeper_board_curation_submit" ]
-    (Surface.preferred_tool_names_for_turn_affordances
-       [ "board_curation"; "task_claim"; "board_curation" ]);
+    true
+    (List.mem
+       "keeper_board_curation_submit"
+       (Surface.preferred_tool_names_for_turn_affordances
+          [ "board_curation"; "task_claim"; "board_curation" ]));
+  check
+    bool
+    "board_curation force-includes cleanup tool"
+    true
+    (List.mem
+       "keeper_board_cleanup"
+       (Surface.preferred_tool_names_for_turn_affordances
+          [ "board_curation"; "task_claim"; "board_curation" ]));
   check
     (list string)
     "generic board affordance has no forced specific tool"
@@ -10356,6 +10366,18 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
      fail
        (Printf.sprintf
           "expected Auto when curation submit is unavailable and keeper is idle, got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "board_curation" ]
+       ~allowed_tool_names:[ "keeper_board_cleanup"; "keeper_board_post" ]
+       ()
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any when board cleanup can satisfy curation lane, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (* #10008: when no specific tool is applicable for the current
      affordance, fall back to [Auto] so the model can respond with
@@ -12192,6 +12214,61 @@ let () =
                check
                  bool
                  "task_claim present for matched backlog"
+                 true
+                 (List.mem "task_claim" affordances))
+        ; test_case
+            "affordance: janitor discovery sources do not force task claim"
+            `Quick
+            (fun () ->
+               let meta =
+                 { minimal_meta with
+                   work_discovery_sources = Some [ "stale_tasks"; "board_cleanup" ]
+                 }
+               in
+               let obs =
+                 { base_observation with
+                   unclaimed_task_count = 3
+                 ; claimable_task_count = 1
+                 ; failed_task_count = 1
+                 ; work_discovery_due = true
+                 }
+               in
+               let affordances = UM.observed_affordances_of_observation ~meta obs in
+               check
+                 bool
+                 "task_claim suppressed for janitor cleanup/audit sources"
+                 false
+                 (List.mem "task_claim" affordances);
+               check
+                 bool
+                 "task_audit remains available for stale_tasks"
+                 true
+                 (List.mem "task_audit" affordances);
+               check
+                 bool
+                 "board cleanup source maps to curation lane"
+                 true
+                 (List.mem "board_curation" affordances))
+        ; test_case
+            "affordance: unclaimed discovery source keeps task claim"
+            `Quick
+            (fun () ->
+               let meta =
+                 { minimal_meta with
+                   work_discovery_sources = Some [ "unclaimed_tasks" ]
+                 }
+               in
+               let obs =
+                 { base_observation with
+                   unclaimed_task_count = 3
+                 ; claimable_task_count = 1
+                 ; work_discovery_due = true
+                 }
+               in
+               let affordances = UM.observed_affordances_of_observation ~meta obs in
+               check
+                 bool
+                 "task_claim present for unclaimed_tasks source"
                  true
                  (List.mem "task_claim" affordances))
         ; test_case "trigger: absolute and matched backlog split" `Quick (fun () ->

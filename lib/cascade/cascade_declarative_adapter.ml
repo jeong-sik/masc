@@ -4,9 +4,8 @@
     an {!adapted_catalog} that mirrors the runtime's expected shape.
 
     Resolution chain:
-    - TOML provider.id -> normalize -> Provider_adapter.resolve_adapter_by_cascade_prefix
+    - TOML provider.id -> declared provider metadata
     - TOML provider metadata + model spec -> Provider_config.t
-    - legacy parser fallback only for providers not yet declared in TOML
 
     @stability Internal *)
 
@@ -201,28 +200,15 @@ let resolve_binding_config (cfg : cascade_config)
       | Some input_cost, Some _ when input_cost > 0.0 -> Some spec.max_context
       | _ -> None
     in
-    let supports_tool_choice_override =
-      supports_tool_choice_override_of_model_spec spec
-    in
-    let parse_registered_provider () =
-      match resolve_provider_prefix binding.provider_id with
-      | None ->
-        errors := Provider_not_found binding.provider_id :: !errors;
-        None
-      | Some cascade_prefix ->
-        let model_string = Printf.sprintf "%s:%s" cascade_prefix spec.api_name in
-        Cascade_config.parse_model_string
-          ?max_tokens
-          ?supports_tool_choice_override
-          model_string
-    in
     let result =
       match find_provider cfg binding.provider_id with
       | Some provider ->
         (match provider_config_from_declared_provider provider spec ~max_tokens with
          | Some cfg -> Some cfg
-         | None -> parse_registered_provider ())
-      | None -> parse_registered_provider ()
+         | None -> None)
+      | None ->
+        errors := Provider_not_found binding.provider_id :: !errors;
+        None
     in
     (match result with
      | Some config ->

@@ -221,7 +221,8 @@ let turn_affordances_require_tool_gate turn_affordances =
    does not hard-gate by itself; the concrete signals inside a discovery turn
    (claimable tasks, board activity, worktree delta) own the strict contract. *)
 let tools_for_gated_affordance = function
-  | Board_curation -> [ "keeper_board_curation_submit" ]
+  | Board_curation ->
+    [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
   | Board_post_or_comment ->
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
   | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
@@ -239,7 +240,7 @@ let tools_for_gated_affordance = function
   | Work_discovery ->
     [ "keeper_task_claim"; "masc_claim_next";
       "keeper_board_post"; "keeper_task_create"; "masc_add_task";
-      "keeper_tasks_audit" ]
+      "keeper_tasks_audit"; "keeper_board_cleanup" ]
   | Inspect_worktree_delta ->
     [ "keeper_shell"; "keeper_bash"; "masc_code_git";
       "keeper_fs_read" ]
@@ -248,7 +249,8 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
   turn_affordances
   |> List.filter_map turn_affordance_of_string
   |> List.concat_map (function
-       | Board_curation -> [ "keeper_board_curation_submit" ]
+       | Board_curation ->
+         [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
        | Board_post_or_comment
        | Message_sweep
        | Reply_in_room
@@ -350,7 +352,9 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
   in
   if has_turn_affordance Board_curation turn_affordances
-     && progress_tool_available "keeper_board_curation_submit"
+     && List.exists
+          progress_tool_available
+          [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
   then
     (* Keep the curation submit tool visible, but do not force exact
        tool_choice. Several keeper cascades can use runtime MCP tools while

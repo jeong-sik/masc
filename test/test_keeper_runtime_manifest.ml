@@ -2035,6 +2035,8 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     ];
   check_source_omits "lib/keeper/keeper_turn_driver.ml" "direct_model_strings";
   check_source_omits "lib/cascade/cascade_runtime.ml" "direct_model_strings";
+  check_source_omits "lib/cascade/cascade_config.ml" "let parse_model_strings";
+  check_source_omits "lib/cascade/cascade_config.mli" "val parse_model_strings";
   check_source_missing "lib/keeper/keeper_agent_context.ml";
   check_source_missing "lib/keeper/keeper_agent_context.mli";
   check_source_omits

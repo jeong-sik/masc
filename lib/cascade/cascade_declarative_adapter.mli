@@ -67,6 +67,4 @@ val adapt_config : Cascade_declarative_types.cascade_config -> adapted_catalog
     Precondition: [cfg] should pass {!Cascade_declarative_validator.validate}
     (zero errors) before calling [adapt_config]. The adapter performs a
     second pass focused on runtime resolution: declared providers are
-    converted to [Provider_config.t] from their typed TOML metadata, with
-    legacy model-string parsing retained only for providers not yet declared
-    in TOML. *)
+    converted to [Provider_config.t] from their typed TOML metadata. *)

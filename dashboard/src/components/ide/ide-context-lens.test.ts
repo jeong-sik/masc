@@ -229,6 +229,7 @@ describe('IdeContextLens', () => {
           task_id: 'task-42',
           pr_id: '15000',
           board_post_id: 'post-1',
+          comment_id: 'comment-1',
           git_ref: 'abc123',
           log_id: 'turn-9',
         },
@@ -241,11 +242,12 @@ describe('IdeContextLens', () => {
     expect(counts.get('goal')).toBeGreaterThan(0)
     expect(counts.get('task')).toBeGreaterThan(0)
     expect(counts.get('board')).toBeGreaterThan(0)
+    expect(counts.get('comment')).toBeGreaterThan(0)
     expect(counts.get('git')).toBeGreaterThan(0)
     expect(counts.get('pr')).toBeGreaterThan(0)
     expect(counts.get('log')).toBe(1)
     expect(model.anchors[0]).toMatchObject({
-      surface: 'PR',
+      surface: 'Comment',
       line: 27,
       keeper_id: 'sangsu',
     })
@@ -254,8 +256,14 @@ describe('IdeContextLens', () => {
       'Goal',
       'Task',
       'Board',
+      'Comment',
       'PR',
+      'Git',
     ])
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Comment')).toMatchObject({
+      tab: 'workspace',
+      params: { section: 'board', post: 'post-1', comment: 'comment-1' },
+    })
   })
 
   it('keeps other-file activity out of the current-file lens', () => {
@@ -288,5 +296,30 @@ describe('IdeContextLens', () => {
     expect(model.linkedCount).toBe(0)
     expect(model.activeLineCount).toBe(0)
     expect(model.anchors).toEqual([])
+  })
+
+  it('does not advertise an unsupported log focus route param', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diffRows: [],
+      events: [{
+        id: 'evt-log',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'telemetry',
+        timestamp_ms: 400,
+        context: {
+          file_path: 'lib/keeper/keeper_exec_ide.ml',
+          line: 27,
+          log_id: 'turn-9',
+        },
+      }],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    const logRoute = model.anchors[0]?.route_links?.find(link => link.label === 'Log')
+    expect(logRoute?.params).toEqual({ section: 'runtime', view: 'audit' })
   })
 })

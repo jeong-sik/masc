@@ -30,6 +30,7 @@ export interface RunActivityContext {
   readonly goal_id?: string
   readonly task_id?: string
   readonly board_post_id?: string
+  readonly comment_id?: string
   readonly pr_id?: string
   readonly git_ref?: string
   readonly log_id?: string
@@ -165,6 +166,7 @@ function isRunActivityContext(value: unknown): value is RunActivityContext {
     && optionalNonEmptyString(value.goal_id)
     && optionalNonEmptyString(value.task_id)
     && optionalNonEmptyString(value.board_post_id)
+    && optionalNonEmptyString(value.comment_id)
     && optionalNonEmptyString(value.pr_id)
     && optionalNonEmptyString(value.git_ref)
     && optionalNonEmptyString(value.log_id)

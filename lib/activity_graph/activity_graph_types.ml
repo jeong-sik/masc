@@ -181,8 +181,8 @@ let json_positive_int_opt name json =
 
 let json_int_as_string_opt name json =
   match Safe_ops.json_int_opt name json with
-  | Some value -> Some (string_of_int value)
-  | None -> None
+  | Some value when value >= 1 -> Some (string_of_int value)
+  | Some _ | None -> None
 
 let assoc_replace name value fields =
   (name, value) :: List.filter (fun (key, _) -> key <> name) fields
@@ -247,6 +247,10 @@ let derive_context_from_payload payload fields =
   |> assoc_replace_string_opt "board_post_id"
        (json_string_non_empty_opt "board_post_id" payload
         |> fun value -> first_some value (json_string_non_empty_opt "post_id" payload))
+  |> assoc_replace_string_opt "comment_id"
+       (json_string_non_empty_opt "comment_id" payload
+        |> fun value -> first_some value (json_string_non_empty_opt "reply_id" payload)
+        |> fun value -> first_some value (json_int_as_string_opt "comment_number" payload))
   |> assoc_replace_string_opt "pr_id"
        (json_string_non_empty_opt "pr_id" payload
         |> fun value -> first_some value (json_string_non_empty_opt "pull_request" payload)
@@ -273,6 +277,8 @@ let derive_context_from_tag fields raw =
   | Some ("task", value) -> assoc_replace "task_id" (`String value) fields
   | Some ("board", value) | Some ("post", value) ->
     assoc_replace "board_post_id" (`String value) fields
+  | Some ("comment", value) | Some ("reply", value) ->
+    assoc_replace "comment_id" (`String value) fields
   | Some ("pr", value) | Some ("pull_request", value) | Some ("review", value) ->
     assoc_replace "pr_id" (`String value) fields
   | Some ("git", value) | Some ("commit", value) | Some ("branch", value) ->

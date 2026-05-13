@@ -56,6 +56,7 @@ describe('createRunActivityStore', () => {
           goal_id: 'goal-runtime',
           task_id: 'task-runtime',
           board_post_id: 'post-1',
+          comment_id: 'comment-1',
           pr_id: '15000',
           git_ref: 'main',
           log_id: 'turn-7',
@@ -68,6 +69,7 @@ describe('createRunActivityStore', () => {
       line: 42,
       goal_id: 'goal-runtime',
       task_id: 'task-runtime',
+      comment_id: 'comment-1',
       pr_id: '15000',
     })
   })

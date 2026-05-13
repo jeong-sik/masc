@@ -137,10 +137,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     if (line !== undefined) activeLines.add(line)
   }
 
-  const eventText = [
-    ...fileEvents.map(eventSearchText),
-    ...fileThreads.map(threadSearchText),
-  ]
   const surfaces = SURFACE_ORDER.map(id => {
     const count = surfaceCount(id, {
       annotations: fileAnnotations,
@@ -148,7 +144,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
       threads: fileThreads,
       changedLineCount,
       activeLineCount: activeLines.size,
-      eventText,
       events: fileEvents,
     })
     const status: SurfaceStatus = count > 0 ? 'linked' : 'quiet'
@@ -303,7 +298,6 @@ function surfaceCount(
     readonly threads: ReadonlyArray<AnchoredThread>
     readonly changedLineCount: number
     readonly activeLineCount: number
-    readonly eventText: ReadonlyArray<string>
     readonly events: ReadonlyArray<RunActivityEvent>
   },
 ): number {
@@ -319,31 +313,58 @@ function surfaceCount(
   if (id === 'goal') {
     return state.annotations.filter(annotation => annotation.goal_id).length
       + state.events.filter(event => event.context?.goal_id).length
-      + countEventText(state.eventText, /\bgoal[:#/\s-]/)
+      + countUnstructuredEventText(
+        state.events,
+        /\bgoal[:#/\s-]/,
+        event => !!event.context?.goal_id,
+      )
   }
   if (id === 'task') {
     return state.annotations.filter(annotation => annotation.task_id).length
       + state.events.filter(event => event.context?.task_id).length
-      + countEventText(state.eventText, /\btask[:#/\s-]/)
+      + countUnstructuredEventText(
+        state.events,
+        /\btask[:#/\s-]/,
+        event => !!event.context?.task_id,
+      )
   }
   if (id === 'board') {
     return state.threads.length
       + state.events.filter(event => event.context?.board_post_id).length
-      + countEventText(state.eventText, /\b(board|post)[:#/\s-]/)
+      + countUnstructuredEventText(
+        state.events,
+        /\b(board|post)[:#/\s-]/,
+        event => !!event.context?.board_post_id,
+      )
   }
   if (id === 'git') {
     return state.changedLineCount
       + state.events.filter(event => event.context?.git_ref).length
-      + countEventText(state.eventText, /\b(git|commit|branch|diff)[:#/\s-]/)
+      + countUnstructuredEventText(
+        state.events,
+        /\b(git|commit|branch|diff)[:#/\s-]/,
+        event => !!event.context?.git_ref,
+      )
   }
   if (id === 'pr') {
     return state.events.filter(event => event.context?.pr_id).length
-      + countEventText(state.eventText, /\b(pr|pull[_\s-]?request|review)[:#/\s-]/)
+      + countUnstructuredEventText(
+        state.events,
+        /\b(pr|pull[_\s-]?request|review)[:#/\s-]/,
+        event => !!event.context?.pr_id,
+      )
   }
   if (id === 'comment') {
     return state.annotations.filter(annotation =>
       annotation.kind === 'Comment' || annotation.kind === 'Question',
-    ).length + state.threads.length + countEventText(state.eventText, /\b(comment|note|question)[:#/\s-]/)
+    ).length
+      + state.threads.length
+      + state.events.filter(event => event.context?.comment_id).length
+      + countUnstructuredEventText(
+        state.events,
+        /\b(comment|note|question)[:#/\s-]/,
+        event => !!event.context?.comment_id,
+      )
   }
   if (id === 'log') {
     return state.events.length
@@ -472,6 +493,7 @@ function buildAnchors(
         goalId: event.context?.goal_id,
         taskId: event.context?.task_id,
         boardPostId: event.context?.board_post_id,
+        commentId: event.context?.comment_id,
         prId: event.context?.pr_id,
         gitRef: event.context?.git_ref,
         logId: event.context?.log_id,
@@ -494,6 +516,7 @@ function eventSearchText(event: RunActivityEvent): string {
     event.context?.goal_id ? `goal:${event.context.goal_id}` : undefined,
     event.context?.task_id ? `task:${event.context.task_id}` : undefined,
     event.context?.board_post_id ? `board:${event.context.board_post_id}` : undefined,
+    event.context?.comment_id ? `comment:${event.context.comment_id}` : undefined,
     event.context?.pr_id ? `pr:${event.context.pr_id}` : undefined,
     event.context?.git_ref ? `git:${event.context.git_ref}` : undefined,
     event.context?.log_id ? `log:${event.context.log_id}` : undefined,
@@ -504,26 +527,16 @@ function eventSearchText(event: RunActivityEvent): string {
     .toLowerCase()
 }
 
-function threadSearchText(thread: AnchoredThread): string {
-  return [
-    thread.kind,
-    thread.author_keeper_id,
-    thread.anchor.file_path,
-    thread.anchor.symbol_hint,
-    thread.body,
-    'board',
-    'comment',
-  ]
-    .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
-    .join(' ')
-    .toLowerCase()
-}
-
-function countEventText(values: ReadonlyArray<string>, pattern: RegExp): number {
-  return values.filter(value => pattern.test(value)).length
+function countUnstructuredEventText(
+  events: ReadonlyArray<RunActivityEvent>,
+  pattern: RegExp,
+  hasStructuredLink: (event: RunActivityEvent) => boolean,
+): number {
+  return events.filter(event => !hasStructuredLink(event) && pattern.test(eventSearchText(event))).length
 }
 
 function surfaceFromEvent(event: RunActivityEvent): string {
+  if (event.context?.comment_id) return 'Comment'
   if (event.context?.pr_id) return 'PR'
   if (event.context?.board_post_id) return 'Board'
   if (event.context?.goal_id) return 'Goal'
@@ -555,6 +568,7 @@ function eventContextMeta(event: RunActivityEvent): string {
     context.task_id ? `task ${context.task_id}` : null,
     context.pr_id ? `PR ${context.pr_id}` : null,
     context.board_post_id ? `board ${context.board_post_id}` : null,
+    context.comment_id ? `comment ${context.comment_id}` : null,
     context.git_ref ? `git ${context.git_ref}` : null,
     context.log_id ? `log ${context.log_id}` : null,
     context.file_path ?? null,
@@ -574,6 +588,7 @@ function routeLinksForContext(context: {
   readonly goalId?: string
   readonly taskId?: string
   readonly boardPostId?: string
+  readonly commentId?: string
   readonly prId?: string
   readonly gitRef?: string
   readonly logId?: string
@@ -614,6 +629,20 @@ function routeLinksForContext(context: {
       evidence: `Board post ${boardPostId}`,
     })
   }
+  const commentId = cleanId(context.commentId)
+  if (commentId) {
+    add({
+      id: `comment:${commentId}`,
+      label: 'Comment',
+      tab: 'workspace',
+      params: {
+        section: 'board',
+        ...(boardPostId ? { post: boardPostId } : {}),
+        comment: commentId,
+      },
+      evidence: `Comment ${commentId}`,
+    })
+  }
   const prId = cleanId(context.prId)
   if (prId) {
     add({
@@ -640,7 +669,7 @@ function routeLinksForContext(context: {
       id: `log:${logId}`,
       label: 'Log',
       tab: 'monitoring',
-      params: { section: 'runtime', view: 'audit', log: logId },
+      params: { section: 'runtime', view: 'audit' },
       evidence: `Log ${logId}`,
     })
   }
@@ -654,7 +683,7 @@ function routeLinksForContext(context: {
       evidence: `Keeper ${keeperId}`,
     })
   }
-  return links.slice(0, 4)
+  return links.slice(0, 6)
 }
 
 function cleanId(value: string | undefined): string | null {

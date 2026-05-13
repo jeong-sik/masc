@@ -67,9 +67,10 @@ describe('IdeActivityMock', () => {
             file_path: 'lib/runtime.ml',
             line: 4,
             goal_id: 'goal-runtime',
+            comment_id: 'comment-1',
             pr_number: 15000,
           },
-          tags: ['task:task-runtime', 'board:post-1', 'git:main', 'log:turn-1'],
+          tags: ['task:task-runtime', 'board:post-1', 'comment:comment-1', 'git:main', 'log:turn-1'],
         }],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -87,7 +88,7 @@ describe('IdeActivityMock', () => {
 
     const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
       .map(node => node.textContent)
-    expect(surfaces).toEqual(['Goal1', 'Task1', 'Board1', 'PR1', 'Git1', 'Log1'])
+    expect(surfaces).toEqual(['Goal1', 'Task1', 'Board1', 'Comment1', 'PR1', 'Git1', 'Log1'])
 
     const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
     expect(jump?.textContent).toContain('runtime.ml:4')
@@ -144,6 +145,7 @@ describe('IdeActivityMock', () => {
         timestamp_ms: Date.parse('2026-05-05T09:59:00Z'),
         context: {
           board_post_id: 'post-1',
+          comment_id: 'comment-1',
         },
       },
     ], 'lib/runtime.ml')
@@ -158,6 +160,7 @@ describe('IdeActivityMock', () => {
       ['Goal', 1],
       ['Task', 1],
       ['Board', 1],
+      ['Comment', 1],
       ['PR', 1],
       ['Git', 1],
       ['Log', 1],

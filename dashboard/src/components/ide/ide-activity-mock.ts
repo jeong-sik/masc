@@ -48,6 +48,7 @@ const PROGRESS_SURFACES = [
   ['goal_id', 'Goal'],
   ['task_id', 'Task'],
   ['board_post_id', 'Board'],
+  ['comment_id', 'Comment'],
   ['pr_id', 'PR'],
   ['git_ref', 'Git'],
   ['log_id', 'Log'],
@@ -155,6 +156,10 @@ function mergePayloadContext(next: MutableRunActivityContext, payload: unknown):
   if (taskId) next.task_id = taskId
   const boardPostId = stringValue(record.board_post_id) ?? stringValue(record.post_id)
   if (boardPostId) next.board_post_id = boardPostId
+  const commentId = stringValue(record.comment_id)
+    ?? stringValue(record.reply_id)
+    ?? numberString(record.comment_number)
+  if (commentId) next.comment_id = commentId
   const prId = stringValue(record.pr_id)
     ?? stringValue(record.pull_request)
     ?? numberString(record.pr_number)
@@ -191,6 +196,7 @@ function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void 
   if (key === 'goal') next.goal_id = value
   else if (key === 'task') next.task_id = value
   else if (key === 'board' || key === 'post') next.board_post_id = value
+  else if (key === 'comment' || key === 'reply') next.comment_id = value
   else if (key === 'pr' || key === 'pull_request' || key === 'review') next.pr_id = value
   else if (key === 'git' || key === 'commit' || key === 'branch') next.git_ref = value
   else if (key === 'log' || key === 'telemetry') next.log_id = value

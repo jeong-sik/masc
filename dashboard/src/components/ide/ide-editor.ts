@@ -177,6 +177,9 @@ export function IdeEditor({
               Focused ${currentFileFocus.line !== undefined ? `L${currentFileFocus.line}` : currentFileFocus.surface}
               · ${currentFileFocus.label}
             </span>
+            <span class="ide-editor-context-focus-meta" aria-label="Focused context metadata">
+              ${contextFocusMetaParts(currentFileFocus).map(part => html`<span>${part}</span>`)}
+            </span>
             ${currentFileFocus.route_links && currentFileFocus.route_links.length > 0 ? html`
               <span class="ide-editor-context-route-links" aria-label="Focused context operational links">
                 ${currentFileFocus.route_links.map(link => EditorContextRouteLink(link))}
@@ -245,6 +248,16 @@ export function IdeEditor({
       }
     </div>
   `
+}
+
+function contextFocusMetaParts(focus: IdeContextFocus): ReadonlyArray<string> {
+  const routeCount = focus.route_links?.length ?? 0
+  return [
+    focus.surface,
+    focus.keeper_id ? `keeper ${focus.keeper_id}` : null,
+    `source ${focus.source_id}`,
+    routeCount > 0 ? `${routeCount} links` : null,
+  ].filter((part): part is string => part !== null)
 }
 
 function EditorContextRouteLink(link: IdeContextRouteLink) {

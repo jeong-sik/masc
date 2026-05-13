@@ -1,7 +1,7 @@
 // @ts-nocheck
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
-import { borderForStatus, buildElements, stylesheet } from "./git-graph-view"
+import { borderForStatus, buildElements, findGitGraphRefMatches, stylesheet } from "./git-graph-view"
 import type { GitGraphResponse } from "../api/git-graph"
 
 type StyleBlock = { selector: string; style: Record<string, unknown> }
@@ -138,6 +138,23 @@ describe("buildElements", () => {
     expect(n2!.classes).toBe("commit dirty conflict")
   })
 
+  it("marks nodes that match the route-focused git ref", () => {
+    const elements = buildElements(baseGraph, { focusRef: "abc123" })
+    const focused = elements.find(el => el.data.id === "n1")
+    const other = elements.find(el => el.data.id === "n2")
+
+    expect(focused!.data.routeFocus).toBe(true)
+    expect(focused!.classes).toContain("route-focus")
+    expect(other!.data.routeFocus).toBe(false)
+    expect(other!.classes).not.toContain("route-focus")
+  })
+
+  it("finds git graph nodes by full branch or short sha", () => {
+    expect(findGitGraphRefMatches(baseGraph, "main").map(node => node.id)).toEqual(["n1"])
+    expect(findGitGraphRefMatches(baseGraph, "abc").map(node => node.id)).toEqual(["n1"])
+    expect(findGitGraphRefMatches(baseGraph, "missing")).toEqual([])
+  })
+
   it("filters edges whose source or target is missing from nodes", () => {
     const graph: GitGraphResponse = {
       ...baseGraph,
@@ -226,6 +243,14 @@ describe("stylesheet", () => {
     const conflict = styleBlock(ss, "node.conflict")
     expect(conflict).toBeDefined()
     expect(conflict?.style?.["border-width"]).toBe(4)
+  })
+
+  it("has route focus node style", () => {
+    const ss = stylesheet()
+    const focused = styleBlock(ss, "node.route-focus")
+    expect(focused).toBeDefined()
+    expect(focused?.style?.["border-color"]).toBe("#d4a14a")
+    expect(focused?.style?.["border-width"]).toBe(4)
   })
 
   it("has parent node style", () => {

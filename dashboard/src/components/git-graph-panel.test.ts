@@ -2,6 +2,13 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { h, type ComponentChildren } from 'preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
+import { signal } from '@preact/signals'
+
+const routeSignal = signal<{ tab: string; params: Record<string, string>; postId: string | null }>({
+  tab: 'workspace',
+  params: { section: 'repositories', view: 'graph' },
+  postId: null,
+})
 
 vi.mock('./git-graph-store', () => {
   const mockState = { value: { data: null, loading: false, error: null } }
@@ -14,6 +21,19 @@ vi.mock('./git-graph-store', () => {
 
 vi.mock('./git-graph-view', () => ({
   GitGraphView: () => h('div', { 'data-testid': 'git-graph-view' }, 'GitGraphView'),
+  findGitGraphRefMatches: (
+    graph: GitGraphResponse,
+    focusRef: string | null | undefined,
+  ) => {
+    const normalized = focusRef?.trim().toLowerCase()
+    if (!normalized) return []
+    return graph.nodes.filter(node => {
+      const sha = node.sha?.trim().toLowerCase()
+      if (sha && (sha === normalized || sha.startsWith(normalized))) return true
+      return [node.branch, node.label, node.detail]
+        .some(value => value?.trim().toLowerCase() === normalized)
+    })
+  },
 }))
 
 vi.mock('../api/repositories', () => ({
@@ -45,6 +65,13 @@ vi.mock('../api/repositories', () => ({
       updated_at: null,
     },
   ])),
+}))
+
+vi.mock('../router', () => ({
+  get route() { return routeSignal },
+  replaceRoute: vi.fn((tab: string, params?: Record<string, string>) => {
+    routeSignal.value = { tab, params: params ?? {}, postId: null }
+  }),
 }))
 
 vi.mock('./common/feedback-state', () => ({
@@ -116,6 +143,11 @@ describe('GitGraphPanel', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     gitGraphResource.state.value = { data: null, loading: false, error: null }
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph' },
+      postId: null,
+    }
     vi.clearAllMocks()
   })
 
@@ -250,6 +282,98 @@ describe('GitGraphPanel', () => {
     expect(container.querySelector('[data-testid="git-graph-context-strip"]')).not.toBeNull()
     expect(container.textContent).toContain('Current checkout')
     expect(container.textContent).toContain('main')
+  })
+
+  it('renders git ref route focus with matched graph nodes', () => {
+    gitGraphResource.state.value = {
+      data: makeGraph({
+        repos: [makeRepo()],
+        nodes: [
+          {
+            id: 'commit-1',
+            kind: 'commit',
+            label: 'commit abcdef1234',
+            repo_id: 'repo-1',
+            agent_id: null,
+            color: null,
+            status: 'current',
+            conflict: false,
+            sha: 'abcdef1234567890',
+            branch: null,
+            detail: null,
+          },
+        ],
+        stats: { repo_count: 1, agent_count: 0, branch_count: 0, commit_count: 1, dirty_count: 0, conflict_count: 0 },
+        warnings: [],
+        generated_at: '',
+      }),
+      loading: false,
+      error: null,
+    }
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph', ref: 'abcdef' },
+      postId: null,
+    }
+
+    render(h(GitGraphPanel, null), container)
+
+    expect(container.querySelector('[data-testid="git-graph-route-focus"]')).not.toBeNull()
+    expect(container.textContent).toContain('REF abcdef')
+    expect(container.textContent).toContain('1 node match')
+    expect(container.textContent).toContain('commit abcdef1234')
+    expect(container.textContent).toContain('abcdef1234')
+  })
+
+  it('renders PR route focus even when the graph has no PR node', () => {
+    gitGraphResource.state.value = {
+      data: makeGraph({
+        repos: [makeRepo()],
+        stats: { repo_count: 1, agent_count: 0, branch_count: 0, commit_count: 0, dirty_count: 0, conflict_count: 0 },
+        warnings: [],
+        generated_at: '',
+      }),
+      loading: false,
+      error: null,
+    }
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph', pr: '15035' },
+      postId: null,
+    }
+
+    render(h(GitGraphPanel, null), container)
+
+    expect(container.querySelector('[data-testid="git-graph-route-focus"]')).not.toBeNull()
+    expect(container.textContent).toContain('PR 15035')
+    expect(container.textContent).toContain('route received')
+  })
+
+  it('clears PR and git ref route focus while preserving graph route params', () => {
+    gitGraphResource.state.value = {
+      data: makeGraph({
+        repos: [makeRepo()],
+        stats: { repo_count: 1, agent_count: 0, branch_count: 0, commit_count: 0, dirty_count: 0, conflict_count: 0 },
+        warnings: [],
+        generated_at: '',
+      }),
+      loading: false,
+      error: null,
+    }
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph', pr: '15035', ref: 'abcdef' },
+      postId: null,
+    }
+
+    render(h(GitGraphPanel, null), container)
+    const clearButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      button => button.textContent?.includes('CLEAR'),
+    )
+    expect(clearButton).not.toBeUndefined()
+    clearButton!.click()
+
+    expect(routeSignal.value.params).toEqual({ section: 'repositories', view: 'graph' })
   })
 
   it('renders repository selector from configured repositories', async () => {

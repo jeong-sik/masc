@@ -104,6 +104,39 @@ describe('IdeActivityMock', () => {
     })
   })
 
+  it('ignores non-positive numeric payload ids when deriving context links', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        events: [{
+          seq: 1,
+          ts_ms: 100,
+          ts_iso: '2026-05-05T10:00:00Z',
+          room_id: 'run-default',
+          kind: 'telemetry.turn',
+          actor: { kind: 'keeper', id: 'sangsu' },
+          subject: { kind: 'log', id: 'turn-1' },
+          payload: {
+            file_path: 'lib/runtime.ml',
+            line: 4,
+            comment_number: 0,
+            pr_number: 0,
+            log_id: 'turn-1',
+          },
+          tags: [],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
+        .map(node => node.textContent)
+      expect(surfaces).toEqual(['Goal0', 'Task0', 'Board0', 'Comment0', 'PR0', 'Git0', 'Log1'])
+    })
+  })
+
   it('derives a compact run progress summary from activity events', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-05T10:01:30Z'))

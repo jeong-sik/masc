@@ -207,7 +207,9 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function numberString(value: unknown): string | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : undefined
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? String(value)
+    : undefined
 }
 
 function positiveInteger(value: unknown): number | undefined {

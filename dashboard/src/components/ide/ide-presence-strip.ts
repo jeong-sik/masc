@@ -8,7 +8,7 @@ import {
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
-import { activeIdeFile } from './ide-shell'
+import { activeIdeFile } from './ide-state'
 
 const FALLBACK_PRESENCE: KeeperPresenceSnapshot = {
   runtime_id: 'local',

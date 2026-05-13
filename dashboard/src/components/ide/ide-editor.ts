@@ -19,6 +19,8 @@ import {
   lineNumberExt,
   blameExtensions,
   keeperLineSelectExt,
+  contextFocusLineExt,
+  focusEditorContextLine,
   pushOwnership,
   internalDocumentSync,
   syntaxHighlightExt,
@@ -33,6 +35,8 @@ import {
   type KeeperPresenceSnapshot,
   type KeeperPresenceStatus,
 } from './keeper-presence-store'
+import { openIdeContextRouteLink, type IdeContextRouteLink } from './ide-context-lens'
+import { ideContextFocus, type IdeContextFocus } from './ide-state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -92,10 +96,26 @@ export function IdeEditor({
 }: IdeEditorProps) {
   const [, forceRender] = useState(0)
 
-  useEffect(() => documentStore.subscribe(() => forceRender(tick => tick + 1)), [documentStore])
-  useEffect(() => ownershipStore.subscribe(() => forceRender(tick => tick + 1)), [ownershipStore])
-  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1)), [])
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1)), [])
+  useEffect(() => {
+    const unsub = documentStore.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [documentStore])
+  useEffect(() => {
+    const unsub = ownershipStore.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [ownershipStore])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = ideContextFocus.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const document = documentStore.document()
   const lines = documentStore.lines()
@@ -103,6 +123,8 @@ export function IdeEditor({
   const keepers = ownershipStore.knownKeepers()
   const overlay = cursorOverlaySignal.value
   const presence = globalPresenceSnapshot.value
+  const contextFocus = ideContextFocus.value
+  const currentFileFocus = contextFocus?.file_path === document.file_path ? contextFocus : null
   const activeCursors = keepersWithCursorInFile(overlay.cursors, document.file_path)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
   const currentDiffRows = diffRows()
@@ -144,6 +166,24 @@ export function IdeEditor({
         <span style=${{ marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ${lines.length} lines · ownership · ${keepers.length} keepers · ${activeLayerKinds.length} layers
         </span>
+        ${currentFileFocus ? html`
+          <div
+            role="status"
+            class="ide-editor-context-focus"
+            data-testid="ide-context-focus-status"
+            title=${currentFileFocus.file_path}
+          >
+            <span class="ide-editor-context-focus-label">
+              Focused ${currentFileFocus.line !== undefined ? `L${currentFileFocus.line}` : currentFileFocus.surface}
+              · ${currentFileFocus.label}
+            </span>
+            ${currentFileFocus.route_links && currentFileFocus.route_links.length > 0 ? html`
+              <span class="ide-editor-context-route-links" aria-label="Focused context operational links">
+                ${currentFileFocus.route_links.map(link => EditorContextRouteLink(link))}
+              </span>
+            ` : null}
+          </div>
+        ` : null}
         ${activeCursors.length > 0 ? html`
           <ul
             role="status"
@@ -200,9 +240,25 @@ export function IdeEditor({
               showBlame=${activeView === 'blame'}
               keepers=${keepers}
               onKeeperLineSelect=${onKeeperLineSelect}
+              contextFocus=${currentFileFocus}
             />`
       }
     </div>
+  `
+}
+
+function EditorContextRouteLink(link: IdeContextRouteLink) {
+  return html`
+    <button
+      key=${link.id}
+      type="button"
+      class="ide-editor-context-route-link"
+      title=${link.evidence}
+      aria-label=${`Open ${link.evidence}`}
+      onClick=${() => openIdeContextRouteLink(link)}
+    >
+      ${link.label}
+    </button>
   `
 }
 
@@ -483,6 +539,7 @@ function CodeMirrorEditor({
   showBlame,
   keepers,
   onKeeperLineSelect,
+  contextFocus,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
@@ -490,6 +547,7 @@ function CodeMirrorEditor({
   readonly keepers: ReadonlyArray<string>
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
   readonly annotations?: ReadonlyArray<IdeAnnotation>
+  readonly contextFocus?: IdeContextFocus | null
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
@@ -523,6 +581,7 @@ function CodeMirrorEditor({
           lang,
           lspExtension({ filePath: mountDocument.file_path }),
           keeperCursorExtension(),
+          contextFocusLineExt(),
           EditorView.updateListener.of((update) => {
             const sel = getSelectedAnnotation(update.view)
             if (sel !== prevAnnRef.current) {
@@ -580,10 +639,33 @@ function CodeMirrorEditor({
     pushOwnership(view, ownership)
   }, [ownership, ready, showBlame])
 
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready) return
+    if (!contextFocus || contextFocus.file_path !== documentStore.document().file_path) {
+      focusEditorContextLine(view, undefined)
+      return
+    }
+    focusEditorContextLine(view, contextFocus.line)
+  }, [
+    contextFocus?.activated_at_ms,
+    contextFocus?.file_path,
+    contextFocus?.line,
+    document.file_path,
+    documentStore,
+    ready,
+  ])
+
   // Subscribe to store changes for re-render
   const [, forceRender] = useState(0)
-  useEffect(() => documentStore.subscribe(() => forceRender(n => n + 1)), [documentStore])
-  useEffect(() => ownershipStore.subscribe(() => forceRender(n => n + 1)), [ownershipStore])
+  useEffect(() => {
+    const unsub = documentStore.subscribe(() => forceRender(n => n + 1))
+    return () => unsub()
+  }, [documentStore])
+  useEffect(() => {
+    const unsub = ownershipStore.subscribe(() => forceRender(n => n + 1))
+    return () => unsub()
+  }, [ownershipStore])
 
   return html`
     <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>

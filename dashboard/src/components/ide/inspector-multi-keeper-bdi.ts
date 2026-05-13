@@ -8,7 +8,7 @@ import {
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import { useSignalValue } from './use-signal-value'
-import { activeIdeFile } from './ide-shell'
+import { activeIdeFile } from './ide-state'
 import {
   pinKeeper,
   pinnedKeepers,

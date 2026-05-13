@@ -5,16 +5,21 @@ import { fireEvent, waitFor } from '@testing-library/preact'
 import { currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
+import { activeIdeFile, focusIdeContextAnchor, ideContextFocus } from './ide-state'
 
 describe('IdeEditor', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
     container = document.createElement('div')
+    activeIdeFile.value = 'package.json'
+    ideContextFocus.value = null
   })
 
   afterEach(() => {
     render(null, container)
+    ideContextFocus.value = null
+    window.location.hash = ''
   })
 
   it('syncs CodeMirror when file content loads after initial mount', async () => {
@@ -152,5 +157,97 @@ describe('IdeEditor', () => {
     expect(container.textContent).toContain('2 layers')
     expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
       .toContain('Trace')
+  })
+
+  it('counts loaded annotations in the notes overlay summary', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['notes']),
+        annotations: [{
+          id: 'ann-1',
+          file_path: 'runtime.ts',
+          line_start: 1,
+          line_end: 1,
+          keeper_id: 'sangsu',
+          kind: 'Comment',
+          content: 'Keep this task linked to the line',
+          goal_id: 'goal-1',
+          task_id: 'task-1',
+          created_at_ms: 1,
+          updated_at_ms: 1,
+        }],
+      }),
+      container,
+    )
+
+    expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
+      .toContain('1 note')
+  })
+
+  it('shows and highlights the focused context line from the shared IDE signal', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst task = runtime + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-content')).not.toBeNull()
+    })
+
+    focusIdeContextAnchor({
+      file_path: 'runtime.ts',
+      line: 2,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      keeper_id: 'sangsu',
+      route_links: [
+        {
+          id: 'task:task-runtime',
+          label: 'Task',
+          tab: 'workspace',
+          params: { section: 'planning', view: 'default', task: 'task-runtime' },
+          evidence: 'Task task-runtime',
+        },
+        {
+          id: 'telemetry:event-log',
+          label: 'Telemetry',
+          tab: 'monitoring',
+          params: { section: 'fleet-health', view: 'event-log' },
+          evidence: 'Fleet telemetry event log',
+        },
+      ],
+    })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-context-focus-status"]')?.textContent)
+        .toContain('Focused L2')
+      expect(container.querySelector('.cm-masc-context-focus')).not.toBeNull()
+    })
+    const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-editor-context-route-link')]
+    expect(routeLinks.map(link => link.textContent)).toEqual(['Task', 'Telemetry'])
+    fireEvent.click(routeLinks.find(link => link.textContent === 'Telemetry')!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log')
   })
 })

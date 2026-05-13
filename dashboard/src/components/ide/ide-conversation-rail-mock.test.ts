@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { waitFor } from '@testing-library/preact'
-import { IdeConversationRailMock, replayRailItems } from './ide-conversation-rail-mock'
+import { fireEvent, waitFor } from '@testing-library/preact'
+import { IdeConversationRailMock, postsToAnchoredThreads, replayRailItems } from './ide-conversation-rail-mock'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  activeIdeFile.value = 'package.json'
+  ideContextFocus.value = null
 })
 
 describe('IdeConversationRailMock', () => {
@@ -21,6 +24,84 @@ describe('IdeConversationRailMock', () => {
     expect(container.textContent).toContain('REACTION THREAD')
     expect(container.textContent).toContain('0')
     expect(container.textContent).toContain('no conversation activity')
+  })
+
+  it('normalizes explicit board post file references into anchored threads', () => {
+    const threads = postsToAnchoredThreads([
+      {
+        id: 'thread-line',
+        title: 'Review lib/runtime.ml:42',
+        body: 'question fn:run about this line',
+        author_identity: 'scholar',
+        votes: 0,
+        comment_count: 2,
+        created_at_iso: '2026-05-05T10:00:00Z',
+      },
+      {
+        id: 'thread-file',
+        title: 'File-level note',
+        body: 'looks good',
+        author_identity: 'sangsu',
+        votes: 1,
+        comment_count: 0,
+        created_at_iso: '2026-05-05T10:01:00Z',
+      },
+      {
+        id: 'thread-windows-path',
+        title: 'Review ./lib\\runtime.ml:43',
+        body: 'question about normalized file path',
+        author_identity: 'scholar',
+        votes: 0,
+        comment_count: 1,
+        created_at_iso: '2026-05-05T10:02:00Z',
+      },
+      {
+        id: 'thread-absolute-path',
+        title: 'Review /workspace/lib/runtime.ml:44',
+        body: 'should not anchor unsafe absolute paths',
+        author_identity: 'scholar',
+        votes: 0,
+        comment_count: 1,
+        created_at_iso: '2026-05-05T10:03:00Z',
+      },
+    ])
+
+    expect(threads).toHaveLength(2)
+    expect(threads[0]).toMatchObject({
+      id: 'thread-line',
+      anchor: {
+        file_path: 'lib/runtime.ml',
+        line_start: 42,
+        line_end: 42,
+        symbol_hint: 'fn:run',
+      },
+      reply_count: 2,
+    })
+    expect(threads[1]).toMatchObject({
+      id: 'thread-windows-path',
+      anchor: {
+        file_path: 'lib/runtime.ml',
+        line_start: 43,
+        line_end: 43,
+      },
+      reply_count: 1,
+    })
+  })
+
+  it('does not reanchor generic board posts when the active file changes', () => {
+    const posts = [{
+      id: 'thread-generic',
+      title: 'File-level note',
+      body: 'looks good',
+      author_identity: 'sangsu',
+      votes: 1,
+      comment_count: 0,
+      created_at_iso: '2026-05-05T10:01:00Z',
+    }]
+
+    expect(postsToAnchoredThreads(posts)).toEqual([])
+    activeIdeFile.value = 'lib/runtime.ml'
+    expect(postsToAnchoredThreads(posts)).toEqual([])
   })
 
   it('orders thread, decision, and cascade replay items on one timeline', () => {
@@ -143,6 +224,51 @@ describe('IdeConversationRailMock', () => {
     expect(container.textContent).not.toContain('new thread body')
     expect(container.textContent).not.toContain('turn_completed')
     expect(container.textContent).not.toContain('primary')
+
+    render(null, container)
+  })
+
+  it('focuses the editor line when a line-anchored board thread is clicked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/v1/board')) {
+        return new Response(JSON.stringify([{
+          id: 'thread-line',
+          title: 'Review lib/runtime.ml:42',
+          body: 'question fn:run about this line',
+          author_identity: 'scholar',
+          votes: 0,
+          comment_count: 2,
+          created_at_iso: '2026-05-05T10:00:00Z',
+        }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
+        return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+        return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response('{}', { status: 404 })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeConversationRailMock, {}), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('question fn:run about this line')
+    })
+
+    const card = container.querySelector<HTMLButtonElement>('.ide-conversation-card')
+    expect(card).not.toBeNull()
+    fireEvent.click(card!)
+
+    expect(activeIdeFile.value).toBe('lib/runtime.ml')
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 42,
+      surface: 'QUESTION',
+      source_id: 'thread-thread-line',
+      keeper_id: 'scholar',
+    })
 
     render(null, container)
   })

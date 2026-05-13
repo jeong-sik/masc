@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
 import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
 import { bridgeDecisionsToTrace } from './decision-log-trace-bridge'
@@ -13,18 +13,23 @@ import {
   fetchCascadeStrategyTrace,
   type CascadeStrategyTraceEvent,
 } from '../../api/dashboard-cascade'
-import type { ThreadKind } from './anchored-thread-rail-store'
+import {
+  createAnchoredThreadRailStore,
+  type AnchoredThread,
+  type ThreadKind,
+} from './anchored-thread-rail-store'
 import {
   AuditReplaySlider,
   filterReplayEvents,
   type AuditReplayEvent,
 } from './audit-replay-slider'
-import { activeIdeFile } from './ide-shell'
+import { publishIdeConversationThreads } from './ide-context-bridge'
+import { activeIdeFile, focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 
-interface BoardPost {
+export interface BoardPost {
   readonly id: string
   readonly title: string
   readonly body: string
@@ -118,6 +123,7 @@ function boardKindFromPost(post: BoardPost): ThreadKind {
 }
 
 export function IdeConversationRailMock() {
+  const threadStore = useMemo(() => createAnchoredThreadRailStore(activeIdeFile.value), [])
   const [posts, setPosts] = useState<ReadonlyArray<BoardPost>>(EMPTY_POSTS)
   const [decisions, setDecisions] = useState<ReadonlyArray<KeeperDecision>>(EMPTY_DECISIONS)
   const [cascadeEvents, setCascadeEvents] = useState<ReadonlyArray<CascadeStrategyTraceEvent>>(EMPTY_CASCADE)
@@ -158,6 +164,24 @@ export function IdeConversationRailMock() {
     const unsub = activeKeeperName.subscribe(name => setKeeperName(name))
     return () => unsub()
   }, [])
+  useEffect(() => {
+    const publish = () => {
+      publishIdeConversationThreads(threadStore.filePath(), threadStore.visibleThreads())
+      forceRender((t: number) => t + 1)
+    }
+    const unsub = threadStore.subscribe(publish)
+    publish()
+    return () => unsub()
+  }, [threadStore])
+  useEffect(() => {
+    threadStore.reset(activeFile)
+    threadStore.seed(postsToAnchoredThreads(posts))
+    publishIdeConversationThreads(threadStore.filePath(), threadStore.visibleThreads())
+  }, [activeFile, posts, threadStore])
+  useEffect(() => {
+    threadStore.setReplayUntilMs(replayUntilMs)
+    publishIdeConversationThreads(threadStore.filePath(), threadStore.visibleThreads())
+  }, [replayUntilMs, threadStore])
 
   // RFC-0028 PR-δ anchored-thread producer: each fetched post becomes a
   // keeper-trace event the first time it is observed, deduplicated by id
@@ -192,6 +216,9 @@ export function IdeConversationRailMock() {
     ? replayItems
     : replayItems.filter(item => visibleItemIds.has(replayItemId(item)))
   const visibleCounts = sourceCounts(visibleItems)
+  const lineAnchoredThreads = threadStore.visibleThreads().filter(thread =>
+    thread.anchor.line_start !== null,
+  )
 
   const presence = globalPresenceSnapshot.value
   const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
@@ -217,6 +244,10 @@ export function IdeConversationRailMock() {
         <span>${keeperName ? `@${keeperName}` : 'all keepers'}</span>
         <span title=${activeFile}>${activeFile}</span>
       </div>
+      <div class="ide-rail-context-row" aria-label="Conversation context anchors">
+        <span>${threadStore.visibleThreads().length} file threads</span>
+        <span>${lineAnchoredThreads.length} line anchors</span>
+      </div>
       <${AuditReplaySlider}
         events=${replayEvents}
         value=${replayUntilMs}
@@ -237,6 +268,14 @@ export function IdeConversationRailMock() {
       </ol>
     </div>
   `
+}
+
+export function postsToAnchoredThreads(
+  posts: ReadonlyArray<BoardPost>,
+): ReadonlyArray<AnchoredThread> {
+  return posts
+    .map(postToAnchoredThread)
+    .filter((thread): thread is AnchoredThread => thread !== null)
 }
 
 export function replayRailItems(
@@ -276,6 +315,49 @@ function replayEventsForItems(items: ReadonlyArray<ReplayRailItem>): AuditReplay
     id: replayItemId(item),
     timestamp_ms: item.timestamp_ms,
   }))
+}
+
+function postToAnchoredThread(post: BoardPost): AnchoredThread | null {
+  const createdMs = parseIsoToMs(post.created_at_iso)
+  if (!Number.isFinite(createdMs)) return null
+  const anchor = anchorFromPost(post)
+  if (!anchor) return null
+  return {
+    id: post.id,
+    kind: boardKindFromPost(post),
+    author_keeper_id: post.author_identity || 'keeper',
+    anchor,
+    body: post.body || post.title || 'board thread',
+    created_ms: createdMs,
+    resolved: false,
+    reply_count: Number.isSafeInteger(post.comment_count) ? Math.max(0, post.comment_count) : 0,
+  }
+}
+
+function anchorFromPost(post: BoardPost): AnchoredThread['anchor'] | null {
+  const text = `${post.title ?? ''}\n${post.body ?? ''}`
+  const lineRef = text.match(/(?:^|\s)([A-Za-z0-9_./\\-]+\.[A-Za-z0-9_]+):([1-9][0-9]*)\b/)
+  if (!lineRef) return null
+  const filePath = normalizePostAnchorFilePath(lineRef[1]!)
+  if (!filePath) return null
+  const line = lineRef?.[2] ? Number.parseInt(lineRef[2], 10) : null
+  return {
+    file_path: filePath,
+    line_start: line,
+    line_end: line,
+    symbol_hint: symbolHintFromText(text),
+  }
+}
+
+function normalizePostAnchorFilePath(rawFilePath: string): string | null {
+  const withoutDotPrefix = rawFilePath.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '')
+  return normalizeIdeContextFilePath(withoutDotPrefix)
+}
+
+function symbolHintFromText(text: string): string | undefined {
+  const match = text.match(/\b(fn|token|if|goal|task|pr):([A-Za-z0-9_./-]+)/)
+  if (!match) return undefined
+  return `${match[1]}:${match[2]}`
 }
 
 function sourceCounts(items: ReadonlyArray<ReplayRailItem>) {
@@ -325,6 +407,8 @@ function PostCard(
   const cursor = overlay.cursors.get(post.author_identity)
   const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
+  const thread = postToAnchoredThread(post)
+  const anchor = thread?.anchor ?? null
 
   return html`
     <li class="ide-rail-item">
@@ -332,7 +416,18 @@ function PostCard(
         class="ide-conversation-card"
         type="button"
         aria-current=${focused ? 'true' : undefined}
-        onClick=${onFocus}
+        onClick=${() => {
+          onFocus()
+          if (!anchor) return
+          focusIdeContextAnchor({
+            file_path: anchor.file_path,
+            line: anchor.line_start ?? undefined,
+            surface: KIND_LABEL[kind],
+            label: bodyText || post.title || 'board thread',
+            source_id: `thread-${post.id}`,
+            keeper_id: post.author_identity || undefined,
+          })
+        }}
         style=${{
           '--ide-conversation-bg': focused ? 'var(--color-bg-muted)' : 'var(--color-bg-elevated)',
           borderLeft: `2px solid ${keeperColor}`,

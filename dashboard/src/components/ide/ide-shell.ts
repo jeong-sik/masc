@@ -103,6 +103,20 @@ export function IdeShell() {
   const coordinator = useMemo(() => createIdeDataCoordinator(), [])
 
   useEffect(() => () => coordinator.dispose(), [coordinator])
+  const annotations = useSubscribedSnapshot(
+    coordinator.annotations,
+    coordinator.subscribeAnnotations,
+  )
+  const diffRows = useSubscribedSnapshot(
+    coordinator.diffRows,
+    coordinator.subscribeDiffRows,
+  )
+  const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
+
+  useEffect(() => {
+    const unsubscribe = activeIdeFile.subscribe(setActiveFilePath)
+    return () => unsubscribe()
+  }, [])
 
   const activeFocus = focusFromRoute(route.value.params.focus)
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
@@ -225,12 +239,12 @@ export function IdeShell() {
             activeLayers=${activeLayers}
             documentStore=${coordinator.documentStore}
             ownershipStore=${coordinator.ownershipStore}
-            diffRows=${coordinator.diffRows}
+            diffRows=${() => diffRows}
             findOpen=${findOpen}
             onFindOpen=${handleFindOpen}
             onFindClose=${handleFindClose}
             onKeeperLineSelect=${pinInspectorKeeper}
-            annotations=${coordinator.annotations}
+            annotations=${annotations}
           />
           <${OverlayKeeperTrace} active=${activeLayers.has('keeper-trace')} />
         </div>
@@ -260,7 +274,11 @@ export function IdeShell() {
           ? null
           : html`
             <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
-              <${IdeActivityMock} />
+              <${IdeActivityMock}
+                activeFile=${activeFilePath}
+                annotations=${annotations}
+                diffRows=${diffRows}
+              />
             </div>
           `}
       </div>
@@ -270,6 +288,31 @@ export function IdeShell() {
       <${IdeInterjectMock} keeperName=${terminalKeeper} />
     </section>
   `
+}
+
+function useSubscribedSnapshot<T>(
+  read: () => ReadonlyArray<T>,
+  subscribe: (listener: () => void) => () => void,
+): ReadonlyArray<T> {
+  const [value, setValue] = useState<ReadonlyArray<T>>(() => read())
+
+  useEffect(() => {
+    let current = read()
+    setValue(previous => previous === current ? previous : current)
+
+    let sawInitialSnapshot = false
+    return subscribe(() => {
+      const next = read()
+      if (!sawInitialSnapshot) {
+        sawInitialSnapshot = true
+        if (next === current) return
+      }
+      current = next
+      setValue(previous => previous === next ? previous : next)
+    })
+  }, [read, subscribe])
+
+  return value
 }
 
 function IdeReviewFocusStrip({ activeLayers }: { readonly activeLayers: ReadonlySet<string> }) {

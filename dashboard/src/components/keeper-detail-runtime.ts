@@ -932,6 +932,19 @@ function runtimeTraceMemoryEvidence(trace: KeeperRuntimeTraceResponse): string {
   ].join(' · ')
 }
 
+function artifactEvidenceLabel(artifacts: readonly { present: boolean }[]): string {
+  if (artifacts.length === 0) return '0/0'
+  const present = artifacts.filter(item => item.present).length
+  return `${present}/${artifacts.length}`
+}
+
+function artifactEvidenceTitle(artifacts: readonly { kind: string; path: string; present: boolean }[]): string {
+  if (artifacts.length === 0) return 'no linked artifacts'
+  return artifacts
+    .map(item => `${item.present ? 'present' : 'missing'} ${item.kind}: ${item.path || '-'}`)
+    .join('\n')
+}
+
 function lensGapTone(severity: string): StatusChipTone {
   switch (severity) {
     case 'bad':
@@ -995,6 +1008,7 @@ export function RuntimeLensSection({
   const context = lens.axes.context
   const memory = lens.axes.memory
   const clock = lens.turn_clock
+  const artifacts = trace.linked_artifacts
   const swimlanes = [
     lens.swimlanes.keeper,
     lens.swimlanes.masc_policy_cascade,
@@ -1016,8 +1030,30 @@ export function RuntimeLensSection({
         <${SignalRow} label="context compaction" value=${`${context.context_compacted_count}/${context.context_compact_started_count}`} />
         <${SignalRow} label="memory flush" value=${`${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />
+        <${SignalRow}
+          label="manifest file"
+          value=${trace.manifest_path_present ? 'present' : 'missing'}
+          title=${trace.manifest_path}
+        />
         <${SignalRow} label="manifest rows" value=${`${trace.manifest_returned_rows}/${trace.manifest_total_rows}`} />
         <${SignalRow} label="receipt rows" value=${trace.receipt_returned_rows} />
+        <${SignalRow} label="manifest raw rows" value=${trace.manifest_rows.length} />
+        <${SignalRow} label="receipt raw rows" value=${trace.receipts.length} />
+        <${SignalRow}
+          label="receipt artifacts"
+          value=${artifactEvidenceLabel(artifacts.receipts)}
+          title=${artifactEvidenceTitle(artifacts.receipts)}
+        />
+        <${SignalRow}
+          label="checkpoint artifacts"
+          value=${artifactEvidenceLabel(artifacts.checkpoints)}
+          title=${artifactEvidenceTitle(artifacts.checkpoints)}
+        />
+        <${SignalRow}
+          label="tool log artifacts"
+          value=${artifactEvidenceLabel(artifacts.tool_call_logs)}
+          title=${artifactEvidenceTitle(artifacts.tool_call_logs)}
+        />
         <${SignalRow} label="provider attempts" value=${`${trace.provider_attempts.started_count}/${trace.provider_attempts.finished_count}`} />
         <${SignalRow} label="provider terminal" value=${runtimeTraceProviderTerminal(trace)} />
         <${SignalRow} label="event ids" value=${runtimeTraceEventIds(trace)} />

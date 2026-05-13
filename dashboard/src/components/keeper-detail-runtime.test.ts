@@ -530,6 +530,34 @@ describe('RuntimeLensSection', () => {
         ],
       },
       health: 'partial',
+      linked_artifacts: {
+        receipts: [
+          {
+            kind: 'execution_receipt',
+            path: '/tmp/receipt.jsonl',
+            present: true,
+            file_stat: { size: 120 },
+          },
+        ],
+        checkpoints: [
+          {
+            kind: 'oas_checkpoint',
+            path: '/tmp/checkpoint.json',
+            present: false,
+            file_stat: null,
+          },
+        ],
+        tool_call_logs: [
+          {
+            kind: 'tool_call_log',
+            path: '/tmp/tool-calls.jsonl',
+            present: true,
+            file_stat: { size: 80 },
+          },
+        ],
+      },
+      manifest_rows: [{ event: 'Turn_started', trace_id: 'trace-lens' }],
+      receipts: [{ terminal_reason_code: 'completed' }],
       stale_reason: null,
     }
   }
@@ -631,6 +659,14 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('manifest rows')).toBeInTheDocument()
     expect(screen.getByText('6/6')).toBeInTheDocument()
     expect(screen.getByText('receipt rows')).toBeInTheDocument()
+    expect(screen.getByText('manifest file')).toBeInTheDocument()
+    expect(screen.getByText('manifest raw rows')).toBeInTheDocument()
+    expect(screen.getByText('receipt raw rows')).toBeInTheDocument()
+    expect(screen.getByText('receipt artifacts')).toBeInTheDocument()
+    expect(screen.getByText('checkpoint artifacts')).toBeInTheDocument()
+    expect(screen.getByText('tool log artifacts')).toBeInTheDocument()
+    expect(screen.getAllByText('1/1').length).toBeGreaterThan(1)
+    expect(screen.getByText('0/1')).toBeInTheDocument()
     expect(screen.getByText('provider attempts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
     expect(screen.getByText('provider terminal')).toBeInTheDocument()

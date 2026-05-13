@@ -239,7 +239,7 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
             asNumber(executionRaw.provider_attempt_count) ?? null,
           provider_fallback_applied:
             asBoolean(executionRaw.provider_fallback_applied) ?? null,
-          provider_selected_model: null,
+          provider_selected_model: asString(executionRaw.provider_selected_model) ?? null,
           cascade_outcome: asString(executionRaw.cascade_outcome) ?? null,
           sandbox_summary: asString(executionRaw.sandbox_summary) ?? null,
           sandbox_root: asString(executionRaw.sandbox_root) ?? null,

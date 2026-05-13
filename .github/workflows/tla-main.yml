@@ -13,6 +13,13 @@ name: TLA+ Main Verification
 #
 # This workflow has its own concurrency group keyed by sha, so each commit
 # gets its own slot and runs to completion regardless of subsequent pushes.
+#
+# Sharding (2026-05-13): The monolithic `check-clean` + `check-buggy`
+# pair previously took ~22 min wall-clock on every main push (run
+# 25800347971 sampled 100 specs / 1178s, but 5 specs accounted for 1107s).
+# The matrix below partitions specs across 4 GitHub-hosted runners using
+# Makefile shard targets, dropping wall-clock to ~7-8 min while keeping
+# coverage identical (`check-matrix-coverage` is the gate).
 
 on:
   push:
@@ -29,10 +36,29 @@ permissions:
   contents: read
 
 jobs:
-  tla-specs:
-    name: TLA+ Model Checking (main)
+  coverage:
+    name: TLA+ matrix coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Verify every spec dir is sharded
+        run: make -C specs check-matrix-coverage
+
+  tla-specs:
+    name: TLA+ Model Checking (${{ matrix.shard.name }})
+    needs: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - { name: keeper-state-machine, target: check-keeper }
+          - { name: masc-ecosystem,       target: check-ecosystem }
+          - { name: social-state,         target: check-social }
+          - { name: others,               target: check-others }
 
     steps:
       - name: Checkout
@@ -49,7 +75,5 @@ jobs:
           curl -fsSL -o specs/keeper-state-machine/tla2tools.jar \
             https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 
-      - name: Run TLA+ model checking
-        run: |
-          make -C specs check-clean
-          make -C specs check-buggy
+      - name: Run TLA+ model checking (${{ matrix.shard.name }})
+        run: make -C specs ${{ matrix.shard.target }}

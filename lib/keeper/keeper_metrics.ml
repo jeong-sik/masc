@@ -76,6 +76,7 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
+  | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
   | MetaJsonFailures
   | ToolsOasFailures
@@ -272,6 +273,7 @@ let to_string = function
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
+  | BoardSignalWakeupCappedTotal -> "masc_keeper_board_signal_wakeup_capped_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | MetaJsonFailures -> "masc_keeper_meta_json_failures_total"
   | ToolsOasFailures -> "masc_keeper_tools_oas_failures_total"
@@ -537,6 +539,10 @@ let metric_keeper_generation_lineage_failures =
 
 let metric_keeper_keepalive_signal_failures =
   "masc_keeper_keepalive_signal_failures_total"
+;;
+
+let metric_keeper_board_signal_wakeup_capped_total =
+  "masc_keeper_board_signal_wakeup_capped_total"
 ;;
 
 let metric_keeper_board_signal_no_wake_total = "masc_keeper_board_signal_no_wake_total"

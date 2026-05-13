@@ -201,6 +201,23 @@ let test_generate_compact_contains_keepers () =
   Alcotest.(check bool) "contains KEEPERS line" true (contains output "KEEPERS:");
   cleanup_dir dir
 
+let test_generate_compact_surfaces_board_cap_without_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = test_dir () in
+  let config = Coord_utils.default_config dir in
+  setup_room config;
+  Lib.Prometheus.inc_counter
+    Lib.Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
+    ~labels:[("kind", "task")]
+    ();
+  let output = Lib.Dashboard.generate_compact config in
+  Alcotest.(check bool)
+    "contains board cap diagnostic"
+    true
+    (contains output "BOARD-CAPPED:");
+  cleanup_dir dir
+
 let test_keepers_section_dead_phase () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -274,6 +291,9 @@ let keepers_tests = [
   "keepers section with entry", `Quick, test_keepers_section_with_entry;
   "generate full contains keepers", `Quick, test_generate_full_contains_keepers;
   "generate compact contains keepers", `Quick, test_generate_compact_contains_keepers;
+  ( "generate compact surfaces board cap",
+    `Quick,
+    test_generate_compact_surfaces_board_cap_without_failure );
   "keepers section dead phase", `Quick, test_keepers_section_dead_phase;
   "keepers section with error truncated", `Quick, test_keepers_section_with_error_truncated;
 ]

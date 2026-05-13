@@ -604,6 +604,11 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
       let write_meta_failures =
         Prometheus.metric_total Keeper_metrics.metric_keeper_write_meta_failures |> int_of_float
       in
+      let board_capped =
+        Prometheus.metric_total
+          Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
+        |> int_of_float
+      in
       let tool_failures =
         (Prometheus.metric_total Keeper_metrics.metric_keeper_tool_selection_failures |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.metric_keeper_task_load_failures |> int_of_float)
@@ -672,6 +677,19 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         then Printf.sprintf " | TOOL-ERR: %d" tool_failures
         else ""
       in
-      Printf.sprintf "KEEPERS: %d running / %d dead / %d other | GUARD: %d | META-WRITE-ERR: %d%s"
-        k_running k_dead k_other guard_violations write_meta_failures tool_suffix;
+      let board_suffix =
+        if board_capped > 0
+        then Printf.sprintf " | BOARD-CAPPED: %d" board_capped
+        else ""
+      in
+      Printf.sprintf
+        "KEEPERS: %d running / %d dead / %d other | GUARD: %d | \
+         META-WRITE-ERR: %d%s%s"
+        k_running
+        k_dead
+        k_other
+        guard_violations
+        write_meta_failures
+        tool_suffix
+        board_suffix;
     ]

@@ -68,6 +68,7 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
+  | BoardSignalWakeupCappedTotal
   | BoardSignalNoWakeTotal
   | MetaJsonFailures
   | ToolsOasFailures
@@ -274,6 +275,7 @@ val metric_keeper_fs_failures : string
 val metric_keeper_crash_persistence_failures : string
 val metric_keeper_generation_lineage_failures : string
 val metric_keeper_keepalive_signal_failures : string
+val metric_keeper_board_signal_wakeup_capped_total : string
 val metric_keeper_board_signal_no_wake_total : string
 val metric_keeper_meta_json_failures : string
 val metric_keeper_tools_oas_failures : string

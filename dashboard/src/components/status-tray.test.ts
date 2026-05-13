@@ -97,6 +97,42 @@ describe('summarizeStatusTray', () => {
     })
   })
 
+  it('counts execution receipt evidence even without the top-level attention flag', () => {
+    const summary = summarizeStatusTray({
+      wsOnly: false,
+      sseConnected: true,
+      wsConnected: true,
+      wsReady: true,
+      wsLastEventAt: NOW - 1000,
+      wsEventCount60s: 4,
+      wsLastError: null,
+      reconnectCount: 0,
+      lastDisconnectedAt: 0,
+      keepers: [
+        keeper('gamma', {
+          needs_attention: false,
+          trust: {
+            execution_summary: {
+              tool_contract_result: 'missing_required_tool_use',
+              missing_required_tools: ['keeper_bash'],
+            },
+          },
+        }),
+      ],
+      staleKeeperNames: new Set(),
+      tasks: [],
+      journalEntries: [],
+      unacknowledgedErrors: 0,
+      now: NOW,
+    })
+
+    expect(summary.counts.keeperAttention).toBe(1)
+    expect(summary.items.fleet.tone).toBe('warn')
+    expect(summary.items.fleet.detail).toBe('1 keeper need attention')
+    expect(summary.items.attention.tone).toBe('warn')
+    expect(summary.items.attention.value).toBe('1')
+  })
+
   it('uses the first journal entry for activity state from newest-first snapshots', () => {
     const summary = summarizeStatusTray({
       wsOnly: false,

@@ -71,11 +71,21 @@ let find_registry_entry (provider_id : string) :
      | Some cascade_prefix -> Llm_provider.Provider_registry.find registry cascade_prefix
      | None -> None)
 
+let credential_env_candidates = function
+  | "OLLAMA_CLOUD_API_KEY" -> [ "OLLAMA_CLOUD_API_KEY"; "OLLAMA_API_KEY" ]
+  | key -> [ key ]
+
+let api_key_from_env key =
+  credential_env_candidates key
+  |> List.find_map (fun env ->
+         match Sys.getenv_opt env with
+         | Some value when String.trim value <> "" -> Some value
+         | _ -> None)
+  |> Option.value ~default:""
+
 let api_key_of_credential ?registry_entry = function
   | Some (Env key) ->
-      (match Sys.getenv_opt key with
-       | Some value -> value
-       | None -> "")
+      api_key_from_env key
   | Some (Inline value) -> value
   | Some (File _) -> ""
   | None ->
@@ -86,9 +96,7 @@ let api_key_of_credential ?registry_entry = function
        then ""
        else (
          (* NDT-OK: credential materialization is the provider boundary; catalog parsing stays deterministic. *)
-         match Sys.getenv_opt env with
-         | Some value -> value
-         | None -> "")
+         api_key_from_env env)
      | None -> "")
 
 let provider_kind_of_cli_provider (provider : cascade_provider) :
@@ -149,12 +157,15 @@ let provider_config_from_declared_provider
     (match provider_kind_for_http_provider ?registry_entry provider with
      | Some kind ->
        let request_path = request_path_for_http_provider ~registry_entry ~kind ~base_url in
+       let api_key = api_key_of_credential ?registry_entry provider.credentials in
+       let headers = Cascade_config.headers_with_auth ~kind ~api_key in
        Some
          (Llm_provider.Provider_config.make
             ~kind
             ~model_id:spec.api_name
             ~base_url
-            ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
+            ~api_key
+            ~headers
             ~request_path
             ~max_context:spec.max_context
             ?supports_tool_choice_override

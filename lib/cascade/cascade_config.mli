@@ -44,6 +44,15 @@ val resolve_auto_model_id : string -> string -> string
 val normalize_openai_compat_request_path :
   base_url:string -> request_path:string -> string
 
+(** Build HTTP headers for a resolved provider API key.
+
+    Empty API keys return only the JSON content-type header; HTTP providers
+    with bearer-token auth receive [Authorization: Bearer ...]. *)
+val headers_with_auth :
+  kind:Llm_provider.Provider_config.provider_kind ->
+  api_key:string ->
+  (string * string) list
+
 (** Parse a "provider:model_id" string into a {!Llm_provider.Provider_config.t}.
 
     Supported providers are determined by {!Llm_provider.Provider_registry.default}.

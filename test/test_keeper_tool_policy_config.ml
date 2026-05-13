@@ -139,6 +139,18 @@ masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
       | Some KTPC.All_candidates -> fail "legacy preset should be explicit subset"
       | None -> fail "legacy preset missing")
 
+let test_policy_validation_knows_static_and_oas_core_tools () =
+  check bool "keeper static tag tool is known" true
+    (KTPC.is_known_policy_tool_name "keeper_board_post");
+  check bool "masc static tag tool is known" true
+    (KTPC.is_known_policy_tool_name "masc_status");
+  check bool "OAS core tool is known" true
+    (KTPC.is_known_policy_tool_name "extend_turns");
+  check bool "retired typed tool is not known" false
+    (KTPC.is_known_policy_tool_name "masc_complete_task");
+  check bool "unknown tool is not known" false
+    (KTPC.is_known_policy_tool_name "__missing_tool")
+
 (* ── preset_can_satisfy tests ───────────────────────────────── *)
 
 let load_config () =
@@ -222,6 +234,8 @@ let () =
             test_load_anchors_resolution_to_base_path_over_cwd_candidate;
           test_case "normalizes legacy fs tool names" `Quick
             test_load_normalizes_legacy_fs_tool_names;
+          test_case "policy validation accepts static and OAS core tools" `Quick
+            test_policy_validation_knows_static_and_oas_core_tools;
         ] );
       ( "preset_can_satisfy",
         [

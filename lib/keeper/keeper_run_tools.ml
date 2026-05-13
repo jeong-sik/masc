@@ -588,6 +588,27 @@ let prepare_agent_setup
        | None -> [])
   in
   let validate_allow_list ~turn raw =
+    let visible_policy_name name =
+      (* Preserve names that are already valid public surface entries.
+         keeper_fs_edit has two public aliases (Edit, Write) with different
+         schemas; round-tripping through public_name_for_internal always
+         picks Edit, so any Write entry would be coerced to Edit and then
+         deduped. Only canonicalize names that are not themselves valid
+         public entries (e.g., internal names like keeper_fs_edit, or
+         unrecognized inputs). *)
+      if Keeper_tool_policy.StringSet.mem name universe_set
+         && Keeper_tool_policy.StringSet.mem name allowed_exec_set
+      then name
+      else (
+        let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+        match Keeper_tool_alias.public_name_for_internal canonical with
+        | Some public
+          when Keeper_tool_policy.StringSet.mem public universe_set
+               && Keeper_tool_policy.StringSet.mem public allowed_exec_set ->
+          public
+        | _ -> name)
+    in
+    let raw = raw |> List.map visible_policy_name |> Keeper_types.dedupe_keep_order in
     let validated, dropped_names =
       List.fold_right
         (fun n (validated, dropped_names) ->
@@ -613,7 +634,7 @@ let prepare_agent_setup
         if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
       in
       Log.Keeper.warn
-        "keeper:%s turn:%d AllowList pruned %d tool(s) outside dispatch universe: %s%s"
+        "keeper:%s turn:%d AllowList pruned %d tool(s) outside visible policy surface: %s%s"
         meta.name
         turn
         dropped

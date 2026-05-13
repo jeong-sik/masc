@@ -10549,6 +10549,30 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:[ "keeper_shell"; "keeper_bash"; "keeper_board_post" ]
+       ~allowed_tool_names:[ "Grep"; "Bash"; "keeper_board_post" ]
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any when internal required tools are exposed via public aliases, got \
+           %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
+       ~required_tool_names:[ "keeper_shell" ]
+       ~allowed_tool_names:[ "Grep" ]
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any for internal keeper_shell required tool exposed as public alias, \
+           got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_tasks_audit" ]
        ~allowed_tool_names:[ "keeper_tasks_audit"; "keeper_board_post" ]
    with

@@ -114,6 +114,14 @@ let route name =
     to allowlists — they should now add these names directly. *)
 let public_names () = [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ]
 
+let public_name_for_internal internal_name =
+  public_names ()
+  |> List.find_opt (fun public ->
+    match route public with
+    | Some r -> String.equal r.internal_name internal_name
+    | None -> false)
+;;
+
 (* ── MCP surface routing (separate concern) ──────────────────────── *)
 
 let public_masc_to_internal_tbl =

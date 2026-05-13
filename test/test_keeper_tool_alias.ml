@@ -40,6 +40,25 @@ let test_known_aliases_resolve () =
     (route_internal "WebSearch")
 ;;
 
+let test_internal_names_resolve_to_preferred_public_alias () =
+  Alcotest.(check (option string))
+    "keeper_bash -> Bash"
+    (Some "Bash")
+    (Alias.public_name_for_internal "keeper_bash");
+  Alcotest.(check (option string))
+    "keeper_shell -> Grep"
+    (Some "Grep")
+    (Alias.public_name_for_internal "keeper_shell");
+  Alcotest.(check (option string))
+    "keeper_fs_edit primary public alias is Edit"
+    (Some "Edit")
+    (Alias.public_name_for_internal "keeper_fs_edit");
+  Alcotest.(check (option string))
+    "unaliased internal has no public alias"
+    None
+    (Alias.public_name_for_internal "keeper_board_post")
+;;
+
 let test_unknown_returns_none () =
   Alcotest.(check (option string)) "Skill has no cognate" None (route_internal "Skill");
   Alcotest.(check (option string))
@@ -656,6 +675,10 @@ let () =
     "Keeper_tool_alias"
     [ ( "routing-table"
       , [ Alcotest.test_case "known aliases resolve" `Quick test_known_aliases_resolve
+        ; Alcotest.test_case
+            "internal names resolve to preferred public alias"
+            `Quick
+            test_internal_names_resolve_to_preferred_public_alias
         ; Alcotest.test_case "unknown returns None" `Quick test_unknown_returns_none
         ; Alcotest.test_case "route round-trip" `Quick test_route_round_trip
         ; Alcotest.test_case

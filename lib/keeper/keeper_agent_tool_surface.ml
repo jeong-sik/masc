@@ -432,7 +432,10 @@ let preferred_tool_choice_for_required_tool_names
       let canonical = Keeper_tool_disclosure.canonical_tool_name name in
       if List.mem canonical allowed_tool_names then Some canonical
       else if List.mem name allowed_tool_names then Some name
-      else None)
+      else (
+        match Keeper_tool_alias.public_name_for_internal canonical with
+        | Some public when List.mem public allowed_tool_names -> Some public
+        | _ -> None))
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with

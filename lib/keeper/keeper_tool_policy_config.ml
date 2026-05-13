@@ -222,7 +222,7 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
 let tool_schema_names schemas =
   List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
 
-let is_known_runtime_policy_tool name =
+let is_known_policy_tool_name name =
   Tool_dispatch.is_registered name
   || List.mem name (Keeper_tool_registry.keeper_internal_candidate_tool_names)
   || List.mem name (Keeper_tool_registry.effective_core_tools ())
@@ -304,22 +304,37 @@ let load ~base_path : (t, string) result =
         (match all_errors with
         | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
-          (* Validate static tool groups against the keeper-facing runtime
-             universe, not only [Tool_dispatch].  Keeper-local tools, shard
-             schemas, injected MASC tools, and SDK-provided helpers such as
-             [extend_turns] are materialized outside the public dispatch table. *)
+          (* Validate tool names against the keeper-facing policy surface.
+             Skip shard-backed groups because their members resolve from
+             [Tool_shard] at runtime. *)
           let unknown_tools =
             Hashtbl.fold (fun group_name (group : group_source) acc ->
               match group with
               | Static tools ->
-                  List.filter (fun t -> not (is_known_runtime_policy_tool t)) tools
+                  List.filter (fun t -> not (is_known_policy_tool_name t)) tools
                   |> List.rev_map (fun t ->
-                    Printf.sprintf "groups.%s: tool '%s' is not registered" group_name t)
+                    Printf.sprintf "groups.%s: tool '%s' is not a known policy tool" group_name t)
                   |> List.rev_append acc
               | Shard_ref _ -> acc
             ) groups []
           in
-          let all_tool_errors = unknown_tools in
+          let unknown_masc_tools =
+            Hashtbl.fold (fun group_name tools acc ->
+              List.filter (fun t -> not (is_known_policy_tool_name t)) tools
+              |> List.rev_map (fun t ->
+                Printf.sprintf "masc.%s: tool '%s' is not a known policy tool" group_name t)
+              |> List.rev_append acc
+            ) masc_groups []
+          in
+          let unknown_preset_tools =
+            Hashtbl.fold (fun preset_name (def : preset_def) acc ->
+              List.filter (fun t -> not (is_known_policy_tool_name t)) def.masc_tools
+              |> List.rev_map (fun t ->
+                Printf.sprintf "presets.%s.masc_tools: tool '%s' is not a known policy tool" preset_name t)
+              |> List.rev_append acc
+            ) presets []
+          in
+          let all_tool_errors = unknown_tools @ unknown_masc_tools @ unknown_preset_tools in
           (match all_tool_errors with
           | _ :: _ ->
               Log.Keeper.warn "tool_policy_config: %d unknown tools in %s" (List.length all_tool_errors) path;

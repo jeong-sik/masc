@@ -322,7 +322,7 @@ let load ~base_path : (t, string) result =
             Hashtbl.fold (fun group_name tools acc ->
               List.filter (fun t -> not (is_known_policy_tool_name t)) tools
               |> List.rev_map (fun t ->
-                Printf.sprintf "masc_groups.%s: tool '%s' is not a known policy tool" group_name t)
+                Printf.sprintf "masc.%s: tool '%s' is not a known policy tool" group_name t)
               |> List.rev_append acc
             ) masc_groups []
           in

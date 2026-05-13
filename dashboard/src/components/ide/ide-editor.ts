@@ -658,8 +658,14 @@ function CodeMirrorEditor({
 
   // Subscribe to store changes for re-render
   const [, forceRender] = useState(0)
-  useEffect(() => documentStore.subscribe(() => forceRender(n => n + 1)), [documentStore])
-  useEffect(() => ownershipStore.subscribe(() => forceRender(n => n + 1)), [ownershipStore])
+  useEffect(() => {
+    const unsub = documentStore.subscribe(() => forceRender(n => n + 1))
+    return () => unsub()
+  }, [documentStore])
+  useEffect(() => {
+    const unsub = ownershipStore.subscribe(() => forceRender(n => n + 1))
+    return () => unsub()
+  }, [ownershipStore])
 
   return html`
     <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>

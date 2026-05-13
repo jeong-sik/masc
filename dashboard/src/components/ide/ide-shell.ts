@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { activeIdeFile } from './ide-state'
+import { activeIdeFile, focusIdeContextAnchor } from './ide-state'
 import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -68,6 +68,30 @@ function keeperFromRoute(): string {
   return keepers.value[0]?.name?.trim() ?? ''
 }
 
+function routeFocusFile(params: Record<string, string>): string | undefined {
+  return params.file?.trim() || params.file_path?.trim() || params.path?.trim() || undefined
+}
+
+function routeFocusLine(params: Record<string, string>): number | undefined {
+  const raw = params.line?.trim() || params.lineno?.trim()
+  if (!raw) return undefined
+  if (!/^[1-9]\d*$/.test(raw)) return undefined
+  const value = Number.parseInt(raw, 10)
+  return Number.isSafeInteger(value) && value >= 1 ? value : undefined
+}
+
+function routeFocusLabel(params: Record<string, string>, filePath: string): string {
+  const label = params.label?.trim()
+  if (label) return label
+  return filePath.split('/').pop() || filePath
+}
+
+function routeFocusSourceId(params: Record<string, string>, filePath: string, line?: number): string {
+  const sourceId = params.source_id?.trim() || params.source?.trim()
+  if (sourceId) return sourceId
+  return line !== undefined ? `route:${filePath}:${line}` : `route:${filePath}`
+}
+
 function paramsWithLayers(
   params: Record<string, string>,
   view: ViewTab,
@@ -117,6 +141,34 @@ export function IdeShell() {
     const unsubscribe = activeIdeFile.subscribe(setActiveFilePath)
     return () => unsubscribe()
   }, [])
+
+  const routeFileFocus = routeFocusFile(route.value.params)
+  const routeLineFocus = routeFocusLine(route.value.params)
+  const routeSurfaceFocus = route.value.params.surface?.trim() || 'Route'
+  const routeLabelFocus = routeFileFocus ? routeFocusLabel(route.value.params, routeFileFocus) : ''
+  const routeSourceFocus = routeFileFocus
+    ? routeFocusSourceId(route.value.params, routeFileFocus, routeLineFocus)
+    : ''
+  const routeKeeperFocus = route.value.params.keeper?.trim() || undefined
+
+  useEffect(() => {
+    if (!routeFileFocus) return
+    focusIdeContextAnchor({
+      file_path: routeFileFocus,
+      line: routeLineFocus,
+      surface: routeSurfaceFocus,
+      label: routeLabelFocus,
+      source_id: routeSourceFocus,
+      keeper_id: routeKeeperFocus,
+    })
+  }, [
+    routeFileFocus,
+    routeLineFocus,
+    routeSurfaceFocus,
+    routeLabelFocus,
+    routeSourceFocus,
+    routeKeeperFocus,
+  ])
 
   const activeFocus = focusFromRoute(route.value.params.focus)
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))

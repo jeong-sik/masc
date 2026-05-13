@@ -115,17 +115,19 @@ function PlanningRouteFocusPanel() {
     <section
       class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
       data-testid="planning-route-focus"
+      data-route-focused-goal=${goalId ?? undefined}
+      data-route-focused-task=${taskId ?? undefined}
       aria-label="Planning route focus"
     >
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
-            route focus
+          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+            ROUTE FOCUS
           </div>
           <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-text-body">
             ${goalId ? html`
-              <span class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
-                goal ${goalId}
+              <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                GOAL ${goalId}
               </span>
               <span class="min-w-0 truncate text-sm font-semibold text-text-strong">
                 ${goal?.title ?? 'goal not loaded'}
@@ -133,8 +135,8 @@ function PlanningRouteFocusPanel() {
               ${goal?.status ? html`<span class="font-mono text-3xs text-text-muted">${goal.status}</span>` : null}
             ` : null}
             ${taskId ? html`
-              <span class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
-                task ${taskId}
+              <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                TASK ${taskId}
               </span>
               <span class="min-w-0 truncate text-sm font-semibold text-text-strong">
                 ${task?.title ?? 'task not loaded'}
@@ -148,7 +150,7 @@ function PlanningRouteFocusPanel() {
           class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-text-muted transition-colors hover:border-[var(--color-border-strong)] hover:text-text-strong"
           onClick=${clearPlanningRouteFocus}
         >
-          clear
+          CLEAR
         </button>
       </div>
     </section>

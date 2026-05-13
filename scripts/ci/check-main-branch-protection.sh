@@ -30,7 +30,8 @@ endpoint="repos/${repo}/branches/${branch}/protection"
 
 is_integration_forbidden() {
   local output="$1"
-  [[ "$output" == *"Resource not accessible by integration"* ]] || [[ "$output" == *'"status":"403"'* ]]
+  [[ "$output" == *'"message":"Resource not accessible by integration"'* ]] ||
+    [[ "$output" == *"gh: Resource not accessible by integration (HTTP 403)"* ]]
 }
 
 skip_integration_forbidden() {

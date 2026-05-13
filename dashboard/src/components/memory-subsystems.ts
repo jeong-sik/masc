@@ -701,7 +701,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
     : episodes
 
   const showArch = useSignal(false)
-  const showMemoryEntries = normalizedFocus === 'entries' || data?.memory_entries !== undefined
+  const showMemoryEntries = normalizedFocus === 'entries'
 
   return html`
     <div class="space-y-6">

@@ -163,4 +163,34 @@ describe('MemorySubsystems focus targets', () => {
       expect(scrollIntoViewMock.mock.contexts).toContain(target)
     })
   })
+
+  it('does not show the entries panel from an unrequested empty memory_entries payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      ...baseResponse,
+      memory_entries: {
+        total: 0,
+        filtered: 0,
+        shown: 0,
+        limit: 100,
+        items: [],
+      },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(html`<${MemorySubsystems} />`, container)
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled()
+      const requestUrls = fetchMock.mock.calls.map(call =>
+        new URL(call[0] as string, 'http://dashboard.local'),
+      )
+      expect(requestUrls.some(url => url.searchParams.has('include_memory_entries'))).toBe(false)
+    })
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Finished a task')
+    })
+
+    expect(container.querySelector('[data-memory-focus-target="entries"]')).toBeNull()
+    expect(container.querySelector('[data-testid="memory-entries"]')).toBeNull()
+  })
 })

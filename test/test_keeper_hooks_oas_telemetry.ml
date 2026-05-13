@@ -1190,6 +1190,23 @@ let test_pr_work_action_metric_observes_invalid_output_json () =
     (hook_output_parse_failures "pr_work_action")
 ;;
 
+let test_pr_work_action_metric_ignores_non_pr_tool_output () =
+  let before = hook_output_parse_failures "pr_work_action" in
+  let events =
+    pr_work_events
+      ~tool_name:"keeper_board_cleanup"
+      ~input:(`Assoc [])
+      ~output_text:"cleanup report is not PR telemetry JSON"
+      ()
+  in
+  check (list string) "no pr work actions" [] (work_actions events);
+  check
+    (float 0.001)
+    "non-pr tool output is not parsed as pr_work_action JSON"
+    before
+    (hook_output_parse_failures "pr_work_action")
+;;
+
 let test_pr_work_action_metric_extracts_embedded_output_json () =
   let before = hook_output_parse_failures "pr_work_action" in
   let events =
@@ -1543,6 +1560,10 @@ let () =
             "observes invalid output JSON"
             `Quick
             test_pr_work_action_metric_observes_invalid_output_json
+        ; test_case
+            "ignores non-pr tool output"
+            `Quick
+            test_pr_work_action_metric_ignores_non_pr_tool_output
         ; test_case
             "extracts embedded output JSON"
             `Quick

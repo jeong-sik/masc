@@ -1434,9 +1434,22 @@ let update_meta ~base_path name meta =
   update_entry ~base_path name (fun e -> { e with meta })
 ;;
 
+let sync_meta_if_registered ~base_path name meta =
+  let key = registry_key ~base_path name in
+  let rec loop () =
+    let current = Atomic.get registry in
+    match StringMap.find_opt key current with
+    | None -> ()
+    | Some entry ->
+      let updated = StringMap.add key { entry with meta } current in
+      if not (Atomic.compare_and_set registry current updated) then loop ()
+  in
+  loop ()
+;;
+
 let () =
   register_runtime_meta_write_sync (fun config meta ->
-    update_meta ~base_path:config.base_path meta.name meta)
+    sync_meta_if_registered ~base_path:config.base_path meta.name meta)
 ;;
 
 let mark_dead ~base_path name ~at =

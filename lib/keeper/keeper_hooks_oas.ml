@@ -1515,12 +1515,22 @@ let pr_work_actions_of_command command =
          | [] -> pr_work_actions_of_git_segment segment
          | actions -> actions)
 
+let is_pr_work_action_tool_name = function
+  | "masc_code_git"
+  | "keeper_pr_create"
+  | "keeper_shell"
+  | "keeper_bash"
+  | "masc_code_shell" -> true
+  | _ -> false
+
 let pr_work_action_metric_events_of_tool_io
     ~route_via_fallback
     ~(tool_name : string)
     ~(input : Yojson.Safe.t)
     ~(output_text : string)
     ~(transport_success : bool) =
+  if not (is_pr_work_action_tool_name tool_name) then []
+  else
   let output_json = output_json_opt ~surface:"pr_work_action" output_text in
   let route_via =
     first_some (Option.bind output_json route_via_of_json)

@@ -924,6 +924,11 @@ let keeper_persona_audit_item ctx requested_name =
     | None -> defaults.autoboot_enabled
   in
   let paused = runtime_meta |> Option.map (fun meta -> meta.paused) in
+  let dormant_autoboot_disabled =
+    match runtime_meta, autoboot_enabled, paused, registry_entry with
+    | Some _, Some false, (Some false | None), None -> true
+    | _ -> false
+  in
   let issues =
     let add cond issue acc = if cond then issue :: acc else acc in
     []
@@ -933,10 +938,11 @@ let keeper_persona_audit_item ctx requested_name =
          "missing_persona_profile"
     |> add (not live_meta_exists) "missing_runtime_meta"
     |> add (Option.is_some runtime_meta_error) "runtime_meta_error"
-    |> add (Option.is_some runtime_meta && Option.is_none registry_entry)
+    |> add
+         (Option.is_some runtime_meta
+          && Option.is_none registry_entry
+          && not dormant_autoboot_disabled)
          "registry_missing"
-    |> add (match autoboot_enabled with Some false -> true | _ -> false)
-         "autoboot_disabled"
     |> add (match paused with Some true -> true | _ -> false) "keeper_paused"
     |> add (match runtime_meta with Some meta when Stdlib.List.length meta.active_goal_ids = 0 -> true | _ -> false)
          "empty_active_goal_ids"
@@ -980,6 +986,9 @@ let keeper_persona_audit_item ctx requested_name =
       ("phase", Json_util.string_opt_to_json phase);
       ("runtime_status", Json_util.string_opt_to_json runtime_status);
       ("autoboot_enabled", json_bool_opt autoboot_enabled);
+      ("dormant", `Bool dormant_autoboot_disabled);
+      ( "dormant_reason",
+        if dormant_autoboot_disabled then `String "autoboot_disabled" else `Null );
       ("paused", json_bool_opt paused);
       ("keepalive_running", json_bool_opt keepalive_running);
       ("keepalive_started_at", json_float_opt keepalive_started_at);
@@ -999,6 +1008,18 @@ let keeper_persona_audit_summary items =
     List.fold_left (fun acc item -> if pred item then acc + 1 else acc) 0 items
   in
   let count_issue issue = count (has_issue issue) in
+  let count_bool_field field =
+    count (fun item ->
+        match Yojson.Safe.Util.member field item with
+        | `Bool true -> true
+        | _ -> false)
+  in
+  let count_autoboot_disabled =
+    count (fun item ->
+        match Yojson.Safe.Util.member "autoboot_enabled" item with
+        | `Bool false -> true
+        | _ -> false)
+  in
   let ok_count =
     count (fun item ->
         match Yojson.Safe.Util.member "ok" item with
@@ -1017,7 +1038,8 @@ let keeper_persona_audit_summary items =
       ("missing_runtime_meta", `Int (count_issue "missing_runtime_meta"));
       ("runtime_meta_error", `Int (count_issue "runtime_meta_error"));
       ("registry_missing", `Int (count_issue "registry_missing"));
-      ("autoboot_disabled", `Int (count_issue "autoboot_disabled"));
+      ("dormant_autoboot_disabled", `Int (count_bool_field "dormant"));
+      ("autoboot_disabled", `Int count_autoboot_disabled);
       ("keeper_paused", `Int (count_issue "keeper_paused"));
       ("keepalive_not_running", `Int (count_issue "keepalive_not_running"));
       ("empty_active_goal_ids", `Int (count_issue "empty_active_goal_ids"));

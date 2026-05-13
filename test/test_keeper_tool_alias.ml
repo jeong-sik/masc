@@ -301,6 +301,27 @@ let test_partial_tolerance_still_works () =
     has_valid
 ;;
 
+let test_public_allowed_surface_accepts_canonical_alias () =
+  let observed = [ "Bash" ] in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:[ "Bash" ]
+      ~tool_names:canonical
+  in
+  Alcotest.(check (list string))
+    "public Bash allowlist accepts canonical keeper_bash observation"
+    []
+    unexpected;
+  Alcotest.(check (list string))
+    "final names keep canonical internal name"
+    [ "keeper_bash" ]
+    (Disclosure.final_keeper_tool_names
+       ~reported_tool_names:observed
+       ~observed_tool_names:[]
+       ~allowed_tool_names:[ "Bash" ])
+;;
+
 (* ── Routing table and schemas ─────────────────────────────── *)
 
 let yojson_field name j =
@@ -724,6 +745,10 @@ let () =
             "partial tolerance still works"
             `Quick
             test_partial_tolerance_still_works
+        ; Alcotest.test_case
+            "public allowed surface accepts canonical alias"
+            `Quick
+            test_public_allowed_surface_accepts_canonical_alias
         ] )
     ; ( "routing-and-schemas"
       , [ Alcotest.test_case

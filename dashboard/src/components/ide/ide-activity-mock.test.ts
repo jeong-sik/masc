@@ -187,6 +187,7 @@ describe('IdeActivityMock', () => {
       totalEvents: 3,
       currentFileEvents: 1,
       linkedEvents: 3,
+      keeperTotalCount: 2,
       latestAgeLabel: '30s ago',
     })
     expect(summary.surfaceCounts.map(surface => [surface.label, surface.count])).toEqual([
@@ -202,5 +203,22 @@ describe('IdeActivityMock', () => {
       { keeper_id: 'sangsu', count: 2 },
       { keeper_id: 'analyst', count: 1 },
     ])
+  })
+
+  it('keeps the run progress keeper total separate from the top keeper list', () => {
+    const events = ['delta', 'bravo', 'charlie', 'alpha'].map((keeper_id, index) => ({
+      id: `evt-${keeper_id}`,
+      run_id: 'run-default',
+      keeper_id,
+      verb: 'noted' as const,
+      target: 'telemetry',
+      timestamp_ms: 100 - index,
+    }))
+
+    const summary = deriveIdeRunProgressSummary(events, 'lib/runtime.ml')
+
+    expect(summary.keeperTotalCount).toBe(4)
+    expect(summary.keeperCounts).toHaveLength(3)
+    expect(summary.keeperCounts.map(entry => entry.keeper_id)).toEqual(['alpha', 'bravo', 'charlie'])
   })
 })

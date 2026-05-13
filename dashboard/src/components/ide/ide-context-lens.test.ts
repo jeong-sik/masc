@@ -161,6 +161,47 @@ describe('IdeContextLens', () => {
     })
   })
 
+  it('omits invalid annotation lines from anchors and focus state', () => {
+    const invalidLineAnnotation: IdeAnnotation = {
+      ...annotation,
+      id: 'ann-line-zero',
+      line_start: 0,
+      line_end: 0,
+    }
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [invalidLineAnnotation],
+      diffRows: [],
+      events: [],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    expect(model.activeLineCount).toBe(0)
+    expect(model.anchors[0]).toMatchObject({
+      id: 'annotation-ann-line-zero',
+      surface: 'Comment',
+    })
+    expect(model.anchors[0]?.line).toBeUndefined()
+
+    const container = document.createElement('div')
+    ideContextFocus.value = null
+    render(
+      h(IdeContextLens, {
+        filePath: 'lib/keeper/keeper_exec_ide.ml',
+        annotations: [invalidLineAnnotation],
+        diffRows: [],
+        events: [],
+        overlay: { ...overlay, cursors: new Map() },
+      }),
+      container,
+    )
+    const button = container.querySelector<HTMLButtonElement>('.ide-context-anchor-action')
+    fireEvent.click(button!)
+
+    const focus = ideContextFocus.value as { readonly line?: number } | null
+    expect(focus?.line).toBeUndefined()
+  })
+
   it('renders operational route links for linked goal, task, and keeper context', () => {
     const activated: unknown[] = []
     const container = document.createElement('div')

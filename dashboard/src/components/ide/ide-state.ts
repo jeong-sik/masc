@@ -31,12 +31,20 @@ export function focusIdeContextAnchor(
 ): void {
   const filePath = normalizeIdeContextFilePath(anchor.file_path)
   if (filePath === null) return
+  const line = normalizeIdeContextLine(anchor.line)
   activeIdeFile.value = filePath
   ideContextFocus.value = {
     ...anchor,
     file_path: filePath,
+    line,
     activated_at_ms: Date.now(),
   }
+}
+
+function normalizeIdeContextLine(value: number | undefined): number | undefined {
+  return Number.isSafeInteger(value) && value !== undefined && value >= 1
+    ? value
+    : undefined
 }
 
 function normalizeIdeContextFilePath(value: string): string | null {

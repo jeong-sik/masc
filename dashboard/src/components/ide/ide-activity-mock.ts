@@ -63,6 +63,7 @@ export interface IdeRunProgressSummary {
   readonly totalEvents: number
   readonly currentFileEvents: number
   readonly linkedEvents: number
+  readonly keeperTotalCount: number
   readonly latestAgeLabel: string
   readonly surfaceCounts: ReadonlyArray<{ readonly label: string; readonly count: number }>
   readonly keeperCounts: ReadonlyArray<{ readonly keeper_id: string; readonly count: number }>
@@ -310,17 +311,19 @@ export function deriveIdeRunProgressSummary(
     label,
     count: events.filter(event => event.context?.[key]).length,
   }))
-  const keeperCounts = [...events.reduce((acc, event) => {
+  const keeperEntries = [...events.reduce((acc, event) => {
     acc.set(event.keeper_id, (acc.get(event.keeper_id) ?? 0) + 1)
     return acc
   }, new Map<string, number>())]
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+  const keeperCounts = keeperEntries
     .slice(0, 3)
     .map(([keeper_id, count]) => ({ keeper_id, count }))
   return {
     totalEvents: events.length,
     currentFileEvents,
     linkedEvents,
+    keeperTotalCount: keeperEntries.length,
     latestAgeLabel: latestAgeLabel(events),
     surfaceCounts,
     keeperCounts,
@@ -337,7 +340,7 @@ function RunProgressStrip({ summary }: { readonly summary: IdeRunProgressSummary
       <div class="ide-run-progress-stats" role="list" aria-label="Run progress stats">
         <span role="listitem"><strong>${summary.totalEvents}</strong> events</span>
         <span role="listitem"><strong>${summary.currentFileEvents}</strong> file</span>
-        <span role="listitem"><strong>${summary.keeperCounts.length}</strong> keepers</span>
+        <span role="listitem"><strong>${summary.keeperTotalCount}</strong> keepers</span>
         <span role="listitem">${summary.latestAgeLabel}</span>
       </div>
       <div class="ide-run-progress-surfaces" role="list" aria-label="Linked operational surfaces">

@@ -43,4 +43,17 @@ describe('ide-state', () => {
     expect(activeIdeFile.value).toBe('package.json')
     expect(ideContextFocus.value).toBeNull()
   })
+
+  it.each([0, -1, Number.NaN])('drops invalid context anchor line %s', line => {
+    focusIdeContextAnchor({
+      file_path: 'src/runtime/router.ts',
+      line,
+      surface: 'Log',
+      label: 'runtime event',
+      source_id: 'evt-1',
+    })
+
+    expect(activeIdeFile.value).toBe('src/runtime/router.ts')
+    expect(ideContextFocus.value?.line).toBeUndefined()
+  })
 })

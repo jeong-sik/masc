@@ -95,11 +95,26 @@ export function IdeEditor({
 }: IdeEditorProps) {
   const [, forceRender] = useState(0)
 
-  useEffect(() => documentStore.subscribe(() => forceRender(tick => tick + 1)), [documentStore])
-  useEffect(() => ownershipStore.subscribe(() => forceRender(tick => tick + 1)), [ownershipStore])
-  useEffect(() => cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1)), [])
-  useEffect(() => globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1)), [])
-  useEffect(() => ideContextFocus.subscribe(() => forceRender(tick => tick + 1)), [])
+  useEffect(() => {
+    const unsub = documentStore.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [documentStore])
+  useEffect(() => {
+    const unsub = ownershipStore.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [ownershipStore])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = ideContextFocus.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const document = documentStore.document()
   const lines = documentStore.lines()

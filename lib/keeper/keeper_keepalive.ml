@@ -121,6 +121,7 @@ let set_keeper_paused_state ~agent_name paused =
           else Keeper_state_machine.Operator_resume);
        if not paused
        then (
+         Keeper_turn_livelock.reset_keeper_livelock ~keeper:entry.name;
          (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;
          (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
@@ -181,7 +182,12 @@ let process_directive ~agent_name directive =
        [meta.paused = true]. Without this branch, wakeup signals fiber_wakeup
        but the heartbeat loop honors paused state and skips — user clicks
        "깨우기" with no observable effect. Treat wakeup as a superset of
-       resume so paused keepers re-enter the run loop. *)
+       resume so paused keepers re-enter the run loop.
+       Also clear any persisted livelock attempt counter regardless of which
+       branch runs: turn-livelock blocks record only a `pause_human` receipt
+       and do not persist [meta.paused], so the wakeup directive on those
+       keepers takes the non-paused branch and the stale attempt counter
+       would otherwise survive into the next dispatch. *)
     let entry_paused =
       match Keeper_registry.find_by_agent_name agent_name with
       | Some e -> e.meta.paused
@@ -193,6 +199,7 @@ let process_directive ~agent_name directive =
          | Some meta -> meta.paused
          | None -> false)
     in
+    Keeper_turn_livelock.reset_keeper_livelock ~keeper:agent_name;
     if entry_paused
     then (
       Log.Keeper.info "directive: waking up %s (was paused — auto-resuming)" agent_name;

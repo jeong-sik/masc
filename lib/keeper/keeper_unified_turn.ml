@@ -1181,11 +1181,9 @@ let run_keeper_cycle
                          let mark_terminal_error err =
                            if EC.is_cascade_exhausted_error err
                            then (
-                             Keeper_registry.set_turn_cascade_state
+                             Keeper_registry.mark_turn_cascade_exhausted
                                ~base_path:config.base_path
-                               meta.name
-                               (Keeper_registry.Packed Cascade_exhausted
-                                : Keeper_registry.packed_cascade_state);
+                               meta.name;
                              Prometheus.inc_counter
                                Keeper_metrics.metric_keeper_fsm_edge_transitions
                                ~labels:[ "edge", "kcl_to_ktc_exhaustion" ]

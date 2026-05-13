@@ -707,6 +707,15 @@ val set_turn_decision_stage :
 val set_turn_cascade_state :
   base_path:string -> string -> packed_cascade_state -> unit
 
+(** Mark cascade exhaustion on the live turn.
+
+    When provider selection fails before the tool-disclosure hook runs, the
+    live cascade axis can still be [Cascade_idle]. This helper materializes the
+    spec-valid pre-terminal path ([idle -> selecting -> trying -> exhausted])
+    instead of allowing callers to jump directly to [Cascade_exhausted]. No-op
+    when no turn is active. *)
+val mark_turn_cascade_exhausted : base_path:string -> string -> unit
+
 (** Update the live turn's phase directly. No-op if idle. *)
 val set_turn_phase :
   base_path:string -> string -> packed_turn_phase -> unit

@@ -130,12 +130,21 @@ let request_path_for_http_provider ~registry_entry ~kind ~base_url =
     Cascade_config.normalize_openai_compat_request_path ~base_url ~request_path
   | _ -> request_path
 
+let supports_tool_choice_override_of_model_spec (spec : cascade_model_spec) =
+  match spec.capabilities with
+  | Some capabilities -> Some capabilities.supports_tool_choice
+  | None -> None
+;;
+
 let provider_config_from_declared_provider
     (provider : cascade_provider)
     (spec : cascade_model_spec)
     ~(max_tokens : int option)
     : Llm_provider.Provider_config.t option =
   let registry_entry = find_registry_entry provider.id in
+  let supports_tool_choice_override =
+    supports_tool_choice_override_of_model_spec spec
+  in
   match provider.transport with
   | Http base_url ->
     (match provider_kind_for_http_provider ?registry_entry provider with
@@ -149,6 +158,7 @@ let provider_config_from_declared_provider
             ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
             ~request_path
             ~max_context:spec.max_context
+            ?supports_tool_choice_override
             ?max_tokens
             ())
      | None -> None)
@@ -163,6 +173,7 @@ let provider_config_from_declared_provider
             ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
             ~headers:[]
             ~max_context:spec.max_context
+            ?supports_tool_choice_override
             ?max_tokens
             ())
      | None -> None)
@@ -190,6 +201,9 @@ let resolve_binding_config (cfg : cascade_config)
       | Some input_cost, Some _ when input_cost > 0.0 -> Some spec.max_context
       | _ -> None
     in
+    let supports_tool_choice_override =
+      supports_tool_choice_override_of_model_spec spec
+    in
     let parse_registered_provider () =
       match resolve_provider_prefix binding.provider_id with
       | None ->
@@ -197,7 +211,10 @@ let resolve_binding_config (cfg : cascade_config)
         None
       | Some cascade_prefix ->
         let model_string = Printf.sprintf "%s:%s" cascade_prefix spec.api_name in
-        Cascade_config.parse_model_string ?max_tokens model_string
+        Cascade_config.parse_model_string
+          ?max_tokens
+          ?supports_tool_choice_override
+          model_string
     in
     let result =
       match find_provider cfg binding.provider_id with

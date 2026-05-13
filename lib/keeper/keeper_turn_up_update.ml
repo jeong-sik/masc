@@ -222,6 +222,12 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       "update_keeper resumed paused keeper %s; clearing \
        auto_resume_after_sec=%s last_blocker.klass=%s last_blocker.detail=%S"
       old.name auto_resume_after_sec blocker_class blocker_detail);
+  (* Clear any persisted livelock attempt counter on every update_keeper run,
+     not only the resume-paused branch.  Turn-livelock guards record a
+     `pause_human` receipt without setting [meta.paused], so a follow-up
+     `masc_keeper_up` for that keeper would otherwise leave the stale
+     counter in memory and the next dispatch would still be blocked. *)
+  Keeper_turn_livelock.reset_keeper_livelock ~keeper:old.name;
   if old.paused && not resume_paused_keeper then
     Log.Keeper.warn
       "update_keeper kept %s paused because an approval/reconcile gate is pending"

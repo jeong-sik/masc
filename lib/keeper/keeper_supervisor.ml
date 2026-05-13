@@ -799,6 +799,7 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
     resumed_meta.name
     None;
   Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path resumed_meta.name;
+  Keeper_turn_livelock.reset_keeper_livelock ~keeper:resumed_meta.name;
   Keeper_registry.dispatch_event_unit
     ~base_path:ctx.config.base_path
     resumed_meta.name

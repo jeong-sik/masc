@@ -1070,11 +1070,22 @@ let test_directive_pause () =
 
 let test_directive_resume () =
   R.clear ();
+  Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
   let _entry = R.register ~base_path:bp "dr1" (make_meta "dr1") in
+  ignore
+    (Masc_mcp.Keeper_turn_livelock.guard_and_record_turn_start
+       ~keeper:"dr1"
+       ~turn_id:7
+       ~max_attempts:3
+       ~stuck_after_sec:1800.0
+       ());
   KK.process_directive ~agent_name:"agent-dr1" "pause";
   KK.process_directive ~agent_name:"agent-dr1" "resume";
   match R.get ~base_path:bp "dr1" with
-  | Some e -> check bool "resumed after directive" false e.meta.paused
+  | Some e ->
+    check bool "resumed after directive" false e.meta.paused;
+    check bool "resume clears livelock attempt state" true
+      (Option.is_none (Masc_mcp.Keeper_turn_livelock.current_state ~keeper:"dr1"))
   | None -> fail "expected dr1"
 
 let test_directive_keeper_name_alias () =
@@ -1447,6 +1458,24 @@ let test_mark_sdk_turn_started_no_op_without_obs () =
     fail "mark_sdk_turn_started installed observation without keeper-turn"
   | None -> fail "entry missing"
 
+let test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path () =
+  R.clear ();
+  let keeper_name = "k-cascade-exhausted-pre-disclosure" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.mark_turn_cascade_exhausted ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "cascade_state lands on Cascade_exhausted" true
+      (obs.R.cascade_state = R.Packed R.Cascade_exhausted);
+    check bool "turn_phase lands on Turn_exhausted" true
+      (obs.R.turn_phase = R.Packed R.Turn_exhausted);
+    check bool "decision_stage records tool policy boundary" true
+      (obs.R.decision_stage = R.Packed R.Decision_tool_policy_selected)
+  | Some { current_turn_observation = None; _ } ->
+    fail "mark_turn_cascade_exhausted cleared observation"
+  | None -> fail "entry missing"
+
 (* The production [Assert_failure] at keeper_registry.ml:775 was triggered
    when the SDK fired [before_turn_params] for a second time inside one
    keeper-turn.  This test reproduces the same shape: two
@@ -1663,6 +1692,8 @@ let () =
             test_mark_sdk_turn_started_preserves_keeper_scope;
           eio_test "mark_sdk_turn_started no-op without observation"
             test_mark_sdk_turn_started_no_op_without_obs;
+          eio_test "mark_turn_cascade_exhausted materializes pre-disclosure path"
+            test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path;
           eio_test "two SDK-turn boundaries inside one keeper-turn"
             test_two_sdk_turn_boundaries_no_assert;
           eio_test "set_turn_phase rejection bumps guard metric"

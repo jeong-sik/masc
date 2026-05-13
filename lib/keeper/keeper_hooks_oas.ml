@@ -1086,7 +1086,7 @@ let parse_json_candidate ~surface candidate =
     ~context:("Keeper_hooks_oas." ^ surface ^ ".output.embedded")
     candidate
 
-let output_json_opt ~surface output_text =
+let output_json_opt ?(observe_failure = true) ~surface output_text =
   match
     Safe_ops.parse_json_safe
       ~context:("Keeper_hooks_oas." ^ surface ^ ".output")
@@ -1107,8 +1107,9 @@ let output_json_opt ~surface output_text =
        with
        | Some json -> Some json
        | None ->
-           observe_output_parse_failure ~surface
-             ~output_bytes:(String.length output_text);
+           if observe_failure then
+             observe_output_parse_failure ~surface
+               ~output_bytes:(String.length output_text);
            None)
 
 let normalized_route_via raw =
@@ -1531,7 +1532,15 @@ let pr_work_action_metric_events_of_tool_io
     ~(transport_success : bool) =
   if not (is_pr_work_action_tool_name tool_name) then []
   else
-  let output_json = output_json_opt ~surface:"pr_work_action" output_text in
+  let observe_json_failure =
+    match tool_name with
+    | "keeper_shell" | "keeper_bash" | "masc_code_shell" -> false
+    | _ -> true
+  in
+  let output_json =
+    output_json_opt ~observe_failure:observe_json_failure
+      ~surface:"pr_work_action" output_text
+  in
   let route_via =
     first_some (Option.bind output_json route_via_of_json)
       route_via_fallback

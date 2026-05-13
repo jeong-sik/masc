@@ -13,8 +13,8 @@ let clear_retired_pg_envs () =
     (fun key ->
       match Sys.getenv_opt key |> Env_config_core.trim_opt with
       | Some _ ->
-          Log.Server.warn
-            "Ignoring retired PG runtime env %s; filesystem-only bootstrap is enforced."
+          Log.Server.info
+            "Clearing retired PG runtime env %s; filesystem-only bootstrap is enforced."
             key;
           Unix.putenv key ""
       | None -> Unix.putenv key "")

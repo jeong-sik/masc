@@ -253,6 +253,7 @@ describe('normalizeOperatorSnapshot', () => {
             execution: {
               tool_contract_result: 'violated',
               missing_required_tools: ['masc_board_post'],
+              provider_selected_model: 'provider:runtime-lane',
             },
             latest_terminal_reason: {
               code: 'required_tool_use_unsatisfied',
@@ -271,6 +272,7 @@ describe('normalizeOperatorSnapshot', () => {
       execution_summary: {
         tool_contract_result: 'violated',
         missing_required_tools: ['masc_board_post'],
+        provider_selected_model: 'provider:runtime-lane',
       },
       latest_terminal_reason: {
         code: 'required_tool_use_unsatisfied',

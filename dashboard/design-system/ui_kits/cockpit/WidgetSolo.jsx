@@ -22,7 +22,11 @@
      plane-cognition      Cognition plane
      plane-ide            IDE plane
      plane-dashboard      Dashboard (swimlanes + deck)
-     drawer-<id>          drawer panel (rendered standalone)
+     drawer-terminal      Terminal drawer panel
+     drawer-output        Output drawer panel
+     drawer-cascade       Cascade drawer panel
+     drawer-audit         Audit drawer panel
+     drawer-cost          Cost drawer panel
 */
 
 const { useState: _wsUseState, useEffect: _wsUseEffect } = React;
@@ -40,6 +44,11 @@ const _WS_DEFS = {
   "plane-observe":   { name: "Observe plane",    kind: "plane-observe"    },
   "plane-cognition": { name: "Cognition plane",  kind: "plane-cognition"  },
   "plane-ide":       { name: "IDE plane",        kind: "plane-ide"        },
+  "drawer-terminal": { name: "Terminal drawer",  kind: "drawer", drawer: "terminal" },
+  "drawer-output":   { name: "Output drawer",    kind: "drawer", drawer: "output"   },
+  "drawer-cascade":  { name: "Cascade drawer",   kind: "drawer", drawer: "cascade"  },
+  "drawer-audit":    { name: "Audit drawer",     kind: "drawer", drawer: "audit"    },
+  "drawer-cost":     { name: "Cost drawer",      kind: "drawer", drawer: "cost"     },
 };
 
 function WidgetSolo({ id }) {
@@ -140,6 +149,11 @@ function WidgetSolo({ id }) {
     case "plane-observe":   body = <div className="center"><window.ObservePlane {...ctx}/></div>; break;
     case "plane-cognition": body = <div className="center"><window.CognitionPlane {...ctx}/></div>; break;
     case "plane-ide":       body = <div className="center"><window.IdePlane {...ctx}/></div>; break;
+    case "drawer":
+      body = window.__DrawerPanel
+        ? <window.__DrawerPanel kind={def.drawer} />
+        : <div className="ws-empty-msg">drawer renderer not loaded</div>;
+      break;
     default:
       body = <div className="ws-empty-msg">renderer not wired</div>;
   }

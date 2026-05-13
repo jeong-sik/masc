@@ -2,29 +2,39 @@
           MASC_DATA, WorkPlane, CommsPlane, ObservePlane, CognitionPlane, IdePlane,
           ViewportBanner, useCockpitState, useLayoutProfile, Drawer */
 const { useState, useCallback, useEffect } = React;
+const cockpitStateAvailable = typeof window.useCockpitState === "function";
+const useCockpitStateHook = cockpitStateAvailable
+  ? window.useCockpitState
+  : () => [{}, () => {}];
+const layoutProfileAvailable = typeof window.useLayoutProfile === "function";
+const useLayoutProfileHook = layoutProfileAvailable ? window.useLayoutProfile : () => {};
 
 function App() {
   // sync mode/branch with the cockpit-state singleton (URL+localStorage).
-  // If the hook is not available we surface that loudly: previously the
-  // fallback was a silent stub which made cockpit state look functional
-  // while every write was dropped on the floor.
-  const [cs, setCs] = (() => {
-    if (window.useCockpitState) return window.useCockpitState();
-    console.error("[App] window.useCockpitState missing — cockpit state hook did not load; mode/branch changes will not persist");
-    return [{}, () => {}];
-  })();
+  const [cs, setCs] = useCockpitStateHook();
   // run layout profile — auto-collapses chrome per mode
-  if (window.useLayoutProfile) {
-    window.useLayoutProfile();
-  } else {
-    console.error("[App] window.useLayoutProfile missing — layout auto-collapse disabled");
-  }
+  useLayoutProfileHook();
   const [mode, setModeRaw] = useState(cs.mode || "Dashboard");
   const [density, setDensity] = useState("normal");
   const [selKeeper, setSelKeeper] = useState("nick0cave");
   const [selGoal, setSelGoal] = useState("goal-merge-blockers");
   const [branch, setBranchRaw] = useState(cs.branch || "main");
   const [selectedKeepers, setSelectedKeepers] = useState(new Set(["nick0cave","sangsu"]));
+
+  if (!cockpitStateAvailable) {
+    return (
+      <div className="app app-error" role="alert" data-error="missing-cockpit-state">
+        <h1>Cockpit state unavailable</h1>
+        <p>
+          <code>window.useCockpitState</code> did not load. Verify
+          cockpit-ext.jsx is loaded before App.jsx.
+        </p>
+      </div>
+    );
+  }
+  if (!layoutProfileAvailable) {
+    console.error("[App] window.useLayoutProfile missing — layout auto-collapse disabled");
+  }
 
   // cs is the source of truth for mode/branch — mirror to local state for child props
   useEffect(() => {

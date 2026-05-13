@@ -249,7 +249,7 @@ function Drawer() {
 
   // apply CSS var --h-drawer to document root so the grid can read it
   dUseEffect(() => {
-    const h = drawer.open ? Math.max(120, Math.min(window.innerHeight * 0.8, drawer.height)) : 0;
+    const h = drawer.open ? Math.max(120, Math.min(window.innerHeight * 0.8, drawer.height)) : 26;
     document.documentElement.style.setProperty("--h-drawer", h + "px");
     document.body.classList.toggle("drawer-open", drawer.open);
   }, [drawer.open, drawer.height]);
@@ -379,13 +379,6 @@ function Drawer() {
 
   // listen for programmatic events (from IDE's drawer hint button etc.)
   window.addEventListener("masc-drawer-toggle", () => {
-    if (!window.useCockpitState) return;
-    // bypass hook: read singleton directly via the module-internal __state
-    const ev = window.__cockpit_state || null;
-    // simpler: push a custom postMessage that any mounted Drawer hook will receive via state singleton
-    // we trigger by directly invoking the persist with a flipped open flag
-    const cur = (window.MASC_EXT && window.MASC_EXT.initialState) ? null : null;
-    // Use a global helper installed below
     if (window.__drawerToggle) window.__drawerToggle();
   });
   window.addEventListener("masc-drawer-set", (e) => {

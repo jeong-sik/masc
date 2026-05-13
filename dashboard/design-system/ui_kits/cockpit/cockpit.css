@@ -196,7 +196,7 @@ button { font: inherit; }
   padding: 0 var(--sp-4);
   overflow: hidden;
 }
-.life-label { font: 600 var(--fs-9)/1 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0; }
+.life-label { background: transparent; border: 0; padding: 0; cursor: pointer; font: 600 var(--fs-9)/1 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-muted); flex-shrink: 0; }
 .life-trace { flex: 1; height: 20px; position: relative; overflow: hidden; }
 .life-trace svg { width: 100%; height: 100%; display: block; }
 .life-now {

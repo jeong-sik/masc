@@ -65,7 +65,7 @@ function FocusToggle() {
   return (
     <div className="focus-cluster" ref={ref}>
       {open && (
-        <div className="focus-menu">
+        <div className="focus-menu" id="focus-menu" role="menu">
           <div className="focus-menu-h">view</div>
           <button className={"focus-menu-row" + (focus ? " on" : "")}
                   onClick={() => { toggleFocus(); }}>
@@ -85,7 +85,8 @@ function FocusToggle() {
         className={"focus-toggle " + (focus ? "on" : "") + (open ? " menu-open" : "")}
         onClick={() => setOpen(!open)}
         title="view options"
-        aria-pressed={focus}
+        aria-haspopup="menu"
+        aria-controls="focus-menu"
         aria-expanded={open}>
         <span className="focus-icon">⛶</span>
         <span className="focus-label">{focus ? "exit focus" : "focus"}</span>

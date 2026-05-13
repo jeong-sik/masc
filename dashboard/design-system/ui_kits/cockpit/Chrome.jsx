@@ -359,6 +359,31 @@ function KpiStrip() {
 }
 
 // ============== Lifeline ==============
+const normalizeLifeKind = kind => ({
+  err: "fail",
+  fail: "fail",
+  flag: "cascade",
+  cascade: "cascade",
+  tool: "nudge",
+  note: "nudge",
+  nudge: "nudge",
+  claim: "claim",
+  verify: "verify",
+}[kind] || "nudge");
+const lifeKindY = kind => (
+  kind === "fail" ? 2 :
+  kind === "cascade" ? 4 :
+  kind === "nudge" ? 6 :
+  kind === "claim" || kind === "verify" ? 8 :
+  6
+);
+const lifeKindColor = kind => (
+  kind === "fail" ? "var(--err-fg)" :
+  kind === "cascade" ? "var(--info-fg)" :
+  kind === "nudge" ? "var(--brass-1)" :
+  "var(--ok-fg)"
+);
+
 function Lifeline() {
   const [col, toggleLife] = (window.useCollapsed ? window.useCollapsed("lifeline") : [false, () => {}]);
   // Build a heartbeat trace from real keeper events instead of pure sin wave.
@@ -370,36 +395,39 @@ function Lifeline() {
   // Map events to x positions (most recent on right).
   const eventX = events.map((e, i) => Math.floor(N - 1 - (i * (N-2) / Math.max(events.length-1,1))));
   const eventKind = {};
-  events.forEach((e, i) => { eventKind[eventX[i]] = e.kind; });
+  events.forEach((e, i) => { eventKind[eventX[i]] = normalizeLifeKind(e.kind); });
   for (let i = 0; i < N; i++) {
     const x = (i / (N-1)) * 600;
     const base = 12;
     let y = base + Math.sin(i * 0.18) * 0.5;
     const k = eventKind[i];
-    if (k === "fail")     y = 2;
-    else if (k === "cascade") y = 4;
-    else if (k === "nudge")   y = 6;
-    else if (k === "claim" || k === "verify") y = 8;
+    if (k) y = lifeKindY(k);
     pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
   const d = "M" + pts.join(" L");
   // Render event markers as small dots.
   const markers = events.slice(0, 8).map((e, i) => ({
     x: (eventX[i] / (N-1)) * 600,
-    kind: e.kind,
+    kind: normalizeLifeKind(e.kind),
     keeper: e.keeper,
   }));
   return (
     <div className={"life" + (col ? " wx-collapsed" : "")}>
-      <span className="life-label" onClick={toggleLife} title={col ? "expand lifeline" : "collapse lifeline"} style={{cursor:"pointer"}}>
+      <button
+        type="button"
+        className="life-label"
+        onClick={toggleLife}
+        aria-expanded={!col}
+        aria-controls="life-trace"
+        title={col ? "expand lifeline" : "collapse lifeline"}>
         {col ? "▸" : "▾"} Lifeline · 60s
-      </span>
-      <div className="life-trace">
+      </button>
+      <div className="life-trace" id="life-trace">
         <svg viewBox="0 0 600 20" preserveAspectRatio="none">
           <path d={d} stroke="var(--color-accent-fg)" strokeWidth="1" fill="none" />
           {markers.map((m, i) => (
-            <circle key={i} cx={m.x} cy={m.kind === "fail" ? 2 : m.kind === "cascade" ? 4 : 6} r="1.6"
-              fill={m.kind === "fail" ? "var(--err-fg)" : m.kind === "cascade" ? "var(--info-fg)" : m.kind === "nudge" ? "var(--brass-1)" : "var(--ok-fg)"} />
+            <circle key={i} cx={m.x} cy={lifeKindY(m.kind)} r="1.6"
+              fill={lifeKindColor(m.kind)} />
           ))}
         </svg>
       </div>

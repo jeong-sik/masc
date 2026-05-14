@@ -5,6 +5,7 @@ import {
   COGNITIVE_MODE_STATES,
   COGNITIVE_MODE_TARGETS,
   COCKPIT_ENTRYPOINTS,
+  COCKPIT_LEGACY_ENTRYPOINTS,
   COCKPIT_MODE_TARGETS,
   cognitiveModeForCockpitMode,
   cognitiveModeForRoute,
@@ -15,8 +16,8 @@ import {
 import { sectionItemsForTab } from './config/navigation'
 
 describe('cockpit entrypoint registry', () => {
-  const coverageForAlias = (alias: string) =>
-    COCKPIT_ENTRYPOINTS.find(entrypoint => entrypoint.aliases.includes(alias))?.coverage
+  const visibleAliases = () => COCKPIT_ENTRYPOINTS.flatMap(entrypoint => entrypoint.aliases)
+  const legacyAliases = () => COCKPIT_LEGACY_ENTRYPOINTS.flatMap(entrypoint => entrypoint.aliases)
 
   it('keeps every prototype plane mode mapped to a production route', () => {
     expect(Object.keys(COCKPIT_MODE_TARGETS)).toEqual([
@@ -59,6 +60,38 @@ describe('cockpit entrypoint registry', () => {
     })
   })
 
+  it('keeps the visible cockpit command map to ten primary aliases', () => {
+    const aliases = visibleAliases()
+
+    expect(COCKPIT_ENTRYPOINTS).toHaveLength(10)
+    expect(aliases).toEqual([
+      'goal-horizon',
+      'task-board',
+      'board-feed',
+      'composer',
+      'cascade',
+      'audit',
+      'safety',
+      'cost',
+      'keeper-cognition',
+      'source',
+    ])
+    expect(new Set(aliases).size).toBe(10)
+    expect(aliases).not.toContain('ct-lat')
+    expect(aliases).not.toContain('cs-deep')
+    expect(aliases).not.toContain('pr-thread')
+  })
+
+  it('keeps old prototype aliases as legacy redirects instead of visible commands', () => {
+    const visible = new Set(visibleAliases())
+    const legacy = legacyAliases()
+
+    for (const alias of ['ct-lat', 'cs-deep', 'pr-thread', 'dc-mem', 'acc-led']) {
+      expect(visible.has(alias)).toBe(false)
+      expect(legacy).toContain(alias)
+    }
+  })
+
   it('normalizes cognitive mode aliases from cockpit routes', () => {
     expect(normalizeCognitiveMode(' CODE ')).toBe('code')
     expect(cognitiveModeForCockpitMode('Work')).toBe('cockpit')
@@ -82,8 +115,8 @@ describe('cockpit entrypoint registry', () => {
     expect(normalizeCockpitEntrypoint('Keeper / Tool Access')).toBe('keeper-tool-access')
   })
 
-  it('targets registered dashboard sections for every cockpit sub-entrypoint', () => {
-    for (const entrypoint of COCKPIT_ENTRYPOINTS) {
+  it('targets registered dashboard sections for primary and legacy entrypoints', () => {
+    for (const entrypoint of [...COCKPIT_ENTRYPOINTS, ...COCKPIT_LEGACY_ENTRYPOINTS]) {
       const section = entrypoint.target.params?.section
       if (!section) continue
       const knownSections = sectionItemsForTab(entrypoint.target.tab).map(item => item.params.section)
@@ -91,7 +124,30 @@ describe('cockpit entrypoint registry', () => {
     }
   })
 
-  it('resolves prototype subtabs to explicit live route homes', () => {
+  it('resolves primary cockpit aliases to canonical production routes', () => {
+    expect(cockpitTargetForParams({ mode: 'Work', tab: 'goal-horizon' })).toEqual({
+      tab: 'workspace',
+      params: { section: 'planning', view: 'goal-tree' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Comms', tab: 'composer' })).toEqual({
+      tab: 'command',
+      params: { section: 'operations', view: 'ops' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'cost' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'keeper-cognition' })).toEqual({
+      tab: 'monitoring',
+      params: { section: 'cognition', view: 'keeper' },
+    })
+    expect(cockpitTargetForParams({ mode: 'IDE', tab: 'source' })).toEqual({
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+    })
+  })
+
+  it('keeps legacy prototype subtabs routeable without re-exposing them in the command map', () => {
     expect(cockpitTargetForParams({ mode: 'IDE', tab: 'edit' })).toEqual({
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -152,125 +208,25 @@ describe('cockpit entrypoint registry', () => {
       tab: 'monitoring',
       params: { section: 'runtime', view: 'audit', focus: 'summary' },
     })
-  })
-  it('routes the covered IDE search entrypoint directly to the find panel', () => {
-    const entrypoint = COCKPIT_ENTRYPOINTS.find(entry => entry.aliases.includes('find'))
-
-    expect(entrypoint?.coverage).toBe('covered')
-    expect(cockpitTargetForParams({ mode: 'IDE', tab: 'search' })).toEqual({
+    expect(cockpitTargetForParams({ mode: 'IDE', tab: 'find' })).toEqual({
       tab: 'code',
       params: { section: 'ide-shell', view: 'source', find: 'open' },
     })
-    expect(cockpitTargetForParams({ mode: 'CODE', tab: 'find' })).toEqual({
-      tab: 'code',
-      params: { section: 'ide-shell', view: 'source', find: 'open' },
+    expect(cockpitTargetForParams({ mode: 'Comms', tab: 'cm-bc' })).toEqual({
+      tab: 'command',
+      params: { section: 'operations', view: 'ops', focus: 'broadcast' },
     })
-  })
-  it('routes covered C3 composer variants to focused quick intervention modes', () => {
-    const variants = [
-      ['cm-bc', 'broadcast'],
-      ['cm-mn', 'mention'],
-      ['cm-st', 'state'],
-    ] as const
-
-    for (const [alias, focus] of variants) {
-      const entrypoint = COCKPIT_ENTRYPOINTS.find(entry => entry.aliases.includes(alias))
-      expect(entrypoint?.coverage).toBe('covered')
-      expect(cockpitTargetForParams({ mode: 'Comms', tab: alias })).toEqual({
-        tab: 'command',
-        params: { section: 'operations', view: 'ops', focus },
-      })
-    }
-  })
-  it('marks IDE review entrypoints as covered review focus routes', () => {
-    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
-      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
-    ))
-
-    expect(byAlias.get('review')).toMatchObject({
-      coverage: 'covered',
-      target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } },
-    })
-    expect(byAlias.get('pr-thread')).toMatchObject({
-      coverage: 'covered',
-      target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } },
-    })
-  })
-
-  it('marks planning focus cockpit entries as route-covered', () => {
-    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
-      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
-    ))
-
-    expect(byAlias.get('task-st')?.coverage).toBe('covered')
-    expect(byAlias.get('acc-led')?.coverage).toBe('covered')
-    expect(byAlias.get('acc-mtx')?.coverage).toBe('covered')
     expect(cockpitTargetForParams({ mode: 'Work', tab: 'acc-led' })).toEqual({
       tab: 'workspace',
       params: { section: 'planning', focus: 'accountability-ledger' },
-    })
-    expect(cockpitTargetForParams({ mode: 'Work', tab: 'acc-mtx' })).toEqual({
-      tab: 'workspace',
-      params: { section: 'planning', focus: 'accountability-matrix' },
-    })
-  })
-
-  it('marks cost cockpit entries as route-covered focus surfaces', () => {
-    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
-      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
-    ))
-
-    expect(byAlias.get('ct-agt')?.coverage).toBe('covered')
-    expect(byAlias.get('ct-mtx')?.coverage).toBe('covered')
-    expect(byAlias.get('ct-lat')?.coverage).toBe('covered')
-    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'ct-agt' })).toEqual({
-      tab: 'monitoring',
-      params: { section: 'runtime', view: 'cost', focus: 'agent' },
-    })
-    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'ct-mtx' })).toEqual({
-      tab: 'monitoring',
-      params: { section: 'runtime', view: 'cost', focus: 'matrix' },
     })
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'ct-lat' })).toEqual({
       tab: 'monitoring',
       params: { section: 'runtime', view: 'cost', focus: 'latency' },
     })
-  })
-
-  it('marks cascade cockpit entries as route-covered inspector focus surfaces', () => {
-    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
-      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
-    ))
-
-    expect(byAlias.get('cs-deep')?.coverage).toBe('covered')
-    expect(byAlias.get('cs-cmp')?.coverage).toBe('covered')
-    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'cs-deep' })).toEqual({
-      tab: 'monitoring',
-      params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' },
-    })
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'cascade-compare' })).toEqual({
       tab: 'monitoring',
       params: { section: 'runtime', view: 'inspector', focus: 'compare' },
     })
-  })
-  it('marks audit actor and summary entrypoints as covered runtime routes', () => {
-    const byAlias = new Map(COCKPIT_ENTRYPOINTS.flatMap(entrypoint =>
-      entrypoint.aliases.map(alias => [alias, entrypoint] as const),
-    ))
-
-    expect(byAlias.get('au-act')).toMatchObject({
-      coverage: 'covered',
-      target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'actor' } },
-    })
-    expect(byAlias.get('au-sum')).toMatchObject({
-      coverage: 'covered',
-      target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'summary' } },
-    })
-  })
-
-  it('marks existing IDE source, split, and graph surfaces covered', () => {
-    expect(coverageForAlias('edit')).toBe('covered')
-    expect(coverageForAlias('split-diff')).toBe('covered')
-    expect(coverageForAlias('git-graph')).toBe('covered')
   })
 })

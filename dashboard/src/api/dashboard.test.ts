@@ -309,6 +309,55 @@ describe('fetchDashboardTools', () => {
     const result = await fetchDashboardTools()
     expect(result.tool_inventory).toBeDefined()
   })
+
+  it('preserves tool usage coverage gap rows', async () => {
+    const rawResponse = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        total_calls: 0,
+        distinct_tools_called: 0,
+        top_20: [],
+        never_called_count: 0,
+        dispatch_v2_enabled: false,
+        registered_count: 0,
+        source: 'tool_usage',
+        health: 'coverage_gap',
+        stale_reason: 'tool_usage_append_failed',
+        coverage_gap_count: 1,
+        coverage_gaps: [
+          {
+            schema: 'masc.telemetry_coverage_gap.v1',
+            source: 'tool_usage',
+            producer: 'tool_usage_log',
+            durable_store: '.masc/tool_usage',
+            dashboard_surface: '/api/v1/dashboard/tools',
+            stale_reason: 'tool_usage_append_failed',
+            error: 'synthetic append failure',
+          },
+        ],
+      },
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardTools()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tools')
+    expect(result.tool_usage.coverage_gap_count).toBe(1)
+    expect(result.tool_usage.coverage_gaps?.[0]).toMatchObject({
+      producer: 'tool_usage_log',
+      durable_store: '.masc/tool_usage',
+      dashboard_surface: '/api/v1/dashboard/tools',
+      stale_reason: 'tool_usage_append_failed',
+      error: 'synthetic append failure',
+    })
+  })
 })
 
 describe('fetchToolQuality', () => {

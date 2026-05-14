@@ -1719,19 +1719,7 @@ export interface ToolMetricsTopEntry {
   call_count: number
 }
 
-export interface ToolMetricsResponse {
-  source?: string
-  producer?: string
-  durable_store?: string
-  dashboard_surface?: string
-  freshness_slo_s?: number | null
-  latest_ts_unix?: number | null
-  latest_ts_iso?: string | null
-  latest_age_s?: number | null
-  health?: string
-  stale_reason?: string | null
-  entry_count?: number
-  exists?: boolean
+export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
   total_calls: number
   distinct_tools_called: number
   top_20: ToolMetricsTopEntry[]

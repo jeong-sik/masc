@@ -5,7 +5,17 @@ type provider_metadata =
   ; labels : string list
   ; telemetry_bucket : string option
   ; telemetry_model_prefixes : string list
+  ; tool_policy : tool_policy_metadata
+  }
+
+and tool_policy_metadata =
+  { supports_runtime_mcp_http_headers : bool
+  ; requires_per_keeper_bridging_for_bound_actor_tools : bool
+  ; identity_runtime_mcp_header_keys : string list
   ; argv_prompt_preflight : bool
+  ; uses_anthropic_caching : bool
+  ; max_turns_per_attempt : int option
+  ; tolerates_bound_actor_fallback : bool
   }
 
 type model_ref =
@@ -85,6 +95,15 @@ let bool_any_opt keys fields =
     keys
 ;;
 
+let int_any_opt keys fields =
+  List.find_map
+    (fun key ->
+       match List.assoc_opt key fields with
+       | Some (Otoml.TomlInteger value) -> Some value
+       | _ -> None)
+    keys
+;;
+
 let string_list_opt key fields =
   match List.assoc_opt key fields with
   | Some (Otoml.TomlArray values) ->
@@ -129,11 +148,16 @@ let ancestor_config_path_opt start =
       existing_file_opt (Filename.concat dir "config/cascade.toml"))
 ;;
 
+let executable_config_path_opt () =
+  Sys.executable_name |> Filename.dirname |> ancestor_config_path_opt
+;;
+
 let cascade_path_opt () =
   [ env_file "MASC_CONFIG_DIR" "cascade.toml"
   ; env_file "MASC_BASE_PATH" ".masc/config/cascade.toml"
   ; (Sys.getenv_opt "DUNE_SOURCEROOT"
      |> Option.map (fun root -> Filename.concat root "config/cascade.toml"))
+  ; executable_config_path_opt ()
   ; Some (Filename.concat (Sys.getcwd ()) "config/cascade.toml")
   ; ancestor_config_path_opt (Sys.getcwd ())
   ; Config_dir_resolver.cascade_path_opt ()
@@ -217,18 +241,59 @@ let parse_provider_metadata provider_id provider_fields =
              (string_list_any_opt [ "aliases" ] fields |> Option.value ~default:[]))
     |> List.rev
   in
-  let argv_prompt_preflight =
+  let tool_policy =
     match find_table_opt "capabilities" provider_fields with
-    | None -> false
+    | None ->
+      { supports_runtime_mcp_http_headers = false
+      ; requires_per_keeper_bridging_for_bound_actor_tools = false
+      ; identity_runtime_mcp_header_keys = []
+      ; argv_prompt_preflight = false
+      ; uses_anthropic_caching = false
+      ; max_turns_per_attempt = None
+      ; tolerates_bound_actor_fallback = false
+      }
     | Some fields ->
-      bool_any_opt [ "argv-prompt-preflight"; "argv_prompt_preflight" ] fields
-      |> Option.value ~default:false
+      { supports_runtime_mcp_http_headers =
+          bool_any_opt
+            [ "supports-runtime-mcp-http-headers"
+            ; "supports_runtime_mcp_http_headers"
+            ]
+            fields
+          |> Option.value ~default:false
+      ; requires_per_keeper_bridging_for_bound_actor_tools =
+          bool_any_opt
+            [ "requires-per-keeper-bridging-for-bound-actor-tools"
+            ; "requires_per_keeper_bridging_for_bound_actor_tools"
+            ]
+            fields
+          |> Option.value ~default:false
+      ; identity_runtime_mcp_header_keys =
+          string_list_any_opt
+            [ "identity-runtime-mcp-header-keys"
+            ; "identity_runtime_mcp_header_keys"
+            ]
+            fields
+          |> Option.value ~default:[]
+      ; argv_prompt_preflight =
+          bool_any_opt [ "argv-prompt-preflight"; "argv_prompt_preflight" ] fields
+          |> Option.value ~default:false
+      ; uses_anthropic_caching =
+          bool_any_opt [ "uses-anthropic-caching"; "uses_anthropic_caching" ] fields
+          |> Option.value ~default:false
+      ; max_turns_per_attempt =
+          int_any_opt [ "max-turns-per-attempt"; "max_turns_per_attempt" ] fields
+      ; tolerates_bound_actor_fallback =
+          bool_any_opt
+            [ "tolerates-bound-actor-fallback"; "tolerates_bound_actor_fallback" ]
+            fields
+          |> Option.value ~default:false
+      }
   in
   { id = provider_id
   ; labels
   ; telemetry_bucket
   ; telemetry_model_prefixes
-  ; argv_prompt_preflight
+  ; tool_policy
   }
 ;;
 
@@ -395,6 +460,17 @@ let telemetry_bucket_of_model_id model_id =
     | None -> telemetry_bucket_of_model_raw snapshot model_id)
 ;;
 
+let tool_policy_metadata_of_provider_label label =
+  let label = String.trim label in
+  if String.equal label ""
+  then None
+  else (
+    let snapshot = load_snapshot () in
+    Option.map
+      (fun provider -> provider.tool_policy)
+      (provider_for_label snapshot label))
+;;
+
 let model_matches_model_id (model : model_ref) model_id =
   String.equal model.model_id model_id
   || String.equal model.api_name model_id
@@ -426,6 +502,6 @@ let provider_requires_argv_prompt_preflight cfg =
   candidate_provider_ids snapshot cfg
   |> List.exists (fun provider_id ->
     match provider_for_label snapshot provider_id with
-    | Some provider -> provider.argv_prompt_preflight
+    | Some provider -> provider.tool_policy.argv_prompt_preflight
     | None -> false)
 ;;

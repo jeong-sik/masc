@@ -442,28 +442,48 @@ let auth_mode_of_binding (binding : Runtime_binding.t) =
      | Local | Direct_api -> No_auth)
 ;;
 
-let tool_policy_of_binding (binding : Runtime_binding.t) =
-  let requires_bridging =
-    match binding.Runtime_binding.command with
-    | Some "codex" -> true
-    | Some _ | None -> false
-  in
-  { supports_runtime_mcp_http_headers =
-      binding_supports_runtime_mcp_http_headers binding && not requires_bridging
-  ; requires_per_keeper_bridging_for_bound_actor_tools = requires_bridging
-  ; identity_runtime_mcp_header_keys =
-      (if requires_bridging
-       then [ "authorization"; "x-masc-agent-name"; "x-masc-keeper-name" ]
-       else [])
-  ; argv_prompt_preflight = requires_bridging
-  ; uses_anthropic_caching = binding_uses_prompt_caching binding
-  ; max_turns_per_attempt =
-      Llm_provider.Provider_config.max_turns_hard_cap binding.Runtime_binding.kind
-  ; tolerates_bound_actor_fallback =
-      (not requires_bridging)
-      && (binding_supports_runtime_mcp_http_headers binding
-          || runtime_kind_of_binding binding <> Direct_api)
+let tool_policy_of_metadata
+      (metadata : Cascade_provider_metadata.tool_policy_metadata)
+  =
+  { supports_runtime_mcp_http_headers = metadata.supports_runtime_mcp_http_headers
+  ; requires_per_keeper_bridging_for_bound_actor_tools =
+      metadata.requires_per_keeper_bridging_for_bound_actor_tools
+  ; identity_runtime_mcp_header_keys = metadata.identity_runtime_mcp_header_keys
+  ; argv_prompt_preflight = metadata.argv_prompt_preflight
+  ; uses_anthropic_caching = metadata.uses_anthropic_caching
+  ; max_turns_per_attempt = metadata.max_turns_per_attempt
+  ; tolerates_bound_actor_fallback = metadata.tolerates_bound_actor_fallback
   }
+;;
+
+let tool_policy_of_binding (binding : Runtime_binding.t) =
+  match
+    Cascade_provider_metadata.tool_policy_metadata_of_provider_label
+      binding.Runtime_binding.id
+  with
+  | Some metadata -> tool_policy_of_metadata metadata
+  | None ->
+    let requires_bridging =
+      match binding.Runtime_binding.command with
+      | Some "codex" -> true
+      | Some _ | None -> false
+    in
+    { supports_runtime_mcp_http_headers =
+        binding_supports_runtime_mcp_http_headers binding && not requires_bridging
+    ; requires_per_keeper_bridging_for_bound_actor_tools = requires_bridging
+    ; identity_runtime_mcp_header_keys =
+        (if requires_bridging
+         then [ "authorization"; "x-masc-agent-name"; "x-masc-keeper-name" ]
+         else [])
+    ; argv_prompt_preflight = requires_bridging
+    ; uses_anthropic_caching = binding_uses_prompt_caching binding
+    ; max_turns_per_attempt =
+        Llm_provider.Provider_config.max_turns_hard_cap binding.Runtime_binding.kind
+    ; tolerates_bound_actor_fallback =
+        (not requires_bridging)
+        && (binding_supports_runtime_mcp_http_headers binding
+            || runtime_kind_of_binding binding <> Direct_api)
+    }
 ;;
 
 let telemetry_policy_of_binding (binding : Runtime_binding.t) =

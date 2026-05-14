@@ -307,6 +307,17 @@ spawn 시 인자로 직접 설정하는 필드.
 - hard mode runtime preflight는 Docker `SecurityOptions`에서 `rootless`와 `userns`를 모두 요구한다. 현재 Docker Desktop/rootful daemon처럼 둘 중 하나라도 없으면 `doctor`와 keeper startup에서 fail-closed 된다.
 - 기본 sandbox 이미지는 `masc-keeper-sandbox:local`이다. Docker keeper를 올리기 전에 `scripts/build-keeper-sandbox-image.sh`를 실행해 이미지를 만들고, smoke 검증은 `scripts/keeper-sandbox-smoke.sh`를 사용한다.
 - keeper Docker 컨테이너에는 `masc.mcp.component=keeper-sandbox`와 base path hash 라벨이 붙는다. 새 컨테이너 시작 전 같은 base path 범위의 오래된 MASC keeper 컨테이너만 best-effort로 정리한다. 조정값은 `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED`, `MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC`, `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC`이다.
+
+#### Docker profile vs one-shot/managed 실행
+
+Docker 사용 여부와 컨테이너 유지 방식은 서로 다른 결정이다.
+
+- `sandbox_profile`은 keeper config/meta에서 정해지는 boot-time policy다. `sandbox_profile=docker` keeper는 sandboxed tool 실행 시 Docker 경로를 사용한다. 이 값은 keeper LLM turn 자체를 Docker 안에서 돌린다는 뜻은 아니다.
+- 실제 컨테이너 route는 tool call 시점에 정해진다. `keeper_bash`, `keeper_shell`, `keeper_fs_read`, `keeper_fs_edit`, git/gh 계열처럼 sandboxed execution이 필요한 tool만 Docker 실행 경로를 탄다. board/task/goal 같은 control-plane tool은 서버 내부 상태 변경이라 컨테이너를 띄우지 않는다.
+- managed container가 없으면 sandboxed tool call은 one-shot Docker container를 만들고 명령 종료 후 사라진다. 그래서 `docker ps`에 계속 보이는 컨테이너가 없어도 Docker가 사용 중일 수 있다.
+- `masc_keeper_sandbox_start`로 visible managed container를 미리 띄우면 이후 sandboxed tool call은 그 container/runtime에 붙을 수 있다. 디버깅, 연속 shell 작업, container 상태 관찰이 필요할 때 쓰는 운영 모드다.
+- `masc_keeper_sandbox_status`에서 `sandbox_profile=docker`, `effective_mode=oneshot_or_managed_inherit`, `container_count=0`이면 "Docker keeper지만 현재 prewarmed container는 없고, sandboxed tool call 때 one-shot Docker를 쓴다"는 뜻이다.
+
 ### 3.1.2 GitHub identity 운영 절차
 
 `github_identity`는 현재 대시보드의 일반 설정 화면에서 수정하는 필드가 아니라 active config root의 `keeper.toml` overlay가 SSOT다. 대시보드에서 찾지 못하면 먼저 active config root를 확인하고 파일을 수정한다.

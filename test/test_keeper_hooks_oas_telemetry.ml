@@ -738,6 +738,36 @@ let test_record_llm_tok_s_metrics_none_telemetry_is_noop () =
     (prompt_count_after -. prompt_count_before)
 ;;
 
+let test_summarize_thinking_blocks_metadata_only () =
+  let summary =
+    Hooks.summarize_thinking_blocks
+      [
+        Agent_sdk.Types.Text "visible";
+        Agent_sdk.Types.Thinking
+          { thinking_type = "extended"; content = "private reasoning" };
+        Agent_sdk.Types.RedactedThinking "opaque-redacted-payload";
+        Agent_sdk.Types.Thinking { thinking_type = "extended"; content = "more" };
+      ]
+  in
+  check bool "thinking present" true summary.thinking_present;
+  check int "thinking blocks" 2 summary.thinking_blocks;
+  check int "thinking chars" 21 summary.thinking_chars;
+  check int "redacted blocks" 1 summary.redacted_thinking_blocks;
+  check string "mixed kind" "mixed" summary.thinking_kind
+;;
+
+let test_summarize_thinking_blocks_none () =
+  let summary =
+    Hooks.summarize_thinking_blocks
+      [ Agent_sdk.Types.Text "visible"; Agent_sdk.Types.Text "" ]
+  in
+  check bool "thinking absent" false summary.thinking_present;
+  check int "no thinking blocks" 0 summary.thinking_blocks;
+  check int "no thinking chars" 0 summary.thinking_chars;
+  check int "no redacted blocks" 0 summary.redacted_thinking_blocks;
+  check string "none kind" "none" summary.thinking_kind
+;;
+
 let inference_latency_labels _model = [ "model", "runtime" ]
 
 let test_record_llm_inference_latency_metric_positive_observes () =
@@ -1568,6 +1598,16 @@ let () =
             "telemetry=None is a safe no-op"
             `Quick
             test_record_llm_tok_s_metrics_none_telemetry_is_noop
+        ] )
+    ; ( "thinking_log_summary"
+      , [ test_case
+            "summarizes thinking metadata only"
+            `Quick
+            test_summarize_thinking_blocks_metadata_only
+        ; test_case
+            "reports none without thinking blocks"
+            `Quick
+            test_summarize_thinking_blocks_none
         ] )
     ; ( "llm_inference_latency"
       , [ test_case

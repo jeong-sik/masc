@@ -330,12 +330,12 @@ function entryPreview(e: TelemetryEntry): string {
       return `${keeper} -> ${tool}`
     }
     case 'trajectory_tool_call': {
-      const tool = telemetryToolName(e) ?? 'tool'
+      const tool = telemetryToolName(e) ?? '(unknown tool)'
       const keeper =
         normalizeText(e.keeper_name)
         ?? normalizeText(recordField(e.runtime_contract, 'keeper_name'))
         ?? normalizeText(e.keeper)
-        ?? 'unknown'
+        ?? '(unknown keeper)'
       return `${keeper} -> ${tool}`
     }
     case 'tool_usage': {
@@ -344,7 +344,7 @@ function entryPreview(e: TelemetryEntry): string {
       return `${caller || 'unknown'} -> ${tool}`
     }
     case 'oas_event': {
-      const eventType = normalizeText(e.event_type) ?? normalizeText(e.type) ?? 'oas'
+      const eventType = normalizeText(e.event_type) ?? normalizeText(e.type) ?? '(unknown event_type)'
       const agentName = normalizeText(e.agent_name)
       const toolName = normalizeText(e.tool_name)
       const turn = typeof e.turn === 'number' ? e.turn : null
@@ -358,14 +358,14 @@ function entryPreview(e: TelemetryEntry): string {
       return parts.length > 0 ? `${eventType}: ${parts.join(' · ')}` : eventType
     }
     case 'execution_receipt': {
-      const keeper = normalizeText(e.keeper_name) ?? normalizeText(e.agent_name) ?? 'unknown'
-      const outcome = normalizeText(e.outcome) ?? normalizeText(e.operator_disposition) ?? 'recorded'
+      const keeper = normalizeText(e.keeper_name) ?? normalizeText(e.agent_name) ?? '(unknown keeper)'
+      const outcome = normalizeText(e.outcome) ?? normalizeText(e.operator_disposition) ?? '(no outcome)'
       const reason = normalizeText(e.terminal_reason_code)
       return reason ? `${keeper} receipt ${outcome} (${reason})` : `${keeper} receipt ${outcome}`
     }
     case 'goal_event': {
-      const goal = normalizeText(e.goal_id) ?? 'unknown-goal'
-      const eventType = normalizeText(e.event_type) ?? 'goal_event'
+      const goal = normalizeText(e.goal_id) ?? '(unknown goal)'
+      const eventType = normalizeText(e.event_type) ?? '(unknown event_type)'
       return `${goal} ${eventType}`
     }
     case 'tool_metric': {

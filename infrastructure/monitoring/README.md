@@ -16,7 +16,7 @@ Prometheus / Grafana files that live alongside the masc-mcp source so deployment
 | `keeper-turn-fsm-alerts.yml` | keeper turn FSM | alerts | `docs/observability/keeper-turn-fsm-metrics.md` |
 | `keeper-turn-fsm-slo.yml` | keeper turn FSM | recording rules | `docs/observability/keeper-turn-fsm-metrics.md` |
 | `grafana-dashboard-surface-dashboard.json` | dashboard IA | Grafana dashboard | `docs/observability/dashboard-surface-metrics.md` |
-| `auth-credential-alerts.yml` | auth credential surface | alerts | PR #15112 (`lib/auth.ml` doc comments + commit messages) |
+| `auth-credential-alerts.yml` | auth credential surface | alerts | `docs/observability/auth-credential-metrics.md` |
 
 ## Domains
 

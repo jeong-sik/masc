@@ -59,6 +59,7 @@ interface DashboardNavItem {
   icon: DashboardSurfaceIcon
   description: string
   defaultParams?: Record<string, string>
+  hidden?: boolean
 }
 
 export interface DashboardSectionNavItem {
@@ -77,6 +78,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     description: 'High-Fidelity MASC Cockpit',
     defaultTab: 'cockpit',
     tabs: ['cockpit'],
+    hidden: true,
   },
 
   {
@@ -157,7 +159,11 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
   icon: surface.icon,
   description: surface.description,
   defaultParams: surface.defaultParams,
+  hidden: surface.hidden,
 }))
+
+export const VISIBLE_DASHBOARD_NAV_ITEMS: DashboardNavItem[] =
+  DASHBOARD_NAV_ITEMS.filter(item => item.hidden !== true)
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   cockpit: [],

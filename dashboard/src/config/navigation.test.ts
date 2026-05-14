@@ -3,11 +3,22 @@ import { describe, expect, it } from 'vitest'
 import {
   DASHBOARD_SURFACES,
   SECTION_REDIRECTS,
+  VISIBLE_DASHBOARD_NAV_ITEMS,
   defaultParamsForTab,
   normalizeRouteParams,
   sectionItemsForTab,
   visibleSectionItemsForTab,
 } from './navigation'
+
+describe('dashboard surface navigation', () => {
+  it('keeps MASC Cockpit routeable but out of primary navigation', () => {
+    const cockpit = DASHBOARD_SURFACES.find(surface => surface.id === 'cockpit')
+
+    expect(cockpit?.hidden).toBe(true)
+    expect(defaultParamsForTab('cockpit')).toEqual({})
+    expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).not.toContain('cockpit')
+  })
+})
 
 describe('code (IDE plane) navigation', () => {
   it('exposes the production IDE plane in the sidebar', () => {

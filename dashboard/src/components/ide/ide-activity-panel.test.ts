@@ -54,6 +54,7 @@ describe('IdeActivityPanel', () => {
     expect(container.querySelector('[data-testid="ide-context-lens"]')).not.toBeNull()
     expect(container.textContent).toContain('RUN PROGRESS')
     expect(container.textContent).toContain('0/0 linked')
+    expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('0')
     expect(container.textContent).toContain('no keeper activity')
   })
 
@@ -145,6 +146,7 @@ describe('IdeActivityPanel', () => {
       expect(container.textContent).toContain('1 line anchors')
       expect(container.textContent).toContain('1/1 linked')
     })
+    expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('100')
 
     const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
       .map(node => node.textContent)
@@ -222,6 +224,52 @@ describe('IdeActivityPanel', () => {
       line: 4,
       surface: 'PR',
     })])
+  })
+
+  it('shows linked context coverage for mixed activity events', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        events: [
+          {
+            seq: 1,
+            ts_ms: 100,
+            ts_iso: '2026-05-05T10:00:00Z',
+            room_id: 'run-default',
+            kind: 'telemetry.turn',
+            actor: { kind: 'keeper', id: 'sangsu' },
+            subject: { kind: 'log', id: 'turn-1' },
+            payload: {
+              log_id: 'turn-1',
+            },
+            tags: [],
+          },
+          {
+            seq: 2,
+            ts_ms: 200,
+            ts_iso: '2026-05-05T10:00:01Z',
+            room_id: 'run-default',
+            kind: 'keeper.note',
+            actor: { kind: 'keeper', id: 'analyst' },
+            subject: { kind: 'note', id: 'note-1' },
+            payload: {
+              summary: 'unlinked note',
+            },
+            tags: [],
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('1/2 linked')
+      expect(container.textContent).toContain('50%')
+    })
+    const coverage = container.querySelector('[role="progressbar"]')
+    expect(coverage?.getAttribute('aria-label')).toBe('Linked context coverage 1 of 2 events')
+    expect(coverage?.getAttribute('aria-valuenow')).toBe('50')
   })
 
   it('maps nested activity context and evidence refs into IDE route links', async () => {
@@ -687,6 +735,8 @@ describe('IdeActivityPanel', () => {
       totalEvents: 3,
       currentFileEvents: 1,
       linkedEvents: 3,
+      linkedCoveragePercent: 100,
+      linkedCoverageLabel: '100%',
       keeperTotalCount: 2,
       latestAgeLabel: '30s ago',
       activeGoal: {

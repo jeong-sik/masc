@@ -175,6 +175,72 @@ describe('IdeShell', () => {
     })
   })
 
+  it('hydrates operational route links from IDE route params', async () => {
+    route.value = {
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/runtime.ml',
+        line: '42',
+        surface: 'PR',
+        label: 'Runtime review',
+        source_id: 'trace:evt-42',
+        keeper: 'sangsu',
+        goal: 'goal-runtime',
+        task: 'task-runtime',
+        post: 'post-runtime',
+        comment: 'comment-runtime',
+        pr: '15035',
+        ref: 'main',
+        log_id: 'turn-42',
+        session_id: 'sess-runtime',
+        operation_id: 'op-runtime',
+        worker_run_id: 'wr-runtime',
+      },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ]))
+
+    const toolbarFocus = container.querySelector('[data-testid="ide-toolbar-context-focus"]')
+    expect(toolbarFocus?.getAttribute('aria-label')).toBe(
+      'Current IDE context: PR line 42, Runtime review, keeper sangsu, 10 route links',
+    )
+
+    const routeButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
+    expect(routeButtons.map(button => button.getAttribute('aria-label'))).toEqual([
+      'Open Code lib/runtime.ml:42',
+      'Open Goal goal-runtime',
+      'Open Task task-runtime',
+      'Open Board post post-runtime',
+      'Open Comment comment-runtime',
+      'Open PR 15035',
+      'Open Git main',
+      'Open Log turn-42',
+      'Open Fleet telemetry event log · session sess-runtime · operation op-runtime · worker wr-runtime · query turn-42',
+      'Open Keeper sangsu',
+    ])
+
+    fireEvent.click(routeButtons[8]!)
+    expect(window.location.hash).toBe(
+      '#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-42',
+    )
+  })
+
   it('rejects unsafe IDE route file focus params', async () => {
     route.value = {
       tab: 'code',

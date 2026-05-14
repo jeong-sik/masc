@@ -102,7 +102,7 @@ let tool_post_create : Masc_domain.tool_schema =
                 , `Assoc
                     [ "type", `String "string"
                     ; ( "description"
-                      , `String "Topic hearth name (e.g. webrtc, code-review)" )
+                      , `String "SubBoard slug or topic hearth name (e.g. ops, research). When a SubBoard with this slug exists, the post is bound to that SubBoard and its access policy." )
                     ] )
               ; ( "thread_id"
                 , `Assoc
@@ -157,7 +157,7 @@ let tool_post_list : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; "maxLength", `Int 100
                     ; ( "description"
-                      , `String "Filter by hearth topic (e.g. webrtc, code-review)" )
+                      , `String "Filter by SubBoard slug or hearth topic (e.g. ops, research)" )
                     ] )
               ; ( "random"
                 , `Assoc

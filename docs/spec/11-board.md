@@ -447,6 +447,8 @@ type sub_board = {
 | GET | `/api/v1/board/sub-boards` | 전체 SubBoard 목록 (`{sub_boards: [...]}`) |
 | POST | `/api/v1/board/sub-boards` | SubBoard 생성 (`slug`, `name`, `description`, `access?` 필요) |
 | GET | `/api/v1/board/sub-boards/<id_or_slug>` | 단일 SubBoard 조회 (ID 또는 slug로 검색) |
+| PUT | `/api/v1/board/sub-boards/<id_or_slug>` | SubBoard 수정 (name?, description?, access?, members?) |
+| DELETE | `/api/v1/board/sub-boards/<id_or_slug>` | SubBoard 삭제 (소속 게시물의 hearth는 orphan 정책으로 클리어됨) |
 
 POST 요청은 `with_tool_auth` (`tool_name: "board_sub_board_create"`)로 인증.
 

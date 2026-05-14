@@ -63,7 +63,7 @@ make test-contract
 
 대표 항목:
 
-- benchmark / swarm proof
+- benchmark / keeper fleet proof
   - `scripts/harness_agent_swarm_live.sh`
   - `docs/BENCHMARK-RUNBOOK.md`
 - supervised delivery / operator path
@@ -96,4 +96,4 @@ make test-contract
 그리고 이번 변경에서 **필수로 올리지 않는 것**은:
 
 - PostgreSQL/live network/viewer/local llama runtime 의존 검증
-- benchmark/swarm/team-session workload 실험
+- benchmark/team-session workload 실험

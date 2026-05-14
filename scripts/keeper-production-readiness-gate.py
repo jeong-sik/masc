@@ -25,8 +25,13 @@ ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "cancele
 
 @dataclass
 class Thresholds:
+    expected_keepers: int = 1
     min_terminal_turns: int = 3
     min_success_turns: int = 3
+    min_terminal_turns_per_keeper: int = 0
+    min_success_turns_per_keeper: int = 0
+    min_provider_turns_per_keeper: int = 0
+    min_success_provider_turns_per_keeper: int = 0
     min_receipt_coverage_pct: float = 100.0
     min_checkpoint_coverage_pct: float = 100.0
     min_provider_closure_pct: float = 100.0
@@ -64,10 +69,21 @@ class ReadinessMetrics:
 
 
 @dataclass
+class KeeperReadinessMetrics:
+    manifest_files: int = 0
+    terminal_turns: int = 0
+    success_turns: int = 0
+    provider_turns: int = 0
+    success_provider_turns: int = 0
+    tool_used_turns: int = 0
+
+
+@dataclass
 class ReadinessSummary:
     status: str
     base_path: str
     keepers: list[str]
+    per_keeper: dict[str, dict[str, int]]
     thresholds: dict[str, Any]
     metrics: dict[str, Any]
     derived: dict[str, float]
@@ -133,7 +149,9 @@ def final_status(rows: list[dict[str, Any]]) -> str:
     return str(status or "unknown").lower()
 
 
-def linked_artifact_ok(base_path: Path, rows: list[dict[str, Any]], event: str, link_key: str) -> bool:
+def linked_artifact_ok(
+    base_path: Path, rows: list[dict[str, Any]], event: str, link_key: str
+) -> bool:
     for row in reversed(event_rows(rows, event)):
         links = row.get("links")
         if not isinstance(links, dict):
@@ -177,28 +195,58 @@ def check_timestamp_order(rows: list[dict[str, Any]]) -> tuple[int, float]:
         terminal = event_rows(rows, "turn_finished")
         terminal_ts = parse_ts(terminal[-1].get("ts")) if terminal else None
         if terminal_ts is not None:
-            for event in ("checkpoint_saved", "receipt_appended", "event_bus_correlated", "memory_injected"):
+            for event in (
+                "checkpoint_saved",
+                "receipt_appended",
+                "event_bus_correlated",
+                "memory_injected",
+            ):
                 for row in event_rows(rows, event):
                     ts = parse_ts(row.get("ts"))
                     if ts is not None and ts > terminal_ts:
                         violations += 1
-            started = [parse_ts(row.get("ts")) for row in event_rows(rows, "provider_attempt_started")]
-            finished = [parse_ts(row.get("ts")) for row in event_rows(rows, "provider_attempt_finished")]
+            started = [
+                parse_ts(row.get("ts"))
+                for row in event_rows(rows, "provider_attempt_started")
+            ]
+            finished = [
+                parse_ts(row.get("ts"))
+                for row in event_rows(rows, "provider_attempt_finished")
+            ]
             if started and finished:
-                max_started = max(ts for ts in started if ts is not None) if any(ts is not None for ts in started) else None
-                max_finished = max(ts for ts in finished if ts is not None) if any(ts is not None for ts in finished) else None
-                if max_started is not None and max_finished is not None and max_started > max_finished:
+                max_started = (
+                    max(ts for ts in started if ts is not None)
+                    if any(ts is not None for ts in started)
+                    else None
+                )
+                max_finished = (
+                    max(ts for ts in finished if ts is not None)
+                    if any(ts is not None for ts in finished)
+                    else None
+                )
+                if (
+                    max_started is not None
+                    and max_finished is not None
+                    and max_started > max_finished
+                ):
                     violations += 1
         return violations, max(ordered) - min(ordered)
     return violations, 0.0
 
 
-def discover_manifest_files(base_path: Path, keepers: list[str], trace_ids: list[str], max_traces_per_keeper: int) -> list[Path]:
+def discover_manifest_files(
+    base_path: Path,
+    keepers: list[str],
+    trace_ids: list[str],
+    max_traces_per_keeper: int,
+) -> list[Path]:
     root = base_path / ".masc" / "keepers"
     if keepers:
         keeper_dirs = [root / keeper for keeper in keepers]
     else:
-        keeper_dirs = [path for path in root.iterdir() if path.is_dir()] if root.is_dir() else []
+        keeper_dirs = (
+            [path for path in root.iterdir() if path.is_dir()] if root.is_dir() else []
+        )
 
     manifests: list[Path] = []
     wanted_traces = set(trace_ids)
@@ -223,15 +271,24 @@ def evaluate(
     keepers: list[str],
     trace_ids: list[str],
     max_traces_per_keeper: int,
+    max_turns_per_keeper: int,
     thresholds: Thresholds,
 ) -> ReadinessSummary:
     metrics = ReadinessMetrics()
-    rows_by_turn: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
-    manifest_files = discover_manifest_files(base_path, keepers, trace_ids, max_traces_per_keeper)
+    rows_by_turn: dict[tuple[str, str, str, int], list[dict[str, Any]]] = {}
+    manifest_files = discover_manifest_files(
+        base_path, keepers, trace_ids, max_traces_per_keeper
+    )
     metrics.manifest_files = len(manifest_files)
+    per_keeper_metrics: dict[str, KeeperReadinessMetrics] = {}
+
+    def keeper_metrics(name: str) -> KeeperReadinessMetrics:
+        return per_keeper_metrics.setdefault(name, KeeperReadinessMetrics())
 
     discovered_keepers: set[str] = set()
     for manifest in manifest_files:
+        manifest_keeper = manifest.parent.parent.name
+        keeper_metrics(manifest_keeper).manifest_files += 1
         for row in iter_jsonl(manifest):
             metrics.manifest_rows += 1
             metrics.timestamp_rows += 1
@@ -239,20 +296,45 @@ def evaluate(
                 metrics.parseable_timestamp_rows += 1
             keeper = str(row.get("keeper_name") or manifest.parent.parent.name)
             trace = str(row.get("trace_id") or manifest.stem)
+            generation = str(row.get("generation") or "")
             turn = row.get("keeper_turn_id")
             if not isinstance(turn, int):
                 continue
             discovered_keepers.add(keeper)
-            rows_by_turn.setdefault((keeper, trace, turn), []).append(row)
+            keeper_metrics(keeper)
+            rows_by_turn.setdefault((keeper, trace, generation, turn), []).append(row)
 
-    for (_keeper, _trace, _turn), rows in rows_by_turn.items():
+    selected_rows_by_turn = rows_by_turn
+    if max_turns_per_keeper > 0:
+        latest_by_keeper: dict[str, list[tuple[float, tuple[str, str, str, int]]]] = {}
+        for key, rows in rows_by_turn.items():
+            if not event_rows(rows, "turn_finished"):
+                continue
+            keeper = key[0]
+            parsed = [ts for ts in timestamps_for_rows(rows) if ts is not None]
+            latest_ts = max(parsed) if parsed else 0.0
+            latest_by_keeper.setdefault(keeper, []).append((latest_ts, key))
+
+        selected_keys: set[tuple[str, str, str, int]] = set()
+        for keyed_turns in latest_by_keeper.values():
+            keyed_turns.sort(reverse=True)
+            for _latest_ts, key in keyed_turns[:max_turns_per_keeper]:
+                selected_keys.add(key)
+        selected_rows_by_turn = {
+            key: rows for key, rows in rows_by_turn.items() if key in selected_keys
+        }
+
+    for (keeper, _trace, _generation, _turn), rows in selected_rows_by_turn.items():
         if not event_rows(rows, "turn_finished"):
             continue
+        keeper_metric = keeper_metrics(keeper)
         metrics.terminal_turns += 1
+        keeper_metric.terminal_turns += 1
         status = final_status(rows)
         success = status not in ERROR_STATUSES
         if success:
             metrics.success_turns += 1
+            keeper_metric.success_turns += 1
 
         provider = bool(
             event_rows(rows, "provider_lane_resolved")
@@ -261,8 +343,10 @@ def evaluate(
         )
         if provider:
             metrics.provider_turns += 1
+            keeper_metric.provider_turns += 1
             if success:
                 metrics.success_provider_turns += 1
+                keeper_metric.success_provider_turns += 1
 
         started_count = len(event_rows(rows, "provider_attempt_started"))
         finished_count = len(event_rows(rows, "provider_attempt_finished"))
@@ -278,7 +362,9 @@ def evaluate(
 
         checkpoint_required = provider and success
         if checkpoint_required:
-            if linked_artifact_ok(base_path, rows, "checkpoint_saved", "checkpoint_path"):
+            if linked_artifact_ok(
+                base_path, rows, "checkpoint_saved", "checkpoint_path"
+            ):
                 metrics.checkpoint_ok_turns += 1
             else:
                 metrics.missing_artifacts += 1
@@ -291,30 +377,86 @@ def evaluate(
         tools_used = receipt_tools_used(base_path, rows)
         if tools_used > 0:
             metrics.tool_used_turns += 1
-            if linked_artifact_ok(base_path, rows, "turn_finished", "tool_call_log_path"):
+            keeper_metric.tool_used_turns += 1
+            if linked_artifact_ok(
+                base_path, rows, "turn_finished", "tool_call_log_path"
+            ):
                 metrics.tool_log_ok_turns += 1
             else:
                 metrics.missing_artifacts += 1
 
         order_violations, evidence_span = check_timestamp_order(rows)
         metrics.order_violations += order_violations
-        metrics.max_evidence_span_sec = max(metrics.max_evidence_span_sec, evidence_span)
+        metrics.max_evidence_span_sec = max(
+            metrics.max_evidence_span_sec, evidence_span
+        )
 
     derived = {
         "receipt_coverage_pct": pct(metrics.receipt_ok_turns, metrics.terminal_turns),
-        "checkpoint_coverage_pct": pct(metrics.checkpoint_ok_turns, metrics.success_provider_turns),
-        "provider_closure_pct": pct(metrics.provider_closed_turns, metrics.provider_turns),
-        "event_bus_coverage_pct": pct(metrics.event_bus_ok_turns, metrics.success_provider_turns),
-        "memory_coverage_pct": pct(metrics.memory_ok_turns, metrics.success_provider_turns),
-        "tool_log_coverage_pct": pct(metrics.tool_log_ok_turns, metrics.tool_used_turns),
-        "timestamp_coverage_pct": pct(metrics.parseable_timestamp_rows, metrics.timestamp_rows),
+        "checkpoint_coverage_pct": pct(
+            metrics.checkpoint_ok_turns, metrics.success_provider_turns
+        ),
+        "provider_closure_pct": pct(
+            metrics.provider_closed_turns, metrics.provider_turns
+        ),
+        "event_bus_coverage_pct": pct(
+            metrics.event_bus_ok_turns, metrics.success_provider_turns
+        ),
+        "memory_coverage_pct": pct(
+            metrics.memory_ok_turns, metrics.success_provider_turns
+        ),
+        "tool_log_coverage_pct": pct(
+            metrics.tool_log_ok_turns, metrics.tool_used_turns
+        ),
+        "timestamp_coverage_pct": pct(
+            metrics.parseable_timestamp_rows, metrics.timestamp_rows
+        ),
     }
 
     failures: list[str] = []
+    observed_keeper_count = len(discovered_keepers)
+    if observed_keeper_count < thresholds.expected_keepers:
+        failures.append(
+            f"keeper_count {observed_keeper_count} < {thresholds.expected_keepers}"
+        )
+    missing_requested_keepers = sorted(set(keepers) - discovered_keepers)
+    for keeper in missing_requested_keepers:
+        failures.append(f"keeper {keeper} has no manifest evidence")
+        keeper_metrics(keeper)
+    per_keeper_targets = sorted(discovered_keepers | set(keepers))
+    for keeper in per_keeper_targets:
+        keeper_metric = keeper_metrics(keeper)
+        if keeper_metric.terminal_turns < thresholds.min_terminal_turns_per_keeper:
+            failures.append(
+                f"keeper {keeper} terminal_turns {keeper_metric.terminal_turns} "
+                f"< {thresholds.min_terminal_turns_per_keeper}"
+            )
+        if keeper_metric.success_turns < thresholds.min_success_turns_per_keeper:
+            failures.append(
+                f"keeper {keeper} success_turns {keeper_metric.success_turns} "
+                f"< {thresholds.min_success_turns_per_keeper}"
+            )
+        if keeper_metric.provider_turns < thresholds.min_provider_turns_per_keeper:
+            failures.append(
+                f"keeper {keeper} provider_turns {keeper_metric.provider_turns} "
+                f"< {thresholds.min_provider_turns_per_keeper}"
+            )
+        if (
+            keeper_metric.success_provider_turns
+            < thresholds.min_success_provider_turns_per_keeper
+        ):
+            failures.append(
+                f"keeper {keeper} success_provider_turns {keeper_metric.success_provider_turns} "
+                f"< {thresholds.min_success_provider_turns_per_keeper}"
+            )
     if metrics.terminal_turns < thresholds.min_terminal_turns:
-        failures.append(f"terminal_turns {metrics.terminal_turns} < {thresholds.min_terminal_turns}")
+        failures.append(
+            f"terminal_turns {metrics.terminal_turns} < {thresholds.min_terminal_turns}"
+        )
     if metrics.success_turns < thresholds.min_success_turns:
-        failures.append(f"success_turns {metrics.success_turns} < {thresholds.min_success_turns}")
+        failures.append(
+            f"success_turns {metrics.success_turns} < {thresholds.min_success_turns}"
+        )
     if derived["receipt_coverage_pct"] < thresholds.min_receipt_coverage_pct:
         failures.append(
             f"receipt_coverage_pct {derived['receipt_coverage_pct']} < {thresholds.min_receipt_coverage_pct}"
@@ -332,7 +474,9 @@ def evaluate(
             f"event_bus_coverage_pct {derived['event_bus_coverage_pct']} < {thresholds.min_event_bus_coverage_pct}"
         )
     if derived["memory_coverage_pct"] < thresholds.min_memory_coverage_pct:
-        failures.append(f"memory_coverage_pct {derived['memory_coverage_pct']} < {thresholds.min_memory_coverage_pct}")
+        failures.append(
+            f"memory_coverage_pct {derived['memory_coverage_pct']} < {thresholds.min_memory_coverage_pct}"
+        )
     if derived["tool_log_coverage_pct"] < thresholds.min_tool_log_coverage_pct:
         failures.append(
             f"tool_log_coverage_pct {derived['tool_log_coverage_pct']} < {thresholds.min_tool_log_coverage_pct}"
@@ -342,9 +486,13 @@ def evaluate(
             f"timestamp_coverage_pct {derived['timestamp_coverage_pct']} < {thresholds.min_timestamp_coverage_pct}"
         )
     if metrics.missing_artifacts > thresholds.max_missing_artifacts:
-        failures.append(f"missing_artifacts {metrics.missing_artifacts} > {thresholds.max_missing_artifacts}")
+        failures.append(
+            f"missing_artifacts {metrics.missing_artifacts} > {thresholds.max_missing_artifacts}"
+        )
     if metrics.order_violations > thresholds.max_order_violations:
-        failures.append(f"order_violations {metrics.order_violations} > {thresholds.max_order_violations}")
+        failures.append(
+            f"order_violations {metrics.order_violations} > {thresholds.max_order_violations}"
+        )
     if metrics.dangling_provider_attempts > thresholds.max_dangling_provider_attempts:
         failures.append(
             f"dangling_provider_attempts {metrics.dangling_provider_attempts} > {thresholds.max_dangling_provider_attempts}"
@@ -358,6 +506,10 @@ def evaluate(
         status="PASS" if not failures else "FAIL",
         base_path=str(base_path),
         keepers=sorted(discovered_keepers),
+        per_keeper={
+            keeper: asdict(per_keeper_metrics[keeper])
+            for keeper in sorted(per_keeper_metrics)
+        },
         thresholds=asdict(thresholds),
         metrics=asdict(metrics),
         derived=derived,
@@ -376,7 +528,9 @@ def fixture_ts(turn: int, offset: int) -> str:
     return f"2026-05-13T00:{turn:02d}:{offset:02d}Z"
 
 
-def write_fixture_turn(base_path: Path, keeper: str, trace: str, turn: int, *, tools: bool = False) -> None:
+def write_fixture_turn(
+    base_path: Path, keeper: str, trace: str, turn: int, *, tools: bool = False
+) -> None:
     keeper_dir = base_path / ".masc" / "keepers" / keeper
     manifest_path = keeper_dir / "runtime-manifests" / f"{trace}.jsonl"
     receipt_path = keeper_dir / "execution-receipts" / "2026-05" / f"{turn:02d}.jsonl"
@@ -401,7 +555,14 @@ def write_fixture_turn(base_path: Path, keeper: str, trace: str, turn: int, *, t
     if tools:
         write_jsonl(
             tool_log_path,
-            [{"keeper": keeper, "trace_id": trace, "tool": "keeper_tool_search", "success": True}],
+            [
+                {
+                    "keeper": keeper,
+                    "trace_id": trace,
+                    "tool": "keeper_tool_search",
+                    "success": True,
+                }
+            ],
         )
 
     base_row = {
@@ -414,7 +575,11 @@ def write_fixture_turn(base_path: Path, keeper: str, trace: str, turn: int, *, t
         "cascade_name": "fixture",
         "status": "ok",
         "decision": {},
-        "links": {"receipt_path": None, "checkpoint_path": None, "tool_call_log_path": None},
+        "links": {
+            "receipt_path": None,
+            "checkpoint_path": None,
+            "tool_call_log_path": None,
+        },
     }
     rows = []
     for offset, event in enumerate(
@@ -434,9 +599,17 @@ def write_fixture_turn(base_path: Path, keeper: str, trace: str, turn: int, *, t
         row["ts"] = fixture_ts(turn, offset)
         row["event"] = event
         if event == "checkpoint_saved":
-            row["links"] = {"receipt_path": None, "checkpoint_path": str(checkpoint_path), "tool_call_log_path": None}
+            row["links"] = {
+                "receipt_path": None,
+                "checkpoint_path": str(checkpoint_path),
+                "tool_call_log_path": None,
+            }
         elif event == "receipt_appended":
-            row["links"] = {"receipt_path": str(receipt_path), "checkpoint_path": None, "tool_call_log_path": None}
+            row["links"] = {
+                "receipt_path": str(receipt_path),
+                "checkpoint_path": None,
+                "tool_call_log_path": None,
+            }
         elif event == "turn_finished":
             row["status"] = "success"
             row["links"] = {
@@ -463,28 +636,70 @@ def run_self_test() -> None:
             keepers=[keeper],
             trace_ids=[trace],
             max_traces_per_keeper=5,
+            max_turns_per_keeper=0,
             thresholds=Thresholds(),
         )
         assert summary.status == "PASS", summary.failures
 
-        checkpoint = base_path / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
+        checkpoint = (
+            base_path / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
+        )
         checkpoint.unlink()
         broken = evaluate(
             base_path=base_path,
             keepers=[keeper],
             trace_ids=[trace],
             max_traces_per_keeper=5,
+            max_turns_per_keeper=0,
             thresholds=Thresholds(),
         )
         assert broken.status == "FAIL"
         assert any("missing_artifacts" in failure for failure in broken.failures)
+
+        for name in ("fleet-a", "fleet-b"):
+            for turn in range(1, 4):
+                write_fixture_turn(
+                    base_path, name, f"trace-{name}", turn, tools=(turn == 1)
+                )
+        fleet = evaluate(
+            base_path=base_path,
+            keepers=["fleet-a", "fleet-b"],
+            trace_ids=[],
+            max_traces_per_keeper=5,
+            max_turns_per_keeper=3,
+            thresholds=Thresholds(
+                expected_keepers=2,
+                min_terminal_turns=6,
+                min_success_turns=6,
+                min_terminal_turns_per_keeper=3,
+                min_success_provider_turns_per_keeper=3,
+            ),
+        )
+        assert fleet.status == "PASS", fleet.failures
+        insufficient_fleet = evaluate(
+            base_path=base_path,
+            keepers=["fleet-a", "fleet-b"],
+            trace_ids=[],
+            max_traces_per_keeper=5,
+            max_turns_per_keeper=3,
+            thresholds=Thresholds(expected_keepers=3),
+        )
+        assert insufficient_fleet.status == "FAIL"
+        assert any(
+            "keeper_count 2 < 3" in failure for failure in insufficient_fleet.failures
+        )
     print("keeper-production-readiness-gate: self-test PASS")
 
 
 def thresholds_from_args(args: argparse.Namespace) -> Thresholds:
     return Thresholds(
+        expected_keepers=args.expected_keepers,
         min_terminal_turns=args.min_terminal_turns,
         min_success_turns=args.min_success_turns,
+        min_terminal_turns_per_keeper=args.min_terminal_turns_per_keeper,
+        min_success_turns_per_keeper=args.min_success_turns_per_keeper,
+        min_provider_turns_per_keeper=args.min_provider_turns_per_keeper,
+        min_success_provider_turns_per_keeper=args.min_success_provider_turns_per_keeper,
         min_receipt_coverage_pct=args.min_receipt_coverage_pct,
         min_checkpoint_coverage_pct=args.min_checkpoint_coverage_pct,
         min_provider_closure_pct=args.min_provider_closure_pct,
@@ -501,15 +716,35 @@ def thresholds_from_args(args: argparse.Namespace) -> Thresholds:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-path", default=os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"))
-    parser.add_argument("--keeper", action="append", default=[], help="Keeper name to scan. Repeatable.")
-    parser.add_argument("--trace-id", action="append", default=[], help="Trace id to scan. Repeatable.")
+    parser.add_argument(
+        "--base-path",
+        default=os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
+    )
+    parser.add_argument(
+        "--keeper", action="append", default=[], help="Keeper name to scan. Repeatable."
+    )
+    parser.add_argument(
+        "--trace-id", action="append", default=[], help="Trace id to scan. Repeatable."
+    )
     parser.add_argument("--max-traces-per-keeper", type=int, default=20)
-    parser.add_argument("--json", action="store_true", help="Print machine-readable summary only.")
+    parser.add_argument(
+        "--max-turns-per-keeper",
+        type=int,
+        default=0,
+        help="Only evaluate this many latest terminal turns per keeper. 0 means unlimited.",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Print machine-readable summary only."
+    )
     parser.add_argument("--output", help="Optional JSON summary output path.")
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--expected-keepers", type=int, default=1)
     parser.add_argument("--min-terminal-turns", type=int, default=3)
     parser.add_argument("--min-success-turns", type=int, default=3)
+    parser.add_argument("--min-terminal-turns-per-keeper", type=int, default=0)
+    parser.add_argument("--min-success-turns-per-keeper", type=int, default=0)
+    parser.add_argument("--min-provider-turns-per-keeper", type=int, default=0)
+    parser.add_argument("--min-success-provider-turns-per-keeper", type=int, default=0)
     parser.add_argument("--min-receipt-coverage-pct", type=float, default=100.0)
     parser.add_argument("--min-checkpoint-coverage-pct", type=float, default=100.0)
     parser.add_argument("--min-provider-closure-pct", type=float, default=100.0)
@@ -536,19 +771,24 @@ def main(argv: list[str] | None = None) -> int:
         keepers=args.keeper,
         trace_ids=args.trace_id,
         max_traces_per_keeper=args.max_traces_per_keeper,
+        max_turns_per_keeper=args.max_turns_per_keeper,
         thresholds=thresholds,
     )
     payload = asdict(summary)
     if args.output:
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        output.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(f"keeper-production-readiness-gate: {summary.status}")
         print(f"  base_path: {summary.base_path}")
-        print(f"  keepers: {', '.join(summary.keepers) if summary.keepers else '<none>'}")
+        print(
+            f"  keepers: {', '.join(summary.keepers) if summary.keepers else '<none>'}"
+        )
         for key, value in summary.metrics.items():
             if isinstance(value, float) and math.isfinite(value):
                 print(f"  {key}: {value:.4f}")

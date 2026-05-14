@@ -6,9 +6,38 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ALLOWLIST="${ROOT}/scripts/lint/no-provider-name-hardcoding.allowlist"
+ROOT="${PROVIDER_NAME_HARDCODING_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+ALLOWLIST="${PROVIDER_NAME_HARDCODING_ALLOWLIST:-${ROOT}/scripts/lint/no-provider-name-hardcoding.allowlist}"
 MODE="${1:---report}"
+
+if [[ "${MODE}" == "--self-test" ]]; then
+  self_root="$(mktemp -d -t no-provider-name-hc-self.XXXXXX)"
+  trap 'rm -rf "${self_root}"' EXIT
+  mkdir -p "${self_root}/lib" "${self_root}/scripts/lint"
+  printf 'let leaked = "codex"\n' >"${self_root}/lib/leak.ml"
+  : >"${self_root}/scripts/lint/no-provider-name-hardcoding.allowlist"
+
+  set +e
+  PROVIDER_NAME_HARDCODING_ROOT="${self_root}" \
+    PROVIDER_NAME_HARDCODING_ALLOWLIST="${self_root}/scripts/lint/no-provider-name-hardcoding.allowlist" \
+    bash "$0" --fail >"${self_root}/out" 2>&1
+  status="$?"
+  set -e
+
+  if [[ "${status}" -eq 0 ]]; then
+    echo "provider-name-hardcoding self-test: expected --fail to reject a disallowed literal" >&2
+    sed -n '1,80p' "${self_root}/out" >&2
+    exit 1
+  fi
+  if ! grep -q 'off-catalog match' "${self_root}/out"; then
+    echo "provider-name-hardcoding self-test: failure output did not include violation summary" >&2
+    sed -n '1,80p' "${self_root}/out" >&2
+    exit 1
+  fi
+
+  echo "provider-name-hardcoding self-test: pass"
+  exit 0
+fi
 
 ROOTS=(
   "${ROOT}/lib"

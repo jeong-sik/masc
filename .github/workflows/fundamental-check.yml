@@ -38,6 +38,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/provider-adapter-removal-ratchet.sh
 
+  no-provider-name-hardcoding:
+    name: Provider/client name hardcoding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove detector fails on a disallowed literal
+        run: bash scripts/lint/no-provider-name-hardcoding.sh --self-test
+      - name: Run lint
+        run: bash scripts/lint/no-provider-name-hardcoding.sh --fail
+
   no-fabricated-telemetry:
     name: Math.random in components
     runs-on: ubuntu-latest

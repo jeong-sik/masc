@@ -59,14 +59,14 @@ Disallowed surfaces:
 
 ## Enforcement
 
-Advisory detector:
+Required detector:
 
 ```bash
 scripts/lint/no-provider-name-hardcoding.sh --summary
 scripts/lint/no-provider-name-hardcoding.sh --fail
 ```
 
-The detector scans runtime code paths, skips tests and binary assets, strips OCaml block comments, skips comment-only lines in other scanned files, and subtracts `scripts/lint/no-provider-name-hardcoding.allowlist`. `--fail` becomes a CI gate only after the off-catalog report reaches zero.
+The detector scans runtime code paths, skips tests and binary assets, strips OCaml block comments, skips comment-only lines in other scanned files, and subtracts `scripts/lint/no-provider-name-hardcoding.allowlist`. The `Provider/client name hardcoding` job in `.github/workflows/fundamental-check.yml` runs `--self-test` and `--fail`, so new off-catalog provider/client literals block the Fundamental Check workflow instead of relying on manual local invocation.
 
 Current checkpoint after catalog migration and allowlist classification:
 
@@ -121,6 +121,7 @@ Material runtime-policy migrations completed in this slice:
 ## Done Criteria
 
 - `scripts/lint/no-provider-name-hardcoding.sh --fail` exits 0.
+- `.github/workflows/fundamental-check.yml` runs `scripts/lint/no-provider-name-hardcoding.sh --self-test` and `--fail`.
 - `scripts/lint/no-provider-name-hardcoding.allowlist` contains only catalog, compatibility, generated, operator, or fixture paths with explicit category reasons.
 - `rg -n -i '\b(codex|gemini|claude|kimi|glm)\b' lib bin dashboard/src scripts sidecars` has no unexplained runtime-policy hits outside the detector report.
 - Focused OCaml/TS checks for touched modules pass.

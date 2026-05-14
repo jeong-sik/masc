@@ -555,7 +555,8 @@ let test_error_result_logs_at_error_level () =
        match entry with
        | None -> fail "expected keeper error log for failing tool result"
        | Some (entry : Mlog.Ring.entry) ->
-         check string "failing tool result logs at ERROR" "ERROR" entry.normalized_level)
+         check string "failing tool result logs at ERROR" "ERROR"
+           (Mlog.level_to_string entry.level))
 ;;
 
 let test_missing_file_error_redacts_directory_suggestions () =

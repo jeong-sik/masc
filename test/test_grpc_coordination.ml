@@ -545,7 +545,7 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
         true
         (List.exists
            (fun (entry : Log.Ring.entry) ->
-              String.equal entry.normalized_level "WARN"
+              String.equal (Log.level_to_string entry.level) "WARN"
               && String.starts_with ~prefix:"gRPC Heartbeat decode failed:" entry.message)
            logs);
       Alcotest.(check bool)

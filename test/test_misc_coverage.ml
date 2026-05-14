@@ -96,7 +96,7 @@ let test_log_routine_tagged_entry () =
     | [] -> fail "expected routine entry"
     | entry :: _ ->
         check string "module" "Keeper" entry.Log.Ring.module_name;
-        check string "level" "DEBUG" entry.Log.Ring.level;
+        check string "level" "DEBUG" (Log.level_to_string entry.Log.Ring.level);
         check string "message" "routine-test-42" entry.Log.Ring.message;
         let has_routine_class =
           match entry.Log.Ring.details with

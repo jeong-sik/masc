@@ -1321,6 +1321,7 @@
 (include stanzas/test_tool_call_replay_harness.inc)
 (include stanzas/test_tool_diversity.inc)
 (include stanzas/test_tool_help_registry_shard_coverage_10101.inc)
+(include stanzas/test_tool_inline_dispatch.inc)
 (include stanzas/test_tool_name.inc)
 (include stanzas/test_tool_task_completion_example.inc)
 (include stanzas/test_transport_bridge_seal.inc)

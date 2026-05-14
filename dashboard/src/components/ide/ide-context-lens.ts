@@ -904,7 +904,7 @@ function diagnosticTelemetryQuery(diagnostic: IdeContextDiagnostic): string | un
   return parts.length > 0 ? parts.join(' ') : undefined
 }
 
-interface EventRouteRefs {
+export interface IdeContextTextRouteRefs {
   readonly line?: number
   readonly goalId?: string
   readonly taskId?: string
@@ -932,8 +932,11 @@ const EVENT_REF_PATTERNS = {
   workerRunId: new RegExp(`\\b(?:worker_run|worker|wr)[:#/]+${REF_VALUE_PATTERN}`, 'i'),
 } as const
 
-function eventRouteRefs(event: RunActivityEvent): EventRouteRefs {
-  const text = eventRawText(event)
+function eventRouteRefs(event: RunActivityEvent): IdeContextTextRouteRefs {
+  return routeRefsFromText(eventRawText(event))
+}
+
+export function routeRefsFromText(text: string): IdeContextTextRouteRefs {
   return {
     line: eventLineRef(text),
     goalId: firstEventRef(text, EVENT_REF_PATTERNS.goalId),
@@ -976,7 +979,7 @@ function eventLineRef(text: string): number | undefined {
   return compact ? positiveLine(Number(compact)) : undefined
 }
 
-function eventContextMeta(event: RunActivityEvent, refs: EventRouteRefs): string {
+function eventContextMeta(event: RunActivityEvent, refs: IdeContextTextRouteRefs): string {
   const context = event.context
   const goalId = context?.goal_id ?? refs.goalId
   const taskId = context?.task_id ?? refs.taskId

@@ -40,6 +40,7 @@ afterEach(() => {
   activeIdeFile.value = 'package.json'
   ideContextFocus.value = null
   setIdeReplayUntilMs(null)
+  window.location.hash = ''
   clearTraces()
 })
 
@@ -310,6 +311,65 @@ describe('IdeConversationRail', () => {
       source_id: 'thread-thread-line',
       keeper_id: 'scholar',
     })
+
+    render(null, container)
+  })
+
+  it('renders route links for board thread code, planning, review, and keeper context', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/v1/board')) {
+        return new Response(JSON.stringify([{
+          id: 'thread-line',
+          title: 'Review lib/runtime.ml:42',
+          body: 'question fn:run comment:comment-1 PR 15035 task:task-runtime goal:goal-runtime branch:feat/ide-routes log:turn-7',
+          author_identity: 'scholar',
+          votes: 0,
+          comment_count: 2,
+          created_at_iso: '2026-05-05T10:00:00Z',
+        }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
+        return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+        return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response('{}', { status: 404 })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeConversationRail, {}), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('comment:comment-1')
+    })
+
+    const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
+    expect(links.map(link => link.textContent)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+    expect(links.map(link => link.getAttribute('aria-label'))).toContain('Open Comment comment-1')
+
+    fireEvent.click(links.find(link => link.textContent === 'Board')!)
+    expect(window.location.hash).toBe('#workspace?section=board&post=thread-line')
+
+    fireEvent.click(links.find(link => link.textContent === 'Comment')!)
+    expect(window.location.hash).toBe('#workspace?section=board&post=thread-line&comment=comment-1')
+
+    fireEvent.click(links.find(link => link.textContent === 'PR')!)
+    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&pr=15035')
+
+    fireEvent.click(links.find(link => link.textContent === 'Keeper')!)
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
 
     render(null, container)
   })

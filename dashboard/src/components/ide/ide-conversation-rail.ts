@@ -29,6 +29,12 @@ import { activeIdeFile, focusIdeContextAnchor, normalizeIdeContextFilePath } fro
 import { activeKeeperName } from '../../keeper-state'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  routeRefsFromText,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 
 export interface BoardPost {
   readonly id: string
@@ -425,6 +431,7 @@ function PostCard(
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
   const thread = postToAnchoredThread(post)
   const anchor = thread?.anchor ?? null
+  const routeLinks = conversationRouteLinks(post, anchor, kind, bodyText)
 
   return html`
     <li class="ide-rail-item">
@@ -501,7 +508,60 @@ function PostCard(
           ${post.comment_count > 0 ? `${post.comment_count} replies · ` : ''}${(post.votes ?? 0) > 0 ? `${post.votes ?? 0} votes` : ''}
         </div>
       </button>
+      ${routeLinks.length > 0 ? html`
+        <div class="ide-conversation-route-links" aria-label="Conversation operational links">
+          ${routeLinks.map(link => ConversationRouteLink(link))}
+        </div>
+      ` : null}
     </li>
+  `
+}
+
+function conversationRouteLinks(
+  post: BoardPost,
+  anchor: AnchoredThread['anchor'] | null,
+  kind: ThreadKind,
+  bodyText: string,
+): ReadonlyArray<IdeContextRouteLink> {
+  const refs = routeRefsFromText(`${post.title ?? ''}\n${post.body ?? ''}\n${post.hearth ?? ''}`)
+  const logId = refs.logId
+  const sessionId = refs.sessionId
+  const operationId = refs.operationId
+  const workerRunId = refs.workerRunId
+  return routeLinksForContext({
+    filePath: anchor?.file_path,
+    line: anchor?.line_start ?? refs.line,
+    surface: KIND_LABEL[kind],
+    label: bodyText || post.title || 'board thread',
+    sourceId: `thread-${post.id}`,
+    goalId: refs.goalId,
+    taskId: refs.taskId,
+    boardPostId: post.id,
+    commentId: refs.commentId,
+    prId: refs.prId,
+    gitRef: refs.gitRef,
+    logId,
+    sessionId,
+    operationId,
+    workerRunId,
+    telemetryQuery: logId ?? sessionId ?? operationId ?? workerRunId,
+    keeperId: post.author_identity || undefined,
+    telemetry: Boolean(logId || sessionId || operationId || workerRunId),
+  })
+}
+
+function ConversationRouteLink(link: IdeContextRouteLink) {
+  return html`
+    <button
+      key=${link.id}
+      type="button"
+      class="ide-conversation-route-link"
+      title=${link.evidence}
+      aria-label=${`Open ${link.evidence}`}
+      onClick=${() => openIdeContextRouteLink(link)}
+    >
+      ${link.label}
+    </button>
   `
 }
 

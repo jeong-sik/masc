@@ -1471,8 +1471,23 @@ button.ide-persistence-focus:focus-visible {
 .ide-bdi-route-links {
   display: inline-flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 3px;
   min-width: 0;
+}
+
+.ide-bdi-route-count,
+.ide-interject-context-count {
+  height: 17px;
+  padding: 0 5px;
+  border: 1px solid var(--color-border-divider);
+  border-radius: var(--r-1);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  line-height: 15px;
+  white-space: nowrap;
 }
 
 .ide-bdi-route-link {
@@ -1506,8 +1521,14 @@ button.ide-persistence-focus:focus-visible {
 .ide-interject-context-links {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 3px;
   min-width: 0;
+}
+
+.ide-interject-context-count {
+  height: 18px;
+  line-height: 16px;
 }
 
 .ide-interject-context-links button {

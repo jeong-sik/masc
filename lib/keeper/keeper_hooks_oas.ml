@@ -735,9 +735,14 @@ let wall_tokens_per_second
   | Some t when not usage_missing && output_tokens > 0 -> (
       match t.request_latency_ms with
       | Some request_latency_ms when request_latency_ms > 0 ->
-      Some
-        (Float.of_int output_tokens
-         /. (Float.of_int request_latency_ms /. ms_per_second))
+        let request_latency_ms = Float.of_int request_latency_ms in
+        let latency_ms =
+          match t.ttfrc_ms with
+          | Some ttfrc_ms when ttfrc_ms > 0.0 && ttfrc_ms < request_latency_ms ->
+            request_latency_ms -. ttfrc_ms
+          | _ -> request_latency_ms
+        in
+        Some (Float.of_int output_tokens /. (latency_ms /. ms_per_second))
       | _ -> None)
   | _ -> None
 

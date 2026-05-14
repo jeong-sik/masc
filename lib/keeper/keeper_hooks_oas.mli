@@ -184,8 +184,10 @@ val wall_tokens_per_second :
   usage_missing:bool ->
   output_tokens:int ->
   telemetry:Agent_sdk.Types.inference_telemetry option -> float option
-(** Wall-clock tokens/sec computed from telemetry latency, or [None]
-    when usage / latency is missing. *)
+(** Output tokens/sec computed from telemetry latency, subtracting
+    [ttfrc_ms] when available so the fallback approximates decode
+    throughput instead of first-token wait time. Returns [None] when usage
+    / latency is missing. *)
 
 (** {1 Cost emit source} *)
 

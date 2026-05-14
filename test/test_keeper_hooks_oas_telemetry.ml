@@ -318,6 +318,42 @@ let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
      | _ -> false)
 ;;
 
+let test_emit_cost_event_derives_wall_tok_s_after_first_chunk () =
+  let root = temp_dir () in
+  let telemetry : Agent_sdk.Types.inference_telemetry =
+    { system_fingerprint = None
+    ; timings = None
+    ; reasoning_tokens = None
+    ; reasoning_tokens_estimated = false
+    ; request_latency_ms = Some 250
+    ; peak_memory_gb = None
+    ; provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat
+    ; reasoning_effort = None
+    ; canonical_model_id = Some "auto"
+    ; effective_context_window = Some 128000
+    ; provider_internal_action_count = None
+    ; ttfrc_ms = Some 50.0
+    ; prefill_ms = None
+    }
+  in
+  Hooks.emit_cost_event
+    ~masc_root:root
+    ~agent_name:"keeper"
+    ~task_id:None
+    ~model:"ollama:qwen3.6:27b-coding-nvfp4"
+    ~input_tokens:100
+    ~output_tokens:50
+    ~cost_usd:0.0
+    ~telemetry
+    ();
+  let json = read_jsonl_line (Filename.concat root "costs.jsonl") in
+  check
+    (float 0.001)
+    "tokens_per_second uses post-first-chunk duration"
+    250.0
+    (json |> member "tokens_per_second" |> to_float)
+;;
+
 let test_emit_cost_event_marks_untrusted_usage () =
   let root = temp_dir () in
   let telemetry : Agent_sdk.Types.inference_telemetry =
@@ -1546,6 +1582,10 @@ let () =
             "emit_cost_event computes wall tok/s without native timings"
             `Quick
             test_emit_cost_event_writes_wall_tok_s_without_provider_timings
+        ; test_case
+            "emit_cost_event computes wall tok/s after first chunk"
+            `Quick
+            test_emit_cost_event_derives_wall_tok_s_after_first_chunk
         ; test_case
             "emit_cost_event marks untrusted usage"
             `Quick

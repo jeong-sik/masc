@@ -560,8 +560,10 @@ function StaleTerminationPanel({
 
 type ReactivityView = 'health' | 'lifecycle' | 'events' | 'pause' | 'proactive' | 'stale'
 
+const DEFAULT_REACTIVITY_VIEW: ReactivityView = 'health'
+
 const VIEW_CHIPS: Array<{ key: ReactivityView; label: string; title?: string }> = [
-  { key: 'health',           label: '상태 그리드',     title: '전체 키퍼 phase/활동 빠른 뷰' },
+  { key: DEFAULT_REACTIVITY_VIEW, label: '상태 그리드',     title: '전체 키퍼 phase/활동 빠른 뷰' },
   { key: 'lifecycle',        label: '상태 전환',       title: '키퍼 FSM 전환 타임라인' },
   { key: 'events', label: '생명주기 이벤트', title: '수퍼바이저 생명주기 이벤트 (Started, Restarted, Dead_cleaned 등)' },
   { key: 'pause',            label: '자동 일시정지',   title: '스톰/버짓 자동 일시정지 이벤트' },
@@ -573,7 +575,7 @@ const VIEW_CHIPS: Array<{ key: ReactivityView; label: string; title?: string }> 
 
 /** Keeper Reactivity Monitor — real-time keeper lifecycle observability. */
 export function KeeperReactivityMonitor({ defaultView }: { defaultView?: ReactivityView }) {
-  const activeView = useSignal<ReactivityView>(defaultView ?? 'health')
+  const activeView = useSignal<ReactivityView>(defaultView ?? DEFAULT_REACTIVITY_VIEW)
   const metricsLoading = useSignal(false)
   const metricsError = useSignal<string | null>(null)
   const parsedMetrics = useSignal<ParsedMetric[]>([])

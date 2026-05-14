@@ -435,11 +435,6 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
            ())
       reasons
 
-let usage_untrusted_warns_operator = function
-  | Keeper_usage_trust.Usage_untrusted ["zero_token_usage_reported"] -> false
-  | Keeper_usage_trust.Usage_missing | Keeper_usage_trust.Usage_trusted -> false
-  | Keeper_usage_trust.Usage_untrusted _ -> true
-
 type cost_status =
   | Cost_reported
   | Cost_known_free
@@ -1984,7 +1979,7 @@ let make_hooks
             | [] -> [Keeper_usage_trust.to_string usage_trust]
             | reasons -> reasons
           in
-          if usage_untrusted_warns_operator usage_trust then
+          if Keeper_usage_trust.warns_operator usage_trust then
             Log.Keeper.warn
               "keeper:%s after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
               meta.name runtime_lane_label

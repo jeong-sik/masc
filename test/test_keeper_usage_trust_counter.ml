@@ -10,6 +10,7 @@
    while that fix is in-flight. *)
 
 module UM = Masc_mcp.Keeper_unified_metrics
+module UT = Masc_mcp.Keeper_usage_trust
 module Prom = Masc_mcp.Prometheus
 
 let outcome_for ~keeper ~outcome =
@@ -107,6 +108,20 @@ let test_per_keeper_isolation () =
     "B untrusted unchanged" b_before
     (outcome_for ~keeper:b ~outcome:"untrusted")
 
+let test_zero_token_usage_is_info_severity () =
+  Alcotest.(check bool)
+    "zero-token-only remains non-WARN"
+    false
+    (UT.warns_operator (UT.Usage_untrusted [ "zero_token_usage_reported" ]))
+
+let test_compound_usage_anomaly_warns_operator () =
+  Alcotest.(check bool)
+    "compound anomaly remains WARN"
+    true
+    (UT.warns_operator
+       (UT.Usage_untrusted
+          [ "zero_token_usage_reported"; "input_tokens_gt_1m" ]))
+
 let () =
   Alcotest.run "keeper_usage_trust_counter_9959"
     [
@@ -128,5 +143,12 @@ let () =
         [
           Alcotest.test_case "per-keeper independent" `Quick
             test_per_keeper_isolation;
+        ] );
+      ( "severity",
+        [
+          Alcotest.test_case "zero-token-only is info" `Quick
+            test_zero_token_usage_is_info_severity;
+          Alcotest.test_case "compound anomaly warns" `Quick
+            test_compound_usage_anomaly_warns_operator;
         ] );
     ]

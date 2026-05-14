@@ -19,4 +19,12 @@ val to_string : t -> string
 
 val reasons : t -> string list
 
+val warns_operator : t -> bool
+(** [true] when the trust anomaly should be operator-visible as WARN.
+
+    A pure zero-token report is an untrusted usage shape, but several
+    CLI/runtime lanes legitimately cannot report token usage. It remains
+    counted and serialized as untrusted, but should not page operators via
+    WARN unless another anomaly reason is present. *)
+
 val json_fields : t -> (string * Yojson.Safe.t) list

@@ -118,10 +118,13 @@ let render_pre_tool_gate_source_hint
     Printf.sprintf " source_path=%s source_line=%d"
       (Keeper_guards.escape_field path) line
 
+let tool_approval_required_tag = "[tool_approval_required]"
+
 let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
   if event.decision = Keeper_guards.Gate_approval_required then
     Printf.sprintf
-      "[tool_approval_required] tool=%s source=keeper_hook code=%s reason=%s%s"
+      "%s tool=%s source=keeper_hook code=%s reason=%s%s"
+      tool_approval_required_tag
       (Keeper_guards.escape_field event.tool_name)
       (Keeper_guards.escape_field event.reason_code)
       (Keeper_guards.escape_field event.reason_text)

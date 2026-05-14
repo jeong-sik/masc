@@ -207,6 +207,10 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'GOAL LOOP',
       description: 'Runtime progress through the goal loop.',
       params: { section: 'goal-loop' },
+      // Planning owns the primary goal/task journey. Keep this as a
+      // direct diagnostic route so existing bookmarks and status links
+      // still work without keeping a duplicate Monitor menu item.
+      hidden: true,
     },
     {
       id: 'fleet-health',

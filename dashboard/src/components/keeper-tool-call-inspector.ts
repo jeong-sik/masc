@@ -30,7 +30,7 @@ function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   const gap = coverageGapDisplay(data)
   return html`
     <div class="text-3xs text-[var(--color-fg-disabled)]">
-      <span class="font-mono">${data.source ?? 'tool_call_io'}</span>
+      <span class="font-mono">${data.source ?? '(unknown source)'}</span>
       <span class="mx-1" aria-hidden="true">·</span>
       <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
       <span class="mx-1" aria-hidden="true">·</span>

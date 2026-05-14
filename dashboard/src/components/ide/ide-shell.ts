@@ -210,7 +210,7 @@ function statusbarWorkspaceLabel(
       return `@${workspaceSource.keeper} unknown`
     case 'project':
     case undefined:
-      return statusbarRepositoryLabel(activeStatusbarRepository(repositories, activeRepositoryId)) ?? 'workspace'
+      return statusbarRepositoryLabel(activeStatusbarRepository(repositories, activeRepositoryId)) ?? '(no workspace)'
   }
 }
 

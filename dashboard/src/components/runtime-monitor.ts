@@ -420,7 +420,7 @@ export function RuntimeMonitor() {
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-sm text-text-strong">${provider.provider}</strong>
-                      <span class="text-xs text-text-muted">${provider.runtime_kind ?? 'runtime'}</span>
+                      <span class="text-xs text-text-muted">${provider.runtime_kind ?? '(unknown runtime_kind)'}</span>
                     </div>
                     <${StatusChip}
                       label=${runtimeStatusLabel(provider)}

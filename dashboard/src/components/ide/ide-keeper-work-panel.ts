@@ -266,7 +266,7 @@ function RuntimeBlock(summary: KeeperWorkSummary) {
   return html`
     <div class="ide-keeper-work-runtime" role="status">
       <div>
-        <span>${summary.terminalCode ?? 'runtime'}</span>
+        <span>${summary.terminalCode ?? '(unknown terminal code)'}</span>
         <strong>${headline ?? action}</strong>
       </div>
       ${action ? html`<span>${action}</span>` : null}

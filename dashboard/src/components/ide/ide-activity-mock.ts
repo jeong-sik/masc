@@ -176,41 +176,62 @@ function contextFromPayloadAndTags(
 function mergePayloadContext(next: MutableRunActivityContext, payload: unknown): void {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return
   const record = payload as Record<string, unknown>
+  mergeContextRecord(next, nestedRecord(record.context))
+  mergeContextRecord(next, nestedRecord(record.evidence_ref))
+  const failureEnvelope = nestedRecord(record.failure_envelope)
+  mergeContextRecord(next, nestedRecord(failureEnvelope?.evidence_ref))
+  mergeContextRecord(next, nestedRecord(record.tool_args))
+  mergeContextRecord(next, nestedRecord(record.input))
+  mergeContextRecord(next, record, true)
+}
+
+function mergeContextRecord(
+  next: MutableRunActivityContext,
+  record: Record<string, unknown> | null,
+  overwrite = false,
+): void {
+  if (!record) return
   const filePath = stringValue(record.file_path)
     ?? stringValue(record.path)
     ?? stringValue(record.file)
   const normalizedFilePath = filePath ? normalizeIdeContextFilePath(filePath) : null
-  if (normalizedFilePath) next.file_path = normalizedFilePath
+  if (normalizedFilePath && (overwrite || next.file_path === undefined)) next.file_path = normalizedFilePath
   const line = positiveInteger(record.line)
     ?? positiveInteger(record.line_start)
     ?? positiveInteger(record.lineno)
-  if (line !== undefined) next.line = line
+  if (line !== undefined && (overwrite || next.line === undefined)) next.line = line
   const goalId = stringValue(record.goal_id)
-  if (goalId) next.goal_id = goalId
+  if (goalId && (overwrite || next.goal_id === undefined)) next.goal_id = goalId
   const taskId = stringValue(record.task_id)
-  if (taskId) next.task_id = taskId
+  if (taskId && (overwrite || next.task_id === undefined)) next.task_id = taskId
   const boardPostId = stringValue(record.board_post_id) ?? stringValue(record.post_id)
-  if (boardPostId) next.board_post_id = boardPostId
+  if (boardPostId && (overwrite || next.board_post_id === undefined)) next.board_post_id = boardPostId
   const commentId = stringValue(record.comment_id)
     ?? stringValue(record.reply_id)
     ?? numberString(record.comment_number)
-  if (commentId) next.comment_id = commentId
+  if (commentId && (overwrite || next.comment_id === undefined)) next.comment_id = commentId
   const prId = stringValue(record.pr_id)
     ?? stringValue(record.pull_request)
     ?? numberString(record.pr_number)
-  if (prId) next.pr_id = prId
+  if (prId && (overwrite || next.pr_id === undefined)) next.pr_id = prId
   const gitRef = stringValue(record.git_ref)
     ?? stringValue(record.commit)
     ?? stringValue(record.branch)
-  if (gitRef) next.git_ref = gitRef
+  if (gitRef && (overwrite || next.git_ref === undefined)) next.git_ref = gitRef
   const logId = stringValue(record.log_id)
-  if (logId) next.log_id = logId
+  if (logId && (overwrite || next.log_id === undefined)) next.log_id = logId
   const sessionId = stringValue(record.session_id)
-  if (sessionId) next.session_id = sessionId
+  if (sessionId && (overwrite || next.session_id === undefined)) next.session_id = sessionId
   const operationId = stringValue(record.operation_id)
-  if (operationId) next.operation_id = operationId
+  if (operationId && (overwrite || next.operation_id === undefined)) next.operation_id = operationId
   const workerRunId = stringValue(record.worker_run_id)
-  if (workerRunId) next.worker_run_id = workerRunId
+  if (workerRunId && (overwrite || next.worker_run_id === undefined)) next.worker_run_id = workerRunId
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void {

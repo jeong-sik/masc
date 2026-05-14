@@ -169,6 +169,72 @@ describe('IdeActivityMock', () => {
     ])
   })
 
+  it('maps nested activity context and evidence refs into IDE route links', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({
+        events: [{
+          seq: 1,
+          ts_ms: 100,
+          ts_iso: '2026-05-05T10:00:00Z',
+          room_id: 'run-default',
+          kind: 'telemetry.turn',
+          actor: { kind: 'keeper', id: 'sangsu' },
+          subject: { kind: 'log', id: 'turn-8' },
+          payload: {
+            context: {
+              goal_id: 'goal-runtime',
+              task_id: 'task-runtime',
+              board_post_id: 'post-1',
+              comment_id: 'comment-1',
+            },
+            failure_envelope: {
+              evidence_ref: {
+                file_path: 'lib/runtime.ml',
+                line_start: 8,
+                pr_number: 15008,
+                branch: 'feat/runtime',
+                log_id: 'turn-8',
+                session_id: 'sess-nested',
+                operation_id: 'op-nested',
+                worker_run_id: 'wr-nested',
+              },
+            },
+          },
+          tags: [],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('goal goal-runtime')
+      expect(container.textContent).toContain('PR 15008')
+      expect(container.textContent).toContain('1 line anchors')
+    })
+
+    const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
+    expect(activityRouteLinks.map(link => link.textContent)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+
+    fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Code')!)
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=8&surface=PR&label=telemetry.turn&source_id=evt-1&keeper=sangsu')
+
+    fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
+  })
+
   it('renders active run goal progress from activity goal and task links', async () => {
     goals.value = [{
       id: 'goal-runtime',

@@ -155,19 +155,24 @@ CLI OAuth) 의 2026-05-14 측정 결과 기반. 다른 머신/quota 조합에서
 
 ```toml
 # ── Fast lane: short verdict / scoring / ack ─────────────────
-# 실측 latency (prompt = "reply OK only", max-tokens = 10, 3-run median):
-#   ollama-local gemma4:31b-it-q4_K_M : warm 1.7 s / cold 11 s (keep-alive=10m)
-#   deepseek-v4-flash:cloud (HTTP)    : 7-11 s  (thinking-support=true)
-#   gemini_cli noninteractive         : 9-12 s  (subprocess spawn + JSON parse)
+# 실측 latency (prompt = "reply OK only", max-tokens = 2048, 3-run median):
+#   ollama-local gemma4:31b-it-q4_K_M  : warm 1.7s / cold 11s (keep-alive=10m)
+#   ollama-cloud kimi-k2.6:cloud       : median 6.75s, variance 작음 (5-10s)
+#   ollama-cloud deepseek-v4-flash:cloud: median 6.36s, variance 큼 (1-9s)
+#   ollama-cloud glm-5.1:cloud         : median 14.66s — fast 부적합, 제외
+#   gemini_cli noninteractive          : 9-12s (subprocess spawn + JSON parse)
 #
 # 1차: ollama 로컬 — M3 Max + Q4 quantization, warm cache 활용.
-# 2차: deepseek-v4-flash:cloud — local daemon down 시 fallback. thinking 켜져
-#                                 있어 "flash" 명칭에도 latency 7s+.
-# 3차: gemini_cli — OAuth quota 무료지만 spawn cost 9-12s. 마지막 안전망.
+# 2차: kimi-k2.6:cloud — local daemon down 시 1차 fallback. cloud 중 안정적.
+# 3차: deepseek-v4-flash:cloud — kimi-cloud 가용성 문제 시 fallback.
+# 4차: gemini_cli — OAuth quota 무료지만 spawn cost 9-12s. 마지막 안전망.
 # 모든 멤버는 2KB cap alias 로 ceiling 정렬됨.
+# (max-tokens 측정 cap = alias 와 일치 2048. max=10 이면 thinking-support
+#  모델의 reasoning chain 에 다 소진돼 content 빈 응답을 줌)
 [tier.fast_judge_primary]
 members = [
   "ollama.ollama-local-default.fast_judge",
+  "ollama_cloud.ollama-cloud-kimi.fast_judge",
   "ollama_cloud.ollama-cloud-deepseek-v4-flash.fast_judge",
   "gemini_cli.gemini-cli-auto.fast_judge",
 ]
@@ -241,6 +246,8 @@ routes 는 §2 분류대로 매핑. 19 개 모두 명시 (누락 = silent fallba
 | system-only tier 에 `keeper-assignable` 누락 | keeper 가 자기 cascade 를 fast_judge 로 잘못 설정. | system-only 는 `keeper-assignable = false`. |
 | RFC 번호 동시 claim 충돌 | 작업자 split 시 같은 번호 두 PR (#14396 vs #14394 선례). | 새 RFC 직전 `git fetch origin main && ls docs/rfc/`. |
 | endpoint quota / auth 미검증 멤버 등록 | fast_judge_primary 1차가 production 호출 시 "Insufficient balance" / 401 로 매번 fail → 2차로 silent fallback. RFC-0038 substitution 사고와 동형. | alias 추가 전 `curl <endpoint>/chat/completions` probe 의무 (§6.7 참조). |
+| Direct API 와 Cloud variant 의 quota 를 같은 quota 로 가정 | z.ai general direct (`glm-5.1`) 가 quota 0 라도 Ollama Cloud variant (`glm-5.1:cloud`) 는 별도 quota 로 살아있을 수 있고 그 반대도 가능. 한쪽 측정만으로 멤버 등록/제외하면 다른 쪽의 가용 자원을 놓치거나 죽은 멤버를 등록한다. | provider boundary 별로 probe — `https://api.z.ai/...` (direct) 와 `https://ollama.com/v1/...` 에 `<model>:cloud` 가 별도. cascade.toml 의 `models.X.api-name` 이 `:cloud` suffix 인지 확인. |
+| thinking-support 모델에 짧은 `max-tokens` 으로 측정 | max-tokens=10 이면 reasoning chain 에 모두 소진되어 `choices[0].message.content = ""` 빈 응답. "모델 죽음"으로 오진할 수 있음. | latency / 동작 측정 시 max-tokens 을 alias 의 cap (보통 2048) 과 일치시켜 `finish_reason="stop"` + `content` 존재 확인. |
 | "flash" 명칭 모델을 fast lane 1차로 가정 | thinking-support=true 모델은 verdict 호출에도 reasoning chain 돌아 7s+. | `models.X.thinking-support` 확인. fast lane 멤버는 thinking 꺼진 모델 또는 `reasoning_effort:"none"` 강제 가능한 endpoint 만. |
 | CLI spawn provider 를 fast lane 1차로 | subprocess fork + JSON parse 사이클이 매 호출 9-12s. fast lane SLA 위반. | HTTP-direct provider 우선, CLI 는 fallback. (§3.4) |
 

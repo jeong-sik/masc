@@ -1863,6 +1863,52 @@
   white-space: nowrap;
 }
 
+.ide-editor-file-signals {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 0 1 auto;
+}
+
+.ide-editor-file-signals > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-page);
+  color: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+}
+
+.ide-editor-file-signals > li[data-active="true"] {
+  border-color: color-mix(in srgb, var(--color-accent-fg) 36%, var(--color-border-default));
+  background: color-mix(in srgb, var(--color-bg-elevated) 82%, var(--color-accent-fg));
+  color: var(--color-accent-fg);
+}
+
+.ide-editor-file-signals span,
+.ide-editor-file-signals strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-editor-file-signals strong {
+  color: var(--color-fg-primary);
+  font-weight: 700;
+}
+
 .ide-editor-context-route-links {
   display: inline-flex;
   flex-wrap: wrap;

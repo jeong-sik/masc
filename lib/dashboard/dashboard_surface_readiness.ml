@@ -165,7 +165,7 @@ let all_entries =
       ~meets_main_gate:true
       ~rationale:"Canonical runtime surface for cascade routing and provider health."
       ~route_hash:"#monitoring?section=runtime"
-      ~live_spotcheck:"/api/v1/dashboard/shell"
+      ~live_spotcheck:"/api/v1/cascade/health"
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry

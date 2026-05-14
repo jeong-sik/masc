@@ -27,48 +27,8 @@ let active_verifications_dir base_path =
   let base_path = project_root_of_base_path base_path in
   Filename.concat (Coord_utils.masc_dir_from_base_path ~base_path) "verifications"
 
-let legacy_verifications_dir base_path =
-  Filename.concat (project_root_of_base_path base_path) "verifications"
-
-let warned_legacy_dirs : (string, unit) Hashtbl.t = Hashtbl.create 8
-let warned_legacy_dirs_mutex = Stdlib.Mutex.create ()
-
-let dir_exists path =
-  try Sys.file_exists path && Sys.is_directory path with
-  | Sys_error _ -> false
-
-let dir_entry_count path =
-  try Sys.readdir path |> Array.length with
-  | Sys_error _ -> 0
-
-let warn_if_legacy_verifications_dir_present ~base_path ~active_dir =
-  let legacy_dir = legacy_verifications_dir base_path in
-  if dir_exists legacy_dir then (
-    Stdlib.Mutex.lock warned_legacy_dirs_mutex;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock warned_legacy_dirs_mutex)
-      (fun () ->
-        if not (Hashtbl.mem warned_legacy_dirs legacy_dir) then (
-          Hashtbl.add warned_legacy_dirs legacy_dir ();
-          let entry_count = dir_entry_count legacy_dir in
-          Log.Task.emit Log.Info
-            ~details:
-              (`Assoc
-                [
-                  ("event", `String "legacy_verification_dir_ignored");
-                  ("legacy_dir", `String legacy_dir);
-                  ("active_dir", `String active_dir);
-                  ("legacy_entry_count", `Int entry_count);
-                ])
-            (Printf.sprintf
-               "Ignoring legacy verification directory %s; active store is %s \
-                (legacy_entries=%d)"
-               legacy_dir active_dir entry_count))))
-
 let verifications_dir base_path =
-  let dir = active_verifications_dir base_path in
-  warn_if_legacy_verifications_dir_present ~base_path ~active_dir:dir;
-  dir
+  active_verifications_dir base_path
 
 let request_path base_path req_id =
   Filename.concat (verifications_dir base_path) (req_id ^ ".json")

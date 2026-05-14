@@ -210,6 +210,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 | --- | --- |
 | `also_allow` | Renamed to `tool_also_allow` in `keeper.toml`. Use `tool_access.also_allow` only inside the JSON `tool_access` object. |
 | `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `cascade_name` → `cascade.toml`. Do not pin per-keeper. |
+| `allowed_providers` | Provider/model ownership lives in `cascade.toml` and OAS runtime receipts. Do not pin providers per keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |
 | `trigger_mode`, `policy_action_budget` | Removed with the legacy policy engine. |
 | `initiative_scope`, `initiative_enabled`, `initiative_idle_sec`, `initiative_cooldown_sec` | Renamed to `proactive_*` (see above). |

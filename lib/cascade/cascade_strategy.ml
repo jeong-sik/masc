@@ -219,8 +219,7 @@ let latency_score_of_p50 ~baseline p50 =
 
 let latency_score_for_provider health ~provider_key =
   (* Public API: uses the env-var-backed global default baseline so
-     external callers (e.g. Cascade_inventory) do not need to thread
-     a [scoring_params] record. *)
+     callers do not need to thread a [scoring_params] record. *)
   match Cascade_health_tracker.provider_info health ~provider_key with
   | None -> 1.0
   | Some info ->

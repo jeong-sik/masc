@@ -47,14 +47,6 @@ let base_provider_attempt_provenance =
   ; provider_source_cascade = None
   }
 
-let cross_cascade_provider_attempt_provenance ~source_cascade =
-  { model_source = "cross_cascade_recovery"
-  ; resolved_model_source = "cross_cascade_catalog_binding"
-  ; capability_source = "provider_config_from_cross_cascade_catalog"
-  ; fallback_authority = "cross_cascade_recovery"
-  ; provider_source_cascade = Some source_cascade
-  }
-
 let provider_attempt_provenance_fields p =
   let base =
     [ ("model_source", `String p.model_source)
@@ -218,52 +210,15 @@ let run_named
                   cascade_name runtime_candidate_label runtime_candidate_label msg;
                 false)
   in
-  (* Cross-cascade health-aware fallback: when the current cascade has no
-     tool-capable providers after filtering, search all other cascades for
-     a healthy tool-capable provider. Depth 1 only (no recursive search). *)
-  let base_attempt_provenance = base_provider_attempt_provenance in
-  let provider_attempt_provenance, candidates =
-    match candidates with
-    | [] ->
-        (match Cascade_runtime_candidate.resolve_tool_capable_across_cascades
-                ~sw ~net ~keeper_name ?runtime_mcp_policy ~tools
-                ~require_tool_choice_support ~require_tool_support
-                ~exclude_cascade:cascade_name ()
-         with
-         | Some (source_cascade, candidate) ->
-             Prometheus.inc_counter cross_cascade_fallback_metric
-               ~labels:[
-                 ("from_cascade", cascade_name);
-                 ("to_cascade", source_cascade);
-               ]
-               ();
-             (* §7.3.2 Zero Silent Failure: feed the unified fallback
-                counter so the dashboard panel sees a single numerator
-                across all fallback classes (cross_cascade,
-                cascade_empty, capability_drop, …). *)
-             Llm_metric_bridge.emit_fallback_triggered
-               ~kind:"cross_cascade"
-               ~detail:
-                 (Printf.sprintf "%s->%s" cascade_name source_cascade);
-             Log.Misc.info
-               "cascade %s: cross-cascade fallback to %s from %s \
-                (original had no tool-capable providers)"
-               cascade_name
-               "tool-capable candidate"
-               source_cascade;
-             (cross_cascade_provider_attempt_provenance ~source_cascade, [ candidate ])
-         | None ->
-             Log.Misc.error
-               "cascade %s: no callable models available (cross-cascade \
-                search also failed) — candidate_count=%d \
-                require_tool_choice_support=%b require_tool_support=%b"
-               cascade_name
-               (List.length configured_labels)
-               require_tool_choice_support
-               require_tool_support;
-             (base_attempt_provenance, []))
-    | _ -> (base_attempt_provenance, candidates)
-  in
+  let provider_attempt_provenance = base_provider_attempt_provenance in
+  if candidates = [] then
+    Log.Misc.error
+      "cascade %s: no callable models available in declared cascade — \
+       candidate_count=%d require_tool_choice_support=%b require_tool_support=%b"
+      cascade_name
+      (List.length configured_labels)
+      require_tool_choice_support
+      require_tool_support;
   match candidates with
   | [] ->
       let required_tool_names =
@@ -793,9 +748,9 @@ let run_named
         let _ = err_str in
         (* FSM: Call_err → decide.
            Hard-quota fast-path: a hard quota is permanent for this turn —
-           every remaining tier in this cascade (and any cross-cascade
-           borrow) will hit the same account-level limit, so retrying
-           burns the full OAS turn budget (~60min) for nothing.  Force
+           every remaining tier in this declared cascade will hit the same
+           account-level limit, so retrying burns the full OAS turn budget
+           (~60min) for nothing.  Force
            [Exhausted] regardless of [is_last] so the agent loop sees the
            terminal error immediately.  The hard-quota cooldown recorded
            above (line ~1760) keeps this provider deselected for future

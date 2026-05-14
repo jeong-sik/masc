@@ -2,7 +2,7 @@
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Provides cascade profile defaults, Eio context validation,
-    provider resolution, tool-support filtering, and cross-cascade fallback.
+    provider resolution, and tool-support filtering.
 
     This module is [include]d by {!Keeper_turn_driver}; all bindings are
     re-exported by the facade.  @since God file decomposition *)
@@ -125,20 +125,3 @@ val filter_candidate_providers_for_tool_support :
     zero-based position in the original candidate list, after the initial
     classification, so it does not affect the hot path when no entries
     have a [secondary] declaration. *)
-
-(** {1 Cross-cascade fallback} *)
-
-val resolve_tool_capable_provider_across_cascades :
-  sw:Eio.Switch.t ->
-  net:Eio_context.eio_net ->
-  keeper_name:string ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  ?tools:Agent_sdk.Tool.t list ->
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  exclude_cascade:string ->
-  unit ->
-  (string * Llm_provider.Provider_config.t) option
-(** Search all other cascades for a healthy tool-capable provider when the
-    current cascade has none after filtering.  Returns the source cascade
-    name and provider config, or [None].  Depth: 1 level only. *)

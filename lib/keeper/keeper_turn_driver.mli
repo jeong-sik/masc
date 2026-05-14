@@ -93,8 +93,6 @@ val admission_wait_timeout_error :
   int ->
   (string, Agent_sdk.Error.sdk_error) result
 
-val cross_cascade_fallback_metric : string
-
 (** {1 Cascade error helpers} *)
 
 val sdk_error_to_cascade_outcome :

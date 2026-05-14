@@ -475,7 +475,6 @@ binding/alias path.
 | `cascade_routes.ml` | Route mapping → tier-group routing |
 | `cascade_strategy.ml` | Strategy selection → config-driven strategy |
 | `cascade_pool.ml` | Model pool → binding pool |
-| `cascade_inventory.ml` | Inventory → binding inventory |
 
 ### New modules
 

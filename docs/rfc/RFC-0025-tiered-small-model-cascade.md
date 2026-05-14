@@ -90,7 +90,6 @@ request → detect_complexity → select tier profile → resolve_cascade_provid
 | `config/cascade.toml` | `[tier_small]`, `[tier_medium]` 프로파일 | High |
 | `lib/cascade/cascade_config.ml` | Tier 설정 스키마 | Medium |
 | `lib/oas_worker_named.ml` | Tier metadata 전달 | Medium |
-| `lib/cascade/cascade_inventory.ml` | Tier-aware scoring | Low |
 
 ## 6. Validation
 

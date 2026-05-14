@@ -484,26 +484,20 @@ val metric_llm_provider_output_tokens : string
 
 (** §7.3.2 Zero Silent Failure measurement: aggregate counter for every
     fallback event across the cascade pipeline. Labels: [kind] enumerates
-    the fallback class (cross_cascade, cascade_empty, capability_drop,
-    cli_unsupported, …); [detail] carries the specific reason within
-    the kind (e.g. for cross_cascade: source provider; for cascade_empty:
-    rejection_reason_label). Detail counters
-    ([masc_cross_cascade_fallback_total],
-    [masc_llm_provider_capability_drops_total]) remain for per-class
-    drill-down; this counter exists so the "Zero Silent Failure"
-    dashboard panel has a single numerator across all classes. *)
+    the fallback class (cascade_empty, capability_drop, cli_unsupported,
+    …); [detail] carries the specific reason within the kind (e.g. for
+    cascade_empty: rejection_reason_label). This counter exists so the
+    "Zero Silent Failure" dashboard panel has a single numerator across all
+    fallback classes. *)
 val metric_fallback_triggered : string
 
 (** §7.3.2 Zero Silent Failure measurement: aggregate counter for every
     fallback event across the cascade pipeline. Labels: [kind] enumerates
-    the fallback class (cross_cascade, cascade_empty, capability_drop,
-    cli_unsupported, …); [detail] carries the specific reason within
-    the kind (e.g. for cross_cascade: source provider; for cascade_empty:
-    rejection_reason_label). Detail counters
-    ([masc_cross_cascade_fallback_total],
-    [masc_llm_provider_capability_drops_total]) remain for per-class
-    drill-down; this counter exists so the "Zero Silent Failure"
-    dashboard panel has a single numerator across all classes. *)
+    the fallback class (cascade_empty, capability_drop, cli_unsupported,
+    …); [detail] carries the specific reason within the kind (e.g. for
+    cascade_empty: rejection_reason_label). This counter exists so the
+    "Zero Silent Failure" dashboard panel has a single numerator across all
+    fallback classes. *)
 val metric_board_truncated_posts : string
 
 val metric_anti_rationalization_fallback : string
@@ -1091,7 +1085,7 @@ val metric_memory_usage_bytes : string
     - [source="max_execution_time"] — agent_sdk's
       [with_optional_timeout] fired because the per-OAS-call ceiling
       ([max_execution_time_s], wired in PR #13923/#13933) was reached.
-      This is the canonical signal for cross-cascade fallback on hang.
+      This is the canonical signal for OAS call timeout enforcement.
     - [source="provider"] — transport-level timeout from the upstream
       provider (HTTP read deadline, gRPC deadline, etc.). The agent
       did not have [max_execution_time_s] set, or the timeout fired

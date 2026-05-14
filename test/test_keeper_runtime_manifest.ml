@@ -1997,6 +1997,23 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     "lib/keeper/keeper_turn_driver.ml"
     "resolve_tool_capable_provider_across_cascades";
   check_source_omits
+    "lib/cascade/cascade_oas_runner.ml"
+    "resolve_tool_capable_provider_across_cascades";
+  check_source_omits
+    "lib/cascade/cascade_oas_runner.mli"
+    "resolve_tool_capable_provider_across_cascades";
+  check_source_omits
+    "lib/cascade/cascade_runtime_candidate.ml"
+    "resolve_tool_capable_across_cascades";
+  check_source_omits
+    "lib/cascade/cascade_runtime_candidate.mli"
+    "resolve_tool_capable_across_cascades";
+  check_source_omits
+    "lib/cascade/cascade_config.mli"
+    "val local_capacity_for_selections";
+  check_source_missing "lib/cascade/cascade_inventory.ml";
+  check_source_missing "lib/cascade/cascade_inventory.mli";
+  check_source_omits
     "lib/keeper/keeper_turn_driver_helpers.mli"
     "Llm_provider.Provider_config";
   check_source_omits

@@ -72,7 +72,7 @@ OAS  ──does not know──→ MASC
   does not branch on vendor/model literals. Provider/model ids remain
   OAS-owned runtime data, not MASC product data.
 - 따라서 checked-in repo defaults는 review-stable pinning이 중요할 때 explicit `provider:model_id`를 쓰고, adapter default 자체를 계약으로 삼을 때만 `provider:auto`를 쓴다.
-- legacy `allowed_providers` keeper TOML/meta fields는 compatibility input일 뿐이며, active runtime policy로 취급하지 않는다.
+- legacy `allowed_providers` keeper TOML/meta fields는 더 이상 허용하지 않으며 load/parse boundary에서 reject한다.
 - persisted legacy keeper meta tool-policy fields are scrubbed into canonical `tool_access` on read; direct `meta_of_json` callers must use canonical keeper meta keys.
 
 ## Current Integration Status
@@ -87,7 +87,7 @@ OAS  ──does not know──→ MASC
 | Checkpoint integration | Mostly complete, sidecar debt remains | OAS checkpoint is used in shared worker/runtime paths. New keeper checkpoint writes keep continuity state out of `working_context`: `patch_checkpoint_last_assistant` strips visible `[STATE]`, stores replay metadata on the assistant message, and clears `Checkpoint.working_context`. Compatibility readers still accept legacy structured sidecars, and feature-flagged autonomous/resilience/multimodal adapters may store neutral sidecar metadata in `working_context`. |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
 | Team-session swarm | Removed | `lib/team_session/` module purged; MASC no longer owns a session orchestration surface. OAS Swarm Runner is the sole substrate; consumers drive swarm runs via OAS primitives directly. |
-| Provider/model identity ownership | OAS-owned | MASC resolves logical `cascade_name` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. Legacy `allowed_providers` inputs are ignored |
+| Provider/model identity ownership | OAS-owned | MASC resolves logical `cascade_name` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. Legacy `allowed_providers` inputs are rejected |
 
 ## Boundary Audit Snapshot
 

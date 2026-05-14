@@ -257,30 +257,6 @@ let tool_filter_rejection_label
     candidate.provider_cfg
   |> Option.map Cascade_oas_runner.filter_rejection_reason_label
 
-let resolve_tool_capable_across_cascades
-    ~sw
-    ~net
-    ~keeper_name
-    ?runtime_mcp_policy
-    ~tools
-    ~require_tool_choice_support
-    ~require_tool_support
-    ~exclude_cascade
-    ()
-  =
-  Cascade_oas_runner.resolve_tool_capable_provider_across_cascades
-    ~sw
-    ~net
-    ~keeper_name
-    ?runtime_mcp_policy
-    ~tools
-    ~require_tool_choice_support
-    ~require_tool_support
-    ~exclude_cascade
-    ()
-  |> Option.map (fun (source_cascade, provider_cfg) ->
-         source_cascade, of_provider_config provider_cfg)
-
 let capacity_key candidate = candidate.capacity_key
 let capacity_keys candidates = List.map capacity_key candidates
 

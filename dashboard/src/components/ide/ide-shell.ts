@@ -5,7 +5,7 @@ import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
-import { IdeActivityMock } from './ide-activity-mock'
+import { IdeActivityPanel } from './ide-activity-panel'
 import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
 import { IdeInterjectMock } from './ide-interject-mock'
 import { KeeperShellDrawer } from './keeper-shell-drawer'
@@ -327,7 +327,7 @@ export function IdeShell() {
           ? null
           : html`
             <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
-              <${IdeActivityMock}
+              <${IdeActivityPanel}
                 activeFile=${activeFilePath}
                 annotations=${annotations}
                 diffRows=${diffRows}

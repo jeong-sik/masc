@@ -108,7 +108,7 @@ export interface IdeRunProgressGoal {
   readonly progressLabel: string
 }
 
-export interface IdeActivityMockProps {
+export interface IdeActivityPanelProps {
   readonly activeFile?: string
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
@@ -297,7 +297,7 @@ function normalizedPollMs(value: number | undefined): number | null {
   return Math.floor(value)
 }
 
-export function IdeActivityMock(props: IdeActivityMockProps = {}) {
+export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile = '',
     annotations = EMPTY_ANNOTATIONS,

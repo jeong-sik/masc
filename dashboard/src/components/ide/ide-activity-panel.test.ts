@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render as preactRender } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { deriveIdeRunProgressSummary, IdeActivityMock } from './ide-activity-mock'
+import { deriveIdeRunProgressSummary, IdeActivityPanel } from './ide-activity-panel'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { goals, tasks } from '../../store'
@@ -40,10 +40,10 @@ afterEach(() => {
   window.location.hash = ''
 })
 
-describe('IdeActivityMock', () => {
+describe('IdeActivityPanel', () => {
   it('renders the activity pane with empty state when no API data', () => {
     const container = document.createElement('div')
-    render(h(IdeActivityMock, {}), container)
+    render(h(IdeActivityPanel, {}), container)
 
     const region = container.querySelector('[role="region"]')
     expect(region?.getAttribute('aria-label')).toBe('EVENT TIMELINE')
@@ -56,7 +56,7 @@ describe('IdeActivityMock', () => {
 
   it('renders file context from annotation and diff props', () => {
     const container = document.createElement('div')
-    render(h(IdeActivityMock, {
+    render(h(IdeActivityPanel, {
       activeFile: 'lib/runtime.ml',
       annotations: [{
         id: 'ann-1',
@@ -94,7 +94,7 @@ describe('IdeActivityMock', () => {
     ]])
     const container = document.createElement('div')
 
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     expect(container.textContent).toContain('Type mismatch in keeper progress projection')
     expect(container.textContent).toContain('1 line anchors')
@@ -133,7 +133,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('goal goal-runtime')
@@ -228,7 +228,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('goal goal-runtime')
@@ -298,7 +298,7 @@ describe('IdeActivityMock', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml', pollMs: 1_000 }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', pollMs: 1_000 }), container)
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('turn-1')
@@ -340,7 +340,7 @@ describe('IdeActivityMock', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml', pollMs: 1_000 }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', pollMs: 1_000 }), container)
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('turn-stable')
@@ -394,7 +394,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('GOAL TRACK')
@@ -437,7 +437,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
@@ -467,7 +467,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('telemetry.turn')
@@ -547,7 +547,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('4 events')

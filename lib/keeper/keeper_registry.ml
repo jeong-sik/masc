@@ -2458,6 +2458,58 @@ let restore_tool_usage ~base_path name =
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 
+type lifecycle_event_origin =
+  | Generic_dispatch
+  | Post_turn_lifecycle
+  | Operator_compact
+
+let lifecycle_event_origin_to_string = function
+  | Generic_dispatch -> "generic_dispatch"
+  | Post_turn_lifecycle -> "post_turn_lifecycle"
+  | Operator_compact -> "operator_compact"
+;;
+
+let is_paired_lifecycle_event = function
+  | Keeper_state_machine.Compaction_started
+  | Keeper_state_machine.Compaction_completed _
+  | Keeper_state_machine.Compaction_failed _
+  | Keeper_state_machine.Handoff_started
+  | Keeper_state_machine.Handoff_completed _
+  | Keeper_state_machine.Handoff_failed _ -> true
+  | _ -> false
+;;
+
+let origin_allows_paired_lifecycle_event origin event =
+  match origin, event with
+  | Post_turn_lifecycle, event when is_paired_lifecycle_event event -> true
+  | ( Operator_compact
+    , ( Keeper_state_machine.Compaction_started
+      | Keeper_state_machine.Compaction_completed _
+      | Keeper_state_machine.Compaction_failed _ ) ) -> true
+  | Generic_dispatch, event when is_paired_lifecycle_event event -> false
+  | Operator_compact, event when is_paired_lifecycle_event event -> false
+  | _, _ -> true
+;;
+
+let validate_paired_lifecycle_origin origin event =
+  if origin_allows_paired_lifecycle_event origin event
+  then Ok ()
+  else
+    Error
+      (Keeper_state_machine.Precondition_violation
+         { event = Keeper_state_machine.event_to_string event
+         ; reason =
+             Printf.sprintf
+               "paired lifecycle event requires origin=post_turn_lifecycle%s; got %s"
+               (match event with
+                | Keeper_state_machine.Compaction_started
+                | Keeper_state_machine.Compaction_completed _
+                | Keeper_state_machine.Compaction_failed _ -> " or origin=operator_compact"
+                | _ -> "")
+               (lifecycle_event_origin_to_string origin)
+         })
+;;
+
 let execute_entry_action_observability
       ~(name : string)
       ~(phase : Keeper_state_machine.phase)
@@ -2587,6 +2639,7 @@ let compaction_stage_after_event entry event =
     state is consistent. *)
 let rec dispatch_event_with_audit
           ~base_path
+          ?(origin = Generic_dispatch)
           ?snapshot
           ?events_fired
           ?selected_event
@@ -2613,14 +2666,22 @@ let rec dispatch_event_with_audit
       | Keeper_state_machine.Context_measured { auto_rules; _ } -> Some (now, auto_rules)
       | _ -> entry.last_auto_rules
     in
+    let origin_result = validate_paired_lifecycle_origin origin event in
     let pending_turn_measurement = pending_measurement_after_event now entry event in
-    let compaction_stage = compaction_stage_after_event entry event in
+    let compaction_stage =
+      match origin_result with
+      | Error _ -> entry.compaction_stage
+      | Ok () -> compaction_stage_after_event entry event
+    in
     let result =
-      Keeper_state_machine.apply_event
-        ~current_phase:entry.phase
-        ~conditions:entry.conditions
-        ~event
-        ~now
+      match origin_result with
+      | Error _ as err -> err
+      | Ok () ->
+        Keeper_state_machine.apply_event
+          ~current_phase:entry.phase
+          ~conditions:entry.conditions
+          ~event
+          ~now
     in
     Dashboard_attribution.record
       (Keeper_state_machine.attribution_of_transition ~event result);
@@ -2786,10 +2847,12 @@ let rec dispatch_event_with_audit
        Error e)
 ;;
 
-let dispatch_event ~base_path name event = dispatch_event_with_audit ~base_path name event
+let dispatch_event ~base_path ?(origin = Generic_dispatch) name event =
+  dispatch_event_with_audit ~base_path ~origin name event
+;;
 
-let dispatch_event_and_log ~base_path name event =
-  match dispatch_event ~base_path name event with
+let dispatch_event_and_log ~base_path ?(origin = Generic_dispatch) name event =
+  match dispatch_event ~base_path ~origin name event with
   | Ok tr -> Ok tr
   | Error e ->
     let reason_label =
@@ -2805,8 +2868,8 @@ let dispatch_event_and_log ~base_path name event =
     Error e
 ;;
 
-let dispatch_event_unit ~base_path name event =
-  match dispatch_event_and_log ~base_path name event with
+let dispatch_event_unit ~base_path ?(origin = Generic_dispatch) name event =
+  match dispatch_event_and_log ~base_path ~origin name event with
   | Ok _ -> ()
   | Error e ->
     Log.Keeper.warn
@@ -2817,6 +2880,7 @@ let dispatch_event_unit ~base_path name event =
 
 let dispatch_event_with_audit_and_log
       ~base_path
+      ?(origin = Generic_dispatch)
       ?snapshot
       ?events_fired
       ?selected_event
@@ -2826,6 +2890,7 @@ let dispatch_event_with_audit_and_log
   match
     dispatch_event_with_audit
       ~base_path
+      ~origin
       ?snapshot
       ?events_fired
       ?selected_event

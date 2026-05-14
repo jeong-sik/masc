@@ -2472,11 +2472,13 @@ let run_keeper_cycle
                       ~on_compaction_started:(fun () ->
                         dispatch_keeper_phase_event
                           ~config
+                          ~origin:Keeper_registry.Post_turn_lifecycle
                           ~keeper_name:meta.name
                           Keeper_state_machine.Compaction_started)
                       ~on_handoff_started:(fun () ->
                         dispatch_keeper_phase_event
                           ~config
+                          ~origin:Keeper_registry.Post_turn_lifecycle
                           ~keeper_name:meta.name
                           Keeper_state_machine.Handoff_started)
                       ~meta

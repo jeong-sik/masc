@@ -2606,6 +2606,7 @@ let test_dispatch_keeper_phase_event_uses_room_base_path () =
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
         KST.Compaction_started;
       match KR.get ~base_path:config.base_path meta.name with
@@ -2627,6 +2628,7 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
         KST.Compaction_started;
       let lifecycle =
@@ -2654,6 +2656,45 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
           check string "compaction completion reaches registry" "running"
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after lifecycle dispatch")
+
+let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_origin_guard" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let meta = make_keeper_meta ~name:"keeper-origin-guard" () in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let labels =
+        [ ("keeper", meta.name); ("event", "compaction_started") ]
+      in
+      let before =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      KEC.dispatch_keeper_phase_event
+        ~config
+        ~keeper_name:meta.name
+        KST.Compaction_started;
+      let after =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      check bool "origin guard rejection metric increments" true (after > before);
+      match KR.get ~base_path:config.base_path meta.name with
+      | Some entry ->
+          check string "unscoped compaction start is rejected" "running"
+            (KST.phase_to_string entry.phase)
+      | None -> fail "expected registered keeper after rejected lifecycle dispatch")
 
 let test_dispatch_keeper_phase_event_rejection_increments_metric () =
   let base_dir = temp_dir "keeper_lifecycle_registry_rejection" in
@@ -2907,6 +2948,8 @@ let () =
             test_dispatch_keeper_phase_event_uses_room_base_path;
           test_case "post-turn lifecycle events use room base_path" `Quick
             test_dispatch_post_turn_lifecycle_events_uses_room_base_path;
+          test_case "unscoped lifecycle event is rejected" `Quick
+            test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event;
           test_case "phase event rejection increments metric" `Quick
             test_dispatch_keeper_phase_event_rejection_increments_metric;
           test_case "keepalive event rejection increments metric" `Quick

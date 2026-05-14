@@ -30,9 +30,13 @@ let http_probe_url_of_config (cfg : Llm_provider.Provider_config.t) =
   else None
 
 let of_provider_config provider_cfg =
+  let health_key = Provider_adapter.provider_health_key_of_config provider_cfg in
+  let model_health_key =
+    Provider_adapter.provider_model_health_key_of_config provider_cfg
+  in
   { provider_cfg
-  ; health_key = "runtime"
-  ; model_health_key = "runtime"
+  ; health_key
+  ; model_health_key
   ; capacity_key = capacity_key_of_config provider_cfg
   ; http_probe_url = http_probe_url_of_config provider_cfg
   }
@@ -173,8 +177,15 @@ let health_keys candidate =
     [ candidate.health_key; candidate.model_health_key ]
 
 let first_health_cooldown candidate =
-  let _ = candidate in
-  None
+  health_keys candidate
+  |> List.find_map (fun provider_key ->
+    match
+      Cascade_health_tracker.check_circuit_breaker
+        Cascade_health_tracker.global
+        ~provider_key
+    with
+    | Ok () -> None
+    | Error msg -> Some (provider_key, msg))
 
 let has_recovery_evidence candidate =
   let _ = candidate in

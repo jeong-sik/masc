@@ -270,7 +270,7 @@ let catalog_metadata_of_materialized_json json =
       if profile_is_keeper_assignable assignable then None else Some name)
     |> List.sort_uniq String.compare
   in
-  let keeper_assignable_names =
+  let keeper_assignable_public_names =
     public_names
     |> List.filter (fun public_name ->
       let qualified_name =
@@ -280,9 +280,18 @@ let catalog_metadata_of_materialized_json json =
       | Some assignable -> profile_is_keeper_assignable assignable
       | None -> true)
   in
+  let keeper_assignable_qualified_names =
+    profile_assignability
+    |> List.filter_map (fun (name, assignable) ->
+      if profile_is_keeper_assignable assignable then Some name else None)
+  in
+  let keeper_assignable_names =
+    keeper_assignable_public_names @ keeper_assignable_qualified_names
+    |> List.sort_uniq String.compare
+  in
   let system_names =
     public_names
-    |> List.filter (fun name -> not (List.mem name keeper_assignable_names))
+    |> List.filter (fun name -> not (List.mem name keeper_assignable_public_names))
   in
   let fallback_hints =
     tier_group_fields
@@ -439,6 +448,11 @@ let route_target_public_name ?config_path use =
 let normalize_keeper_runtime_declared_name ?config_path raw =
   let normalized = normalize_declared_name raw in
   let public_name = public_name_of_target normalized in
+  let explicitly_keeper_assignable =
+    match catalog_metadata_result ?config_path () with
+    | Ok meta -> List.mem normalized meta.keeper_assignable_names
+    | Error _ -> false
+  in
   let keeper_route_targets =
     keeper_runtime_route_uses
     |> List.filter_map (route_target_public_name ?config_path)
@@ -450,7 +464,8 @@ let normalize_keeper_runtime_declared_name ?config_path raw =
     |> List.filter_map (route_target_public_name ?config_path)
     |> List.sort_uniq String.compare
   in
-  if List.mem public_name non_keeper_route_targets
+  if (not explicitly_keeper_assignable)
+     && List.mem public_name non_keeper_route_targets
      && not (List.mem public_name keeper_route_targets)
   then cascade_name_for_use ?config_path Keeper_turn
   else normalized

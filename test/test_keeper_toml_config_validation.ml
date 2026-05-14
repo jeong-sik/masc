@@ -428,7 +428,8 @@ target = "tier.primary"
 let test_cascade_profile_metadata_from_toml () =
   with_temp_config_dir minimal_cascade_profile_metadata_toml
   @@ fun ~config_root:_ ~cascade_path:_ ->
-  check (list string) "keeper assignable catalog" ["backup"; "primary"]
+  check (list string) "keeper assignable catalog"
+    ["backup"; "primary"; "tier-group.primary"; "tier.backup"; "tier.primary"]
     (Masc_mcp.Keeper_cascade_profile.keeper_catalog_names ());
   check bool "rerank route is system-only" true
     (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "llm_rerank");
@@ -606,8 +607,8 @@ target = "tier.ollama_cloud_primary"
 |}
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
-  check string "non-keeper route target falls back to keeper_turn route"
-    "tier-group.coding_plan"
+  check string "assignable concrete route target is preserved"
+    "tier.ollama_cloud_primary"
     (Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name
        ~config_path:cascade_path "tier.ollama_cloud_primary")
 

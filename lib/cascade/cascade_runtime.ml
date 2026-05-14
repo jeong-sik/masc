@@ -33,6 +33,10 @@ let is_local_label label =
   | Some pname -> Provider_adapter.is_local_provider pname
   | None -> false
 
+let is_typed_declarative_label_provider = function
+  | "openai_compat" -> true
+  | _ -> false
+
 let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
 
 let default_model_strings ~cascade_name =
@@ -303,7 +307,9 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
           match provider_name_of_label label with
           | None -> true
           | Some pname ->
-              if Provider_adapter.is_local_provider pname then true
+              if Provider_adapter.is_local_provider pname
+                 || is_typed_declarative_label_provider pname
+              then true
               else
                 match Llm_provider.Provider_registry.find default_registry pname with
                 | None -> false
@@ -318,7 +324,9 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
             match provider_name_of_label label with
             | None -> None
             | Some pname ->
-                if Provider_adapter.is_local_provider pname then None
+                if Provider_adapter.is_local_provider pname
+                   || is_typed_declarative_label_provider pname
+                then None
                 else
                   match Llm_provider.Provider_registry.find default_registry pname with
                   | None -> Some (Printf.sprintf "%s (unknown provider)" pname)

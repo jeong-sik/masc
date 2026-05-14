@@ -90,6 +90,7 @@ let int_opt_field name = function
 let inspect
     ~(config : Coord.config)
     ~(meta : keeper_meta)
+    ?(workspace_discovery = true)
     ?repo_name
     ?(repo = "")
     ?(default_branch = "main")
@@ -130,6 +131,16 @@ let inspect
         "exists", `Bool false;
         "is_git_repo", `Bool false;
         "has_origin", `Bool false;
+      ]
+  else if not (safe_is_dir clone_path) && not workspace_discovery then
+    common_fields "missing_clone" false
+      "Clone the repo into sandbox repos/ first with keeper_shell op=git_clone, then create a worktree."
+      [
+        "exists", `Bool false;
+        "is_git_repo", `Bool false;
+        "has_origin", `Bool false;
+        "workspace_discovery", `String "skipped";
+        "auto_provision_on_worktree_create", `Bool false;
       ]
   else if not (safe_is_dir clone_path) then
     let workspace_matches =

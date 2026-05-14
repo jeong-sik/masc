@@ -53,6 +53,8 @@ val playground_repos_json :
 val live_status_json :
   ?include_preflight:bool ->
   ?preflight_override:Yojson.Safe.t option ->
+  ?containers_override:(Keeper_sandbox_runtime.live_container list, string) result ->
+  ?include_playground_repos:bool ->
   config:Coord.config ->
   meta:keeper_meta ->
   timeout_sec:float ->
@@ -64,7 +66,14 @@ val live_status_json :
     the per-keeper render skips its own [docker_preflight] call.
     Pass [Some json] for the cached result, or [None] for "preflight
     was attempted but yielded nothing".  Without this override the
-    render falls back to its own preflight invocation. *)
+    render falls back to its own preflight invocation.
+
+    [containers_override] lets a fleet caller reuse one base-path-scoped
+    Docker listing and filter it by keeper in memory.  Without it the
+    render performs its own keeper-scoped Docker listing.
+
+    [include_playground_repos=false] skips live playground repo enrichment,
+    including per-repo Git metadata probes, for dashboard hot paths. *)
 
 val preflight_status_json :
   timeout_sec:float -> Yojson.Safe.t option

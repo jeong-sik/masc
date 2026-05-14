@@ -71,6 +71,15 @@ let live_containers ~config ~meta ~timeout_sec =
     ~timeout_sec
     ()
 
+let live_containers_for_keeper ~(meta : keeper_meta) containers =
+  let keeper_label = Keeper_sandbox_runtime.sanitize_label_value meta.name in
+  List.filter
+    (fun (c : Keeper_sandbox_runtime.live_container) ->
+      match c.keeper_name with
+      | Some name -> String.equal name meta.name || String.equal name keeper_label
+      | None -> false)
+    containers
+
 let running_managed_container ~network_label containers =
   List.find_opt
     (fun (c : Keeper_sandbox_runtime.live_container) ->
@@ -503,6 +512,8 @@ let identity_json (meta : keeper_meta) =
 
 let live_status_json ?(include_preflight = true)
     ?preflight_override
+    ?containers_override
+    ?(include_playground_repos = true)
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(timeout_sec : float)
@@ -519,9 +530,14 @@ let live_status_json ?(include_preflight = true)
   in
   let containers, container_error =
     if meta.sandbox_profile = Docker then
-      match live_containers ~config ~meta ~timeout_sec with
-      | Ok containers -> (containers, None)
-      | Error err -> ([], Some err)
+      match containers_override with
+      | Some (Ok containers) ->
+          (live_containers_for_keeper ~meta containers, None)
+      | Some (Error err) -> ([], Some err)
+      | None -> (
+        match live_containers ~config ~meta ~timeout_sec with
+        | Ok containers -> (containers, None)
+        | Error err -> ([], Some err))
     else
       ([], None)
   in
@@ -551,6 +567,14 @@ let live_status_json ?(include_preflight = true)
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ("recommendation", Json_util.string_opt_to_json recommendation);
-      ("playground_repos", playground_repos_json ~config ~meta);
+      ( "playground_repos",
+        if include_playground_repos then
+          playground_repos_json ~config ~meta
+        else
+          `List [] );
+      ( "playground_repos_source",
+        `String
+          (if include_playground_repos then "live"
+           else "skipped_dashboard_hot_path") );
       ("identity", identity_json meta);
     ]

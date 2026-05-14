@@ -2071,6 +2071,35 @@ let test_oas_worker_exec_build_applies_stream_idle_timeout () =
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
+let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Ollama
+      ~model_id:"glm-5.1:cloud"
+      ~base_url:"https://ollama.com"
+      ~request_path:"/api/chat"
+      ()
+  in
+  let config =
+    Cascade_runner.default_config
+      ~name:"oas-worker-ollama-cloud"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  Eio.Switch.run
+  @@ fun sw ->
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+    let transport = (Agent_sdk.Agent.options agent).transport in
+    Alcotest.(check bool)
+      "remote ollama installs native HTTP transport"
+      true
+      (Option.is_some transport);
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
 let test_apply_stream_idle_timeout_default_passes_through_caller_value () =
   let provided = Some 7.5 in
   let result = Keeper_turn_driver.apply_stream_idle_timeout_default provided in
@@ -6443,6 +6472,10 @@ let () =
             "oas_worker applies stream idle timeout"
             `Quick
             test_oas_worker_exec_build_applies_stream_idle_timeout
+        ; Alcotest.test_case
+            "oas_worker installs native Ollama HTTP transport"
+            `Quick
+            test_oas_worker_exec_build_installs_ollama_kind_preserving_transport
         ; Alcotest.test_case
             "apply_stream_idle_timeout_default passes Some through"
             `Quick

@@ -208,6 +208,60 @@ module Kimi_cli_transport_local = Cascade_transport.Kimi_cli_transport_local
 let non_http_transport_of_provider =
   Cascade_transport.non_http_transport_of_provider
 
+let request_runtime_fields_on_base_config
+    ~(base : Llm_provider.Provider_config.t)
+    (req_config : Llm_provider.Provider_config.t)
+  =
+  { base with
+    max_tokens = req_config.max_tokens;
+    temperature = req_config.temperature;
+    top_p = req_config.top_p;
+    top_k = req_config.top_k;
+    min_p = req_config.min_p;
+    system_prompt = req_config.system_prompt;
+    enable_thinking = req_config.enable_thinking;
+    thinking_budget = req_config.thinking_budget;
+    clear_thinking = req_config.clear_thinking;
+    tool_stream = req_config.tool_stream;
+    tool_choice = req_config.tool_choice;
+    disable_parallel_tool_use = req_config.disable_parallel_tool_use;
+    response_format = req_config.response_format;
+    output_schema = req_config.output_schema;
+    cache_system_prompt = req_config.cache_system_prompt;
+    seed = req_config.seed;
+  }
+
+let provider_config_preserving_http_transport
+    ~sw
+    ~net
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+  : Llm_provider.Llm_transport.t =
+  let http_transport = Llm_provider.Complete.make_http_transport ~sw ~net in
+  let patch_request (req : Llm_provider.Llm_transport.completion_request) =
+    { req with
+      config =
+        request_runtime_fields_on_base_config ~base:provider_cfg req.config;
+    }
+  in
+  { complete_sync =
+      (fun req -> http_transport.complete_sync (patch_request req));
+    complete_stream =
+      (fun ?on_telemetry ~on_event req ->
+        http_transport.complete_stream ?on_telemetry ~on_event
+          (patch_request req));
+  }
+
+let transport_for_provider ~sw ~net ~provider_cfg ?runtime_mcp_policy
+    ?cli_transport_overrides () =
+  match provider_cfg.Llm_provider.Provider_config.kind with
+  | Llm_provider.Provider_config.Ollama ->
+      Ok
+        (Some
+           (provider_config_preserving_http_transport ~sw ~net ~provider_cfg))
+  | _ ->
+      non_http_transport_of_provider ~sw ~provider_cfg ?runtime_mcp_policy
+        ?cli_transport_overrides ()
+
 (* ================================================================ *)
 (* Internal: event publishing                                        *)
 (* ================================================================ *)
@@ -238,7 +292,7 @@ let build
     ~(config : config)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   match
-    non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg
       ?runtime_mcp_policy:config.runtime_mcp_policy
       ?cli_transport_overrides:config.cli_transport_overrides
       ()
@@ -332,7 +386,7 @@ let resume_from_checkpoint
     ~(checkpoint : Agent_sdk.Checkpoint.t)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   match
-    non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+    transport_for_provider ~sw ~net ~provider_cfg:config.provider_cfg
       ?runtime_mcp_policy:config.runtime_mcp_policy
       ?cli_transport_overrides:config.cli_transport_overrides
       ()

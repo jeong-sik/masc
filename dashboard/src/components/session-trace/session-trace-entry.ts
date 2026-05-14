@@ -11,7 +11,12 @@ import { truncate } from '../../lib/truncate'
 import { formatCost } from '../../lib/format-number'
 import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
-import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from '../ide/ide-context-lens'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteContext,
+  type IdeContextRouteLink,
+} from '../ide/ide-context-lens'
 import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 
 // ── Constants ──────────────────────────────────────────
@@ -149,8 +154,34 @@ interface TraceCodeLocation {
   readonly line?: number
 }
 
+type TraceRouteContextFields = Pick<
+  IdeContextRouteContext,
+  | 'filePath'
+  | 'line'
+  | 'goalId'
+  | 'taskId'
+  | 'boardPostId'
+  | 'commentId'
+  | 'prId'
+  | 'gitRef'
+  | 'logId'
+  | 'sessionId'
+  | 'operationId'
+  | 'workerRunId'
+>
+
+type MutableTraceRouteContext = {
+  -readonly [K in keyof TraceRouteContextFields]?: TraceRouteContextFields[K]
+}
+
 function stringField(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+function stringishField(value: unknown): string | null {
+  if (typeof value === 'string') return stringField(value)
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return null
 }
 
 function positiveLine(value: unknown): number | undefined {
@@ -192,6 +223,159 @@ function toolCallCodeRouteLink(event: UnifiedTraceEvent): IdeContextRouteLink | 
     sourceId: event.id,
     keeperId: event.agentName,
   }).find(link => link.label === 'Code') ?? null
+}
+
+export function traceRouteLinks(event: UnifiedTraceEvent): ReadonlyArray<IdeContextRouteLink> {
+  const context: MutableTraceRouteContext = {}
+  mergeTraceRouteRecord(context, nestedRecord(event.detail.context))
+  mergeTraceRouteRecord(context, nestedRecord(event.detail.evidence_ref))
+  mergeTraceRouteRecord(context, nestedRecord(event.detail.tool_args))
+  mergeTraceRouteRecord(context, nestedRecord(event.detail.input))
+  mergeTraceRouteRecord(context, event.detail, true)
+
+  const parsedArgs = event.toolArgs ? parseJsonLikeData(event.toolArgs) : null
+  if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
+    mergeTraceRouteRecord(context, parsedArgs as Record<string, unknown>)
+  }
+
+  context.sessionId ??= event.sessionId ?? undefined
+  context.operationId ??= event.operationId ?? undefined
+  context.workerRunId ??= event.workerRunId ?? undefined
+
+  if (!hasTraceRouteContext(context)) return []
+  return routeLinksForContext({
+    ...context,
+    surface: traceRouteSurface(event),
+    label: traceRouteLabel(event),
+    sourceId: event.id,
+    keeperId: event.agentName,
+    telemetry: context.logId !== undefined
+      || context.sessionId !== undefined
+      || context.operationId !== undefined
+      || context.workerRunId !== undefined,
+    telemetryQuery: context.logId ?? event.id,
+  })
+}
+
+function TraceContextLinks({
+  links,
+}: {
+  readonly links: ReadonlyArray<IdeContextRouteLink>
+}) {
+  if (links.length === 0) return null
+  return html`
+    <div
+      class="flex flex-wrap items-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2"
+      aria-label="Trace operational context links"
+    >
+      ${links.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          data-testid="session-trace-context-link"
+          class="inline-flex max-w-44 items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-mono text-[var(--color-fg-muted)] hover:border-[var(--color-accent-border)] hover:text-[var(--color-accent-fg)]"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >
+          <span class="shrink-0 font-semibold text-[var(--color-fg-secondary)]">${link.label}</span>
+          <span class="min-w-0 truncate">${traceLinkEvidenceSuffix(link)}</span>
+        </button>
+      `)}
+    </div>
+  `
+}
+
+function mergeTraceRouteRecord(
+  context: MutableTraceRouteContext,
+  record: Record<string, unknown> | null,
+  overwrite = false,
+): void {
+  if (!record) return
+  const location = recordCodeLocation(record)
+  if (location && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
+  if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
+
+  const goalId = firstStringish(record, ['goal_id', 'goalId', 'goal'])
+  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
+  const taskId = firstStringish(record, ['task_id', 'taskId', 'task'])
+  if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
+  const boardPostId = firstStringish(record, ['board_post_id', 'boardPostId', 'post_id', 'postId'])
+  if (boardPostId && (overwrite || context.boardPostId === undefined)) context.boardPostId = boardPostId
+  const commentId = firstStringish(record, ['comment_id', 'commentId'])
+  if (commentId && (overwrite || context.commentId === undefined)) context.commentId = commentId
+  const prId = firstStringish(record, ['pr_id', 'prId', 'pr', 'pull_request_id', 'pullRequestId'])
+  if (prId && (overwrite || context.prId === undefined)) context.prId = prId
+  const gitRef = firstStringish(record, ['git_ref', 'gitRef', 'commit', 'commit_sha', 'branch', 'ref'])
+  if (gitRef && (overwrite || context.gitRef === undefined)) context.gitRef = gitRef
+  const logId = firstStringish(record, ['log_id', 'logId', 'log', 'turn_id', 'turnId'])
+  if (logId && (overwrite || context.logId === undefined)) context.logId = logId
+  const sessionId = firstStringish(record, ['session_id', 'sessionId'])
+  if (sessionId && (overwrite || context.sessionId === undefined)) context.sessionId = sessionId
+  const operationId = firstStringish(record, ['operation_id', 'operationId'])
+  if (operationId && (overwrite || context.operationId === undefined)) context.operationId = operationId
+  const workerRunId = firstStringish(record, ['worker_run_id', 'workerRunId'])
+  if (workerRunId && (overwrite || context.workerRunId === undefined)) context.workerRunId = workerRunId
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function firstStringish(record: Record<string, unknown>, keys: ReadonlyArray<string>): string | null {
+  for (const key of keys) {
+    const value = stringishField(record[key])
+    if (value) return value
+  }
+  const goalIds = keys.includes('goal_id') || keys.includes('goalId')
+    ? firstStringishArray(record.goal_ids) ?? firstStringishArray(record.goalIds)
+    : null
+  return goalIds
+}
+
+function firstStringishArray(value: unknown): string | null {
+  if (!Array.isArray(value)) return null
+  for (const item of value) {
+    const normalized = stringishField(item)
+    if (normalized) return normalized
+  }
+  return null
+}
+
+function hasTraceRouteContext(context: MutableTraceRouteContext): boolean {
+  return context.filePath !== undefined
+    || context.goalId !== undefined
+    || context.taskId !== undefined
+    || context.boardPostId !== undefined
+    || context.commentId !== undefined
+    || context.prId !== undefined
+    || context.gitRef !== undefined
+    || context.logId !== undefined
+    || context.sessionId !== undefined
+    || context.operationId !== undefined
+    || context.workerRunId !== undefined
+}
+
+function traceRouteSurface(event: UnifiedTraceEvent): string {
+  if (event.kind === 'tool_call') return 'Tool'
+  if (event.kind === 'oas_tool') return 'OAS Tool'
+  if (event.kind === 'oas_turn') return 'OAS Turn'
+  if (event.kind === 'oas_context') return 'OAS Context'
+  return KIND_STYLES[event.kind]?.label ?? event.kind
+}
+
+function traceRouteLabel(event: UnifiedTraceEvent): string {
+  return event.toolName ?? event.summary
+}
+
+function traceLinkEvidenceSuffix(link: IdeContextRouteLink): string {
+  const evidence = link.evidence.trim()
+  const labelPrefix = `${link.label} `
+  if (evidence.startsWith(labelPrefix)) return evidence.slice(labelPrefix.length)
+  const scoped = evidence.split(' · ').slice(1).join(' · ')
+  return scoped || evidence
 }
 
 // ── Task event helpers ─────────────────────────────────
@@ -323,6 +507,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
   const resultText = event.error ?? event.toolResult ?? null
   const hint = resultText ? detectContentHint(resultText) : 'plain'
   const codeRouteLink = toolCallCodeRouteLink(event)
+  const contextLinks = traceRouteLinks(event).filter(link => link.id !== codeRouteLink?.id)
 
   return html`
     <div class="mt-2 space-y-2">
@@ -343,6 +528,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
           </button>
         </div>
       ` : null}
+      <${TraceContextLinks} links=${contextLinks} />
       ${event.toolArgs ? html`
         <div>
           <${SectionHeader} size="xs" class="mb-1">인자</${SectionHeader}>
@@ -568,6 +754,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     : durable ?? kindStyle
 
   const gateRejected = event.kind === 'tool_call' && event.gate?.status === 'reject'
+  const contextLinks = traceRouteLinks(event)
 
   // Summary text
   let summaryText = event.summary
@@ -586,6 +773,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     || event.kind === 'oas_turn'
     || event.kind === 'oas_context'
     || (event.kind === 'lifecycle' && event.detail.durable_kind)
+    || contextLinks.length > 0
 
   const row = html`
     <div class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] ${gateRejected ? 'opacity-50' : ''}">
@@ -653,6 +841,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
       </summary>
       <div class="px-3 pb-3 pl-13">
         ${event.kind === 'tool_call' ? html`<${ToolCallDetail} event=${event} />` : null}
+        ${event.kind !== 'tool_call' ? html`<${TraceContextLinks} links=${contextLinks} />` : null}
         ${event.kind === 'broadcast' ? html`<${BroadcastDetail} event=${event} />` : null}
         ${event.kind === 'task' ? html`<${TaskDetail} event=${event} />` : null}
         ${event.kind === 'thinking' ? html`<${ThinkingDetail} event=${event} />` : null}

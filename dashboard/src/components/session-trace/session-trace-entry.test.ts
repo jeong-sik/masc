@@ -1,8 +1,8 @@
 import { h } from 'preact'
 import { fireEvent, render, screen } from '@testing-library/preact'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { UnifiedTraceEvent } from './session-trace-state'
-import { SessionTraceEntry } from './session-trace-entry'
+import { SessionTraceEntry, traceRouteLinks } from './session-trace-entry'
 
 vi.mock('../common/json-viewer', async importOriginal => {
   const actual = await importOriginal<typeof import('../common/json-viewer')>()
@@ -20,6 +20,10 @@ vi.mock('../common/time-ago', () => ({
 vi.mock('../common/markdown', () => ({
   Markdown: ({ text }: { text: string }) => h('div', { 'data-testid': 'markdown' }, text),
 }))
+
+afterEach(() => {
+  window.location.hash = ''
+})
 
 function sampleToolCallEvent(overrides: Partial<UnifiedTraceEvent> = {}): UnifiedTraceEvent {
   return {
@@ -83,6 +87,96 @@ describe('SessionTraceEntry', () => {
 
     fireEvent.click(codeLink)
     expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=12&surface=Tool&label=demo_tool&source_id=trace-1&keeper=sangsu')
+  })
+
+  it('renders tool-call operational context links from trace detail and top-level ids', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleToolCallEvent({
+        id: 'trace-context-1',
+        agentName: 'sangsu',
+        sessionId: 'sess-9',
+        operationId: 'op-9',
+        workerRunId: 'wr-9',
+        toolArgs: { file_path: 'lib/runtime.ml', line: 12 },
+        detail: {
+          task_id: 'task-runtime',
+          pr_id: '15035',
+          git_ref: 'abc123',
+          log_id: 'turn-9',
+        },
+      }),
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+
+    const contextLinks = screen.getAllByTestId('session-trace-context-link')
+    expect(contextLinks.map(link => link.textContent)).toEqual([
+      'Tasktask-runtime',
+      'PR15035',
+      'Gitabc123',
+      'Logturn-9',
+      'Telemetrysession sess-9 · operation op-9 · worker wr-9 · query turn-9',
+      'Keepersangsu',
+    ])
+
+    fireEvent.click(contextLinks.find(link => link.textContent?.startsWith('Telemetry'))!)
+    expect(window.location.hash).toBe(
+      '#monitoring?section=fleet-health&view=event-log&session_id=sess-9&operation_id=op-9&worker_run_id=wr-9&q=turn-9',
+    )
+  })
+
+  it('expands lifecycle trace rows when nested evidence carries IDE context', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: {
+        id: 'lifecycle-context-1',
+        ts: 3,
+        ts_iso: '2026-04-03T00:02:00Z',
+        kind: 'lifecycle',
+        sourceLane: 'masc',
+        summary: 'checkpoint saved',
+        detail: {
+          evidence_ref: {
+            file_path: 'lib/keeper.ml',
+            line: 7,
+            goal_id: 'goal-runtime',
+            operation_id: 'op-runtime',
+          },
+        },
+        agentName: 'sangsu',
+      },
+    }))
+
+    const summary = container.querySelector('summary')
+    expect(summary).not.toBeNull()
+    fireEvent.click(summary as HTMLElement)
+
+    const contextLinks = screen.getAllByTestId('session-trace-context-link')
+    expect(contextLinks.map(link => link.getAttribute('aria-label'))).toEqual([
+      'Open Code lib/keeper.ml:7',
+      'Open Goal goal-runtime',
+      'Open Fleet telemetry event log · operation op-runtime · query lifecycle-context-1',
+      'Open Keeper sangsu',
+    ])
+
+    fireEvent.click(contextLinks[0]!)
+    expect(window.location.hash).toBe(
+      '#code?section=ide-shell&view=source&file=lib%2Fkeeper.ml&line=7&surface=%EC%83%9D%EB%AA%85%EC%A3%BC%EA%B8%B0&label=checkpoint+saved&source_id=lifecycle-context-1&keeper=sangsu',
+    )
+  })
+
+  it('derives trace route links from nested detail records without rendering', () => {
+    const links = traceRouteLinks(sampleToolCallEvent({
+      agentName: 'keeper-alpha',
+      detail: {
+        context: {
+          goal_ids: ['goal-1'],
+          board_post_id: 'post-1',
+          comment_id: 'comment-1',
+        },
+      },
+    }))
+
+    expect(links.map(link => link.label)).toEqual(['Goal', 'Board', 'Comment', 'Keeper'])
   })
 
   it('does not render Code links for unsafe absolute tool-call file args', () => {

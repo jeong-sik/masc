@@ -445,6 +445,7 @@ let required_tool_rotation_candidate
   && (allow_local_recovery
       || not
            (String.equal normalized Keeper_config.local_recovery_cascade_name))
+  && not (Cascade_capability_profile.is_system_cascade_name normalized)
 
 let legacy_degraded_rotation_candidates
     ~catalog_names

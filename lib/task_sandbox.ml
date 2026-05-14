@@ -48,7 +48,9 @@ let git_exit ~cwd args =
 (* Worktree-message regexes are static — hoist so the DFAs are built
    once at module init instead of per [extract_*] call. *)
 let abs_path_re = Re.Pcre.re {|Path: (/[^ \t\n\r]+)|} |> Re.compile
-let rel_worktree_re = Re.Pcre.re {|\.worktrees/[^ \t\n\r]+|} |> Re.compile
+let rel_worktree_re =
+  Re.Pcre.re {|((?:[^ \t\n\r:]+/)?\.worktrees/[^ \t\n\r]+)|} |> Re.compile
+;;
 let branch_name_re = Re.Pcre.re {|Branch: ([^ \t\n\r]+)|} |> Re.compile
 
 (** Extract absolute worktree path from [Coord_worktree.worktree_create_r]

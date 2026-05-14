@@ -576,6 +576,65 @@ let test_keeper_persona_audit_reports_durable_live_persona_keeper () =
           check int "no issues" 0
             Yojson.Safe.Util.(item |> member "issues" |> to_list |> List.length))
 
+let test_keeper_persona_audit_reports_dormant_autoboot_disabled_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_persona_profile_exn config ~name:"dormant";
+      write_keeper_persona_toml_exn config ~name:"dormant"
+        ~persona_name:"dormant" ~autoboot_enabled:false;
+      write_keeper_meta_exn config ~name:"dormant" ~trace_id:"trace-dormant"
+        ~autoboot_enabled:false;
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
+            ~args:(`Assoc [ ("name", `String "dormant") ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_persona_audit dispatch"
+      in
+      check bool "tool audit ok" true ok;
+      let json = parse_json_exn body in
+      check int "summary ok" 1
+        Yojson.Safe.Util.(json |> member "summary" |> member "ok" |> to_int);
+      check int "summary registry missing" 0
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "registry_missing" |> to_int);
+      check int "summary dormant" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "dormant_autoboot_disabled"
+          |> to_int);
+      check int "summary autoboot disabled" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "autoboot_disabled" |> to_int);
+      match audit_item_by_name json "dormant" with
+      | None -> fail "expected dormant audit item"
+      | Some item ->
+          check bool "item ok" true
+            Yojson.Safe.Util.(item |> member "ok" |> to_bool);
+          check bool "dormant flag" true
+            Yojson.Safe.Util.(item |> member "dormant" |> to_bool);
+          check string "dormant reason" "autoboot_disabled"
+            Yojson.Safe.Util.(item |> member "dormant_reason" |> to_string);
+          check int "no issues" 0
+            Yojson.Safe.Util.(item |> member "issues" |> to_list |> List.length))
+
 let test_keeper_persona_audit_flags_missing_persona_runtime () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -782,6 +841,9 @@ let () =
             `Quick test_keeper_list_exposes_last_social_transition_reason;
           test_case "keeper persona audit reports durable live keeper" `Quick
             test_keeper_persona_audit_reports_durable_live_persona_keeper;
+          test_case "keeper persona audit reports dormant autoboot-disabled keeper"
+            `Quick
+            test_keeper_persona_audit_reports_dormant_autoboot_disabled_keeper;
           test_case "keeper persona audit flags missing persona runtime" `Quick
             test_keeper_persona_audit_flags_missing_persona_runtime;
           test_case "keeper persona audit flags runtime meta parse error" `Quick

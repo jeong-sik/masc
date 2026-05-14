@@ -110,6 +110,7 @@ let run_named_with_masc_tools
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec
+    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
     ?memory
@@ -142,6 +143,7 @@ let run_named_with_masc_tools
     ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks ?memory
     ?tool_retry_policy
     ~required_tool_satisfaction
+    ~accept
     ?compact_ratio
     ?approval
     ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref

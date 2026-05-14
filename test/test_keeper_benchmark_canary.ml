@@ -45,6 +45,8 @@ let make_meta ?(name = "analyst") ?(models = []) () =
       ("trace_id", `String "trace-keeper-benchmark-canary");
       ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
       ("last_model_used", `String "");
+      ("sandbox_profile", `String "local");
+      ("network_mode", `String "none");
     ]
   in
   let fields =
@@ -174,16 +176,16 @@ let test_runtime_canary_prepends_recommended_model_only_without_explicit_models 
         let labels =
           KML.configured_model_labels_of_meta (make_meta ~name:"analyst" ())
         in
-        check string "recommended model is prepended"
-          "test-provider:test-model" (List.hd labels);
+        check bool "bench recommendation is not a runtime dispatch override"
+          false (List.mem "test-provider:test-model" labels);
         let explicit_meta =
           { (make_meta ~name:"analyst" ()) with models = [ "explicit:model" ] }
         in
         let explicit_labels =
           KML.configured_model_labels_of_meta explicit_meta
         in
-        check (list string) "explicit models stay untouched"
-          [ "explicit:model" ] explicit_labels)))
+        check bool "legacy explicit models are ignored by runtime labels"
+          false (List.mem "explicit:model" explicit_labels))))
 
 let () =
   run "keeper_benchmark_canary"

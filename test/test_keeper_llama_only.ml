@@ -38,6 +38,8 @@ let make_meta ?(last_model_used = "glm-5.1") ?(models = []) () =
           ("trace_id", `String "trace-keeper-llama-only");
           ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
           ("last_model_used", `String last_model_used);
+          ("sandbox_profile", `String "local");
+          ("network_mode", `String "none");
         ])
     with
   | Ok meta -> meta
@@ -67,14 +69,15 @@ let test_matching_last_model_is_preserved_when_still_in_cascade () =
     | actual_first :: _ ->
       check string "matching model stays first" first actual_first
 
-let test_explicit_models_override_cascade_resolution () =
+let test_legacy_explicit_models_do_not_override_cascade_resolution () =
   let explicit =
     [ "ollama:qwen3.5:35b-a3b-nvfp4"; "glm-coding:glm-5.1" ]
   in
+  let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
   let labels =
     labels_for_turn (make_meta ~last_model_used:"" ~models:explicit ())
   in
-  check (list string) "explicit models are used as configured" explicit labels
+  check (list string) "legacy explicit models do not override cascade" baseline labels
 
 let () =
   run "keeper_llama_only"
@@ -85,7 +88,7 @@ let () =
             test_stale_last_model_is_not_reused_outside_current_cascade;
           test_case "keeps llama pin when still allowed" `Quick
             test_matching_last_model_is_preserved_when_still_in_cascade;
-          test_case "prefers explicit models over cascade defaults" `Quick
-            test_explicit_models_override_cascade_resolution;
+          test_case "ignores legacy explicit models for runtime labels" `Quick
+            test_legacy_explicit_models_do_not_override_cascade_resolution;
         ] );
     ]

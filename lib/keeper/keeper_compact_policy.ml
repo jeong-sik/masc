@@ -138,15 +138,7 @@ let compact_if_needed_typed
       tok_count
       trigger_human;
     let model_meta =
-      let model_labels =
-        match
-          dedupe_keep_order (List.filter (fun s -> String.trim s <> "") meta.models)
-        with
-        | _ :: _ as explicit -> explicit
-        | [] ->
-          Cascade_runtime.models_of_cascade_name
-            (Keeper_cascade_profile.Runtime_name (cascade_name_of_meta meta))
-      in
+      let model_labels = Keeper_model_labels.configured_model_labels_of_meta meta in
       Cascade_runtime_candidate.context_window_hint_of_labels model_labels
     in
     let pre_compact_event =

@@ -34,6 +34,8 @@ let phase_recovery_cascade_name () =
     Masc_mcp.Keeper_cascade_profile.Phase_recovery
 ;;
 
+let safe_lane_cascade_name = Masc_mcp.Cascade_capability_profile.safe_lane_cascade_name
+
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
 ;;
@@ -6266,8 +6268,8 @@ let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
-    "next degraded retry"
-    (KC.default_cascade_name ())
+    "next degraded retry uses configured fallback"
+    safe_lane_cascade_name
     "hard_quota"
     degraded_retry
 ;;
@@ -6281,11 +6283,11 @@ let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
       ~attempted_cascades:[ "scoring"; KC.default_cascade_name () ]
       (wrapped_claude_limit_error ())
   in
-  check
-    bool
-    "collapsed local_recovery is exhausted after default"
-    true
-    (Option.is_none degraded_retry)
+  expect_degraded_retry
+    "configured fallback remains after default"
+    safe_lane_cascade_name
+    "hard_quota"
+    degraded_retry
 ;;
 
 let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () =
@@ -6295,7 +6297,11 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
       ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
-        [ "scoring"; KC.default_cascade_name (); KC.local_recovery_cascade_name ]
+        [ "scoring"
+        ; KC.default_cascade_name ()
+        ; KC.local_recovery_cascade_name
+        ; safe_lane_cascade_name
+        ]
       (wrapped_claude_limit_error ())
   in
   check bool "exhausted rotation group suppressed" true (Option.is_none degraded_retry)
@@ -6361,7 +6367,11 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
         [ "scoring"; KC.default_cascade_name (); KC.local_recovery_cascade_name ]
       (wrapped_claude_limit_error ())
   in
-  expect_degraded_retry "catalog degraded retry" "ollama_only" "hard_quota" degraded_retry
+  expect_degraded_retry
+    "catalog degraded retry uses configured fallback first"
+    safe_lane_cascade_name
+    "hard_quota"
+    degraded_retry
 ;;
 
 let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_omits_it () =
@@ -6375,8 +6385,8 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
-    "catalog-only degraded retry"
-    "resilient_profile"
+    "catalog-only degraded retry uses configured fallback first"
+    safe_lane_cascade_name
     "hard_quota"
     degraded_retry
 ;;
@@ -6527,6 +6537,7 @@ let test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable
       ~catalog_names:
         [ KC.default_cascade_name (); KC.local_recovery_cascade_name; "ollama_only" ]
       ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
+      ()
   in
   check
     (option (list string))
@@ -6541,6 +6552,7 @@ let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
       ~catalog_names:
         [ "ollama_only"; KC.local_recovery_cascade_name; KC.default_cascade_name () ]
       ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
+      ()
   in
   check
     (option (list string))
@@ -6549,11 +6561,37 @@ let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
     rotation
 ;;
 
+let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () =
+  let rotation =
+    UT.fail_open_rotation_cascades_from_catalog
+      ~excluded_targets:[ "tier.ollama_cloud_primary" ]
+      ~catalog_names:
+        [
+          KC.default_cascade_name ();
+          "ollama_cloud_primary";
+          "coding_plan";
+        ]
+      ~keeper_assignable:
+        [
+          KC.default_cascade_name ();
+          "ollama_cloud_primary";
+          "coding_plan";
+        ]
+      ()
+  in
+  check
+    (option (list string))
+    "catalog-derived rotation excludes non-keeper route targets"
+    (Some [ KC.default_cascade_name (); "coding_plan" ])
+    rotation
+;;
+
 let test_fail_open_rotation_cascades_from_catalog_empty_when_unresolved () =
   let rotation =
     UT.fail_open_rotation_cascades_from_catalog
       ~catalog_names:[]
       ~keeper_assignable:[ KC.default_cascade_name () ]
+      ()
   in
   check
     (option (list string))
@@ -6567,6 +6605,7 @@ let test_fail_open_rotation_cascades_from_catalog_empty_without_assignable_candi
     UT.fail_open_rotation_cascades_from_catalog
       ~catalog_names:[ "experimental_only" ]
       ~keeper_assignable:[]
+      ()
   in
   check
     (option (list string))
@@ -8518,6 +8557,45 @@ let test_normalize_response_text_empty_without_tools_errors () =
        found)
 ;;
 
+let response ?(stop_reason = Agent_sdk.Types.EndTurn) content =
+  { Agent_sdk.Types.id = "response-test"
+  ; model = "test-model"
+  ; stop_reason
+  ; content
+  ; usage = None
+  ; telemetry = None
+  }
+;;
+
+let test_response_has_text_or_tool_progress_rejects_empty_end_turn () =
+  check
+    bool
+    "empty end_turn rejected"
+    false
+    (KTD.response_has_text_or_tool_progress (response []))
+;;
+
+let test_response_has_text_or_tool_progress_accepts_text () =
+  check
+    bool
+    "text accepted"
+    true
+    (KTD.response_has_text_or_tool_progress
+       (response [ Agent_sdk.Types.Text "ok" ]))
+;;
+
+let test_response_has_text_or_tool_progress_accepts_tool_use () =
+  check
+    bool
+    "tool use accepted"
+    true
+    (KTD.response_has_text_or_tool_progress
+       (response
+          [ Agent_sdk.Types.ToolUse
+              { id = "call-1"; name = "keeper_bash"; input = `Assoc [] }
+          ]))
+;;
+
 let test_validate_completion_contract_allows_text_without_tools () =
   match
     KTD.validate_completion_contract ~contract:KTD.Allow_text_or_tool ~tool_names:[] ()
@@ -10389,12 +10467,12 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
       ~allowed_tool_names
   in
   (match choose () with
-   | Agent_sdk.Types.Tool name ->
-     check string "forces claim tool first" "keeper_task_claim" name
+   | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Tool keeper_task_claim, got %s"
+          "expected Any for claim turn to avoid raw require_specific_tool \
+           MCP-prefix mismatches, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match choose ~has_current_task:true () with
    | Agent_sdk.Types.Any -> ()
@@ -11381,6 +11459,18 @@ let () =
             `Quick
             test_normalize_response_text_empty_without_tools_errors
         ; test_case
+            "response progress rejects empty end turn"
+            `Quick
+            test_response_has_text_or_tool_progress_rejects_empty_end_turn
+        ; test_case
+            "response progress accepts text"
+            `Quick
+            test_response_has_text_or_tool_progress_accepts_text
+        ; test_case
+            "response progress accepts tool use"
+            `Quick
+            test_response_has_text_or_tool_progress_accepts_tool_use
+        ; test_case
             "completion contract allows text without tools"
             `Quick
             test_validate_completion_contract_allows_text_without_tools
@@ -12155,6 +12245,10 @@ let () =
             "catalog rotation preserves catalog order"
             `Quick
             test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order
+        ; test_case
+            "catalog rotation excludes non-keeper route targets"
+            `Quick
+            test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes
         ; test_case
             "unresolved catalog keeps legacy rotation fallback"
             `Quick

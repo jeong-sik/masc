@@ -230,6 +230,23 @@ let test_mcp_prefixed_keeper_internal_routes () =
     canonical
 ;;
 
+let test_mcp_prefixed_public_masc_goal_tool_routes () =
+  let canonical = Disclosure.canonical_tool_name "mcp__masc__masc_goal_list" in
+  Alcotest.(check string)
+    "mcp__masc__masc_goal_list canonicalises to masc_goal_list"
+    "masc_goal_list"
+    canonical;
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:[ "masc_goal_list"; "masc_goal_verify" ]
+      ~tool_names:[ canonical ]
+  in
+  Alcotest.(check (list string))
+    "public MASC goal allowlist accepts MCP-prefixed observation"
+    []
+    unexpected
+;;
+
 let test_mcp_prefixed_masc_public_telemetry_preserves_label () =
   (* PR #14585 review: a successful MCP-mapped route for a name like
      [mcp__masc__masc_board_post] must record [tool=masc_board_post],
@@ -299,6 +316,27 @@ let test_partial_tolerance_still_works () =
     "Bash counts as valid -> partial tolerance kicks in"
     true
     has_valid
+;;
+
+let test_public_allowed_surface_accepts_canonical_alias () =
+  let observed = [ "Bash" ] in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:[ "Bash" ]
+      ~tool_names:canonical
+  in
+  Alcotest.(check (list string))
+    "public Bash allowlist accepts canonical keeper_bash observation"
+    []
+    unexpected;
+  Alcotest.(check (list string))
+    "final names keep canonical internal name"
+    [ "keeper_bash" ]
+    (Disclosure.final_keeper_tool_names
+       ~reported_tool_names:observed
+       ~observed_tool_names:[]
+       ~allowed_tool_names:[ "Bash" ])
 ;;
 
 (* ── Routing table and schemas ─────────────────────────────── *)
@@ -713,6 +751,10 @@ let () =
             `Quick
             test_mcp_prefixed_keeper_internal_routes
         ; Alcotest.test_case
+            "mcp-prefixed public MASC goal tool canonicalises to stripped"
+            `Quick
+            test_mcp_prefixed_public_masc_goal_tool_routes
+        ; Alcotest.test_case
             "mcp-prefixed masc public name telemetry preserves label"
             `Quick
             test_mcp_prefixed_masc_public_telemetry_preserves_label
@@ -724,6 +766,10 @@ let () =
             "partial tolerance still works"
             `Quick
             test_partial_tolerance_still_works
+        ; Alcotest.test_case
+            "public allowed surface accepts canonical alias"
+            `Quick
+            test_public_allowed_surface_accepts_canonical_alias
         ] )
     ; ( "routing-and-schemas"
       , [ Alcotest.test_case

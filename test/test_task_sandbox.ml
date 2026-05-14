@@ -403,6 +403,9 @@ let test_create_infers_repo_from_task_file_evidence () =
         | Ok sb ->
             check bool "picked masc-mcp repo" true
               (contains "/repos/masc-mcp/.worktrees/" sb.worktree_path);
+            check bool "linked .masc in nested repo worktree" true
+              (Sys.file_exists
+                 (Filename.concat sb.worktree_path Common.masc_dirname));
             let persisted =
               Coord.read_backlog config
               |> fun backlog ->

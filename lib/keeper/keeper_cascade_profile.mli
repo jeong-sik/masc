@@ -140,6 +140,11 @@ val normalize_declared_name : string -> string
     Logical route aliases resolve through {!cascade_name_for_use}; otherwise
     the trimmed input is returned. *)
 
+val normalize_keeper_runtime_declared_name : ?config_path:string -> string -> string
+(** Like {!normalize_declared_name}, but ignores stale keeper-local profile
+    assignments that point at a route target reserved for non-keeper logical
+    uses. In that case the active [routes.keeper_turn] target is returned. *)
+
 (** {1 In-memory cascade key helpers} *)
 
 (** First canonicalize, then build the key. *)

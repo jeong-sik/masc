@@ -570,6 +570,47 @@ target = "tier-group.primary"
     (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for
        ~config_path:cascade_path "tier.primary")
 
+let test_keeper_runtime_declared_name_ignores_non_keeper_route_target () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+max-concurrent = 1
+
+[tier.coding_plan_primary]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.ollama_cloud_primary]
+members = ["ollama.qwen3"]
+strategy = "failover"
+keeper-assignable = true
+
+[tier-group.coding_plan]
+tiers = ["coding_plan_primary"]
+strategy = "failover"
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+
+[routes.provider_benchmark]
+target = "tier.ollama_cloud_primary"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  check string "non-keeper route target falls back to keeper_turn route"
+    "tier-group.coding_plan"
+    (Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+       ~config_path:cascade_path "tier.ollama_cloud_primary")
+
 let test_catalog_validator_surfaces_adapter_errors () =
   let cascade_toml =
     {|
@@ -879,6 +920,8 @@ let () =
             test_keeper_assignability_uses_preferred_qualified_profile;
           test_case "fallback preserves qualified source profile" `Quick
             test_fallback_cascade_preserves_qualified_source_profile;
+          test_case "keeper runtime ignores non-keeper route target" `Quick
+            test_keeper_runtime_declared_name_ignores_non_keeper_route_target;
           test_case "surfaces declarative adapter errors" `Quick
             test_catalog_validator_surfaces_adapter_errors;
           test_case "surfaces declarative parse errors" `Quick

@@ -997,6 +997,91 @@ let test_update_entry_orphan_drop_emits_metrics () =
   check int "successful update applies"
     7 (R.get_last_agent_count ~base_path:bp name)
 
+let test_meta_write_sync_updates_registered_only () =
+  R.clear ();
+  let base_path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc-test-meta-write-sync-%d-%06x"
+         (Unix.getpid ())
+         (Random.bits ()))
+  in
+  if Sys.file_exists base_path then rm_rf base_path;
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      R.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_path in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "registry-test"));
+      let dormant_name = "meta-sync-dormant" in
+      let labels = [ "name", dormant_name ] in
+      let dropped_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+          ~labels ()
+      in
+      (match Keeper_types.write_meta ~force:true config (make_meta dormant_name) with
+       | Ok () -> ()
+       | Error err -> fail ("write_meta dormant failed: " ^ err));
+      let dropped_after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+          ~labels ()
+      in
+      check (float 0.001)
+        "durable meta write for dormant keeper does not count as orphan registry drop"
+        dropped_before
+        dropped_after;
+      let live_name = "meta-sync-live" in
+      let live_meta = make_meta live_name in
+      ignore (R.register ~base_path live_name live_meta);
+      let updated_meta = { live_meta with goal = "updated from disk write" } in
+      (match Keeper_types.write_meta ~force:true config updated_meta with
+       | Ok () -> ()
+       | Error err -> fail ("write_meta live failed: " ^ err));
+      match R.get ~base_path live_name with
+      | Some entry ->
+        check string "registered keeper meta synced"
+          "updated from disk write"
+          entry.meta.goal
+      | None -> fail "expected registered keeper entry")
+
+let test_missing_turn_observation_updates_are_silent () =
+  R.clear ();
+  let name = "missing-turn-observation-test" in
+  let labels = [ "name", name ] in
+  let dropped_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  R.mark_turn_started ~base_path:bp name;
+  R.mark_sdk_turn_started ~base_path:bp name;
+  R.mark_turn_measurement ~base_path:bp name;
+  R.set_turn_decision_stage
+    ~base_path:bp
+    name
+    R.Decision_active_tool_policy_selected;
+  R.set_turn_cascade_state ~base_path:bp name (R.Packed R.Cascade_selecting);
+  R.set_turn_phase ~base_path:bp name (R.Packed R.Turn_executing);
+  R.set_turn_selected_model ~base_path:bp name (Some "runtime");
+  R.prepare_turn_retry_after_compaction ~base_path:bp name;
+  R.mark_turn_finished ~base_path:bp name;
+  let dropped_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  check
+    (float 0.001)
+    "missing turn-observation writes are documented no-ops, not orphan drops"
+    dropped_before
+    dropped_after
+;;
+
 let test_find_by_agent_name () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fn1" (make_meta "fn1") in
@@ -1649,6 +1734,10 @@ let () =
         [
           eio_test "update_entry orphan drops emit metrics + edge breach"
             test_update_entry_orphan_drop_emits_metrics;
+          eio_test "meta write sync skips dormant registry drops"
+            test_meta_write_sync_updates_registered_only;
+          eio_test "missing turn observation updates are silent"
+            test_missing_turn_observation_updates_are_silent;
         ] );
       ( "resolve_config",
         [

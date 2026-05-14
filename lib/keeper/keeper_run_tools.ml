@@ -587,27 +587,39 @@ let prepare_agent_setup
           | None -> [])
        | None -> [])
   in
+  let visible_policy_name name =
+    (* Preserve names that are already valid public surface entries.
+       keeper_fs_edit has two public aliases (Edit, Write) with different
+       schemas; round-tripping through public_name_for_internal always
+       picks Edit, so any Write entry would be coerced to Edit and then
+       deduped. Only canonicalize names that are not themselves valid
+       public entries (e.g., internal names like keeper_fs_edit, or
+       unrecognized inputs). *)
+    if Keeper_tool_policy.StringSet.mem name universe_set
+       && Keeper_tool_policy.StringSet.mem name allowed_exec_set
+    then name
+    else (
+      let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+      match Keeper_tool_alias.public_name_for_internal canonical with
+      | Some public
+        when Keeper_tool_policy.StringSet.mem public universe_set
+             && Keeper_tool_policy.StringSet.mem public allowed_exec_set ->
+        public
+      | _ -> name)
+  in
+  let visible_policy_name_opt name =
+    let name = visible_policy_name name in
+    if Keeper_tool_policy.StringSet.mem name universe_set
+       && Keeper_tool_policy.StringSet.mem name allowed_exec_set
+    then Some name
+    else allowed_public_alias_for_internal name
+  in
+  let filter_visible_policy_surface names =
+    names
+    |> List.filter_map visible_policy_name_opt
+    |> Keeper_types.dedupe_keep_order
+  in
   let validate_allow_list ~turn raw =
-    let visible_policy_name name =
-      (* Preserve names that are already valid public surface entries.
-         keeper_fs_edit has two public aliases (Edit, Write) with different
-         schemas; round-tripping through public_name_for_internal always
-         picks Edit, so any Write entry would be coerced to Edit and then
-         deduped. Only canonicalize names that are not themselves valid
-         public entries (e.g., internal names like keeper_fs_edit, or
-         unrecognized inputs). *)
-      if Keeper_tool_policy.StringSet.mem name universe_set
-         && Keeper_tool_policy.StringSet.mem name allowed_exec_set
-      then name
-      else (
-        let canonical = Keeper_tool_disclosure.canonical_tool_name name in
-        match Keeper_tool_alias.public_name_for_internal canonical with
-        | Some public
-          when Keeper_tool_policy.StringSet.mem public universe_set
-               && Keeper_tool_policy.StringSet.mem public allowed_exec_set ->
-          public
-        | _ -> name)
-    in
     let raw = raw |> List.map visible_policy_name |> Keeper_types.dedupe_keep_order in
     let validated, dropped_names =
       List.fold_right
@@ -705,7 +717,10 @@ let prepare_agent_setup
       Keeper_exec_tools.effective_core_tools ()
       |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
     in
-    let discovered = Keeper_discovered_tools.active_names acc.discovered ~turn in
+    let discovered =
+      Keeper_discovered_tools.active_names acc.discovered ~turn
+      |> filter_visible_policy_surface
+    in
     let () =
       if decay_discovered then ignore (Keeper_discovered_tools.decay acc.discovered ~turn)
     in
@@ -717,6 +732,7 @@ let prepare_agent_setup
         ~query_text
         ~selection_limit
         ~core
+      |> filter_visible_policy_surface
     in
     let llm_rerank_enabled = Keeper_config.keeper_llm_rerank_enabled () in
     let llm_selected =
@@ -804,7 +820,7 @@ let prepare_agent_setup
                        (List.length selected)
                        (String.length query_text)
                        (List.length preset_tools);
-                   selected
+                   filter_visible_policy_surface selected
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->

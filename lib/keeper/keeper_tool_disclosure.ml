@@ -167,6 +167,8 @@ let final_keeper_tool_names
   let allowed_tool_names =
     allowed_tool_names |> List.map canonical_name |> Keeper_types.dedupe_keep_order
   in
+  let allowed = Hashtbl.create (List.length allowed_tool_names) in
+  List.iter (fun tool_name -> Hashtbl.replace allowed tool_name ()) allowed_tool_names;
   let reported_tool_names = List.map canonical_name reported_tool_names in
   let observed_tool_names = List.map canonical_name observed_tool_names in
   let tool_names =
@@ -183,7 +185,7 @@ let final_keeper_tool_names
           reported_tool_names
   in
   tool_names
-  |> List.filter (fun tool_name -> List.mem tool_name allowed_tool_names)
+  |> List.filter (fun tool_name -> Hashtbl.mem allowed tool_name)
 ;;
 
 let unexpected_tool_names ~(allowed_tool_names : string list) ~(tool_names : string list)
@@ -194,13 +196,16 @@ let unexpected_tool_names ~(allowed_tool_names : string list) ~(tool_names : str
   in
   let allowed = Hashtbl.create (List.length allowed_tool_names) in
   let seen = Hashtbl.create (List.length tool_names) in
-  List.iter (fun tool_name -> Hashtbl.replace allowed tool_name ()) allowed_tool_names;
+  List.iter
+    (fun tool_name -> Hashtbl.replace allowed (canonical_name tool_name) ())
+    allowed_tool_names;
   tool_names
   |> List.filter (fun tool_name ->
-    if Hashtbl.mem allowed tool_name || Hashtbl.mem seen tool_name
+    let canonical = canonical_name tool_name in
+    if Hashtbl.mem allowed canonical || Hashtbl.mem seen canonical
     then false
     else (
-      Hashtbl.replace seen tool_name ();
+      Hashtbl.replace seen canonical ();
       true))
 ;;
 
@@ -542,6 +547,23 @@ let normalize_response_text ~(text : string) ~(tool_names : string list) ()
         (Printf.sprintf
            "Completed without a textual reply. Tools used: %s."
            (String.concat ", " tool_names)))
+;;
+
+let response_has_text_or_tool_progress (response : Agent_sdk.Types.api_response) =
+  let text = Agent_sdk.Types.text_of_content response.content |> String.trim in
+  text <> ""
+  || List.exists
+       (function
+         | Agent_sdk.Types.ToolUse _ -> true
+         | Agent_sdk.Types.Text _
+         | Agent_sdk.Types.Thinking _
+         | Agent_sdk.Types.RedactedThinking _
+         | Agent_sdk.Types.ToolResult _
+         | Agent_sdk.Types.Image _
+         | Agent_sdk.Types.Document _
+         | Agent_sdk.Types.Audio _ -> false)
+       response.content
+  || response.stop_reason <> Agent_sdk.Types.EndTurn
 ;;
 
 let tool_query_text_of_user_message (text : string) : string =

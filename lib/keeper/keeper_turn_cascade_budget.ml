@@ -16,30 +16,81 @@ type cascade_execution = {
   max_tokens : int;
 }
 
+let public_profile_name name =
+  let name = String.trim name in
+  let tier_group_prefix = "tier-group." in
+  let tier_prefix = "tier." in
+  if String.starts_with ~prefix:tier_group_prefix name then
+    String.sub name (String.length tier_group_prefix)
+      (String.length name - String.length tier_group_prefix)
+  else if String.starts_with ~prefix:tier_prefix name then
+    String.sub name (String.length tier_prefix)
+      (String.length name - String.length tier_prefix)
+  else name
+
 let fail_open_rotation_cascades_from_catalog
+    ?(excluded_targets : string list = [])
     ~(catalog_names : string list)
-    ~(keeper_assignable : string list) =
+    ~(keeper_assignable : string list)
+    () =
   if catalog_names = [] then None
   else
+    let excluded_targets =
+      excluded_targets |> List.map public_profile_name |> dedupe_keep_order
+    in
     let is_reserved_default name =
       String.equal name (Keeper_config.default_cascade_name ())
     in
     let is_keeper_assignable name =
       List.exists (String.equal name) keeper_assignable
     in
+    let is_excluded name =
+      List.exists (String.equal (public_profile_name name)) excluded_targets
+    in
     match
       catalog_names
       |> List.filter (fun name ->
-             is_reserved_default name || is_keeper_assignable name)
+             (is_reserved_default name || is_keeper_assignable name)
+             && not (is_excluded name))
       |> dedupe_keep_order
     with
     | [] -> None
     | candidates -> Some candidates
 
+let keeper_fail_open_route_uses =
+  [
+    Keeper_cascade_profile.Keeper_turn;
+    Keeper_cascade_profile.Phase_recovery;
+    Keeper_cascade_profile.Phase_buffer;
+    Keeper_cascade_profile.Tool_required;
+  ]
+
+let is_keeper_fail_open_route_use use =
+  List.exists (( = ) use) keeper_fail_open_route_uses
+
+let route_target_for_use use =
+  try Some (Keeper_cascade_profile.cascade_name_for_use use |> public_profile_name)
+  with Failure _ -> None
+
+let active_fail_open_excluded_route_targets () =
+  let keeper_route_targets =
+    keeper_fail_open_route_uses
+    |> List.filter_map route_target_for_use
+    |> dedupe_keep_order
+  in
+  Cascade_routes.all_logical_uses
+  |> List.filter (fun use -> not (is_keeper_fail_open_route_use use))
+  |> List.filter_map route_target_for_use
+  |> List.filter (fun target ->
+         not (List.exists (String.equal target) keeper_route_targets))
+  |> dedupe_keep_order
+
 let active_fail_open_rotation_cascades () =
   fail_open_rotation_cascades_from_catalog
+    ~excluded_targets:(active_fail_open_excluded_route_targets ())
     ~catalog_names:(Keeper_cascade_profile.catalog_names ())
     ~keeper_assignable:(Keeper_cascade_profile.keeper_catalog_names ())
+    ()
 
 let next_fail_open_cascade_for_turn
     ?rotation_cascades

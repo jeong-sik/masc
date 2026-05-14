@@ -172,10 +172,11 @@ let effective_declarative_cascade_name
     (meta : keeper_meta) =
   match defaults.cascade_name, defaults.manifest_path with
   | Some cascade_name, _ ->
-      Keeper_cascade_profile.normalize_declared_name cascade_name
+      Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
   | None, Some _ -> (Keeper_config.default_cascade_name ())
   | None, None ->
-      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
+      Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+        (cascade_name_of_meta meta)
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)

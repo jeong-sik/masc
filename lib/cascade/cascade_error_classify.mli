@@ -91,6 +91,11 @@ val classify_masc_internal_error_of_string :
     "Internal error: [masc_oas_error] ..." wrapper).  Returns [None]
     when the prefix is absent or the JSON payload is malformed. *)
 
+val sdk_error_is_server_rejected_parse_error :
+  Agent_sdk.Error.sdk_error -> bool
+(** [true] when the provider rejected the request body before processing it
+    because the JSON/request payload could not be parsed. *)
+
 val kind_of_masc_internal_error : masc_internal_error -> string
 (** Short label for each variant, used as the [kind] Prometheus label. *)
 

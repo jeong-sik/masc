@@ -657,6 +657,7 @@ let compute_judgments
       let prompt = prompt_for_facts factual_json in
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
+        ~accept:Keeper_tool_disclosure.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve
         ()
     )

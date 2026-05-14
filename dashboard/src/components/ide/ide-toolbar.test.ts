@@ -84,6 +84,15 @@ describe('IdeToolbar', () => {
       'Repo: 1 route link',
       'Runtime: 1 route link',
     ])
+    const routeGroupButtons = [...container.querySelectorAll<HTMLButtonElement>(
+      '.ide-toolbar-context-route-group-action',
+    )]
+    expect(routeGroupButtons.map(group => group.getAttribute('aria-label'))).toEqual([
+      'Open Code lib/runtime.ml:42',
+      'Open Task task-runtime',
+      'Open PR 15035',
+      'Open Fleet telemetry event log · query turn-9',
+    ])
 
     const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
     expect(routeLinks.map(link => link.getAttribute('aria-label'))).toEqual([
@@ -98,6 +107,9 @@ describe('IdeToolbar', () => {
       .toBe('task-runtime')
     expect(routeLinks[3]?.querySelector('.ide-toolbar-context-link-evidence')?.textContent)
       .toBe('query turn-9')
+
+    fireEvent.click(routeGroupButtons.find(group => group.getAttribute('aria-label')?.includes('telemetry'))!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
 
     fireEvent.click(routeLinks.find(link => link.getAttribute('aria-label')?.includes('telemetry'))!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
@@ -176,11 +188,17 @@ describe('IdeToolbar', () => {
       ],
     })
 
-    expect(groups).toEqual([
-      { id: 'planning', label: 'Plan', count: 1, evidence: 'Goal goal-runtime' },
-      { id: 'board', label: 'Board', count: 1, evidence: 'Comment comment-1' },
-      { id: 'repo', label: 'Repo', count: 1, evidence: 'Git abc123' },
-      { id: 'runtime', label: 'Runtime', count: 1, evidence: 'Log turn-9' },
+    expect(groups.map(group => ({
+      id: group.id,
+      label: group.label,
+      count: group.count,
+      evidence: group.evidence,
+      routeLinkId: group.routeLink.id,
+    }))).toEqual([
+      { id: 'planning', label: 'Plan', count: 1, evidence: 'Goal goal-runtime', routeLinkId: 'goal:goal-runtime' },
+      { id: 'board', label: 'Board', count: 1, evidence: 'Comment comment-1', routeLinkId: 'comment:comment-1' },
+      { id: 'repo', label: 'Repo', count: 1, evidence: 'Git abc123', routeLinkId: 'git:abc123' },
+      { id: 'runtime', label: 'Runtime', count: 1, evidence: 'Log turn-9', routeLinkId: 'log:turn-9' },
     ])
   })
 })

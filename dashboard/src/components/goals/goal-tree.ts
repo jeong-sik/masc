@@ -1282,8 +1282,8 @@ function GoalDetailPanel({
                       ${detail.approvals.map((approval, index) => html`
                         <div key=${String(approval.id ?? index)} class="rounded-[var(--r-1)] border border-warn/20 bg-warn/6 p-3 text-xs">
                           <div class="flex flex-wrap items-center justify-between gap-2">
-                            <strong class="text-text-strong">${String(approval.tool_name ?? 'tool')}</strong>
-                            <span class="text-text-dim">${String(approval.risk_level ?? 'risk')}</span>
+                            <strong class="text-text-strong">${String(approval.tool_name ?? '(unknown tool)')}</strong>
+                            <span class="text-text-dim">${String(approval.risk_level ?? '(unknown risk_level)')}</span>
                           </div>
                           <div class="mt-2 text-text-muted">${String(approval.input_preview ?? 'pending operator decision')}</div>
                         </div>

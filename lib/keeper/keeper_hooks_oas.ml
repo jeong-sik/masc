@@ -799,7 +799,8 @@ let assemble_cost_event_payload
     ("cost_usd_source", `String cost_usd_source);
     ("usage_missing", `Bool usage_missing);
     ("timestamp", `String (Masc_domain.now_iso ()));
-    ("source", `String "auto_trajectory");
+    let source_auto_trajectory = "auto_trajectory" in
+    ("source", `String source_auto_trajectory);
   ]
   @ Keeper_usage_trust.json_fields usage_trust
   @ raw_usage_fields

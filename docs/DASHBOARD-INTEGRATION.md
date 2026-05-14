@@ -109,6 +109,8 @@ code_refs:
   - overview + runtime shell metadata
 - `GET /api/v1/dashboard/namespace-truth`
   - journey / agents / shared namespace truth
+- `GET /api/v1/dashboard/goal-loop/status`
+  - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph
 - `GET /api/v1/dashboard/telemetry/summary`
@@ -126,7 +128,7 @@ code_refs:
   - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
-- `GET /api/v1/cascade/strategy-trace`, `GET /api/v1/cascade/health`
+- `GET /api/v1/cascade/strategy_trace`, `GET /api/v1/cascade/health`
   - runtime inspector view
 - `GET /api/v1/operator/digest`
   - operations read model
@@ -134,6 +136,8 @@ code_refs:
   - connectors descriptor + live state
 - `GET /api/v1/dashboard/board`
   - workspace board
+- `GET /api/v1/board/sub-boards`
+  - workspace named board spaces
 - `GET /api/v1/dashboard/planning`
   - planning + goal tree
 - `GET /api/v1/git/graph`

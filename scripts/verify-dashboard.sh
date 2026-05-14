@@ -143,10 +143,16 @@ check_json_eventually \
   '^True$' \
   6 \
   2
+check_http "goal-loop status 200" "$BASE/api/v1/dashboard/goal-loop/status" "200"
+check_json "goal-loop status exposes phases" "$BASE/api/v1/dashboard/goal-loop/status" "'overall_status' in d and 'phases' in d" '^True$'
 check_http "activity graph 200" "$BASE/api/v1/activity/graph" "200"
 check_json "activity graph has nodes" "$BASE/api/v1/activity/graph" "len(d.get('nodes', [])) >= 0" '^True$'
 check_http "telemetry summary 200" "$BASE/api/v1/dashboard/telemetry/summary" "200"
 check_json "telemetry summary has sources" "$BASE/api/v1/dashboard/telemetry/summary" "'sources' in d" '^True$'
+check_http "cascade health 200" "$BASE/api/v1/cascade/health" "200"
+check_json "cascade health exposes providers" "$BASE/api/v1/cascade/health" "'providers' in d" '^True$'
+check_http "cascade strategy trace 200" "$BASE/api/v1/cascade/strategy_trace?limit=1" "200"
+check_json "cascade strategy trace exposes events" "$BASE/api/v1/cascade/strategy_trace?limit=1" "'events' in d" '^True$'
 check_http "memory subsystems 200" "$BASE/api/v1/dashboard/memory-subsystems" "200"
 check_json "memory subsystems has hebbian block" "$BASE/api/v1/dashboard/memory-subsystems" "'hebbian' in d" '^True$'
 check_http "transport health 200" "$BASE/api/v1/dashboard/transport-health" "200"
@@ -159,8 +165,12 @@ check_http "operator digest 200" "$BASE/api/v1/operator/digest" "200"
 check_json "operator digest has health block" "$BASE/api/v1/operator/digest" "'health' in d" '^True$'
 check_http "board 200" "$BASE/api/v1/dashboard/board" "200"
 check_json "board exposes posts" "$BASE/api/v1/dashboard/board" "'posts' in d" '^True$'
+check_http "sub-boards 200" "$BASE/api/v1/board/sub-boards" "200"
+check_json "sub-boards exposes list" "$BASE/api/v1/board/sub-boards" "'sub_boards' in d" '^True$'
 check_http "planning 200" "$BASE/api/v1/dashboard/planning" "200"
 check_json "planning exposes rollup" "$BASE/api/v1/dashboard/planning" "'rollup' in d" '^True$'
+check_http "git graph 200" "$BASE/api/v1/git/graph?n=20" "200"
+check_json "git graph exposes stats and nodes" "$BASE/api/v1/git/graph?n=20" "'stats' in d and 'nodes' in d" '^True$'
 check_http "verification requests 200" "$BASE/api/v1/verification/requests" "200"
 check_json "verification requests exposes list" "$BASE/api/v1/verification/requests" "'requests' in d" '^True$'
 check_http "verification summary 200" "$BASE/api/v1/verification/summary" "200"

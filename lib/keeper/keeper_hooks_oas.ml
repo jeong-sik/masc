@@ -268,6 +268,9 @@ let empty_response_model_metric =
 let alias_response_model_metric =
   Prometheus.metric_after_turn_response_model_alias
 
+let empty_response_content_metric =
+  Prometheus.metric_after_turn_response_content_empty
+
 let zero_usage : Agent_sdk.Types.api_usage =
   {
     input_tokens = 0;
@@ -327,6 +330,47 @@ let resolve_after_turn_model ~keeper_name
         keeper_name "telemetry_canonical");
     runtime_lane_label
   end
+
+let stop_reason_metric_label = function
+  | Agent_sdk.Types.EndTurn -> "end_turn"
+  | Agent_sdk.Types.StopToolUse -> "tool_use"
+  | Agent_sdk.Types.MaxTokens -> "max_tokens"
+  | Agent_sdk.Types.StopSequence -> "stop_sequence"
+  | Agent_sdk.Types.Unknown _ -> "unknown"
+
+let content_block_has_visible_or_tool_progress = function
+  | Agent_sdk.Types.Text text -> String.trim text <> ""
+  | Agent_sdk.Types.ToolResult { content; json; _ } ->
+      String.trim content <> "" || Option.is_some json
+  | Agent_sdk.Types.ToolUse _
+  | Agent_sdk.Types.Image _
+  | Agent_sdk.Types.Document _
+  | Agent_sdk.Types.Audio _ -> true
+  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> false
+
+let response_content_empty_shape content =
+  if content = [] then "empty"
+  else if
+    List.exists
+      (function
+        | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> true
+        | _ -> false)
+      content
+  then "thinking_only"
+  else "blank_text"
+
+let record_response_content_quality_metric ~keeper_name
+    (response : Agent_sdk.Types.api_response) =
+  if not (List.exists content_block_has_visible_or_tool_progress response.content)
+  then
+    Prometheus.inc_counter empty_response_content_metric
+      ~labels:
+        [
+          ("keeper", keeper_name);
+          ("stop_reason", stop_reason_metric_label response.stop_reason);
+          ("shape", response_content_empty_shape response.content);
+        ]
+      ()
 
 let context_max_of_telemetry
     (telemetry : Agent_sdk.Types.inference_telemetry option) =
@@ -1904,6 +1948,7 @@ let make_hooks
            histogram still proves the hook ran. *)
         record_llm_inference_latency_metric ~model
           ~telemetry:response.telemetry;
+        record_response_content_quality_metric ~keeper_name:meta.name response;
         let fmt_tok_s = function
           | Some v -> Printf.sprintf "%.1f" v
           | None -> "-"

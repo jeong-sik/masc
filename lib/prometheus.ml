@@ -739,6 +739,8 @@ let metric_cascade_ttfb_seconds = "masc_cascade_ttfb_seconds"
 let metric_cascade_inter_chunk_seconds = "masc_cascade_inter_chunk_seconds"
 let metric_after_turn_hook = "masc_after_turn_hook_total"
 let metric_after_turn_telemetry_missing = "masc_after_turn_telemetry_missing_total"
+let metric_after_turn_response_content_empty =
+  "masc_after_turn_response_content_empty_total"
 
 let metric_after_turn_telemetry_zero_latency =
   "masc_after_turn_telemetry_zero_latency_total"
@@ -1124,6 +1126,11 @@ let init () =
   add
     metric_after_turn_telemetry_zero_latency
     "AfterTurn responses where telemetry was present but request_latency_ms was 0."
+    Counter;
+  add
+    metric_after_turn_response_content_empty
+    "AfterTurn responses that completed without visible assistant text or tool \
+     progress. Labels: keeper, stop_reason, shape."
     Counter;
   add
     metric_oas_inference_telemetry_tokens

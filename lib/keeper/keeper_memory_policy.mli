@@ -210,6 +210,7 @@ val keeper_state_snapshot_to_summary_text : keeper_state_snapshot -> string
 val default_max_string_chars : int
 val default_max_list_items : int
 val default_max_item_chars : int
+val default_continuity_summary_max_chars : int
 
 val cap_string : max_chars:int -> string option -> string option
 (** Truncate to [max_chars]; [None] passes through. *)
@@ -224,6 +225,11 @@ val cap_snapshot :
   ?max_item_chars:int -> keeper_state_snapshot -> keeper_state_snapshot
 (** Apply per-field caps using the [default_max_*] values when none
     are supplied. *)
+
+val cap_continuity_summary_text : ?max_chars:int -> string -> string
+(** Trim and truncate rendered [continuity_summary] text. This final
+    shared cap is used by production and fallback consumption paths, so
+    legacy oversized summaries cannot bypass {!cap_snapshot}. *)
 
 (** {1 Prompt rendering} *)
 

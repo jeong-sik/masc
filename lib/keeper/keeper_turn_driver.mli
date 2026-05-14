@@ -61,6 +61,12 @@ type masc_internal_error =
       min_required_sec : float;
       phase : string;
     }
+  | Max_tokens_ceiling_violation of {
+      cascade_name : cascade_name;
+      requested_max_tokens : int;
+      provider_ceiling : int;
+      reason : string;
+    }
   | Ambiguous_post_commit of {
       is_timeout : bool;
       tools : string list;

@@ -712,11 +712,20 @@ max-input = 8192
 max-output = 2048
 temperature = 0.1
 
+[codex_cli.codex-spark.for-keeper-turn]
+max-output = 32768
+
+[kimi_cli.kimi-coding.for-keeper-turn]
+max-output = 32768
+
 # ── Layer 5: Tiers ─────────────────────────────────────────────
 
 [tier.primary]
 # Canonical keeper/workflow tier.
-members = ["codex_cli.codex-spark", "kimi_cli.kimi-coding"]
+members = [
+  "codex_cli.codex-spark.for-keeper-turn",
+  "kimi_cli.kimi-coding.for-keeper-turn",
+]
 strategy = "failover"
 
 [tier.keeper_diverse]
@@ -756,12 +765,12 @@ strategy = "failover"
 # System-only baseline tier (RFC-0027 PR-4). Last-resort fallback
 # target that satisfies every capability profile. Not keeper-assignable.
 keeper-assignable = false
-members = ["kimi_cli.kimi-coding"]
+members = ["kimi_cli.kimi-coding.for-keeper-turn"]
 strategy = "failover"
 
 [tier.local_recovery]
 # Recovery tier for fallback_cascade = "local_recovery".
-members = ["codex_cli.codex-spark"]
+members = ["codex_cli.codex-spark.for-keeper-turn"]
 strategy = "failover"
 
 # ── Tier-Groups (fallback chains) ──────────────────────────────

@@ -55,6 +55,69 @@ type context = Tool_inline_dispatch_types.context = {
     Coord.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
+let tool_index_entry_of_schema (schema : Masc_domain.tool_schema)
+  : Agent_sdk.Tool_index.entry =
+  let group =
+    Tool_catalog.tool_group schema.name
+    |> Option.map Tool_catalog.tool_group_to_string
+  in
+  Agent_sdk.Tool_index.
+    { name = schema.name; description = schema.description; group; aliases = [] }
+
+let discover_tool_matches ~(query : string) ~(limit : int)
+    (schemas : Masc_domain.tool_schema list) =
+  let query = String.lowercase_ascii (String.trim query) in
+  let limit = max 0 limit in
+  if String.equal query "" || limit = 0 then []
+  else
+    let schema_by_name = Hashtbl.create (List.length schemas) in
+    List.iter
+      (fun (schema : Masc_domain.tool_schema) ->
+         Hashtbl.replace schema_by_name schema.name schema)
+      schemas;
+    let index_config = { Agent_sdk.Tool_index.default_config with top_k = limit } in
+    let index =
+      schemas
+      |> List.map tool_index_entry_of_schema
+      |> Agent_sdk.Tool_index.build ~config:index_config
+    in
+    Agent_sdk.Tool_index.retrieve index query
+    |> List.filter_map (fun (name, score) ->
+      match Hashtbl.find_opt schema_by_name name with
+      | Some schema -> Some (schema, score)
+      | None -> None)
+
+let discover_tools_json ~(query : string) ~(limit : int)
+    (schemas : Masc_domain.tool_schema list) : Yojson.Safe.t =
+  let query = String.lowercase_ascii (String.trim query) in
+  let matches = discover_tool_matches ~query ~limit schemas in
+  let results =
+    List.map
+      (fun ((schema : Masc_domain.tool_schema), score) ->
+         `Assoc
+           [
+             ("name", `String schema.name);
+             ("description", `String schema.description);
+             ("score", `Float score);
+           ])
+      matches
+  in
+  `Assoc
+    [
+      ("query", `String query);
+      ("count", `Int (List.length results));
+      ("tools", `List results);
+      ("scoring", `String "bm25");
+      ( "hint",
+        `String
+          "These tools are callable via tools/call even if not in the default tools/list."
+      );
+    ]
+
+module For_testing = struct
+  let discover_tools_json = discover_tools_json
+end
+
 (** Dispatch a tool call.
     Returns [Some (Tool_result.t)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
@@ -266,35 +329,14 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
 
   (* ── Tool discovery ─────────────────────────────────────────── *)
   | "masc_discover_tools" ->
-      let query = String.lowercase_ascii (arg_get_string "query" "") in
+      let query = arg_get_string "query" "" in
       let limit = arg_get_int "limit" 20 in
-      if String.equal query "" then
+      if String.equal (String.trim query) "" then
         Some (Tool_result.error ~tool_name:name ~start_time:start "query is required")
       else
         let all_schemas = Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false () in
-        let words = String.split_on_char ' ' query |> List.filter (fun w -> String.length w > 0) in
-        let matches =
-          all_schemas
-          |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-                 let name_l = String.lowercase_ascii schema.name in
-                 let desc_l = String.lowercase_ascii schema.description in
-                 let haystack = name_l ^ " " ^ desc_l in
-                 words |> List.exists (fun w ->
-                   String_util.contains_substring haystack w))
-          |> List.filteri (fun i _ -> i < limit)
-        in
-        let results = List.map (fun (schema : Masc_domain.tool_schema) ->
-          `Assoc [
-            ("name", `String schema.name);
-            ("description", `String schema.description);
-          ]
-        ) matches in
-        Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string (`Assoc [
-          ("query", `String query);
-          ("count", `Int (List.length results));
-          ("tools", `List results);
-          ("hint", `String "These tools are callable via tools/call even if not in the default tools/list.");
-        ])))
+        let payload = discover_tools_json ~query ~limit all_schemas in
+        Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string payload))
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | _ ->

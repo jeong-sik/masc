@@ -912,16 +912,10 @@ let metric_cascade_metrics_eviction =
 let on_cascade_metrics_eviction () =
   Prometheus.inc_counter metric_cascade_metrics_eviction ()
 
-(* [Cascade_inference.clamp_max_tokens_to_ceiling] silently reduces
-   an operator-supplied [max_tokens] to the provider's
-   [provider_ceiling] when the operator's value exceeds it.  The
-   policy is intentional ("smaller response is better than no
-   response" per the docstring) but the silent reduction means
-   operators who configured [max_tokens=16384] for a long-form
-   response in cascade.toml and got a 4096-token truncation had no
-   signal that the budget was clipped.  Pair with iter 26
-   [max_context_fallback] for the symmetric context-window
-   side. *)
+(* Legacy iter-46 counter retained for metric compatibility.  DD-020
+   replaced runtime max_tokens clipping with a structured
+   [max_tokens_ceiling_violation] pre-dispatch error, so this counter
+   should stay at zero on current code paths. *)
 let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 
 let on_max_tokens_clamped () =
@@ -959,7 +953,7 @@ let on_cascade_audit_failure ~stage =
    [max_context=128_000] for a cascade that happens to be
    local-only got an unexpectedly small window with no signal.
 
-   Companion to iter 46 [max_tokens_clamped] (response-budget
+   Companion to DD-020 [max_tokens_ceiling_violation] (response-budget
    side) and iter 26 [max_context_fallback] (no-resolved-value
    side); together they form the complete inference-budget
    coverage:
@@ -968,7 +962,7 @@ let on_cascade_audit_failure ~stage =
      resolved but suspicious   iter 27 discovered_context_below_floor
      resolved but disagreement iter 28 context_capability_drift
      local-only clamp          iter 49 local_context_clamped  (this)
-     response budget clip      iter 46 max_tokens_clamped *)
+     response budget invalid   DD-020 max_tokens_ceiling_violation *)
 let metric_local_context_clamped =
   "masc_cascade_local_context_clamped_total"
 

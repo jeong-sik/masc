@@ -241,10 +241,9 @@ let clamp_context_for_pure_local_labels ~(labels : string list) ~(max_context : 
   then begin
     let clamped = min max_context Env_config.ContextCompact.small_local_floor in
     (* Iter 49: tick a counter when the clamp actually reduces the
-       window (max_context > floor).  Same shape as iter 46
-       max_tokens_clamped — the policy stays (local providers
-       have tiny context windows) but the rate is observable so
-       operators can spot cascade.toml settings being silently
+       window (max_context > floor).  Same family as DD-020
+       max_tokens_ceiling_violation: local context clamps remain
+       observable so operators can spot cascade.toml settings being
        clipped on local-only cascades. *)
     if clamped < max_context then
       Cascade_metrics.on_local_context_clamped ();
@@ -368,6 +367,174 @@ let models_of_cascade_name cascade_name =
         "cascade config resolve failed for %s, returning []: %s"
         normalized detail;
       []
+
+let min_positive_int_options values =
+  values
+  |> List.filter_map (function Some value when value > 0 -> Some value | _ -> None)
+  |> function
+  | [] -> None
+  | value :: rest -> Some (List.fold_left min value rest)
+
+let strip_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  if String.length value >= prefix_len
+     && String.equal (String.sub value 0 prefix_len) prefix
+  then Some (String.sub value prefix_len (String.length value - prefix_len))
+  else None
+
+let declarative_model_max_output_tokens
+    (cfg : Cascade_declarative_types.cascade_config)
+    model_id =
+  let open Cascade_declarative_types in
+  match
+    cfg.models
+    |> List.find_opt
+         (fun (model : cascade_model_spec) -> String.equal model.id model_id)
+  with
+  | None -> None
+  | Some model -> (
+      match model.capabilities with
+      | Some caps -> caps.max_output_tokens
+      | None -> None)
+
+let declarative_member_max_output_tokens
+    (cfg : Cascade_declarative_types.cascade_config)
+    member =
+  let open Cascade_declarative_types in
+  let alias =
+    cfg.aliases
+    |> List.find_opt (fun (alias : cascade_alias) ->
+         String.equal
+           (Printf.sprintf "%s.%s.%s" alias.provider_id alias.model_id alias.name)
+           member)
+  in
+  match alias with
+  | Some alias ->
+      min_positive_int_options
+        [
+          alias.max_output;
+          declarative_model_max_output_tokens cfg alias.model_id;
+        ]
+  | None ->
+      (match
+         cfg.bindings
+         |> List.find_opt
+              (fun (binding : cascade_binding) ->
+                 String.equal
+                   (Printf.sprintf "%s.%s" binding.provider_id binding.model_id)
+                   member)
+       with
+       | None -> None
+       | Some binding -> declarative_model_max_output_tokens cfg binding.model_id)
+
+let declarative_member_exists (cfg : Cascade_declarative_types.cascade_config) member
+    =
+  let open Cascade_declarative_types in
+  List.exists
+    (fun (alias : cascade_alias) ->
+       String.equal
+         (Printf.sprintf "%s.%s.%s" alias.provider_id alias.model_id alias.name)
+         member)
+    cfg.aliases
+  || List.exists
+       (fun (binding : cascade_binding) ->
+          String.equal
+            (Printf.sprintf "%s.%s" binding.provider_id binding.model_id)
+            member)
+       cfg.bindings
+
+let declarative_tier_members (cfg : Cascade_declarative_types.cascade_config)
+    tier_name =
+  let open Cascade_declarative_types in
+  match
+    cfg.tiers
+    |> List.find_opt (fun (tier : cascade_tier) ->
+         String.equal tier.name tier_name)
+  with
+  | Some tier -> tier.members
+  | None -> []
+
+let declarative_tier_group_members
+    (cfg : Cascade_declarative_types.cascade_config)
+    group_name =
+  let open Cascade_declarative_types in
+  let tiers_by_name = Hashtbl.create (List.length cfg.tiers) in
+  List.iter
+    (fun (tier : cascade_tier) -> Hashtbl.replace tiers_by_name tier.name tier)
+    cfg.tiers;
+  match
+    cfg.tier_groups
+    |> List.find_opt (fun (group : cascade_tier_group) ->
+         String.equal group.name group_name)
+  with
+  | None -> []
+  | Some group ->
+      group.tiers
+      |> List.filter_map (Hashtbl.find_opt tiers_by_name)
+      |> List.concat_map (fun (tier : cascade_tier) -> tier.members)
+
+let declarative_members_for_profile
+    (cfg : Cascade_declarative_types.cascade_config)
+    profile_name =
+  match strip_prefix ~prefix:"tier." profile_name with
+  | Some tier_name -> declarative_tier_members cfg tier_name
+  | None -> (
+      match strip_prefix ~prefix:"tier-group." profile_name with
+      | Some group_name -> declarative_tier_group_members cfg group_name
+      | None ->
+          let group_members = declarative_tier_group_members cfg profile_name in
+          if group_members <> [] then group_members
+          else
+            let tier_members = declarative_tier_members cfg profile_name in
+            if tier_members <> [] then tier_members
+            else if declarative_member_exists cfg profile_name then [ profile_name ]
+            else [])
+
+let declarative_route_target
+    (cfg : Cascade_declarative_types.cascade_config)
+    raw_name =
+  let open Cascade_declarative_types in
+  let trimmed = String.trim raw_name in
+  let candidate_keys =
+    (match Cascade_routes.logical_use_of_string_opt trimmed with
+     | Some use -> [ trimmed; Cascade_routes.logical_use_key use ]
+     | None -> [ trimmed ])
+    |> List.filter (fun key -> not (String.equal key ""))
+  in
+  let routes = cfg.routes @ cfg.system_targets in
+  candidate_keys
+  |> List.find_map (fun key ->
+       routes
+       |> List.find_opt (fun (route : cascade_route) -> String.equal route.name key)
+       |> Option.map (fun route -> route.target))
+
+let first_nonempty_members cfg candidates =
+  candidates
+  |> List.find_map (fun profile_name ->
+       let members = declarative_members_for_profile cfg profile_name in
+       if members = [] then None else Some members)
+
+let max_output_tokens_ceiling_of_cascade_name cascade_name =
+  match cascade_config_path () with
+  | None -> None
+  | Some path -> (
+      match Cascade_declarative_parser.parse_file path with
+      | Error _ -> None
+      | Ok cfg ->
+          let raw_name = cascade_name_to_string cascade_name in
+          let resolved_name =
+            match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
+            | Ok resolved -> Some resolved
+            | Error _ -> None
+          in
+          [ resolved_name; declarative_route_target cfg raw_name; Some raw_name ]
+          |> List.filter_map Fun.id
+          |> first_nonempty_members cfg
+          |> Option.map (fun members ->
+               members
+               |> List.map (declarative_member_max_output_tokens cfg)
+               |> min_positive_int_options)
+          |> Option.join)
 
 let resolve_named_providers_result ?provider_filter
     ?(require_tool_choice_support = false)

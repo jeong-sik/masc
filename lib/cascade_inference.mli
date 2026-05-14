@@ -46,13 +46,16 @@ val resolve_max_tokens :
   fallback:(unit -> int) ->
   int
 
-(** Clamp max_tokens to provider ceiling.
+(** Validate max_tokens against the provider ceiling before dispatch.
 
     If [provider_ceiling] is [Some ceiling] and [max_tokens > ceiling],
-    returns [ceiling]. Otherwise returns [max_tokens] unchanged.
+    returns [Error _] instead of silently reducing the operator-supplied
+    budget. Also rejects non-positive [max_tokens] and non-positive
+    provider ceilings.
 
-    Clamping strategy: a smaller response is better than no response.
-    Mirrors TLA+ KeeperCoreTriad.CapabilityGate action.
-
-    @since Core Triad *)
-val clamp_max_tokens_to_ceiling : provider_ceiling:int option -> int -> int
+    @since DD-020 *)
+val validate_max_tokens_within_ceiling :
+  cascade_name:Keeper_cascade_profile.runtime_name ->
+  provider_ceiling:int option ->
+  int ->
+  (int, Cascade_error_classify.masc_internal_error) result

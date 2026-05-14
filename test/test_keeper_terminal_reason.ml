@@ -401,6 +401,27 @@ let test_structured_oas_timeout_budget () =
     (terminal_next_action terminal)
 ;;
 
+let test_structured_max_tokens_ceiling_violation () =
+  let err =
+    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Masc_mcp.Keeper_turn_driver.Max_tokens_ceiling_violation
+         { cascade_name =
+             Masc_mcp.Keeper_turn_driver.cascade_name_of_string "keeper_unified"
+         ; requested_max_tokens = 65_536
+         ; provider_ceiling = 40_960
+         ; reason = "requested_exceeds_provider_ceiling"
+         })
+  in
+  let terminal = KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err in
+  check string "code" "max_tokens_ceiling_violation" (terminal_code terminal);
+  check string "severity" "bad" (KT.severity_to_string (terminal_severity terminal));
+  check
+    (option string)
+    "next action"
+    (Some "inspect_latest_error")
+    (terminal_next_action terminal)
+;;
+
 let test_structured_turn_wall_clock_timeout () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
@@ -517,6 +538,10 @@ let () =
             `Quick
             test_structured_required_tool_no_tool_call
         ; test_case "oas timeout budget" `Quick test_structured_oas_timeout_budget
+        ; test_case
+            "max_tokens ceiling violation"
+            `Quick
+            test_structured_max_tokens_ceiling_violation
         ; test_case
             "turn wall-clock timeout"
             `Quick

@@ -438,6 +438,7 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
 let default_max_string_chars = 400
 let default_max_list_items = 5
 let default_max_item_chars = 200
+let default_continuity_summary_max_chars = 5_600
 
 let cap_string ~max_chars = function
   | None -> None
@@ -474,6 +475,15 @@ let cap_snapshot
     constraints =
       cap_list ~max_items:max_list_items ~max_item_chars snapshot.constraints;
   }
+
+let cap_continuity_summary_text
+    ?(max_chars = default_continuity_summary_max_chars)
+    (text : string) : string =
+  let trimmed = String.trim text in
+  if trimmed = "" then ""
+  else
+    String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" trimmed
+    |> String_util.to_string
 
 (* RFC-MASC-001 Phase 1 post-mortem (Gen3 2026-04-17):
    [keeper_state_snapshot_to_summary_text] renders every field for audit/persistence.
@@ -716,6 +726,7 @@ let continuity_fallback_summary_text
   if trimmed = "" then
     "No continuity snapshot available."
   else
+    let bounded = cap_continuity_summary_text trimmed in
     let freshness_line =
       if last_continuity_update_ts > 0.0 then
         let age_s = max 0.0 (Time_compat.now () -. last_continuity_update_ts) in
@@ -729,7 +740,7 @@ let continuity_fallback_summary_text
         freshness_line;
         "Checkpoint note: latest checkpoint [STATE] snapshot unavailable.";
         "Treat the following as prior context only and re-verify blockers, constraints, and repo state against the live world state before acting.";
-        trimmed;
+        bounded;
       ]
 
 let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Safe.t =

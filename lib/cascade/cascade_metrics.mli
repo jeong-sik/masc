@@ -291,11 +291,10 @@ val on_cascade_metrics_eviction : unit -> unit
     [cascade_max_keys] or canonicalize synthesized names. *)
 
 val on_max_tokens_clamped : unit -> unit
-(** Tick the max_tokens-clamped counter at
-    [Cascade_inference.clamp_max_tokens_to_ceiling] when the
-    operator-supplied [max_tokens] exceeds the provider ceiling
-    and is silently reduced.  Symmetric to iter-26
-    [max_context_fallback] (context-window side). *)
+(** Legacy iter-46 counter retained for metric compatibility. DD-020
+    replaced runtime max_tokens clipping with the structured
+    [max_tokens_ceiling_violation] pre-dispatch error, so current code
+    paths should not emit this counter. *)
 
 val on_cascade_audit_failure : stage:string -> unit
 (** Tick the cascade-audit subsystem failure counter at
@@ -310,8 +309,8 @@ val on_local_context_clamped : unit -> unit
     [Cascade_runtime.clamp_context_for_pure_local_labels] when a
     cascade with only local-provider labels has its
     [max_context] silently reduced to [small_local_floor].
-    Symmetric to iter 46 [max_tokens_clamped] (response-budget
-    side). *)
+    Symmetric to DD-020 [max_tokens_ceiling_violation]
+    (response-budget side). *)
 
 val all_cascade_counters : (string * string) list
 (** SSOT list of every cascade counter in this module, paired with

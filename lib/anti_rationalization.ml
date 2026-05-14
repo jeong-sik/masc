@@ -742,6 +742,7 @@ let review
                   | Keeper_turn_driver.Admission_queue_rejected _
                   | Keeper_turn_driver.Turn_timeout _
                   | Keeper_turn_driver.Oas_timeout_budget _
+                  | Keeper_turn_driver.Max_tokens_ceiling_violation _
                   | Keeper_turn_driver.Ambiguous_post_commit _ )
               | None ->
                 false

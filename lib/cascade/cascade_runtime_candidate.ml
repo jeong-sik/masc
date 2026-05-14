@@ -147,12 +147,28 @@ let runtime_label_for_active_id ~configured_labels ~active =
          | None -> active)
 
 let runtime_health_key_of_label label =
-  let _ = label in
-  None
+  let cfg_of_kind ~kind ~model_id ~base_url =
+    Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
+  in
+  let cfg =
+    match Provider_kind_resolver.resolve label with
+    | Registered { provider_name; model_id; kind } ->
+      let base_url = registry_default_base_url provider_name in
+      Some (cfg_of_kind ~kind ~model_id ~base_url)
+    | Custom_url { model_id; base_url } ->
+      Some
+        (cfg_of_kind
+           ~kind:Llm_provider.Provider_config.OpenAI_compat
+           ~model_id
+           ~base_url)
+    | Unknown _ -> None
+  in
+  Option.map Provider_adapter.provider_health_key_of_config cfg
 
 let runtime_health_keys_of_labels labels =
-  let _ = labels in
-  []
+  labels
+  |> List.filter_map runtime_health_key_of_label
+  |> List.sort_uniq String.compare
 
 let resolve_reported_runtime_id ~labels ~reported_runtime_id =
   let _ = labels in
@@ -188,8 +204,18 @@ let first_health_cooldown candidate =
     | Error msg -> Some (provider_key, msg))
 
 let has_recovery_evidence candidate =
-  let _ = candidate in
-  false
+  health_keys candidate
+  |> List.exists (fun provider_key ->
+    match
+      Cascade_health_tracker.provider_info
+        Cascade_health_tracker.global
+        ~provider_key
+    with
+    | None -> false
+    | Some info ->
+      (not info.in_cooldown)
+      && (info.events_in_window > 0 || info.latency_samples > 0)
+      && info.success_rate > 0.0)
 
 let provider_attempt_timeout_constraints candidate =
   Provider_adapter.timeout_bounds_of_kind candidate.provider_cfg.kind

@@ -204,6 +204,11 @@ val default_max_checkpoint_tool_result_chars : int
     threshold the payload collapses to a stub so a single
     orphan-repair pass cannot inflate one block to multi-MB. *)
 
+val default_max_checkpoint_content_chars_total : int
+(** Total persisted Text/tool_result content budget across the retained
+    checkpoint message list. The newest messages are kept first; older
+    messages are truncated or dropped once this budget is exhausted. *)
+
 val tool_result_text_of_block :
   tool_use_id:string ->
   content:string ->

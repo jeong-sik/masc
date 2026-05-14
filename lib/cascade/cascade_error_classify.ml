@@ -60,6 +60,12 @@ type masc_internal_error =
       min_required_sec : float;
       phase : string;
     }
+  | Max_tokens_ceiling_violation of {
+      cascade_name : cascade_name;
+      requested_max_tokens : int;
+      provider_ceiling : int;
+      reason : string;
+    }
   | Ambiguous_post_commit of {
       is_timeout : bool;
       tools : string list;
@@ -207,6 +213,17 @@ let masc_internal_error_to_json = function
         ("min_required_sec", `Float min_required_sec);
         ("phase", `String phase);
       ]
+  | Max_tokens_ceiling_violation
+      { cascade_name; requested_max_tokens; provider_ceiling; reason } ->
+    let cascade_name = cascade_name_to_string cascade_name in
+    `Assoc
+      [
+        ("kind", `String "max_tokens_ceiling_violation");
+        ("cascade_name", `String cascade_name);
+        ("requested_max_tokens", `Int requested_max_tokens);
+        ("provider_ceiling", `Int provider_ceiling);
+        ("reason", `String reason);
+      ]
   | Ambiguous_post_commit { is_timeout; tools; original_error } ->
     `Assoc
       [
@@ -263,6 +280,15 @@ let summary_of_masc_internal_error = function
            "OAS timeout budget exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
            phase source budget_sec remaining min_required_sec
            estimated_input_tokens keeper_turn_timeout_sec)
+  | Max_tokens_ceiling_violation
+      { cascade_name; requested_max_tokens; provider_ceiling; reason } ->
+    Some
+      (Printf.sprintf
+         "Invalid max_tokens budget for cascade %s; requested_max_tokens=%d; provider_ceiling=%d; reason=%s"
+         (cascade_name_to_string cascade_name)
+         requested_max_tokens
+         provider_ceiling
+         reason)
   (* Variants without a custom long-form summary: callers fall back to
      [kind_of_masc_internal_error] / the JSON payload.  Enumerated
      explicitly so adding a new [masc_internal_error] variant forces
@@ -300,7 +326,8 @@ let () =
        kind (cascade_exhausted | resumable_cli_session | \
        no_tool_capable_provider | accept_rejected | \
        admission_queue_timeout | admission_queue_rejected | \
-       turn_timeout | oas_timeout_budget | ambiguous_post_commit), \
+       turn_timeout | oas_timeout_budget | max_tokens_ceiling_violation | \
+       ambiguous_post_commit), \
        cascade_name (originating cascade or \"unknown\" for \
        cascade-less variants)."
     ()
@@ -314,6 +341,7 @@ let kind_of_masc_internal_error = function
   | Admission_queue_rejected _ -> "admission_queue_rejected"
   | Turn_timeout _ -> "turn_timeout"
   | Oas_timeout_budget _ -> "oas_timeout_budget"
+  | Max_tokens_ceiling_violation _ -> "max_tokens_ceiling_violation"
   | Ambiguous_post_commit _ -> "ambiguous_post_commit"
 
 (** #10285: which cascade emitted this error.
@@ -340,7 +368,8 @@ let cascade_name_of_masc_internal_error = function
   | Cascade_exhausted { cascade_name; _ }
   | Resumable_cli_session { cascade_name; _ }
   | No_tool_capable_provider { cascade_name; _ }
-  | Admission_queue_timeout { cascade_name; _ } ->
+  | Admission_queue_timeout { cascade_name; _ }
+  | Max_tokens_ceiling_violation { cascade_name; _ } ->
       let cascade_name = cascade_name_to_string cascade_name in
       if String.equal (String.trim cascade_name) "" then "unknown"
       else cascade_name
@@ -530,6 +559,24 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                              (string_opt_of_assoc "phase" json);
                        })
               | _ -> None)
+          | _ -> None)
+      | Some (`String "max_tokens_ceiling_violation") -> (
+          match
+            string_opt_of_assoc "cascade_name" json,
+            int_opt_of_assoc "requested_max_tokens" json,
+            int_opt_of_assoc "provider_ceiling" json
+          with
+          | Some cascade_name, Some requested_max_tokens, Some provider_ceiling ->
+            Some
+              (Max_tokens_ceiling_violation
+                 {
+                   cascade_name = cascade_name_of_string cascade_name;
+                   requested_max_tokens;
+                   provider_ceiling;
+                   reason =
+                     Option.value ~default:"unknown"
+                       (string_opt_of_assoc "reason" json);
+                 })
           | _ -> None)
       | Some (`String "ambiguous_post_commit") -> (
           match string_opt_of_assoc "original_error" json with

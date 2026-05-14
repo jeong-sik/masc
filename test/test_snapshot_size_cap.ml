@@ -80,6 +80,35 @@ let test_idempotence () =
   Alcotest.(check (list string)) "decisions idempotent"
     c1.decisions c2.decisions
 
+let test_continuity_summary_text_capped () =
+  let capped =
+    KMP.cap_continuity_summary_text ~max_chars:80 (long_string 500 'c')
+  in
+  Alcotest.(check bool) "summary length near cap"
+    true (String.length capped <= 80 + 3);
+  Alcotest.(check bool) "ellipsis appended"
+    true (Astring.String.is_suffix ~affix:"…" capped)
+
+let test_continuity_fallback_caps_legacy_summary () =
+  let rendered =
+    KMP.continuity_fallback_summary_text
+      ~continuity_summary:(long_string 10_000 'f')
+      ~last_continuity_update_ts:0.0
+  in
+  Alcotest.(check bool) "freshness retained"
+    true (Astring.String.is_infix ~affix:"Freshness:" rendered);
+  let payload =
+    rendered
+    |> String.split_on_char '\n'
+    |> List.rev
+    |> List.find_opt (fun line -> String.trim line <> "")
+  in
+  let payload = Option.value payload ~default:"" in
+  Alcotest.(check bool) "legacy payload capped"
+    true (String.length payload <= KMP.default_continuity_summary_max_chars + 3);
+  Alcotest.(check bool) "legacy payload has ellipsis"
+    true (Astring.String.is_suffix ~affix:"…" payload)
+
 let () =
   Alcotest.run "snapshot_size_cap"
     [ ( "cap_snapshot",
@@ -95,5 +124,9 @@ let () =
             test_none_fields_stay_none;
           Alcotest.test_case "cap is idempotent" `Quick
             test_idempotence;
+          Alcotest.test_case "continuity summary text capped" `Quick
+            test_continuity_summary_text_capped;
+          Alcotest.test_case "fallback caps legacy summary" `Quick
+            test_continuity_fallback_caps_legacy_summary;
         ] );
     ]

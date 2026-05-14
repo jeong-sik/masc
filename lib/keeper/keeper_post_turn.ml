@@ -437,7 +437,9 @@ let apply_post_turn_lifecycle_with_resilience_handles
                ());
         {
           meta with
-          continuity_summary = keeper_state_snapshot_to_summary_text snapshot;
+          continuity_summary =
+            keeper_state_snapshot_to_summary_text snapshot
+            |> Keeper_memory_policy.cap_continuity_summary_text;
           runtime =
             {
               meta.runtime with

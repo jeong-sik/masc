@@ -28,6 +28,7 @@ let default_max_checkpoint_messages = 120
     accumulates hundreds of text blocks or multi-MB synthetic context. *)
 let default_max_checkpoint_text_blocks_per_message = 32
 let default_max_checkpoint_text_chars_per_message = 16 * 1024
+let default_max_checkpoint_content_chars_total = 512 * 1024
 let checkpoint_text_cap_marker = "\n[capped]"
 
 (** ToolResult block caps — analogous to text block caps above.
@@ -1177,23 +1178,145 @@ let sanitize_checkpoint_message
         { empty_checkpoint_sanitize_stats with dropped_messages = 1 } )
   else (Some { msg with content = kept }, stats)
 
+let checkpoint_content_chars_of_block = function
+  | Agent_sdk.Types.Text text -> String.length text
+  | Agent_sdk.Types.Thinking { content; _ } -> String.length content
+  | Agent_sdk.Types.RedactedThinking text -> String.length text
+  | Agent_sdk.Types.ToolResult { content; _ } -> String.length content
+  | _ -> 0
+
+let checkpoint_content_chars_of_message (msg : Agent_sdk.Types.message) : int =
+  List.fold_left
+    (fun total block -> total + checkpoint_content_chars_of_block block)
+    0
+    msg.content
+
+let cap_checkpoint_message_to_remaining_content
+    ~(remaining : int)
+    (msg : Agent_sdk.Types.message)
+  : Agent_sdk.Types.message option * int * checkpoint_sanitize_stats =
+  let message_chars = checkpoint_content_chars_of_message msg in
+  if message_chars = 0 then (Some msg, 0, empty_checkpoint_sanitize_stats)
+  else if remaining <= 0 then
+    ( None,
+      0,
+      {
+        empty_checkpoint_sanitize_stats with
+        dropped_messages = 1;
+        dropped_chars = message_chars;
+      } )
+  else if message_chars <= remaining then
+    (Some msg, message_chars, empty_checkpoint_sanitize_stats)
+  else
+    let remaining_ref = ref remaining in
+    let used_ref = ref 0 in
+    let kept_rev, stats =
+      List.fold_left
+        (fun (kept_rev, stats) block ->
+           let cap_content rebuild content =
+             let len = String.length content in
+             if len = 0 then
+               (rebuild content :: kept_rev, stats)
+             else if !remaining_ref <= 0 then
+               ( kept_rev,
+                 add_checkpoint_sanitize_stats stats
+                   {
+                     empty_checkpoint_sanitize_stats with
+                     dropped_blocks = 1;
+                     dropped_chars = len;
+                   } )
+             else if len <= !remaining_ref then (
+               remaining_ref := !remaining_ref - len;
+               used_ref := !used_ref + len;
+               (rebuild content :: kept_rev, stats))
+             else
+               let capped, truncated_chars =
+                 truncate_checkpoint_text ~max_chars:!remaining_ref content
+               in
+               let capped_len = String.length capped in
+               remaining_ref := 0;
+               used_ref := !used_ref + capped_len;
+               ( rebuild capped :: kept_rev,
+                 add_checkpoint_sanitize_stats stats
+                   {
+                     empty_checkpoint_sanitize_stats with
+                     truncated_blocks = 1;
+                     truncated_chars;
+                   } )
+           in
+           match block with
+           | Agent_sdk.Types.Text text ->
+               cap_content (fun text -> Agent_sdk.Types.Text text) text
+           | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
+               cap_content
+                 (fun content ->
+                   Agent_sdk.Types.ToolResult
+                     { tool_use_id; content; is_error; json = None })
+                 content
+           | Agent_sdk.Types.Thinking { content; _ } ->
+               cap_content (fun text -> Agent_sdk.Types.Text text) content
+           | Agent_sdk.Types.RedactedThinking text ->
+               cap_content (fun text -> Agent_sdk.Types.Text text) text
+           | _ -> (block :: kept_rev, stats))
+        ([], empty_checkpoint_sanitize_stats)
+        msg.content
+    in
+    let kept = List.rev kept_rev in
+    if kept = [] then
+      ( None,
+        !used_ref,
+        add_checkpoint_sanitize_stats stats
+          { empty_checkpoint_sanitize_stats with dropped_messages = 1 } )
+    else (Some { msg with content = kept }, !used_ref, stats)
+
+let cap_checkpoint_messages_total_content
+    (messages : Agent_sdk.Types.message list)
+  : Agent_sdk.Types.message list * checkpoint_sanitize_stats =
+  let rec loop kept remaining stats = function
+    | [] -> (kept, stats)
+    | msg :: older ->
+        let sanitized, used, msg_stats =
+          cap_checkpoint_message_to_remaining_content ~remaining msg
+        in
+        let kept =
+          match sanitized with
+          | Some msg -> msg :: kept
+          | None -> kept
+        in
+        let remaining = max 0 (remaining - used) in
+        loop
+          kept
+          remaining
+          (add_checkpoint_sanitize_stats stats msg_stats)
+          older
+  in
+  loop
+    []
+    default_max_checkpoint_content_chars_total
+    empty_checkpoint_sanitize_stats
+    (List.rev messages)
+
 let sanitize_checkpoint_messages
     (messages : Agent_sdk.Types.message list)
   : Agent_sdk.Types.message list * checkpoint_sanitize_stats =
-  List.fold_right
-    (fun msg (acc, stats) ->
-       let sanitized_opt, msg_stats = sanitize_checkpoint_message msg in
-       let acc =
-         match sanitized_opt with
-         | Some sanitized -> sanitized :: acc
-         | None -> acc
-       in
-       let stats =
-         add_checkpoint_sanitize_stats stats msg_stats
-       in
-       (acc, stats))
-    messages
-    ([], empty_checkpoint_sanitize_stats)
+  let messages, stats =
+    List.fold_right
+      (fun msg (acc, stats) ->
+         let sanitized_opt, msg_stats = sanitize_checkpoint_message msg in
+         let acc =
+           match sanitized_opt with
+           | Some sanitized -> sanitized :: acc
+           | None -> acc
+         in
+         let stats =
+           add_checkpoint_sanitize_stats stats msg_stats
+         in
+         (acc, stats))
+      messages
+      ([], empty_checkpoint_sanitize_stats)
+  in
+  let messages, total_stats = cap_checkpoint_messages_total_content messages in
+  (messages, add_checkpoint_sanitize_stats stats total_stats)
 
 let sanitize_oas_checkpoint
     ?(repair_orphans = true)
@@ -1287,9 +1410,9 @@ let save_oas_checkpoint
       (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
       capped_messages
   in
-  let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
+  let capped_messages, sanitize_stats = sanitize_checkpoint_messages capped_messages in
   let capped_messages =
-    if capped_messages_were_truncated
+    if capped_messages_were_truncated || checkpoint_sanitize_changed sanitize_stats
     then repair_broken_tool_call_pairs capped_messages
     else capped_messages
   in

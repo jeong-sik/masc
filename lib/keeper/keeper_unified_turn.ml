@@ -591,24 +591,31 @@ let run_keeper_cycle
                     ~cascade_name
                     ~fallback:Keeper_config.keeper_unified_temperature
                 in
-                let max_tokens =
-                  let raw =
-                    Cascade_inference.resolve_max_tokens
-                      ~cascade_name
-                      ~fallback:Keeper_config.keeper_unified_max_tokens
-                  in
-                  (* Capability gate: clamp to provider ceiling (TLA+ S3) *)
-                  Cascade_inference.clamp_max_tokens_to_ceiling
-                    ~provider_ceiling:(Some max_context)
-                    raw
+                let raw_max_tokens =
+                  Cascade_inference.resolve_max_tokens
+                    ~cascade_name
+                    ~fallback:Keeper_config.keeper_unified_max_tokens
                 in
-                Ok
-                  { cascade_name
-                  ; max_context_resolution
-                  ; max_context
-                  ; temperature
-                  ; max_tokens
-                  })
+                let max_output_ceiling =
+                  Cascade_runtime.max_output_tokens_ceiling_of_cascade_name
+                    cascade_name
+                in
+                (match
+                   Cascade_inference.validate_max_tokens_within_ceiling
+                     ~cascade_name
+                     ~provider_ceiling:max_output_ceiling
+                     raw_max_tokens
+                 with
+                 | Error err ->
+                   Error (Cascade_error_classify.sdk_error_of_masc_internal_error err)
+                 | Ok max_tokens ->
+                   Ok
+                     { cascade_name
+                     ; max_context_resolution
+                     ; max_context
+                     ; temperature
+                     ; max_tokens
+                     }))
          in
          let effective_cascade_runtime_name = KCP.Runtime_name effective_cascade_name in
          (match build_cascade_execution ~cascade_name:effective_cascade_runtime_name with

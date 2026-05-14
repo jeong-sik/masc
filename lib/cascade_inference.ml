@@ -99,17 +99,35 @@ let resolve_max_tokens
   | Some t -> t
   | None -> fallback ()
 
-(** Clamp max_tokens to provider ceiling.
-    Clamping > rejection: a smaller response is better than no response.
-    Mirrors TLA+ KeeperCoreTriad.CapabilityGate action. *)
-let clamp_max_tokens_to_ceiling ~(provider_ceiling : int option) (max_tokens : int) : int =
+(** Validate max_tokens against provider ceilings before dispatch. *)
+let validate_max_tokens_within_ceiling
+    ~(cascade_name : Keeper_cascade_profile.runtime_name)
+    ~(provider_ceiling : int option)
+    (max_tokens : int)
+  : (int, Cascade_error_classify.masc_internal_error) result =
+  let violation ~reason ~provider_ceiling =
+    Error
+      (Cascade_error_classify.Max_tokens_ceiling_violation
+         {
+           cascade_name;
+           requested_max_tokens = max_tokens;
+           provider_ceiling;
+           reason;
+         })
+  in
   match provider_ceiling with
-  | Some ceiling when max_tokens > ceiling ->
-    (* Iter 46: tick a counter so operators can alert on
-       cascade.toml [max_tokens] settings being silently clipped
-       by provider ceilings.  The clamp policy itself stays — a
-       smaller response beats none — but the rate is now
-       observable for budget tuning / docs alignment. *)
-    Cascade_metrics.on_max_tokens_clamped ();
-    max 1 ceiling
-  | _ -> max_tokens
+  | None ->
+    if max_tokens <= 0
+    then violation ~reason:"max_tokens_not_positive" ~provider_ceiling:0
+    else Ok max_tokens
+  | Some ceiling ->
+    if max_tokens <= 0
+    then violation ~reason:"max_tokens_not_positive" ~provider_ceiling:ceiling
+    else if ceiling <= 0
+    then violation ~reason:"provider_ceiling_not_positive" ~provider_ceiling:ceiling
+    else if max_tokens > ceiling
+    then
+      violation
+        ~reason:"requested_exceeds_provider_ceiling"
+        ~provider_ceiling:ceiling
+    else Ok max_tokens

@@ -137,6 +137,16 @@ val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
 val cycle_continues_after_wake :
   Heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
 
+val visible_consumer_count : unit -> int
+
+val visibility_gate_decision :
+  visible_consumers:int ->
+  has_pending_signal:bool ->
+  now:float ->
+  last_heartbeat_cycle_ts:float ->
+  Heartbeat_smart.decision ->
+  Heartbeat_smart.decision
+
 val run_smart_heartbeat_gate :
   config:Coord.config ->
   clock:'a Eio.Time.clock ->

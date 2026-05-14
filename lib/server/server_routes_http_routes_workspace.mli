@@ -62,8 +62,10 @@ val tree_node_limit_of_query : string option -> int
 (** [scan_dir ~base ~depth ~max_depth ~max_nodes acc dir] returns at most
     [max_nodes] tree nodes. The cap prevents a dashboard file-tree request
     against a large workspace root from monopolizing the server event loop.
-    Exposed for regression testing. *)
+    [diff_by_path], when present, maps relative file paths to compact
+    display badges from git numstat. Exposed for regression testing. *)
 val scan_dir :
+  ?diff_by_path:(string, string) Hashtbl.t ->
   base:string ->
   depth:int ->
   max_depth:int ->
@@ -86,4 +88,6 @@ module For_testing : sig
 
   val observe_workspace_route_failure :
     ?warn_on_failure:bool -> site:string -> path:string -> exn -> unit
+
+  val parse_git_numstat_line : string -> (string * string) option
 end

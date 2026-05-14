@@ -79,7 +79,7 @@ const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
 interface IdeStatusbarInput {
   readonly activeView: ViewTab
   readonly activeLayers: ReadonlySet<string>
-  readonly activeFilePath: string
+  readonly activeFilePath: string | null
   readonly findOpen: boolean
   readonly terminalOpen: boolean
   readonly railsCollapsed: boolean
@@ -276,9 +276,9 @@ export function deriveIdeStatusbarModel({
   addStatusbarChip(
     chips,
     'file',
-    shortStatusbarPath(activeFilePath),
+    activeFilePath === null ? 'no file' : shortStatusbarPath(activeFilePath),
     'ghost',
-    `Active file: ${activeFilePath.trim() || 'no file'}`,
+    `Active file: ${activeFilePath === null ? 'no file' : activeFilePath}`,
   )
 
   const layerLabel = statusbarLayerLabel(activeLayers)
@@ -765,6 +765,14 @@ function IdeBreadcrumb() {
     return () => unsub()
   }, [])
 
+  if (filePath === null) {
+    return html`
+      <nav
+        aria-label="Editor breadcrumb (no file)"
+        style=${{ color: 'var(--color-fg-disabled)', fontStyle: 'italic' }}
+      >no active file</nav>
+    `
+  }
   const segments = filePath.split('/')
   const fileName = segments.at(-1) ?? ""
   const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : ''

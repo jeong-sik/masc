@@ -156,17 +156,25 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal }
 
-    // Load file tree
+    // Load file tree (independent of active file — needed to suggest first file)
     fetchWorkspaceTree(2, opts).then(({ nodes, source }) => {
       if (signal.aborted) return
       fileTreeStore.seed(nodes)
       workspaceSourceSignal.value = source
-      const hasCurrentFile = nodes.some(node => node.path === filePath && !node.hasChildren)
+      const hasCurrentFile =
+        filePath !== null && nodes.some(node => node.path === filePath && !node.hasChildren)
       const nextFile = hasCurrentFile ? null : firstFilePath(nodes)
       if (nextFile && nextFile !== activeIdeFile.value) {
         activeIdeFile.value = nextFile
       }
     }).catch(() => {})
+
+    // File-scoped fetches require an active file path; skip when none is selected.
+    if (filePath === null) {
+      diffRowsSignal.value = []
+      annotationsSignal.value = []
+      return
+    }
 
     // Load file content
     fetchWorkspaceFile(filePath, opts).then(response => {

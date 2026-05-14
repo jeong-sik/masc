@@ -28,12 +28,12 @@ export interface LineOwnership {
 }
 
 export interface KeeperLineOwnershipAccumulator {
-  readonly filePath: () => string
+  readonly filePath: () => string | null
   readonly ownership: () => ReadonlyMap<number, LineOwnership>
   readonly eventsForLine: (line: number) => ReadonlyArray<KeeperEdit>
   readonly knownKeepers: () => ReadonlyArray<string>
   readonly ingest: (event: KeeperEdit) => boolean
-  readonly reset: (filePath?: string) => void
+  readonly reset: (filePath?: string | null) => void
 }
 
 export function keeperHueIndex(keeperId: string): AgentColorSlot {
@@ -58,20 +58,21 @@ function shouldReplace(existing: LineOwnership | undefined, event: KeeperEdit): 
 }
 
 export function createKeeperLineOwnershipAccumulator(
-  initialFilePath: string,
+  initialFilePath: string | null,
 ): KeeperLineOwnershipAccumulator {
-  let activeFilePath = initialFilePath
+  let activeFilePath: string | null = initialFilePath
   const ownershipByLine = new Map<number, LineOwnership>()
   const eventsByLine = new Map<number, KeeperEdit[]>()
   const keepers = new Set<string>()
 
-  const filePath = (): string => activeFilePath
+  const filePath = (): string | null => activeFilePath
   const ownership = (): ReadonlyMap<number, LineOwnership> => new Map(ownershipByLine)
   const eventsForLine = (line: number): ReadonlyArray<KeeperEdit> =>
     Number.isSafeInteger(line) ? [...(eventsByLine.get(line) ?? [])] : []
   const knownKeepers = (): ReadonlyArray<string> => [...keepers].sort()
 
   const ingest = (event: KeeperEdit): boolean => {
+    if (activeFilePath === null) return false
     if (event.file_path !== activeFilePath) return false
     if (!validTimestamp(event)) return false
     const range = validLineRange(event)
@@ -97,7 +98,7 @@ export function createKeeperLineOwnershipAccumulator(
     return true
   }
 
-  const reset = (filePath?: string): void => {
+  const reset = (filePath?: string | null): void => {
     if (filePath !== undefined) activeFilePath = filePath
     ownershipByLine.clear()
     eventsByLine.clear()

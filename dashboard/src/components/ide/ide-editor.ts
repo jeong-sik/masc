@@ -164,19 +164,37 @@ export function IdeEditor({
   }, [])
 
   const document = documentStore.document()
+  if (document.file_path === null) {
+    return html`
+      <div
+        role="region"
+        aria-label="ide editor"
+        data-testid="ide-editor-empty"
+        style=${{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          color: 'var(--color-fg-disabled)',
+          fontStyle: 'italic',
+        }}
+      >no active file</div>
+    `
+  }
+  const documentFilePath: string = document.file_path
   const lines = documentStore.lines()
   const ownership = ownershipStore.ownership()
   const keepers = ownershipStore.knownKeepers()
   const overlay = cursorOverlaySignal.value
   const presence = globalPresenceSnapshot.value
   const contextFocus = ideContextFocus.value
-  const currentFileFocus = contextFocus?.file_path === document.file_path ? contextFocus : null
-  const activeCursors = keepersWithCursorInFile(overlay.cursors, document.file_path)
+  const currentFileFocus = contextFocus?.file_path === documentFilePath ? contextFocus : null
+  const activeCursors = keepersWithCursorInFile(overlay.cursors, documentFilePath)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
   const currentDiffRows = diffRows()
   const replayTraceEvents = filterTraceEventsByReplay(keeperTraceState.value.events, ideReplayUntilMs.value)
   const currentFileSignals = buildCurrentFileSignals({
-    filePath: document.file_path,
+    filePath: documentFilePath,
     annotations,
     diffRows: currentDiffRows,
     activeKeeperCount: activeCursors.length,
@@ -322,8 +340,10 @@ function buildCurrentFileSignals({
   readonly traceEvents: ReadonlyArray<KeeperTraceEvent>
 }): ReadonlyArray<CurrentFileSignal> {
   const normalizedFile = normalizeIdeContextFilePath(filePath)
-  const matchesCurrentFile = (value: string): boolean =>
-    normalizedFile !== null && normalizeIdeContextFilePath(value) === normalizedFile
+  const matchesCurrentFile = (value: string | null): boolean => {
+    if (value === null) return false
+    return normalizedFile !== null && normalizeIdeContextFilePath(value) === normalizedFile
+  }
   const diagnosticCount = normalizedFile
     ? lspDiagnosticSnapshot.value.get(normalizedFile)?.length ?? 0
     : 0
@@ -805,14 +825,19 @@ function CodeMirrorEditor({
   const prevAnnRef = useRef<SelectedAnnotation | null>(null)
 
   const document = documentStore.document()
+  const documentFilePath = document.file_path
   const ownership = ownershipStore.ownership()
   const currentFileAnnotations = useMemo(
-    () => annotations.filter(annotation => annotation.file_path === document.file_path),
-    [annotations, document.file_path],
+    () => documentFilePath === null
+      ? []
+      : annotations.filter(annotation => annotation.file_path === documentFilePath),
+    [annotations, documentFilePath],
   )
   const traceLines = useMemo(
-    () => traceActive ? keeperTraceLinesForFile(document.file_path, traceEvents) : [],
-    [document.file_path, traceActive, traceEvents],
+    () => traceActive && documentFilePath !== null
+      ? keeperTraceLinesForFile(documentFilePath, traceEvents)
+      : [],
+    [documentFilePath, traceActive, traceEvents],
   )
   const traceLinesRef = useRef<ReadonlyArray<EditorKeeperTraceLine>>(traceLines)
 
@@ -829,7 +854,9 @@ function CodeMirrorEditor({
 
     async function mount() {
       const mountDocument = documentStore.document()
-      const lang = await languageExt(mountDocument.file_path)
+      const mountFilePath = mountDocument.file_path
+      if (mountFilePath === null) return
+      const lang = await languageExt(mountFilePath)
       if (destroyed) return
 
       const blameExts = showBlame ? blameExtensions() : []
@@ -841,7 +868,7 @@ function CodeMirrorEditor({
           lineNumberExt(),
           syntaxHighlightExt(),
           lang,
-          lspExtension({ filePath: mountDocument.file_path }),
+          lspExtension({ filePath: mountFilePath }),
           keeperCursorExtension(),
           contextFocusLineExt(),
           annotationLineChipExt(),
@@ -859,11 +886,11 @@ function CodeMirrorEditor({
             ? [
                 keeperTraceLineGutterExt({
                   getTraceLines: () => traceLinesRef.current,
-                  onTraceLineSelect: (event, line) => focusTraceLineContext(
-                    documentStore.document().file_path,
-                    event,
-                    line,
-                  ),
+                  onTraceLineSelect: (event, line) => {
+                    const current = documentStore.document().file_path
+                    if (current === null) return
+                    focusTraceLineContext(current, event, line)
+                  },
                 }),
               ]
             : []),

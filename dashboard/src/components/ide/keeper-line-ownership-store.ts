@@ -17,18 +17,18 @@ import {
 export type { KeeperEdit, LineOwnership }
 
 export interface KeeperLineOwnershipStore {
-  readonly filePath: () => string
+  readonly filePath: () => string | null
   readonly ownership: () => ReadonlyMap<number, LineOwnership>
   readonly eventsForLine: (line: number) => ReadonlyArray<KeeperEdit>
   readonly knownKeepers: () => ReadonlyArray<string>
   readonly ingest: (event: KeeperEdit) => boolean
-  readonly reset: (filePath?: string) => void
+  readonly reset: (filePath?: string | null) => void
   readonly subscribe: (listener: () => void) => () => void
   readonly dispose: () => void
 }
 
 export function createKeeperLineOwnershipStore(
-  initialFilePath: string,
+  initialFilePath: string | null,
 ): KeeperLineOwnershipStore {
   const accumulator = createKeeperLineOwnershipAccumulator(initialFilePath)
   const ownershipSignal = signal<ReadonlyMap<number, LineOwnership>>(new Map())
@@ -45,7 +45,7 @@ export function createKeeperLineOwnershipStore(
     return accepted
   }
 
-  const reset = (filePath?: string): void => {
+  const reset = (filePath?: string | null): void => {
     accumulator.reset(filePath)
     publish()
   }

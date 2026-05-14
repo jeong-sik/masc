@@ -48,6 +48,28 @@ type reporting_policy =
   | Missing_by_design
   | Unknown
 
+type known_cascade_prefix =
+  | Prefix_llama
+  | Prefix_ollama
+  | Prefix_unknown_provider
+  | Prefix_claude_code
+  | Prefix_codex_cli
+  | Prefix_gemini_cli
+  | Prefix_kimi_cli
+  | Prefix_claude
+  | Prefix_openai
+  | Prefix_gemini
+  | Prefix_kimi
+  | Prefix_kimi_coding
+  | Prefix_glm
+  | Prefix_glm_coding
+  | Prefix_openrouter
+  | Prefix_custom
+
+type cascade_prefix =
+  | Known_cascade_prefix of known_cascade_prefix
+  | Registry_cascade_prefix of string
+
 type model_policy =
   { default_model_env : string option
   ; default_model_fallback : string option
@@ -125,7 +147,7 @@ type adapter =
   ; auth_mode : auth_mode
   ; aliases : string list
   ; spawn_key : string option
-  ; cascade_prefix : string
+  ; cascade_prefix : cascade_prefix
   ; endpoint_url : string option
   ; default_model_id : string option
   ; model_policy : model_policy
@@ -163,6 +185,9 @@ val cn_custom : string
 
 val string_of_runtime_kind : runtime_kind -> string
 val string_of_auth_mode : auth_mode -> string
+val string_of_known_cascade_prefix : known_cascade_prefix -> string
+val string_of_cascade_prefix : cascade_prefix -> string
+val cascade_prefix_of_string : string -> cascade_prefix option
 
 (** {1 Adapter Registry} *)
 

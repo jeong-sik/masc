@@ -113,8 +113,10 @@ code_refs:
   - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph
-- `GET /api/v1/dashboard/telemetry/summary`
-  - fleet-health summary
+- `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=oas_event`
+  - fleet-health summary + durable OAS event replay used by the dashboard OAS runtime monitor
+- `GET /api/v1/dashboard/oas/telemetry/recent`, `GET /api/v1/dashboard/oas/telemetry/summary`
+  - in-process OAS runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `oas_event` replay
 - `GET /api/v1/dashboard/memory-subsystems`
   - cognition memory sub-view read model
 - `GET /api/v1/attribution/summary`

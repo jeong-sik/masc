@@ -167,6 +167,12 @@ check_http "activity swimlane 200" "$BASE/api/v1/activity/swimlane" "200"
 check_json "activity swimlane exposes spans" "$BASE/api/v1/activity/swimlane" "'spans' in d and 'agents' in d" '^True$'
 check_http "telemetry summary 200" "$BASE/api/v1/dashboard/telemetry/summary" "200"
 check_json "telemetry summary has sources" "$BASE/api/v1/dashboard/telemetry/summary" "'sources' in d" '^True$'
+check_http "telemetry entries 200" "$BASE/api/v1/dashboard/telemetry?source=oas_event&n=5" "200"
+check_json "telemetry entries exposes replay envelope" "$BASE/api/v1/dashboard/telemetry?source=oas_event&n=5" "'entries' in d and 'total_matching_entries' in d and 'truncated' in d" '^True$'
+check_http "oas telemetry recent 200" "$BASE/api/v1/dashboard/oas/telemetry/recent?limit=5" "200"
+check_json "oas telemetry recent exposes provenance" "$BASE/api/v1/dashboard/oas/telemetry/recent?limit=5" "'samples' in d and 'dashboard_surface' in d and 'retention' in d" '^True$'
+check_http "oas telemetry summary 200" "$BASE/api/v1/dashboard/oas/telemetry/summary?limit=5" "200"
+check_json "oas telemetry summary exposes provenance" "$BASE/api/v1/dashboard/oas/telemetry/summary?limit=5" "'summary' in d and 'dashboard_surface' in d and 'retention' in d" '^True$'
 check_http "cascade health 200" "$BASE/api/v1/cascade/health" "200"
 check_json "cascade health exposes providers" "$BASE/api/v1/cascade/health" "'providers' in d" '^True$'
 check_http "cascade strategy trace 200" "$BASE/api/v1/cascade/strategy_trace?limit=1" "200"

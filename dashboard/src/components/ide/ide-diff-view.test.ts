@@ -215,12 +215,34 @@ describe('diff preview chrome', () => {
       .toBe('Diff context: Task line 4, task task-runtime, 2 route links')
     expect(focus?.textContent).toContain('Task')
     expect(focus?.textContent).toContain('L4')
-    expect(container.querySelectorAll('[data-context-focus="true"]')).toHaveLength(2)
+    const focusedRows = container.querySelectorAll<HTMLElement>('[data-context-focus="true"]')
+    expect(focusedRows).toHaveLength(2)
+    expect(focusedRows[0]?.getAttribute('style')).toContain('inset 3px 0 0 var(--color-accent-fg)')
 
     const telemetry = [...container.querySelectorAll<HTMLButtonElement>('.ide-diff-context-links button')]
       .find(button => button.textContent === 'Telemetry')
     fireEvent.click(telemetry!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
+  })
+
+  it('renders the focused split diff row with the same visible rail', () => {
+    render(SplitDiffView([
+      row('delete', 4, null, 'old value'),
+      row('add', null, 4, 'new value'),
+      row('context', 5, 5, 'same value'),
+    ], {
+      file_path: 'lib/runtime.ml',
+      line: 4,
+      surface: 'PR',
+      label: 'PR 15035',
+      source_id: 'event-2',
+      activated_at_ms: Date.now(),
+      route_links: [],
+    }), container)
+
+    const focusedRows = container.querySelectorAll<HTMLElement>('[data-context-focus="true"]')
+    expect(focusedRows).toHaveLength(1)
+    expect(focusedRows[0]?.getAttribute('style')).toContain('inset 3px 0 0 var(--color-accent-fg)')
   })
 
   it('renders split empty state instead of a blank pane', () => {

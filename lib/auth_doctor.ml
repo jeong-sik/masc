@@ -84,35 +84,14 @@ let status_to_string = function
   | Warn -> "warn"
   | Error -> "error"
 
-let codex_mcp_token_env_var = "MASC_MCP_TOKEN"
+let codex_mcp_spec, _codex_mcp_config_sync =
+  Local_mcp_client_catalog.primary_config_sync_client ()
 
 let codex_mcp_login_note =
-  "`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth."
+  Option.value ~default:"masc-mcp uses bearer token auth."
+    codex_mcp_spec.login_note
 
-type mcp_client_spec = {
-  client_name : string;
-  agent_name : string;
-  token_env_var : string;
-}
-
-let mcp_client_specs =
-  [
-    {
-      client_name = "codex";
-      agent_name = "codex-mcp-client";
-      token_env_var = codex_mcp_token_env_var;
-    };
-    {
-      client_name = "claude";
-      agent_name = "claude";
-      token_env_var = "MASC_CLAUDE_MCP_TOKEN";
-    };
-    {
-      client_name = "gemini";
-      agent_name = "gemini";
-      token_env_var = "MASC_GEMINI_MCP_TOKEN";
-    };
-  ]
+let mcp_client_specs = Local_mcp_client_catalog.all
 
 let canonicalize_path path =
   try Unix.realpath path with
@@ -174,14 +153,8 @@ let watched_agent_of_credential ~auth_dir agent_name credential_opt =
       }
 
 let watched_agent_names ~initial_admin admin_token_env_agent =
-  [
-    Some "codex";
-    Some "codex-mcp-client";
-    Some "dashboard-dev";
-    Some "admin";
-    initial_admin;
-    admin_token_env_agent;
-  ]
+  List.map (fun name -> Some name) (Local_mcp_client_catalog.agent_names ())
+  @ [ Some "dashboard-dev"; Some "admin"; initial_admin; admin_token_env_agent ]
   |> List.filter_map Fun.id
   |> dedupe_keep_order
 
@@ -259,19 +232,19 @@ let admin_bearer_sources ~base_path ~auth_dir ~dashboard_dev_token_available
 let codex_mcp_report ~base_path =
   let config = Codex_mcp_config_doctor.analyze_default () in
   match
-    Sys.getenv_opt codex_mcp_token_env_var |> Env_config_core.trim_opt
+    Sys.getenv_opt codex_mcp_spec.token_env_var |> Env_config_core.trim_opt
   with
   | None ->
       {
-        server_name = "masc";
+        server_name = codex_mcp_spec.server_name;
         auth_model = "bearer_token_env";
-        token_env_var = codex_mcp_token_env_var;
+        token_env_var = codex_mcp_spec.token_env_var;
         token_env_configured = false;
         token_status = "unset";
         token_agent = None;
         token_role = None;
         token_can_read_state = None;
-        login_supported = false;
+        login_supported = codex_mcp_spec.login_supported;
         login_note = codex_mcp_login_note;
         config;
       }
@@ -279,36 +252,37 @@ let codex_mcp_report ~base_path =
       match Auth.find_credential_by_token base_path ~token:raw_token with
       | Ok cred ->
           {
-            server_name = "masc";
+            server_name = codex_mcp_spec.server_name;
             auth_model = "bearer_token_env";
-            token_env_var = codex_mcp_token_env_var;
+            token_env_var = codex_mcp_spec.token_env_var;
             token_env_configured = true;
             token_status = "live";
             token_agent = Some cred.agent_name;
             token_role = Some (agent_role_to_string cred.role);
             token_can_read_state =
               Some (has_permission cred.role CanReadState);
-            login_supported = false;
+            login_supported = codex_mcp_spec.login_supported;
             login_note = codex_mcp_login_note;
             config;
           }
       | Error _ ->
           {
-            server_name = "masc";
+            server_name = codex_mcp_spec.server_name;
             auth_model = "bearer_token_env";
-            token_env_var = codex_mcp_token_env_var;
+            token_env_var = codex_mcp_spec.token_env_var;
             token_env_configured = true;
             token_status = "invalid_or_expired";
             token_agent = None;
             token_role = None;
             token_can_read_state = None;
-            login_supported = false;
+            login_supported = codex_mcp_spec.login_supported;
             login_note = codex_mcp_login_note;
             config;
           })
 
 let mcp_client_report ~base_path ~auth_dir
-    ({ client_name; agent_name; token_env_var } : mcp_client_spec) =
+    ({ client_name; agent_name; token_env_var; _ } :
+      Local_mcp_client_catalog.spec) =
   let token_file_path = raw_token_file_path ~auth_dir agent_name in
   let credential_opt = Auth.load_credential base_path agent_name in
   let raw_token_file_present = file_exists token_file_path in
@@ -430,9 +404,20 @@ let analyze ~base_path_input ~default_base_path () =
              (Auth.load_credential base_path agent_name))
   in
   let admin_permission = show_permission CanAdmin in
-  let codex = Auth.load_credential base_path "codex" in
-  let codex_mcp_client =
-    Auth.load_credential base_path "codex-mcp-client"
+  let config_sync_client = codex_mcp_spec in
+  let admin_warning_agents =
+    config_sync_client.agent_name :: config_sync_client.legacy_agent_names
+  in
+  let admin_warning_for_agent agent_name =
+    match Auth.load_credential base_path agent_name with
+    | Some cred when not (has_permission cred.role CanAdmin) ->
+        Some
+          (Printf.sprintf
+             "%s is role=%s, so requests authenticated as %s cannot satisfy %s."
+             agent_name
+             (agent_role_to_string cred.role)
+             agent_name admin_permission)
+    | Some _ | None -> None
   in
   let warnings =
     [
@@ -467,21 +452,6 @@ let analyze ~base_path_input ~default_base_path () =
            "No usable admin bearer source was detected for token-bound admin HTTP mutation routes."
        else
          None);
-      (match codex with
-       | Some cred when not (has_permission cred.role CanAdmin) ->
-           Some
-             (Printf.sprintf
-                "codex is role=%s, so requests authenticated as codex cannot satisfy %s."
-                (agent_role_to_string cred.role)
-                admin_permission)
-       | _ -> None);
-      (match codex_mcp_client with
-       | Some cred when not (has_permission cred.role CanAdmin) ->
-           Some
-             (Printf.sprintf
-                "codex-mcp-client is role=%s, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/cascade/config/raw."
-                (agent_role_to_string cred.role))
-       | _ -> None);
       (if not dashboard_dev_token_available then
          Some
            "Dashboard dev-token bootstrap is unavailable because the bind host is non-loopback or HTTP strict auth is enabled."
@@ -491,10 +461,18 @@ let analyze ~base_path_input ~default_base_path () =
          match codex_mcp.token_status with
          | "unset" ->
              Some
-               "Codex MCP bearer env var MASC_MCP_TOKEN is unset; Codex should use bearer_token_env_var, not `codex mcp login`."
+               (Printf.sprintf
+                  "%s MCP bearer env var %s is unset; %s should use bearer_token_env_var, not `%s mcp login`."
+                  (String.capitalize_ascii config_sync_client.client_name)
+                  config_sync_client.token_env_var
+                  (String.capitalize_ascii config_sync_client.client_name)
+                  config_sync_client.client_name)
          | "invalid_or_expired" ->
              Some
-               "Codex MCP bearer env var MASC_MCP_TOKEN is set, but it does not resolve to a live credential in this base path."
+               (Printf.sprintf
+                  "%s MCP bearer env var %s is set, but it does not resolve to a live credential in this base path."
+                  (String.capitalize_ascii config_sync_client.client_name)
+                  config_sync_client.token_env_var)
          | "live" -> None
          | _ -> None
        else
@@ -503,6 +481,7 @@ let analyze ~base_path_input ~default_base_path () =
     |> List.filter_map Fun.id
     |> (fun values ->
          values
+         @ List.filter_map admin_warning_for_agent admin_warning_agents
          @ List.filter_map mcp_client_warning mcp_clients
          @ Codex_mcp_config_doctor.warnings codex_mcp.config)
     |> dedupe_keep_order
@@ -524,11 +503,13 @@ let analyze ~base_path_input ~default_base_path () =
        else
          None);
       (if auth_cfg.enabled && auth_cfg.require_token
-          && (match codex_mcp_client with
+          && (match Auth.load_credential base_path config_sync_client.agent_name with
               | Some cred -> not (has_permission cred.role CanAdmin)
               | None -> false) then
          Some
-           "Use dashboard-dev or another admin bearer for POST /api/v1/cascade/config/raw; the codex-mcp-client worker bearer cannot satisfy CanAdmin."
+           (Printf.sprintf
+              "Use dashboard-dev or another admin bearer for POST /api/v1/cascade/config/raw; the %s worker bearer cannot satisfy CanAdmin."
+              config_sync_client.agent_name)
        else
          None);
       (if auth_cfg.enabled && auth_cfg.require_token
@@ -546,10 +527,17 @@ let analyze ~base_path_input ~default_base_path () =
       (if auth_cfg.enabled && auth_cfg.require_token
           && not (String.equal codex_mcp.token_status "live") then
          Some
-           "For Codex MCP, run `masc-mcp login --agent codex-mcp-client --role worker --shell` and export MASC_MCP_TOKEN; do not run `codex mcp login masc`."
+           (Printf.sprintf
+              "For %s MCP, run `masc-mcp login --agent %s --role worker --shell` and export %s; do not run `%s mcp login %s`."
+              (String.capitalize_ascii config_sync_client.client_name)
+              config_sync_client.agent_name config_sync_client.token_env_var
+              config_sync_client.client_name config_sync_client.server_name)
        else
          None);
-      Some "For Codex MCP pipeline drift, inspect the codex_mcp.config.stages section from `masc-mcp doctor auth --json`.";
+      Some
+        (Printf.sprintf
+           "For %s MCP pipeline drift, inspect the codex_mcp.config.stages section from `masc-mcp doctor auth --json`."
+           (String.capitalize_ascii config_sync_client.client_name));
       Some "Rerun `masc-mcp doctor auth` after editing auth files or rotating tokens.";
     ]
     |> List.filter_map Fun.id

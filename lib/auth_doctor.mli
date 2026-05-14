@@ -5,9 +5,8 @@
     that is rendered as JSON ({!to_yojson}) or human text
     ({!render_text}) and graded by {!exit_code} for CLI use.
 
-    Internal: ~16 helpers + 1 type stay private —
-    \[admin_token_env_state] enum, [codex_mcp_token_env_var] /
-    [codex_mcp_login_note] pinned literals,
+    Internal helpers stay private —
+    \[admin_token_env_state] enum, MCP client catalog lookup,
     [canonicalize_path] / [file_exists] / [read_nonempty_text_file]
     file-system helpers, [dedupe_keep_order], [option_field],
     [raw_token_file_path], [watched_agent_of_credential],
@@ -57,9 +56,8 @@ type codex_mcp = {
   login_note : string;
   config : Codex_mcp_config_doctor.t;
 }
-(** Codex MCP wiring snapshot.  [login_note] documents that
-    [codex mcp login] is OAuth-only while masc-mcp uses bearer
-    token auth — pinned at the contract seam. *)
+(** MCP wiring snapshot for the compatibility [codex_mcp] report block.
+    Values are catalog-backed; [login_note] remains operator-visible. *)
 
 type mcp_client = {
   client_name : string;
@@ -76,8 +74,8 @@ type mcp_client = {
   token_can_read_state : bool option;
   identity_ready : bool;
 }
-(** Per-client MCP identity readiness for local Codex/Claude/Gemini
-    bearer-token wiring.  [token_source] is ["env"], ["token_file"],
+(** Per-client MCP identity readiness for cataloged local MCP clients.
+    [token_source] is ["env"], ["token_file"],
     or ["missing"]; [token_status] is ["live"], ["wrong_agent"],
     ["invalid_or_expired"], or ["missing"]. *)
 
@@ -132,8 +130,8 @@ val analyze :
     + Each registered agent credential -> {!watched_agent} row.
     + Admin-token env-var status + admin-bearer source
       enumeration ([admin_bearer_sources]).
-    + Codex MCP config via {!Codex_mcp_config_doctor}.
-    + Local MCP client identities for Codex, Claude, and Gemini.
+    + MCP config via {!Codex_mcp_config_doctor}'s compatibility report.
+    + Local MCP client identities from {!Local_mcp_client_catalog}.
 
     Side-effecting (file reads); pure with respect to the
     process registry — does not mutate auth state. *)

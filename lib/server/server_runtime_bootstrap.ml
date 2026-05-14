@@ -676,8 +676,14 @@ let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   Log.Server.info
     "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
 
-let sync_codex_mcp_config_env_key = "MASC_SYNC_CODEX_MCP_CONFIG"
-let codex_config_path_env_key = "MASC_CODEX_CONFIG_PATH"
+let codex_mcp_client_spec, codex_mcp_config_sync =
+  Local_mcp_client_catalog.primary_config_sync_client ()
+
+let sync_codex_mcp_config_env_key =
+  codex_mcp_config_sync.enabled_env_var
+
+let codex_config_path_env_key =
+  codex_mcp_config_sync.config_path_env_var
 
 type codex_mcp_config_sync_status =
   | Codex_mcp_config_updated
@@ -759,11 +765,12 @@ let is_authorization_header_binding trimmed =
 
 let codex_mcp_headers_line indent =
   Printf.sprintf
-    "%shttp_headers = { \"Accept\" = \"application/json, text/event-stream\", \"X-MASC-Agent\" = \"codex-mcp-client\" }"
-    indent
+    "%shttp_headers = { \"Accept\" = \"application/json, text/event-stream\", \"X-MASC-Agent\" = \"%s\" }"
+    indent codex_mcp_client_spec.agent_name
 
 let codex_mcp_bearer_env_line indent =
-  Printf.sprintf "%sbearer_token_env_var = \"MASC_MCP_TOKEN\"" indent
+  Printf.sprintf "%sbearer_token_env_var = \"%s\"" indent
+    codex_mcp_client_spec.token_env_var
 
 let sync_codex_mcp_auth_header_content content =
   let lines, has_trailing_newline =
@@ -871,7 +878,9 @@ let codex_config_path_opt () =
   | Some path -> Some path
   | None ->
       Option.map
-        (fun home -> Filename.concat home ".codex/config.toml")
+        (fun home ->
+          List.fold_left Filename.concat home
+            codex_mcp_config_sync.default_config_path_segments)
         (Env_config_core.home_dir_opt ())
 
 let sync_codex_mcp_config ~agent_name =
@@ -999,17 +1008,15 @@ let sync_client_token_file ~base_path ~agent_name ~role =
                normalize_existing raw_token cred
            | _ -> create_and_persist ~reason:"repaired"))
    | None -> create_and_persist ~reason:"created");
-  if String.equal agent_name "codex-mcp-client" then
+  if Option.is_some (Local_mcp_client_catalog.config_sync_for_agent agent_name)
+  then
     sync_codex_mcp_config ~agent_name
 
 let sync_mcp_client_token_files ~base_path =
-  [
-    ("codex-mcp-client", Masc_domain.Worker);
-    ("claude", Masc_domain.Worker);
-    ("gemini", Masc_domain.Worker);
-  ]
-  |> List.iter (fun (agent_name, role) ->
-         sync_client_token_file ~base_path ~agent_name ~role)
+  Local_mcp_client_catalog.all
+  |> List.iter (fun (spec : Local_mcp_client_catalog.spec) ->
+         sync_client_token_file ~base_path ~agent_name:spec.agent_name
+           ~role:Masc_domain.Worker)
 
 let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   let base_path = state.Mcp_server.room_config.base_path in

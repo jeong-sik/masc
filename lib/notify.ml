@@ -178,16 +178,12 @@ let escape_applescript s =
   Buffer.contents buf
 
 (** Agent emoji mapping for visual distinction.
-    Use {!register_agent_emoji} at startup to add provider-specific entries
-    without modifying this file. *)
+    Provider-specific entries are runtime registrations; this module keeps
+    only non-provider defaults. *)
 let agent_emoji_table : (string, string) Hashtbl.t =
   let t = Hashtbl.create 8 in
   List.iter (fun (k, v) -> Hashtbl.replace t k v)
-    [ ("claude", "🟣");
-      ("gemini", "🔵");
-      ("codex",  "🟢");
-      ("llama",  "🦙");
-      ("system", "⚙️") ];
+    [ ("system", "⚙️") ];
   t
 
 (** Register an agent-name → emoji mapping at startup.

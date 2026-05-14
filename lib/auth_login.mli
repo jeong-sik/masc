@@ -14,7 +14,7 @@
        {!render_text}).
 
     All internal helpers (URL encoding, shell quoting, RNG init,
-    config-flip, token persistence, hard-coded codex constants) stay
+    config-flip, token persistence, MCP client catalog lookup) stay
     private — the four entry points cover every documented [masc-mcp
     login] consumer (CLI, JSON API, shell-export). *)
 
@@ -55,15 +55,11 @@ type t = {
       written to [raw_token_file] (operator-readable, mode 0600).
     - [dashboard_url] always carries [agent] + [token] query params,
       both URL-encoded.
-    - [mcp_token_env_var] is the client-specific bearer env var for
-      known MCP clients ([claude] -> [MASC_CLAUDE_MCP_TOKEN],
-      [gemini] -> [MASC_GEMINI_MCP_TOKEN], Codex ->
-      [MASC_MCP_TOKEN]).
-    - [codex_server_name] is the constant [["masc"]] and
-      [codex_token_env_var] is [["MASC_MCP_TOKEN"]]; both pinned at
-      this level so the operator runbook for `codex` integration
-      surfaces them through the login output rather than via runtime
-      string lookup.
+    - [mcp_token_env_var] is the client-specific bearer env var from
+      {!Local_mcp_client_catalog}.
+    - [codex_server_name] and [codex_token_env_var] are compatibility
+      fields for older callers that still read the [codex_mcp] block;
+      their values come from {!Local_mcp_client_catalog}.
     - [codex_login_supported] is currently always [false] —
       {!render_text} explains the OAuth-only `codex mcp login` and
       directs operators to the bearer-token export instead. *)

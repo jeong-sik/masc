@@ -69,7 +69,7 @@ val startup_prune_keeper_checkpoints : Mcp_server.server_state -> unit
 val startup_migrate_keeper_histories : Mcp_server.server_state -> unit
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
 
-(** {2 Codex MCP Client Auth} *)
+(** {2 MCP Client Auth Config Sync} *)
 
 type codex_mcp_config_sync_status =
   | Codex_mcp_config_updated
@@ -80,8 +80,9 @@ type codex_mcp_config_sync_status =
 val sync_codex_mcp_auth_header_content :
   string -> string * codex_mcp_config_sync_status
 (** [sync_codex_mcp_auth_header_content content] rewrites the TOML
-    content of a Codex config file to produce the canonical
-    [[mcp_servers.masc]] shape:
+    content of the cataloged config-sync MCP client to produce the
+    canonical [[mcp_servers.masc]] shape.  The function name is kept
+    for compatibility with existing tests and scripts.
 
     - Replaces any [http_headers = \{ ... \}] binding with the
       canonical Accept + X-MASC-Agent form (removing any hardcoded

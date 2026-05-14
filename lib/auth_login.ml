@@ -23,17 +23,12 @@ type t = {
 
 let codex_server_name = "masc"
 
-let codex_token_env_var = "MASC_MCP_TOKEN"
+let codex_token_env_var = Local_mcp_client_catalog.default_token_env_var
 
-let mcp_token_env_var_for_agent = function
-  | "claude" -> "MASC_CLAUDE_MCP_TOKEN"
-  | "gemini" -> "MASC_GEMINI_MCP_TOKEN"
-  | "codex" | "codex-mcp-client" -> codex_token_env_var
-  | _ -> codex_token_env_var
+let mcp_token_env_var_for_agent =
+  Local_mcp_client_catalog.token_env_var_for_agent
 
-let is_local_mcp_client_agent = function
-  | "claude" | "gemini" | "codex" | "codex-mcp-client" -> true
-  | _ -> false
+let is_local_mcp_client_agent = Local_mcp_client_catalog.registered_agent
 
 let rng_initialized = Atomic.make false
 
@@ -124,7 +119,7 @@ let mint ~base_path ~host ~port ~agent_name ~role () =
               dashboard_url;
               mcp_url;
               mcp_token_env_var = mcp_token_env_var_for_agent cred.agent_name;
-              codex_server_name;
+              codex_server_name = Local_mcp_client_catalog.default_server_name;
               codex_token_env_var;
               codex_login_supported = false;
             })

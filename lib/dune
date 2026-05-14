@@ -110,6 +110,7 @@
    keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status
+  local_mcp_client_catalog
   provider_tool_support
   voice_runtime_overlay
   keeper_status_detail

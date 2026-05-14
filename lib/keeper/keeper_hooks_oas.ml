@@ -736,6 +736,7 @@ let assemble_cost_event_payload
       ~output_tokens
       ~cost_usd
   in
+  let default_safe_cost_usd = 0.0
   let safe_cost_usd =
     match cost_status with
     | Cost_reported -> cost_usd
@@ -744,7 +745,7 @@ let assemble_cost_event_payload
     | Cost_usage_missing
     | Cost_usage_untrusted
     | Cost_runtime_unknown
-    | Cost_oas_cost_unreported -> 0.0
+    | Cost_oas_cost_unreported -> default_safe_cost_usd
   in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in

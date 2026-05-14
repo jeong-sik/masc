@@ -584,6 +584,12 @@ function DecisionCard(
   const cursor = overlay.cursors.get(keeper)
   const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
   const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
+  const routeLinks = decisionRouteLinks(
+    item,
+    hasFocus ? cursor.file_path : undefined,
+    hasFocus ? cursor.line : undefined,
+    summary,
+  )
   return html`
     <li style=${{ display: 'block' }}>
       <div
@@ -640,13 +646,51 @@ function DecisionCard(
           title=${cursor.file_path}
           >↗ ${focusFile}:${cursor.line}</span>
         ` : null}
+        ${routeLinks.length > 0 ? html`
+          <div class="ide-conversation-route-links" aria-label="Decision operational links">
+            ${routeLinks.map(link => ConversationRouteLink(link))}
+          </div>
+        ` : null}
       </div>
     </li>
   `
 }
 
+function decisionRouteLinks(
+  item: Extract<ReplayRailItem, { source: 'decision' }>,
+  filePath: string | undefined,
+  line: number | undefined,
+  summary: string,
+): ReadonlyArray<IdeContextRouteLink> {
+  const decision = item.decision
+  const keeper = decision.keeper_name || 'keeper'
+  return routeLinksForContext({
+    filePath,
+    line,
+    surface: 'Decision',
+    label: summary || decision.event_type || 'decision event',
+    sourceId: `decision-${keeper}-${item.timestamp_ms}-${decision.event_type}`,
+    keeperId: keeper,
+    telemetry: true,
+    telemetryQuery: decisionTelemetryQuery(decision, item.timestamp_ms),
+  })
+}
+
+function decisionTelemetryQuery(decision: KeeperDecision, timestampMs: number): string {
+  return compactRouteQuery([
+    'decision',
+    `keeper:${decision.keeper_name || 'keeper'}`,
+    decision.event_type ? `event:${decision.event_type}` : null,
+    decision.outcome ? `outcome:${decision.outcome}` : null,
+    decision.tool ? `tool:${decision.tool}` : null,
+    decision.model_used ? `model:${decision.model_used}` : null,
+    Number.isFinite(timestampMs) ? `ts:${Math.floor(timestampMs / 1000)}` : null,
+  ])
+}
+
 function CascadeCard(item: Extract<ReplayRailItem, { source: 'cascade' }>) {
   const event = item.cascade
+  const routeLinks = cascadeRouteLinks(item)
   return html`
     <li style=${{ display: 'block' }}>
       <div
@@ -669,9 +713,42 @@ function CascadeCard(item: Extract<ReplayRailItem, { source: 'cascade' }>) {
         <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>
           ${event.strategy} · ${event.kind} · ${event.candidates_in}->${event.candidates_out}
         </p>
+        ${routeLinks.length > 0 ? html`
+          <div class="ide-conversation-route-links" aria-label="Cascade operational links">
+            ${routeLinks.map(link => ConversationRouteLink(link))}
+          </div>
+        ` : null}
       </div>
     </li>
   `
+}
+
+function cascadeRouteLinks(
+  item: Extract<ReplayRailItem, { source: 'cascade' }>,
+): ReadonlyArray<IdeContextRouteLink> {
+  const event = item.cascade
+  return routeLinksForContext({
+    surface: 'Cascade',
+    label: `${event.cascade_name} ${event.kind}`,
+    sourceId: `cascade-${event.cascade_name}-${event.cycle}-${item.timestamp_ms}`,
+    telemetry: true,
+    telemetryQuery: cascadeTelemetryQuery(event, item.timestamp_ms),
+  })
+}
+
+function cascadeTelemetryQuery(event: CascadeStrategyTraceEvent, timestampMs: number): string {
+  return compactRouteQuery([
+    'cascade',
+    event.cascade_name,
+    `strategy:${event.strategy}`,
+    `cycle:${event.cycle}`,
+    `kind:${event.kind}`,
+    Number.isFinite(timestampMs) ? `ts:${Math.floor(timestampMs / 1000)}` : null,
+  ])
+}
+
+function compactRouteQuery(values: ReadonlyArray<string | null>): string {
+  return values.filter((value): value is string => Boolean(value)).join(' ')
 }
 
 function formatThreadTime(ms: number): string {

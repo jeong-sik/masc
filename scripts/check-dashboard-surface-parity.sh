@@ -126,6 +126,16 @@ def parse_navigation_contract() -> list[dict[str, object]]:
         "{",
         "}",
     )
+    redirects_block = extract_balanced_block(
+        nav_text,
+        "export const SECTION_REDIRECTS",
+        "{",
+        "}",
+    )
+    redirect_only_sections = {
+        (surface, section)
+        for surface, section in re.findall(r"'([^']+):([^']+)'\s*:", redirects_block)
+    }
 
     def exposure_for(tab: str, hidden: bool) -> str:
         if hidden:
@@ -144,6 +154,8 @@ def parse_navigation_contract() -> list[dict[str, object]]:
         for obj in split_top_level_objects(tab_block):
             hidden = re.search(r"hidden:\s*true", obj) is not None
             section_id = extract_string(r"id:\s*'([^']+)'", obj, label=f"{tab} id")
+            if (tab, section_id) in redirect_only_sections:
+                continue
             label = extract_string(r"label:\s*'([^']+)'", obj, label=f"{tab}.{section_id} label")
             tab_entries.append(
                 {

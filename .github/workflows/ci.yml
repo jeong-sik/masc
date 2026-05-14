@@ -575,8 +575,12 @@ jobs:
           fi
 
       - name: Install eio-trace
+        continue-on-error: true
         run: |
-          opam install -y eio-trace || echo "eio-trace install skipped"
+          # Diagnostic-only. Avoid opam depexts here: GTK/cairo system
+          # packages can consume the step before the quick suite runs.
+          timeout 45s opam install -y --no-depexts eio-trace \
+            || echo "::warning::eio-trace install skipped"
 
       - name: Run tests (quick suite)
         id: quick_suite

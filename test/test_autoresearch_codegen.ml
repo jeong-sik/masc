@@ -20,7 +20,7 @@ let latest_log_seq () =
 let autoresearch_warnings_since seq =
   Log.Ring.recent ~limit:20 ~module_filter:"Autoresearch" ~since_seq:seq ()
   |> List.filter (fun (entry : Log.Ring.entry) ->
-       String.equal entry.normalized_level "WARN")
+       entry.level = Log.Warn)
 
 (* ------------------------------------------------------------------ *)
 (* has_background_capacity: fail-safe + noisy contract (#9537)         *)

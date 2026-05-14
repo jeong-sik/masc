@@ -2284,18 +2284,10 @@ let init () =
        masc_llm_inference_duration_seconds (turn-scope) — this fires per provider HTTP \
        call regardless of keeper hook health. Labels: provider, model."
     ();
-  register_histogram
-    ~name:metric_llm_provider_streaming_first_chunk
-    ~help:
-      "Time from streaming provider request start to first parsed response chunk from \
-       OAS on_streaming_first_chunk callback. Labels: provider, model."
-    ();
-  register_histogram
-    ~name:metric_llm_provider_streaming_inter_chunk
-    ~help:
-      "Inter-chunk gap during provider streaming from OAS on_streaming_chunk callback. \
-       Labels: provider, model."
-    ();
+  register_histogram ~name:metric_llm_provider_streaming_first_chunk
+    ~help:"OAS streaming time to first parsed chunk. Labels: provider, model." ();
+  register_histogram ~name:metric_llm_provider_streaming_inter_chunk
+    ~help:"OAS streaming inter-chunk gap. Labels: provider, model." ();
   (* Process-level resource gauges.  Sampled on every /metrics scrape via
      [update_fd_gauges] so a monotonic ramp (fd leak) is visible in the
      time series before it crosses the OS limit and crashes the server.

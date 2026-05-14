@@ -101,7 +101,8 @@ let test_record_writes_audit_ring_and_telemetry () =
         | row :: _ -> row
         | [] -> fail "expected ring entry"
       in
-      check string "ring source" "client_tool_host" latest.source;
+      check string "ring source" "client_tool_host"
+        (Log.source_to_string latest.source);
       check string "ring module" "ToolHost" latest.module_name;
       check bool "ring details object" true
         (match latest.details with `Assoc _ -> true | _ -> false);

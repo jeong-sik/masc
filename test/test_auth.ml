@@ -695,12 +695,11 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
       check bool "canonical credential remains" true
         (Sys.file_exists canonical_path))
 
-(* PR-3b2: bare-form file may also be a redirect stub (PR #10440
-   pattern -- {"redirect_to": "<uuid>.json"}) rather than a direct
-   credential. After PR-3b1 starvation, even redirect stubs are dead
-   references. The generalised archive_bare_for_canonical archives
-   them too. This is the production shape for all 8 keepers in
-   ~/.masc/auth/agents/ as of 2026-04-27. *)
+(* PR-3b2: a bare-form file that is a redirect stub aiming at a UUID
+   *different* from the canonical credential's UUID is an orphan and
+   must be archived. Under γ (ping-pong fix 2026-05-14) this case is
+   still archived; only the alive-alias case
+   (test_archive_bare_skips_alive_alias) survives. *)
 let test_ensure_keeper_credential_archives_redirect_stub_bare () =
   let dir = setup_test_room () in
   Fun.protect
@@ -743,6 +742,99 @@ let test_ensure_keeper_credential_no_archive_when_no_bare () =
       let archive = archive_dir_of dir in
       check bool "no archive directory created on clean state" false
         (Sys.file_exists archive))
+
+(* γ regression guard (ping-pong fix 2026-05-14): when the bare-form
+   file is a legitimate short-form alias written by
+   ensure_credential_alias (#10440) -- i.e. a redirect stub pointing
+   to the *same* UUID file as the canonical credential -- the boot
+   sweep must keep it. Without this, every boot archives the alias
+   and the alias writer immediately re-creates it, producing the
+   331-epoch .archive/ accumulation observed on prod 2026-05-14. *)
+let test_archive_bare_skips_alive_alias () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-sangsu-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      (match
+         Auth.ensure_credential_alias dir
+           ~canonical_name:"keeper-sangsu-agent"
+           ~alias_name:"sangsu"
+       with
+       | Ok () -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      let bare_path = Auth.credential_file dir "sangsu" in
+      check bool "alias written by ensure_credential_alias" true
+        (Sys.file_exists bare_path);
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-sangsu-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      check bool "alive alias survives second boot" true
+        (Sys.file_exists bare_path);
+      check bool "alive alias NOT archived" false
+        (archive_contains dir "sangsu.json"))
+
+let test_prune_archive_retains_recent_and_drops_old () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let archive_root = Filename.concat (Auth.auth_dir dir) ".archive" in
+      Fs_compat.mkdir_p archive_root;
+      let now = int_of_float (Unix.gettimeofday ()) in
+      let make_epoch epoch =
+        let path = Filename.concat archive_root (string_of_int epoch) in
+        Fs_compat.mkdir_p path;
+        Auth.save_private_text_file
+          (Filename.concat path "victim.json") "{}";
+        path
+      in
+      let recent = make_epoch (now - (2 * 86400)) in
+      let aged = make_epoch (now - (60 * 86400)) in
+      let kept, pruned =
+        Auth.prune_archive ~base_path:dir ~retention_days:30 ~min_keep:1
+      in
+      check bool "recent epoch dir survives" true (Sys.file_exists recent);
+      check bool "aged epoch dir pruned" false (Sys.file_exists aged);
+      check int "kept count" 1 kept;
+      check int "pruned count" 1 pruned)
+
+let test_prune_archive_honors_min_keep () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let archive_root = Filename.concat (Auth.auth_dir dir) ".archive" in
+      Fs_compat.mkdir_p archive_root;
+      let now = int_of_float (Unix.gettimeofday ()) in
+      let aged_paths =
+        List.init 3 (fun i ->
+          let epoch = now - (60 * 86400) - i in
+          let path = Filename.concat archive_root (string_of_int epoch) in
+          Fs_compat.mkdir_p path;
+          path)
+      in
+      let kept, pruned =
+        Auth.prune_archive ~base_path:dir ~retention_days:30 ~min_keep:5
+      in
+      List.iter
+        (fun p ->
+          check bool "aged dir retained because of min_keep" true
+            (Sys.file_exists p))
+        aged_paths;
+      check int "all aged kept (under min_keep)" 3 kept;
+      check int "nothing pruned" 0 pruned)
 
 let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched () =
   let dir = setup_test_room () in
@@ -1120,6 +1212,12 @@ let () =
         test_ensure_keeper_credential_archives_redirect_stub_bare;
       test_case "ensure_keeper_credential no archive on clean state" `Quick
         test_ensure_keeper_credential_no_archive_when_no_bare;
+      test_case "archive_bare skips alive alias (γ)" `Quick
+        test_archive_bare_skips_alive_alias;
+      test_case "prune_archive drops aged epoch dirs" `Quick
+        test_prune_archive_retains_recent_and_drops_old;
+      test_case "prune_archive honors min_keep" `Quick
+        test_prune_archive_honors_min_keep;
     ];
     "permissions", [
       test_case "worker permissions" `Quick test_worker_permissions;

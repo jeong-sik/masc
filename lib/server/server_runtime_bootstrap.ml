@@ -1235,6 +1235,37 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
      Log.Misc.warn "startup checkpoint prune failed: %s (next boot retries)"
        (Printexc.to_string exn))
 
+let startup_prune_auth_archive (state : Mcp_server.server_state) =
+  (try
+     let days =
+       Safe_ops.get_env_int_logged
+         "MASC_AUTH_ARCHIVE_RETENTION_DAYS"
+         ~default:30
+     in
+     let min_keep =
+       Safe_ops.get_env_int_logged
+         "MASC_AUTH_ARCHIVE_MIN_KEEP"
+         ~default:20
+     in
+     let kept, pruned =
+       Auth.prune_archive
+         ~base_path:state.room_config.base_path
+         ~retention_days:days
+         ~min_keep
+     in
+     if pruned > 0 then
+       Log.Misc.info
+         "startup auth archive prune: pruned=%d kept=%d (retention=%dd \
+          min_keep=%d)"
+         pruned kept days min_keep
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Misc.warn
+       "startup auth archive prune failed: %s (next boot retries; disk \
+        impact bounded by retention)"
+       (Printexc.to_string exn))
+
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
   (try
      let traces_dir =
@@ -1571,6 +1602,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("jsonl_prune", fun () -> startup_prune_jsonl state);
           ( "keeper_checkpoint_prune",
             fun () -> startup_prune_keeper_checkpoints state );
+          ( "auth_archive_prune",
+            fun () -> startup_prune_auth_archive state );
           (* keeper_bootstrap removed: keeper_autoboot subsystem in
              start_keeper_loops handles this in a dedicated fiber,
              avoiding bootstrap contention with dashboard refresh loops. *)

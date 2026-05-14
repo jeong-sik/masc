@@ -1059,33 +1059,113 @@ let archive_credential_file config ~agent_name ~reason =
 
 (* Boot self-heal of bare-form keeper credential files.
 
-   PR-3a (#11146) introduced this as a dual-identity guard, archiving
-   only the case where the bare file's token differed from the
-   canonical's. After PR-3b1 (#11152) starved the runtime caller
-   (lib/tool_coord.ml now asks for the canonical form via
-   Keeper_runtime.canonicalize_if_keeper), every bare-form file is a
-   dead reference at runtime regardless of its shape:
+   Three policies cross this code path:
 
-     - direct credential, different token  -> dual-identity (3a case)
-     - direct credential, same token       -> redundant alias
-     - redirect stub to canonical's UUID   -> unused after starvation
+     PR-3a (#11146)   archive bare when token differs from canonical
+                      (dual-identity guard).
+     PR-3b1 (#11152)  starve runtime callers via canonicalize_if_keeper
+                      in tool_coord.
+     PR-3b2 (#11155)  archive bare unconditionally, on the assumption
+                      that starvation killed every short-form caller.
+     PR-#10440        ensure_credential_alias re-creates a bare-form
+                      redirect stub on every boot so short-form
+                      load_credential callers (auth_doctor, etc.)
+                      resolve directly.
 
-   PR-3b2 generalises the helper to archive any of those without
-   inspecting the token, because none of them can route a request now.
-   The .archive/ destination preserves the file for operator review.
-   Idempotent: once archived, subsequent boots see no bare file and
-   become no-ops. Spec: AuthIdentityFSM.tla I1 IdentityBindsToken. *)
+   PR-3b2 and PR-#10440 contradict: the alias writer puts a stub back
+   on every boot and the archiver moves it on every boot, producing a
+   ping-pong that accumulated 331 .archive/<epoch>/ folders in 17 days
+   (measured 2026-05-14). Spec: AuthIdentityFSM.tla I1 IdentityBindsToken.
+
+   This helper resolves the conflict by recognising a legitimate alias
+   as alive: a bare-form file that is a redirect stub pointing to the
+   *same* UUID file as the canonical credential is the PR-#10440 alias
+   and must not be archived. Every other shape stays subject to PR-3b2:
+
+     - direct credential (no redirect)               -> archive
+     - redirect stub to a different UUID             -> archive (orphan)
+     - redirect stub to the same UUID as canonical   -> KEEP (alias)
+     - canonical missing or itself a direct cred     -> archive
+       (alias semantics need both sides to share a UUID-backed cred). *)
+(* Retention sweep for the .archive/<epoch>/ directories produced by
+   [archive_credential_file]. Each epoch dir is flat (one .json per
+   archived agent_name); this helper does not recurse so a stray
+   nested directory would be left in place instead of being deleted
+   wholesale. Returns [(kept, pruned)] for telemetry.
+
+   Selection rule: sort epochs newest-first, always keep the most
+   recent [min_keep], and among the remainder delete those whose
+   epoch is older than [retention_days * 86400] seconds. *)
+let prune_archive ~base_path ~retention_days ~min_keep : int * int =
+  let archive_dir = Filename.concat (auth_dir base_path) ".archive" in
+  if not (Sys.file_exists archive_dir && Sys.is_directory archive_dir)
+  then 0, 0
+  else (
+    let now = Unix.gettimeofday () in
+    let cutoff = now -. (float_of_int retention_days *. 86400.0) in
+    let entries =
+      try Sys.readdir archive_dir |> Array.to_list with
+      | Sys_error _ -> []
+    in
+    let epoch_entries =
+      List.filter_map
+        (fun name ->
+           match int_of_string_opt name with
+           | Some epoch -> Some (epoch, Filename.concat archive_dir name)
+           | None -> None)
+        entries
+      |> List.sort (fun (a, _) (b, _) -> compare b a)
+    in
+    let total = List.length epoch_entries in
+    let prune_count = ref 0 in
+    List.iteri
+      (fun i (epoch, path) ->
+         if i >= min_keep && float_of_int epoch < cutoff
+         then (
+           let inner =
+             try Sys.readdir path |> Array.to_list with
+             | Sys_error _ -> []
+           in
+           List.iter
+             (fun name ->
+                let file = Filename.concat path name in
+                try Sys.remove file with
+                | Sys_error _ -> ())
+             inner;
+           (try Fs_compat.rmdir path with
+            | Sys_error _ -> ());
+           if not (Sys.file_exists path) then incr prune_count))
+      epoch_entries;
+    total - !prune_count, !prune_count)
+;;
+
 let archive_bare_for_canonical config ~canonical_name =
   match bare_keeper_name_from_canonical canonical_name with
   | None -> ()
   | Some bare_name ->
     let bare_file = credential_file config bare_name in
-    if file_exists bare_file
-    then
-      archive_credential_file
-        config
-        ~agent_name:bare_name
-        ~reason:"bare-form keeper credential is dead after PR-3b1 starvation"
+    if not (file_exists bare_file)
+    then ()
+    else (
+      let canonical_file = credential_file config canonical_name in
+      let is_alive_alias =
+        match
+          load_redirect_target config bare_file,
+          load_redirect_target config canonical_file
+        with
+        | Some bare_target, Some canonical_target ->
+          String.equal
+            (Filename.basename bare_target)
+            (Filename.basename canonical_target)
+        | _ -> false
+      in
+      if is_alive_alias
+      then ()
+      else
+        archive_credential_file
+          config
+          ~agent_name:bare_name
+          ~reason:"bare-form keeper credential is dead after PR-3b1 starvation")
 ;;
 
 let ensure_keeper_credential config ~agent_name

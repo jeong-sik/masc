@@ -313,3 +313,17 @@ val read_initial_admin : string -> string option
 (** {1 Nickname Helpers} *)
 
 val extract_agent_type_prefix : string -> string option
+
+(** {1 Credential Archive Retention} *)
+
+val prune_archive
+  :  base_path:string
+  -> retention_days:int
+  -> min_keep:int
+  -> int * int
+(** [prune_archive ~base_path ~retention_days ~min_keep] deletes
+    [<base_path>/.masc/auth/.archive/<epoch>/] subdirectories that are
+    older than [retention_days * 86400] seconds, always keeping the
+    most recent [min_keep] epochs regardless of age. Returns
+    [(kept, pruned)]. Non-recursive: each epoch dir is treated as flat
+    (one .json per archived agent_name). *)

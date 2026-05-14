@@ -322,12 +322,16 @@ let route_text_for_evidence output_text =
   | Tool_output.Inline value -> value
 ;;
 
+let parse_tool_output_json_sanitized text =
+  let text = Safe_ops.sanitize_text_utf8 text in
+  try Ok (Yojson.Safe.from_string text) with
+  | Yojson.Json_error msg -> Error msg
+;;
+
 let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
   let route_text = route_text_for_evidence output_text in
   let parsed_output =
-    match
-      Safe_ops.parse_json_safe ~context:"Keeper_tool_call_log.route_evidence" route_text
-    with
+    match parse_tool_output_json_sanitized route_text with
     | Ok json -> Some json
     | Error _ -> None
   in
@@ -534,9 +538,7 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
 ;;
 
 let semantic_outcome_of_output ~success output =
-  match
-    Safe_ops.parse_json_safe ~context:"Keeper_tool_call_log.semantic_outcome" output
-  with
+  match parse_tool_output_json_sanitized output with
   | Ok json ->
     let ok_field = Safe_ops.json_bool_opt "ok" json in
     let error_field = Safe_ops.json_string_opt "error" json |> Option.map String.trim in

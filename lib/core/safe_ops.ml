@@ -297,9 +297,15 @@ let count_invalid_utf8_bytes s =
   in
   loop 0 0
 
-let repair_utf8_text ?(surface = "persistence") ?path s =
+type utf8_repair_result =
+  { text : string
+  ; invalid_bytes : int
+  ; changed : bool
+  }
+
+let repair_utf8_text_with_stats ?(surface = "persistence") ?path s =
   let invalid_bytes = count_invalid_utf8_bytes s in
-  if invalid_bytes = 0 then s
+  if invalid_bytes = 0 then { text = s; invalid_bytes = 0; changed = false }
   else
     let len = String.length s in
     let buf = Buffer.create len in
@@ -317,7 +323,10 @@ let repair_utf8_text ?(surface = "persistence") ?path s =
     in
     loop 0;
     record_utf8_repair ~surface ~path ~invalid_bytes;
-    Buffer.contents buf
+    { text = Buffer.contents buf; invalid_bytes; changed = true }
+
+let repair_utf8_text ?surface ?path s =
+  (repair_utf8_text_with_stats ?surface ?path s).text
 
 (** Parse JSON with detailed error reporting *)
 let parse_json_safe ~context str : (Yojson.Safe.t, string) result =

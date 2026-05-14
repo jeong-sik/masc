@@ -703,6 +703,7 @@ let test_dashboard_aggregate_surfaces_coverage_gap () =
    entire JSONL file and silently drop rows. *)
 let test_output_invalid_utf8_sanitized () =
   with_tmp_log_dir (fun dir ->
+    Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
     let raw_output = "prefix\xecsuffix" in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_bin"
@@ -734,7 +735,12 @@ let test_output_invalid_utf8_sanitized () =
         if dlen > 0 && Uchar.utf_decode_is_valid dec then scan (i + dlen)
         else false
     in
-    Alcotest.(check bool) "persisted file is valid UTF-8" true (scan 0))
+    Alcotest.(check bool) "persisted file is valid UTF-8" true (scan 0);
+    let repair_stats = Safe_ops.persistence_utf8_repair_stats () in
+    Alcotest.(check int)
+      "writer-side tool output parsing does not emit persistence repair"
+      0
+      repair_stats.repaired_reads)
 
 let test_output_valid_utf8_untouched () =
   with_tmp_log (fun () ->

@@ -659,11 +659,21 @@ function CodeMirrorEditor({
       focusEditorContextLine(view, undefined)
       return
     }
-    focusEditorContextLine(view, contextFocus.line)
+    focusEditorContextLine(view, contextFocus.line === undefined ? undefined : {
+      line: contextFocus.line,
+      surface: contextFocus.surface,
+      label: contextFocus.label,
+      keeperId: contextFocus.keeper_id,
+      linkCount: contextFocus.route_links?.length,
+    })
   }, [
     contextFocus?.activated_at_ms,
     contextFocus?.file_path,
     contextFocus?.line,
+    contextFocus?.surface,
+    contextFocus?.label,
+    contextFocus?.keeper_id,
+    contextFocus?.route_links,
     document.file_path,
     documentStore,
     ready,

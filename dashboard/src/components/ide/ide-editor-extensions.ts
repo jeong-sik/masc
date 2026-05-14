@@ -1,4 +1,4 @@
-import { Decoration, EditorView, GutterMarker, gutter, lineNumbers, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import { Decoration, EditorView, GutterMarker, WidgetType, gutter, lineNumbers, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { Annotation, EditorState, Extension, StateField, StateEffect } from '@codemirror/state'
 import {
   defaultHighlightStyle,
@@ -114,6 +114,26 @@ export function themeExt(): Extension {
     '.cm-line.cm-masc-context-focus': {
       background: 'color-mix(in srgb, var(--color-accent-fg) 12%, transparent)',
       boxShadow: 'inset 2px 0 0 var(--color-accent-fg)',
+    },
+    '.cm-masc-context-focus-chip': {
+      display: 'inline-flex',
+      alignItems: 'center',
+      maxWidth: '36ch',
+      marginLeft: 'var(--sp-2)',
+      padding: '0 var(--sp-2)',
+      border: '1px solid var(--color-border-default)',
+      borderRadius: 'var(--r-0)',
+      background: 'var(--color-bg-elevated)',
+      color: 'var(--color-accent-fg)',
+      fontFamily: 'var(--font-mono)',
+      fontSize: 'var(--fs-10)',
+      lineHeight: '1.4',
+      verticalAlign: 'baseline',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      pointerEvents: 'none',
+      userSelect: 'none',
     },
   })
 }
@@ -243,7 +263,39 @@ export function keeperLineSelectExt(
 
 // ── Context focus highlight ───────────────────────────────────────
 
-const setContextFocusLine = StateEffect.define<number | null>()
+export interface EditorContextFocusLine {
+  readonly line: number
+  readonly surface?: string
+  readonly label?: string
+  readonly keeperId?: string
+  readonly linkCount?: number
+}
+
+const setContextFocusLine = StateEffect.define<EditorContextFocusLine | null>()
+
+class ContextFocusChip extends WidgetType {
+  constructor(private readonly focus: EditorContextFocusLine) {
+    super()
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement('span')
+    el.className = 'cm-masc-context-focus-chip'
+    const parts = contextFocusChipParts(this.focus)
+    el.textContent = parts.join(' · ')
+    el.title = `Focused ${parts.join(' · ')}`
+    el.setAttribute('aria-label', contextFocusChipAriaLabel(this.focus))
+    return el
+  }
+
+  eq(other: ContextFocusChip): boolean {
+    return this.focus.line === other.focus.line
+      && this.focus.surface === other.focus.surface
+      && this.focus.label === other.focus.label
+      && this.focus.keeperId === other.focus.keeperId
+      && this.focus.linkCount === other.focus.linkCount
+  }
+}
 
 const contextFocusLineField = StateField.define<DecorationSet>({
   create() {
@@ -253,13 +305,17 @@ const contextFocusLineField = StateField.define<DecorationSet>({
     const mapped = value.map(tr.changes)
     for (const effect of tr.effects) {
       if (!effect.is(setContextFocusLine)) continue
-      const lineNumber = effect.value
-      if (lineNumber === null || lineNumber < 1 || lineNumber > tr.state.doc.lines) {
+      const focus = effect.value
+      if (focus === null || focus.line < 1 || focus.line > tr.state.doc.lines) {
         return Decoration.none
       }
-      const line = tr.state.doc.line(lineNumber)
+      const line = tr.state.doc.line(focus.line)
       return Decoration.set([
         Decoration.line({ class: 'cm-masc-context-focus' }).range(line.from),
+        Decoration.widget({
+          widget: new ContextFocusChip(focus),
+          side: 1,
+        }).range(line.to),
       ])
     }
     return mapped
@@ -271,21 +327,39 @@ export function contextFocusLineExt(): Extension {
   return contextFocusLineField
 }
 
-export function focusEditorContextLine(view: EditorView, lineNumber: number | undefined): boolean {
-  if (lineNumber === undefined || lineNumber < 1 || lineNumber > view.state.doc.lines) {
+export function focusEditorContextLine(
+  view: EditorView,
+  focus: number | EditorContextFocusLine | undefined,
+): boolean {
+  const nextFocus = typeof focus === 'number' ? { line: focus } : focus
+  if (nextFocus === undefined || nextFocus.line < 1 || nextFocus.line > view.state.doc.lines) {
     view.dispatch({ effects: [setContextFocusLine.of(null)] })
     return false
   }
-  const line = view.state.doc.line(lineNumber)
+  const line = view.state.doc.line(nextFocus.line)
   view.dispatch({
     selection: { anchor: line.from },
     effects: [
-      setContextFocusLine.of(lineNumber),
+      setContextFocusLine.of(nextFocus),
       EditorView.scrollIntoView(line.from, { y: 'center' }),
     ],
   })
   view.focus()
   return true
+}
+
+function contextFocusChipParts(focus: EditorContextFocusLine): ReadonlyArray<string> {
+  return [
+    focus.surface?.trim() || `L${focus.line}`,
+    focus.label?.trim() || null,
+    focus.keeperId?.trim() ? `keeper ${focus.keeperId.trim()}` : null,
+    focus.linkCount && focus.linkCount > 0 ? `${focus.linkCount} links` : null,
+  ].filter((part): part is string => part !== null)
+}
+
+function contextFocusChipAriaLabel(focus: EditorContextFocusLine): string {
+  const parts = contextFocusChipParts(focus)
+  return `Focused context on line ${focus.line}: ${parts.join(', ')}`
 }
 
 // ── Language support (dynamic import) ─────────────────────────────

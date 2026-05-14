@@ -244,7 +244,11 @@ describe('IdeEditor', () => {
       expect(container.querySelector('[data-testid="ide-context-focus-status"]')?.textContent)
         .toContain('Focused L2')
       expect(container.querySelector('.cm-masc-context-focus')).not.toBeNull()
+      expect(container.querySelector('.cm-masc-context-focus-chip')?.textContent)
+        .toContain('Task · task task-runtime · keeper sangsu · 2 links')
     })
+    expect(container.querySelector('.cm-masc-context-focus-chip')?.getAttribute('aria-label'))
+      .toBe('Focused context on line 2: Task, task task-runtime, keeper sangsu, 2 links')
     const focusMeta = [...container.querySelectorAll('.ide-editor-context-focus-meta > span')]
       .map(node => node.textContent)
     expect(focusMeta).toEqual(['Task', 'keeper sangsu', 'source event-1', '2 links'])

@@ -411,6 +411,7 @@ let store_episode_from_snapshot
     ~(memory : Agent_sdk.Memory.t)
     ~(keeper_name : string)
     ~(turn : int)
+    ?(oas_turn_count : int option)
     ~(trace_id : string)
     (snapshot : Keeper_memory_policy.keeper_state_snapshot) : unit =
   let parts =
@@ -441,6 +442,15 @@ let store_episode_from_snapshot
       (int_of_float (ts *. 1000.0) mod 1_000_000)
   in
   let episode : Agent_sdk.Memory.episode =
+    let context =
+      [
+        ("trace_id", `String trace_id);
+        ("turn", `String (string_of_int turn));
+      ]
+      @ (match oas_turn_count with
+         | None -> []
+         | Some count -> [ ("oas_turn_count", `String (string_of_int count)) ])
+    in
     {
       id = episode_id;
       timestamp = ts;
@@ -455,12 +465,7 @@ let store_episode_from_snapshot
           ("institution_outcome", `String outcome_str);
           ( "learnings",
             `List (List.map (fun l -> `String l) learnings) );
-          ( "context",
-            `Assoc
-              [
-                ("trace_id", `String trace_id);
-                ("turn", `String (string_of_int turn));
-              ] );
+          ("context", `Assoc context);
         ];
     }
   in
@@ -537,6 +542,7 @@ let store_failed_turn_episode
     ~(memory : Agent_sdk.Memory.t)
     ~(keeper_name : string)
     ~(turn : int)
+    ?(oas_turn_count : int option)
     ~(trace_id : string)
     ~(error_kind : error_kind)
     ~(error_message : string)
@@ -567,6 +573,19 @@ let store_failed_turn_episode
     failure_learnings ~error_kind ~error_preview
   in
   let episode : Agent_sdk.Memory.episode =
+    let context =
+      [
+        ("trace_id", `String trace_id);
+        ("turn", `String (string_of_int turn));
+      ]
+      @ (match oas_turn_count with
+         | None -> []
+         | Some count -> [ ("oas_turn_count", `String (string_of_int count)) ])
+      @ [
+          ("error_kind", `String error_kind_label);
+          ("error_message", `String error_context);
+        ]
+    in
     {
       id = episode_id;
       timestamp = ts;
@@ -589,14 +608,7 @@ let store_failed_turn_episode
              readers can distinguish absent data from a placeholder. *)
           ( "learnings",
             `List (List.map (fun s -> `String s) learnings) );
-          ( "context",
-            `Assoc
-              [
-                ("trace_id", `String trace_id);
-                ("turn", `String (string_of_int turn));
-                ("error_kind", `String error_kind_label);
-                ("error_message", `String error_context);
-              ] );
+          ("context", `Assoc context);
         ];
     }
   in

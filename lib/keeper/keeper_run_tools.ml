@@ -171,6 +171,11 @@ let prepare_agent_setup
   : (agent_setup, Agent_sdk.Error.sdk_error) result
   =
   let cascade_name_string = Keeper_cascade_profile.runtime_name_to_string cascade_name in
+  let manifest_keeper_turn_id =
+    match runtime_manifest_context with
+    | Some ctx -> ctx.Keeper_runtime_manifest.manifest_keeper_turn_id
+    | None -> None
+  in
   let ctx_snapshot = ctx_work in
   let agent_name = meta.agent_name in
   let acc : hook_accumulator =
@@ -1604,7 +1609,7 @@ let prepare_agent_setup
                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~generation
                   ~turn
-                  ~keeper_turn_id:turn
+                  ?keeper_turn_id:manifest_keeper_turn_id
                   ?task_id:
                     (Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id)
                   ~goal_ids:meta.active_goal_ids

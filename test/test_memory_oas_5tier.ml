@@ -476,6 +476,52 @@ let test_flush_episodes_appends_only_new_records () =
   Alcotest.(check bool) "new record appended" true (List.mem "new-episode-id" ids);
   cleanup_tmp_dir dir
 
+let test_success_episode_preserves_oas_turn_count () =
+  let dir = setup_tmp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmp_dir dir)
+    (fun () ->
+      let memory =
+        Memory_oas_bridge.create_memory ~agent_name:"test-success-turn" ()
+      in
+      let snapshot =
+        {
+          Keeper_memory_policy.empty_keeper_state_snapshot with
+          goal = Some "preserve turn clocks";
+          done_summary = Some "keeper turn completed";
+        }
+      in
+      Memory_oas_bridge.store_episode_from_snapshot
+        ~memory
+        ~keeper_name:"test-success-turn"
+        ~turn:24
+        ~oas_turn_count:1
+        ~trace_id:"trace-success-turn"
+        snapshot;
+      let flushed =
+        Memory_oas_bridge.flush_episodes
+          ~memory
+          ~agent_name:"test-success-turn"
+      in
+      Alcotest.(check int) "success episode flushed" 1 flushed;
+      let persisted = Institution_eio.load_recent_episodes_jsonl ~limit:10 in
+      let episode =
+        List.find_opt
+          (fun (episode : Institution_eio.episode) ->
+            String.equal episode.event_type "keeper_turn"
+            && List.mem "test-success-turn" episode.participants)
+          persisted
+      in
+      match episode with
+      | None -> Alcotest.fail "expected successful keeper_turn episode"
+      | Some episode ->
+        Alcotest.(check string) "trace_id preserved" "trace-success-turn"
+          (List.assoc "trace_id" episode.context);
+        Alcotest.(check string) "keeper turn preserved" "24"
+          (List.assoc "turn" episode.context);
+        Alcotest.(check string) "oas turn count preserved" "1"
+          (List.assoc "oas_turn_count" episode.context))
+
 let test_failed_turn_episode_flushes_failure_outcome () =
   let dir = setup_tmp_dir () in
   Fun.protect
@@ -488,6 +534,7 @@ let test_failed_turn_episode_flushes_failure_outcome () =
         ~memory
         ~keeper_name:"test-failed-turn"
         ~turn:7
+        ~oas_turn_count:2
         ~trace_id:"trace-failed-turn"
         ~error_kind:(Memory_oas_bridge.error_kind_of_string "provider_timeout")
         ~error_message:"provider timed out before producing a tool-using turn"
@@ -517,6 +564,8 @@ let test_failed_turn_episode_flushes_failure_outcome () =
           (List.assoc "trace_id" episode.context);
         Alcotest.(check string) "turn preserved" "7"
           (List.assoc "turn" episode.context);
+        Alcotest.(check string) "oas turn count preserved" "2"
+          (List.assoc "oas_turn_count" episode.context);
         Alcotest.(check string) "error kind preserved" "provider_timeout"
           (List.assoc "error_kind" episode.context);
         Alcotest.(check string) "error message preserved"
@@ -566,6 +615,8 @@ let () =
         test_jsonl_backend_uses_explicit_base_dir;
       Alcotest.test_case "flush_episodes appends only new" `Quick
         test_flush_episodes_appends_only_new_records;
+      Alcotest.test_case "successful keeper turn preserves OAS turn count" `Quick
+        test_success_episode_preserves_oas_turn_count;
       Alcotest.test_case "failed keeper turn flushes failure outcome" `Quick
         test_failed_turn_episode_flushes_failure_outcome;
     ]);

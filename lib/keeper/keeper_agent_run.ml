@@ -217,12 +217,13 @@ let run_turn
   let approval_mode_derived = ctx.approval_mode_derived in
   let keeper_oas_context = ctx.keeper_oas_context in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let manifest_keeper_turn_id = meta.runtime.usage.total_turns + 1 in
   let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
     ; manifest_agent_name = Some meta.agent_name
     ; manifest_trace_id = trace_id
     ; manifest_generation = Some generation
-    ; manifest_keeper_turn_id = Some (start_turn_count + 1)
+    ; manifest_keeper_turn_id = Some manifest_keeper_turn_id
     }
   in
   let checkpoint_path =
@@ -253,7 +254,7 @@ let run_turn
     Hash.(to_hex (get (loop empty messages)))
   in
   append_manifest ~site:"checkpoint_loaded"
-    ~keeper_turn_id:(start_turn_count + 1)
+    ~keeper_turn_id:manifest_keeper_turn_id
     ~checkpoint_path
     ~decision:
       (`Assoc
@@ -267,7 +268,7 @@ let run_turn
         ])
     Keeper_runtime_manifest.Checkpoint_loaded;
   append_manifest ~site:"context_compacted"
-    ~keeper_turn_id:(start_turn_count + 1)
+    ~keeper_turn_id:manifest_keeper_turn_id
     ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
     ~decision:
       (`Assoc
@@ -303,7 +304,7 @@ let run_turn
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   let history_messages_digest = digest_message_texts_as_joined history_messages in
   append_manifest ~site:"context_injected"
-    ~keeper_turn_id:(start_turn_count + 1)
+    ~keeper_turn_id:manifest_keeper_turn_id
     ~decision:
       (`Assoc
         [
@@ -401,7 +402,7 @@ let run_turn
     let memory = s.Keeper_run_tools.memory in
     let acc = s.Keeper_run_tools.acc in
     append_manifest ~site:"tool_surface_selected"
-      ~keeper_turn_id:(start_turn_count + 1)
+      ~keeper_turn_id:manifest_keeper_turn_id
       ~decision:
         (`Assoc
           [
@@ -1220,7 +1221,7 @@ let run_turn
                     let state_snapshot_sidecar_path =
                       Filename.concat
                         (Filename.concat session.session_dir "state-snapshots")
-                        (Printf.sprintf "turn-%06d.json" result.turns)
+                        (Printf.sprintf "turn-%06d.json" manifest_keeper_turn_id)
                     in
                     let latest_state_snapshot_sidecar_path =
                       Filename.concat session.session_dir "state-snapshot.latest.json"
@@ -1234,6 +1235,7 @@ let run_turn
                           ("agent_name", `String meta.agent_name);
                           ("trace_id", `String trace_id);
                           ("generation", `Int generation);
+                          ("keeper_turn_id", `Int manifest_keeper_turn_id);
                           ("oas_turn_count", `Int result.turns);
                           ( "state_snapshot",
                             Keeper_memory_policy.keeper_state_snapshot_to_json
@@ -1282,7 +1284,7 @@ let run_turn
                         false
                     in
                     append_manifest ~site:"state_snapshot_sidecar"
-                      ~keeper_turn_id:(start_turn_count + 1)
+                      ~keeper_turn_id:manifest_keeper_turn_id
                       ~oas_turn_count:result.turns
                       ~status:
                         (if state_snapshot_sidecar_saved then "saved" else "error")
@@ -1339,7 +1341,7 @@ let run_turn
                           with
                           | Ok () ->
                             append_manifest ~site:"checkpoint_saved"
-                              ~keeper_turn_id:(start_turn_count + 1)
+                              ~keeper_turn_id:manifest_keeper_turn_id
                               ~oas_turn_count:result.turns
                               ~checkpoint_path:
                                 (Keeper_checkpoint_store.oas_checkpoint_path
@@ -1493,7 +1495,7 @@ let run_turn
                               config
                               meta
                               ~snapshot:state_snapshot
-                              ~turn:result.turns
+                              ~turn:manifest_keeper_turn_id
                               ~reply:response_text
                               ()
                           in
@@ -1507,7 +1509,7 @@ let run_turn
                               Keeper_memory_bank.append_memory_notes_from_tool_results
                                 config
                                 meta
-                                ~turn:result.turns
+                                ~turn:manifest_keeper_turn_id
                                 ~results:tool_results)
                             else 0
                           in
@@ -1543,7 +1545,8 @@ let run_turn
                          ~config
                          ~keeper_name:meta.name
                          ~memory
-                         ~turn:result.turns
+                         ~turn:manifest_keeper_turn_id
+                         ~oas_turn_count:result.turns
                          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                          ~snapshot:state_snapshot
                          ();
@@ -1629,7 +1632,8 @@ let run_turn
                               ([ "ts_unix", `Float (Time_compat.now ())
                                ; "event", `String "post_turn_eval"
                                ; "keeper_name", `String meta.name
-                               ; "turn", `Int result.turns
+                               ; "turn", `Int manifest_keeper_turn_id
+                               ; "oas_turn_count", `Int result.turns
                                ; "goal_alignment", `Float goal_score
                                ; ( "tools_used_count"
                                  , `Int (List.length actual_keeper_tool_names) )
@@ -1722,16 +1726,13 @@ let run_turn
 	       (match turn_result with
 	        | Ok _ -> ()
 	        | Error err ->
-          let turn =
-            match !receipt_turn_count_ref with
-            | Some turns -> turns
-            | None -> start_turn_count + 1
-          in
+          let oas_turn_count = !receipt_turn_count_ref in
           Keeper_agent_memory_episode.record_failure
             ~config
             ~keeper_name:meta.name
             ~memory
-            ~turn
+            ~turn:manifest_keeper_turn_id
+            ?oas_turn_count
             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
             ~error_kind:(Memory_oas_bridge.error_kind_of_string (sdk_error_kind err))
             ~error_message:(Agent_sdk.Error.to_string err)
@@ -1868,11 +1869,12 @@ let run_turn
                | None -> `Null
                | Some ok -> `Bool ok );
            ]
-       in
-       let append_receipt_manifest ?status ?decision ~site event =
-         let status =
-           match status with
-           | Some status -> status
+         in
+         let append_receipt_manifest ?status ?decision ~site event =
+           let oas_turn_count = receipt.turn_count in
+           let status =
+             match status with
+             | Some status -> status
            | None ->
              Keeper_execution_receipt.outcome_kind_to_string receipt.outcome
          in
@@ -1889,7 +1891,8 @@ let run_turn
          Keeper_runtime_manifest.make ~ts:receipt.ended_at
            ~keeper_name:receipt.keeper_name ~agent_name:receipt.agent_name
            ~trace_id:receipt.trace_id ~generation:receipt.generation
-           ~keeper_turn_id:(start_turn_count + 1) ~event
+           ~keeper_turn_id:manifest_keeper_turn_id ~event
+           ?oas_turn_count
            ~cascade_name:
              (Keeper_execution_receipt.cascade_name_to_string receipt.cascade_name)
            ~status ~decision ~receipt_path ?tool_call_log_path ()

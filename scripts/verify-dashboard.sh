@@ -110,6 +110,7 @@ echo ""
 
 echo "[1/7] Source Parity"
 check_command "navigation/readiness parity" bash scripts/check-dashboard-surface-parity.sh --check
+check_command "navigation/nav-event parity" bash scripts/check-dashboard-nav-event-parity.sh --check
 
 echo "[2/7] Health + Shell"
 check_http "health 200" "$BASE/health" "200"
@@ -118,15 +119,20 @@ check_http "dashboard shell 200" "$BASE/api/v1/dashboard/shell" "200"
 check_json "shell exposes auth contract" "$BASE/api/v1/dashboard/shell" "'auth' in d" '^True$'
 check_http "surface-readiness 200" "$BASE/api/v1/dashboard/surface-readiness" "200"
 check_json \
-  "surface-readiness contains current command/connectors/workspace surfaces" \
+  "surface-readiness has canonical surface count" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "all(any(s.get('id') == target for s in d.get('surfaces', [])) for target in ['command.operations', 'connectors.connector-status', 'workspace.verification'])" \
+  "len(d.get('surfaces', []))" \
+  '^21$'
+check_json \
+  "surface-readiness matches canonical surface ids" \
+  "$BASE/api/v1/dashboard/surface-readiness" \
+  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.agents', 'monitoring.goal-loop', 'monitoring.fleet-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.autoresearch', 'lab.harness', 'code.ide-shell', 'logs'])" \
   '^True$'
 check_json \
-  "surface-readiness dropped legacy sessions surface" \
+  "surface-readiness dropped retired surfaces" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "any(s.get('id') == 'monitoring.sessions' for s in d.get('surfaces', []))" \
-  '^False$'
+  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'workspace.collab-mvp'])" \
+  '^True$'
 
 echo "[3/7] Monitoring"
 check_http "namespace-truth 200" "$BASE/api/v1/dashboard/namespace-truth" "200"

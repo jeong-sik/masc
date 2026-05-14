@@ -115,29 +115,23 @@ module Http_client = struct
       failure marker; [None] for reasons with no recognised marker
       (e.g. [output_schema] violations), which remain terminal
       ([Accept_rejected_terminal]). *)
+  (** Mapping table from string markers to [retryable_error] variants.
+      Keeping needles separate from the matching loop makes the mapping
+      explicit, reduces duplication, and makes new markers a one-line
+      change. *)
+  let accept_rejected_rules : (string list * retryable_error) list =
+    [ [ "does not support"; "required_tool_lane_unavailable" ], Model_unsupported
+    ; [ "rejected the request" ], Request_rejected
+    ; [ "startup crash" ], Startup_crash
+    ]
+
   let classify_accept_rejected reason : retryable_error option =
-    (* Model/capability unsupported — MASC worker-layer wrapping of OAS
-       InvalidConfig errors (#9850). *)
-    if contains_ci_scan_limited ~haystack:reason ~needle:"does not support" then
-      Some Model_unsupported
-    (* MASC worker-layer wrapping of the [required_tool_lane_unavailable]
-       InvalidConfig {field = "tool_support"} emitted by
-       Keeper_turn_driver_helpers.required_tool_lane_unavailable_error.
-       Semantically identical to the [does not support] case: this
-       provider's materialized tool set lacks the required lane, but
-       another provider may have it — the cascade must advance. *)
-    else if
-      contains_ci_scan_limited ~haystack:reason ~needle:"required_tool_lane_unavailable"
-    then
-      Some Model_unsupported
-    (* kimi_cli permanent auth/config/model rejection (#9932). *)
-    else if contains_ci_scan_limited ~haystack:reason ~needle:"rejected the request" then
-      Some Request_rejected
-    (* gemini_cli / kimi_cli CLI startup failures. *)
-    else if contains_ci_scan_limited ~haystack:reason ~needle:"startup crash" then
-      Some Startup_crash
-    else
-      None
+    List.find_map
+      (fun (needles, err) ->
+         if List.exists (fun needle -> contains_ci_scan_limited ~haystack:reason ~needle) needles
+         then Some err
+         else None)
+      accept_rejected_rules
 
   (** Return [true] when an HTTP 400/422 body signals a provider-side
       JSON parse failure (M04).

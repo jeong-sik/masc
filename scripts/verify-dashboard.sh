@@ -153,6 +153,18 @@ check_http "cascade health 200" "$BASE/api/v1/cascade/health" "200"
 check_json "cascade health exposes providers" "$BASE/api/v1/cascade/health" "'providers' in d" '^True$'
 check_http "cascade strategy trace 200" "$BASE/api/v1/cascade/strategy_trace?limit=1" "200"
 check_json "cascade strategy trace exposes events" "$BASE/api/v1/cascade/strategy_trace?limit=1" "'events' in d" '^True$'
+check_http "runtime providers 200" "$BASE/api/v1/providers" "200"
+check_json "runtime providers exposes inventory" "$BASE/api/v1/providers" "'summary' in d and 'providers' in d" '^True$'
+check_http "cascade config 200" "$BASE/api/v1/cascade/config" "200"
+check_json "cascade config exposes profiles" "$BASE/api/v1/cascade/config" "'validation_status' in d and 'profiles' in d" '^True$'
+check_http "cascade raw config 200" "$BASE/api/v1/cascade/config/raw" "200"
+check_json "cascade raw config exposes source" "$BASE/api/v1/cascade/config/raw" "'source_text' in d and 'source_editable' in d" '^True$'
+check_http "cascade client capacity 200" "$BASE/api/v1/cascade/client_capacity" "200"
+check_json "cascade client capacity exposes entries" "$BASE/api/v1/cascade/client_capacity" "'entries' in d" '^True$'
+check_http "cascade capacity history 200" "$BASE/api/v1/cascade/client_capacity/history?limit=1" "200"
+check_json "cascade capacity history exposes events" "$BASE/api/v1/cascade/client_capacity/history?limit=1" "'events' in d" '^True$'
+check_http "cascade slo 200" "$BASE/api/v1/cascade/slo" "200"
+check_json "cascade slo exposes status" "$BASE/api/v1/cascade/slo" "'status' in d and 'current' in d" '^True$'
 check_http "model metrics 200" "$BASE/api/v1/models/metrics?window=30&bucket_min=5" "200"
 check_json "model metrics exposes model list" "$BASE/api/v1/models/metrics?window=30&bucket_min=5" "'models' in d" '^True$'
 check_http "keeper costs 200" "$BASE/api/v1/dashboard/keeper-costs?window=60" "200"

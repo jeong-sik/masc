@@ -255,6 +255,7 @@
         test_keeper_event_queue
         test_keeper_relevance_check
         test_gh_api_classification
+        test_provider_capability_matrix
         test_effect_evidence_source_path
         test_cognitive_gravity
         test_intentional_projection
@@ -613,7 +614,6 @@
         test_bg_task_stub
         test_process_eio_detached
         test_provider_adapter
-        test_provider_runtime_overlay
         test_voice_runtime_overlay
         test_worker_container_coverage
         test_resilience
@@ -834,7 +834,6 @@
         test_bg_task_stub
         test_process_eio_detached
         test_provider_adapter
-        test_provider_runtime_overlay
         test_voice_runtime_overlay
         test_worker_container_coverage
         test_resilience

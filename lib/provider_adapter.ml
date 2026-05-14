@@ -1466,23 +1466,8 @@ let accepts_runtime_mcp_http_header_for_config
         adapter.tool_policy.identity_runtime_mcp_header_keys)
 ;;
 
-(** SSOT for the OAS provider_kind → capabilities mapping.  This is the
-    one place that pattern-matches on [Llm_provider.Provider_config.provider_kind]
-    for capability lookup — RFC-0058 §2.4 forbids the dispatch in consumer
-    modules; centralising it here keeps consumers off the closed variant. *)
 let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
-  match cfg.kind with
-  | Llm_provider.Provider_config.Ollama -> Llm_provider.Capabilities.ollama_capabilities
-  | Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
-  | Kimi -> Llm_provider.Capabilities.kimi_capabilities
-  | Glm -> Llm_provider.Capabilities.glm_capabilities
-  | Gemini -> Llm_provider.Capabilities.gemini_capabilities
-  | DashScope -> Llm_provider.Capabilities.dashscope_capabilities
-  | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
-  | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
-  | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
-  | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
-  | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
+  Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config cfg
 ;;
 
 (* ── Generic provider auth detail ─────────────────────────────── *)

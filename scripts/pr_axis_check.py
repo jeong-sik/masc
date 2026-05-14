@@ -124,10 +124,11 @@ def get_repo_slug() -> Tuple[str, str]:
     return data["owner"]["login"], data["name"]
 
 
-def get_pr_base_sha(pr_number: int, owner: str, repo: str) -> Optional[str]:
-    """Get the base SHA of an open PR."""
+def get_pr_base_info(pr_number: int, owner: str, repo: str) -> Tuple[Optional[str], Optional[str]]:
+    """Get the base SHA and base ref name of an open PR."""
     resp = _run_gh([f"/repos/{owner}/{repo}/pulls/{pr_number}"])
-    return resp.get("base", {}).get("sha")
+    base = resp.get("base", {})
+    return base.get("sha"), base.get("ref")
 
 
 def merge_commit_already_in_base(
@@ -207,6 +208,7 @@ query {{
         number
         title
         mergedAt
+        baseRefName
         mergeCommit {{ oid }}
         files(first: 100) {{
           nodes {{ path }}
@@ -254,7 +256,7 @@ def check_pr_axis_stale(
         print(f"Warning: no files found for PR #{pr_number}", file=sys.stderr)
         return []
 
-    pr_base_sha = get_pr_base_sha(pr_number, owner, repo)
+    pr_base_sha, pr_base_ref = get_pr_base_info(pr_number, owner, repo)
     if not pr_base_sha:
         print(f"Warning: could not determine base SHA for PR #{pr_number}", file=sys.stderr)
 
@@ -268,6 +270,14 @@ def check_pr_axis_stale(
 
         overlap = open_files & merged_files
         if not overlap:
+            continue
+
+        # This guard is about stale PRs caused by recent merges into the same
+        # target branch. Stacked PRs can be merged into another feature branch;
+        # treating those as mainline merges creates a false BUILD_DEP_BREAK
+        # blocker for their own base PR.
+        merged_base_ref = merged.get("baseRefName")
+        if pr_base_ref and merged_base_ref and merged_base_ref != pr_base_ref:
             continue
 
         # Skip if the merged PR is already included in the current PR's base.

@@ -7,9 +7,9 @@ type capabilities =
   }
 
 (** Whether the resolved provider adapter is a CLI runtime (Claude Code,
-    Codex CLI, Gemini CLI, Kimi CLI).  Capability normalisation and the
-    [for_model_id] bypass both key off this predicate rather than matching
-    on [Provider_config.provider_kind] (RFC-0058 §2.4). *)
+    Codex CLI, Gemini CLI, Kimi CLI).  MASC uses this only for local
+    tool-delivery projection after OAS has resolved provider/model
+    capabilities. *)
 let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
   match Provider_adapter.adapter_of_provider_config provider_cfg with
   | Some adapter -> adapter.runtime_kind = Provider_adapter.Cli_agent
@@ -31,46 +31,24 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
   else caps
 ;;
 
-(** Resolve OAS-level capabilities for a provider config.
-
-    CLI runtimes (Claude_code, Gemini_cli, Kimi_cli, Codex_cli) bypass
-    [for_model_id] because the CLI tool selects the underlying model
-    internally — the model_id in the config is a routing hint, not an
-    API model identifier that OAS can look up.  All other adapters consult
-    [for_model_id] first, falling back to the kind-level base. *)
+(** Resolve OAS-level capabilities for a provider config, then apply only
+    MASC's tool-delivery projection for CLI runtimes.  Provider/model/catalog
+    capability truth stays in OAS. *)
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
-  (* Resolve the adapter once via [is_cli_agent_provider]; reuse the
-     boolean for both the [for_model_id] bypass and the CLI cap override
-     so we do not call [Provider_adapter.adapter_of_provider_config]
-     twice for the same config. *)
   let is_cli = is_cli_agent_provider provider_cfg in
   let caps = Provider_adapter.oas_capabilities_of_config provider_cfg in
-  let caps =
-    if is_cli
-    then caps
-    else (
-      match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
-      | Some override -> override
-      | None -> caps)
-  in
-  let caps =
-    if is_cli
-    then
-      let runtime_mcp_lane =
-        Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
-        || Provider_adapter
-           .requires_per_keeper_bridging_for_bound_actor_tools_for_config
-             provider_cfg
-      in
-      { (normalize_cli_caps_when ~is_cli caps) with
-        supports_runtime_mcp_tools = runtime_mcp_lane
-      ; supports_runtime_tool_events = runtime_mcp_lane
-      }
-    else caps
-  in
-  match provider_cfg.supports_tool_choice_override with
-  | Some supports_tool_choice -> { caps with supports_tool_choice }
-  | None -> caps
+  if is_cli
+  then
+    let runtime_mcp_lane =
+      Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
+      || Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
+           provider_cfg
+    in
+    { (normalize_cli_caps_when ~is_cli caps) with
+      supports_runtime_mcp_tools = runtime_mcp_lane
+    ; supports_runtime_tool_events = runtime_mcp_lane
+    }
+  else caps
 ;;
 
 let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_config.t) =

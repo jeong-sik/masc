@@ -29,21 +29,18 @@ type capabilities =
 
 (** {1 Capability resolution} *)
 
-(** [oas_capabilities_of_config cfg] returns the OAS-side
-    {!Llm_provider.Capabilities.capabilities}.  Resolution order:
+(** [oas_capabilities_of_config cfg] returns OAS-resolved
+    {!Llm_provider.Capabilities.capabilities} plus MASC's local
+    tool-delivery projection.  Resolution order:
 
-    + Per-kind base via
-      {!Provider_adapter.oas_capabilities_of_config} (SSOT for the
-      [provider_kind → capabilities] mapping).
-    + For non-CLI-agent adapters, override with
-      {!Llm_provider.Capabilities.for_model_id} when present.
+    + Provider/model/catalog capability truth via
+      {!Provider_adapter.oas_capabilities_of_config}, which delegates to
+      OAS [Provider_runtime_binding].
     + CLI-agent normalisation: adapters with
       [runtime_kind = Cli_agent] (Claude Code / Codex CLI / Gemini CLI /
       Kimi CLI) force [supports_tools = false],
       [supports_tool_choice = false], [supports_runtime_mcp_tools = true],
-      and [supports_runtime_tool_events = true].
-    + [provider_cfg.supports_tool_choice_override] (if [Some _])
-      overrides the resolved [supports_tool_choice]. *)
+      and [supports_runtime_tool_events = true]. *)
 val oas_capabilities_of_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Capabilities.capabilities

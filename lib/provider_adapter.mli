@@ -484,10 +484,9 @@ val tolerates_bound_actor_fallback_for_kind
   :  Llm_provider.Provider_config.provider_kind
   -> bool
 
-(** OAS-level capabilities for a provider config.  SSOT for the kind →
-    capability mapping; centralises what was previously a closed-variant
-    [match Llm_provider.Provider_config.provider_kind] in
-    [Provider_tool_support]. *)
+(** OAS-level capabilities for a provider config.  Delegates provider/model
+    capability truth to [Agent_sdk.Provider_runtime_binding] so MASC consumers
+    do not own provider-kind capability tables. *)
 val oas_capabilities_of_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Capabilities.capabilities

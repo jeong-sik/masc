@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Search } from 'lucide-preact'
 import { activeKeeperName } from '../../keeper-state'
 import { type FileTreeStore, type FileTreeNode } from './file-tree-store'
-import { activeIdeFile } from './ide-state'
+import { activeIdeFile, ideContextFocus, type IdeContextFocus } from './ide-state'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
@@ -111,6 +111,9 @@ export function IdeExplorer({
   const [isScanningRepositories, setIsScanningRepositories] = useState(false)
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   useEffect(() => activeIdeFile.subscribe(file => setActiveFile(file)), [])
+
+  const [contextFocus, setContextFocus] = useState(ideContextFocus.value)
+  useEffect(() => ideContextFocus.subscribe(focus => setContextFocus(focus)), [])
 
   const [cursorOverlay, setCursorOverlay] = useState(cursorOverlaySignal.value)
   useEffect(() => cursorOverlaySignal.subscribe(v => setCursorOverlay(v)), [])
@@ -302,6 +305,7 @@ export function IdeExplorer({
               if (node.hasChildren) store.toggle(node.path)
               else activeIdeFile.value = node.path
             },
+            contextFocus?.file_path === node.path ? contextFocus : null,
             keepersByFile.get(node.path),
           ))}
         </ul>
@@ -357,6 +361,7 @@ function TreeRow(
   expanded: boolean,
   selected: boolean,
   onClick: () => void,
+  contextFocus: IdeContextFocus | null,
   activeKeepers?: ReadonlyArray<{ readonly keeperId: string; readonly color: string; readonly focusMode: string }>,
 ) {
   const indent = node.depth * 12
@@ -385,6 +390,7 @@ function TreeRow(
         ? html`<${KeeperBadge} id=${node.keeperId} variant="sigil" size="sm" />`
         : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px', textAlign: 'center', fontSize: '12px', lineHeight: '14px' }}>${fileIcon(node, expanded)}</span>`}
       <span class="ide-explorer-row-label">${node.label}</span>
+      ${contextFocus ? ExplorerContextChip(contextFocus) : null}
       ${activeKeepers && activeKeepers.length > 0
         ? html`<span
             aria-label=${`${activeKeepers.map(k => k.keeperId).join(', ')} focusing`}
@@ -408,4 +414,28 @@ function TreeRow(
         : null}
     </li>
   `
+}
+
+function ExplorerContextChip(focus: IdeContextFocus) {
+  const line = focus.line !== undefined ? `L${focus.line}` : null
+  const linkCount = focus.route_links?.length ?? 0
+  return html`
+    <span
+      class="ide-explorer-context-chip"
+      aria-label=${explorerContextChipLabel(focus)}
+      title=${`${focus.surface} · ${focus.label}`}
+    >
+      <span>${focus.surface}</span>
+      ${line ? html`<span>${line}</span>` : null}
+      ${linkCount > 0 ? html`<span>${linkCount} links</span>` : null}
+    </span>
+  `
+}
+
+function explorerContextChipLabel(focus: IdeContextFocus): string {
+  const line = focus.line !== undefined ? ` line ${focus.line}` : ''
+  const links = focus.route_links?.length
+    ? `, ${focus.route_links.length} route links`
+    : ''
+  return `Focused ${focus.surface}${line}: ${focus.label}${links}`
 }

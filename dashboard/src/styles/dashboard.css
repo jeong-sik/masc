@@ -431,6 +431,29 @@
   white-space: nowrap;
 }
 
+.ide-explorer-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 116px;
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-page);
+  color: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+}
+
+.ide-explorer-context-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ide-plane-editor {
   grid-column: 2;
   grid-row: 1 / span 2;

@@ -291,6 +291,17 @@ let add_routes ~sw ~clock router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/board/curation" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let json =
+           match Board_dispatch.latest_curation_snapshot () with
+           | None -> `Assoc [ ("snapshot", `Null) ]
+           | Some snap ->
+             `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
+         in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/board/flairs" (fun _request reqd ->
        let flairs = List.map Board.flair_to_yojson Board.available_flairs in
        let json = `Assoc [("flairs", `List flairs)] in

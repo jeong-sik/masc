@@ -142,6 +142,8 @@ code_refs:
   - connectors descriptor + live state
 - `GET /api/v1/dashboard/board`
   - workspace board
+- `GET /api/v1/board/hearths`, `GET /api/v1/board/curation`, `GET /api/v1/board/karma/ledger`
+  - workspace board filters, curation, and karma ledger
 - `GET /api/v1/board/sub-boards`
   - workspace named board spaces
 - `GET /api/v1/dashboard/planning`

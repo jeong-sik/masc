@@ -240,9 +240,9 @@ flowchart TD
     L --> M
     M --> N[health cooldown prefilter]
     N --> O{empty?}
-    O -- yes --> P[cross-cascade tool-capable provider search]
+    O -- yes --> P[terminal no-callable-provider diagnostic]
     O -- no --> Q[candidate providers]
-    P --> Q
+    P --> X[operator-facing required-tool/cascade exhaustion reason]
     Q --> R[resolve strategy + capacity probes + admission permit]
     R --> S[cycle_loop order_candidates]
     S --> T[try_cascade over providers]

@@ -130,14 +130,13 @@ let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
       ()
 
 (** Canonical metric name for the unified fallback counter (§7.3.2 Zero
-    Silent Failure). Per-class counters (capability_drops,
-    cross_cascade_fallback) remain for drill-down; this is the single
-    numerator across all classes for the dashboard panel. *)
+    Silent Failure). This is the single numerator across all fallback
+    classes for the dashboard panel. *)
 let fallback_triggered_metric = Prometheus.metric_fallback_triggered
 
 (** Emit a fallback observation to the unified counter.
-    [kind]   one of: cross_cascade | cascade_empty | capability_drop
-                   | cli_unsupported | provider_error_fallback | …
+    [kind]   one of: cascade_empty | capability_drop | cli_unsupported
+                   | provider_error_fallback | …
     [detail] free-form drill-down (rejection_reason, target provider,
              dropped field, …). Cardinality bounded by callers. *)
 let emit_fallback_triggered ~kind ~detail =

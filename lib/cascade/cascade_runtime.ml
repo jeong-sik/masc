@@ -422,3 +422,88 @@ let resolve_named_providers ?provider_filter
            (cascade_name_to_string cascade_name))
         detail;
       []
+
+type local_capacity = {
+  total : int;
+  process_active : int;
+  process_available : int;
+  process_queue_length : int;
+  all_discovered : bool;
+  endpoints_found : int;
+}
+
+let empty_capacity = {
+  total = 0;
+  process_active = 0;
+  process_available = 0;
+  process_queue_length = 0;
+  all_discovered = true;
+  endpoints_found = 0;
+}
+
+let local_urls_of_named_selection ~sw ~net selection =
+  match
+    Cascade_catalog_runtime.resolve_named_providers
+      ~sw
+      ~net
+      ~cascade_name:selection
+      ()
+  with
+  | Error _ -> []
+  | Ok providers ->
+    providers
+    |> List.filter_map (fun (provider : Llm_provider.Provider_config.t) ->
+           if Llm_provider.Provider_config.is_local provider
+           then
+             let base_url = String.trim provider.base_url in
+             if base_url = "" then None else Some base_url
+           else None)
+
+let local_capacity_for_selections ~sw ~net ?config_path selections =
+  let (_ : string option) = config_path in
+  let local_urls =
+    selections
+    |> List.concat_map (fun selection ->
+           match local_urls_of_named_selection ~sw ~net selection with
+           | _ :: _ as urls -> urls
+           | [] ->
+             let fallback_profile =
+               Cascade_routes.cascade_name_for_use Cascade_routes.Keeper_turn
+             in
+             local_urls_of_named_selection ~sw ~net fallback_profile)
+    |> List.sort_uniq String.compare
+  in
+  if local_urls = [] then empty_capacity
+  else begin
+    let need_probe =
+      List.filter (fun url -> Cascade_throttle.lookup url = None) local_urls
+    in
+    if need_probe <> [] then begin
+      let statuses =
+        Llm_provider.Discovery.discover ~sw ~net ~endpoints:need_probe
+      in
+      Cascade_throttle.populate statuses
+    end;
+    let infos =
+      List.filter_map (fun url -> Cascade_throttle.capacity url) local_urls
+    in
+    match infos with
+    | [] -> empty_capacity
+    | _ ->
+      List.fold_left
+        (fun acc (info : Cascade_throttle.capacity_info) ->
+           { total = acc.total + info.total
+           ; process_active = acc.process_active + info.process_active
+           ; process_available =
+               acc.process_available + info.process_available
+           ; process_queue_length =
+               acc.process_queue_length + info.process_queue_length
+           ; all_discovered =
+               acc.all_discovered
+               &&
+               info.source = Llm_provider.Provider_throttle.Discovered
+           ; endpoints_found = acc.endpoints_found + 1
+           })
+        { empty_capacity with all_discovered = true }
+        infos
+  end

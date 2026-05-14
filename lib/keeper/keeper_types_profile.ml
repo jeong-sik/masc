@@ -1391,10 +1391,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 cascade_name =
                   normalize_cascade_name_opt
                     (Safe_ops.json_string_opt "cascade_name" keeper_json);
-                models =
-                  (match Safe_ops.json_string_list "models" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
+                models = None;
                 (* oas_env lives only in keeper TOML, not persona JSON —
                    persona profiles are a design-time artifact whereas
                    transport env is an ops-time toggle. *)

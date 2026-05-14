@@ -118,7 +118,7 @@ let has_background_capacity () =
   | Some sw, Some net -> (
       try
         let capacity =
-          Cascade_config.local_capacity_for_selections ~sw ~net
+          Cascade_runtime.local_capacity_for_selections ~sw ~net
             [ cascade_name ]
         in
         not

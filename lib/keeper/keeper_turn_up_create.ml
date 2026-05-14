@@ -464,7 +464,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           };
         (* RFC-0041 (post-step-4): cascade_ref is the SSOT; the legacy
            cascade_name field was removed from keeper_meta. *)
-        models = Option.value ~default:[] p.profile_defaults.models;
+        models = [];
         will;
         needs;
         desires;

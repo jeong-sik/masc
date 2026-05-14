@@ -291,8 +291,6 @@ let summary_of_masc_internal_error = function
    name in scope. *)
 let masc_oas_error_total_metric = "masc_oas_error_total"
 
-let cross_cascade_fallback_metric = "masc_cross_cascade_fallback_total"
-
 let () =
   Prometheus.register_counter
     ~name:masc_oas_error_total_metric
@@ -305,15 +303,6 @@ let () =
        turn_timeout | oas_timeout_budget | ambiguous_post_commit), \
        cascade_name (originating cascade or \"unknown\" for \
        cascade-less variants)."
-    ();
-  Prometheus.register_counter
-    ~name:cross_cascade_fallback_metric
-    ~help:
-      "Total times a keeper turn could not find a tool-capable \
-       provider in its own cascade and was driven by an upper layer \
-       to a different cascade. Labels: from_cascade (cascade the \
-       keeper was configured for), to_cascade (cascade that \
-       supplied the working candidate)."
     ()
 
 let kind_of_masc_internal_error = function

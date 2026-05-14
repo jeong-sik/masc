@@ -91,17 +91,6 @@ val tool_filter_rejection_label :
   t ->
   string option
 
-val resolve_tool_capable_across_cascades :
-  sw:Eio.Switch.t ->
-  net:Eio_context.eio_net ->
-  keeper_name:string ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  tools:Agent_sdk.Tool.t list ->
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  exclude_cascade:string ->
-  unit ->
-  (string * t) option
 
 val capacity_key : t -> string
 val capacity_keys : t list -> string list

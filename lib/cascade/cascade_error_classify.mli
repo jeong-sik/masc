@@ -114,8 +114,6 @@ val admission_wait_timeout_error :
   (string, Agent_sdk.Error.sdk_error) result
 (** Build an [Admission_queue_timeout] error from a wait duration in ms. *)
 
-val cross_cascade_fallback_metric : string
-
 (** {1 Config construction} *)
 
 val config_for_label :

@@ -841,10 +841,7 @@ let with_config_dir f =
       Masc_mcp.Config_dir_resolver.reset ();
       f config_dir)
 
-(* Legacy allowed_providers is accepted for compatibility but ignored.
-   Provider ownership now lives with OAS cascade resolution. *)
-
-let test_profile_ignores_legacy_allowed_providers () =
+let test_profile_rejects_legacy_allowed_providers () =
   let input = {|
 [keeper]
 goal = "test"
@@ -855,10 +852,10 @@ cascade_name = "primary"
   | Error e -> fail e
   | Ok doc ->
     (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok d ->
-       check (option string) "cascade preserved"
-         (Some "primary") d.cascade_name)
+     | Ok _ -> fail "expected removed TOML key error"
+     | Error msg ->
+       check bool "mentions removed allowed_providers key" true
+         (contains_substring msg "keeper.allowed_providers"))
 
 let test_profile_max_turns_overrides () =
   let input = {|
@@ -1943,8 +1940,8 @@ let () =
             test_profile_rejects_removed_also_allow_alias;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
-          test_case "legacy allowed_providers ignored" `Quick
-            test_profile_ignores_legacy_allowed_providers;
+          test_case "legacy allowed_providers rejected" `Quick
+            test_profile_rejects_legacy_allowed_providers;
           test_case "legacy keeper cascade alias normalized" `Quick
             test_profile_normalizes_legacy_keeper_cascade_alias;
           test_case "max_turns overrides parsed and applied" `Quick

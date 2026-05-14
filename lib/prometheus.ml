@@ -1524,7 +1524,7 @@ let init () =
   add
     metric_fallback_triggered
     "Total fallback events across the LLM cascade pipeline, labeled by kind \
-     (cross_cascade|cascade_empty|capability_drop|cli_unsupported|...) and detail"
+     (cascade_empty|capability_drop|cli_unsupported|...) and detail"
     Counter;
   (* Cascade FSM metrics — emitted by cascade_metrics.ml. *)
   add

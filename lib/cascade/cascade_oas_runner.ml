@@ -2,7 +2,7 @@
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Provides cascade profile defaults, Eio context validation,
-    provider resolution, tool-support filtering, and cross-cascade fallback.
+    provider resolution, and tool-support filtering.
 
     @since God file decomposition *)
 
@@ -473,106 +473,3 @@ let filter_candidate_providers_for_tool_support
           label
           signature);
     kept)
-
-(* Cross-cascade health-aware fallback.
-   When the current cascade has no tool-capable providers after filtering,
-   search all other cascades for a healthy tool-capable provider using the
-   health tracker's success rate and cooldown state. Returns the provider
-   config and the source cascade name, or None if no suitable provider exists.
-
-   Depth: 1 level only (no cross-cascade-of-cross-cascade).
-   Scope: excludes the current cascade to avoid revisiting. *)
-let resolve_tool_capable_provider_across_cascades
-      ~sw
-      ~net
-      ~(keeper_name : string)
-      ?runtime_mcp_policy
-      ?(tools = [])
-      ~require_tool_choice_support
-      ~require_tool_support
-      ~(exclude_cascade : string)
-      ()
-  =
-  match Cascade_catalog_runtime.known_profile_names ~sw ~net () with
-  | Error _ -> None
-  | Ok all_names ->
-    let assignable_names = Keeper_cascade_profile.keeper_catalog_names () in
-    (* Name had said "set" but the prior implementation was
-       [List.fold_left (fun acc n -> n :: acc) [] assignable_names] —
-       i.e. a reversed list with O(N) [List.mem] semantics.
-       [is_keeper_assignable] fires once per cascade in the
-       [List.concat_map] below; with N cascades x M assignable_names
-       that was O(N x M).  Materialise an actual Hashtbl so the
-       lookup is O(1) and the name matches the behaviour. *)
-    let assignable_set : (string, unit) Hashtbl.t =
-      let tbl = Hashtbl.create (List.length assignable_names) in
-      List.iter (fun n -> Hashtbl.replace tbl n ()) assignable_names;
-      tbl
-    in
-    let is_keeper_assignable name = Hashtbl.mem assignable_set name in
-    let scored_candidates =
-      all_names
-      |> List.filter (fun name -> name <> exclude_cascade)
-      |> List.filter_map (fun cascade_name ->
-        match
-          Cascade_catalog_runtime.resolve_named_providers
-            ~sw
-            ~net
-            ~require_tool_choice_support
-            ~require_tool_support
-            ?runtime_mcp_policy
-            ~cascade_name
-            ()
-        with
-        | Error _ -> None
-        | Ok providers ->
-          let secondary_resolver _provider_index primary =
-            Cascade_catalog_runtime.resolve_secondary_provider_for_primary
-              ~sw
-              ~net
-              ~cascade_name
-              ~primary
-              ()
-          in
-          let filtered =
-            filter_candidate_providers_for_tool_support
-              ~keeper_name
-              ?runtime_mcp_policy
-              ~tools
-              ~require_tool_choice_support
-              ~require_tool_support
-              ~secondary_resolver
-              ~label:cascade_name
-              providers
-          in
-          (match filtered with
-           | [] -> None
-           | _ -> Some (cascade_name, filtered)))
-      |> List.concat_map (fun (cascade_name, providers) ->
-        let keeper_assignable = is_keeper_assignable cascade_name in
-        let inventory_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
-        providers
-        |> List.map (fun (provider : Llm_provider.Provider_config.t) ->
-          let score =
-            Cascade_inventory.score_provider
-              Cascade_health_tracker.global
-              ~exclude:[]
-              ~keeper_assignable
-              provider
-          in
-          Cascade_inventory.{ cascade_name = inventory_cascade_name; provider; score }))
-    in
-    (* The score_provider helper already collapses cooldown,
-         keeper_assignable, and the success × latency composition into a
-         single [0.0–1.0] number; best_runner_among picks the strict
-         positive max with deterministic tie-break.  This replaces the
-         pre-PR4 sort that ranked solely by success_rate (which left
-         slow-but-alive providers indistinguishable from fast ones, and
-         did not exclude non-keeper-assignable cascades like
-         [governance_judge] from a regular keeper's fallback pool). *)
-    Cascade_inventory.best_runner_among
-      ~health:Cascade_health_tracker.global
-      ~exclude:[]
-      scored_candidates
-    |> Option.map (fun (sp : Cascade_inventory.scored_provider) ->
-      Keeper_cascade_profile.runtime_name_to_string sp.cascade_name, sp.provider)

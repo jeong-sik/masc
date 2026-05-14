@@ -55,11 +55,10 @@ val emit_token_usage :
 val fallback_triggered_metric : string
 
 (** Emit a fallback observation to the unified counter.
-    [kind] enumerates the fallback class (cross_cascade | cascade_empty |
-    capability_drop | cli_unsupported | provider_error_fallback | …);
-    [detail] carries the specific reason within the kind. Detail counters
-    (capability_drops, cross_cascade_fallback) remain for per-class
-    drill-down — this is the single numerator across all classes. *)
+    [kind] enumerates the fallback class (cascade_empty | capability_drop |
+    cli_unsupported | provider_error_fallback | …); [detail] carries the
+    specific reason within the kind. This is the single numerator across all
+    fallback classes. *)
 val emit_fallback_triggered : kind:string -> detail:string -> unit
 
 (** Construct the OAS Metrics.t sink without installing it.  Useful

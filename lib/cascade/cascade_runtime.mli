@@ -63,3 +63,26 @@ val resolve_named_providers :
   cascade_name:Keeper_cascade_profile.runtime_name ->
   unit ->
   Llm_provider.Provider_config.t list
+
+(** Point-in-time capacity for local LLM endpoints.
+    All [process_*] counts reflect this OAS process only. Other clients
+    sharing the same server are not visible. *)
+type local_capacity = {
+  total : int;
+  process_active : int;
+  process_available : int;
+  process_queue_length : int;
+  all_discovered : bool;
+  endpoints_found : int;
+}
+
+val local_capacity_for_selections :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?config_path:string ->
+  string list ->
+  local_capacity
+(** Query local endpoint capacity for named cascade selections.
+
+    Selections are resolved through the TOML catalog into typed provider
+    candidates. Direct model-string parsing is intentionally not a fallback. *)

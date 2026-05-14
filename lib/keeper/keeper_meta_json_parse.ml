@@ -20,7 +20,6 @@ type parsed_keeper_identity =
   ; pk_social_model : string
   ; pk_cascade_name : string
   ; pk_cascade_ref : Cascade_ref.cascade_ref option
-  ; pk_models : string list
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string
@@ -130,16 +129,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
        fallback".  Downstream code canonicalizes at point-of-use. *)
       Safe_ops.json_string ~default:(Keeper_config.default_cascade_name ()) "cascade_name" json
     in
-    let pk_models =
-      match json |> Yojson.Safe.Util.member "models" with
-      | `List items ->
-        List.filter_map
-          (function
-            | `String s -> Some (String.trim s)
-            | _ -> None)
-          items
-      | _ -> []
-    in
     Ok
       { pk_name
       ; pk_agent_name
@@ -158,7 +147,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
              (match Cascade_ref.cascade_ref_of_json ref_json with
               | Some ref -> Some ref
               | None -> Some (Cascade_ref.cascade_ref_of_string pk_cascade_name)))
-      ; pk_models
       ; pk_will
       ; pk_needs
       ; pk_desires
@@ -606,7 +594,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                               group = identity.pk_cascade_name;
                               item = None;
                             })
-                   ; models = identity.pk_models
+                   ; models = []
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs
                    ; desires = identity.pk_desires

@@ -1932,19 +1932,22 @@ let test_oas_worker_capability_threading_contracts () =
 let test_oas_capacity_restore_contracts () =
   check bool "operator judge backoff uses OAS local capacity" true
     (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
-       "local_capacity_for_selections ~sw ~net");
+       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
   check bool "operator judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
        "Keeper_cascade_profile.Operator_judge");
   check bool "governance judge backoff uses OAS local capacity" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
-       "local_capacity_for_selections ~sw ~net");
+       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
   check bool "governance judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
        "Keeper_cascade_profile.Governance_judge");
   check bool "autoresearch background gating restores OAS capacity query" true
     (file_contains_pattern "lib/autoresearch_codegen.ml"
-       "local_capacity_for_selections ~sw ~net");
+       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
+  check bool "cascade config no longer exposes legacy local capacity parser" true
+    (file_not_contains_pattern "lib/cascade/cascade_config.mli"
+       "val local_capacity_for_selections");
   check bool "autoresearch uses Eio context fallback for capacity probing" true
     (file_contains_pattern "lib/autoresearch_codegen.ml"
        "Eio_context.get_switch_opt (), Eio_context.get_net_opt ()")

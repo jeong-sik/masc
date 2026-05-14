@@ -141,6 +141,7 @@ let removed_keeper_input_key_names =
     "models";
     "allowed_models";
     "active_model";
+    "allowed_providers";
     "presence_keepalive";
     "presence_keepalive_sec";
     "trigger_mode";

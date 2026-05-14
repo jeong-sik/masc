@@ -732,7 +732,7 @@ let should_backoff ~sw ~net =
   in
   try
     let capacity =
-      Cascade_config.local_capacity_for_selections ~sw ~net
+      Cascade_runtime.local_capacity_for_selections ~sw ~net
         [ cascade_name ]
     in
     capacity.all_discovered && capacity.endpoints_found > 0

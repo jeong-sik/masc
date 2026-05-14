@@ -166,11 +166,10 @@ val resolve_secondary_provider_for_primary :
     from {!resolve_named_providers} of [cascade_name], find the matching
     weighted entry and parse its [secondary] field (if any) into a fresh
     [Provider_config.t]. Returns [None] when the entry has no secondary,
-    when the primary is not present in the cascade (e.g. cross-cascade
-    fallback path), or when secondary parsing fails (unregistered scheme,
-    invalid syntax). The lookup is read-only and does not mutate cascade
-    state — secondary resolution is invoked only after the primary has
-    been rejected by the tool-use gate. *)
+    when the primary is not present in the declared cascade, or when
+    secondary parsing fails (unregistered scheme, invalid syntax). The lookup
+    is read-only and does not mutate cascade state — secondary resolution is
+    invoked only after the primary has been rejected by the tool-use gate. *)
 
 val resolve_inference_params :
   ?sw:Eio.Switch.t ->

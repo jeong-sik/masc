@@ -236,7 +236,6 @@ let ensure_keeper_meta config name =
             defaults.room_signal_prompt_enabled
     in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
-    let target_models = apply_default defaults.models meta.models in
     let target_social_model =
       apply_default defaults.social_model meta.social_model
       |> Keeper_social_model.normalize_social_model in
@@ -387,7 +386,6 @@ let ensure_keeper_meta config name =
     let signal_changed =
       meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
     let denylist_changed = meta.tool_denylist <> target_denylist in
-    let models_changed = meta.models <> target_models in
     let social_model_changed = meta.social_model <> target_social_model in
     (* [meta.cascade_name] may be a raw TOML/JSON value while
        [resolved_target_cascade_name] is the validated runtime catalog
@@ -448,7 +446,7 @@ let ensure_keeper_meta config name =
       meta.per_provider_timeout_s <> target_per_provider_timeout in
     let oas_env_changed = meta.oas_env <> target_oas_env in
     let any_changed =
-      proactive_changed || signal_changed || denylist_changed || models_changed
+      proactive_changed || signal_changed || denylist_changed
       || social_model_changed
       || cascade_changed
       || personality_changed || policy_changed || discovery_changed
@@ -459,7 +457,6 @@ let ensure_keeper_meta config name =
         (if proactive_changed then Some "proactive" else None);
         (if signal_changed then Some "signal" else None);
         (if denylist_changed then Some "denylist" else None);
-        (if models_changed then Some "models" else None);
         (if social_model_changed then Some "social_model" else None);
         (if cascade_changed then Some "cascade" else None);
         (if personality_changed then
@@ -518,7 +515,6 @@ let ensure_keeper_meta config name =
         };
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
-        models = target_models;
         social_model = target_social_model;
         (* RFC-0041: cascade_ref is the SSOT after step 4 (B7). When
            cascade_changed flips, materialize a fresh cascade_ref;

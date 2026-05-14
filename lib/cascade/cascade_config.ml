@@ -1453,53 +1453,15 @@ let resolve_strategy ?config_path ~name () =
                (default_kind, []))
       | _ -> (parsed_kind, [])
     in
-    let sticky_ttl_ms =
-      (* Enumerate every [Cascade_strategy.kind] variant so the compiler
-         flags any new strategy added here. [sticky_ttl_ms] is only
-         meaningful for [Sticky]; the six other strategies today produce
-         0 (no TTL applicable). A future strategy that *also* needs a
-         per-attempt TTL (e.g. [Hash_sticky], [Affinity]) would inherit
-         "no TTL" silently under the previous [_, _ -> 0] catch-all. *)
-      match kind, cfg.sticky_ttl_ms with
-      | Cascade_strategy.Sticky, Some n -> n
-      | Cascade_strategy.Sticky, None -> Cascade_strategy.default_sticky_ttl_ms
-      | ( Cascade_strategy.Failover | Cascade_strategy.Capacity_aware
-        | Cascade_strategy.Weighted_random
-        | Cascade_strategy.Circuit_breaker_cycling
-        | Cascade_strategy.Priority_tier | Cascade_strategy.Round_robin ), _ -> 0
-    in
-    let defaults = Cascade_strategy.default_scoring_params in
-    let scoring = {
-      Cascade_strategy.latency_baseline_ms =
-        (match cfg.latency_baseline_ms with
-         | Some n when n > 0.0 -> n
-         | _ -> defaults.latency_baseline_ms);
-      rate_limit_recency_window_s =
-        (match cfg.rate_limit_recency_window_s with
-         | Some n -> n
-         | _ -> defaults.rate_limit_recency_window_s);
-      rate_limit_decay_base =
-        (match cfg.rate_limit_decay_base with
-         | Some n when n > 0.0 && n < 1.0 -> n
-         | _ -> defaults.rate_limit_decay_base);
-      rate_limit_skip_after =
-        (match cfg.rate_limit_skip_after with
-         | Some n when n >= 0 -> n
-         | _ -> defaults.rate_limit_skip_after);
-      server_error_recency_window_s =
-        (match cfg.server_error_recency_window_s with
-         | Some n -> n
-         | _ -> defaults.server_error_recency_window_s);
-      server_error_decay_base =
-        (match cfg.server_error_decay_base with
-         | Some n when n > 0.0 && n < 1.0 -> n
-         | _ -> defaults.server_error_decay_base);
-      server_error_skip_after =
-        (match cfg.server_error_skip_after with
-         | Some n when n >= 0 -> n
-         | _ -> defaults.server_error_skip_after);
-    } in
-    { Cascade_strategy.kind; cycle; tiers; sticky_ttl_ms; scoring }
+    ignore cfg.sticky_ttl_ms;
+    ignore cfg.latency_baseline_ms;
+    ignore cfg.rate_limit_recency_window_s;
+    ignore cfg.rate_limit_decay_base;
+    ignore cfg.rate_limit_skip_after;
+    ignore cfg.server_error_recency_window_s;
+    ignore cfg.server_error_decay_base;
+    ignore cfg.server_error_skip_after;
+    { Cascade_strategy.kind; cycle; tiers }
 
 let resolve_ollama_max_concurrent ?config_path ~name () =
   match config_path with

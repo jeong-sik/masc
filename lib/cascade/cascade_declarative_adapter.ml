@@ -333,18 +333,6 @@ let map_cycle_policy (cp : cascade_cycle_policy) :
     backoff_cap_ms = cp.backoff_cap_ms;
   }
 
-let map_scoring_params (sp : cascade_scoring_params) :
-    Cascade_strategy.scoring_params =
-  {
-    Cascade_strategy.latency_baseline_ms = sp.latency_baseline_ms;
-    rate_limit_recency_window_s = sp.rate_limit_recency_window_s;
-    rate_limit_decay_base = sp.rate_limit_decay_base;
-    rate_limit_skip_after = sp.rate_limit_skip_after;
-    server_error_recency_window_s = sp.server_error_recency_window_s;
-    server_error_decay_base = sp.server_error_decay_base;
-    server_error_skip_after = sp.server_error_skip_after;
-  }
-
 let build_strategy (tier : cascade_tier) : Cascade_strategy.t =
   let kind = map_strategy_kind tier.strategy in
   let cycle =
@@ -352,17 +340,9 @@ let build_strategy (tier : cascade_tier) : Cascade_strategy.t =
     | Some cp -> map_cycle_policy cp
     | None -> Cascade_strategy.default_cycle_policy
   in
-  let sticky_ttl_ms =
-    match tier.sticky_ttl_ms with
-    | Some ttl -> ttl
-    | None -> Cascade_strategy.default_sticky_ttl_ms
-  in
-  let scoring =
-    match tier.scoring_params with
-    | Some sp -> map_scoring_params sp
-    | None -> Cascade_strategy.default_scoring_params
-  in
-  { Cascade_strategy.kind; cycle; tiers = []; sticky_ttl_ms; scoring }
+  ignore tier.sticky_ttl_ms;
+  ignore tier.scoring_params;
+  { Cascade_strategy.kind; cycle; tiers = [] }
 
 let build_tier_group_strategy (tg : cascade_tier_group)
     (tier_tiers : string list list) : Cascade_strategy.t =
@@ -371,8 +351,6 @@ let build_tier_group_strategy (tg : cascade_tier_group)
     Cascade_strategy.kind;
     cycle = Cascade_strategy.default_cycle_policy;
     tiers = tier_tiers;
-    sticky_ttl_ms = 0;
-    scoring = Cascade_strategy.default_scoring_params;
   }
 
 (* --- Member resolution --- *)

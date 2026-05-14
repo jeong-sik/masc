@@ -23,16 +23,14 @@ module Cascade_state = Masc_mcp.Cascade_state
 type cand = {
   name : string;          (* health key *)
   url : string;           (* capacity key *)
-  w : int;                (* config weight *)
 }
 
-let mk_cand ?(url = "http://test/" ^ "x") ?(w = 1) name =
-  { name; url = url ^ name; w }
+let mk_cand ?(url = "http://test/" ^ "x") name =
+  { name; url = url ^ name }
 
 let adapter : cand S.adapter = {
   health_key = (fun c -> c.name);
   capacity_key = (fun c -> c.url);
-  weight = (fun c -> c.w);
 }
 
 let names cands = List.map (fun c -> c.name) cands
@@ -61,10 +59,8 @@ let mk_ctx ?(health = H.create ())
 
 let mk_t ?(cycle = S.default_cycle_policy)
          ?(tiers = [])
-         ?(sticky_ttl_ms = 0)
-         ?(scoring = S.default_scoring_params)
          kind : S.t =
-  { kind; cycle; tiers; sticky_ttl_ms; scoring }
+  { kind; cycle; tiers }
 
 (* ── S1 Failover ─────────────────────────────────────────────── *)
 
@@ -85,321 +81,6 @@ let test_failover_filters_cooldown () =
   let ordered = S.order_candidates S.failover ~adapter ~ctx ~cycle:0 cands in
   check (list string) "cooldown candidate removed, remaining order preserved"
     ["b"; "c"] (names ordered)
-
-(* ── S2 Capacity_aware ───────────────────────────────────────── *)
-
-let test_capacity_aware_filters_busy () =
-  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
-  let table = [
-    (List.nth cands 0).url, mk_capacity_info ~total:1 ~active:1;
-    (List.nth cands 1).url, mk_capacity_info ~total:2 ~active:0;
-    (* "c" has no entry → unknown → kept (fail-open) *)
-  ] in
-  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
-  let strat = mk_t S.Capacity_aware in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "busy 'a' filtered, 'b' and 'c' (unknown) kept"
-    ["b"; "c"] (names ordered)
-
-let test_capacity_aware_all_busy_yields_empty () =
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let table = [
-    (List.nth cands 0).url, mk_capacity_info ~total:1 ~active:1;
-    (List.nth cands 1).url, mk_capacity_info ~total:1 ~active:1;
-  ] in
-  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
-  let strat = mk_t S.Capacity_aware in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "all busy → empty list" [] (names ordered)
-
-let test_capacity_aware_unknown_passes () =
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let ctx = mk_ctx ~capacity:(fun _ -> None) () in
-  let strat = mk_t S.Capacity_aware in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "unknown capacity → all kept (fail-open)"
-    ["a"; "b"] (names ordered)
-
-(* ── S3 Weighted_random ──────────────────────────────────────── *)
-
-let test_weighted_random_deterministic_with_rand0 () =
-  (* With rand_int = (fun _ -> 0) the weighted picker always selects
-     the first remaining candidate, producing a stable left-to-right
-     ordering identical to the input. *)
-  let cands = [
-    mk_cand ~w:30 "a";
-    mk_cand ~w:50 "b";
-    mk_cand ~w:20 "c";
-  ] in
-  let ctx = mk_ctx ~rand:(fun _ -> 0) () in
-  let strat = mk_t S.Weighted_random in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "rand=0 picks left-to-right"
-    ["a"; "b"; "c"] (names ordered)
-
-let test_weighted_random_all_cooldown_yields_empty () =
-  (* Cool down all providers via health tracker. effective_weight
-     becomes 0 for all, so weighted_random must return no candidates
-     and let the caller surface a filtered-empty cascade state. *)
-  let h = H.create () in
-  let cool_down k =
-    H.record_failure h ~provider_key:k ();
-    H.record_failure h ~provider_key:k ();
-    H.record_failure h ~provider_key:k ()
-  in
-  cool_down "a"; cool_down "b";
-  let cands = [mk_cand ~w:50 "a"; mk_cand ~w:30 "b"] in
-  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
-  let strat = mk_t S.Weighted_random in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "all-cooldown → empty"
-    [] (names ordered)
-
-(* ── Latency-aware weight scaling (PR3) ──────────────────────── *)
-
-(* For these tests we exercise weight scaling indirectly through the
-   internal RNG.  With [rand_int n = always n - 1] we always pick the
-   *last* candidate within the active list — so a candidate with weight
-   1 ends up at the head of the returned ordering only when it survived
-   the weighted draw.  By comparing two configurations that differ only
-   in latency samples, we can observe whether the latency factor
-   actually shifted the per-candidate weight. *)
-
-let pick_first_with_rand_max () =
-  (* rand_int returning (n - 1) always selects the last candidate first
-     in [weighted_shuffle], so the head of the result ≈ the candidate
-     with the smallest weighted partition relative to the running total.
-     For a simpler invariant we just ensure the function returns a
-     deterministic permutation. *)
-  ()
-
-let test_latency_no_samples_preserves_baseline_order () =
-  (* Without latency samples, latency_score = 1.0 for both providers,
-     so the per-candidate weight is unchanged from the pre-PR3
-     behaviour.  Pin rand to 0 → left-to-right ordering. *)
-  let h = H.create () in
-  let cands = [mk_cand ~w:30 "a"; mk_cand ~w:30 "b"; mk_cand ~w:30 "c"] in
-  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
-  let strat = mk_t S.Weighted_random in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "no latency samples → input order with rand=0"
-    ["a"; "b"; "c"] (names ordered)
-
-let test_latency_below_baseline_full_weight () =
-  (* p50 below baseline → score = 1.0 → no penalty.  Verify by feeding
-     fast samples (10ms) and confirming weight stays at config.  We
-     observe via [Cascade_health_tracker.effective_weight] before and
-     [latency_score_for_provider] separately. *)
-  let h = H.create () in
-  H.record_success h ~provider_key:"a" ~latency_ms:10.0 ();
-  H.record_success h ~provider_key:"b" ~latency_ms:10.0 ();
-  let score = S.latency_score_for_provider h ~provider_key:"a" in
-  check (float 0.001) "fast provider gets score 1.0" 1.0 score
-
-let test_latency_above_baseline_fractional () =
-  (* p50 = 4 × baseline (default 2000ms) → score should be ~0.25.
-     We feed 8000ms samples and verify the score is well below 1.0. *)
-  let h = H.create () in
-  H.record_success h ~provider_key:"slow" ~latency_ms:8000.0 ();
-  let score = S.latency_score_for_provider h ~provider_key:"slow" in
-  check bool
-    (Printf.sprintf "slow provider score=%.3f should be < 0.5" score)
-    true (score < 0.5);
-  check bool
-    (Printf.sprintf "slow provider score=%.3f should be > 0" score)
-    true (score > 0.0)
-
-let test_latency_unknown_provider_neutral () =
-  (* Provider with no entry in the tracker → score = 1.0 (optimistic
-     default, matches success_rate convention). *)
-  let h = H.create () in
-  let score = S.latency_score_for_provider h ~provider_key:"never-seen" in
-  check (float 0.001) "unknown provider score = 1.0" 1.0 score
-
-let test_latency_changes_weighted_ordering () =
-  (* When providers have identical config_weight and success_rate, but
-     one is materially slower, weighted_shuffle's per-candidate weight
-     for the slow provider must drop below the fast one.  We probe the
-     effect by running shuffle many times with a varying [rand_int] and
-     confirming the slow provider lands at the head less often than
-     the fast ones. *)
-  let h = H.create () in
-  H.record_success h ~provider_key:"fast" ~latency_ms:50.0 ();
-  H.record_success h ~provider_key:"medium" ~latency_ms:500.0 ();
-  H.record_success h ~provider_key:"slow" ~latency_ms:8000.0 ();
-  let cands = [mk_cand ~w:100 "fast"; mk_cand ~w:100 "medium"; mk_cand ~w:100 "slow"] in
-  let strat = mk_t S.Weighted_random in
-  (* Sweep all possible rand_int draws across the total weight.  With
-     rand=k we get a deterministic head pick for a given total; counting
-     how often each candidate is the head over k=0..total-1 approximates
-     the head-probability distribution. *)
-  let head_counts = Hashtbl.create 3 in
-  let trials = 500 in
-  for i = 0 to trials - 1 do
-    let ctx = mk_ctx ~health:h ~rand:(fun n -> i mod (max 1 n)) () in
-    let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-    match ordered with
-    | head :: _ ->
-      let key = adapter.health_key head in
-      let prev = try Hashtbl.find head_counts key with Not_found -> 0 in
-      Hashtbl.replace head_counts key (prev + 1)
-    | [] -> ()
-  done;
-  let count k = try Hashtbl.find head_counts k with Not_found -> 0 in
-  let fast_n = count "fast" in
-  let medium_n = count "medium" in
-  let slow_n = count "slow" in
-  check bool
-    (Printf.sprintf "fast(%d) head-rate >= medium(%d) head-rate" fast_n medium_n)
-    true (fast_n >= medium_n);
-  check bool
-    (Printf.sprintf "medium(%d) head-rate >= slow(%d) head-rate" medium_n slow_n)
-    true (medium_n >= slow_n);
-  check bool
-    (Printf.sprintf "fast(%d) > slow(%d) (strict)" fast_n slow_n)
-    true (fast_n > slow_n)
-
-let test_latency_does_not_zero_alive_provider () =
-  (* Even at extreme p50 (e.g. 60s), an alive provider must still get
-     weight ≥ 1 — the [max 1] guard prevents zero-out from latency
-     alone, only cooldown can produce 0. *)
-  let h = H.create () in
-  H.record_success h ~provider_key:"slow" ~latency_ms:60_000.0 ();
-  H.record_success h ~provider_key:"fast" ~latency_ms:50.0 ();
-  let cands = [mk_cand ~w:10 "slow"; mk_cand ~w:10 "fast"] in
-  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
-  let strat = mk_t S.Weighted_random in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check int "extreme-slow provider still appears in ordering"
-    2 (List.length ordered);
-  check bool "extreme-slow not filtered as cooldown"
-    true (List.exists (fun c -> adapter.health_key c = "slow") ordered);
-  ignore pick_first_with_rand_max
-
-(* ── rate_limit_score_for_provider (PR3b) ─────────────────────── *)
-
-let test_rl_score_unknown_provider_full () =
-  (* Optimistic default: untracked provider scores 1.0 — the recency
-     factor must not penalise providers we have never seen. *)
-  let h = H.create () in
-  let s = S.rate_limit_score_for_provider h ~provider_key:"unseen" in
-  check (float 0.001) "unknown → 1.0" 1.0 s
-
-let test_rl_score_no_recent_429_full () =
-  (* A provider with successes only must also score 1.0 — only
-     [Soft_rate_limited] events should count. *)
-  let h = H.create () in
-  H.record_success h ~provider_key:"p" ();
-  H.record_success h ~provider_key:"p" ();
-  let s = S.rate_limit_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "no 429 → 1.0" 1.0 s
-
-let test_rl_score_one_429_decays_to_half () =
-  (* Default decay base is 0.5, so 1 recent 429 produces score = 0.5. *)
-  let h = H.create () in
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  let s = S.rate_limit_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "1 × 429 → 0.5" 0.5 s
-
-let test_rl_score_two_429_decays_to_quarter () =
-  (* 0.5^2 = 0.25 — exponential decay confirms the formula. *)
-  let h = H.create () in
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  let s = S.rate_limit_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "2 × 429 → 0.25" 0.25 s
-
-let test_rl_score_three_429_skips_provider () =
-  let h = H.create () in
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  let s = S.rate_limit_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "3 × 429 → hard skip" 0.0 s
-
-(* ── weighted_shuffle composition with recency factor ──────────── *)
-
-let test_weighted_shuffle_429_provider_loses_to_clean_peer () =
-  (* Two providers with identical config_weight + success_rate, but one
-     has 3 recent 429s.  Over 200 trials with ctx.rand_int sampling the
-     full weight range, the clean provider should win the head slot
-     materially more often than the rate-limited one (≥ ~70/30 split is
-     the expected band given decay 0.5^3 = 0.125 vs 1.0). *)
-  let h = H.create () in
-  H.record_soft_rate_limited h ~provider_key:"limited" ();
-  H.record_soft_rate_limited h ~provider_key:"limited" ();
-  H.record_soft_rate_limited h ~provider_key:"limited" ();
-  let cands = [mk_cand ~w:100 "limited"; mk_cand ~w:100 "clean"] in
-  let strat = mk_t S.Weighted_random in
-  let st = Random.State.make [| 42 |] in
-  let trials = 200 in
-  let clean_wins = ref 0 in
-  for _ = 1 to trials do
-    let ctx = mk_ctx ~health:h
-        ~rand:(fun n -> Random.State.int st n) ()
-    in
-    match S.order_candidates strat ~adapter ~ctx ~cycle:0 cands with
-    | [] -> ()
-    | hd :: _ -> if hd.name = "clean" then incr clean_wins
-  done;
-  let win_rate = float_of_int !clean_wins /. float_of_int trials in
-  check bool
-    (Printf.sprintf "clean wins %d/%d (%.2f) — expected > 0.65 (decay 0.125 vs 1.0)"
-       !clean_wins trials win_rate)
-    true (win_rate > 0.65)
-
-let test_weighted_shuffle_429_provider_does_not_crash () =
-  (* Sustained 429s now zero the recency score.  The strategy should
-     return an empty ordering when that removes the only candidate,
-     rather than reviving it via the max-1 floor. *)
-  let h = H.create () in
-  for _ = 1 to 5 do
-    H.record_soft_rate_limited h ~provider_key:"limited" ()
-  done;
-  let cands = [mk_cand ~w:100 "limited"] in
-  let strat = mk_t S.Weighted_random in
-  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "rate-limited provider skipped" [] (names ordered)
-
-(* ── S4 Circuit_breaker_cycling ──────────────────────────────── *)
-
-let test_cb_cycling_excludes_cooldown_and_busy () =
-  let h = H.create () in
-  H.record_failure h ~provider_key:"a" ();
-  H.record_failure h ~provider_key:"a" ();
-  H.record_failure h ~provider_key:"a" ();
-  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
-  let table = [
-    (List.nth cands 1).url, mk_capacity_info ~total:1 ~active:1;
-    (* "c" unknown → kept *)
-  ] in
-  let ctx = mk_ctx ~health:h ~capacity:(stub_capacity table) () in
-  let strat = mk_t S.Circuit_breaker_cycling
-      ~cycle:{ max_cycles = 3; backoff_base_ms = 100; backoff_cap_ms = 1000 }
-  in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "cooldown 'a' + busy 'b' filtered, 'c' (unknown) kept"
-    ["c"] (names ordered)
-
-let test_cb_cycling_starvation_guard () =
-  (* Cooldown filter passes both 'a' and 'b', but capacity reports 0 for
-     both.  Guard must return the post-cooldown list instead of empty so
-     a real call is attempted (otherwise cascade exhausts with no
-     upstream error signal). *)
-  let h = H.create () in
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let table = [
-    (List.nth cands 0).url, mk_capacity_info ~total:1 ~active:1;
-    (List.nth cands 1).url, mk_capacity_info ~total:1 ~active:1;
-  ] in
-  let ctx = mk_ctx ~health:h ~capacity:(stub_capacity table) () in
-  let strat = mk_t S.Circuit_breaker_cycling
-      ~cycle:{ max_cycles = 3; backoff_base_ms = 100; backoff_cap_ms = 1000 }
-  in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "all-busy cooled list → fall through non-empty"
-    ["a"; "b"] (names ordered)
 
 (* ── Cycle policy + backoff ───────────────────────────────────── *)
 
@@ -433,9 +114,7 @@ let test_parse_kind_known () =
     | Error msg -> fail (Printf.sprintf "expected Ok, got Error %s" msg)
   in
   check_ok "failover" S.Failover;
-  check_ok "capacity_aware" S.Capacity_aware;
-  check_ok "weighted_random" S.Weighted_random;
-  check_ok "circuit_breaker_cycling" S.Circuit_breaker_cycling
+  check_ok "priority_tier" S.Priority_tier
 
 let string_contains haystack needle =
   let nlen = String.length needle in
@@ -703,106 +382,7 @@ let test_priority_tier_starvation_guard () =
   check (list string) "all-busy tier → fall through with tier list"
     ["a"; "b"] (names ordered)
 
-(* ── Phase B: Sticky (S6) ──────────────────────────────────── *)
-
-let test_sticky_records_and_pins () =
-  Cascade_state.clear_all ();
-  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
-  let strat = mk_t S.Sticky ~sticky_ttl_ms:60_000 in
-  let ctx = mk_ctx ~now:1000.0 ~keeper_name:"k1" ~cascade_name:"cas" () in
-  (* First call: no entry → returns full list *)
-  let first = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "no sticky → full list" ["a"; "b"; "c"] (names first);
-  (* Record success on 'b' *)
-  S.record_choice strat ~ctx ~provider_key:"b";
-  (* Second call: pinned to 'b' *)
-  let second = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "after record → pinned to 'b'" ["b"] (names second)
-
-let test_sticky_expires_after_ttl () =
-  Cascade_state.clear_all ();
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let strat = mk_t S.Sticky ~sticky_ttl_ms:60_000 in
-  let ctx_now = mk_ctx ~now:0.0 ~keeper_name:"k" ~cascade_name:"cas" () in
-  S.record_choice strat ~ctx:ctx_now ~provider_key:"a";
-  (* 60s + 1ms past expiry *)
-  let ctx_later = mk_ctx ~now:60.001 ~keeper_name:"k" ~cascade_name:"cas" () in
-  let ordered = S.order_candidates strat ~adapter ~ctx:ctx_later ~cycle:0 cands in
-  check (list string) "expired → fall back to full list"
-    ["a"; "b"] (names ordered)
-
-let test_sticky_pinned_provider_missing_falls_back () =
-  Cascade_state.clear_all ();
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let strat = mk_t S.Sticky ~sticky_ttl_ms:60_000 in
-  let ctx = mk_ctx ~now:0.0 ~keeper_name:"k" ~cascade_name:"cas" () in
-  (* Pin 'c' which doesn't exist in the candidate list *)
-  S.record_choice strat ~ctx ~provider_key:"c";
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "missing pin → fall back to full list"
-    ["a"; "b"] (names ordered)
-
-let test_sticky_per_keeper_isolation () =
-  Cascade_state.clear_all ();
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let strat = mk_t S.Sticky ~sticky_ttl_ms:60_000 in
-  let k1 = mk_ctx ~now:0.0 ~keeper_name:"k1" ~cascade_name:"cas" () in
-  let k2 = mk_ctx ~now:0.0 ~keeper_name:"k2" ~cascade_name:"cas" () in
-  S.record_choice strat ~ctx:k1 ~provider_key:"a";
-  S.record_choice strat ~ctx:k2 ~provider_key:"b";
-  let ordered_k1 = S.order_candidates strat ~adapter ~ctx:k1 ~cycle:0 cands in
-  let ordered_k2 = S.order_candidates strat ~adapter ~ctx:k2 ~cycle:0 cands in
-  check (list string) "k1 → 'a'" ["a"] (names ordered_k1);
-  check (list string) "k2 → 'b'" ["b"] (names ordered_k2)
-
-(* ── Phase B: Round_robin (S7) ─────────────────────────────── *)
-
-let test_round_robin_rotates_each_call () =
-  Cascade_state.clear_all ();
-  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
-  let strat = mk_t S.Round_robin in
-  let ctx = mk_ctx ~cascade_name:"rr-test" () in
-  let r0 = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  let r1 = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  let r2 = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  let r3 = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "call 0: cursor 0 → abc" ["a"; "b"; "c"] (names r0);
-  check (list string) "call 1: cursor 1 → bca" ["b"; "c"; "a"] (names r1);
-  check (list string) "call 2: cursor 2 → cab" ["c"; "a"; "b"] (names r2);
-  check (list string) "call 3: cursor 3 mod 3 = 0 → abc" ["a"; "b"; "c"] (names r3)
-
-let test_round_robin_singleton_no_op () =
-  Cascade_state.clear_all ();
-  let cands = [mk_cand "only"] in
-  let strat = mk_t S.Round_robin in
-  let ctx = mk_ctx ~cascade_name:"singleton" () in
-  let r = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check (list string) "singleton → unchanged" ["only"] (names r);
-  (* Cursor not advanced for singleton *)
-  check int "cursor stays at 0" 0
-    (Cascade_state.peek_round_robin ~cascade:"singleton")
-
-let test_round_robin_per_cascade_cursor () =
-  Cascade_state.clear_all ();
-  let cands = [mk_cand "a"; mk_cand "b"] in
-  let strat = mk_t S.Round_robin in
-  let ctx_x = mk_ctx ~cascade_name:"cas-x" () in
-  let ctx_y = mk_ctx ~cascade_name:"cas-y" () in
-  let _ = S.order_candidates strat ~adapter ~ctx:ctx_x ~cycle:0 cands in
-  let _ = S.order_candidates strat ~adapter ~ctx:ctx_x ~cycle:0 cands in
-  let r_y = S.order_candidates strat ~adapter ~ctx:ctx_y ~cycle:0 cands in
-  check (list string) "cas-y has its own cursor (still 0)"
-    ["a"; "b"] (names r_y)
-
-(* ── Phase B: cascade_state primitives ─────────────────────── *)
-
-let test_cascade_state_sticky_zero_ttl_no_record () =
-  Cascade_state.clear_all ();
-  Cascade_state.record_sticky_choice ~keeper:"k" ~cascade:"c"
-    ~provider:"p" ~ttl_ms:0 ~now:0.0;
-  match Cascade_state.lookup_sticky ~keeper:"k" ~cascade:"c" ~now:0.0 with
-  | None -> ()
-  | Some _ -> fail "ttl_ms=0 should not record"
+(* ── Cascade_state auto-rotation primitive ───────────────────── *)
 
 let test_cascade_state_round_robin_negative_bound () =
   Cascade_state.clear_all ();
@@ -1111,7 +691,7 @@ let test_trace_prometheus_counter_increments () =
   ST.record (mk_trace_event ~cascade_name:"primary"
                ~strategy:"failover" ~kind:ST.Ordered ());
   ST.record (mk_trace_event ~cascade_name:"nick0cave"
-               ~strategy:"circuit_breaker_cycling"
+               ~strategy:"priority_tier"
                ~kind:ST.Filtered_empty ~backoff_ms:500 ());
   let text = Masc_mcp.Prometheus.to_prometheus_text () in
   let ordered =
@@ -1121,137 +701,20 @@ let test_trace_prometheus_counter_increments () =
   in
   let filtered =
     find_strategy_counter_value text
-      ~cascade:"nick0cave" ~strategy:"circuit_breaker_cycling"
+      ~cascade:"nick0cave" ~strategy:"priority_tier"
       ~kind:"filtered_empty"
     |> Option.value ~default:0.0
   in
   check bool "primary/failover/ordered advanced by >= 2"
     true (ordered >= before +. 2.0);
-  check bool "nick0cave/circuit_breaker_cycling/filtered_empty >= 1"
+  check bool "nick0cave/priority_tier/filtered_empty >= 1"
     true (filtered >= 1.0)
-
-(* ── server_error_score_for_provider (#12797) ─────────────────── *)
-
-let test_se_score_unknown_provider_full () =
-  let h = H.create () in
-  let s = S.server_error_score_for_provider h ~provider_key:"unseen" in
-  check (float 0.001) "unknown → 1.0" 1.0 s
-
-let test_se_score_no_failures_full () =
-  let h = H.create () in
-  H.record_success h ~provider_key:"p" ();
-  H.record_success h ~provider_key:"p" ();
-  let s = S.server_error_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "no failures → 1.0" 1.0 s
-
-let test_se_score_one_failure_decays () =
-  (* Default decay base 0.6: 1 recent failure → 0.6 *)
-  let h = H.create () in
-  H.record_failure h ~provider_key:"p" ();
-  let s = S.server_error_score_for_provider h ~provider_key:"p" in
-  (* Allow for env override: just verify score < 1.0 and > 0.0 *)
-  check bool "1 failure → score < 1.0" true (s < 1.0);
-  check bool "1 failure → score > 0.0" true (s > 0.0)
-
-let test_se_score_many_failures_skips () =
-  (* Default skip_after is 4: 4 failures should zero the score *)
-  let h = H.create () in
-  for _ = 1 to 4 do
-    H.record_failure h ~provider_key:"p" ()
-  done;
-  let s = S.server_error_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "4 failures → hard skip (0.0)" 0.0 s
-
-let test_se_score_only_rate_limits_no_penalty () =
-  (* Rate-limit events should NOT increase server-error score *)
-  let h = H.create () in
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  let s = S.server_error_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "429s don't affect se score" 1.0 s
-
-let test_weighted_shuffle_server_error_provider_deprioritised () =
-  (* A provider with 4 server errors should be skipped when there is a
-     clean peer.  All other conditions are equal (weight, no 429s). *)
-  let h = H.create () in
-  for _ = 1 to 4 do
-    H.record_failure h ~provider_key:"errored" ()
-  done;
-  let cands = [mk_cand ~w:100 "errored"; mk_cand ~w:100 "clean"] in
-  let strat = mk_t S.Weighted_random in
-  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  match ordered with
-  | [] -> fail "expected at least clean provider"
-  | hd :: _ ->
-      check string "clean provider heads the list" "clean" hd.name
 
 let () =
   run "cascade_strategy" [
     "failover", [
       test_case "preserves order" `Quick test_failover_preserves_order;
       test_case "filters cooldown" `Quick test_failover_filters_cooldown;
-    ];
-    "capacity_aware", [
-      test_case "filters busy candidates" `Quick test_capacity_aware_filters_busy;
-      test_case "all busy yields empty" `Quick test_capacity_aware_all_busy_yields_empty;
-      test_case "unknown capacity passes" `Quick test_capacity_aware_unknown_passes;
-    ];
-    "weighted_random", [
-      test_case "deterministic with rand=0" `Quick
-        test_weighted_random_deterministic_with_rand0;
-      test_case "all cooldown yields empty" `Quick
-        test_weighted_random_all_cooldown_yields_empty;
-    ];
-    "weighted_random_latency", [
-      test_case "no samples → input order preserved at rand=0" `Quick
-        test_latency_no_samples_preserves_baseline_order;
-      test_case "p50 below baseline → score 1.0" `Quick
-        test_latency_below_baseline_full_weight;
-      test_case "p50 well above baseline → fractional score" `Quick
-        test_latency_above_baseline_fractional;
-      test_case "unknown provider → score 1.0 (optimistic)" `Quick
-        test_latency_unknown_provider_neutral;
-      test_case "latency shifts head-rate (fast > medium > slow)" `Quick
-        test_latency_changes_weighted_ordering;
-      test_case "extreme p50 does not zero alive provider" `Quick
-        test_latency_does_not_zero_alive_provider;
-    ];
-    "weighted_random_rate_limit_recency", [
-      test_case "unknown provider scores 1.0" `Quick
-        test_rl_score_unknown_provider_full;
-      test_case "no recent 429 scores 1.0" `Quick
-        test_rl_score_no_recent_429_full;
-      test_case "1 × 429 → 0.5 (decay base 0.5)" `Quick
-        test_rl_score_one_429_decays_to_half;
-      test_case "2 × 429 → 0.25" `Quick
-        test_rl_score_two_429_decays_to_quarter;
-      test_case "3 × 429 → hard skip" `Quick
-        test_rl_score_three_429_skips_provider;
-      test_case "weighted_shuffle prefers clean peer over 429-hit (200 trials)" `Quick
-        test_weighted_shuffle_429_provider_loses_to_clean_peer;
-      test_case "weighted_shuffle does not crash on rate-limited provider" `Quick
-        test_weighted_shuffle_429_provider_does_not_crash;
-    ];
-    "weighted_random_server_error_recency", [
-      test_case "unknown provider scores 1.0" `Quick
-        test_se_score_unknown_provider_full;
-      test_case "no failures → 1.0" `Quick
-        test_se_score_no_failures_full;
-      test_case "1 failure → score decays" `Quick
-        test_se_score_one_failure_decays;
-      test_case "skip_after failures → hard skip (0.0)" `Quick
-        test_se_score_many_failures_skips;
-      test_case "429s do not affect server_error score" `Quick
-        test_se_score_only_rate_limits_no_penalty;
-      test_case "server-errored provider deprioritised vs clean peer" `Quick
-        test_weighted_shuffle_server_error_provider_deprioritised;
-    ];
-    "circuit_breaker_cycling", [
-      test_case "excludes cooldown and busy" `Quick
-        test_cb_cycling_excludes_cooldown_and_busy;
-      test_case "all-busy cooled list falls through (starvation guard)" `Quick
-        test_cb_cycling_starvation_guard;
     ];
     "cycle_policy", [
       test_case "default policy backward-compat" `Quick
@@ -1304,27 +767,7 @@ let () =
       test_case "all-busy tier falls through (starvation guard)" `Quick
         test_priority_tier_starvation_guard;
     ];
-    "sticky", [
-      test_case "record_choice → pinned on next call" `Quick
-        test_sticky_records_and_pins;
-      test_case "expires after ttl" `Quick
-        test_sticky_expires_after_ttl;
-      test_case "missing pinned provider falls back" `Quick
-        test_sticky_pinned_provider_missing_falls_back;
-      test_case "per-keeper isolation" `Quick
-        test_sticky_per_keeper_isolation;
-    ];
-    "round_robin", [
-      test_case "rotates each call" `Quick
-        test_round_robin_rotates_each_call;
-      test_case "singleton list is no-op" `Quick
-        test_round_robin_singleton_no_op;
-      test_case "per-cascade cursor isolation" `Quick
-        test_round_robin_per_cascade_cursor;
-    ];
     "cascade_state", [
-      test_case "sticky ttl_ms=0 does not record" `Quick
-        test_cascade_state_sticky_zero_ttl_no_record;
       test_case "round_robin bound<=0 returns 0" `Quick
         test_cascade_state_round_robin_negative_bound;
     ];

@@ -418,7 +418,7 @@ fallback = true
 keeper-assignable = false
 ```
 
-### 7.4 Pluggable Strategy (Phase A~B, #7606/#7611)
+### 7.4 Pluggable Strategy
 
 각 `tier` 또는 `tier-group`은 `strategy` 키로 provider 선택 전략을
 지정한다. 미설정 시 `failover`로 동작한다. Operator config에서
@@ -429,10 +429,8 @@ keeper-assignable = false
 | S1 Failover | `failover` | members 입력 순서 유지 |
 | S5 Priority tier | `priority_tier` | tier-group의 `tiers` 순서대로 fallback |
 
-`capacity_aware`, `weighted_random`, `circuit_breaker_cycling`, `sticky`,
-`round_robin` 구현은 내부/과거 strategy 코드와 테스트를 위해 남아 있지만
-shipped `cascade.toml` config boundary에서는 거부된다. 실제 runtime seed/profile이
-생기기 전까지 operator config의 허용 목록에 추가하지 않는다.
+Retired experimental strategy 값은 더 이상 `Cascade_strategy.kind`에 남기지 않는다.
+오래된 `cascade.toml`이 해당 값을 지정하면 parser 단계에서 실패한다.
 
 관련 선언형 키:
 

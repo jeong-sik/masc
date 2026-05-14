@@ -9,9 +9,12 @@ import {
   normalizeCredentialsResponse,
   type Credential,
   type CredentialCreatePayload,
+  type CredentialOauthMethod,
   type CredentialState,
   type CredentialType,
 } from '../api/credentials'
+
+const DEFAULT_OAUTH_METHOD: CredentialOauthMethod = 'web'
 import { createAsyncResource } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
@@ -45,7 +48,7 @@ const addDraft = signal<CredentialCreatePayload>({
   name: '',
   username: '',
   type: 'github',
-  oauth_method: 'web',
+  oauth_method: DEFAULT_OAUTH_METHOD,
   description: '',
 })
 
@@ -154,7 +157,7 @@ export function buildCredentialCreateRequest(payload: CredentialCreatePayload): 
 }
 
 function resetAddDraft() {
-  addDraft.value = { id: '', name: '', username: '', type: 'github', oauth_method: 'web', description: '' }
+  addDraft.value = { id: '', name: '', username: '', type: 'github', oauth_method: DEFAULT_OAUTH_METHOD, description: '' }
   saveError.value = null
 }
 
@@ -255,7 +258,7 @@ export function CredentialSettings() {
         gh_config_dir: sanitizeOptionalString(draft.gh_config_dir),
         ssh_key_path: sanitizeOptionalString(draft.ssh_key_path),
         gpg_key_id: sanitizeOptionalString(draft.gpg_key_id),
-        oauth_method: draft.oauth_method ?? 'web',
+        oauth_method: draft.oauth_method ?? DEFAULT_OAUTH_METHOD,
         token: sanitizeOptionalString(draft.token),
         description: draft.description?.trim() || undefined,
       })
@@ -351,7 +354,7 @@ export function CredentialSettings() {
                   addDraft.value = {
                     ...draft,
                     type: nextType,
-                    oauth_method: nextType === 'github' ? draft.oauth_method ?? 'web' : 'web',
+                    oauth_method: nextType === 'github' ? draft.oauth_method ?? DEFAULT_OAUTH_METHOD : DEFAULT_OAUTH_METHOD,
                     token: nextType === 'github' ? draft.token ?? '' : '',
                   }
                 }}
@@ -366,11 +369,11 @@ export function CredentialSettings() {
                 <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">gh login</label>
                 <select
                   class="${fieldStyle}"
-                  value=${draft.oauth_method ?? 'web'}
+                  value=${draft.oauth_method ?? DEFAULT_OAUTH_METHOD}
                   onChange=${(e: Event) => {
                     addDraft.value = {
                       ...draft,
-                      oauth_method: (e.target as HTMLSelectElement).value === 'with_token' ? 'with_token' : 'web',
+                      oauth_method: (e.target as HTMLSelectElement).value === 'with_token' ? 'with_token' : DEFAULT_OAUTH_METHOD,
                     }
                   }}
                 >

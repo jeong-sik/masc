@@ -102,4 +102,4 @@ type session_context =
   ; mutable checkpoints : checkpoint list
   }
 
-let legacy_provider_filter_name = "allowed_providers"
+let legacy_provider_filter_name = Keeper_config.legacy_provider_filter_name

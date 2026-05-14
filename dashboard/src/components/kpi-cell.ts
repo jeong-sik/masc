@@ -18,12 +18,15 @@ import type { VNode } from 'preact'
 import { Bar } from './bar'
 import { type BarKind } from './bar-shared'
 import {
+  DEFAULT_KPI_CELL_VARIANT,
   kpiCellAriaLabel,
   VALUE_COLOR_BY_KIND,
   DELTA_COLOR_BY_DIRECTION,
   MONO_STACK,
   type KpiCellProps,
 } from './kpi-shared'
+
+const DEFAULT_BAR_KIND: BarKind = 'default'
 
 export {
   kpiCellAriaLabel,
@@ -51,7 +54,7 @@ const spotlightOverrideStyle = {
 }
 
 export function KpiCell(props: KpiCellProps): VNode {
-  const variant = props.variant ?? 'standard'
+  const variant = props.variant ?? DEFAULT_KPI_CELL_VARIANT
   const valueColor = props.kind ? VALUE_COLOR_BY_KIND[props.kind] : 'var(--color-fg-primary)'
   const labelColor = 'var(--color-fg-disabled)'
   const captionColor = 'var(--color-fg-muted)'
@@ -99,7 +102,7 @@ export function KpiCell(props: KpiCellProps): VNode {
   // mapping: KpiCellKind ('ok' | 'warn' | 'err') is a strict subset of
   // BarKind so it forwards directly; absent kind → 'default' (brass-2
   // accent fill, matches SPEC `.bar > .fill` default rule).
-  const barKind: BarKind = props.kind ?? 'default'
+  const barKind: BarKind = props.kind ?? DEFAULT_BAR_KIND
   const progressRow = props.progress != null
     ? html`
         <div style=${{ marginTop: '2px' }}>

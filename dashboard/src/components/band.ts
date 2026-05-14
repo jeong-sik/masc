@@ -39,6 +39,8 @@ export type BandKind =
   | 'err'
   | 'stalled'
 
+const DEFAULT_BAND_KIND: BandKind = 'default'
+
 interface BandProps {
   /** State tone. `undefined` ≡ `default` (idle, border-strong color). */
   kind?: BandKind
@@ -78,7 +80,7 @@ const KIND_STYLE: Record<BandKind, KindStyle> = {
 }
 
 export function Band(props: BandProps): VNode {
-  const kind = props.kind ?? 'default'
+  const kind = props.kind ?? DEFAULT_BAND_KIND
   const ks = KIND_STYLE[kind]
   const topRadius = props.topRadius !== false
 

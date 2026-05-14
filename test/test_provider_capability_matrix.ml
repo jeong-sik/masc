@@ -106,8 +106,7 @@ let test_cli_no_inline_tools () =
     cli_kinds
 
 let expected_cli_runtime_mcp = function
-  | PC.Claude_code | PC.Kimi_cli | PC.Codex_cli -> true
-  | PC.Gemini_cli -> false
+  | PC.Claude_code | PC.Gemini_cli | PC.Kimi_cli | PC.Codex_cli -> true
   | PC.Anthropic | PC.Kimi | PC.OpenAI_compat | PC.Ollama | PC.Gemini | PC.Glm
   | PC.DashScope ->
       false

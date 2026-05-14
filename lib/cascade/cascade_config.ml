@@ -156,22 +156,13 @@ let moonshot_base_url_env = "KIMI_BASE_URL"
 let moonshot_api_key_env = "KIMI_API_KEY_SB"
 let moonshot_default_base_url = "https://api.moonshot.ai/v1"
 
-(* #9953: Resolve Kimi max_context from the OAS capabilities SSOT.
-
-   Prior code hard-coded [256_000] here, which drifted from the
-   OAS [Capabilities.kimi_capabilities.max_context_tokens] value
-   of [262_144] (the canonical 256 KiB binary context window).
-   Same-label [kimi] turns therefore recorded two different
-   [context_max] values depending on which config builder ran —
-   one symptom of the 3-way [claude_code:auto] drift documented
-   in the issue.
+(* #9953: Resolve Kimi max_context from OAS runtime binding truth.
 
    Resolution order:
    1. Per-model capabilities override ({!Capabilities.for_model_id}
       resolved id) — allows future per-variant overrides to take
       effect without touching this file.
-   2. Provider-level [kimi_capabilities.max_context_tokens] from
-      the OAS SSOT.
+   2. Provider-level capability exposed by [Provider_runtime_binding].
    3. Registry entry default (safety net for exotic configs).
 *)
 let resolve_kimi_max_context resolved_model_id =
@@ -184,11 +175,14 @@ let resolve_kimi_max_context resolved_model_id =
   match from_model with
   | Some n -> n
   | None ->
-    (match Capabilities.kimi_capabilities.max_context_tokens with
+    (match
+       Option.bind
+         (Agent_sdk.Provider_runtime_binding.find kimi_provider_name)
+         (fun binding ->
+            binding.Agent_sdk.Provider_runtime_binding.capabilities.max_context_tokens)
+     with
      | Some n -> n
      | None ->
-       (* OAS SSOT has always populated this; fall through to
-          registry entry only if OAS removes the field. *)
        (match Provider_registry.find (Provider_registry.default ())
                 kimi_provider_name with
         | Some entry -> entry.Provider_registry.max_context

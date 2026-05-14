@@ -105,6 +105,11 @@ let string_of_auth_mode = function
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+;;
+
 let env_value_opt ?(getenv = Sys.getenv_opt) name =
   match getenv name with
   | Some raw ->
@@ -180,17 +185,17 @@ let telemetry_usage_missing_runtime_reported =
 let cn_llama = "llama"
 let cn_ollama = "ollama"
 let cn_unknown_provider = "unknown_provider"
-let cn_claude = "claude"
-let cn_codex = "codex"
-let cn_gemini = "gemini"
-let cn_kimi = "kimi"
-let cn_claude_api = "claude-api"
-let cn_codex_api = "codex-api"
-let cn_gemini_api = "gemini-api"
-let cn_kimi_api = "kimi-api"
+let cn_claude = "claude_code"
+let cn_codex = "codex_cli"
+let cn_gemini = "gemini_cli"
+let cn_kimi = "kimi_cli"
+let cn_claude_api = "claude"
+let cn_codex_api = "openai"
+let cn_gemini_api = "gemini"
+let cn_kimi_api = "kimi"
 let cn_kimi_coding = "kimi-coding"
-let cn_glm = "glm-api"
-let cn_glm_coding_plan = "glm-coding-plan"
+let cn_glm = "glm"
+let cn_glm_coding_plan = "glm-coding"
 let cn_openrouter = "openrouter"
 let auth_header_authorization = "Authorization"
 let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
@@ -200,7 +205,7 @@ let display_provider_name label =
   match normalize_label label with
   | "glm" | "glm-api" -> cn_glm
   | "glm-coding" | "glm-coding-plan" -> cn_glm_coding_plan
-  | "kimi-api" -> cn_kimi
+  | "kimi-api" -> cn_kimi_api
   | "kimi-coding" | "kimi_coding" -> cn_kimi_coding
   | _ -> String.trim label
 ;;
@@ -268,464 +273,242 @@ let string_of_provider_kind : Llm_provider.Provider_config.provider_kind -> stri
   Llm_provider.Provider_config.string_of_provider_kind
 ;;
 
-(** Map OAS [provider_kind] to the MASC adapter canonical name when adapter
-    semantics are required.
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
-    Note: [OpenAI_compat] maps to the direct cloud adapter [codex-api]; local
-    llama remains an [OpenAI_compat] kind but is identified by endpoint rather
-    than by this helper. *)
-let adapter_canonical_name_of_provider_kind
-  : Llm_provider.Provider_config.provider_kind -> string
-  = function
-  | Anthropic -> cn_claude_api
-  | Kimi -> cn_kimi_api
-  | OpenAI_compat -> cn_codex_api
-  | DashScope -> cn_codex_api
-  | Ollama -> cn_ollama
-  | Gemini -> cn_gemini_api
-  | Gemini_cli -> cn_gemini
-  | Kimi_cli -> cn_kimi
-  | Glm -> cn_glm
-  | Claude_code -> cn_claude
-  | Codex_cli -> cn_codex
-;;
-
-(** MASC-local policy overlay for provider/runtime adapters.
-    Simple names ([claude], [codex], [gemini]) are CLI runtimes.
-    Direct API adapters use explicit [*-api] canonical names.
-
-    Generic OAS provider bindings are appended below; this list remains only
-    for MASC-specific policy that OAS should not own. *)
-let legacy_direct_adapters =
-  [ { canonical_name = cn_llama
-    ; runtime_kind = Local
-    ; auth_mode = No_auth
-    ; aliases = [ cn_llama; "llama.cpp"; "llamacpp" ]
-    ; spawn_key = Some "llama"
-    ; cascade_prefix = "llama"
-    ; endpoint_url = Some Env_config_runtime.Llama.server_url
-    ; default_model_id =
-        (let m = Env_config_runtime.Llama.default_model in
-         if m = "" || m = "explicit-model-required" then None else Some m)
-    ; model_policy =
-        { default_model_env = Some "LLAMA_DEFAULT_MODEL"
-        ; default_model_fallback = None
-        ; auto_models = No_auto_models
-        ; expand_auto = false
-        ; family = Generic
-        }
-    ; tool_policy = no_tool_http_headers
-    ; telemetry_policy = telemetry_reported
-    }
-  ; { canonical_name = cn_ollama
-    ; runtime_kind = Local
-    ; auth_mode = No_auth
-    ; aliases = [ cn_ollama; "ollama-local" ]
-    ; spawn_key = None
-    ; cascade_prefix = "ollama"
-    ; endpoint_url = Some Env_config_runtime.Ollama.server_url
-    ; default_model_id =
-        (let m = Env_config_runtime.Ollama.default_model in
-         if m = "" then None else Some m)
-    ; model_policy =
-        { default_model_env = Some "OLLAMA_DEFAULT_MODEL"
-        ; default_model_fallback = None
-        ; auto_models = No_auto_models
-        ; expand_auto = false
-        ; family = Generic
-        }
-    ; tool_policy = { no_tool_http_headers with tolerates_bound_actor_fallback = true }
-    ; telemetry_policy = telemetry_usage_missing_runtime_reported
-    }
-  ; { canonical_name = cn_claude
-    ; runtime_kind = Cli_agent
-    ; auth_mode = Cli_cached_login
-    ; aliases = [ cn_claude; "claude-code"; "claude_code" ]
-    ; spawn_key = Some "claude"
-    ; cascade_prefix = "claude_code"
-    ; endpoint_url = None
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = None
-        ; default_model_fallback = Some "auto"
-        ; auto_models =
-            Env_csv_or_default
-              { env_var = "MASC_CLAUDE_CODE_AUTO_MODELS"
-              ; defaults = [ "auto" ]
-              ; prefer_default_model_env = false
-              }
-        ; expand_auto = true
-        ; family = Generic
-        }
-    ; tool_policy =
-        { runtime_mcp_http_headers with
-          uses_anthropic_caching = true
-        ; tolerates_bound_actor_fallback = true
-        }
-    ; telemetry_policy = telemetry_usage_missing_runtime_reported
-    }
-  ; { canonical_name = cn_codex
-    ; runtime_kind = Cli_agent
-    ; auth_mode = Cli_cached_login
-    ; aliases = [ cn_codex; "codex-cli"; "codex_cli" ]
-    ; spawn_key = Some "codex"
-    ; cascade_prefix = "codex_cli"
-    ; endpoint_url = None
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = None
-        ; default_model_fallback = Some "auto"
-        ; auto_models =
-            Env_csv_or_default
-              { env_var = "MASC_CODEX_CLI_AUTO_MODELS"
-              ; defaults =
-                  [ "gpt-5.2"
-                  ; "gpt-5.3-codex-spark"
-                  ; "gpt-5.3-codex"
-                  ; "gpt-5.4-mini"
-                  ; "gpt-5.4"
-                  ; "gpt-5.5"
-                  ]
-              ; prefer_default_model_env = false
-              }
-        ; expand_auto = true
-        ; family = Generic
-        }
-    ; tool_policy = codex_cli_tool_policy
-    ; telemetry_policy = telemetry_usage_missing_runtime_reported
-    }
-  ; { canonical_name = cn_gemini
-    ; runtime_kind = Cli_agent
-    ; auth_mode = Cli_cached_login
-    ; aliases = [ cn_gemini; "gemini-cli"; "gemini_cli" ]
-    ; spawn_key = Some "gemini"
-    ; cascade_prefix = "gemini_cli"
-    ; endpoint_url = None
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = Some "GEMINI_DEFAULT_MODEL"
-        ; default_model_fallback = Some "gemini-3-flash-preview"
-        ; auto_models =
-            Env_csv_or_default
-              { env_var = "MASC_GEMINI_CLI_AUTO_MODELS"
-              ; defaults =
-                  [ "gemini-3-flash-preview"
-                  ; "gemini-3.1-flash-lite-preview"
-                  ; "gemini-3.1-pro-preview"
-                  ]
-              ; prefer_default_model_env = true
-              }
-        ; expand_auto = true
-        ; family = Generic
-        }
-    ; (* gemini-cli reads MCP servers only from ~/.gemini/settings.json or
-         project .gemini/settings.json (no --mcp-config flag — see
-         google-gemini/gemini-cli#3470 closed via PR #5481 which added
-         the [gemini mcp add] subcommand for the global file, and #4674
-         duplicate request for runtime override still unimplemented).
-         Even though the settings.json mcpServers schema accepts httpUrl
-         + headers (https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md),
-         masc-mcp emits per-keeper request-scoped policies that gemini-cli
-         cannot consume. OAS reflects this with a hardcoded reject in
-         lib/llm_provider/transport_gemini_cli.ml (runtime_mcp_policy = Some
-         _ branch). Keep this false until upstream adds per-invocation
-         MCP config injection. See masc-mcp#11356 for full analysis. *)
-      tool_policy = { no_tool_http_headers with tolerates_bound_actor_fallback = true }
-    ; telemetry_policy = telemetry_usage_missing_runtime_reported
-    }
-  ; { canonical_name = cn_kimi
-    ; runtime_kind = Cli_agent
-    ; auth_mode = Cli_cached_login
-    ; aliases = [ cn_kimi; "kimi-cli"; "kimi_cli" ]
-    ; spawn_key = None
-    ; cascade_prefix = "kimi_cli"
-    ; endpoint_url = None
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = None
-        ; default_model_fallback = Some "kimi-for-coding"
-        ; auto_models =
-            Env_csv_or_default
-              { env_var = "MASC_KIMI_CLI_AUTO_MODELS"
-              ; defaults = [ "kimi-for-coding" ]
-              ; prefer_default_model_env = false
-              }
-        ; expand_auto = true
-        ; family = Generic
-        }
-    ; tool_policy =
-        { runtime_mcp_http_headers with tolerates_bound_actor_fallback = true }
-    ; telemetry_policy = telemetry_usage_missing
-    }
-  ; { canonical_name = cn_claude_api
-    ; runtime_kind = Direct_api
-    ; auth_mode = Api_key "ANTHROPIC_API_KEY"
-    ; aliases = [ cn_claude_api; "anthropic" ]
-    ; spawn_key = None
-    ; cascade_prefix = "claude"
-    ; endpoint_url = Some (anthropic_api_url ())
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = Some "ANTHROPIC_DEFAULT_MODEL"
-        ; default_model_fallback = Some "claude-sonnet-4-6-20250514"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
-        ; family = Generic
-        }
-    ; tool_policy = { no_tool_http_headers with uses_anthropic_caching = true }
-    ; telemetry_policy = telemetry_reported
-    }
-  ; { canonical_name = cn_codex_api
-    ; runtime_kind = Direct_api
-    ; auth_mode = Api_key "OPENAI_API_KEY"
-    ; aliases = [ cn_codex_api; "openai" ]
-    ; spawn_key = None
-    ; cascade_prefix = "openai"
-    ; endpoint_url = Some (openai_api_url ())
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = Some "OPENAI_DEFAULT_MODEL"
-        ; default_model_fallback = Some "gpt-4.1"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
-        ; family = Generic
-        }
-    ; tool_policy = no_tool_http_headers
-    ; telemetry_policy = telemetry_reported
-    }
-  ; { canonical_name = cn_gemini_api
-    ; runtime_kind = Direct_api
-    ; auth_mode =
-        Vertex_adc
-          { project_env = google_cloud_project_env
-          ; location_env = google_cloud_location_env
-          }
-    ; aliases = [ cn_gemini_api; "google" ]
-    ; spawn_key = None
-    ; cascade_prefix = "gemini"
-    ; endpoint_url = None
-    ; (* Resolved dynamically for Gemini *)
-      default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = Some "GEMINI_DEFAULT_MODEL"
-        ; default_model_fallback = Some "gemini-3-flash-preview"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
-        ; family = Generic
-        }
-    ; tool_policy = no_tool_http_headers
-    ; telemetry_policy = telemetry_reported
-    }
-  ; { canonical_name = cn_kimi_api
-    ; runtime_kind = Direct_api
-    ; auth_mode = Api_key "KIMI_API_KEY_SB"
-    ; aliases = [ cn_kimi_api; "moonshot" ]
-    ; spawn_key = None
-    ; cascade_prefix = "kimi"
-    ; endpoint_url = Some (kimi_api_url ())
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = Some "KIMI_DEFAULT_MODEL"
-        ; default_model_fallback = Some "kimi-k2.5"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
-        ; family = Kimi_api_family
-        }
-    ; tool_policy = no_tool_http_headers
-    ; telemetry_policy = telemetry_reported
-    }
-  ; { canonical_name = cn_kimi_coding
-    ; runtime_kind = Direct_api
-    ; auth_mode = Api_key "KIMI_CODING_API_KEY"
-    ; aliases = [ cn_kimi_coding; "kimi_coding" ]
-    ; spawn_key = None
-    ; cascade_prefix = "kimi_coding"
-    ; endpoint_url = Some (kimi_coding_api_url ())
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = Some "KIMI_CODING_DEFAULT_MODEL"
-        ; default_model_fallback = Some "kimi-coding-auto"
-        ; auto_models = No_auto_models
-        ; expand_auto = false
-        ; family = Kimi_api_family
-        }
-    ; tool_policy = no_tool_http_headers
-    ; telemetry_policy = telemetry_reported
-    }
-  ; { canonical_name = cn_glm
-    ; runtime_kind = Direct_api
-    ; auth_mode = Api_key "ZAI_API_KEY"
-    ; aliases = [ cn_glm; "glm"; "glm_cloud"; "zai" ]
-    ; spawn_key = None
-    ; cascade_prefix = "glm"
-    ; endpoint_url = Some (glm_api_url ())
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = Some "ZAI_DEFAULT_MODEL"
-        ; default_model_fallback = Some "glm-5.1"
-        ; auto_models = Zai_general_auto_models
-        ; expand_auto = true
-        ; family = Glm_general
-        }
-    ; tool_policy = no_tool_http_headers
-    ; telemetry_policy = telemetry_reported
-    }
-  ; { canonical_name = cn_glm_coding_plan
-    ; runtime_kind = Direct_api
-    ; auth_mode = Api_key "ZAI_API_KEY"
-    ; aliases = [ cn_glm_coding_plan; "glm-coding" ]
-    ; spawn_key = None
-    ; cascade_prefix = "glm-coding"
-    ; endpoint_url = Some (glm_coding_api_url ())
-    ; default_model_id = Some "auto"
-    ; model_policy =
-        { default_model_env = Some "ZAI_CODING_DEFAULT_MODEL"
-        ; default_model_fallback = Some "glm-5.1"
-        ; auto_models = Zai_coding_auto_models
-        ; expand_auto = true
-        ; family = Glm_coding
-        }
-    ; tool_policy = no_tool_http_headers
-    ; telemetry_policy = telemetry_reported
-    }
-  ; { canonical_name = cn_openrouter
-    ; runtime_kind = Direct_api
-    ; auth_mode = Api_key "OPENROUTER_API_KEY"
-    ; aliases = [ cn_openrouter ]
-    ; spawn_key = None
-    ; cascade_prefix = "openrouter"
-    ; endpoint_url = Some (openrouter_api_url ())
-    ; default_model_id = None
-    ; model_policy =
-        { default_model_env = Some "OPENROUTER_DEFAULT_MODEL"
-        ; default_model_fallback = None
-        ; auto_models = No_auto_models
-        ; expand_auto = false
-        ; family = Generic
-        }
-    ; tool_policy = no_tool_http_headers
-    ; telemetry_policy = telemetry_reported
-    }
-  ]
-;;
-
-let adapter_binding_candidates (adapter : adapter) =
-  adapter.canonical_name :: adapter.cascade_prefix :: adapter.aliases
-  |> List.filter_map (fun label ->
-    let trimmed = String.trim label in
-    if trimmed = "" then None else Some trimmed)
+let binding_labels (binding : Runtime_binding.t) =
+  let id = binding.Runtime_binding.id in
+  let dashed_id = String.map (function '_' -> '-' | c -> c) id in
+  let local_aliases =
+    if String.equal id cn_llama then [ "llama.cpp"; "llamacpp" ] else []
+  in
+  id :: dashed_id :: binding.Runtime_binding.aliases @ local_aliases
+  |> List.filter_map trim_nonempty
+  |> List.map normalize_label
   |> Json_util.dedupe_keep_order
 ;;
 
-let adapter_labels (adapter : adapter) =
-  adapter_binding_candidates adapter |> List.map normalize_label
+let find_runtime_binding_by_candidates candidates =
+  let rec loop = function
+    | [] -> None
+    | candidate :: rest ->
+      (match trim_nonempty candidate with
+       | None -> loop rest
+       | Some label ->
+         (match Runtime_binding.find label with
+          | Some _ as binding -> binding
+          | None -> loop rest))
+  in
+  loop candidates
 ;;
 
-let overlay_adapter_from_binding
-      (adapter : adapter)
-      (binding : Provider_runtime_overlay.binding)
+let binding_endpoint_url (binding : Runtime_binding.t) =
+  trim_nonempty binding.Runtime_binding.base_url
+;;
+
+let binding_default_model_id (binding : Runtime_binding.t) =
+  match Option.bind binding.Runtime_binding.default_model trim_nonempty with
+  | Some _ as value -> value
+  | None ->
+    (match binding.Runtime_binding.capabilities.supported_models with
+     | Some (model :: _) -> trim_nonempty model
+     | Some [] | None -> None)
+;;
+
+let binding_auth_env_keys (binding : Runtime_binding.t) =
+  let auth_env =
+    match binding.Runtime_binding.auth with
+    | Runtime_binding.Api_key_env env | Runtime_binding.Setup_token_env env -> [ env ]
+    | Runtime_binding.No_auth
+    | Runtime_binding.Cli_cached_login
+    | Runtime_binding.Oauth_cached_login
+    | Runtime_binding.File _
+    | Runtime_binding.Exec _ -> []
+  in
+  binding.Runtime_binding.api_key_env :: auth_env
+  |> List.filter_map trim_nonempty
+  |> Json_util.dedupe_keep_order
+;;
+
+let binding_primary_api_key_env binding =
+  match binding_auth_env_keys binding with
+  | first :: _ -> Some first
+  | [] -> None
+;;
+
+let binding_base_url_is_loopback binding =
+  match binding_endpoint_url binding with
+  | None -> false
+  | Some base_url -> Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+;;
+
+let binding_auth_is_no_auth (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Api_key_env _
+  | Runtime_binding.Cli_cached_login
+  | Runtime_binding.Oauth_cached_login
+  | Runtime_binding.Setup_token_env _
+  | Runtime_binding.File _
+  | Runtime_binding.Exec _ -> false
+;;
+
+let runtime_kind_of_binding (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.transport with
+  | Runtime_binding.Cli -> Cli_agent
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+    if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+    then Local
+    else Direct_api
+;;
+
+let binding_supports_runtime_mcp_http_headers (binding : Runtime_binding.t) =
+  binding.Runtime_binding.capabilities.supports_runtime_mcp_tools
+  || binding.Runtime_binding.capabilities.supports_runtime_tool_events
+  || (runtime_kind_of_binding binding = Cli_agent
+      && binding.Runtime_binding.capabilities.supports_tools)
+;;
+
+let binding_uses_prompt_caching (binding : Runtime_binding.t) =
+  binding.Runtime_binding.capabilities.supports_prompt_caching
+  || binding.Runtime_binding.capabilities.supports_caching
+;;
+
+let binding_usage_missing_by_design (binding : Runtime_binding.t) =
+  not binding.Runtime_binding.capabilities.emits_usage_tokens
+;;
+
+(** Ask OAS to name a provider kind. This is intentionally a best-effort
+    kind-only path; callers with a full config should use
+    [provider_label_from_registry] so OpenAI-compatible and GLM endpoints can
+    be disambiguated by URL. *)
+let provider_name_of_kind (kind : Llm_provider.Provider_config.provider_kind) =
+  let cfg =
+    Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()
+  in
+  Llm_provider.Provider_registry.provider_name_of_config cfg
+;;
+
+(** Map OAS [provider_kind] to the adapter canonical name when only the typed
+    kind is available. The mapping itself lives in OAS Provider_registry; this
+    helper remains only as the legacy MASC API boundary. *)
+let adapter_canonical_name_of_provider_kind
+  : Llm_provider.Provider_config.provider_kind -> string
   =
-  let binding_default_model = Provider_runtime_overlay.default_model_id binding in
-  let binding_endpoint = Provider_runtime_overlay.endpoint_url binding in
-  { adapter with
-    aliases =
-      Json_util.dedupe_keep_order
-        (adapter.aliases @ Provider_runtime_overlay.labels binding)
-  ; endpoint_url =
-      (match adapter.endpoint_url, binding_endpoint with
-       | Some _ as value, _ -> value
-       | None, value -> value)
-  ; default_model_id =
-      (match adapter.default_model_id, binding_default_model with
-       | Some _ as value, _ -> value
-       | None, value -> value)
-  }
+  provider_name_of_kind
 ;;
 
-let runtime_kind_of_binding (binding : Provider_runtime_overlay.binding) =
-  match Provider_runtime_overlay.runtime_kind binding with
-  | `Local -> Local
-  | `Cli_agent -> Cli_agent
-  | `Direct_api -> Direct_api
+let binding_env_fragment (binding : Runtime_binding.t) =
+  binding.Runtime_binding.id
+  |> String.map (function
+    | 'a' .. 'z' as c -> Char.uppercase_ascii c
+    | 'A' .. 'Z' | '0' .. '9' as c -> c
+    | _ -> '_')
 ;;
 
-let auth_mode_of_binding (binding : Provider_runtime_overlay.binding) =
-  match Provider_runtime_overlay.primary_api_key_env binding with
+let model_family_of_binding (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.kind, binding.Runtime_binding.id with
+  | Llm_provider.Provider_config.Glm, "glm-coding" -> Glm_coding
+  | Llm_provider.Provider_config.Glm, _ -> Glm_general
+  | Llm_provider.Provider_config.Kimi, _ -> Kimi_api_family
+  | _ -> Generic
+;;
+
+let default_model_id_of_binding (binding : Runtime_binding.t) =
+  match binding_default_model_id binding with
+  | Some _ as value -> value
+  | None ->
+    (match runtime_kind_of_binding binding with
+     | Local -> None
+     | Cli_agent | Direct_api -> Some "auto")
+;;
+
+let auto_models_of_binding binding default_model_id =
+  match runtime_kind_of_binding binding with
+  | Cli_agent ->
+    Some
+      (Env_csv_or_default
+         { env_var = "MASC_" ^ binding_env_fragment binding ^ "_AUTO_MODELS"
+         ; defaults = [ Option.value default_model_id ~default:"auto" ]
+         ; prefer_default_model_env = false
+         })
+  | Local | Direct_api ->
+    (match model_family_of_binding binding with
+     | Glm_general -> Some Zai_general_auto_models
+     | Glm_coding -> Some Zai_coding_auto_models
+     | Generic | Kimi_api_family -> None)
+;;
+
+let auth_mode_of_binding (binding : Runtime_binding.t) =
+  match binding_primary_api_key_env binding with
   | Some env_name -> Api_key env_name
   | None ->
-    (match Provider_runtime_overlay.runtime_kind binding with
-     | `Cli_agent -> Cli_cached_login
-     | `Local | `Direct_api -> No_auth)
+    (match runtime_kind_of_binding binding with
+     | Cli_agent -> Cli_cached_login
+     | Local | Direct_api -> No_auth)
 ;;
 
-let tool_policy_of_binding (binding : Provider_runtime_overlay.binding) =
-  { no_tool_http_headers with
-    supports_runtime_mcp_http_headers =
-      Provider_runtime_overlay.supports_runtime_mcp_http_headers binding
-  ; uses_anthropic_caching = Provider_runtime_overlay.uses_prompt_caching binding
+let tool_policy_of_binding (binding : Runtime_binding.t) =
+  let requires_bridging =
+    match binding.Runtime_binding.command with
+    | Some "codex" -> true
+    | Some _ | None -> false
+  in
+  { supports_runtime_mcp_http_headers =
+      binding_supports_runtime_mcp_http_headers binding && not requires_bridging
+  ; requires_per_keeper_bridging_for_bound_actor_tools = requires_bridging
+  ; identity_runtime_mcp_header_keys =
+      (if requires_bridging
+       then [ "authorization"; "x-masc-agent-name"; "x-masc-keeper-name" ]
+       else [])
+  ; argv_prompt_preflight = requires_bridging
+  ; uses_anthropic_caching = binding_uses_prompt_caching binding
+  ; max_turns_per_attempt =
+      Llm_provider.Provider_config.max_turns_hard_cap binding.Runtime_binding.kind
+  ; tolerates_bound_actor_fallback =
+      (not requires_bridging)
+      && (binding_supports_runtime_mcp_http_headers binding
+          || runtime_kind_of_binding binding <> Direct_api)
   }
 ;;
 
-let telemetry_policy_of_binding (binding : Provider_runtime_overlay.binding) =
-  if Provider_runtime_overlay.usage_missing_by_design binding
+let telemetry_policy_of_binding (binding : Runtime_binding.t) =
+  if runtime_kind_of_binding binding = Cli_agent || binding_usage_missing_by_design binding
   then telemetry_usage_missing
   else telemetry_reported
 ;;
 
-let spawn_key_of_binding (binding : Provider_runtime_overlay.binding) =
-  match Provider_runtime_overlay.command binding with
+let spawn_key_of_binding (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.command with
   | Some ("claude" | "codex" | "gemini" | "llama" as command) -> Some command
   | Some _ | None -> None
 ;;
 
-let generic_adapter_of_binding (binding : Provider_runtime_overlay.binding) =
-  let default_model_id = Provider_runtime_overlay.default_model_id binding in
-  { canonical_name = Provider_runtime_overlay.id binding
+let generic_adapter_of_binding (binding : Runtime_binding.t) =
+  let default_model_id = default_model_id_of_binding binding in
+  let auto_models = auto_models_of_binding binding default_model_id in
+  { canonical_name = binding.Runtime_binding.id
   ; runtime_kind = runtime_kind_of_binding binding
   ; auth_mode = auth_mode_of_binding binding
-  ; aliases = Provider_runtime_overlay.labels binding
+  ; aliases = binding_labels binding
   ; spawn_key = spawn_key_of_binding binding
-  ; cascade_prefix = Provider_runtime_overlay.id binding
-  ; endpoint_url = Provider_runtime_overlay.endpoint_url binding
+  ; cascade_prefix = binding.Runtime_binding.id
+  ; endpoint_url = binding_endpoint_url binding
   ; default_model_id
   ; model_policy =
-      { default_model_env = None
+      { default_model_env =
+          Some (binding_env_fragment binding ^ "_DEFAULT_MODEL")
       ; default_model_fallback = default_model_id
-      ; auto_models = No_auto_models
-      ; expand_auto = false
-      ; family = Generic
+      ; auto_models = Option.value auto_models ~default:No_auto_models
+      ; expand_auto = Option.is_some auto_models
+      ; family = model_family_of_binding binding
       }
   ; tool_policy = tool_policy_of_binding binding
   ; telemetry_policy = telemetry_policy_of_binding binding
   }
 ;;
 
-let binding_matches_adapter_labels labels (binding : Provider_runtime_overlay.binding) =
-  Provider_runtime_overlay.labels binding
-  |> List.exists (fun label -> List.mem (normalize_label label) labels)
-;;
-
 let direct_adapters =
-  let legacy_with_oas_labels =
-    List.map
-      (fun adapter ->
-         match
-           Provider_runtime_overlay.find_by_candidates
-             (adapter_binding_candidates adapter)
-         with
-         | Some binding -> overlay_adapter_from_binding adapter binding
-         | None -> adapter)
-      legacy_direct_adapters
-  in
-  let legacy_labels =
-    legacy_with_oas_labels |> List.concat_map adapter_labels |> Json_util.dedupe_keep_order
-  in
-  let oas_extra_adapters =
-    Provider_runtime_overlay.all ()
-    |> List.filter (fun binding -> not (binding_matches_adapter_labels legacy_labels binding))
-    |> List.map generic_adapter_of_binding
-  in
-  legacy_with_oas_labels @ oas_extra_adapters
+  Runtime_binding.all () |> List.map generic_adapter_of_binding
 ;;
 
 let find_direct_adapter_by_alias label =
@@ -1242,14 +1025,20 @@ let openai_compat_adapter_by_endpoint (cfg : Llm_provider.Provider_config.t) =
   if cfg.kind <> Llm_provider.Provider_config.OpenAI_compat
   then None
   else
-    List.find_opt
-      (fun (adapter : adapter) ->
-         adapter.runtime_kind = Direct_api
-         &&
-         match adapter.endpoint_url with
-         | Some endpoint when endpoint <> "" -> same_base_url endpoint cfg.base_url
-         | Some _ | None -> false)
-      direct_adapters
+    match
+      List.find_opt
+        (fun (adapter : adapter) ->
+           adapter.runtime_kind = Direct_api
+           &&
+           match adapter.endpoint_url with
+           | Some endpoint when endpoint <> "" -> same_base_url endpoint cfg.base_url
+           | Some _ | None -> false)
+        direct_adapters
+    with
+    | Some _ as adapter -> adapter
+    | None when same_base_url (kimi_api_url ()) cfg.base_url ->
+      resolve_adapter_by_cascade_prefix cn_kimi_api
+    | None -> None
 ;;
 
 let provider_label_from_registry (cfg : Llm_provider.Provider_config.t) =
@@ -1306,19 +1095,7 @@ let apply_wire_overlay
 ;;
 
 let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
-  (* RFC-0058 §2.4: dispatch flows through the kind→canonical_name table
-     ([adapter_canonical_name_of_provider_kind]) rather than enumerating
-     every provider variant inline. [Glm] and [OpenAI_compat] still need
-     a registry lookup because multiple distinct providers share the
-     same [kind]: [OpenAI_compat] is disambiguated by [base_url] via
-     [openai_compat_adapter_by_endpoint], while [Glm] is disambiguated
-     by registry label ([glm] vs [glm-coding]) via
-     [provider_name_of_config]. [provider_label_from_registry] folds
-     both into the same [cascade_prefix] key. *)
-  match cfg.kind with
-  | Llm_provider.Provider_config.Glm | Llm_provider.Provider_config.OpenAI_compat ->
-    resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
-  | kind -> resolve_direct_adapter (adapter_canonical_name_of_provider_kind kind)
+  resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
 ;;
 
 (* RFC-0058 §2.4 boundary: callers with only the typed [provider_kind]
@@ -1510,6 +1287,7 @@ let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider
      wildcard branch covers all current and future provider_kind
      variants without enumerating them. *)
   match kind with
+  | Llm_provider.Provider_config.OpenAI_compat -> [ "OPENAI_API_KEY" ]
   | Llm_provider.Provider_config.Kimi -> kimi_api_key_envs
   | Llm_provider.Provider_config.Gemini ->
     [ google_cloud_project_env; google_cloud_location_env ]

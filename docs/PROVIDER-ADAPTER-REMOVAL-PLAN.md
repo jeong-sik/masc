@@ -81,23 +81,17 @@ out of MASC would preserve the bug.
 
 ## Target Shape
 
-Introduce a narrow replacement boundary:
+Use OAS runtime bindings directly. If MASC needs a local policy projection,
+keep it as data derived at the call site or from a MASC-owned config file,
+not as a provider catalog facade:
 
 ```ocaml
-module Provider_runtime_overlay : sig
-  type runtime_id
-  type runtime_binding
-  type local_policy
-
-  val bindings : unit -> runtime_binding list
-  val resolve_runtime : string -> runtime_binding option
-  val local_policy : runtime_binding -> local_policy
-end
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 ```
 
 The implementation must not contain a concrete provider catalog. It should be
-constructed from OAS provider catalog/capability surfaces plus MASC-local overlay
-configuration. The overlay can enrich opaque runtime entries with local policy,
+constructed from OAS provider catalog/capability surfaces plus MASC-local policy
+configuration. MASC can enrich opaque runtime entries with local policy,
 but it cannot invent provider/model truth.
 
 The remaining compatibility module, if needed, should look like this:
@@ -182,7 +176,7 @@ Goal: remove the internal implementation.
 - Delete provider/model default lists from MASC.
 - Delete provider-kind reverse lookup helpers from MASC.
 - Delete provider auth/capability rules that duplicate OAS registry data.
-- Keep any MASC-local runtime quirks in `Provider_runtime_overlay` with no
+- Keep any MASC-local runtime quirks in data-driven local policy with no
   concrete provider catalog.
 
 Exit criteria:

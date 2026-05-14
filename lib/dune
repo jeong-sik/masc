@@ -111,7 +111,6 @@
   keeper_exec_status_metrics
   keeper_exec_status
   provider_tool_support
-  provider_runtime_overlay
   voice_runtime_overlay
   keeper_status_detail
   keeper_exec_persona

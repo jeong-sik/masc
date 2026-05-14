@@ -87,7 +87,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         return ['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph']
       }
       if (routeState.params.section === 'journey') {
-        return ['execution', 'missionSnapshot']
+        return ['execution']
       }
       if (routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']

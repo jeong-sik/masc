@@ -78,7 +78,7 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'journey' },
-    })).toEqual(['execution', 'missionSnapshot'])
+    })).toEqual(['execution'])
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',

@@ -137,6 +137,60 @@ let health_path_diagnostics () =
         ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
         ~effective_base_path ~effective_masc_root ()
 
+type paused_keeper_scan = {
+  names : string list;
+  read_errors : (string * string) list;
+}
+
+let sorted_unique_strings values = List.sort_uniq String.compare values
+
+let running_paused_keeper_names () =
+  Keeper_registry.all ()
+  |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
+       if e.meta.paused then Some e.name else None)
+  |> sorted_unique_strings
+
+let durable_paused_keeper_scan config =
+  Keeper_types.keeper_names config
+  |> List.fold_left
+       (fun acc name ->
+         match Keeper_types.read_meta config name with
+         | Ok (Some meta) when meta.paused ->
+             { acc with names = meta.name :: acc.names }
+         | Ok (Some _) | Ok None -> acc
+         | Error err ->
+             { acc with read_errors = (name, err) :: acc.read_errors })
+       { names = []; read_errors = [] }
+  |> fun scan ->
+  {
+    names = sorted_unique_strings scan.names;
+    read_errors = List.sort (fun (a, _) (b, _) -> String.compare a b) scan.read_errors;
+  }
+
+let paused_keepers_health_json () =
+  let running_names = running_paused_keeper_names () in
+  let durable_scan =
+    match current_server_state_opt () with
+    | Some state -> durable_paused_keeper_scan state.Mcp_server.room_config
+    | None -> { names = []; read_errors = [] }
+  in
+  let names = sorted_unique_strings (running_names @ durable_scan.names) in
+  `Assoc [
+    ("count", `Int (List.length names));
+    ("names", `List (List.map (fun name -> `String name) names));
+    ("running_count", `Int (List.length running_names));
+    ("running_names", `List (List.map (fun name -> `String name) running_names));
+    ("durable_count", `Int (List.length durable_scan.names));
+    ("durable_names", `List (List.map (fun name -> `String name) durable_scan.names));
+    ("read_error_count", `Int (List.length durable_scan.read_errors));
+    ( "read_errors",
+      `List
+        (List.map
+           (fun (keeper, error) ->
+             `Assoc [ ("keeper", `String keeper); ("error", `String error) ])
+           durable_scan.read_errors) );
+  ]
+
 let make_health_json ?(listener = "http/1.1") request =
   let uptime_secs = int_of_float (Unix.gettimeofday () -. server_start_time) in
   let uptime_str =
@@ -221,20 +275,12 @@ let make_health_json ?(listener = "http/1.1") request =
     ]);
     ("keeper_fibers", `Int (Keeper_registry.count_running ()));
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
-       run turns even if its fiber is alive. The dashboard "깨우기" button
-       now auto-resumes paused keepers, but ops still need a quick count
-       without scraping /metrics. List names so an operator can correlate
-       with the cause encoded in their last_blocker_class. *)
-    ("paused_keepers",
-     let paused =
-       Keeper_registry.all ()
-       |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
-            if e.meta.paused then Some (`String e.name) else None)
-     in
-     `Assoc [
-       ("count", `Int (List.length paused));
-       ("names", `List paused);
-     ]);
+       run turns, and auto-paused keepers may no longer have a live registry
+       entry. The dashboard "깨우기" button now auto-resumes paused keepers,
+       but ops still need a quick count without scraping /metrics. List names
+       so an operator can correlate with the cause encoded in their
+       last_blocker_class. *)
+    ("paused_keepers", paused_keepers_health_json ());
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",

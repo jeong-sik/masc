@@ -22,28 +22,18 @@ type cli_transport_overrides =
      to honour this field there. *)
   }
 
-(* SSOT for the Claude Code subprocess hard cap lives in
-   [Provider_adapter] (claude adapter's [tool_policy.max_turns_per_attempt]).
-   The constant below is a backward-compat re-export for the existing test
-   suite; new code reads the cap via [provider_effective_max_turns] or
-   [Provider_adapter.adapter_of_provider_kind]. *)
+(* SSOT for provider subprocess hard caps lives in OAS
+   [Provider_config.max_turns_hard_cap], projected through
+   [Provider_runtime_overlay]. The constant below is a backward-compat
+   re-export for the existing test suite. *)
 let claude_code_max_turns_hard_cap =
-  match
-    Provider_adapter.adapter_of_provider_kind
-      Llm_provider.Provider_config.Claude_code
-  with
-  | Some adapter ->
-    Option.value ~default:30 adapter.tool_policy.max_turns_per_attempt
-  | None -> 30
+  Provider_runtime_overlay.max_turns_hard_cap
+    Llm_provider.Provider_config.Claude_code
+  |> Option.value ~default:30
 ;;
 
 let provider_effective_max_turns kind requested =
-  match Provider_adapter.adapter_of_provider_kind kind with
-  | Some adapter ->
-    (match adapter.tool_policy.max_turns_per_attempt with
-     | Some cap -> min requested cap
-     | None -> requested)
-  | None -> requested
+  Provider_runtime_overlay.clamp_max_turns kind requested
 ;;
 
 (* #10097: codex_cli can only expose keeper-bound runtime MCP tools when the

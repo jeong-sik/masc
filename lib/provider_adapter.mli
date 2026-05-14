@@ -269,26 +269,6 @@ val is_local_provider : string -> bool
 val is_http_probe_capable_kind :
   Llm_provider.Provider_config.provider_kind -> bool
 
-(** Per-provider per-attempt timeout bounds.
-
-    [min_timeout_s] is the floor below which an attempt timeout is
-    never set; [max_timeout_s] is the ceiling above which an attempt
-    cannot block. *)
-type timeout_bounds =
-  { min_timeout_s : float option
-  ; max_timeout_s : float option
-  }
-
-(** [timeout_bounds_of_kind kind] is the per-provider attempt timeout
-    policy.  Encapsulates the only [match provider_cfg.kind] site
-    that used to live in keeper-layer driver helpers; new providers
-    add an arm here, not at the call site.
-
-    RFC-0058 Phase 5.6: vendor-specific operational tunables live
-    inside the adapter boundary, not the keeper turn-driver. *)
-val timeout_bounds_of_kind :
-  Llm_provider.Provider_config.provider_kind -> timeout_bounds
-
 (** {1 Model Label Resolution} *)
 
 (** Default fallback label for local runtime when no preferred models exist. *)

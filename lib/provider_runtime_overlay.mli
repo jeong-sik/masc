@@ -21,3 +21,20 @@ val supports_runtime_mcp_http_headers : binding -> bool
 val uses_prompt_caching : binding -> bool
 val usage_missing_by_design : binding -> bool
 val provider_config : ?model:string -> binding -> Llm_provider.Provider_config.t
+
+(** Per-provider per-attempt timeout bounds projected from OAS
+    [Provider_config] defaults plus local compatibility semantics.
+
+    [min_timeout_s] floors too-short caller budgets for cold local runtimes.
+    [max_timeout_s] caps providers that should not block past a known hard
+    ceiling. *)
+type timeout_bounds =
+  { min_timeout_s : float option
+  ; max_timeout_s : float option
+  }
+
+val timeout_bounds_of_kind :
+  Llm_provider.Provider_config.provider_kind -> timeout_bounds
+
+val max_turns_hard_cap : Llm_provider.Provider_config.provider_kind -> int option
+val clamp_max_turns : Llm_provider.Provider_config.provider_kind -> int -> int

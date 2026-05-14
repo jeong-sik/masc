@@ -127,3 +127,35 @@ let usage_missing_by_design (binding : binding) =
 ;;
 
 let provider_config ?model binding = Binding.to_provider_config ?model binding
+
+type timeout_bounds =
+  { min_timeout_s : float option
+  ; max_timeout_s : float option
+  }
+
+let timeout_bounds_of_kind (kind : PConfig.provider_kind) =
+  match kind, PConfig.default_attempt_timeout_s kind with
+  | PConfig.Ollama, timeout_s -> { min_timeout_s = timeout_s; max_timeout_s = None }
+  | PConfig.Gemini, Some timeout_s
+  | PConfig.Gemini_cli, Some timeout_s
+  | PConfig.Claude_code, Some timeout_s
+  | PConfig.Kimi_cli, Some timeout_s ->
+    { min_timeout_s = None; max_timeout_s = Some timeout_s }
+  | PConfig.Gemini, None ->
+    { min_timeout_s = None; max_timeout_s = Some 180.0 }
+  | PConfig.Gemini_cli, None ->
+    { min_timeout_s = None; max_timeout_s = Some 180.0 }
+  | PConfig.Claude_code, None ->
+    { min_timeout_s = None; max_timeout_s = Some 120.0 }
+  | PConfig.Kimi_cli, None -> { min_timeout_s = None; max_timeout_s = Some 60.0 }
+  | ( PConfig.Anthropic
+    | PConfig.Kimi
+    | PConfig.OpenAI_compat
+    | PConfig.Glm
+    | PConfig.DashScope
+    | PConfig.Codex_cli )
+    , _ -> { min_timeout_s = None; max_timeout_s = None }
+;;
+
+let max_turns_hard_cap = PConfig.max_turns_hard_cap
+let clamp_max_turns = PConfig.clamp_max_turns

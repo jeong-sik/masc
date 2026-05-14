@@ -81,7 +81,7 @@ function refsLabel(refs: DashboardCoordinationFsmRefs | undefined): string {
 }
 
 function evidenceLabel(evidence: DashboardCoordinationFsmEvidence): string {
-  const source = evidence.source ?? 'evidence'
+  const source = evidence.source ?? '(unknown source)'
   const kind = evidence.kind ? `/${evidence.kind}` : ''
   return `${source}${kind}`
 }
@@ -165,7 +165,7 @@ function CoordinationEvidenceRow({ evidence }: { evidence: DashboardCoordination
           ${evidenceLabel(evidence)}
         </span>
         <span class="min-w-0 truncate text-2xs font-medium text-text-strong">
-          ${evidence.label ?? evidence.id ?? 'evidence'}
+          ${evidence.label ?? evidence.id ?? '(unlabeled evidence)'}
         </span>
       </div>
       ${evidence.detail ? html`
@@ -181,9 +181,9 @@ function CoordinationViolationRow({ violation }: { violation: DashboardCoordinat
     <li class="rounded-[var(--r-1)] border border-card-border/60 bg-black/10 p-2">
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <span class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase ${severityToneClass(violation.severity)}">
-          ${violation.severity ?? 'info'}
+          ${violation.severity ?? '(unknown severity)'}
         </span>
-        <span class="font-mono text-2xs text-text-strong">${violation.code ?? violation.axis ?? 'coordination'}</span>
+        <span class="font-mono text-2xs text-text-strong">${violation.code ?? violation.axis ?? '(unknown violation)'}</span>
         ${violation.axis ? html`<span class="text-3xs text-text-dim">${violation.axis}</span>` : null}
       </div>
       <div class="mt-1 text-xs leading-relaxed text-text-body">${violation.message ?? 'coordination invariant 검토 필요.'}</div>

@@ -215,6 +215,7 @@ describe('diff preview chrome', () => {
       .toBe('Diff context: Task line 4, task task-runtime, 2 route links')
     expect(focus?.textContent).toContain('Task')
     expect(focus?.textContent).toContain('L4')
+    expect(container.querySelector('.ide-diff-context-count')?.textContent).toBe('CTX 2')
     const focusedRows = container.querySelectorAll<HTMLElement>('[data-context-focus="true"]')
     expect(focusedRows).toHaveLength(2)
     expect(focusedRows[0]?.getAttribute('style')).toContain('inset 3px 0 0 var(--color-accent-fg)')

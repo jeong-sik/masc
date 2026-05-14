@@ -74,14 +74,14 @@ check-silent:
 # SSOT fingerprint diff + orphan spec validation.
 # Runs all three SSOT gate scripts:
 #   1. scripts/check-ssot.sh          — ratchet-based bypass checks (R1–R5)
-#   2. scripts/ci/check-ssot-spawn-drift.sh — Provider_adapter ↔ Spawn symmetry
+#   2. scripts/ci/check-ssot-spawn-drift.sh — config/cascade.toml-backed Spawn boundary
 #   3. scripts/check-spec-truth.sh    — TLA+ Mirrors: orphan spec validator
 # Meta-issue: #9516
 check-ssot:
 	@echo "=== SSOT gate: ratchet bypass checks ==="
 	bash scripts/check-ssot.sh
 	@echo ""
-	@echo "=== SSOT gate: spawn adapter drift ==="
+	@echo "=== SSOT gate: catalog-driven spawn boundary ==="
 	bash scripts/ci/check-ssot-spawn-drift.sh
 	@echo ""
 	@echo "=== SSOT gate: spec truth (orphan spec validator) ==="

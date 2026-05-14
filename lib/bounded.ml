@@ -5,7 +5,7 @@
     - Safety: Post-check prevents silent constraint violations
     - Soundness: Typed comparisons with explicit error handling
 
-    Designed based on MAGI review (Gemini + Qwen3 formal verification).
+    Designed based on multi-model formal verification review.
 *)
 
 (* Fiber-safe random state for jitter calculation *)
@@ -213,9 +213,7 @@ let hard_quota_error_indicators = [
 let message_looks_like_hard_quota_error msg =
   let contains needle = String_util.contains_substring_ci msg needle in
   List.exists contains hard_quota_error_indicators
-  || (contains "claude exited with code 1"
-      && contains "\"api_error_status\":429"
-      && contains "you've hit your limit")
+  || (contains "\"api_error_status\":429" && contains "you've hit your limit")
 
 (** Check if error is retryable (transient failures) *)
 let is_retryable_error msg =

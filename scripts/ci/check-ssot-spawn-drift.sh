@@ -1,48 +1,72 @@
 #!/usr/bin/env bash
-# CI gate: SSOT drift detection between Provider_adapter.spawn_key and Spawn.spawn_config_of_key.
+# CI gate: Spawn must stay catalog-driven.
 # Meta-issue: #9516
 #
-# CONTRACT: Every spawn_key declared in Provider_adapter.direct_adapters must have a
-# corresponding branch in Spawn.spawn_config_of_key, and vice versa.
-# This prevents runtime "unknown agent" failures when an adapter is added but the
-# spawn mapping is forgotten.
+# CONTRACT: local agent process wiring lives in config/cascade.toml under
+# providers.<id>.spawn and is loaded by Local_mcp_client_catalog. Spawn must not
+# reintroduce a second provider-name switch or Provider_adapter spawn-key map.
 
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Extract spawn_key values from Provider_adapter.direct_adapters (Some "...")
-# Filter out None entries, sort, dedupe.
-adapter_keys=$(
-  rg 'spawn_key\s*=\s*Some\s*"([^"]+)"' lib/provider_adapter.ml -o -r '$1' | sort -u
-)
-
-# Extract match arms from Spawn.spawn_config_of_key
-spawn_keys=$(
-  sed -n '/let spawn_config_of_key/,/^let /p' lib/spawn.ml \
-  | rg '^\s*\|\s*"([^"]+)"' -o -r '$1' | sort -u
-)
-
-# Compute symmetric difference
-only_in_adapter=$(comm -23 <(echo "$adapter_keys") <(echo "$spawn_keys"))
-only_in_spawn=$(comm -13 <(echo "$adapter_keys") <(echo "$spawn_keys"))
-
 exit_code=0
 
-if [ -n "$only_in_adapter" ]; then
-  echo "FAIL: SSOT drift — spawn_key in Provider_adapter but missing in Spawn.spawn_config_of_key:"
-  echo "$only_in_adapter" | sed 's/^/  /'
-  exit_code=1
-fi
+require_match() {
+  local description="$1"
+  local pattern="$2"
+  local file="$3"
+  if ! rg -q "$pattern" "$file"; then
+    echo "FAIL: ${description}" >&2
+    echo "  missing pattern: ${pattern}" >&2
+    echo "  file: ${file}" >&2
+    exit_code=1
+  fi
+}
 
-if [ -n "$only_in_spawn" ]; then
-  echo "FAIL: SSOT drift — spawn_config_of_key branch in Spawn but no adapter.spawn_key:"
-  echo "$only_in_spawn" | sed 's/^/  /'
-  exit_code=1
-fi
+reject_match() {
+  local description="$1"
+  local pattern="$2"
+  local file="$3"
+  if rg -q "$pattern" "$file"; then
+    echo "FAIL: ${description}" >&2
+    rg -n "$pattern" "$file" >&2 || true
+    exit_code=1
+  fi
+}
+
+require_match \
+  "Spawn.get_config must resolve through Local_mcp_client_catalog.find_spawn" \
+  'Local_mcp_client_catalog\.find_spawn' \
+  lib/spawn.ml
+
+require_match \
+  "Local_mcp_client_catalog must read provider spawn tables from cascade.toml" \
+  '"spawn"' \
+  lib/local_mcp_client_catalog.ml
+
+require_match \
+  "config/cascade.toml must declare at least one provider spawn table" \
+  '^\[providers\.[^]]+\.spawn\]$' \
+  config/cascade.toml
+
+reject_match \
+  "legacy provider spawn-key field must not return" \
+  'spawn[_-]key' \
+  lib/provider_adapter.ml
+
+reject_match \
+  "legacy Spawn.spawn_config_of_key switch must not return" \
+  'spawn_config_of_key' \
+  lib/spawn.ml
+
+reject_match \
+  "Spawn must not branch on hardcoded local agent labels" \
+  '^\s*\|\s*"(claude|gemini|codex|kimi|glm|llama)"' \
+  lib/spawn.ml
 
 if [ "$exit_code" -eq 0 ]; then
-  echo "PASS: Provider_adapter.spawn_key <-> Spawn.spawn_config_of_key are in sync."
+  echo "PASS: Spawn is catalog-driven by config/cascade.toml."
 fi
 
 exit "$exit_code"

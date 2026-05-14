@@ -55,7 +55,7 @@ MCP_URL="http://${HOST}:${PORT}/mcp"
 
 # The canonical [mcp_servers.masc] stanza.
 # bearer_token_env_var is used instead of a hardcoded Authorization header.
-# This is what `masc-mcp doctor auth` checks for in codex_mcp.config.stages.
+# This is what `masc-mcp doctor auth` checks for in the MCP client config stages.
 MASC_STANZA=$(cat <<EOF
 [mcp_servers.masc]
 url = "${MCP_URL}"

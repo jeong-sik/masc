@@ -278,9 +278,9 @@ let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
 
 (** Substring indicators for hard-quota signals in CLI-wrapped error text.
 
-    These are necessary because CLI transports (Gemini CLI, Claude Code CLI)
-    serialize provider errors as plain text in [NetworkError.message] or
-    [InvalidRequest.message].  The structured [Llm_provider.Retry.is_hard_quota]
+    These are necessary because CLI transports serialize provider errors as
+    plain text in [NetworkError.message] or [InvalidRequest.message].
+    The structured [Llm_provider.Retry.is_hard_quota]
     only inspects the [RateLimited] variant, so CLI-wrapped messages require
     text-level pattern matching.
 
@@ -317,10 +317,7 @@ let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
     String_util.contains_substring_ci message needle
   in
   List.exists contains cli_wrapped_hard_quota_indicators
-  ||
-  (contains "claude exited with code 1"
-   && contains "\"api_error_status\":429"
-   && contains "you've hit your limit")
+  || (contains "\"api_error_status\":429" && contains "you've hit your limit")
 
 let cli_wrapped_max_turns_indicators = [
   "\"subtype\":\"error_max_turns\"";

@@ -1010,10 +1010,36 @@ let test_oas_event_bridge_logs_tool_completed_with_agent_name () =
    relaying per-token telemetry over SSE (high-frequency flood path that
    was deliberately suppressed in #10590).  Pin both invariants. *)
 
+let inference_token_labels ~model_bucket ~phase ~token_bucket =
+  [
+    ("model_bucket", model_bucket);
+    ("phase", phase);
+    ("token_bucket", token_bucket);
+  ]
+
 let test_inference_telemetry_aggregates_without_sse_relay () =
+  let prompt_labels =
+    inference_token_labels ~model_bucket:"openai" ~phase:"prompt"
+      ~token_bucket:"1_1k"
+  in
+  let completion_labels =
+    inference_token_labels ~model_bucket:"openai" ~phase:"completion"
+      ~token_bucket:"over_8k"
+  in
   let rate_labels = [ ("model_bucket", "openai") ] in
+  let token_metric = Prometheus.metric_oas_inference_telemetry_tokens in
   let prompt_rate_metric = Prometheus.metric_oas_inference_prompt_tok_per_sec in
   let decode_rate_metric = Prometheus.metric_oas_inference_decode_tok_per_sec in
+  let before_prompt_tokens =
+    Prometheus.metric_value_or_zero token_metric ~labels:prompt_labels ()
+  in
+  let before_prompt_count =
+    Prometheus.metric_value_or_zero (token_metric ^ "_count")
+      ~labels:prompt_labels ()
+  in
+  let before_completion_tokens =
+    Prometheus.metric_value_or_zero token_metric ~labels:completion_labels ()
+  in
   let before_prompt_rate =
     Prometheus.metric_value_or_zero prompt_rate_metric ~labels:rate_labels ()
   in

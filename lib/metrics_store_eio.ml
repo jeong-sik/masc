@@ -32,7 +32,7 @@ module Float = Stdlib.Float
 (** Task completion metric *)
 type task_metric = {
   id: string;               (* Unique metric ID *)
-  agent_id: string;         (* Agent name: claude, gemini, codex *)
+  agent_id: string;         (* Agent name *)
   task_id: string;          (* Task being measured *)
   started_at: float;        (* Unix timestamp *)
   completed_at: float option [@default None];  (* None if still in progress *)

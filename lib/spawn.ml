@@ -252,7 +252,7 @@ let fallback_spawn_failure_output ~exit_code =
 
 let add_default_model_arg agent_name argv =
   match Provider_adapter.resolve_direct_adapter agent_name with
-  | Some adapter when adapter.canonical_name = "llama" -> (
+  | Some adapter when adapter.canonical_name = Provider_adapter.cn_llama -> (
       match Provider_adapter.explicit_llama_model_id_result () with
       | Ok model_id -> argv @ [ model_id ]
       | Error _ -> argv)

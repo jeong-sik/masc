@@ -2116,6 +2116,14 @@ let test_ssot_fingerprint_gate_contracts () =
     (file_contains_pattern "mk/quality.mk" "bash scripts/check-ssot.sh");
   check bool "check-ssot target runs spawn drift script" true
     (file_contains_pattern "mk/quality.mk" "bash scripts/ci/check-ssot-spawn-drift.sh");
+  check bool "spawn drift script is catalog-driven" true
+    (file_contains_pattern
+       "scripts/ci/check-ssot-spawn-drift.sh"
+       "Local_mcp_client_catalog.find_spawn");
+  check bool "spawn drift script no longer scans adapter key assignments" true
+    (file_not_contains_pattern
+       "scripts/ci/check-ssot-spawn-drift.sh"
+       "provider adapter");
   check bool "check-ssot target runs spec truth script" true
     (file_contains_pattern "mk/quality.mk" "bash scripts/check-spec-truth.sh");
   check bool "check-spec-truth script exists" true

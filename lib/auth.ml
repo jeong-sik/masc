@@ -1139,33 +1139,74 @@ let prune_archive ~base_path ~retention_days ~min_keep : int * int =
     total - !prune_count, !prune_count)
 ;;
 
-let archive_bare_for_canonical config ~canonical_name =
+type bare_alias_state =
+  | Bare_absent
+  | Bare_alive_alias
+  | Bare_dead
+
+(* Inspect the bare-form file at [agents/<bare>.json] without mutating
+   it. Pure read; safe to call from audit paths.
+   - [Bare_absent]      no file at the bare path.
+   - [Bare_alive_alias] redirect stub aimed at the *same* UUID file
+                         as the canonical credential (= PR-#10440
+                         alias, must survive).
+   - [Bare_dead]        any other shape: direct credential, redirect
+                         to a different UUID, redirect with canonical
+                         missing or not stub-shaped. *)
+let classify_bare_for_canonical config ~canonical_name =
   match bare_keeper_name_from_canonical canonical_name with
-  | None -> ()
+  | None -> Bare_absent
   | Some bare_name ->
     let bare_file = credential_file config bare_name in
     if not (file_exists bare_file)
-    then ()
+    then Bare_absent
     else (
       let canonical_file = credential_file config canonical_name in
-      let is_alive_alias =
-        match
-          load_redirect_target config bare_file,
-          load_redirect_target config canonical_file
-        with
-        | Some bare_target, Some canonical_target ->
-          String.equal
-            (Filename.basename bare_target)
-            (Filename.basename canonical_target)
-        | _ -> false
-      in
-      if is_alive_alias
-      then ()
-      else
-        archive_credential_file
-          config
-          ~agent_name:bare_name
-          ~reason:"bare-form keeper credential is dead after PR-3b1 starvation")
+      match
+        load_redirect_target config bare_file,
+        load_redirect_target config canonical_file
+      with
+      | Some bare_target, Some canonical_target
+        when String.equal
+               (Filename.basename bare_target)
+               (Filename.basename canonical_target) -> Bare_alive_alias
+      | _ -> Bare_dead)
+;;
+
+let archive_bare_for_canonical config ~canonical_name =
+  match classify_bare_for_canonical config ~canonical_name with
+  | Bare_absent | Bare_alive_alias -> ()
+  | Bare_dead ->
+    (match bare_keeper_name_from_canonical canonical_name with
+     | None -> ()
+     | Some bare_name ->
+       archive_credential_file
+         config
+         ~agent_name:bare_name
+         ~reason:"bare-form keeper credential is dead after PR-3b1 starvation")
+;;
+
+type bare_alias_audit_result =
+  { alive_aliases : int
+  ; dead_bares : int
+  ; no_bares : int
+  }
+
+let empty_bare_alias_audit_result =
+  { alive_aliases = 0; dead_bares = 0; no_bares = 0 }
+
+let bare_alias_audit ~base_path ~canonical_names =
+  List.fold_left
+    (fun acc canonical_name ->
+       match classify_bare_for_canonical base_path ~canonical_name with
+       | Bare_absent ->
+         { acc with no_bares = acc.no_bares + 1 }
+       | Bare_alive_alias ->
+         { acc with alive_aliases = acc.alive_aliases + 1 }
+       | Bare_dead ->
+         { acc with dead_bares = acc.dead_bares + 1 })
+    empty_bare_alias_audit_result
+    canonical_names
 ;;
 
 let ensure_keeper_credential config ~agent_name

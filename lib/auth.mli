@@ -314,6 +314,30 @@ val read_initial_admin : string -> string option
 
 val extract_agent_type_prefix : string -> string option
 
+(** {1 Bare-form Alias Audit} *)
+
+type bare_alias_audit_result =
+  { alive_aliases : int
+  ; dead_bares : int
+  ; no_bares : int
+  }
+(** Aggregate of {!bare_alias_audit}. [alive_aliases] is the count of
+    bare-form files that are legitimate PR-#10440 short-form aliases
+    (redirect stub aimed at the same UUID as the canonical credential).
+    [dead_bares] is the count that would be archived under PR-3b2
+    ([archive_bare_for_canonical] would move them). [no_bares] is the
+    count of canonical names that have no bare-form file at all. *)
+
+val bare_alias_audit
+  :  base_path:string
+  -> canonical_names:string list
+  -> bare_alias_audit_result
+(** Read-only audit of bare/canonical alignment for the supplied
+    canonical agent names. Does not mutate state. Intended for boot-
+    time observability so the operator sees ping-pong regressions as
+    a non-zero [dead_bares] count surfacing on every boot, not as the
+    absence of WARN lines. *)
+
 (** {1 Credential Archive Retention} *)
 
 val prune_archive

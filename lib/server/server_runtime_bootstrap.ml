@@ -1058,6 +1058,24 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
               keeper_name agent_name
               (Masc_domain.masc_error_to_string err))
     keeper_names keeper_agent_names;
+  (* Post-sweep audit: surface the ping-pong outcome as a positive
+     boot signal. Before the γ fix (PR #15112) every keeper logged
+     a WARN "archived credential ..." line and operators could only
+     detect regressions by counting WARN lines. Now we emit a single
+     structured INFO so the steady-state ("alive_aliases=N dead=0")
+     is visible on every boot; a non-zero [dead_bares] is the canary
+     for ping-pong regression. *)
+  let audit =
+    Auth.bare_alias_audit ~base_path ~canonical_names:keeper_agent_names
+  in
+  Log.Server.info
+    "startup bare alias audit: alive_aliases=%d dead_bares=%d no_bares=%d"
+    audit.alive_aliases audit.dead_bares audit.no_bares;
+  if audit.dead_bares > 0 then
+    Log.Server.warn
+      "startup bare alias audit: dead_bares=%d (ping-pong regression \
+       candidate; see PR #15112 γ guard)"
+      audit.dead_bares;
   let rotation_outcomes =
     Auth.rotate_shared_tokens_for_agents base_path
       ~agent_names:keeper_agent_names

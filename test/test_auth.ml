@@ -810,6 +810,98 @@ let test_prune_archive_retains_recent_and_drops_old () =
       check int "kept count" 1 kept;
       check int "pruned count" 1 pruned)
 
+(* Direct repeatability guard for the 331-epoch ping-pong: simulate
+   five boot cycles (ensure_keeper_credential + ensure_credential_alias)
+   and assert the .archive/ directory never materialises. A regression
+   that re-introduces unconditional archiving would create one epoch
+   dir per loop iteration and fail this test deterministically. *)
+let test_no_ping_pong_across_repeated_boots () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      for _ = 1 to 5 do
+        (match
+           Auth.ensure_keeper_credential dir
+             ~agent_name:"keeper-sangsu-agent"
+         with
+         | Ok _ -> ()
+         | Error e -> fail (Masc_domain.masc_error_to_string e));
+        (match
+           Auth.ensure_credential_alias dir
+             ~canonical_name:"keeper-sangsu-agent"
+             ~alias_name:"sangsu"
+         with
+         | Ok () -> ()
+         | Error e -> fail (Masc_domain.masc_error_to_string e))
+      done;
+      let bare_path = Auth.credential_file dir "sangsu" in
+      check bool "alias survives 5 boot cycles" true
+        (Sys.file_exists bare_path);
+      check bool ".archive/ never created" false
+        (Sys.file_exists (archive_dir_of dir));
+      let audit =
+        Auth.bare_alias_audit
+          ~base_path:dir
+          ~canonical_names:["keeper-sangsu-agent"]
+      in
+      check int "audit alive_aliases=1" 1 audit.alive_aliases;
+      check int "audit dead_bares=0" 0 audit.dead_bares;
+      check int "audit no_bares=0" 0 audit.no_bares)
+
+let test_bare_alias_audit_classifies_states () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      (* alive: canonical minted + alias written *)
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-alive-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      (match
+         Auth.ensure_credential_alias dir
+           ~canonical_name:"keeper-alive-agent" ~alias_name:"alive"
+       with
+       | Ok () -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      (* dead: canonical exists but bare points to a stale UUID *)
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-dead-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      Auth.save_private_text_file
+        (Auth.credential_file dir "dead")
+        {|{ "redirect_to": "stale-uuid.json" }|};
+      (* no_bare: canonical exists, no bare file written *)
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-orphan-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      let audit =
+        Auth.bare_alias_audit ~base_path:dir
+          ~canonical_names:
+            [ "keeper-alive-agent"
+            ; "keeper-dead-agent"
+            ; "keeper-orphan-agent"
+            ]
+      in
+      check int "alive=1" 1 audit.alive_aliases;
+      check int "dead=1" 1 audit.dead_bares;
+      check int "no_bare=1" 1 audit.no_bares)
+
 let test_prune_archive_honors_min_keep () =
   let dir = setup_test_room () in
   Fun.protect
@@ -1214,6 +1306,10 @@ let () =
         test_ensure_keeper_credential_no_archive_when_no_bare;
       test_case "archive_bare skips alive alias (γ)" `Quick
         test_archive_bare_skips_alive_alias;
+      test_case "no ping-pong across repeated boots" `Quick
+        test_no_ping_pong_across_repeated_boots;
+      test_case "bare_alias_audit classifies states" `Quick
+        test_bare_alias_audit_classifies_states;
       test_case "prune_archive drops aged epoch dirs" `Quick
         test_prune_archive_retains_recent_and_drops_old;
       test_case "prune_archive honors min_keep" `Quick

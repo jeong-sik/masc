@@ -81,14 +81,11 @@ let argv_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
 
 let argv_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
     : argv_prompt_preflight option =
-  (* RFC-0058 §2.4 — dispatch by adapter capability flag
-     ([tool_policy.argv_prompt_preflight]), never by provider variant.
-     Adding a vendor that needs this check is now a TOML/adapter registry
-     change, not a call-site code change. *)
+  (* RFC-0058 §2.4 — dispatch by cascade.toml provider capability flag,
+     never by provider variant. *)
   let requires_preflight =
-    match Provider_adapter.adapter_of_provider_config config.provider_cfg with
-    | Some adapter -> adapter.tool_policy.argv_prompt_preflight
-    | None -> false
+    Cascade_provider_metadata.provider_requires_argv_prompt_preflight
+      config.provider_cfg
   in
   if not requires_preflight then None
   else

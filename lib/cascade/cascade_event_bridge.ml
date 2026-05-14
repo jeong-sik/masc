@@ -45,10 +45,10 @@ let payload_int_opt key = function
 ;;
 
 let inference_model_bucket ~provider ~model =
-  match Provider_adapter.telemetry_bucket_of_provider_label provider with
+  match Cascade_provider_metadata.telemetry_bucket_of_provider_label provider with
   | Some bucket -> bucket
   | None ->
-    (match Provider_adapter.telemetry_bucket_of_model_id model with
+    (match Cascade_provider_metadata.telemetry_bucket_of_model_id model with
      | Some bucket -> bucket
      | None -> "other")
 ;;

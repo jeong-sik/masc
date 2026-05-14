@@ -10,6 +10,28 @@
 
 # ── Layer 1: Providers ──────────────────────────────────────────
 
+[providers.claude_code]
+display-name = "Anthropic Claude Code CLI"
+protocol = "anthropic-cli"
+command = "claude"
+is-non-interactive = true
+telemetry-bucket = "anthropic"
+telemetry-aliases = ["claude", "claude-code", "claude_code", "anthropic", "claude-api", "claude_api"]
+telemetry-model-prefixes = ["claude-"]
+
+[providers.claude_code.credentials]
+type = "env"
+key = "ANTHROPIC_API_KEY"
+
+# Behavioral capabilities — RFC-0058 §2.4 Phase 5.1.
+# Replaces the OCaml `tool_policy` record and per-kind matches in
+# cascade_transport / provider_tool_support / keeper_usage_trust.
+# Field defaults (when omitted) are all false / [] / None.
+[providers.claude_code.capabilities]
+supports-runtime-mcp-http-headers = true
+uses-anthropic-caching = true
+max-turns-per-attempt = 30
+tolerates-bound-actor-fallback = true
 
 [providers.claude_code.mcp_client_config]
 client-name = "claude"
@@ -34,6 +56,9 @@ display-name = "OpenAI Codex CLI"
 protocol = "openai-cli"
 command = "codex"
 is-non-interactive = true
+telemetry-bucket = "openai"
+telemetry-aliases = ["codex", "codex-cli", "codex_cli", "openai", "codex-api", "codex_api"]
+telemetry-model-prefixes = ["gpt-", "o1", "o3", "o4", "o5"]
 
 [providers.codex_cli.credentials]
 type = "env"
@@ -76,6 +101,9 @@ display-name = "Google Gemini CLI"
 protocol = "google-cli"
 command = "gemini"
 is-non-interactive = true
+telemetry-bucket = "gemini"
+telemetry-aliases = ["gemini", "gemini-cli", "gemini_cli", "google", "gemini-api", "gemini_api"]
+telemetry-model-prefixes = ["gemini-"]
 
 [providers.gemini_cli.credentials]
 type = "env"
@@ -122,6 +150,9 @@ display-name = "Moonshot Kimi CLI"
 protocol = "kimi-cli"
 command = "kimi"
 is-non-interactive = true
+telemetry-bucket = "kimi"
+telemetry-aliases = ["kimi", "kimi-cli", "kimi_cli", "moonshot", "kimi-api", "kimi_api", "kimi-coding", "kimi_coding"]
+telemetry-model-prefixes = ["kimi-"]
 
 [providers.kimi_cli.credentials]
 type = "env"
@@ -135,6 +166,9 @@ tolerates-bound-actor-fallback = true
 display-name = "Zhipu GLM Coding"
 protocol = "openai-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
+telemetry-bucket = "glm"
+telemetry-aliases = ["glm", "glm-api", "glm_cloud", "zai", "glm-coding", "glm-coding-plan"]
+telemetry-model-prefixes = ["glm-"]
 
 [providers.glm-coding.credentials]
 type = "env"
@@ -148,6 +182,9 @@ key = "ZAI_API_KEY"
 display-name = "Ollama Local"
 protocol = "ollama-http"
 endpoint = "http://127.0.0.1:11434"
+telemetry-bucket = "llama"
+telemetry-aliases = ["llama", "llama.cpp", "llamacpp", "ollama-local"]
+telemetry-model-prefixes = ["llama"]
 
 [providers.ollama.spawn]
 agent-name = "llama"
@@ -318,6 +355,7 @@ max-context = 262144
 tools-support = true
 thinking-support = true
 streaming = true
+telemetry-bucket = "qwen"
 
 [models.qwen3.capabilities]
 supports-tool-choice = true

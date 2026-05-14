@@ -2,6 +2,7 @@ open Alcotest
 module Adapter = Masc_mcp.Provider_adapter
 module Candidate = Masc_mcp.Cascade_runtime_candidate
 module Health = Masc_mcp.Cascade_health_tracker
+module Provider_metadata = Masc_mcp.Cascade_provider_metadata
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -16,6 +17,13 @@ let with_env name value f =
     f
 ;;
 
+let rec find_project_root dir =
+  if Sys.file_exists (Filename.concat dir "config/cascade.toml") then dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then Sys.getcwd () else find_project_root parent
+;;
+
 let test_resolve_direct_aliases () =
   let claude = Option.get (Adapter.resolve_direct_adapter "claude") in
   check string "claude direct canonical" "claude" claude.canonical_name;
@@ -27,32 +35,38 @@ let test_resolve_direct_aliases () =
   check string "openrouter canonical" "openrouter" openrouter.canonical_name
 ;;
 
-let test_telemetry_buckets_use_adapter_registry () =
-  check
-    (option string)
-    "provider alias bucket"
-    (Some "openai")
-    (Adapter.telemetry_bucket_of_provider_label "openai");
-  check
-    (option string)
-    "cli cascade prefix bucket"
-    (Some "gemini")
-    (Adapter.telemetry_bucket_of_provider_label "gemini_cli");
-  check
-    (option string)
-    "response model bucket"
-    (Some "openai")
-    (Adapter.telemetry_bucket_of_model_id "gpt-5");
-  check
-    (option string)
-    "provider-prefixed model bucket"
-    (Some "glm")
-    (Adapter.telemetry_bucket_of_model_id "glm-coding:glm-5.1");
-  check
-    (option string)
-    "architecture fallback bucket"
-    (Some "qwen")
-    (Adapter.telemetry_bucket_of_model_id "qwen3.5:35b")
+let test_telemetry_buckets_use_cascade_metadata () =
+  let config_dir = Filename.concat (find_project_root (Sys.getcwd ())) "config" in
+  with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
+  Provider_metadata.reset_cache_for_test ();
+  Fun.protect
+    ~finally:Provider_metadata.reset_cache_for_test
+    (fun () ->
+       check
+         (option string)
+         "provider alias bucket"
+         (Some "openai")
+         (Provider_metadata.telemetry_bucket_of_provider_label "openai");
+       check
+         (option string)
+         "cli cascade prefix bucket"
+         (Some "gemini")
+         (Provider_metadata.telemetry_bucket_of_provider_label "gemini_cli");
+       check
+         (option string)
+         "response model bucket"
+         (Some "openai")
+         (Provider_metadata.telemetry_bucket_of_model_id "gpt-5");
+       check
+         (option string)
+         "provider-prefixed model bucket"
+         (Some "glm")
+         (Provider_metadata.telemetry_bucket_of_model_id "glm-coding:glm-5.1");
+       check
+         (option string)
+         "architecture fallback bucket"
+         (Some "qwen")
+         (Provider_metadata.telemetry_bucket_of_model_id "qwen3.5:35b"))
 ;;
 
 let test_resolve_cli_canonical_names () =
@@ -866,9 +880,9 @@ let () =
     [ ( "registry"
       , [ test_case "resolve direct aliases" `Quick test_resolve_direct_aliases
         ; test_case
-            "telemetry buckets use adapter registry"
+            "telemetry buckets use cascade metadata"
             `Quick
-            test_telemetry_buckets_use_adapter_registry
+            test_telemetry_buckets_use_cascade_metadata
         ; test_case "resolve cli canonicals" `Quick test_resolve_cli_canonical_names
         ; test_case
             "oas registry binding adds generic provider"

@@ -129,8 +129,6 @@ type adapter =
   ; model_policy : model_policy
   ; tool_policy : tool_policy
   ; telemetry_policy : telemetry_policy
-  ; telemetry_bucket : string option
-  ; telemetry_model_prefixes : string list
   }
 
 type gemini_direct_auth =
@@ -210,19 +208,6 @@ val resolve_adapter_by_cascade_prefix : string -> adapter option
 
 (** Resolve the canonical name for a provider label. *)
 val resolve_direct_canonical_name : string -> string option
-
-(** Low-cardinality telemetry bucket declared on an adapter. *)
-val telemetry_bucket_of_adapter : adapter -> string option
-
-(** Resolve a low-cardinality telemetry bucket from a provider label. *)
-val telemetry_bucket_of_provider_label : string -> string option
-
-(** Resolve a low-cardinality telemetry bucket from a response model id or
-    provider-prefixed model label. *)
-val telemetry_bucket_of_model_id : string -> string option
-
-(** Resolve the configured spawn executable for an agent label. *)
-val resolve_spawn_executable : string -> string option
 
 (** Check if a name is a known direct adapter label or alias. *)
 val is_known_provider : string -> bool

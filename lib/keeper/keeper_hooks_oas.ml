@@ -465,6 +465,9 @@ let cost_reason_usage_untrusted = "usage_untrusted"
 let cost_reason_runtime_unknown = "runtime_unknown"
 let cost_reason_oas_cost_unreported = "oas_cost_unreported"
 
+let cost_source_unmetered_provider = "unmetered_provider"
+let cost_source_computed = "computed"
+
 let cost_status_to_string = function
   | Cost_reported -> cost_label_reported
   | Cost_known_free -> cost_label_known_free
@@ -656,12 +659,12 @@ let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
     ~cost_usd =
   if usage_missing then cost_label_usage_missing
   else if not usage_trusted then cost_label_usage_untrusted
-  else if runtime_unmetered then cost_reason_known_free
-  else if cost_usd > 0.0 then cost_label_reported
+  else if runtime_unmetered then cost_source_unmetered_provider
+  else if cost_usd > 0.0 then cost_source_computed
   else cost_label_oas_cost_unreported
 
 let record_cost_emit_source source =
-  if not (String.equal source cost_status_computed) then
+  if not (String.equal source cost_source_computed) then
     Prometheus.inc_counter cost_emit_source_metric
       ~labels:[ ("source", source) ]
       ()

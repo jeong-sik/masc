@@ -358,6 +358,7 @@ val map_scheduled_autonomous_rt :
 (** {1 Legacy model arg rejection} *)
 
 val keeper_legacy_model_arg_names : string list
+val legacy_provider_filter_name : string
 
 val reject_legacy_model_args :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result

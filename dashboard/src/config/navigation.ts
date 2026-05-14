@@ -214,6 +214,13 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: 'Fleet-wide signal aggregation and comparison.',
       params: { section: 'fleet-health' },
     },
+    {
+      id: 'memory-subsystems',
+      label: 'Memory Subsystems',
+      description: 'Legacy memory subsystem drill-down (redirects to cognition).',
+      params: { section: 'memory-subsystems' },
+      hidden: true,
+    },
   ],
   command: [
     {

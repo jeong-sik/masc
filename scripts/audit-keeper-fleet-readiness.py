@@ -1606,11 +1606,11 @@ def row_links(row: dict[str, Any]) -> dict[str, Any]:
     return links if isinstance(links, dict) else {}
 
 
-def same_optional_value(expected: Any, actual: Any) -> bool:
+def manifest_value_matches(expected: Any, actual: Any) -> bool:
     if expected is None or expected == "":
         return True
     if actual is None or actual == "":
-        return True
+        return False
     return str(expected) == str(actual)
 
 
@@ -1657,11 +1657,11 @@ def tool_call_log_has_matching_row(
             if isinstance(row_keeper, str) and row_keeper != name:
                 continue
             row_ids = trace_session_ids_from_row(row)
-            if row_ids and trace not in row_ids:
+            if not trace or trace not in row_ids:
                 continue
-            if not same_optional_value(generation, row.get("generation")):
+            if not manifest_value_matches(generation, row.get("generation")):
                 continue
-            if not same_optional_value(turn, row.get("keeper_turn_id")):
+            if not manifest_value_matches(turn, row.get("keeper_turn_id")):
                 continue
             return True
     except ValueError:

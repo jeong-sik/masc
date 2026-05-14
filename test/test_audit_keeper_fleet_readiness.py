@@ -879,6 +879,37 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertFalse(keeper["pr_surface_action"])
         self.assertEqual(keeper["failures"], ["pr_surface_evidence_missing"])
 
+    def test_require_persistent_work_evidence_rejects_uncorrelated_tool_log_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            write_persistent_work_evidence(root, "alpha")
+            tool_log_path = root / ".masc" / "tool_calls" / "2026-05" / "15.jsonl"
+            tool_log_path.write_text(
+                json.dumps(
+                    {
+                        "keeper": "alpha",
+                        "tool": "keeper_bash",
+                        "success": True,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            args = audit_args(root, expected_keepers=1)
+            args.require_persistent_work_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertTrue(keeper["provider_turn_evidence"])
+        self.assertTrue(keeper["checkpoint_evidence"])
+        self.assertTrue(keeper["history_evidence"])
+        self.assertFalse(keeper["tool_call_log_evidence"])
+        self.assertTrue(keeper["pr_surface_action"])
+        self.assertEqual(keeper["failures"], ["tool_call_log_evidence_missing"])
+
     def test_require_persistent_work_evidence_passes_with_manifest_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

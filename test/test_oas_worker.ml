@@ -2664,10 +2664,10 @@ let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
   Alcotest.(check string) "coding GLM label" "glm-coding" glm_coding
 ;;
 
-let test_provider_effective_max_turns_clamps_claude_code () =
+let test_provider_effective_max_turns_passes_claude_code_budget_to_oas () =
   Alcotest.(check int)
-    "claude_code max_turns hard cap"
-    Cascade_runner.claude_code_max_turns_hard_cap
+    "claude_code max_turns is passed through to OAS"
+    39
     (Cascade_runner.provider_effective_max_turns
        Llm_provider.Provider_config.Claude_code
        39)
@@ -2694,38 +2694,38 @@ let provider_timeout ?(is_last = false) ?configured provider_cfg =
     candidate
 ;;
 
-let test_provider_attempt_timeout_caps_claude_code () =
+let test_provider_attempt_timeout_passes_claude_code_configured_timeout () =
   check_timeout_opt
-    "claude_code caps configured attempt timeout"
-    (Some 120.0)
+    "claude_code configured attempt timeout passes through"
+    (Some 300.0)
     (provider_timeout ~configured:300.0 (make_claude_code_provider_cfg ()))
 ;;
 
-let test_provider_attempt_timeout_caps_kimi_cli () =
+let test_provider_attempt_timeout_passes_kimi_cli_configured_timeout () =
   check_timeout_opt
-    "kimi_cli caps configured attempt timeout"
-    (Some 60.0)
+    "kimi_cli configured attempt timeout passes through"
+    (Some 300.0)
     (provider_timeout ~configured:300.0 (make_kimi_cli_provider_cfg ()))
 ;;
 
-let test_provider_attempt_timeout_caps_gemini_cli () =
+let test_provider_attempt_timeout_passes_gemini_cli_configured_timeout () =
   check_timeout_opt
-    "gemini_cli caps configured attempt timeout"
-    (Some 180.0)
+    "gemini_cli configured attempt timeout passes through"
+    (Some 300.0)
     (provider_timeout ~configured:300.0 (make_gemini_cli_provider_cfg ()))
 ;;
 
-let test_provider_attempt_timeout_floors_ollama () =
+let test_provider_attempt_timeout_passes_ollama_configured_timeout () =
   check_timeout_opt
-    "ollama floors too-short configured attempt timeout"
-    (Some 300.0)
+    "ollama configured attempt timeout passes through"
+    (Some 60.0)
     (provider_timeout ~configured:60.0 (make_ollama_provider_cfg ()))
 ;;
 
-let test_provider_attempt_timeout_leaves_unconstrained_last_to_outer_budget () =
+let test_provider_attempt_timeout_passes_final_configured_timeout () =
   check_timeout_opt
-    "unconstrained final provider relies on enclosing keeper/OAS timeout"
-    None
+    "final provider configured attempt timeout passes through"
+    (Some 300.0)
     (provider_timeout
        ~is_last:true
        ~configured:300.0
@@ -6310,33 +6310,33 @@ let () =
             `Quick
             test_cascade_provider_labels_keep_glm_and_glm_coding_distinct
         ; Alcotest.test_case
-            "provider max_turns clamps claude_code"
+            "provider max_turns passes claude_code budget to OAS"
             `Quick
-            test_provider_effective_max_turns_clamps_claude_code
+            test_provider_effective_max_turns_passes_claude_code_budget_to_oas
         ; Alcotest.test_case
             "provider max_turns leaves ollama uncapped"
             `Quick
             test_provider_effective_max_turns_keeps_ollama_budget
         ; Alcotest.test_case
-            "provider timeout caps claude_code"
+            "provider timeout passes claude_code configured timeout"
             `Quick
-            test_provider_attempt_timeout_caps_claude_code
+            test_provider_attempt_timeout_passes_claude_code_configured_timeout
         ; Alcotest.test_case
-            "provider timeout caps kimi_cli"
+            "provider timeout passes kimi_cli configured timeout"
             `Quick
-            test_provider_attempt_timeout_caps_kimi_cli
+            test_provider_attempt_timeout_passes_kimi_cli_configured_timeout
         ; Alcotest.test_case
-            "provider timeout caps gemini_cli"
+            "provider timeout passes gemini_cli configured timeout"
             `Quick
-            test_provider_attempt_timeout_caps_gemini_cli
+            test_provider_attempt_timeout_passes_gemini_cli_configured_timeout
         ; Alcotest.test_case
-            "provider timeout floors ollama"
+            "provider timeout passes ollama configured timeout"
             `Quick
-            test_provider_attempt_timeout_floors_ollama
+            test_provider_attempt_timeout_passes_ollama_configured_timeout
         ; Alcotest.test_case
-            "provider timeout leaves unconstrained final provider to outer budget"
+            "provider timeout passes final configured timeout"
             `Quick
-            test_provider_attempt_timeout_leaves_unconstrained_last_to_outer_budget
+            test_provider_attempt_timeout_passes_final_configured_timeout
         ; Alcotest.test_case
             "cascade provider labels preserve registered openai_compat family"
             `Quick

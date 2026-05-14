@@ -53,35 +53,14 @@ type metric =
 
 (** {1 Global Metrics Store}
 
-    [metrics] is updated from any fiber on any domain — LLM telemetry,
-    keeper heartbeats, SSE bookkeeping, HTTP handlers. The previous
-    implementation used a bare [Hashtbl.t] with [find_opt] + [add] which
-    has two race windows:
-
-    1. TOCTOU on registration: two fibers call [inc_counter] on a new
-       key, both see [None], both [Hashtbl.add] — duplicate entries in
-       the table.
-    2. Non-atomic float update: [m.value <- m.value +. delta] reads,
-       adds, writes without a memory barrier; two concurrent increments
-       can both observe the same old value.
-
-    We serialise every read and write path through [Stdlib.Mutex].
-    Choice of primitive: operations must work during module
-    initialisation ([let () = init ()] at EOF runs before any Eio
-    scheduler exists), must hold across OCaml 5 domains (Executor_pool
-    workers), and are individually cheap (a Hashtbl op + a float add) so
-   the lock is never held long. [Stdlib.Mutex] fits all three. *)
+    Metrics are shared by fibers/domains, so reads and writes are serialized
+    through [Stdlib.Mutex]. It is available during module initialization and
+    protects both registration and float updates. *)
 let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
 let metrics_mutex = Stdlib.Mutex.create ()
 
-(* #10682 diagnostic: when EDEADLK fires (PTHREAD_MUTEX_ERRORCHECK
-   detects same-thread re-entry on OCaml 5), lock raises Sys_error with
-   message "Mutex.lock: Resource deadlock avoided". Without a backtrace,
-   the actual re-entrant call site is invisible because [with_lock] is
-   used by ~12 sites in this module and is reachable from every read
-   tool dispatch. We capture the raw backtrace at the point of failure
-   and stash it on a side-channel for the next render so the offending
-   site self-documents. The non-failing path is unchanged. *)
+(* #10682: capture the caller stack for rare EDEADLK re-entry failures so the
+   next diagnostic render can name the offending metric path. *)
 let last_deadlock_backtrace : string option Atomic.t = Atomic.make None
 
 let with_lock f =
@@ -96,8 +75,7 @@ let with_lock f =
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mutex) f
 ;;
 
-(** Read-only accessor for the most recent EDEADLK backtrace captured
-    by [with_lock]. Used by diagnostic dumps and tests. *)
+(** Read-only EDEADLK diagnostic accessor. *)
 let last_deadlock_backtrace_for_test () = Atomic.get last_deadlock_backtrace
 
 (** {1 Metric Registration} *)
@@ -2743,17 +2721,8 @@ let init () =
       "acquire_flock_retry* wall-clock excluding openfile. Labels: caller, outcome \
        (acquired|timeout)."
     ();
-  (* The keeper turn / cascade / persistence-failure metrics
-     (turn_livelock_blocks .. session_cleanup_failures, plus
-     chat_store_failures and observation_query_failures) are registered
-     earlier in init() — see line ~1171 for turn_livelock_blocks and
-     lines ~1579-1628 for the rest, with detailed help text. Because
-     `add` is no-op when the name already exists, every help string
-     in this duplicate block was silently dropped, while still making
-     the file look like every metric had two declaration sites with
-     conflicting documentation. The original block is removed so
-     edits to help/labels land on the canonical site instead of a
-     dead one. *)
+  (* Duplicate keeper turn / cascade / persistence-failure registrations were
+     removed; the authoritative help text lives at the earlier init() sites. *)
   add
     Keeper_metrics.metric_keeper_stale_termination_total
     "Total stale watchdog terminations (all classes). Labels: keeper."
@@ -2817,20 +2786,13 @@ let init () =
     metric_pricing_catalog_miss
     "Pricing catalog lookups that missed. Labels: model."
     Counter;
-  (* metric_cost_emit_zero_source registered in keeper_hooks_oas.ml with the
-     authoritative help text and `source` label description. Re-registering
-     here would be silently ignored (add is no-op when name exists) and risks
-     diverging help text across edits. *)
+  (* metric_cost_emit_zero_source is registered in keeper_hooks_oas.ml. *)
   add
     metric_cost_ledger_status
     "Cost ledger status transitions per provider/status/reason combination. Labels: \
      provider, status, reason."
     Counter;
-  (* metric_keeper_turn_gate_rejected_terminal registered in keeper_guards.ml
-     with help text and labels keeper, tool, reason, decision.
-     Keeper_metrics.metric_keeper_receipt_unmapped_disposition registered in
-     keeper_execution_receipt.ml without labels (intentional). Avoid
-     re-registering here so the authoritative help/labels stay single-sourced. *)
+  (* Related keeper guard/receipt metrics are registered in their owning modules. *)
   add
     Keeper_metrics.metric_keeper_bash_network_upgrade
     "Bash shell network upgrade events. Labels: keeper, detected_tool."
@@ -2868,10 +2830,7 @@ let init () =
     "Post-turn wire-in failures (autonomous, tool_emission_drain, multimodal, \
      resilience). Labels: keeper, phase."
     Counter;
-  (* metric_keeper_meta_read_failures registered earlier in init() with
-     "labeled by keeper and site" — `add` is no-op when the name exists,
-     so re-registering with a divergent help/label description here was
-     silently dropped. Single registration kept. *)
+  (* metric_keeper_meta_read_failures is registered earlier in init(). *)
   add
     Keeper_metrics.metric_keeper_recurring_failures
     "Recurring task execution/dispatch failures. Labels: task, phase."
@@ -3011,9 +2970,7 @@ let init () =
        singleton."
     ~labels:[ "keeper_name", "__dashboard__" ]
     ();
-  (* PR-0.2.A: generic cache hit/miss counters.  Labels: cache=eio|dashboard.
-     [eio] tracks Cache_eio.get; [dashboard] tracks Dashboard_cache.get_or_compute.
-     Per-label series are auto-created on first inc_counter call. *)
+  (* Generic cache hit/miss counters. Per-label series are created on first use. *)
   add
     metric_cache_hits_total
     "Cache lookup hits. Labels: cache=eio|dashboard. hit_ratio = hits / (hits + misses) \
@@ -3084,9 +3041,7 @@ let init () =
      of grpc_events_delivered; the difference between scanned-lines and replayed-events \
      isolates wasted scan cost."
     Counter;
-  (* RFC-0022 §9 attempt-liveness gate metrics.
-     These constants are referenced by cascade_attempt_liveness_observer.ml
-     but were not registered in init(), causing silent metric loss. *)
+  (* RFC-0022 §9 attempt-liveness gate metrics. *)
   add
     metric_cascade_attempt_liveness_kill
     "Counts would-be (Observe) and actual (Enforce) liveness kills broken down by \

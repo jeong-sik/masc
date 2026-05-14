@@ -22,19 +22,16 @@ type cli_transport_overrides =
      to honour this field there. *)
   }
 
-(* SSOT for provider subprocess hard caps lives in OAS
-   [Provider_config.max_turns_hard_cap], projected through
-   [Provider_runtime_overlay]. The constant below is a backward-compat
-   re-export for the existing test suite. *)
+(* OAS owns provider subprocess hard caps. This constant is a
+   backward-compat re-export for tests and operator-facing labels only;
+   MASC does not clamp provider-internal max_turns before dispatch. *)
 let claude_code_max_turns_hard_cap =
-  Provider_runtime_overlay.max_turns_hard_cap
+  Llm_provider.Provider_config.max_turns_hard_cap
     Llm_provider.Provider_config.Claude_code
   |> Option.value ~default:30
 ;;
 
-let provider_effective_max_turns kind requested =
-  Provider_runtime_overlay.clamp_max_turns kind requested
-;;
+let provider_effective_max_turns _kind requested = requested
 
 (* #10097: codex_cli can only expose keeper-bound runtime MCP tools when the
    keeper has a raw bearer token that OAS can route through bearer_token_env_var.
@@ -1639,10 +1636,7 @@ let claude_code_transport_ctor
     ; mcp_config = overrides.claude_mcp_config
     ; allowed_tools = Option.value ~default:[] overrides.claude_allowed_tools
     ; permission_mode = overrides.claude_permission_mode
-    ; max_turns =
-        Option.map
-          (provider_effective_max_turns provider_cfg.kind)
-          overrides.claude_max_turns
+    ; max_turns = overrides.claude_max_turns
     }
   in
   with_proc_mgr (fun ~mgr ->

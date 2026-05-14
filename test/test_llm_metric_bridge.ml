@@ -150,6 +150,28 @@ let test_sink_records_oas_callbacks () =
     (Prom.metric_llm_provider_streaming_inter_chunk ^ "_count")
     ~labels:provider_model_labels ~before:before_stream_inter ~delta:1.0
 
+let test_streaming_metrics_ignore_invalid_ms () =
+  let model_id =
+    Printf.sprintf "bridge-streaming-invalid-%d" (Unix.getpid ())
+  in
+  let provider = "bridge-streaming-provider" in
+  let labels = [ ("provider", provider); ("model", model_id) ] in
+  let first_before =
+    metric (Prom.metric_llm_provider_streaming_first_chunk ^ "_count") ~labels
+  in
+  let inter_before =
+    metric (Prom.metric_llm_provider_streaming_inter_chunk ^ "_count") ~labels
+  in
+  Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:0.0;
+  Bridge.emit_streaming_chunk
+    ~provider ~model_id ~chunk_index:1 ~inter_chunk_ms:(0.0 /. 0.0);
+  check_metric_delta "invalid first chunk ignored"
+    (Prom.metric_llm_provider_streaming_first_chunk ^ "_count")
+    ~labels ~before:first_before ~delta:0.0;
+  check_metric_delta "invalid inter chunk ignored"
+    (Prom.metric_llm_provider_streaming_inter_chunk ^ "_count")
+    ~labels ~before:inter_before ~delta:0.0
+
 let test_request_latency_clamps_zero_ms () =
   let model_id =
     Printf.sprintf "bridge-latency-zero-%d" (Unix.getpid ())
@@ -246,6 +268,8 @@ let () =
             test_metric_names_stable;
           Alcotest.test_case "sink records OAS callbacks" `Quick
             test_sink_records_oas_callbacks;
+          Alcotest.test_case "streaming metrics ignore invalid ms" `Quick
+            test_streaming_metrics_ignore_invalid_ms;
           Alcotest.test_case "request latency floors zero ms" `Quick
             test_request_latency_clamps_zero_ms;
           Alcotest.test_case "positive request latency does not clamp" `Quick

@@ -790,19 +790,9 @@ let metric_tool_call = "masc_tool_call_total"
 let metric_tool_call_duration = "masc_tool_call_duration_seconds"
 let metric_llm_provider_http_status = "masc_llm_provider_http_status_total"
 let metric_llm_provider_request_latency = "masc_llm_provider_request_latency_seconds"
-
-let metric_llm_provider_request_latency_clamped =
-  "masc_llm_provider_request_latency_clamped_total"
-;;
-
-let metric_llm_provider_streaming_first_chunk =
-  "masc_llm_provider_streaming_first_chunk_seconds"
-;;
-
-let metric_llm_provider_streaming_inter_chunk =
-  "masc_llm_provider_streaming_inter_chunk_seconds"
-;;
-
+let metric_llm_provider_request_latency_clamped = "masc_llm_provider_request_latency_clamped_total"
+let metric_llm_provider_streaming_first_chunk = "masc_llm_provider_streaming_first_chunk_seconds"
+let metric_llm_provider_streaming_inter_chunk = "masc_llm_provider_streaming_inter_chunk_seconds"
 let metric_llm_provider_capability_drops = "masc_llm_provider_capability_drops_total"
 let metric_llm_provider_cache_hits = "masc_llm_provider_cache_hits_total"
 let metric_llm_provider_cache_misses = "masc_llm_provider_cache_misses_total"
@@ -3049,23 +3039,26 @@ let init () =
   add
     metric_cascade_attempt_liveness_kill
     "Counts would-be (Observe) and actual (Enforce) liveness kills broken down by \
-     failure class. Labels: [kind, mode, provider]."
+     failure class. Labels: [kind, mode, cascade, provider] where provider is a \
+     bounded public provider bucket."
     Counter;
   add
     metric_cascade_attempt_liveness_observed
     "Per-attempt finalizer counter regardless of outcome (success | kill | wire_error). \
-     Useful for the kill-rate ratio."
+     Useful for the kill-rate ratio. Labels: [cascade, provider, outcome] where provider \
+     is a bounded public provider bucket."
     Counter;
   add metric_cascade_strategy_decisions "Cascade strategy decisions by outcome." Counter;
   add metric_cascade_capacity_events "Cascade capacity events by type." Counter;
   add
     metric_cascade_ttfb_seconds
     "Time from cascade attempt start to first non-Done chunk (TTFT). Labels: [cascade, \
-     provider]."
+     provider] where provider is a bounded public provider bucket."
     Histogram;
   add
     metric_cascade_inter_chunk_seconds
-    "Inter-chunk gap during streaming (TBT). Labels: [cascade, provider]."
+    "Inter-chunk gap during streaming (TBT). Labels: [cascade, provider] where provider \
+     is a bounded public provider bucket."
     Histogram;
   add
     metric_cascade_provider_health_score

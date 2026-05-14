@@ -641,6 +641,13 @@ let test_runtime_candidate_uses_internal_health_keys () =
        [ "custom:candidate-health@http://127.0.0.1:15123" ])
 ;;
 
+let test_runtime_candidate_provider_label_is_public_bucket () =
+  let cfg = provider_cfg "codex_cli:gpt-5.4" in
+  let candidate = Candidate.of_provider_config cfg in
+  check string "provider label is bounded bucket" "codex_cli"
+    (Candidate.provider_label candidate)
+;;
+
 let test_runtime_candidate_cooldown_reads_global_health () =
   let cfg =
     provider_cfg "custom:cooldown-health@http://127.0.0.1:15124"
@@ -1083,6 +1090,10 @@ let () =
             "runtime candidate uses internal health keys"
             `Quick
             test_runtime_candidate_uses_internal_health_keys
+        ; test_case
+            "runtime candidate provider label is public bucket"
+            `Quick
+            test_runtime_candidate_provider_label_is_public_bucket
         ; test_case
             "runtime candidate observes global cooldown"
             `Quick

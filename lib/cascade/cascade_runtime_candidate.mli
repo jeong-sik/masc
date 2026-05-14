@@ -46,6 +46,9 @@ val threshold_multipliers_of_runtime_id : string -> float * float
 val health_key : t -> string
 val model_health_key : t -> string
 val health_keys : t -> string list
+val provider_label : t -> string
+(** Public, bounded provider label for telemetry grouping. This does not expose
+    the concrete model id or endpoint-bearing health key. *)
 
 val first_health_cooldown : t -> (string * string) option
 val has_recovery_evidence : t -> bool

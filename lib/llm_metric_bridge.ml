@@ -45,6 +45,7 @@ let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
 let circuit_state_metric = Prometheus.metric_llm_provider_circuit_state
 let streaming_first_chunk_metric =
   Prometheus.metric_llm_provider_streaming_first_chunk
+
 let streaming_inter_chunk_metric =
   Prometheus.metric_llm_provider_streaming_inter_chunk
 
@@ -173,21 +174,28 @@ let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
       ~delta:(Float.of_int output_tokens)
       ()
 
-let seconds_of_ms value_ms =
-  let value_ms = if value_ms <= 0.0 then 0.0 else value_ms in
-  value_ms /. 1000.0
+let seconds_of_ms ms =
+  if Float.is_finite ms && ms > 0.0 then Some (Float.max 0.001 (ms /. 1000.0))
+  else None
 
 let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
   remember_provider ~model_id ~provider;
-  Prometheus.observe_histogram streaming_first_chunk_metric
-    ~labels:[("provider", provider); ("model", model_id)]
-    (seconds_of_ms ttfrc_ms)
+  match seconds_of_ms ttfrc_ms with
+  | Some seconds ->
+    Prometheus.observe_histogram streaming_first_chunk_metric
+      ~labels:[("provider", provider); ("model", model_id)]
+      seconds
+  | None -> ()
 
-let emit_streaming_chunk ~provider ~model_id ~chunk_index:_ ~inter_chunk_ms =
+let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
+  let _ = chunk_index in
   remember_provider ~model_id ~provider;
-  Prometheus.observe_histogram streaming_inter_chunk_metric
-    ~labels:[("provider", provider); ("model", model_id)]
-    (seconds_of_ms inter_chunk_ms)
+  match seconds_of_ms inter_chunk_ms with
+  | Some seconds ->
+    Prometheus.observe_histogram streaming_inter_chunk_metric
+      ~labels:[("provider", provider); ("model", model_id)]
+      seconds
+  | None -> ()
 
 let emit_circuit_state ~provider ~model_id ~provider_key ~state =
   remember_provider ~model_id ~provider;

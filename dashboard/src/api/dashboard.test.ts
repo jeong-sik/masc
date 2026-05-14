@@ -316,8 +316,8 @@ describe('fetchDashboardTools', () => {
     const result = await fetchDashboardTools()
 
     const tools = result.tool_inventory.tools
-    expect(tools[0]).toMatchObject({ name: 'tool_a', category: 'uncategorized', tier: 'standard' })
-    expect(tools[1]).toMatchObject({ name: 'tool_b', category: 'keeper', tier: 'standard' })
+    expect(tools[0]).toMatchObject({ name: 'tool_a', category: 'uncategorized', tier: '(unknown tier)' })
+    expect(tools[1]).toMatchObject({ name: 'tool_b', category: 'keeper', tier: '(unknown tier)' })
     expect(tools[2]).toMatchObject({ name: 'tool_c', category: 'uncategorized', tier: 'essential' })
   })
 

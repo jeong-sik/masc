@@ -31,6 +31,9 @@ export interface IdeContextSurface {
   readonly status: SurfaceStatus
   readonly count: number
   readonly evidence: string
+  readonly routeLink: IdeContextRouteLink | null
+  readonly focusAnchor: IdeContextAnchor | null
+  readonly actionEvidence: string | null
 }
 
 export interface IdeContextAnchor {
@@ -152,6 +155,19 @@ const CONTEXT_ANCHOR_BUCKET_ORDER = [
   'other',
 ] as const
 type ContextAnchorBucket = (typeof CONTEXT_ANCHOR_BUCKET_ORDER)[number]
+const SURFACE_ROUTE_LABELS: Readonly<Record<IdeContextSurfaceId, ReadonlyArray<string>>> = {
+  lsp: ['Code'],
+  line: ['Code'],
+  keeper: ['Keeper'],
+  goal: ['Goal'],
+  task: ['Task'],
+  board: ['Board'],
+  git: ['Git'],
+  pr: ['PR'],
+  comment: ['Comment', 'Board'],
+  log: ['Log'],
+  telemetry: ['Telemetry'],
+}
 
 export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLensModel {
   const filePath = normalizeIdeContextFilePath(input.filePath)
@@ -203,6 +219,17 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     if (line !== undefined) activeLines.add(line)
   }
 
+  const anchorCandidates = buildAnchors(
+    filePath ?? input.filePath,
+    fileAnnotations,
+    fileDiagnostics,
+    activeCursors,
+    fileThreads,
+    changedRows,
+    fileEvents,
+    eventSearchTextByEvent,
+  )
+
   const surfaces = SURFACE_ORDER.map(id => {
     const count = surfaceCount(id, {
       annotations: fileAnnotations,
@@ -215,31 +242,25 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
       eventSearchTextByEvent,
     })
     const status: SurfaceStatus = count > 0 ? 'linked' : 'quiet'
+    const action = count > 0 ? contextSurfaceAction(id, anchorCandidates) : null
     return {
       id,
       label: SURFACE_LABELS[id],
       status,
       count,
       evidence: surfaceEvidence(id, count),
+      routeLink: action?.routeLink ?? null,
+      focusAnchor: action?.focusAnchor ?? null,
+      actionEvidence: action?.evidence ?? null,
     }
   })
-
-  const anchors = buildAnchors(
-    filePath ?? input.filePath,
-    fileAnnotations,
-    fileDiagnostics,
-    activeCursors,
-    fileThreads,
-    changedRows,
-    fileEvents,
-    eventSearchTextByEvent,
-  )
+  const anchors = selectVisibleContextAnchors(anchorCandidates, MAX_CONTEXT_ANCHORS)
 
   return {
     linkedCount: surfaces.filter(surface => surface.status === 'linked').length,
     surfaces,
-    anchors: selectVisibleContextAnchors(anchors, MAX_CONTEXT_ANCHORS),
-    anchorTotalCount: anchors.length,
+    anchors,
+    anchorTotalCount: anchorCandidates.length,
     changedLineCount,
     activeLineCount: activeLines.size,
   }
@@ -302,8 +323,29 @@ function contextAnchorBuckets(anchor: IdeContextAnchor): ReadonlySet<ContextAnch
   }
 
   if (anchor.keeper_id) buckets.add('keeper')
+  if (anchor.line !== undefined) buckets.add('line')
+  if (anchor.id.startsWith('event-')) buckets.add('log')
   if (buckets.size === 0) buckets.add('other')
   return buckets
+}
+
+function contextSurfaceAction(
+  id: IdeContextSurfaceId,
+  anchors: ReadonlyArray<IdeContextAnchor>,
+): { readonly routeLink: IdeContextRouteLink | null; readonly focusAnchor: IdeContextAnchor; readonly evidence: string } | null {
+  const matchingAnchors = anchors.filter(anchor => contextAnchorBuckets(anchor).has(id))
+  for (const anchor of matchingAnchors) {
+    for (const label of SURFACE_ROUTE_LABELS[id]) {
+      const routeLink = anchor.route_links?.find(link => link.label === label)
+      if (routeLink) {
+        return { routeLink, focusAnchor: anchor, evidence: routeLink.evidence }
+      }
+    }
+  }
+  const focusAnchor = matchingAnchors[0]
+  return focusAnchor
+    ? { routeLink: null, focusAnchor, evidence: contextAnchorTitle(focusAnchor) }
+    : null
 }
 
 export function IdeContextLens({
@@ -343,17 +385,7 @@ export function IdeContextLens({
         </div>
       </div>
       <div class="ide-context-surface-grid" role="list" aria-label="Linked surfaces">
-        ${model.surfaces.map(surface => html`
-          <span
-            role="listitem"
-            class="ide-context-surface"
-            data-status=${surface.status}
-            title=${surface.evidence}
-          >
-            <span>${surface.label}</span>
-            <span>${surface.count}</span>
-          </span>
-        `)}
+        ${model.surfaces.map(surface => ContextSurfaceChip(surface, activateAnchor, activateRouteLink))}
       </div>
       <ol class="ide-context-anchor-list" aria-label="Current file anchors">
         ${model.anchors.length === 0
@@ -361,6 +393,48 @@ export function IdeContextLens({
           : model.anchors.map(anchor => ContextAnchorRow(anchor, activateAnchor, activateRouteLink))}
       </ol>
     </section>
+  `
+}
+
+function ContextSurfaceChip(
+  surface: IdeContextSurface,
+  onAnchorActivate: (anchor: IdeContextAnchor) => void,
+  onRouteLinkActivate: (link: IdeContextRouteLink) => void,
+) {
+  const actionable = surface.routeLink !== null || surface.focusAnchor !== null
+  const title = surface.actionEvidence ?? surface.evidence
+  const activate = () => {
+    if (surface.routeLink) {
+      onRouteLinkActivate(surface.routeLink)
+    } else if (surface.focusAnchor) {
+      onAnchorActivate(surface.focusAnchor)
+    }
+  }
+  return html`
+    <span
+      role="listitem"
+      class="ide-context-surface"
+      data-status=${surface.status}
+      data-actionable=${actionable ? 'true' : 'false'}
+      title=${title}
+    >
+      ${actionable
+        ? html`
+          <button
+            type="button"
+            class="ide-context-surface-action"
+            aria-label=${`Open ${title}`}
+            onClick=${activate}
+          >
+            <span>${surface.label}</span>
+            <span>${surface.count}</span>
+          </button>
+        `
+        : html`
+          <span>${surface.label}</span>
+          <span>${surface.count}</span>
+        `}
+    </span>
   `
 }
 

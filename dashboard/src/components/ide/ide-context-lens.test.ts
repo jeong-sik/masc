@@ -111,6 +111,23 @@ describe('IdeContextLens', () => {
     expect(model.changedLineCount).toBe(2)
     expect(model.anchorTotalCount).toBe(4)
     expect(model.anchors.map(anchor => anchor.surface)).toContain('Git')
+    expect(model.surfaces.find(surface => surface.id === 'line')?.routeLink).toMatchObject({
+      label: 'Code',
+      params: { file: 'lib/keeper/keeper_exec_ide.ml', line: '12' },
+    })
+    expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
+      label: 'PR',
+      params: { section: 'repositories', view: 'graph', pr: '15000' },
+    })
+    expect(model.surfaces.find(surface => surface.id === 'telemetry')?.routeLink).toMatchObject({
+      label: 'Telemetry',
+      params: { section: 'fleet-health', view: 'event-log' },
+    })
+    expect(model.surfaces.find(surface => surface.id === 'comment')?.routeLink).toBeNull()
+    expect(model.surfaces.find(surface => surface.id === 'comment')?.focusAnchor).toMatchObject({
+      id: 'annotation-ann-1',
+      surface: 'Comment',
+    })
   })
 
   it('does not claim telemetry links from local-only code evidence', () => {
@@ -130,7 +147,9 @@ describe('IdeContextLens', () => {
   })
 
   it('renders a compact context lens panel', () => {
+    const activated: unknown[] = []
     const container = document.createElement('div')
+    ideContextFocus.value = null
 
     render(
       h(IdeContextLens, {
@@ -139,6 +158,7 @@ describe('IdeContextLens', () => {
         diffRows,
         events,
         overlay,
+        onRouteLinkActivate: link => activated.push(link),
       }),
       container,
     )
@@ -149,6 +169,34 @@ describe('IdeContextLens', () => {
     expect(container.textContent).toContain('keeper_exec_ide.ml')
     expect(container.textContent).toContain('4 anchors')
     expect(container.textContent).toContain('goal goal-ide')
+
+    const surfaceButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-surface-action')]
+    expect(surfaceButtons.map(button => button.textContent)).toEqual([
+      'Line1',
+      'Keeper1',
+      'Goal2',
+      'Task2',
+      'Board1',
+      'Git3',
+      'PR1',
+      'Comment1',
+      'Log1',
+      'Telemetry1',
+    ])
+
+    fireEvent.click(surfaceButtons.find(button => button.textContent === 'PR1')!)
+    expect(activated[0]).toMatchObject({
+      label: 'PR',
+      params: { section: 'repositories', view: 'graph', pr: '15000' },
+    })
+
+    fireEvent.click(surfaceButtons.find(button => button.textContent === 'Comment1')!)
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/keeper/keeper_exec_ide.ml',
+      line: 12,
+      surface: 'Comment',
+      source_id: 'annotation-ann-1',
+    })
   })
 
   it('reports when the compact anchor list is truncated', () => {

@@ -11,7 +11,7 @@ import {
 import { clearPins } from './multi-keeper-pin-store'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
-import { activeIdeFile } from './ide-state'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 const snapshot = {
   keeper: 'scholar',
@@ -64,6 +64,8 @@ afterEach(() => {
     active_file: null,
   }
   activeIdeFile.value = 'package.json'
+  ideContextFocus.value = null
+  window.location.hash = ''
   void inspectorKeeperPin.value
 })
 
@@ -305,6 +307,43 @@ describe('InspectorKeeperBDI', () => {
 
     focusButton!.click()
     expect(activeIdeFile.value).toBe('src/components/ide/inspector-keeper-bdi.ts')
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'src/components/ide/inspector-keeper-bdi.ts',
+      line: 42,
+      surface: 'BDI',
+      keeper_id: 'scholar',
+    })
+
+    render(null, container)
+  })
+
+  it('renders BDI operational route links for code, telemetry, and keeper context', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = 'scholar'
+    setCursorFor('scholar', { file_path: 'src/components/ide/inspector-keeper-bdi.ts', line: 42 })
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
+    expect(links.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
+
+    links.find(link => link.textContent === 'Code')!.click()
+    expect(window.location.hash.startsWith('#code?')).toBe(true)
+    expect(routeHashParams().get('file')).toBe('src/components/ide/inspector-keeper-bdi.ts')
+    expect(routeHashParams().get('line')).toBe('42')
+
+    links.find(link => link.textContent === 'Telemetry')!.click()
+    expect(routeHashParams().get('q')).toBe(
+      'bdi keeper:scholar generated:2026-05-05T13:00:00Z tool:keeper_bash',
+    )
+
+    links.find(link => link.textContent === 'Keeper')!.click()
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
 
     render(null, container)
   })
@@ -332,3 +371,7 @@ describe('InspectorKeeperBDI', () => {
     render(null, container)
   })
 })
+
+function routeHashParams(): URLSearchParams {
+  return new URLSearchParams(window.location.hash.split('?')[1] ?? '')
+}

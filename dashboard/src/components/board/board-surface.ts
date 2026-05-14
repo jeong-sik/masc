@@ -49,8 +49,6 @@ import {
   boardHearthsError,
   subBoardOptions,
   subBoardOptionsLoading,
-  subBoardOptionsError,
-  loadSubBoardOptionsForPost,
   boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,
@@ -254,6 +252,13 @@ function NewPostForm() {
     `
   }
 
+  const subBoardSelectOptions = subBoardOptions.value.map(sb => ({ value: sb.slug, label: sb.name }))
+  const activeHearth = newPostHearth.value.trim()
+  const selectedSubBoardOptions = activeHearth
+    && !subBoardSelectOptions.some(option => option.value === activeHearth)
+    ? [{ value: activeHearth, label: activeHearth }, ...subBoardSelectOptions]
+    : subBoardSelectOptions
+
   return html`
     <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] grid gap-3">
       <${TextInput}
@@ -274,10 +279,10 @@ function NewPostForm() {
       />
       <${Select}
         value=${newPostHearth.value}
-        options=${subBoardOptions.value.map(sb => ({ value: sb.slug, label: sb.name }))}
+        options=${selectedSubBoardOptions}
         placeholder="Sub-board (hearth) 선택"
         disabled=${newPostSubmitting.value || subBoardOptionsLoading.value}
-        ariaLabel="새 글 Sub-board"
+        ariaLabel="새 글 hearth"
         onInput=${(value: string) => { newPostHearth.value = value }}
       />
       <div class="flex gap-2 justify-end">

@@ -61,7 +61,7 @@ function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
             </span>
             <div class="min-w-0 cursor-pointer" onClick=${() => {
               boardHearthFilter.value = board.slug
-              navigate('board')
+              navigate('workspace', { section: 'board' })
             }}>
               <h3 class="truncate text-sm font-semibold text-[var(--color-fg-primary)] hover:underline">${board.name || board.slug}</h3>
               <div class="truncate font-mono text-2xs text-[var(--color-fg-muted)]">/${board.slug}</div>

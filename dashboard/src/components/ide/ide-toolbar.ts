@@ -67,6 +67,7 @@ export interface ToolbarContextRouteGroup {
   readonly label: string
   readonly count: number
   readonly evidence: string
+  readonly routeLink: IdeContextFocusRouteLink
 }
 
 const TOOLBAR_ROUTE_GROUP_ORDER: ReadonlyArray<ToolbarContextRouteGroupId> = [
@@ -311,8 +312,16 @@ function ToolbarContextFocus({
               title=${group.evidence}
               aria-label=${`${group.label}: ${group.count} route ${group.count === 1 ? 'link' : 'links'}`}
             >
-              <span>${group.label}</span>
-              <span>${group.count}</span>
+              <button
+                type="button"
+                class="ide-toolbar-context-route-group-action"
+                title=${group.evidence}
+                aria-label=${`Open ${group.evidence}`}
+                onClick=${() => openToolbarContextRouteLink(group.routeLink)}
+              >
+                <span>${group.label}</span>
+                <span>${group.count}</span>
+              </button>
             </span>
           `)}
         </div>
@@ -369,6 +378,7 @@ export function deriveToolbarContextRouteGroups(
       label: TOOLBAR_ROUTE_GROUP_LABELS[groupId],
       count: groupLinks.length,
       evidence: groupLinks.map(link => link.evidence).join(' / '),
+      routeLink: groupLinks[0]!,
     }]
   })
 }

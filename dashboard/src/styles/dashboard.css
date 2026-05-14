@@ -373,10 +373,9 @@
 .ide-toolbar-context-route-groups > span {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
   min-width: 0;
   height: 18px;
-  padding: 0 5px;
+  padding: 0;
   border: 1px solid color-mix(in srgb, var(--color-accent-fg) 32%, var(--color-border-default));
   border-radius: var(--r-1);
   background: color-mix(in srgb, var(--color-bg-elevated) 88%, var(--color-accent-bg));
@@ -384,14 +383,39 @@
   overflow: hidden;
 }
 
-.ide-toolbar-context-route-groups > span > span {
+.ide-toolbar-context-route-group-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 5px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ide-toolbar-context-route-group-action:hover,
+.ide-toolbar-context-route-group-action:focus-visible {
+  color: var(--color-accent-fg);
+  background: color-mix(in srgb, var(--color-accent-bg) 26%, transparent);
+}
+
+.ide-toolbar-context-route-group-action:focus-visible {
+  outline: 1px solid var(--color-accent-fg);
+  outline-offset: -1px;
+}
+
+.ide-toolbar-context-route-group-action > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ide-toolbar-context-route-groups > span > span:last-child {
+.ide-toolbar-context-route-group-action > span:last-child {
   color: var(--color-fg-muted);
 }
 

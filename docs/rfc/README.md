@@ -114,6 +114,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0072 | Type-encoded keeper sub-FSM transitions (cascade + turn_phase) | Draft | 2026-05-12 | follows PR #14887 + #14893 decision-axis precedent. |
 | 0078 | RFC Number Reservation Ledger + CI Collision Guard | Draft | 2026-05-14 | introduces `docs/rfc/.next-number` ledger + `rfc-number-collision-check` workflow |
 | 0079 | Log row typed encoder + silent-drop removal | Draft | 2026-05-14 | typed `Ring.entry` (level/source closed sums), `Entry_decode_error` raise, drops raw_level/normalized_level/legacy_classified/dropped_entries; supersedes #15170 |
+| 0080 | Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary | Draft | 2026-05-14 | 540-warn/boot split-brain (88 distinct tool names); typed `resolve` at policy load boundary |
 
 ### 다음 번호
 

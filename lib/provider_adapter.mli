@@ -1,7 +1,8 @@
-(** Provider_adapter — provider registry, auth resolution, voice bridge,
-    and cascade label construction.
+(** Provider_adapter — provider registry, auth resolution, and cascade label
+    construction.
 
-    MASC owns local runtime policy, voice routing, and cascade labels.
+    MASC owns local runtime policy and cascade labels. Voice runtime
+    policy lives in [Voice_runtime_overlay].
     OAS owns provider identity and transport defaults through
     [Agent_sdk.Provider_runtime_binding]. Adding a new plain provider
     should normally happen in OAS; MASC only needs an explicit adapter
@@ -118,11 +119,6 @@ type telemetry_policy =
   ; runtime_reporting : reporting_policy
   }
 
-type voice_transport =
-  | Voice_openai_compat
-  | Voice_elevenlabs_direct
-  | Voice_mcp
-
 type adapter =
   { canonical_name : string
   ; runtime_kind : runtime_kind
@@ -130,32 +126,11 @@ type adapter =
   ; aliases : string list
   ; spawn_key : string option
   ; cascade_prefix : string
-  ; default_voice : string option
   ; endpoint_url : string option
   ; default_model_id : string option
   ; model_policy : model_policy
   ; tool_policy : tool_policy
   ; telemetry_policy : telemetry_policy
-  }
-
-type voice_adapter =
-  { canonical_name : string
-  ; transport : voice_transport
-  ; auth_mode : auth_mode
-  ; aliases : string list
-  }
-
-type voice_http_request =
-  { url : string
-  ; headers : (string * string) list
-  ; body_json : Yojson.Safe.t
-  }
-
-type voice_stt_request =
-  { url : string
-  ; headers : (string * string) list
-  ; form_fields : (string * string) list
-  ; file_field : string * string
   }
 
 type gemini_direct_auth =
@@ -197,15 +172,11 @@ val cn_custom : string
 
 val string_of_runtime_kind : runtime_kind -> string
 val string_of_auth_mode : auth_mode -> string
-val string_of_voice_transport : voice_transport -> string
 
 (** {1 Adapter Registry} *)
 
 (** All registered LLM provider/runtime adapters. *)
 val direct_adapters : adapter list
-
-(** All registered voice provider adapters. *)
-val voice_adapters : voice_adapter list
 
 (** {1 Label and Provider Resolution} *)
 
@@ -317,61 +288,6 @@ type timeout_bounds =
     inside the adapter boundary, not the keeper turn-driver. *)
 val timeout_bounds_of_kind :
   Llm_provider.Provider_config.provider_kind -> timeout_bounds
-
-(** {1 Voice Adapter Resolution} *)
-
-val resolve_voice_adapter : string -> voice_adapter option
-val voice_adapter_for_endpoint : Voice_config.endpoint -> voice_adapter
-val voice_adapter_for_endpoint_kind : Voice_config.endpoint_kind -> voice_adapter
-val voice_adapter_labels : voice_adapter -> string list
-val voice_endpoint_matches_provider_label : string -> Voice_config.endpoint -> bool
-
-val select_voice_endpoints
-  :  ?provider:string
-  -> Voice_config.endpoint list
-  -> Voice_config.endpoint list
-
-(** Resolve auth env var name for a voice adapter, with optional endpoint override. *)
-val voice_auth_env_name : ?endpoint_api_key_env:string -> voice_adapter -> string option
-
-val voice_endpoint_auth_env_name : Voice_config.endpoint -> string option
-val voice_transport_supports_http_tts : voice_adapter -> bool
-val voice_endpoint_supports_http_tts : Voice_config.endpoint -> bool
-
-(** All agent voices as [(canonical_name, voice_name)] pairs. *)
-val all_agent_voices : unit -> (string * string) list
-
-(** {1 Voice Session URLs} *)
-
-val default_voice_session_url : path:string -> string
-
-val voice_session_endpoint_result
-  :  Voice_config.t
-  -> (Voice_config.endpoint, string) result
-
-val voice_session_mcp_url_of_endpoint : Voice_config.endpoint -> (string, string) result
-
-val voice_session_health_url_of_endpoint
-  :  Voice_config.endpoint
-  -> (string, string) result
-
-(** {1 Voice HTTP Requests} *)
-
-val voice_http_request_for_tts
-  :  Voice_config.endpoint
-  -> api_key:string
-  -> message:string
-  -> voice:string
-  -> model:string
-  -> tuning:Voice_config.voice_tuning
-  -> (voice_http_request, string) result
-
-val voice_stt_request_for_endpoint
-  :  Voice_config.endpoint
-  -> api_key:string
-  -> audio_file:string
-  -> model:string
-  -> (voice_stt_request, string) result
 
 (** {1 Model Label Resolution} *)
 

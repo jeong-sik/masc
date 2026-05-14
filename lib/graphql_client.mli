@@ -10,6 +10,11 @@ val request : ?timeout_sec:float -> ?fallback:bool -> string -> (string, string)
 
 (** {1 GraphQL Response Parsing} *)
 
+val ensure_json_response : string -> (string, string) result
+(** Validate that the HTTP body is non-empty and looks like JSON.
+    Returns [Error "empty response"] for empty bodies and
+    [Error "endpoint returned HTML instead of JSON"] for HTML responses. *)
+
 val parse_response : string -> (Yojson.Safe.t, string) result
 
 (** {1 Public API} *)

@@ -165,38 +165,6 @@ let observe_histogram name ?(labels = []) value =
         })
 ;;
 
-(* Phase B baseline opt-out — read once at module load.  Lets operators
-   diff a run with the histogram observation enabled vs disabled to
-   quantify the histogram's own overhead before drawing conclusions
-   about the hot path. *)
-let hotpath_hist_disabled =
-  Lazy.from_fun (fun () ->
-    match Sys.getenv_opt "MASC_DISABLE_HOTPATH_HIST" with
-    | Some ("1" | "true" | "yes" | "on" | "TRUE" | "YES" | "ON") -> true
-    | _ -> false)
-;;
-
-(* Convenience wrapper for the OAS dispatch baseline: takes the
-   pre-call [Mtime] timestamp and records the elapsed seconds against
-   [metric].  No-op when [MASC_DISABLE_HOTPATH_HIST] is set.  Catches
-   internal exceptions so a metric-emit failure never bubbles into the
-   hot path it is observing. *)
-let observe_hotpath ~metric ~start =
-  if Lazy.force hotpath_hist_disabled
-  then ()
-  else
-    try
-      let elapsed = Mtime.span start (Mtime_clock.now ()) in
-      let ns = Mtime.Span.to_uint64_ns elapsed in
-      let sec = Int64.to_float ns /. 1.0e9 in
-      observe_histogram metric sec
-    with
-    (* Cancellation must propagate (CLAUDE.md feedback —
-       Eio.Cancel.Cancelled 삼킴 버그 사례 회피). *)
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> ()
-;;
-
 (** {1 Metric Name Constants}
 
     Exported so registration here and [inc_counter] / [set_gauge]
@@ -590,15 +558,6 @@ let metric_oas_context_overflow_ratio = "masc_oas_context_overflow_ratio"
 (* OAS-level context compaction counter — incremented each time
    ContextCompactStarted fires from the event bus. *)
 let metric_oas_context_compaction_total = "masc_oas_context_compaction_total"
-
-(* OAS tool dispatch hot-path latency histograms — Phase B baseline of
-   ~/me/planning/claude-plans/wise-nibbling-lerdorf.md. Wraps the two
-   hot paths called per keeper turn so operators can measure the
-   dispatch share of turn budget before deciding whether memoization is
-   worth the surface-area cost. Observation is gated by
-   [MASC_DISABLE_HOTPATH_HIST=1] for histogram-overhead measurement. *)
-let metric_masc_oas_params_of_schema_sec = "masc_oas_params_of_schema_sec"
-let metric_masc_oas_make_tool_bundle_sec = "masc_oas_make_tool_bundle_sec"
 
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)
@@ -1469,23 +1428,6 @@ let init () =
     ~help:
       "Keeper tool call latency in seconds, labeled by keeper, provider, tool, and \
        outcome"
-    ();
-  (* Phase B baseline (wise-nibbling-lerdorf plan): measure OAS dispatch
-     hot path before deciding whether memoization is justified.  Disable
-     with [MASC_DISABLE_HOTPATH_HIST=1] to quantify the histogram's own
-     overhead. *)
-  register_histogram
-    ~name:metric_masc_oas_params_of_schema_sec
-    ~help:
-      "OAS [params_of_json_schema] elapsed seconds per call.  Fires from \
-       [Tool_bridge.oas_tool_of_masc] per OAS conversion; hot path target of \
-       wise-nibbling-lerdorf Phase B baseline."
-    ();
-  register_histogram
-    ~name:metric_masc_oas_make_tool_bundle_sec
-    ~help:
-      "OAS [make_tool_bundle] elapsed seconds per call.  Fires once per keeper \
-       turn; hot path target of wise-nibbling-lerdorf Phase B baseline."
     ();
   add
     metric_provider_prefix_cache_creation_tokens

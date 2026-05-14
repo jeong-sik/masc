@@ -15,6 +15,7 @@ import {
 } from './multi-keeper-pin-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { activeIdeFile } from './ide-shell'
+import { ideContextFocus } from './ide-state'
 
 function setKeeperCursor(keeperId: string, filePath: string, line: number): void {
   const cursors = new Map(cursorOverlaySignal.value.cursors)
@@ -132,6 +133,8 @@ beforeEach(() => {
   activeKeeperName.value = ''
   clearKeeperCursors()
   activeIdeFile.value = 'package.json'
+  ideContextFocus.value = null
+  window.location.hash = ''
 })
 
 afterEach(() => {
@@ -143,6 +146,8 @@ afterEach(() => {
   activeKeeperName.value = ''
   clearKeeperCursors()
   activeIdeFile.value = 'package.json'
+  ideContextFocus.value = null
+  window.location.hash = ''
 })
 
 describe('InspectorMultiKeeperBDI — single-pin fallback (RFC-0027 §10)', () => {
@@ -665,6 +670,12 @@ describe('InspectorMultiKeeperBDI — file focus label (cursor overlay → IDE j
     fileBtn?.click()
     // activeIdeFile jumped …
     expect(activeIdeFile.value).toBe('lib/keeper/keeper_registry.ml')
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/keeper/keeper_registry.ml',
+      line: 555,
+      surface: 'BDI',
+      keeper_id: 'scholar',
+    })
     // … but pin order untouched (focus-promote did NOT fire because the focus
     // label is now a sibling button, not nested inside the focus chip button).
     expect(pinnedKeepers.value.entries[0]?.keeperName).toBe(headBefore)
@@ -690,4 +701,44 @@ describe('InspectorMultiKeeperBDI — file focus label (cursor overlay → IDE j
     expect(focusBtn.querySelector('button[aria-label^="focus file "]')).toBeNull()
     expect(chip.querySelector('button[aria-label^="focus file "]')).not.toBeNull()
   })
+
+  it('renders BDI route links on keeper panels and focus-mode chips', async () => {
+    vi.stubGlobal('fetch', makeFetchMock())
+    pinKeeper('scholar', 1)
+    pinKeeper('moth', 2)
+    pinKeeper('luna', 3)
+    pinKeeper('ash', 4)
+    setKeeperCursor('ash', 'src/runtime/ash.ts', 9)
+    setKeeperCursor('scholar', 'lib/keeper/keeper_registry.ml', 555)
+
+    const container = createContainer()
+    render(html`<${InspectorMultiKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-layout="focus-mode"]')).not.toBeNull()
+    })
+
+    const ashPanel = container.querySelector('article[data-keeper="ash"]')
+    expect(ashPanel).not.toBeNull()
+    const ashLinks = [...ashPanel!.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
+    expect(ashLinks.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
+
+    ashLinks.find(link => link.textContent === 'Code')!.click()
+    expect(routeHashParams().get('file')).toBe('src/runtime/ash.ts')
+    expect(routeHashParams().get('line')).toBe('9')
+
+    const scholarChip = container.querySelector('span[role="listitem"][data-keeper="scholar"]')
+    expect(scholarChip).not.toBeNull()
+    const scholarLinks = [...scholarChip!.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
+    expect(scholarLinks.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
+
+    scholarLinks.find(link => link.textContent === 'Telemetry')!.click()
+    expect(routeHashParams().get('q')).toContain('bdi keeper:scholar')
+
+    scholarLinks.find(link => link.textContent === 'Keeper')!.click()
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
+  })
 })
+
+function routeHashParams(): URLSearchParams {
+  return new URLSearchParams(window.location.hash.split('?')[1] ?? '')
+}

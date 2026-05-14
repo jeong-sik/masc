@@ -11,7 +11,12 @@ import { cursorOverlaySignal } from './keeper-cursor-overlay'
 // circular dependency `ide-shell -> inspector-keeper-bdi -> ide-shell`
 // (which also drags `router` and other window-touching side effects
 // into this module's tests).
-import { activeIdeFile } from './ide-state'
+import { focusIdeContextAnchor } from './ide-state'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 
 export interface KeeperBdiTokenSpend {
@@ -181,6 +186,66 @@ function BdiRow({ label, value }: { readonly label: string, readonly value: stri
   `
 }
 
+export function bdiRouteLinks({
+  keeperName,
+  snapshot,
+  filePath,
+  line,
+}: {
+  readonly keeperName: string
+  readonly snapshot: KeeperBdiSnapshot | null
+  readonly filePath?: string
+  readonly line?: number
+}): ReadonlyArray<IdeContextRouteLink> {
+  const keeper = keeperName.trim()
+  if (!keeper) return []
+  return routeLinksForContext({
+    filePath,
+    line,
+    surface: 'BDI',
+    label: snapshot?.intention ?? `keeper BDI ${keeper}`,
+    sourceId: `bdi-${keeper}-${snapshot?.generated_at ?? 'live'}`,
+    keeperId: keeper,
+    telemetry: true,
+    telemetryQuery: bdiTelemetryQuery(keeper, snapshot),
+  })
+}
+
+function bdiTelemetryQuery(keeperName: string, snapshot: KeeperBdiSnapshot | null): string {
+  return [
+    'bdi',
+    `keeper:${keeperName}`,
+    snapshot?.generated_at ? `generated:${snapshot.generated_at}` : null,
+    snapshot?.last_tool_call?.tool ? `tool:${snapshot.last_tool_call.tool}` : null,
+  ].filter((value): value is string => value !== null).join(' ')
+}
+
+export function BdiRouteLinks({
+  links,
+  ariaLabel,
+}: {
+  readonly links: ReadonlyArray<IdeContextRouteLink>
+  readonly ariaLabel: string
+}) {
+  if (links.length === 0) return null
+  return html`
+    <div class="ide-bdi-route-links" aria-label=${ariaLabel}>
+      ${links.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          class="ide-bdi-route-link"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >
+          ${link.label}
+        </button>
+      `)}
+    </div>
+  `
+}
+
 export function InspectorKeeperBDI({
   pollMs = 5000,
   traceActive = false,
@@ -265,9 +330,24 @@ export function InspectorKeeperBDI({
   const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
   const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
+  const routeLinks = bdiRouteLinks({
+    keeperName,
+    snapshot,
+    filePath: hasValidFocus ? cursor?.file_path : undefined,
+    line: hasValidFocus ? cursor?.line : undefined,
+  })
 
   const navigateToFocus = (): void => {
-    if (hasValidFocus && cursor) activeIdeFile.value = cursor.file_path
+    if (!hasValidFocus || !cursor) return
+    focusIdeContextAnchor({
+      file_path: cursor.file_path,
+      line: cursor.line,
+      surface: 'BDI',
+      label: snapshot?.intention ?? `keeper BDI ${keeperName}`,
+      source_id: `bdi-${keeperName}-${snapshot?.generated_at ?? 'live'}`,
+      keeper_id: keeperName,
+      route_links: routeLinks,
+    })
   }
 
   return html`
@@ -339,6 +419,7 @@ export function InspectorKeeperBDI({
             }}
           >${focusLabel}</button>
         ` : null}
+        <${BdiRouteLinks} links=${routeLinks} ariaLabel="BDI operational links" />
         ${pin?.line
           ? html`<span style=${{ marginLeft: 'auto', color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${pin.line}</span>`
           : null}

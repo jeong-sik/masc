@@ -1,14 +1,16 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
+  BdiRouteLinks,
   InspectorKeeperBDI,
   KeeperBdiSnapshot,
+  bdiRouteLinks,
   normalizeKeeperBdiSnapshot,
 } from './inspector-keeper-bdi'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import { useSignalValue } from './use-signal-value'
-import { activeIdeFile } from './ide-state'
+import { focusIdeContextAnchor } from './ide-state'
 import {
   pinKeeper,
   pinnedKeepers,
@@ -259,8 +261,23 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, presence, overlay
   const focusLabel = cursor && cursor.file_path && cursor.line >= 1
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
+  const routeLinks = bdiRouteLinks({
+    keeperName: entry.keeperName,
+    snapshot,
+    filePath: cursor && cursor.file_path && cursor.line >= 1 ? cursor.file_path : undefined,
+    line: cursor && cursor.file_path && cursor.line >= 1 ? cursor.line : undefined,
+  })
   const navigateToFocus = (): void => {
-    if (cursor?.file_path) activeIdeFile.value = cursor.file_path
+    if (!cursor?.file_path || cursor.line < 1) return
+    focusIdeContextAnchor({
+      file_path: cursor.file_path,
+      line: cursor.line,
+      surface: 'BDI',
+      label: snapshot?.intention ?? `keeper BDI ${entry.keeperName}`,
+      source_id: `bdi-${entry.keeperName}-${snapshot?.generated_at ?? 'live'}`,
+      keeper_id: entry.keeperName,
+      route_links: routeLinks,
+    })
   }
 
   return html`
@@ -328,6 +345,10 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, presence, overlay
             }}
           >${focusLabel}</button>
         ` : null}
+        <${BdiRouteLinks}
+          links=${routeLinks}
+          ariaLabel=${`${entry.keeperName} BDI operational links`}
+        />
         <button
           type="button"
           aria-label=${`unpin ${entry.keeperName}`}
@@ -387,8 +408,23 @@ function KeeperChip({ entry, slot, dropIdx, presence, overlay, onFocus, onUnpin 
   const focusLabel = cursor && cursor.file_path && cursor.line >= 1
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
+  const routeLinks = bdiRouteLinks({
+    keeperName: entry.keeperName,
+    snapshot: slot.snapshot,
+    filePath: cursor && cursor.file_path && cursor.line >= 1 ? cursor.file_path : undefined,
+    line: cursor && cursor.file_path && cursor.line >= 1 ? cursor.line : undefined,
+  })
   const navigateToFocus = (): void => {
-    if (cursor?.file_path) activeIdeFile.value = cursor.file_path
+    if (!cursor?.file_path || cursor.line < 1) return
+    focusIdeContextAnchor({
+      file_path: cursor.file_path,
+      line: cursor.line,
+      surface: 'BDI',
+      label: slot.snapshot?.intention ?? `keeper BDI ${entry.keeperName}`,
+      source_id: `bdi-${entry.keeperName}-${slot.snapshot?.generated_at ?? 'live'}`,
+      keeper_id: entry.keeperName,
+      route_links: routeLinks,
+    })
   }
   return html`
     <span
@@ -442,6 +478,10 @@ function KeeperChip({ entry, slot, dropIdx, presence, overlay, onFocus, onUnpin 
           }}
         >${focusLabel}</button>
       ` : null}
+      <${BdiRouteLinks}
+        links=${routeLinks}
+        ariaLabel=${`${entry.keeperName} BDI operational links`}
+      />
       <button
         type="button"
         aria-label=${`unpin ${entry.keeperName}`}

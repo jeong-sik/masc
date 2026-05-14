@@ -1016,8 +1016,17 @@ let prepare_agent_setup
         essential @ List.filteri (fun i _ -> i < budget) non_essential)
       else all_allowed
     in
+    let allowed_canonical_tool_names =
+      all_allowed
+      |> List.map Keeper_tool_disclosure.canonical_tool_name
+      |> Keeper_types.dedupe_keep_order
+    in
     let missing_required_tool_names =
-      List.filter (fun name -> not (List.mem name all_allowed)) required_tool_names
+      List.filter
+        (fun name ->
+           let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+           not (List.mem canonical allowed_canonical_tool_names))
+        required_tool_names
     in
     let visible_tool_count = List.length all_allowed in
     let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
@@ -1247,6 +1256,11 @@ let prepare_agent_setup
                  unknown_tool_guard))
     in
     let meta_ref = ref acc.meta in
+    let public_alias_pre_tool_use_guard ~tool_name ~input:_ =
+      Keeper_tool_disclosure.public_alias_guidance_for_internal_call
+        ~visible_tool_names:acc.requested_tool_names
+        tool_name
+    in
     let base_hooks =
       Keeper_hooks_oas.make_hooks
         ~config
@@ -1279,6 +1293,7 @@ let prepare_agent_setup
         ~discover_work_nudge
         ~passive_loop_nudge:(fun () ->
           Keeper_passive_loop_detector.nudge_message ~keeper_name:acc.meta.name)
+        ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()
     in
     let before_turn_hook : Agent_sdk.Hooks.hooks =

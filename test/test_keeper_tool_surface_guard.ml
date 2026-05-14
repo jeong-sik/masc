@@ -42,6 +42,54 @@ let test_final_keeper_tool_names_accepts_public_alias_surface () =
        ~allowed_tool_names:[ "Bash" ])
 ;;
 
+let test_public_alias_guidance_blocks_internal_bash () =
+  check
+    (option string)
+    "internal bash guidance"
+    (Some
+       "keeper_bash is an internal keeper implementation tool name, not a \
+        model-facing tool. Use Bash instead.")
+    (KTD.public_alias_guidance_for_internal_call
+       ~visible_tool_names:[ "Bash"; "Read" ]
+       "keeper_bash")
+;;
+
+let test_public_alias_guidance_ignores_public_bash () =
+  check
+    (option string)
+    "public bash is already model-facing"
+    None
+    (KTD.public_alias_guidance_for_internal_call
+       ~visible_tool_names:[ "Bash" ]
+       "Bash")
+;;
+
+let test_public_alias_guidance_prefers_visible_write_alias () =
+  check
+    (option string)
+    "visible write alias"
+    (Some
+       "keeper_fs_edit is an internal keeper implementation tool name, not a \
+        model-facing tool. Use Write instead.")
+    (KTD.public_alias_guidance_for_internal_call
+       ~visible_tool_names:[ "Write" ]
+       "keeper_fs_edit")
+;;
+
+let test_public_alias_guidance_reports_alias_not_visible () =
+  check
+    (option string)
+    "alias not visible"
+    (Some
+       "keeper_bash is an internal keeper implementation tool name, not a \
+        model-facing tool. No public alias for it is visible in this turn; do \
+        not invent internal tool names. Wait for a visible tool or report the \
+        blocker. Public alias: Bash.")
+    (KTD.public_alias_guidance_for_internal_call
+       ~visible_tool_names:[ "keeper_tasks_list" ]
+       "keeper_bash")
+;;
+
 (* #8471 partial tolerance: mixed turn (valid + unexpected) must not
    hard-fail — the valid tool call is real work and should survive. *)
 let test_has_valid_tool_call_true_when_mixed () =
@@ -180,6 +228,22 @@ let () =
             "final names accept public alias surface"
             `Quick
             test_final_keeper_tool_names_accepts_public_alias_surface
+        ; test_case
+            "internal bash receives public alias guidance"
+            `Quick
+            test_public_alias_guidance_blocks_internal_bash
+        ; test_case
+            "public bash does not receive alias guidance"
+            `Quick
+            test_public_alias_guidance_ignores_public_bash
+        ; test_case
+            "internal edit prefers visible Write alias"
+            `Quick
+            test_public_alias_guidance_prefers_visible_write_alias
+        ; test_case
+            "internal alias reports when public alias is not visible"
+            `Quick
+            test_public_alias_guidance_reports_alias_not_visible
         ] )
     ; ( "partial_tolerance"
       , [ test_case

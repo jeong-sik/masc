@@ -50,4 +50,45 @@ describe('coverageGapDisplay', () => {
       ],
     })
   })
+
+  it('selects the newest gap (last element) when multiple gaps are present', () => {
+    // Backends emit coverage_gaps in oldest→newest order; the UI must show the
+    // most recent incident, not the first one in the list.
+    const display = coverageGapDisplay({
+      source: 'tool_call_io',
+      coverage_gap_count: 2,
+      coverage_gaps: [
+        {
+          source: 'tool_call_io',
+          producer: 'OLD-producer',
+          durable_store: 'OLD-store',
+          dashboard_surface: 'OLD-surface',
+          stale_reason: 'OLD_reason',
+          trace_id: 'OLD-trace',
+          error: 'OLD-error',
+        },
+        {
+          source: 'tool_call_io',
+          producer: 'NEW-producer',
+          durable_store: 'NEW-store',
+          dashboard_surface: 'NEW-surface',
+          stale_reason: 'NEW_reason',
+          trace_id: 'NEW-trace',
+          error: 'NEW-error',
+        },
+      ],
+    })
+
+    expect(display).toEqual({
+      count: 2,
+      summary: 'coverage gaps 2: NEW_reason',
+      details: [
+        'producer NEW-producer',
+        'store NEW-store',
+        'surface NEW-surface',
+        'trace NEW-trace',
+        'error NEW-error',
+      ],
+    })
+  })
 })

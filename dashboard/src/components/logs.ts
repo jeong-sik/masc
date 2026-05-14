@@ -10,6 +10,7 @@ import { Checkbox } from './common/checkbox'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
+import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from './ide/ide-context-lens'
 
 interface LogData {
   entries: LogEntry[]
@@ -60,6 +61,11 @@ type FailureEnvelope = {
   recoverability: string
   operator_action: string | null
   evidence_ref: Record<string, unknown> | null
+}
+
+interface LogCodeLocation {
+  readonly filePath: string
+  readonly line?: number
 }
 
 function normalizedLevel(entry: LogEntry): string {
@@ -140,6 +146,28 @@ function nestedString(value: unknown): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+function positiveLine(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
+}
+
+function codeLocationFromRecord(record: Record<string, unknown> | null): LogCodeLocation | null {
+  if (!record) return null
+  const filePath =
+    nestedString(record.file_path)
+    ?? nestedString(record.path)
+    ?? nestedString(record.file)
+  if (filePath) {
+    return {
+      filePath,
+      line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
+    }
+  }
+  return null
+}
+
 function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   const details = entryDetails(entry)
   const envelope = nestedRecord(details?.failure_envelope)
@@ -167,6 +195,24 @@ function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
     operator_action: nestedString(envelope.operator_action),
     evidence_ref: nestedRecord(envelope.evidence_ref),
   }
+}
+
+export function logCodeRouteLink(entry: LogEntry): IdeContextRouteLink | null {
+  const details = entryDetails(entry)
+  const failure = failureEnvelope(entry)
+  const location =
+    codeLocationFromRecord(details)
+    ?? codeLocationFromRecord(nestedRecord(details?.evidence_ref))
+    ?? codeLocationFromRecord(failure?.evidence_ref ?? null)
+  if (!location) return null
+  return routeLinksForContext({
+    filePath: location.filePath,
+    line: location.line,
+    surface: 'Log',
+    label: entry.module || entry.message,
+    sourceId: `log:${entry.seq}`,
+    logId: String(entry.seq),
+  }).find(link => link.label === 'Code') ?? null
 }
 
 function renderLogMessage(entry: LogEntry): string {
@@ -242,6 +288,7 @@ function renderLogRow(entry: LogEntry) {
   const failure = failureEnvelope(entry)
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
+  const codeRouteLink = logCodeRouteLink(entry)
   let backgroundClass = 'bg-[var(--color-bg-surface)]'
   if (level === 'ERROR') {
     backgroundClass = 'bg-[var(--bad-6)]'
@@ -297,6 +344,18 @@ function renderLogRow(entry: LogEntry) {
           : null}
         ${failure?.operator_action
           ? html`<${StatusChip} tone="info" uppercase=${false}>next ${failure.operator_action}</${StatusChip}>`
+          : null}
+        ${codeRouteLink
+          ? html`
+            <button
+              type="button"
+              data-testid="logs-code-link"
+              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)]"
+              title=${codeRouteLink.evidence}
+              aria-label=${`Open ${codeRouteLink.evidence}`}
+              onClick=${() => openIdeContextRouteLink(codeRouteLink)}
+            >Code</button>
+          `
           : null}
       </div>
       <div

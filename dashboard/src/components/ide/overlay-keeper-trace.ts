@@ -5,6 +5,12 @@ import {
   KeeperTraceSource,
   keeperTraceState,
 } from './keeper-trace-store'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 
 /**
  * RFC-0028 PR-β: keeper-trace gutter chip overlay.
@@ -32,14 +38,15 @@ import {
  */
 
 export const TRACE_CHIP_CAP = 3
+const TRACE_ROUTE_LINK_CAP = 10
 
 /** Source → chip background color (semantic, not literal). */
 const SOURCE_COLORS: Record<KeeperTraceSource, string> = {
-  'anchored-thread': 'var(--color-status-info, #4a90e2)',
-  'cascade-hop': 'var(--color-accent-fg, #8b5cf6)',
-  'bdi-snapshot': 'var(--color-status-ok, #2dba4e)',
-  'decision-log': 'var(--color-status-warn, #d97706)',
-  'activity-event': 'var(--color-status-info, #4a90e2)',
+  'anchored-thread': 'var(--color-status-info)',
+  'cascade-hop': 'var(--color-accent-fg)',
+  'bdi-snapshot': 'var(--color-status-ok)',
+  'decision-log': 'var(--color-status-warn)',
+  'activity-event': 'var(--color-status-info)',
 }
 
 /** Source → label glyph for tooltip + ARIA. */
@@ -152,6 +159,31 @@ const OVERFLOW_STYLE = {
   fontSize: 'var(--fs-11)',
 } as const
 
+const ROUTE_LINKS_STYLE = {
+  display: 'inline-flex',
+  minWidth: 0,
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: '3px',
+} as const
+
+const ROUTE_LINK_BUTTON_STYLE = {
+  minWidth: 0,
+  maxWidth: '58px',
+  height: '17px',
+  padding: '0 5px',
+  overflow: 'hidden',
+  border: '1px solid var(--color-border-default)',
+  borderRadius: 'var(--r-1)',
+  background: 'var(--color-bg-page)',
+  color: 'var(--color-fg-muted)',
+  cursor: 'pointer',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--fs-9)',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+} as const
+
 function formatTooltip(event: KeeperTraceEvent): string {
   const sourceLabel = SOURCE_LABELS[event.source]
   const line = lineOf(event)
@@ -195,6 +227,7 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
   const visible = bucket.events.slice(0, TRACE_CHIP_CAP)
   const overflow = bucket.events.length - visible.length
   const lineLabel = bucket.line !== null ? `L${bucket.line}` : '—'
+  const routeLinks = traceRouteLinks(bucket.events)
 
   return html`
     <div
@@ -223,6 +256,104 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
       ${overflow > 0
         ? html`<span aria-label=${`${overflow} more`} data-overflow=${overflow} style=${OVERFLOW_STYLE}>+${overflow}</span>`
         : null}
+      ${routeLinks.length > 0 ? html`
+        <div class="ide-trace-route-links" aria-label=${`${bucket.keeperName} trace route links`} style=${ROUTE_LINKS_STYLE}>
+          ${routeLinks.map(link => html`
+            <button
+              key=${link.id}
+              type="button"
+              class="ide-trace-route-link"
+              title=${link.evidence}
+              aria-label=${`Open ${link.evidence}`}
+              onClick=${() => openIdeContextRouteLink(link)}
+              style=${ROUTE_LINK_BUTTON_STYLE}
+            >
+              ${link.label}
+            </button>
+          `)}
+        </div>
+      ` : null}
     </div>
   `
+}
+
+function traceRouteLinks(events: ReadonlyArray<KeeperTraceEvent>): ReadonlyArray<IdeContextRouteLink> {
+  const links: IdeContextRouteLink[] = []
+  const seen = new Set<string>()
+  for (const event of events) {
+    for (const link of routeLinksForContext(traceRouteContext(event))) {
+      if (seen.has(link.id)) continue
+      seen.add(link.id)
+      links.push(link)
+      if (links.length >= TRACE_ROUTE_LINK_CAP) return links
+    }
+  }
+  return links
+}
+
+function traceRouteContext(event: KeeperTraceEvent): IdeContextRouteContext {
+  if (event.source === 'activity-event') {
+    return {
+      filePath: event.filePath,
+      line: event.line,
+      surface: event.surface,
+      label: `${event.surface} activity ${event.eventId}`,
+      sourceId: `trace:${event.id}`,
+      goalId: event.goalId,
+      taskId: event.taskId,
+      boardPostId: event.boardPostId,
+      commentId: event.commentId,
+      prId: event.prId,
+      gitRef: event.gitRef,
+      logId: event.logId,
+      sessionId: event.sessionId,
+      operationId: event.operationId,
+      workerRunId: event.workerRunId,
+      telemetryQuery: event.logId ?? event.eventId,
+      keeperId: event.keeperName,
+      telemetry: true,
+    }
+  }
+
+  if (event.source === 'anchored-thread') {
+    return {
+      filePath: event.filePath ?? undefined,
+      line: event.line ?? undefined,
+      surface: 'Thread',
+      label: `thread ${event.threadId}`,
+      sourceId: `trace:${event.id}`,
+      boardPostId: event.threadId,
+      keeperId: event.keeperName,
+    }
+  }
+
+  if (event.source === 'bdi-snapshot') {
+    return {
+      surface: 'BDI',
+      label: event.intention ?? 'BDI snapshot',
+      sourceId: `trace:${event.id}`,
+      keeperId: event.keeperName,
+      telemetryQuery: event.id,
+      telemetry: true,
+    }
+  }
+
+  if (event.source === 'decision-log') {
+    return {
+      surface: 'Decision',
+      label: event.semanticOutcome ?? 'decision',
+      sourceId: `trace:${event.id}`,
+      keeperId: event.keeperName,
+      telemetryQuery: event.decisionId,
+      telemetry: true,
+    }
+  }
+
+  return {
+    surface: 'Cascade',
+    label: event.provider,
+    sourceId: `trace:${event.id}`,
+    telemetryQuery: event.hopId,
+    telemetry: true,
+  }
 }

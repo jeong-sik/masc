@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
+import { fireEvent } from '@testing-library/preact'
 import {
   OverlayKeeperTrace,
   TRACE_CHIP_CAP,
@@ -66,6 +67,7 @@ function pushActivity(
   line: number,
   tsMs: number,
   filePath = 'runtime.ts',
+  refs: Partial<Extract<KeeperTraceEventForTest, { source: 'activity-event' }>> = {},
 ): void {
   pushTrace({
     id,
@@ -76,14 +78,18 @@ function pushActivity(
     filePath,
     line,
     surface: 'Goal',
+    ...refs,
   })
 }
+
+type KeeperTraceEventForTest = Parameters<typeof pushTrace>[0]
 
 beforeEach(() => {
   clearTraces()
 })
 
 afterEach(() => {
+  window.location.hash = ''
   for (const container of mountedContainers.splice(0)) {
     render(null, container)
   }
@@ -260,6 +266,51 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     expect(chip?.getAttribute('aria-label')).toContain('thread')
     expect(chip?.getAttribute('aria-label')).toContain('L42')
     expect(chip?.getAttribute('aria-label')).toContain('×2')
+  })
+
+  it('renders operational route links for enriched activity traces', () => {
+    pushActivity('a', 'scholar', 12, 1000, 'runtime.ts', {
+      eventId: 'evt-a',
+      goalId: 'goal-runtime',
+      taskId: 'task-runtime',
+      prId: '15035',
+      gitRef: 'main',
+      logId: 'turn-12',
+      sessionId: 'sess-runtime',
+      operationId: 'op-runtime',
+      workerRunId: 'wr-runtime',
+    })
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+
+    const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-trace-route-link')]
+    expect(links.map(link => link.textContent)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+
+    fireEvent.click(links[0]!)
+    expect(window.location.hash).toBe(
+      '#code?section=ide-shell&view=source&file=runtime.ts&line=12&surface=Goal&label=Goal+activity+evt-a&source_id=trace%3Aa&keeper=scholar',
+    )
+
+    fireEvent.click(links[5]!)
+    expect(window.location.hash).toBe('#monitoring?section=runtime&view=audit&log_id=turn-12')
+
+    fireEvent.click(links[6]!)
+    expect(window.location.hash).toBe(
+      '#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-12',
+    )
+
+    fireEvent.click(links[7]!)
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
   })
 })
 

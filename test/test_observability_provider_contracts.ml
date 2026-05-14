@@ -28,12 +28,13 @@ let resolution_provenance =
 
 let test_alias_roundtrip () =
   let cases =
-    [ ("anthropic", "claude-api"); ("Claude", "claude");
-      ("google", "gemini-api"); ("Gemini", "gemini");
-      ("openai", "codex-api"); ("OpenAI", "codex-api");
+    [ ("Claude", "claude");
+      ("Gemini", "gemini");
       ("llama", "llama"); ("llamacpp", "llama");
-      ("glm", "glm-api"); ("zai", "glm-api");
-      ("glm-coding", "glm-coding-plan");
+      ("glm", "glm");
+      ("glm-coding", "glm-coding");
+      ("claude-code", "claude_code");
+      ("codex-cli", "codex_cli");
       ("openrouter", "openrouter") ]
   in
   List.iter (fun (input, expected) ->
@@ -46,15 +47,15 @@ let test_alias_roundtrip () =
     cases
 
 let test_case_insensitive () =
-  let a1 = Adapter.resolve_direct_adapter "Claude-API" in
-  let a2 = Adapter.resolve_direct_adapter "CLAUDE-API" in
+  let a1 = Adapter.resolve_direct_adapter "Claude" in
+  let a2 = Adapter.resolve_direct_adapter "CLAUDE" in
   check bool "mixed case resolves" true (Option.is_some a1);
   check bool "upper case resolves" true (Option.is_some a2)
 
 let test_whitespace_trimmed () =
-  let a = Adapter.resolve_direct_adapter "  anthropic  " in
+  let a = Adapter.resolve_direct_adapter "  claude  " in
   check bool "whitespace trimmed" true (Option.is_some a);
-  check string "canonical" "claude-api"
+  check string "canonical" "claude"
     (Option.get a).Adapter.canonical_name
 
 let test_unknown_returns_none () =
@@ -80,7 +81,7 @@ let test_runtime_kind_strings () =
 (* ── Section 2: OAS model resolve contracts ── *)
 
 let test_resolve_canonical_wraps_adapter () =
-  let labels = [ "claude"; "anthropic"; "gemini"; "google"; "openai"; "llama" ] in
+  let labels = [ "claude"; "gemini"; "llama"; "claude_code"; "codex_cli" ] in
   List.iter (fun label ->
     let via_fn = Adapter.resolve_direct_canonical_name label in
     let via_adapter =
@@ -205,9 +206,9 @@ let test_cascade_model_resolve_hardcoded_default_provenance () =
     Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openai"
       (Model_resolve.model_selector_of_string "auto")
   in
-  check string "openai hardcoded default" "gpt-4.1" resolved.resolved_model_id;
-  check resolution_provenance "hardcoded provenance"
-    Model_resolve.Hardcoded_default resolved.provenance
+  check string "openai generic default" "auto" resolved.resolved_model_id;
+  check resolution_provenance "unregistered provider provenance"
+    Model_resolve.Unresolved_auto resolved.provenance
 
 let test_cascade_model_resolve_env_default_provenance () =
   let getenv = function
@@ -242,8 +243,8 @@ let test_cascade_model_resolve_unresolved_auto_provenance () =
   in
   check string "openrouter unresolved auto stays auto" "auto"
     resolved.resolved_model_id;
-  check resolution_provenance "unresolved provenance"
-    Model_resolve.Unresolved_auto resolved.provenance
+  check resolution_provenance "generic OAS binding provenance"
+    Model_resolve.Hardcoded_default resolved.provenance
 
 (* ── Section 3: Dashboard schema contracts ── *)
 

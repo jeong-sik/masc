@@ -75,6 +75,80 @@ let dedupe_keep_order values =
   |> List.filter_map trim_nonempty
   |> Json_util.dedupe_keep_order
 
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+
+let normalize_label value = String.trim value |> String.lowercase_ascii
+
+let binding_labels (binding : Runtime_binding.t) =
+  let id = binding.Runtime_binding.id in
+  let dashed_id = String.map (function '_' -> '-' | c -> c) id in
+  let local_aliases =
+    if String.equal id Provider_adapter.cn_llama then [ "llama.cpp"; "llamacpp" ]
+    else []
+  in
+  id :: dashed_id :: binding.Runtime_binding.aliases @ local_aliases
+  |> List.filter_map trim_nonempty
+  |> List.map normalize_label
+  |> Json_util.dedupe_keep_order
+
+let binding_endpoint_url (binding : Runtime_binding.t) =
+  trim_nonempty binding.Runtime_binding.base_url
+
+let binding_default_model_id (binding : Runtime_binding.t) =
+  Option.bind binding.Runtime_binding.default_model trim_nonempty
+
+let binding_supported_models (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.capabilities.supported_models with
+  | Some models -> dedupe_keep_order models
+  | None -> []
+
+let binding_auth_kind (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> "none"
+  | Runtime_binding.Api_key_env env -> "api_key:" ^ env
+  | Runtime_binding.Cli_cached_login -> "cli_cached_login"
+  | Runtime_binding.Oauth_cached_login -> "oauth_cached_login"
+  | Runtime_binding.Setup_token_env env -> "setup_token:" ^ env
+  | Runtime_binding.File path -> "file:" ^ path
+  | Runtime_binding.Exec command -> "exec:" ^ command
+
+let binding_base_url_is_loopback binding =
+  match binding_endpoint_url binding with
+  | None -> false
+  | Some base_url ->
+      Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+
+let binding_auth_is_no_auth (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Api_key_env _
+  | Runtime_binding.Cli_cached_login
+  | Runtime_binding.Oauth_cached_login
+  | Runtime_binding.Setup_token_env _
+  | Runtime_binding.File _
+  | Runtime_binding.Exec _ -> false
+
+let binding_runtime_kind (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.transport with
+  | Runtime_binding.Cli -> `Cli_agent
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+      if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding then
+        `Local
+      else `Direct_api
+
+let find_runtime_binding_by_candidates candidates =
+  let rec loop = function
+    | [] -> None
+    | candidate :: rest -> (
+        match trim_nonempty candidate with
+        | None -> loop rest
+        | Some label -> (
+            match Runtime_binding.find label with
+            | Some _ as binding -> binding
+            | None -> loop rest))
+  in
+  loop candidates
+
 let string_of_run_status = function
   | Queued -> "queued"
   | Running -> "running"
@@ -161,36 +235,36 @@ type provider_auth_detail = {
 }
 
 let auth_detail_of_binding binding =
-  let available = Provider_runtime_overlay.available binding in
+  let available = binding.Runtime_binding.available in
   let note =
-    match Provider_runtime_overlay.runtime_kind binding with
+    match binding_runtime_kind binding with
     | `Cli_agent ->
         Some "Cached CLI login is assumed; final validation happens at execution time."
     | `Local | `Direct_api -> None
   in
   {
-    auth_kind = Provider_runtime_overlay.auth_kind binding;
+    auth_kind = binding_auth_kind binding;
     status = (if available then "configured" else "missing_auth");
     available;
     supports_run = available;
-    endpoint_url = Provider_runtime_overlay.endpoint_url binding;
+    endpoint_url = binding_endpoint_url binding;
     note;
   }
 
 let models_for_binding binding =
-  let default_model = Provider_runtime_overlay.default_model_id binding in
-  match Provider_runtime_overlay.supported_models binding with
+  let default_model = binding_default_model_id binding in
+  match binding_supported_models binding with
   | [] -> Option.to_list default_model
   | models -> models
 
 let runtime_kind_string binding =
-  match Provider_runtime_overlay.runtime_kind binding with
+  match binding_runtime_kind binding with
   | `Local -> "local"
   | `Cli_agent -> "cli_agent"
   | `Direct_api -> "direct_api"
 
 let dashboard_kind_string binding =
-  match Provider_runtime_overlay.runtime_kind binding with
+  match binding_runtime_kind binding with
   | `Local -> "local"
   | `Cli_agent -> "cli"
   | `Direct_api -> "cloud"
@@ -198,14 +272,14 @@ let dashboard_kind_string binding =
 let llama_snapshot binding =
   let discovered_models, status, available, note =
     let endpoint =
-      Provider_runtime_overlay.endpoint_url binding
+      binding_endpoint_url binding
       |> Option.value ~default:Env_config_runtime.Llama.server_url
     in
     match Tool_local_runtime_core.fetch_models_at endpoint with
     | Ok (_url, models) -> (models, "online", true, None)
     | Error message -> ([], "offline", false, Some message)
   in
-  let default_model = Provider_runtime_overlay.default_model_id binding in
+  let default_model = binding_default_model_id binding in
   let models =
     dedupe_keep_order
       (discovered_models @ Option.to_list default_model)
@@ -234,7 +308,7 @@ let llama_snapshot binding =
   in
   let detail = auth_detail_of_binding binding in
   {
-    provider = Provider_runtime_overlay.id binding;
+    provider = binding.Runtime_binding.id;
     kind = "local";
     runtime_kind = "local";
     auth_kind = detail.auth_kind;
@@ -250,9 +324,9 @@ let llama_snapshot binding =
   }
 
 let provider_snapshot_of_binding binding =
-  let provider = Provider_runtime_overlay.id binding in
+  let provider = binding.Runtime_binding.id in
   let detail = auth_detail_of_binding binding in
-  let default_model = Provider_runtime_overlay.default_model_id binding in
+  let default_model = binding_default_model_id binding in
   let models = models_for_binding binding in
   {
     provider;
@@ -272,9 +346,9 @@ let provider_snapshot_of_binding binding =
   }
 
 let provider_snapshots () : provider_snapshot list =
-  Provider_runtime_overlay.all ()
+  Runtime_binding.all ()
   |> List.map (fun binding ->
-         if String.equal (Provider_runtime_overlay.id binding) "llama" then
+         if String.equal binding.Runtime_binding.id "llama" then
            llama_snapshot binding
          else provider_snapshot_of_binding binding)
 
@@ -363,7 +437,7 @@ let response_text_of_api_response (response : Agent_sdk.Types.api_response) =
   Agent_sdk.Types.text_of_content response.content |> String.trim
 
 let provider_label_for_model provider model =
-  match Provider_runtime_overlay.find_by_candidates [ provider ] with
+  match find_runtime_binding_by_candidates [ provider ] with
   | Some binding ->
       let model = String.trim model in
       if String.equal model "" then
@@ -371,7 +445,7 @@ let provider_label_for_model provider model =
           (Printf.sprintf
              "Missing model for dashboard single-agent provider '%s'"
              provider)
-      else Ok (Printf.sprintf "%s:%s" (Provider_runtime_overlay.id binding) model)
+      else Ok (Printf.sprintf "%s:%s" binding.Runtime_binding.id model)
   | None ->
       Error
         (Printf.sprintf
@@ -423,7 +497,7 @@ let is_label_runnable (label : string) : bool =
       | None -> false
       | Some idx -> (
           let prefix = String.sub label 0 idx |> String.trim in
-          match Provider_runtime_overlay.find_by_candidates [ prefix ] with
+          match find_runtime_binding_by_candidates [ prefix ] with
           | None -> false
           | Some binding ->
               let detail = auth_detail_of_binding binding in

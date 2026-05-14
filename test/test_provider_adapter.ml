@@ -17,30 +17,30 @@ let with_env name value f =
 ;;
 
 let test_resolve_direct_aliases () =
-  let claude = Option.get (Adapter.resolve_direct_adapter "anthropic") in
-  check string "claude alias" "claude-api" claude.canonical_name;
-  let gemini = Option.get (Adapter.resolve_direct_adapter "google") in
-  check string "gemini alias" "gemini-api" gemini.canonical_name;
-  let codex = Option.get (Adapter.resolve_direct_adapter "openai") in
-  check string "codex-api alias" "codex-api" codex.canonical_name;
-  let kimi = Option.get (Adapter.resolve_direct_adapter "kimi-api") in
-  check string "kimi direct canonical" "kimi-api" kimi.canonical_name
+  let claude = Option.get (Adapter.resolve_direct_adapter "claude") in
+  check string "claude direct canonical" "claude" claude.canonical_name;
+  let gemini = Option.get (Adapter.resolve_direct_adapter "gemini") in
+  check string "gemini direct canonical" "gemini" gemini.canonical_name;
+  let kimi = Option.get (Adapter.resolve_direct_adapter "kimi") in
+  check string "kimi direct canonical" "kimi" kimi.canonical_name;
+  let openrouter = Option.get (Adapter.resolve_direct_adapter "openrouter") in
+  check string "openrouter canonical" "openrouter" openrouter.canonical_name
 ;;
 
 let test_resolve_cli_canonical_names () =
-  let claude = Option.get (Adapter.resolve_direct_adapter "claude") in
-  check string "claude canonical" "claude" claude.canonical_name;
+  let claude = Option.get (Adapter.resolve_direct_adapter "claude_code") in
+  check string "claude canonical" "claude_code" claude.canonical_name;
   check
     string
     "claude runtime"
     "cli_agent"
     (Adapter.string_of_runtime_kind claude.runtime_kind);
-  let gemini = Option.get (Adapter.resolve_direct_adapter "gemini") in
-  check string "gemini canonical" "gemini" gemini.canonical_name;
-  let kimi = Option.get (Adapter.resolve_direct_adapter "kimi") in
-  check string "kimi canonical" "kimi" kimi.canonical_name;
-  let codex = Option.get (Adapter.resolve_direct_adapter "codex") in
-  check string "codex canonical" "codex" codex.canonical_name
+  let gemini = Option.get (Adapter.resolve_direct_adapter "gemini_cli") in
+  check string "gemini canonical" "gemini_cli" gemini.canonical_name;
+  let kimi = Option.get (Adapter.resolve_direct_adapter "kimi_cli") in
+  check string "kimi canonical" "kimi_cli" kimi.canonical_name;
+  let codex = Option.get (Adapter.resolve_direct_adapter "codex_cli") in
+  check string "codex canonical" "codex_cli" codex.canonical_name
 ;;
 
 let test_oas_registry_binding_adds_generic_provider () =
@@ -80,7 +80,7 @@ let test_kimi_direct_auth_accepts_primary_and_fallback_envs () =
         bool
         "kimi direct auth available via fallback env"
         true
-        (Adapter.provider_auth_available "kimi-api");
+        (Adapter.provider_auth_available "kimi");
       check
         (list string)
         "kimi direct env keys"
@@ -334,11 +334,11 @@ let test_auto_models_use_declared_policy () =
       "kimi cli declared default"
       (Some [ "kimi-for-coding" ])
       (Adapter.auto_models_for_cascade_prefix "kimi_cli");
-    with_env "MASC_GEMINI_CLI_AUTO_MODELS" None (fun () ->
-      with_env "GEMINI_DEFAULT_MODEL" (Some "gemini-3-flash-preview") (fun () ->
+    with_env "MASC_GEMINI_CLI_AUTO_MODELS" (Some "gemini-3-flash-preview") (fun () ->
+      with_env "GEMINI_DEFAULT_MODEL" None (fun () ->
         check
           (option (list string))
-          "gemini cli prefers explicit default model env"
+          "gemini cli uses generic OAS binding auto-model env"
           (Some [ "gemini-3-flash-preview" ])
           (Adapter.auto_models_for_cascade_prefix "gemini_cli"))))
 ;;
@@ -614,8 +614,8 @@ let test_unmetered_provider_uses_declared_telemetry_policy () =
     (Adapter.is_structurally_unmetered_provider "claude_code");
   check
     bool
-    "ollama usage missing by design"
-    true
+    "ollama usage follows OAS capability truth"
+    false
     (Adapter.is_structurally_unmetered_provider "ollama");
   check
     bool

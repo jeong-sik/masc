@@ -74,7 +74,16 @@ function readCachedWsUrl(): string | null {
     const data = JSON.parse(raw) as { ws_url?: unknown }
     return typeof data.ws_url === 'string' && data.ws_url.length > 0 ? data.ws_url : null
   } catch {
-    storage.removeItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
+    // Eviction must not propagate: in restricted storage contexts the
+    // initial getItem can throw, and a follow-up removeItem can throw too.
+    // If readCachedWsUrl propagates, discovery stops falling back to HTTP
+    // /ws — exactly the wrong behavior in a degraded storage environment.
+    // Degrade to null instead.
+    try {
+      storage.removeItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
+    } catch {
+      // ignore secondary storage failure
+    }
     return null
   }
 }
@@ -603,14 +612,18 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     return
   }
   if (!shouldReconnect || generation !== connectGeneration) return
-  if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
 
   closeSocket()
   let ws: WebSocket
   try {
     ws = new WebSocket(wsUrl)
   } catch (err) {
-    if (discovery.fromCache) clearCachedWsUrl()
+    // Cache only values that constructed successfully: writing before
+    // [new WebSocket(...)] would persist a malformed/incompatible URL
+    // through the next reconnect, adding an extra failure+backoff cycle
+    // before discovery is retried. Also clear any prior cached value so
+    // a stale entry from an earlier session does not survive.
+    clearCachedWsUrl()
     batch(() => {
       dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
     })
@@ -618,6 +631,11 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     return
   }
   socket = ws
+  // Cache the URL only after the WebSocket constructor accepted it.
+  // Persisting before construction would leave a bad value in the cache
+  // for the next reconnect attempt; persisting after means cache only
+  // ever holds URLs that at minimum parsed without throwing.
+  if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
   ws.onopen = () => {
     if (socket !== ws) return
     dashboardWsConnected.value = true

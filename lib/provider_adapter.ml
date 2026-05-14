@@ -310,10 +310,12 @@ let runtime_kind_of_binding (binding : Runtime_binding.t) =
 ;;
 
 let binding_supports_runtime_mcp_http_headers (binding : Runtime_binding.t) =
-  binding.Runtime_binding.capabilities.supports_runtime_mcp_tools
-  || binding.Runtime_binding.capabilities.supports_runtime_tool_events
-  || (runtime_kind_of_binding binding = Cli_agent
-      && binding.Runtime_binding.capabilities.supports_tools)
+  match runtime_kind_of_binding binding with
+  | Cli_agent ->
+    binding.Runtime_binding.capabilities.supports_tools
+  | Local | Direct_api ->
+    binding.Runtime_binding.capabilities.supports_runtime_mcp_tools
+    || binding.Runtime_binding.capabilities.supports_runtime_tool_events
 ;;
 
 let binding_uses_prompt_caching (binding : Runtime_binding.t) =

@@ -335,11 +335,23 @@ let test_runtime_mcp_header_support_uses_declared_policy () =
       ~base_url:""
       ()
   in
+  let gemini_cli_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Gemini_cli
+      ~model_id:"gemini-3-flash-preview"
+      ~base_url:""
+      ()
+  in
   check
     bool
     "kimi cli supports runtime MCP headers"
     true
     (Adapter.supports_runtime_mcp_http_headers_for_config kimi_cli_cfg);
+  check
+    bool
+    "gemini cli does not support request-scoped runtime MCP headers"
+    false
+    (Adapter.supports_runtime_mcp_http_headers_for_config gemini_cli_cfg);
   check
     bool
     "codex cli does not support runtime MCP headers"

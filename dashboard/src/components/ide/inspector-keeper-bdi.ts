@@ -159,6 +159,12 @@ function formatTokens(value: number | null): string {
   return value === null ? '—' : value.toLocaleString()
 }
 
+function formatDurationMs(value: number | null): string {
+  if (value === null || !Number.isFinite(value) || value < 0) return '—'
+  if (value < 1000) return `${Math.round(value).toLocaleString()}ms`
+  return `${(value / 1000).toFixed(1)}s`
+}
+
 function formatAge(value: string | null): string {
   if (!value) return '—'
   return value.slice(11, 19)
@@ -374,6 +380,9 @@ export function InspectorKeeperBDI({
         </span>
         ${lastTool?.semantic_outcome
           ? html`<span style=${{ color: lastTool.success === false ? 'var(--color-status-warn)' : 'var(--color-status-ok)' }}>${lastTool.semantic_outcome}</span>`
+          : null}
+        ${lastTool?.duration_ms !== null && lastTool?.duration_ms !== undefined
+          ? html`<span style=${{ color: 'var(--color-fg-secondary)', fontFamily: 'var(--font-mono)' }}>${formatDurationMs(lastTool.duration_ms)}</span>`
           : null}
       </div>
 

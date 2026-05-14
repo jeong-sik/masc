@@ -3,11 +3,12 @@ import { signal } from '@preact/signals'
 /**
  * RFC-0028 PR-α: keeper-trace store.
  *
- * Stitched read-side projection over 4 existing layer surfaces:
+ * Stitched read-side projection over existing IDE/runtime surfaces:
  *  - anchored-thread (RFC-0021)
  *  - cascade-hop     (RFC-0023)
  *  - bdi-snapshot    (RFC-0024)
  *  - decision-log    (RFC-0026)
+ *  - activity-event  (/api/v1/activity/events normalized context)
  *
  * The store is *append-only* from the producer's perspective. It enforces
  * three invariants on every `pushTrace` call:
@@ -36,6 +37,7 @@ export type KeeperTraceSource =
   | 'cascade-hop'
   | 'bdi-snapshot'
   | 'decision-log'
+  | 'activity-event'
 
 interface KeeperTraceBase {
   readonly id: string
@@ -66,12 +68,20 @@ export type KeeperTraceEvent =
       readonly decisionId: string
       readonly semanticOutcome: string | null
     })
+  | (KeeperTraceBase & {
+      readonly source: 'activity-event'
+      readonly eventId: string
+      readonly filePath: string
+      readonly line: number
+      readonly surface: string
+    })
 
 export type KeeperTraceEventInput =
   | Omit<Extract<KeeperTraceEvent, { source: 'anchored-thread' }>, 'count'>
   | Omit<Extract<KeeperTraceEvent, { source: 'cascade-hop' }>, 'count'>
   | Omit<Extract<KeeperTraceEvent, { source: 'bdi-snapshot' }>, 'count'>
   | Omit<Extract<KeeperTraceEvent, { source: 'decision-log' }>, 'count'>
+  | Omit<Extract<KeeperTraceEvent, { source: 'activity-event' }>, 'count'>
 
 export interface KeeperTraceState {
   readonly events: ReadonlyArray<KeeperTraceEvent>
@@ -88,7 +98,7 @@ export const keeperTraceState = signal<KeeperTraceState>(INITIAL_STATE)
  *
  * Coalescing rule (RFC-0028 §4):
  *   if the existing entry with the largest tsMs has the same trace bucket
- *   (source + keeperName, and for anchored threads also filePath + line)
+ *   (source + keeperName, and for line-anchored sources also filePath + line)
  *   AND `(input.tsMs - existing.tsMs) <= COALESCE_WINDOW_MS`,
  *   then replace it in-array with `{ ...existing, count: existing.count + 1, tsMs: input.tsMs }`.
  *   Otherwise insert at the binary-search position and prune retention.
@@ -197,6 +207,9 @@ function sameTraceBucket(left: KeeperTraceEvent, right: KeeperTraceEvent): boole
   if (left.source === 'anchored-thread' && right.source === 'anchored-thread') {
     return (left.filePath ?? null) === (right.filePath ?? null)
       && left.line === right.line
+  }
+  if (left.source === 'activity-event' && right.source === 'activity-event') {
+    return left.filePath === right.filePath && left.line === right.line
   }
   return true
 }

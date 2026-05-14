@@ -9,12 +9,12 @@ import {
 /**
  * RFC-0028 PR-β: keeper-trace gutter chip overlay.
  *
- * Reads `keeperTraceState` (the 4-source stitched store from PR-α) and
+ * Reads `keeperTraceState` (the stitched trace store) and
  * renders a stacked gutter chip per RFC §5: cap=3 visible chips per
  * (keeperName, line) bucket plus a `+N` overflow indicator. Each chip is
  * colored by source (anchored-thread / cascade-hop / bdi-snapshot /
- * decision-log) and exposes a hover tooltip with the underlying event
- * details.
+ * decision-log / activity-event) and exposes a hover tooltip with the
+ * underlying event details.
  *
  * Bucket key (RFC §5 + §11 #3):
  *   `${keeperName}@${line ?? 'no-line'}`
@@ -39,6 +39,7 @@ const SOURCE_COLORS: Record<KeeperTraceSource, string> = {
   'cascade-hop': 'var(--color-accent-fg, #8b5cf6)',
   'bdi-snapshot': 'var(--color-status-ok, #2dba4e)',
   'decision-log': 'var(--color-status-warn, #d97706)',
+  'activity-event': 'var(--color-status-info, #4a90e2)',
 }
 
 /** Source → label glyph for tooltip + ARIA. */
@@ -47,6 +48,7 @@ const SOURCE_LABELS: Record<KeeperTraceSource, string> = {
   'cascade-hop': 'cascade',
   'bdi-snapshot': 'BDI',
   'decision-log': 'decision',
+  'activity-event': 'activity',
 }
 
 interface TraceBucket {
@@ -92,11 +94,15 @@ export function bucketTraceEvents(
 }
 
 function lineOf(event: KeeperTraceEvent): number | null {
-  return event.source === 'anchored-thread' ? event.line : null
+  if (event.source === 'anchored-thread') return event.line
+  if (event.source === 'activity-event') return event.line
+  return null
 }
 
 function filePathOf(event: KeeperTraceEvent): string | null {
-  return event.source === 'anchored-thread' ? event.filePath ?? null : null
+  if (event.source === 'anchored-thread') return event.filePath ?? null
+  if (event.source === 'activity-event') return event.filePath
+  return null
 }
 
 interface OverlayKeeperTraceProps {
@@ -148,8 +154,9 @@ const OVERFLOW_STYLE = {
 
 function formatTooltip(event: KeeperTraceEvent): string {
   const sourceLabel = SOURCE_LABELS[event.source]
-  const lineSuffix = event.source === 'anchored-thread' && event.line !== null
-    ? ` L${event.line}`
+  const line = lineOf(event)
+  const lineSuffix = line !== null
+    ? ` L${line}`
     : ''
   const countSuffix = event.count > 1 ? ` ×${event.count}` : ''
   return `${sourceLabel}${lineSuffix}${countSuffix}`

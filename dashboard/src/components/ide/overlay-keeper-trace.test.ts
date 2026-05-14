@@ -60,6 +60,25 @@ function pushDecision(id: string, keeperName: string, tsMs: number): void {
   })
 }
 
+function pushActivity(
+  id: string,
+  keeperName: string,
+  line: number,
+  tsMs: number,
+  filePath = 'runtime.ts',
+): void {
+  pushTrace({
+    id,
+    tsMs,
+    keeperName,
+    source: 'activity-event',
+    eventId: `evt-${id}`,
+    filePath,
+    line,
+    surface: 'Goal',
+  })
+}
+
 beforeEach(() => {
   clearTraces()
 })
@@ -95,13 +114,16 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
   it('non-anchored sources fall into the keeper-level no-line bucket', () => {
     pushBdi('a', 'scholar', 1000)
     pushDecision('b', 'scholar', 1100)
-    pushAnchored('c', 'scholar', 12, 1200)
+    pushAnchored('c', 'scholar', 12, 1200, 'th-c', 'runtime.ts')
+    pushActivity('d', 'scholar', 12, 1300)
 
     const buckets = bucketTraceEvents(keeperTraceState.value.events)
     const noLineBucket = buckets.find(b => b.line === null)
     expect(noLineBucket).toBeDefined()
     expect(noLineBucket?.events.length).toBe(2)
     expect(noLineBucket?.events.map(e => e.source).sort()).toEqual(['bdi-snapshot', 'decision-log'])
+    const lineBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
+    expect(lineBucket?.events.map(e => e.source).sort()).toEqual(['activity-event', 'anchored-thread'])
   })
 
   it('sorts events newest-first within each bucket', () => {
@@ -215,13 +237,16 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     pushAnchored('a', 'scholar', null, 1000) // no line → no-line bucket
     pushBdi('b', 'scholar', 1100)
     pushDecision('c', 'scholar', 1200)
+    pushActivity('d', 'scholar', 4, 1300)
 
     const container = createContainer()
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
-    const bucket = container.querySelector('[role="group"][data-keeper="scholar"]')
+    const bucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="no-line"]')
     const chips = Array.from(bucket?.querySelectorAll('li[role="img"]') ?? [])
     const sources = chips.map(c => c.getAttribute('data-source'))
     expect(sources).toEqual(expect.arrayContaining(['anchored-thread', 'bdi-snapshot', 'decision-log']))
+    const lineBucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="4"]')
+    expect(lineBucket?.querySelector('li[role="img"]')?.getAttribute('data-source')).toBe('activity-event')
   })
 
   it('chip aria-label includes source + line + count', () => {

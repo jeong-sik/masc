@@ -16,6 +16,7 @@ import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
 import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
+import { routeLinksForContext } from './ide-context-lens'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -93,6 +94,14 @@ function routeFocusSourceId(params: Record<string, string>, filePath: string, li
   return line !== undefined ? `route:${filePath}:${line}` : `route:${filePath}`
 }
 
+function routeParam(params: Record<string, string>, ...keys: ReadonlyArray<string>): string | undefined {
+  for (const key of keys) {
+    const value = params[key]?.trim()
+    if (value) return value
+  }
+  return undefined
+}
+
 function paramsWithLayers(
   params: Record<string, string>,
   view: ViewTab,
@@ -151,9 +160,26 @@ export function IdeShell() {
     ? routeFocusSourceId(route.value.params, routeFileFocus, routeLineFocus)
     : ''
   const routeKeeperFocus = route.value.params.keeper?.trim() || undefined
+  const routeGoalFocus = routeParam(route.value.params, 'goal_id', 'goal')
+  const routeTaskFocus = routeParam(route.value.params, 'task_id', 'task')
+  const routeBoardPostFocus = routeParam(route.value.params, 'board_post_id', 'post')
+  const routeCommentFocus = routeParam(route.value.params, 'comment_id', 'comment')
+  const routePrFocus = routeParam(route.value.params, 'pr_id', 'pr')
+  const routeGitFocus = routeParam(route.value.params, 'git_ref', 'ref')
+  const routeLogFocus = routeParam(route.value.params, 'log_id', 'log')
+  const routeSessionFocus = routeParam(route.value.params, 'session_id')
+  const routeOperationFocus = routeParam(route.value.params, 'operation_id', 'op')
+  const routeWorkerRunFocus = routeParam(route.value.params, 'worker_run_id', 'worker')
+  const routeTelemetryFocus = routeParam(route.value.params, 'telemetry_q', 'q') ?? routeLogFocus
 
   useEffect(() => {
     if (!routeFileFocus) return
+    const telemetry = Boolean(
+      routeTelemetryFocus
+      || routeSessionFocus
+      || routeOperationFocus
+      || routeWorkerRunFocus,
+    )
     focusIdeContextAnchor({
       file_path: routeFileFocus,
       line: routeLineFocus,
@@ -161,6 +187,26 @@ export function IdeShell() {
       label: routeLabelFocus,
       source_id: routeSourceFocus,
       keeper_id: routeKeeperFocus,
+      route_links: routeLinksForContext({
+        filePath: routeFileFocus,
+        line: routeLineFocus,
+        surface: routeSurfaceFocus,
+        label: routeLabelFocus,
+        sourceId: routeSourceFocus,
+        goalId: routeGoalFocus,
+        taskId: routeTaskFocus,
+        boardPostId: routeBoardPostFocus,
+        commentId: routeCommentFocus,
+        prId: routePrFocus,
+        gitRef: routeGitFocus,
+        logId: routeLogFocus,
+        sessionId: routeSessionFocus,
+        operationId: routeOperationFocus,
+        workerRunId: routeWorkerRunFocus,
+        telemetryQuery: routeTelemetryFocus,
+        keeperId: routeKeeperFocus,
+        telemetry,
+      }),
     })
   }, [
     routeFileFocus,
@@ -169,6 +215,17 @@ export function IdeShell() {
     routeLabelFocus,
     routeSourceFocus,
     routeKeeperFocus,
+    routeGoalFocus,
+    routeTaskFocus,
+    routeBoardPostFocus,
+    routeCommentFocus,
+    routePrFocus,
+    routeGitFocus,
+    routeLogFocus,
+    routeSessionFocus,
+    routeOperationFocus,
+    routeWorkerRunFocus,
+    routeTelemetryFocus,
   ])
 
   const activeFocus = focusFromRoute(route.value.params.focus)

@@ -10,25 +10,6 @@
 
 # ── Layer 1: Providers ──────────────────────────────────────────
 
-[providers.claude_code]
-display-name = "Anthropic Claude Code CLI"
-protocol = "anthropic-cli"
-command = "claude"
-is-non-interactive = true
-
-[providers.claude_code.credentials]
-type = "env"
-key = "ANTHROPIC_API_KEY"
-
-# Behavioral capabilities — RFC-0058 §2.4 Phase 5.1.
-# Replaces the OCaml `tool_policy` record and per-kind matches in
-# cascade_transport / provider_tool_support / keeper_usage_trust.
-# Field defaults (when omitted) are all false / [] / None.
-[providers.claude_code.capabilities]
-supports-runtime-mcp-http-headers = true
-uses-anthropic-caching = true
-max-turns-per-attempt = 30
-tolerates-bound-actor-fallback = true
 
 [providers.codex_cli]
 display-name = "OpenAI Codex CLI"
@@ -147,39 +128,6 @@ streaming = true
 [models.kimi-coding.capabilities]
 max-output-tokens = 32768
 
-[models.sonnet]
-api-name = "claude-sonnet-4-6"
-max-context = 200000
-tools-support = true
-thinking-support = true
-max-thinking-budget = 16000
-streaming = true
-
-# Capabilities mirror OAS for_model_id_static claude-sonnet-4 family
-# (anthropic_capabilities + max-output override). Anthropic prompt
-# caching is part of the standard Messages API.
-[models.sonnet.capabilities]
-max-output-tokens = 64000
-supports-parallel-tool-calls = true
-supports-image-input = true
-supports-native-streaming = true
-supports-caching = true
-
-[models.haiku]
-api-name = "claude-haiku-4-5-20251001"
-max-context = 200000
-tools-support = true
-streaming = true
-
-# Capabilities mirror OAS for_model_id_static claude-haiku-4 family
-# (anthropic_capabilities + max-output override).
-[models.haiku.capabilities]
-max-output-tokens = 8192
-supports-parallel-tool-calls = true
-supports-image-input = true
-supports-native-streaming = true
-supports-caching = true
-
 [models.gemini-flash]
 api-name = "gemini-3-flash-preview"
 max-context = 128000
@@ -256,29 +204,6 @@ supports-response-format-json = true
 # the responsibility of existing bindings + the 8 production model
 # entries above.
 
-# ── Anthropic family ──────────────────────────────
-
-[models.claude-opus-4]
-api-name = "claude-opus-4"
-match-prefixes = ["claude-opus-4"]
-max-context = 1000000
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.claude-opus-4.capabilities]
-max-output-tokens = 128000
-supports-parallel-tool-calls = true
-supports-tool-choice = true
-supports-extended-thinking = true
-supports-reasoning-budget = true
-supports-multimodal-inputs = true
-supports-image-input = true
-supports-structured-output = true
-supports-native-streaming = true
-supports-caching = true
-supports-prompt-caching = true
-prompt-cache-alignment = 1024
 supports-top-k = true
 supports-computer-use = true
 
@@ -664,17 +589,6 @@ max-concurrent = 1
 is-default = true
 max-concurrent = 1
 
-[claude_code.sonnet]
-is-default = true
-max-concurrent = 1
-price-input = 3.00
-price-output = 15.00
-
-[claude_code.haiku]
-is-default = false
-max-concurrent = 2
-price-input = 0.80
-price-output = 4.00
 
 [gemini_cli.gemini-flash]
 is-default = true
@@ -699,18 +613,11 @@ max-concurrent = 2
 # rather than raw `<provider>.<model>` pairs — that is how RFC-0058
 # §2.4 keeps vendor/model identifiers out of OCaml source.
 
-[claude_code.haiku.for-scoring]
-max-output = 1024
-temperature = 0.1
 
 [codex_cli.codex-spark.for-scoring]
 max-output = 1024
 temperature = 0.1
 
-[claude_code.haiku.for-governance]
-max-input = 8192
-max-output = 2048
-temperature = 0.1
 
 [codex_cli.codex-spark.for-keeper-turn]
 max-output = 32768
@@ -731,7 +638,7 @@ strategy = "failover"
 [tier.keeper_diverse]
 # Fallback tier for contract violation retry. Different model
 # composition from primary to break correlated failure.
-members = ["claude_code.sonnet", "gemini_cli.gemini-flash", "codex_cli.codex-spark"]
+members = ["gemini_cli.gemini-flash", "codex_cli.codex-spark"]
 strategy = "failover"
 
 [tier.scoring]
@@ -740,14 +647,13 @@ strategy = "failover"
 keeper-assignable = false
 members = [
   "codex_cli.codex-spark.for-scoring",
-  "claude_code.haiku.for-scoring",
 ]
 strategy = "failover"
 
 [tier.governance]
 # System-only baseline for governance / judge calls.
 keeper-assignable = false
-members = ["claude_code.haiku.for-governance"]
+members = ["kimi_cli.kimi-coding.for-keeper-turn"]
 strategy = "failover"
 
 [tier.tier_small]

@@ -421,17 +421,18 @@ keeper-assignable = false
 ### 7.4 Pluggable Strategy (Phase A~B, #7606/#7611)
 
 각 `tier` 또는 `tier-group`은 `strategy` 키로 provider 선택 전략을
-지정한다. 미설정 시 `failover`로 동작한다.
+지정한다. 미설정 시 `failover`로 동작한다. Operator config에서
+지원되는 strategy 값은 현재 `failover`, `priority_tier` 두 개뿐이다.
 
 | 전략 | 키 값 | 설명 |
 |------|-------|------|
 | S1 Failover | `failover` | members 입력 순서 유지 |
-| S2 Capacity-aware | `capacity_aware` | endpoint capacity == 0인 provider 필터링, cycle 반복 |
-| S3 Weighted random | `weighted_random` | `config_weight × success_rate` 기반 가중 셔플 |
-| S4 Circuit-breaker cycling | `circuit_breaker_cycling` | S2 + `is_in_cooldown` 제외 + exponential backoff |
 | S5 Priority tier | `priority_tier` | tier-group의 `tiers` 순서대로 fallback |
-| S6 Sticky | `sticky` | `(keeper, profile)` 단위로 첫 성공 provider를 TTL 동안 고정 |
-| S7 Round-robin | `round_robin` | profile cursor 기반 회전 |
+
+`capacity_aware`, `weighted_random`, `circuit_breaker_cycling`, `sticky`,
+`round_robin` 구현은 내부/과거 strategy 코드와 테스트를 위해 남아 있지만
+shipped `cascade.toml` config boundary에서는 거부된다. 실제 runtime seed/profile이
+생기기 전까지 operator config의 허용 목록에 추가하지 않는다.
 
 관련 선언형 키:
 

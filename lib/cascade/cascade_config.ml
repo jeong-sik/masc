@@ -1346,7 +1346,7 @@ let default_strategy_kind ?config_path ~name () =
 let parse_kind_or_default ~name ~default_kind = function
   | None -> default_kind
   | Some raw ->
-    match Cascade_strategy.parse_kind raw with
+    match Cascade_strategy.parse_config_kind raw with
     | Ok k -> k
     | Error msg ->
       warn_unknown_strategy ~name ~raw ~msg ~fallback_kind:default_kind;

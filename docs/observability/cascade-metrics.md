@@ -42,12 +42,14 @@ Label cardinality: `3 × 3 = 9 series`.
 | Label | Values |
 |-------|--------|
 | `cascade` | cascade profile name (bounded by `cascade.toml`, typically < 20) |
-| `strategy` | `failover`, `capacity_aware`, `weighted_random`, `circuit_breaker_cycling`, `priority_tier`, `sticky`, `round_robin` |
+| `strategy` | configured runtime: `failover`, `priority_tier`; internal/historical kinds may also render as `capacity_aware`, `weighted_random`, `circuit_breaker_cycling`, `sticky`, `round_robin` |
 | `kind` | `ordered`, `filtered_empty`, `exhausted` |
 
 Incremented from `Cascade_strategy_trace.record`. One event per cycle iteration of `cycle_loop`. `exhausted` is the terminal variant — cascade gave up after `max_cycles` without a successful provider pick.
 
-Label cardinality: `≈ 20 × 7 × 3 = 420 series` upper bound.
+Configured runtime label cardinality: `≈ 20 × 2 × 3 = 120 series`. The
+internal strategy enum still has seven values, so the defensive upper bound is
+`≈ 20 × 7 × 3 = 420 series`.
 
 Both counter names and label tuples are shared with the JSON projection + dashboard card, so Grafana queries join cleanly with the same identifiers that operators see.
 

@@ -26,6 +26,12 @@ let has_rule_at (rule : string) (path : string) (errs : validation_error list) =
 let no_errors (errs : validation_error list) =
   check int "no errors" 0 (List.length errs)
 
+let has_parse_error_at (path : string) (errs : parse_error list) =
+  check bool
+    ("has parse error at " ^ path)
+    true
+    (List.exists (fun (e : parse_error) -> e.path = path) errs)
+
 let validate_toml (toml : string) : validation_error list =
   match parse_string toml with
   | Ok cfg -> validate cfg
@@ -469,7 +475,7 @@ backoff-cap-ms = 10000
   let errs = validate_toml toml in
   has_rule_at "R10" "tier.t.cycle-policy" errs
 
-let test_r10_cycle_policy_on_correct_strategy () =
+let test_retired_cycle_policy_strategy_rejected_by_parser () =
   let toml = {|
 [providers.p]
 protocol = "anthropic-cli"
@@ -488,8 +494,9 @@ max-cycles = 3
 backoff-base-ms = 500
 backoff-cap-ms = 10000
 |} in
-  let errs = validate_toml toml in
-  no_errors errs
+  match parse_string toml with
+  | Ok _ -> Alcotest.fail "expected retired strategy to be rejected"
+  | Error errs -> has_parse_error_at "tier.t.strategy" errs
 
 let test_r10_sticky_ttl_on_wrong_strategy () =
   let toml = {|
@@ -511,7 +518,7 @@ sticky-ttl-ms = 600000
   let errs = validate_toml toml in
   has_rule_at "R10" "tier.t.sticky-ttl-ms" errs
 
-let test_r10_sticky_ttl_on_correct_strategy () =
+let test_retired_sticky_strategy_rejected_by_parser () =
   let toml = {|
 [providers.p]
 protocol = "anthropic-cli"
@@ -528,8 +535,9 @@ members = ["p.m"]
 strategy = "sticky"
 sticky-ttl-ms = 600000
 |} in
-  let errs = validate_toml toml in
-  no_errors errs
+  match parse_string toml with
+  | Ok _ -> Alcotest.fail "expected retired strategy to be rejected"
+  | Error errs -> has_parse_error_at "tier.t.strategy" errs
 
 let test_r10_scoring_on_wrong_strategy () =
   let toml = {|
@@ -557,7 +565,7 @@ server-error-skip-after = 5
   let errs = validate_toml toml in
   has_rule_at "R10" "tier.t.scoring-params" errs
 
-let test_r10_scoring_on_correct_strategy () =
+let test_retired_scoring_strategy_rejected_by_parser () =
   let toml = {|
 [providers.p]
 protocol = "anthropic-cli"
@@ -580,8 +588,9 @@ server-error-recency-window-s = 120.0
 server-error-decay-base = 0.3
 server-error-skip-after = 5
 |} in
-  let errs = validate_toml toml in
-  no_errors errs
+  match parse_string toml with
+  | Ok _ -> Alcotest.fail "expected retired strategy to be rejected"
+  | Error errs -> has_parse_error_at "tier.t.strategy" errs
 
 let test_r10_no_strategy_fields_is_ok () =
   let toml = {|
@@ -737,11 +746,14 @@ let () =
       ];
       "R10_strategy_fields", [
         test_case "cycle_policy on wrong strategy" `Quick test_r10_cycle_policy_on_wrong_strategy;
-        test_case "cycle_policy on correct strategy" `Quick test_r10_cycle_policy_on_correct_strategy;
+        test_case "retired cycle_policy strategy rejected" `Quick
+          test_retired_cycle_policy_strategy_rejected_by_parser;
         test_case "sticky_ttl on wrong strategy" `Quick test_r10_sticky_ttl_on_wrong_strategy;
-        test_case "sticky_ttl on correct strategy" `Quick test_r10_sticky_ttl_on_correct_strategy;
+        test_case "retired sticky strategy rejected" `Quick
+          test_retired_sticky_strategy_rejected_by_parser;
         test_case "scoring on wrong strategy" `Quick test_r10_scoring_on_wrong_strategy;
-        test_case "scoring on correct strategy" `Quick test_r10_scoring_on_correct_strategy;
+        test_case "retired scoring strategy rejected" `Quick
+          test_retired_scoring_strategy_rejected_by_parser;
         test_case "no strategy fields is ok" `Quick test_r10_no_strategy_fields_is_ok;
         test_case "multiple mismatches" `Quick test_r10_multiple_mismatches;
       ];

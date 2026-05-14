@@ -437,20 +437,65 @@ let test_parse_kind_known () =
   check_ok "weighted_random" S.Weighted_random;
   check_ok "circuit_breaker_cycling" S.Circuit_breaker_cycling
 
+let string_contains haystack needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  let rec loop i =
+    if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  nlen = 0 || loop 0
+
 let test_parse_kind_unknown () =
   match S.parse_kind "round_robin_xx" with
   | Ok _ -> fail "expected Error for unknown kind"
   | Error msg ->
     check bool "error mentions the rejected name"
-      true (String.length msg > 0
-            && (let needle = "round_robin_xx" in
-                let nlen = String.length needle in
-                let hlen = String.length msg in
-                let rec loop i =
-                  if i + nlen > hlen then false
-                  else if String.sub msg i nlen = needle then true
-                  else loop (i + 1)
-                in loop 0))
+      true
+      (String.length msg > 0 && string_contains msg "round_robin_xx")
+
+let test_parse_config_kind_supported () =
+  check
+    (list string)
+    "config kind strings"
+    [ "failover"; "priority_tier" ]
+    S.config_kind_strings;
+  let check_ok s expected =
+    match S.parse_config_kind s with
+    | Ok k ->
+      check string ("parse config " ^ s) (S.kind_to_string expected) (S.kind_to_string k)
+    | Error msg -> fail (Printf.sprintf "expected Ok, got Error %s" msg)
+  in
+  check_ok "failover" S.Failover;
+  check_ok "priority_tier" S.Priority_tier
+
+let test_parse_config_kind_retired_rejected () =
+  let rejected =
+    [ "capacity_aware"
+    ; "weighted_random"
+    ; "circuit_breaker_cycling"
+    ; "sticky"
+    ; "round_robin"
+    ; "does_not_exist"
+    ]
+  in
+  List.iter
+    (fun raw ->
+       match S.parse_config_kind raw with
+       | Ok kind ->
+         fail
+           (Printf.sprintf
+              "expected Error for %s, got %s"
+              raw
+              (S.kind_to_string kind))
+       | Error msg ->
+         check
+           bool
+           ("config error mentions supported kinds for " ^ raw)
+           true
+           (string_contains msg "failover" && string_contains msg "priority_tier"))
+    rejected
 
 (* ── Cascade_client_capacity ─────────────────────────────────── *)
 
@@ -1221,6 +1266,9 @@ let () =
       test_case "known kinds parse" `Quick test_parse_kind_known;
       test_case "unknown kind returns Error with name" `Quick
         test_parse_kind_unknown;
+      test_case "config kinds parse" `Quick test_parse_config_kind_supported;
+      test_case "retired config kinds rejected" `Quick
+        test_parse_config_kind_retired_rejected;
     ];
     "client_capacity", [
       test_case "register + query" `Quick test_client_capacity_register_query;

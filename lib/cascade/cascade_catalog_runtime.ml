@@ -603,7 +603,7 @@ let validate_strategy ~config_path ~name =
     match cfg.kind with
     | None -> []
     | Some raw_kind -> (
-        match Cascade_strategy.parse_kind raw_kind with
+        match Cascade_strategy.parse_config_kind raw_kind with
         | Error msg ->
             [
               Printf.sprintf

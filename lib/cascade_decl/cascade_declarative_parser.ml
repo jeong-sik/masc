@@ -549,17 +549,11 @@ let parse_bindings_and_aliases (toml : Otoml.t)
 let strategy_of_string (s : string) : (cascade_strategy, string) result =
   match s with
   | "failover" -> Ok Failover
-  | "capacity_aware" -> Ok Capacity_aware
-  | "weighted_random" -> Ok Weighted_random
-  | "circuit_breaker_cycling" -> Ok Circuit_breaker_cycling
   | "priority_tier" -> Ok Priority_tier
-  | "sticky" -> Ok Sticky
-  | "round_robin" -> Ok Round_robin
   | _ ->
     Error
       (Printf.sprintf
-         "unknown strategy %S: expected one of failover, capacity_aware, \
-          weighted_random, circuit_breaker_cycling, priority_tier, sticky, round_robin"
+         "unsupported strategy %S: expected one of failover, priority_tier"
          s)
 ;;
 

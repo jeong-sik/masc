@@ -219,24 +219,7 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
   { allowed_orgs; denied_repos; default_depth;
     clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
-let tool_schema_names schemas =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
-
-let is_known_policy_tool_name name =
-  let normalized = Keeper_tool_alias.strip_mcp_masc_prefix name in
-  Tool_dispatch.is_registered normalized
-  || Option.is_some (Tool_name.of_string normalized)
-  || Option.is_some (Keeper_tool_alias.route normalized)
-  || Keeper_tool_alias.is_known_internal normalized
-  || Option.is_some (Keeper_tool_alias.public_masc_to_internal normalized)
-  || List.mem normalized (Keeper_tool_registry.keeper_internal_candidate_tool_names)
-  || List.mem normalized (Keeper_tool_registry.effective_core_tools ())
-  || List.mem normalized Keeper_tool_registry.keeper_admin_dispatched_tools
-  || List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas)
-  || Tool_catalog_surfaces.is_on_surface Tool_catalog_surfaces.Public_mcp normalized
-  || Tool_catalog_surfaces.is_on_surface Tool_catalog_surfaces.Spawned_agent normalized
-  || Tool_catalog_surfaces.is_on_surface Tool_catalog_surfaces.Local_worker normalized
-  || Tool_catalog_surfaces.is_on_surface Tool_catalog_surfaces.Admin normalized
+let is_known_policy_tool_name = Tool_resolution.is_known_policy_tool_name
 
 (* Shortcut: if the caller's [base_path] already points at a project root
    that has [base_path/config/tool_policy.toml], prefer that directly.

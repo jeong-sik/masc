@@ -40,7 +40,10 @@ val resolve_temperature :
   float
 
 (** Resolve a max_tokens value with cascade config priority.
-    Returns cascade config value if present, otherwise calls [fallback]. *)
+    Returns cascade config value if present, otherwise calls [fallback].
+    Fallback values are bounded to the resolved cascade's output ceiling when
+    one is available; cascade config values and explicit caller overrides are
+    validated outside this helper and are not silently reduced. *)
 val resolve_max_tokens :
   cascade_name:Keeper_cascade_profile.runtime_name ->
   fallback:(unit -> int) ->

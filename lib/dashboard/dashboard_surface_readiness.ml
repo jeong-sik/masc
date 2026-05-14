@@ -183,25 +183,6 @@ let all_entries =
         };
     };
     {
-      id = "monitoring.memory-subsystems";
-      label = "기억 서브시스템";
-      exposure_status = "diagnostic";
-      hidden_from_nav = true;
-      meets_main_gate = false;
-      rationale =
-        "기억 서브시스템은 Hebbian, episodic, compaction health 진단용 drill-down이라 메인 내비에서는 숨깁니다.";
-      route_hash = Some "#monitoring?section=memory-subsystems";
-      refs =
-        {
-          fixture_harness = None;
-          live_spotcheck = Some "/api/v1/dashboard/memory-subsystems";
-          logs_ref = Some "/api/v1/dashboard/logs";
-          metrics_ref = Some "/metrics";
-          proof_ref = None;
-          tool_name = Some "masc_surface_audit";
-        };
-    };
-    {
       id = "command.operations";
       label = "운영 행동";
       exposure_status = "main";

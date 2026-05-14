@@ -1066,10 +1066,25 @@ let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
   match sandbox_profile with
   | Keeper_types.Local -> Ok ()
   | Keeper_types.Docker ->
-    (match docker_preflight ~timeout_sec () with
-     | None -> Ok ()
-     | Some preflight ->
-       if preflight.ok then Ok () else Error (docker_preflight_failure_message preflight))
+    if not (Env_config_keeper.KeeperSandbox.preflight_enabled ())
+    then Ok ()
+    else (
+      let timeout_sec = docker_preflight_timeout ~timeout_sec in
+      let image = Env_config_keeper.KeeperSandbox.docker_image () in
+      match ensure_keeper_sandbox_runtime ~timeout_sec with
+      | Error message ->
+        Error
+          (Printf.sprintf "Docker sandbox startup preflight failed: %s" message)
+      | Ok _ ->
+        (match docker_image_present ~image ~timeout_sec with
+         | Ok () -> Ok ()
+         | Error message ->
+           Error
+             (Printf.sprintf
+                "Docker sandbox startup preflight failed: %s. Next: Run \
+                 scripts/build-keeper-sandbox-image.sh to build the default keeper \
+                 sandbox image."
+                message)))
 ;;
 
 module For_testing = struct

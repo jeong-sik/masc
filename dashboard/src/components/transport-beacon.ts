@@ -13,8 +13,14 @@ import {
   dashboardWsConnected,
   dashboardWsEventCount60s,
   dashboardWsLastEventAt,
+  dashboardWsLastPongAt,
+  dashboardWsLastPongLatencyMs,
   dashboardWsReady,
 } from '../dashboard-ws-state'
+import {
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+} from '../config/constants'
 
 // Resolved once per mount.  The cutover flag is build-time; runtime
 // changes require a reload anyway, so caching avoids re-evaluating
@@ -25,6 +31,7 @@ const wsOnlyMode = dashboardWsOnlyEnabled()
 // shorter than the typical heartbeat interval to flag truly idle
 // transports without nuisance-firing on quiet workloads.
 const SILENT_THRESHOLD_MS = 30_000
+const HEARTBEAT_FRESH_MS = DASHBOARD_WS_HEARTBEAT_INTERVAL_MS + DASHBOARD_WS_RPC_TIMEOUT_MS + 1_000
 
 type BeaconState = 'green' | 'yellow' | 'red' | 'gray'
 
@@ -40,6 +47,8 @@ export function computeBeaconView(args: {
   ready: boolean
   lastEventAt: number
   eventCount60s: number
+  lastPongAt: number
+  lastPongLatencyMs: number | null
   now: number
 }): BeaconView {
   if (!args.wsOnly) {
@@ -58,10 +67,23 @@ export function computeBeaconView(args: {
   }
   const silentMs = args.now - args.lastEventAt
   if (args.lastEventAt === 0 || silentMs > SILENT_THRESHOLD_MS) {
+    const pongAgeMs = args.lastPongAt === 0
+      ? Number.POSITIVE_INFINITY
+      : args.now - args.lastPongAt
+    if (pongAgeMs <= HEARTBEAT_FRESH_MS) {
+      const latency = args.lastPongLatencyMs == null
+        ? 'ok'
+        : `${args.lastPongLatencyMs}ms`
+      return {
+        state: 'green',
+        label: `WS-only · heartbeat · ${latency}`,
+        title: `WS-only mode active. No route events, but heartbeat pong arrived ${Math.floor(pongAgeMs / 1000)}s ago.`,
+      }
+    }
     return {
       state: 'yellow',
       label: 'WS-only · silent',
-      title: `WS-only mode has received no events for ${Math.floor(silentMs / 1000)}s. The workload may be idle or WS fan-out may be stuck.`,
+      title: `WS-only mode has received no events for ${Math.floor(silentMs / 1000)}s and no fresh heartbeat pong. The workload may be idle or WS fan-out may be stuck.`,
     }
   }
   return {
@@ -87,6 +109,8 @@ const beaconView = computed<BeaconView>(() => computeBeaconView({
   ready: dashboardWsReady.value,
   lastEventAt: dashboardWsLastEventAt.value,
   eventCount60s: dashboardWsEventCount60s.value,
+  lastPongAt: dashboardWsLastPongAt.value,
+  lastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
   now: Date.now(),
 }))
 

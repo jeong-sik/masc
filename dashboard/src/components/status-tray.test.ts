@@ -41,6 +41,8 @@ describe('summarizeStatusTray', () => {
       wsReady: false,
       wsLastEventAt: 0,
       wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: 'socket closed',
       reconnectCount: 0,
       lastDisconnectedAt: 0,
@@ -65,6 +67,8 @@ describe('summarizeStatusTray', () => {
       wsReady: true,
       wsLastEventAt: NOW - 1000,
       wsEventCount60s: 4,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: null,
       reconnectCount: 1,
       lastDisconnectedAt: 0,
@@ -105,6 +109,8 @@ describe('summarizeStatusTray', () => {
       wsReady: true,
       wsLastEventAt: NOW - 1000,
       wsEventCount60s: 4,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,
@@ -133,6 +139,32 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.attention.value).toBe('1')
   })
 
+  it('keeps WS-only transport green when route events are idle but heartbeat is fresh', () => {
+    const summary = summarizeStatusTray({
+      wsOnly: true,
+      sseConnected: false,
+      wsConnected: true,
+      wsReady: true,
+      wsLastEventAt: 0,
+      wsEventCount60s: 0,
+      wsLastPongAt: NOW - 2_000,
+      wsLastPongLatencyMs: 37,
+      wsLastError: null,
+      reconnectCount: 0,
+      lastDisconnectedAt: 0,
+      keepers: [],
+      staleKeeperNames: new Set(),
+      tasks: [],
+      journalEntries: [],
+      unacknowledgedErrors: 0,
+      now: NOW,
+    })
+
+    expect(summary.items.transport.tone).toBe('ok')
+    expect(summary.items.transport.value).toBe('37ms')
+    expect(summary.items.transport.detail).toContain('heartbeat pong 2s ago')
+  })
+
   it('uses the first journal entry for activity state from newest-first snapshots', () => {
     const summary = summarizeStatusTray({
       wsOnly: false,
@@ -141,6 +173,8 @@ describe('summarizeStatusTray', () => {
       wsReady: false,
       wsLastEventAt: 0,
       wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,
@@ -168,6 +202,8 @@ describe('summarizeStatusTray', () => {
       wsReady: false,
       wsLastEventAt: 0,
       wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,

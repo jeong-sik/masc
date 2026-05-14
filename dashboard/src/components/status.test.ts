@@ -8,7 +8,6 @@ describe("sectionLabel", () => {
     ["journey", "Journey"],
     ["runtime", "Runtime"],
     ["fleet-health", "Fleet Health"],
-    ["memory-subsystems", "Memory Subsystems"],
     ["cognition", "Cognition"],
     ["agents", "Agents"],
   ] as [StatusSection, string][])("maps %s to %s", (section, expected) => {

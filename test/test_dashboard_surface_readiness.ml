@@ -196,7 +196,6 @@ let test_hidden_diagnostic_surfaces_are_not_main_gate () =
   List.iter check_hidden
     [
       "monitoring.observatory";
-      "monitoring.memory-subsystems";
       "workspace.collab-mvp";
       "code.ide-shell";
     ]

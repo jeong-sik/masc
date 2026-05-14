@@ -23,6 +23,9 @@ import {
 import {
   dashboardWsConnected,
   dashboardWsLastError,
+  dashboardWsLastPingAt,
+  dashboardWsLastPongAt,
+  dashboardWsLastPongLatencyMs,
   dashboardWsLastSeq,
   dashboardWsReady,
 } from './dashboard-ws-state'
@@ -182,6 +185,9 @@ afterEach(() => {
   MockParseWorker.holdResponses = false
   dashboardWsConnected.value = false
   dashboardWsLastError.value = null
+  dashboardWsLastPingAt.value = 0
+  dashboardWsLastPongAt.value = 0
+  dashboardWsLastPongLatencyMs.value = null
   dashboardWsLastSeq.value = 0
   dashboardWsReady.value = false
   vi.useRealTimers()
@@ -470,6 +476,9 @@ describe('dashboard websocket route subscriptions', () => {
     expect(dashboardWsConnected.value).toBe(true)
     expect(dashboardWsReady.value).toBe(true)
     expect(dashboardWsLastError.value).toBe(null)
+    expect(dashboardWsLastPingAt.value).toBeGreaterThan(0)
+    expect(dashboardWsLastPongAt.value).toBeGreaterThanOrEqual(dashboardWsLastPingAt.value)
+    expect(dashboardWsLastPongLatencyMs.value).not.toBeNull()
   })
 
   it('reconnects when a dashboard heartbeat ping never responds', async () => {

@@ -1,14 +1,19 @@
 ---
 status: runbook
-last_verified: 2026-05-01
+last_verified: 2026-05-14
 code_refs:
   - lib/provider_adapter.ml
   - lib/provider_adapter.mli
+  - docs/PROVIDER-ADAPTER-REMOVAL-PLAN.md
+  - scripts/lint/provider-adapter-removal-ratchet.sh
 ---
 
 # Provider Adapter Runbook
 
-이 문서는 `MASC`에서 provider/runtime/auth를 어떻게 나누는지에 대한 SSOT다.
+이 문서는 현재 `MASC` 호환성 상태를 설명한다. Future-state SSOT가
+아니다. `Provider_adapter` 내부 catalog를 확장하지 말고,
+[Provider Adapter Removal Plan](PROVIDER-ADAPTER-REMOVAL-PLAN.md)에 따라
+OAS-owned provider/catalog truth와 MASC-local runtime overlay로 분리한다.
 
 핵심 원칙:
 

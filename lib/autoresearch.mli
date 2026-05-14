@@ -103,6 +103,8 @@ val latest_loop_id : string option ref
 
 val with_loops_rw : (unit -> 'a) -> 'a
 val with_loops_ro : (unit -> 'a) -> 'a
+val default_model_label_result : unit -> (string, string) result
+(** Default model label selected through the [routes.autoresearch] cascade. *)
 
 (** {1 Serde} *)
 

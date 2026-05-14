@@ -206,10 +206,9 @@ let () =
    [auto_register_ollama_with_override] helpers used a [:11434]
    substring scan to decide which URLs to register. That heuristic
    misclassified non-ollama services on the same port and missed
-   ollama on non-default ports. The keeper-side caller
-   ([Keeper_turn_driver]) now consults
-   [Provider_adapter.is_http_probe_capable_kind] and calls
-   {!register} directly, so the heuristic is gone. *)
+   ollama on non-default ports. The keeper-side caller now consults the
+   provider-kind HTTP-probe capability and calls {!register} directly, so the
+   heuristic is gone. *)
 
 let looks_like_cli_sentinel = Masc_network_defaults.is_cli_sentinel_url
 

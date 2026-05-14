@@ -64,18 +64,14 @@ type cascade_capabilities =
           **Current data flow (parsed-only).** This PR adds the schema and
           parser path so cascade.toml can declare the value, but
           [Cascade_catalog_validator.codex_with_bound_actor_only_issue]
-          still reads
-          [Provider_adapter.tolerates_bound_actor_fallback_for_kind],
-          which is hard-coded to per-adapter literals in
-          [Provider_adapter] (introduced in #14642). Editing this value
-          in cascade.toml has no runtime effect on the catalog warning
-          until the caller cutover lands.
+          still reads the local provider-tool support projection. Editing
+          this value in cascade.toml has no runtime effect on the catalog
+          warning until the declarative capability cutover lands.
 
           The cutover is a follow-up that routes
-          [Provider_adapter.adapter_of_provider_config] through
-          [tool_policy_of_cascade_capabilities] (see #14659) so the
-          cascade-decl value becomes the SSOT. This field is shipped now
-          so the schema is stable before that cutover. *)
+          provider-tool policy through [tool_policy_of_cascade_capabilities]
+          (see #14659) so the cascade-decl value becomes the SSOT. This field
+          is shipped now so the schema is stable before that cutover. *)
   }
 [@@deriving show, eq]
 

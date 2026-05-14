@@ -263,8 +263,8 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
      without rewriting the validator. RFC-0058 §2.4: capability, not match. *)
   let has_bridging_required_kind =
     List.exists
-      Provider_adapter
-      .requires_per_keeper_bridging_for_bound_actor_tools_for_kind
+      Provider_tool_support
+      .provider_kind_requires_per_keeper_bridging_for_bound_actor_tools
       kinds
   in
   (* The legacy whitelist hard-coded PK.Glm as tolerant, but
@@ -277,7 +277,7 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
      RFC-0058 §2.4: capability flag, not a vendor match. *)
   let has_bound_actor_tolerant_fallback =
     List.exists
-      Provider_adapter.tolerates_bound_actor_fallback_for_kind
+      Provider_tool_support.provider_kind_tolerates_bound_actor_fallback
       kinds
   in
   if has_bridging_required_kind && not has_bound_actor_tolerant_fallback then

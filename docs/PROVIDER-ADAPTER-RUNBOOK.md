@@ -10,10 +10,11 @@ code_refs:
 
 # Provider Adapter Runbook
 
-이 문서는 현재 `MASC` 호환성 상태를 설명한다. Future-state SSOT가
-아니다. `Provider_adapter` 내부 catalog를 확장하지 말고,
-[Provider Adapter Removal Plan](PROVIDER-ADAPTER-REMOVAL-PLAN.md)에 따라
-OAS-owned provider/catalog truth와 MASC-local runtime overlay로 분리한다.
+이 문서는 현재 `MASC` 호환성 상태를 설명한다. Provider identity,
+base URL, request path, auth env, capabilities는 OAS
+`Provider_runtime_binding` / `Provider_registry`가 SSOT다.
+`Provider_adapter` 내부 catalog, runtime overlay, provider-specific env
+fallback을 새로 추가하지 않는다.
 
 핵심 원칙:
 
@@ -32,15 +33,14 @@ OAS-owned provider/catalog truth와 MASC-local runtime overlay로 분리한다.
 | `ollama` | `local` | `none` | `OLLAMA_DEFAULT_MODEL` env; bare `ollama` requires explicit model |
 | `glm` | `direct_api` | `api_key` (`ZAI_API_KEY`) | current Z.ai direct path |
 | `glm-coding` | `direct_api` | `api_key` (`ZAI_API_KEY`) | Z.ai coding-plan direct path |
-| `claude-api` | `direct_api` | `api_key` (`ANTHROPIC_API_KEY`) | direct Anthropic API |
-| `codex-api` | `direct_api` | `api_key` (`OPENAI_API_KEY`) | direct OpenAI/Codex-family API |
-| `gemini-api` | `direct_api` | `vertex_adc` first, `GEMINI_API_KEY` fallback | canonical Gemini direct path |
-| `kimi-api` | `direct_api` | `api_key` (`KIMI_API_KEY_SB`, fallback `KIMI_API_KEY`) | direct Moonshot API |
+| `claude` | `direct_api` | `api_key` (`ANTHROPIC_API_KEY`) | direct Anthropic API |
+| `gemini` | `direct_api` | `vertex_adc` first, `GEMINI_API_KEY` fallback | canonical Gemini direct path |
+| `kimi` | `direct_api` | `api_key` (`KIMI_API_KEY`) | direct Kimi API from OAS registry |
 | `openrouter` | `direct_api` | `api_key` (`OPENROUTER_API_KEY`) | OpenRouter aggregation |
-| `claude` | `cli_agent` | `cli_cached_login` | Claude Code / CLI runtime |
-| `codex` | `cli_agent` | `cli_cached_login` | Codex CLI runtime |
-| `gemini` | `cli_agent` | `cli_cached_login` | Gemini CLI runtime |
-| `kimi` | `cli_agent` | `cli_cached_login` | Kimi CLI runtime |
+| `claude_code` | `cli_agent` | `cli_cached_login` | Claude Code / CLI runtime |
+| `codex_cli` | `cli_agent` | `cli_cached_login` | Codex CLI runtime |
+| `gemini_cli` | `cli_agent` | `cli_cached_login` | Gemini CLI runtime |
+| `kimi_cli` | `cli_agent` | `cli_cached_login` | Kimi CLI runtime |
 
 ## Voice Adapters
 
@@ -56,23 +56,20 @@ OAS-owned provider/catalog truth와 MASC-local runtime overlay로 분리한다.
 
 ## Direct API Policy
 
-- `claude-api:<model>`
+- `claude:<model>`
   - direct Anthropic path
   - requires `ANTHROPIC_API_KEY`
-- `codex-api:<model>` or `openai:<model>`
-  - direct OpenAI path
-  - requires `OPENAI_API_KEY`
-- `gemini-api:<model>` or legacy `gemini:<model>`
+- `openrouter:<model>`
+  - OpenRouter aggregation path
+  - requires `OPENROUTER_API_KEY`
+- `gemini:<model>`
   - resolves auth in this order:
     1. `GOOGLE_CLOUD_PROJECT` + ADC
     2. `GEMINI_API_KEY`
     3. actionable error
-- `kimi-api:<model>`
-  - direct Moonshot API path
-  - requires `KIMI_API_KEY_SB` (primary) or `KIMI_API_KEY` (fallback)
-- `openrouter:<model>`
-  - OpenRouter aggregation path
-  - requires `OPENROUTER_API_KEY`
+- `kimi:<model>`
+  - direct Kimi API path from OAS registry
+  - requires `KIMI_API_KEY`
 - `glm:<model>`
   - Z.ai general direct path
   - requires `ZAI_API_KEY`
@@ -80,7 +77,7 @@ OAS-owned provider/catalog truth와 MASC-local runtime overlay로 분리한다.
   - Z.ai coding-plan direct path
   - requires `ZAI_API_KEY`
 
-`gemini-api` Vertex path uses:
+`gemini` Vertex path uses:
 
 - `GOOGLE_CLOUD_PROJECT`
 - `GOOGLE_CLOUD_LOCATION` default `global`
@@ -115,20 +112,19 @@ Current canonical CLI contracts:
 ## Default Swarm Policy
 
 - default worker substrate: managed by cascade
-- `claude`, `codex`, `gemini`, `kimi` are explicit opt-in workers
+- `claude_code`, `codex_cli`, `gemini_cli`, `kimi_cli` are explicit opt-in workers
 - direct API adapters are for:
   - keeper/always-on/MDAL/direct reasoning paths
   - not the default swarm substrate
 
 ## Compatibility
 
-- legacy direct aliases remain supported:
-  - `anthropic:<model>` -> `claude-api`
-  - `google:<model>` -> `gemini-api`
-  - `gemini:<model>` -> `gemini-api`
-  - `moonshot:<model>` -> `kimi-api`
-- CLI names remain simple:
-  - `claude`
-  - `codex`
-  - `gemini`
-  - `kimi`
+- provider labels are resolved through OAS registry/binding aliases first.
+- historical display labels such as `kimi-api` are normalized only as
+  compatibility labels; they do not carry separate endpoint or auth truth in
+  MASC.
+- CLI names use the registry ids:
+  - `claude_code`
+  - `codex_cli`
+  - `gemini_cli`
+  - `kimi_cli`

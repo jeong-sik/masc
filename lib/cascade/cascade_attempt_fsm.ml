@@ -158,26 +158,27 @@ let sdk_error_is_model_access_denied (err : Agent_sdk.Error.sdk_error) =
     true
   | _ -> false
 
-let moonshot_auth_hint_marker = "Moonshot returned 401"
-let openai_compat_not_found_hint_marker =
-  "OpenAI-compatible endpoint returned 404"
-
-let is_moonshot_provider (provider_cfg : Llm_provider.Provider_config.t) =
-  String_util.contains_substring_ci provider_cfg.base_url "moonshot.ai"
-  || String.starts_with ~prefix:"kimi" provider_cfg.model_id
+let provider_auth_hint_marker = "Provider auth returned 401"
+let openai_compat_not_found_hint_marker = "OpenAI-compatible endpoint returned 404"
 
 let cascade_name_to_string = Cascade_error_classify.cascade_name_to_string
 
-let resolve_kimi_api_key_env_name ~cascade_name =
+let resolve_provider_api_key_env_name ~cascade_name ~provider_cfg =
   let cascade_name = cascade_name_to_string cascade_name in
-  let fallback_env = "KIMI_API_KEY_SB" in
+  let provider_name =
+    Llm_provider.Provider_registry.provider_name_of_config provider_cfg
+  in
+  let fallback_env =
+    Llm_provider.Provider_config.default_api_key_env provider_cfg.kind
+    |> Option.value ~default:""
+  in
   let resolve_from_overrides overrides =
     let find_non_empty key =
       match List.assoc_opt key overrides with
       | Some value when String.trim value <> "" -> Some value
       | _ -> None
     in
-    match find_non_empty "kimi" with
+    match find_non_empty provider_name with
     | Some env_name -> env_name
     | None ->
       (match find_non_empty "*" with
@@ -203,10 +204,10 @@ let enrich_sdk_error ~cascade_name
   in
   match err with
   | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message })
-    when is_moonshot_provider provider_cfg ->
+    when not (Llm_provider.Provider_config.is_subprocess_cli provider_cfg.kind) ->
     let env_name =
-      match resolve_kimi_api_key_env_name ~cascade_name with
-      | "" -> "configured kimi API key env"
+      match resolve_provider_api_key_env_name ~cascade_name ~provider_cfg with
+      | "" -> "configured provider API key env"
       | value -> value
     in
     let detail =
@@ -214,14 +215,14 @@ let enrich_sdk_error ~cascade_name
         Printf.sprintf "%s is empty or unset in this process" env_name
       else
         Printf.sprintf
-          "%s was loaded and the auth header was populated; verify that it is a valid Moonshot API key"
+          "%s was loaded and the auth header was populated; verify that it is valid for the configured provider"
           env_name
     in
     Agent_sdk.Error.Api
       (Llm_provider.Retry.AuthError
          {
            message =
-             append_hint message moonshot_auth_hint_marker detail;
+             append_hint message provider_auth_hint_marker detail;
          })
   | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message })
     when retry_message_looks_like_not_found message ->

@@ -1450,41 +1450,13 @@ let make_openai_compat_provider_cfg
     ()
 ;;
 
-let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
-  with_temp_masc_config
-    {|
-[providers.kimi]
-protocol = "openai-http"
-endpoint = "https://api.moonshot.ai/v1"
-
-[providers.kimi.credentials]
-type = "env"
-key = "KIMI_API_KEY"
-
-[models.kimi-k2]
-api-name = "kimi-k2.5"
-max-context = 131072
-tools-support = true
-streaming = true
-
-[kimi.kimi-k2]
-is-default = true
-max-concurrent = 1
-
-[tier.keeper_unified]
-members = ["kimi.kimi-k2"]
-strategy = "failover"
-
-[tier-group.keeper_unified]
-tiers = ["keeper_unified"]
-strategy = "priority_tier"
-fallback = true
-|}
-  @@ fun () ->
+let test_enrich_sdk_error_for_provider_auth_includes_env_hint () =
   let provider_cfg =
-    make_openai_compat_provider_cfg
-      ~model_id:"kimi-k2.5"
-      ~base_url:"https://api.moonshot.ai/v1"
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Kimi
+      ~model_id:"kimi-for-coding"
+      ~base_url:"https://api.kimi.com/coding"
+      ~request_path:"/v1/messages"
       ~api_key:"sk-test"
       ()
   in
@@ -1687,7 +1659,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
         -> Alcotest.skip ()
     in
     let primary_key = "anthropic_open_13318" in
-    let fallback_key = "moonshot_fallback_13318" in
+    let fallback_key = "kimi_fallback_13318" in
     with_temp_masc_config
       (declarative_http_profile_toml
          ~profile:"breaker_probe_13318"
@@ -2635,12 +2607,12 @@ let make_openrouter_provider_cfg ?(model_id = "anthropic/claude-3.5") () =
     ()
 ;;
 
-let make_kimi_provider_cfg ?(model_id = "kimi-k2.5") () =
+let make_kimi_provider_cfg ?(model_id = "kimi-for-coding") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~kind:Llm_provider.Provider_config.Kimi
     ~model_id
-    ~base_url:"https://api.moonshot.ai/v1"
-    ~request_path:"/chat/completions"
+    ~base_url:"https://api.kimi.com/coding"
+    ~request_path:"/v1/messages"
     ()
 ;;
 
@@ -2747,7 +2719,7 @@ let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
     model_label
 ;;
 
-let test_cascade_provider_labels_detect_kimi_from_endpoint_metadata () =
+let test_cascade_provider_labels_detect_kimi_from_kind_metadata () =
   let provider_name =
     Masc_mcp.Cascade_legacy_runner.provider_name_of_config (make_kimi_provider_cfg ())
   in
@@ -2755,7 +2727,7 @@ let test_cascade_provider_labels_detect_kimi_from_endpoint_metadata () =
     Masc_mcp.Cascade_legacy_runner.model_label_of_config (make_kimi_provider_cfg ())
   in
   Alcotest.(check string) "kimi provider name" "kimi" provider_name;
-  Alcotest.(check string) "kimi model label" "kimi:kimi-k2.5" model_label
+  Alcotest.(check string) "kimi model label" "kimi:kimi-for-coding" model_label
 ;;
 
 let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy () =
@@ -6342,9 +6314,9 @@ let () =
             `Quick
             test_cascade_provider_labels_preserve_registered_openai_compat_family
         ; Alcotest.test_case
-            "cascade provider labels detect kimi from endpoint metadata"
+            "cascade provider labels detect kimi from kind metadata"
             `Quick
-            test_cascade_provider_labels_detect_kimi_from_endpoint_metadata
+            test_cascade_provider_labels_detect_kimi_from_kind_metadata
         ; Alcotest.test_case
             "sdk_error_is_hard_quota detects Gemini CLI wrapper"
             `Quick
@@ -6419,9 +6391,9 @@ let () =
             `Quick
             test_fallback_class_labels_resumable_cli_session
         ; Alcotest.test_case
-            "Moonshot auth errors include configured env hint"
+            "provider auth errors include configured env hint"
             `Quick
-            test_enrich_sdk_error_for_moonshot_auth_includes_env_hint
+            test_enrich_sdk_error_for_provider_auth_includes_env_hint
         ; Alcotest.test_case
             "OpenAI-compatible 404 errors include endpoint hint"
             `Quick

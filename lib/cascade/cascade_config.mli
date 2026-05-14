@@ -534,8 +534,7 @@ val resolve_ollama_max_concurrent :
   int option
 (** Per-cascade override for the HTTP-probe-capable provider's
     client-capacity registration default.  The caller in
-    {!Keeper_turn_driver} consults
-    {!Provider_adapter.is_http_probe_capable_kind} and registers
+    {!Keeper_turn_driver} consults provider-kind probe capability and registers
     matching cfgs through {!Cascade_client_capacity.register}.
     [None] means "use the literal default of 1". *)
 

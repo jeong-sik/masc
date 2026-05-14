@@ -5,6 +5,7 @@
 
 module L = Cascade_attempt_liveness
 module Cfg = Cascade_attempt_liveness_config
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 exception Liveness_kill of L.failure
 
@@ -33,25 +34,36 @@ let mode (t : t) : Cfg.mode = t.mode
 let public_runtime_provider_label = "runtime"
 let public_other_provider_label = "other"
 
+let normalize_provider_label label = String.trim label |> String.lowercase_ascii
+
+let provider_prefix raw =
+  match String.index_opt raw ':' with
+  | Some idx when idx > 0 -> String.sub raw 0 idx
+  | _ -> raw
+;;
+
+let public_known_provider_label label =
+  let normalized = normalize_provider_label label in
+  if normalized = ""
+  then None
+  else
+    match Runtime_binding.find normalized with
+    | Some binding -> Some binding.Runtime_binding.id
+    | None ->
+      (match Llm_provider.Capabilities.capabilities_for_provider_label normalized with
+       | Some _ -> Some normalized
+       | None -> None)
+;;
+
 let public_provider_label_of_raw raw =
   let raw = String.trim raw in
   if raw = "" || String.equal raw public_runtime_provider_label
   then public_runtime_provider_label
   else
-    match Provider_adapter.provider_of_model_label raw with
-    | "unknown" ->
-      let prefix =
-        match String.index_opt raw ':' with
-        | Some idx when idx > 0 -> String.sub raw 0 idx
-        | _ -> raw
-      in
-      (match Provider_adapter.resolve_direct_canonical_name prefix with
-       | Some canonical ->
-         (match Provider_adapter.provider_of_model_label (canonical ^ ":runtime") with
-          | "unknown" -> public_other_provider_label
-          | provider -> provider)
-       | None -> public_other_provider_label)
-    | provider -> provider
+    match public_known_provider_label (provider_prefix raw) with
+    | Some provider -> provider
+    | None -> public_other_provider_label
+;;
 
 let create
       ~mode

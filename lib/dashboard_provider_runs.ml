@@ -79,11 +79,23 @@ module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let normalize_label value = String.trim value |> String.lowercase_ascii
 
+let binding_represents_local_openai_runtime (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.kind, binding.Runtime_binding.auth with
+  | Llm_provider.Provider_config.OpenAI_compat, Runtime_binding.No_auth ->
+    Option.value ~default:false
+      (Option.map
+         (fun base_url ->
+           Uri.of_string base_url |> Uri.host
+           |> Masc_network_defaults.is_loopback_host_opt)
+         (trim_nonempty binding.Runtime_binding.base_url))
+  | _ -> false
+
 let binding_labels (binding : Runtime_binding.t) =
   let id = binding.Runtime_binding.id in
   let dashed_id = String.map (function '_' -> '-' | c -> c) id in
   let local_aliases =
-    if String.equal id Provider_adapter.cn_llama then [ "llama.cpp"; "llamacpp" ]
+    if binding_represents_local_openai_runtime binding then
+      [ "llama.cpp"; "llamacpp" ]
     else []
   in
   id :: dashed_id :: binding.Runtime_binding.aliases @ local_aliases

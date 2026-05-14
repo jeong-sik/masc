@@ -95,7 +95,7 @@ let test_validate_rejects_unsupported_provider () =
       let joined = String.concat " | " errors in
       check bool "unsupported provider surfaced" true
         (contains_substring joined
-           "snapshot provider 'anthropic' (canonical 'claude-api') is not supported")
+           "snapshot provider 'anthropic' (canonical 'anthropic') is not supported")
 
 let test_load_rejects_malformed_jsonl () =
   let dir = Filename.temp_file "tool-call-replay" ".dir" in

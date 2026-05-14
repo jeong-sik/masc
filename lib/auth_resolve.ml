@@ -90,12 +90,12 @@ let resolve ~base_path ~keeper_id ~provider_kind
     | None ->
         (* Providers requiring per-keeper bridging cannot accept the shared
            [MASC_MCP_TOKEN] fallback: their bound-actor runtime MCP tools need
-           a per-keeper raw bearer. Codex CLI is the current canonical case
-           (cached login → no per-request headers), and the capability flag
-           on its adapter is the SSOT. RFC-0058 §2.4: capability, not match. *)
-        if Provider_adapter
-           .requires_per_keeper_bridging_for_bound_actor_tools_for_kind
-             provider_kind
+           a per-keeper raw bearer. Dispatch by local tool-delivery policy,
+           not by provider name. RFC-0058 §2.4: capability, not match. *)
+        if
+          Provider_tool_support
+          .provider_kind_requires_per_keeper_bridging_for_bound_actor_tools
+            provider_kind
         then Error (Bound_actor_provider_mismatch { provider_kind })
         else (
           match first_nonempty_env [ "MASC_MCP_TOKEN" ] with

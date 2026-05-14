@@ -9,7 +9,48 @@ type process_result =
   ; stderr : string
   }
 
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+
 let tail_display_max_chars = 4000
+
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+;;
+
+let auth_env_keys_of_binding (binding : Runtime_binding.t) =
+  let auth_env =
+    match binding.Runtime_binding.auth with
+    | Runtime_binding.Api_key_env env | Runtime_binding.Setup_token_env env -> [ env ]
+    | Runtime_binding.No_auth
+    | Runtime_binding.Cli_cached_login
+    | Runtime_binding.Oauth_cached_login
+    | Runtime_binding.File _
+    | Runtime_binding.Exec _ ->
+      []
+  in
+  binding.Runtime_binding.api_key_env :: auth_env
+  |> List.filter_map trim_nonempty
+  |> Json_util.dedupe_keep_order
+;;
+
+let auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.t) =
+  match Runtime_binding.binding_for_provider_config cfg with
+  | Some binding -> auth_env_keys_of_binding binding
+  | None -> Option.to_list (Llm_provider.Provider_config.default_api_key_env cfg.kind)
+;;
+
+let all_provider_auth_env_keys () =
+  Runtime_binding.all ()
+  |> List.concat_map auth_env_keys_of_binding
+  |> List.sort_uniq String.compare
+;;
+
+let provider_id_of_config (cfg : Llm_provider.Provider_config.t) =
+  match Runtime_binding.binding_for_provider_config cfg with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
+;;
 
 let tail_text ?(max_chars = tail_display_max_chars) text =
   let len = String.length text in
@@ -108,7 +149,7 @@ let rewrite_spec_for_container (spec : Worker_execution_spec.t) =
 
 let allowlisted_env_pairs () =
   let keys =
-    Provider_adapter.all_auth_env_keys ()
+    all_provider_auth_env_keys ()
     @ [ "GOOGLE_CLOUD_PROJECT"
       ; "GOOGLE_CLOUD_LOCATION"
       ; Env_config_core.storage_type_env_key
@@ -221,7 +262,15 @@ let auth_requirements_of_model_label model_label =
   match Cascade_config.parse_model_string model_label with
   | None -> Ok []
   | Some cfg ->
-    let keys = Provider_adapter.docker_auth_env_keys_of_provider_config cfg in
+    let keys =
+      match cfg.Llm_provider.Provider_config.kind with
+      | Llm_provider.Provider_config.OpenAI_compat ->
+        let uri = Uri.of_string cfg.Llm_provider.Provider_config.base_url in
+        if Masc_network_defaults.is_loopback_host_opt (Uri.host uri)
+        then []
+        else auth_env_keys_of_provider_config cfg
+      | _ -> auth_env_keys_of_provider_config cfg
+    in
     let missing =
       List.filter
         (fun key ->
@@ -233,10 +282,7 @@ let auth_requirements_of_model_label model_label =
     if missing = []
     then Ok keys
     else (
-      let kind_name =
-        Provider_adapter.cascade_prefix_of_provider_kind
-          cfg.Llm_provider.Provider_config.kind
-      in
+      let kind_name = provider_id_of_config cfg in
       Error
         (Printf.sprintf
            "%s Docker workers require %s"

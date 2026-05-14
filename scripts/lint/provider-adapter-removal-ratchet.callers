@@ -1,50 +1,13 @@
-# Provider_adapter caller baseline.
-#
-# Regenerate only when a PR removes callers:
-#   bash scripts/lint/provider-adapter-removal-ratchet.sh --regenerate
-#
-# Policy: the set may shrink, but it must not grow.
-lib/auto_responder.ml
-lib/autoresearch.ml
-lib/cascade_catalog_validator.ml
 lib/cascade/cascade_agent_context.ml
-lib/cascade/cascade_attempt_liveness_observer.ml
-lib/cascade/cascade_client_capacity.ml
-lib/cascade/cascade_client_capacity.mli
 lib/cascade/cascade_config.ml
-lib/cascade/cascade_config.mli
-lib/cascade/cascade_declarative_adapter.ml
-lib/cascade/cascade_error_classify.ml
-lib/cascade/cascade_health_tracker.ml
-lib/cascade/cascade_legacy_runner.ml
-lib/cascade/cascade_metrics.ml
 lib/cascade/cascade_model_resolve.ml
-lib/cascade/cascade_model_resolve.mli
-lib/cascade/cascade_oas_runner.ml
-lib/cascade/cascade_runtime.ml
 lib/cascade/cascade_runtime_candidate.ml
-lib/cascade/cascade_transport.ml
-lib/cascade_decl/cascade_declarative_types.ml
-lib/dashboard_provider_runs.ml
-lib/notify.ml
-lib/provider_kind_resolver.ml
+lib/cascade/cascade_runtime.ml
 lib/provider_tool_support.ml
-lib/provider_tool_support.mli
 lib/spawn.ml
-lib/tool_autoresearch.ml
-lib/tool_call_replay_harness.ml
-lib/tool_inline_dispatch.ml
-lib/tool_local_runtime_bench.ml
-lib/voice/voice_bridge.ml
-lib/voice/voice_bridge_core.ml
-lib/worker_oas.ml
-lib/worker_runtime_docker.ml
-test/test_auto_responder_coverage.ml
 test/test_cascade_model_resolve.ml
-test/test_cascade_strategy.ml
 test/test_keeper_runtime_manifest.ml
-test/test_mention_coverage.ml
 test/test_oas_worker.ml
 test/test_provider_prefix_boundary.ml
-test/test_spawn.ml
 test/test_spawn_coverage.ml
+test/test_spawn.ml

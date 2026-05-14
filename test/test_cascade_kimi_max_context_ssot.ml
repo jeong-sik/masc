@@ -1,6 +1,6 @@
 (* test/test_cascade_kimi_max_context_ssot.ml
 
-   #9953: Verify [Cascade_config.make_kimi_config] resolves
+   #9953: Verify [Cascade_config.parse_model_string] resolves
    [max_context] from the OAS [Provider_runtime_binding] SSOT
    rather than a drifted local constant.
 
@@ -40,13 +40,13 @@ let test_parse_model_string_uses_oas_ssot () =
        (expected a Provider_config with max_context from OAS SSOT)"
   | Some cfg ->
     Alcotest.(check (option int))
-      "make_kimi_config resolves max_context from OAS capabilities SSOT \
+      "Kimi config resolves max_context from OAS capabilities SSOT \
        (no local 256_000 drift)"
       (Some expected) cfg.max_context
 
 (* Regression guard: the drifted constant must be gone. If a
    future refactor re-introduces a literal 256_000 in this
-   resolver path, the [make_kimi_config] output would disagree
+   resolver path, the parsed Kimi config would disagree
    with OAS and reopen #9953. *)
 let test_no_local_256000_literal () =
   Unix.putenv "KIMI_API_KEY" "sk-test-9953";
@@ -65,7 +65,7 @@ let () =
           Alcotest.test_case "publishes max_context" `Quick
             test_oas_ssot_publishes_max_context;
         ] );
-      ( "make_kimi_config",
+      ( "kimi_config",
         [
           Alcotest.test_case "uses OAS SSOT value" `Quick
             test_parse_model_string_uses_oas_ssot;

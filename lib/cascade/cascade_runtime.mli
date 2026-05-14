@@ -14,6 +14,7 @@
 val fallback_context_window : int
 val cascade_config_path : unit -> string option
 val provider_name_of_label : string -> string option
+val local_model_label : string -> string
 val labels_require_local_discovery : string list -> bool
 val refresh_local_discovery_if_possible :
   ?sw:Eio.Switch.t ->
@@ -30,6 +31,7 @@ val clamp_context_for_pure_local_labels :
 val resolve_primary_model_id : string list -> string
 val default_local_model_label_and_id : unit -> string * string
 val ensure_api_keys_for_labels : string list -> (unit, string) result
+val has_execution_model_config : unit -> bool
 val default_model_strings :
   cascade_name:Keeper_cascade_profile.runtime_name -> string list
 val models_of_cascade_name_result :

@@ -121,10 +121,11 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
       ~(provider_cfg : Llm_provider.Provider_config.t)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
   =
-  (* RFC-0058 §2.4: dispatch by adapter capability, not provider name. *)
+  (* RFC-0058 §2.4: dispatch by local tool-delivery policy, not provider name. *)
   if
     not
-      (Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
+      (Provider_tool_support
+       .provider_requires_per_keeper_bridging_for_bound_actor_tools
          provider_cfg)
   then false
   else (

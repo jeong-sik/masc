@@ -47,6 +47,27 @@ let generate_loop_id () = Random_id.prefixed ~prefix:"ar-" ~bytes:4
 let option_first_some left right =
   match left with Some _ -> left | None -> right
 
+let autoresearch_runtime_name () =
+  Keeper_cascade_profile.Runtime_name
+    (Keeper_cascade_profile.cascade_name_for_use
+       Keeper_cascade_profile.Autoresearch)
+
+let default_model_label_result () =
+  match
+    Cascade_runtime.default_model_strings
+      ~cascade_name:(autoresearch_runtime_name ())
+  with
+  | label :: _ -> Ok label
+  | [] -> Error "autoresearch cascade resolved no default model labels"
+
+let default_model_provider_prefix () =
+  match default_model_label_result () with
+  | Ok label -> (
+    match Cascade_runtime.provider_name_of_label label with
+    | Some provider -> provider
+    | None -> "auto")
+  | Error _ -> "auto"
+
 (* ================================================================ *)
 (* Re-exports: Serde                                                 *)
 (* ================================================================ *)
@@ -140,9 +161,10 @@ let generate_code_change = Autoresearch_codegen.generate_code_change
 let create_state ~goal ~metric_fn ?model_model ?author ~target_file ?target_score
     ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn
     ?(lower_is_better = false) ~workdir () =
-  let model_model = match model_model with
+  let model_model =
+    match model_model with
     | Some m -> m
-    | None -> Provider_adapter.default_model_provider_prefix_result () |> Result.value ~default:"auto"
+    | None -> default_model_provider_prefix ()
   in
   let now = Time_compat.now () in
   let patience = match patience with

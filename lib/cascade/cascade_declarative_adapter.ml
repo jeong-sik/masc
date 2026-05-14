@@ -11,6 +11,8 @@
 
 open Cascade_declarative_types
 
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+
 type adapter_error =
   | Provider_not_found of string
   | Model_not_found of string
@@ -48,14 +50,36 @@ let err (e : adapter_error) : adapter_error list = [ e ]
 
 (* --- Provider resolution --- *)
 
+let runtime_binding_id label =
+  match Runtime_binding.find label with
+  | Some binding -> Some binding.Runtime_binding.id
+  | None -> None
+;;
+
 let resolve_provider_prefix (provider_id : string) : string option =
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-  | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
+  match runtime_binding_id provider_id with
+  | Some _ as found -> found
   | None ->
     let normalized = normalize_id provider_id in
-    match Provider_adapter.resolve_adapter_by_cascade_prefix normalized with
-    | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
-    | None -> None
+    runtime_binding_id normalized
+;;
+
+let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
+  match Runtime_binding.binding_for_provider_config cfg with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
+;;
+
+let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
+  match cfg.kind with
+  | Llm_provider.Provider_config.OpenAI_compat
+    when Llm_provider.Provider_config.is_local cfg ->
+    let base_url = String.trim cfg.base_url in
+    if base_url = ""
+    then provider_label_of_config cfg
+    else Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg) cfg.model_id base_url
+  | _ -> provider_label_of_config cfg
+;;
 
 let find_provider (cfg : cascade_config) (provider_id : string) :
     cascade_provider option =
@@ -441,7 +465,7 @@ let build_profile_from_tier_group (cfg : cascade_config)
   let provider_configs = List.concat resolved_configs_by_tier in
   let tier_member_keys =
     List.map
-      (List.map Provider_adapter.provider_health_key_of_config)
+      (List.map provider_health_key_of_config)
       resolved_configs_by_tier
   in
   let strategy = build_tier_group_strategy tg tier_member_keys in

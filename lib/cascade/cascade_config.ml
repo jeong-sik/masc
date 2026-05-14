@@ -33,6 +33,106 @@ let resolve_api_key_env = Cascade_config_loader.resolve_api_key_env
 (* ── Provider registry (SSOT: Provider_registry) ─────── *)
 
 let default_registry = Llm_provider.Provider_registry.default ()
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+
+let normalize_provider_id provider_id =
+  String.trim provider_id
+  |> String.lowercase_ascii
+  |> String.map (fun c -> if c = '-' then '_' else c)
+;;
+
+let runtime_binding_of_label label =
+  match Runtime_binding.find label with
+  | Some _ as found -> found
+  | None -> Runtime_binding.find (normalize_provider_id label)
+;;
+
+let provider_name_of_kind (kind : Llm_provider.Provider_config.provider_kind) =
+  let cfg =
+    Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()
+  in
+  Llm_provider.Provider_registry.provider_name_of_config cfg
+;;
+
+let cascade_prefix_of_provider_kind kind =
+  let provider_name = provider_name_of_kind kind in
+  match runtime_binding_of_label provider_name with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> provider_name
+;;
+
+let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
+  match Runtime_binding.binding_for_provider_config cfg with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
+;;
+
+let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
+  match cfg.kind with
+  | Llm_provider.Provider_config.OpenAI_compat
+    when Llm_provider.Provider_config.is_local cfg ->
+    let base_url = String.trim cfg.base_url in
+    if base_url = ""
+    then provider_label_of_config cfg
+    else Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg) cfg.model_id base_url
+  | _ -> provider_label_of_config cfg
+;;
+
+let binding_auth_is_no_auth (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Api_key_env _
+  | Runtime_binding.Cli_cached_login
+  | Runtime_binding.Oauth_cached_login
+  | Runtime_binding.Setup_token_env _
+  | Runtime_binding.File _
+  | Runtime_binding.Exec _ -> false
+;;
+
+let binding_base_url_is_loopback (binding : Runtime_binding.t) =
+  let base_url = String.trim binding.Runtime_binding.base_url in
+  if base_url = ""
+  then false
+  else Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+;;
+
+let runtime_kind_of_binding (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.transport with
+  | Runtime_binding.Cli -> "cli_agent"
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+    if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+    then "local"
+    else "direct_api"
+;;
+
+let is_binding_local_openai_runtime (binding : Runtime_binding.t) =
+  binding.Runtime_binding.kind = Llm_provider.Provider_config.OpenAI_compat
+  && String.equal (runtime_kind_of_binding binding) "local"
+;;
+
+let default_local_openai_runtime_provider_id () =
+  Runtime_binding.all ()
+  |> List.find_opt is_binding_local_openai_runtime
+  |> Option.map (fun binding -> binding.Runtime_binding.id)
+;;
+
+let provider_name_matches_default_local_openai_runtime provider_name =
+  match default_local_openai_runtime_provider_id () with
+  | Some id -> String.equal (normalize_provider_id provider_name) (normalize_provider_id id)
+  | None -> false
+;;
+
+let provider_name_matches_kind_default provider_name kind =
+  String.equal
+    (normalize_provider_id provider_name)
+    (normalize_provider_id (provider_name_of_kind kind))
+;;
+
+let display_provider_name provider_name =
+  match runtime_binding_of_label provider_name with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> String.trim provider_name
+;;
 
 (* Build headers list with Authorization when api_key is present.
    Anthropic/Kimi use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
@@ -146,15 +246,7 @@ let nonempty_env name =
     if trimmed = "" then None else Some trimmed
   | None -> None
 
-let env_url_or ~env ~default =
-  match nonempty_env env with
-  | Some url -> url
-  | None -> default
-
 let kimi_provider_name = "kimi"
-let moonshot_base_url_env = "KIMI_BASE_URL"
-let moonshot_api_key_env = "KIMI_API_KEY_SB"
-let moonshot_default_base_url = "https://api.moonshot.ai/v1"
 
 (* #9953: Resolve Kimi max_context from OAS runtime binding truth.
 
@@ -188,63 +280,6 @@ let resolve_kimi_max_context resolved_model_id =
         | Some entry -> entry.Provider_registry.max_context
         | None -> 0))
 
-let is_kimi_provider provider_name =
-  String.equal provider_name kimi_provider_name
-
-let moonshot_api_url () =
-  env_url_or ~env:moonshot_base_url_env ~default:moonshot_default_base_url
-
-let moonshot_request_path () =
-  normalize_openai_compat_request_path
-    ~base_url:(moonshot_api_url ())
-    ~request_path:Masc_network_defaults.openai_chat_completions_path
-
-let resolve_kimi_api_key_env ~api_key_env_overrides =
-  resolve_effective_api_key_env
-    ~api_key_env_overrides
-    ~provider_name:kimi_provider_name
-    ~registry_default:moonshot_api_key_env
-
-let kimi_is_available ~api_key_env_overrides =
-  match resolve_kimi_api_key_env ~api_key_env_overrides with
-  | "" -> false
-  | env_name -> Option.is_some (nonempty_env env_name)
-    || Option.is_some (nonempty_env "KIMI_API_KEY")
-
-let make_kimi_config ~temperature ~max_tokens ?system_prompt
-    ?(api_key_env_overrides = []) ?supports_tool_choice_override
-    ?keep_alive ?num_ctx model_id =
-  let effective_api_key_env =
-    resolve_kimi_api_key_env ~api_key_env_overrides
-  in
-  let api_key =
-    match nonempty_env effective_api_key_env with
-    | Some value -> value
-    | None ->
-      (match nonempty_env "KIMI_API_KEY" with
-       | Some value -> value
-       | None -> "")
-  in
-  let headers = headers_with_auth ~kind:OpenAI_compat ~api_key in
-  let resolved_model_id =
-    resolve_auto_model_id kimi_provider_name model_id
-  in
-  Llm_provider.Provider_config.make
-    ~kind:OpenAI_compat
-    ~model_id:resolved_model_id
-    ~base_url:(moonshot_api_url ())
-    ~api_key
-    ~headers
-    ~request_path:(moonshot_request_path ())
-    ~temperature
-    ~max_tokens
-    ~max_context:(resolve_kimi_max_context resolved_model_id)
-    ?system_prompt
-    ?supports_tool_choice_override
-    ?keep_alive
-    ?num_ctx
-    ()
-
 (** Build a {!Llm_provider.Provider_config.t} from a registry entry. *)
 let make_registry_config ~temperature ~max_tokens ?system_prompt
     ?(api_key_env_overrides=[]) ?supports_tool_choice_override
@@ -266,12 +301,12 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
      inject provider-specific discovery so routing stays isolated by
      endpoint (e.g. ollama:auto must not pick up llama-server models). *)
   let discover =
-    if String.equal provider_name Provider_adapter.cn_ollama then
+    if provider_name_matches_kind_default provider_name Ollama then
       Some
         (fun () ->
           Llm_provider.Discovery.first_discovered_model_id_for_url
             defaults.base_url)
-    else if String.equal provider_name Provider_adapter.cn_llama then
+    else if provider_name_matches_default_local_openai_runtime provider_name then
       Some Llm_provider.Discovery.first_discovered_model_id
     else None
   in
@@ -281,7 +316,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
   in
   let resolved_model_id = model_resolution.resolved_model_id in
   let base_url =
-    if String.equal provider_name Provider_adapter.cn_llama then
+    if provider_name_matches_default_local_openai_runtime provider_name then
       (* Route to the endpoint that has this model; round-robin fallback *)
       match Llm_provider.Discovery.endpoint_for_model resolved_model_id with
       | Some url -> url
@@ -338,14 +373,6 @@ let parse_model_string
              model_id with
      | Some cfg -> Some cfg
      | None -> None)
-  | Some (provider_name, model_id) when is_kimi_provider provider_name ->
-    if kimi_is_available ~api_key_env_overrides then
-      Some
-        (make_kimi_config ~temperature ~max_tokens ?system_prompt
-           ~api_key_env_overrides ?supports_tool_choice_override
-           ?keep_alive ?num_ctx
-           model_id)
-    else None
   | _ ->
   (* Kind classification goes through [Provider_kind_resolver] — a sum-typed
      resolver that consults Provider_registry as SSOT and never flattens
@@ -410,16 +437,6 @@ let parse_weighted_entry_diag
              ?keep_alive ?num_ctx model_id with
      | Some c -> Ok c
      | None -> Error (Drop_invalid_syntax raw))
-  | Some (provider_name, model_id) when is_kimi_provider provider_name ->
-    if kimi_is_available ~api_key_env_overrides then
-      Ok
-        (make_kimi_config ~temperature ~max_tokens ?system_prompt
-           ~api_key_env_overrides
-           ?supports_tool_choice_override:entry.supports_tool_choice
-           ?keep_alive ?num_ctx
-           model_id)
-    else
-      Error (Drop_unavailable_scheme { model = raw; scheme = provider_name })
   | Some (provider_name, model_id) ->
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None ->
@@ -608,14 +625,6 @@ let parse_model_string_result
      | Some cfg -> Ok cfg
      | None ->
        Error (Printf.sprintf "invalid custom model spec %S: empty model after @" s))
-  | Some (provider_name, model_id) when is_kimi_provider provider_name ->
-    if kimi_is_available ~api_key_env_overrides:[] then
-      Ok (make_kimi_config ~temperature ~max_tokens ?system_prompt model_id)
-    else
-      Error
-        (Printf.sprintf "provider %S unavailable (missing env var %S)"
-           provider_name
-           (resolve_kimi_api_key_env ~api_key_env_overrides:[]))
   | Some (provider_name, model_id) ->
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None ->
@@ -794,7 +803,7 @@ let weighted_shuffle
     ["claude_code:auto"] and ["gemini_cli:auto"] remain independent. *)
 let provider_key_of_model_string s =
   match parse_model_string s with
-  | Some cfg -> Provider_adapter.provider_health_key_of_config cfg
+  | Some cfg -> provider_health_key_of_config cfg
   | None -> (
       match String.split_on_char ':' s with
       | provider :: _rest when String.trim provider <> "" -> String.trim provider
@@ -846,10 +855,7 @@ let order_weighted_entries
     in
     weighted_shuffle ~rand_int effective
 
-let normalize_decl_provider_id provider_id =
-  String.trim provider_id
-  |> String.lowercase_ascii
-  |> String.map (fun c -> if c = '-' then '_' else c)
+let normalize_decl_provider_id = normalize_provider_id
 
 let json_assoc_opt key = function
   | `Assoc fields -> List.assoc_opt key fields
@@ -879,12 +885,9 @@ let materialized_provider_endpoint json provider_id =
   | None -> None
 
 let direct_provider_cascade_prefix provider_id =
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-  | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
-  | None ->
-    Provider_adapter.resolve_adapter_by_cascade_prefix
-      (normalize_decl_provider_id provider_id)
-    |> Option.map Provider_adapter.cascade_prefix_of_adapter
+  match runtime_binding_of_label provider_id with
+  | Some binding -> Some binding.Runtime_binding.id
+  | None -> None
 
 let registry_provider_prefix provider_id =
   match Llm_provider.Provider_registry.find default_registry provider_id with
@@ -901,6 +904,20 @@ let openai_compatible_custom_model json provider_id api_name =
     Some (Printf.sprintf "custom:%s@%s" api_name (String.trim endpoint))
   | _ -> None
 
+let cascade_prefix_of_decl_protocol raw =
+  let kind =
+    match String.trim raw |> String.lowercase_ascii with
+    | "anthropic-cli" -> Some Llm_provider.Provider_config.Claude_code
+    | "anthropic-http" -> Some Llm_provider.Provider_config.Anthropic
+    | "openai-cli" -> Some Llm_provider.Provider_config.Codex_cli
+    | "openai-http" -> Some Llm_provider.Provider_config.OpenAI_compat
+    | "google-cli" -> Some Llm_provider.Provider_config.Gemini_cli
+    | "kimi-cli" -> Some Llm_provider.Provider_config.Kimi_cli
+    | "ollama-http" -> Some Llm_provider.Provider_config.Ollama
+    | _ -> None
+  in
+  Option.map cascade_prefix_of_provider_kind kind
+
 let materialized_member_model_string json provider_id api_name =
   match direct_provider_cascade_prefix provider_id with
   | Some prefix -> Some (Printf.sprintf "%s:%s" prefix api_name)
@@ -915,7 +932,7 @@ let materialized_member_model_string json provider_id api_name =
        match protocol with
        | Some "openai-http" -> openai_compatible_custom_model json provider_id api_name
        | Some protocol ->
-         Provider_adapter.cascade_prefix_of_declarative_protocol protocol
+         cascade_prefix_of_decl_protocol protocol
          |> Option.map (fun prefix -> Printf.sprintf "%s:%s" prefix api_name)
        | None -> None)
 
@@ -1085,14 +1102,12 @@ type selection_trace = {
 let display_model_string s =
   match split_provider_model s with
   | Some (provider_name, model_id) ->
-      Printf.sprintf "%s:%s"
-        (Provider_adapter.display_provider_name provider_name)
-        model_id
+      Printf.sprintf "%s:%s" (display_provider_name provider_name) model_id
   | None -> s
 
 let runtime_kind_of_provider_name provider_name =
-  match Provider_adapter.resolve_direct_adapter provider_name with
-  | Some adapter -> Some (Provider_adapter.string_of_runtime_kind adapter.runtime_kind)
+  match runtime_binding_of_label provider_name with
+  | Some binding -> Some (runtime_kind_of_binding binding)
   | None -> None
 
 (** Build a [candidate_info] for a model string given its config weight.
@@ -1145,7 +1160,7 @@ let candidate_info_of_weighted (e : Cascade_config_loader.weighted_entry) =
   let provider_name, display_provider_name, runtime_kind =
     match split_provider_model e.model with
     | Some (provider_name, _model_id) ->
-        let display_name = Provider_adapter.display_provider_name provider_name in
+        let display_name = display_provider_name provider_name in
         (Some provider_name, Some display_name,
          runtime_kind_of_provider_name provider_name)
     | None -> (None, None, None)

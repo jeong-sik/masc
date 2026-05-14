@@ -739,6 +739,7 @@ let config_for_label
 
 let codex_cli_prompt_arg_limit_bytes = 512 * 1024
 let codex_cli_min_retry_tokens = 4_096
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 type codex_cli_prompt_preflight = {
   prompt_bytes : int;
@@ -760,6 +761,15 @@ let codex_cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
         (of_int prompt_bytes)
       |> to_int)
 
+let provider_requires_argv_prompt_preflight provider_cfg =
+  match Runtime_binding.binding_for_provider_config provider_cfg with
+  | Some binding ->
+      (match binding.Runtime_binding.command with
+       | Some command -> String.equal command "codex"
+       | None -> false)
+  | None -> false
+;;
+
 let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
     : codex_cli_prompt_preflight option =
   (* RFC-0058 §2.4 — dispatch by adapter capability flag
@@ -769,9 +779,7 @@ let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string
      Adding a new vendor that needs the same preflight is now a TOML/
      adapter registry change, not a code change here. *)
   let requires_preflight =
-    match Provider_adapter.adapter_of_provider_config config.provider_cfg with
-    | Some adapter -> adapter.tool_policy.argv_prompt_preflight
-    | None -> false
+    provider_requires_argv_prompt_preflight config.provider_cfg
   in
   if not requires_preflight then None
   else

@@ -33,9 +33,8 @@ type capabilities =
     {!Llm_provider.Capabilities.capabilities} plus MASC's local
     tool-delivery projection.  Resolution order:
 
-    + Provider/model/catalog capability truth via
-      {!Provider_adapter.oas_capabilities_of_config}, which delegates to
-      OAS [Provider_runtime_binding].
+    + Provider/model/catalog capability truth via OAS
+      [Provider_runtime_binding].
     + CLI-agent normalisation: adapters with
       [runtime_kind = Cli_agent] (Claude Code / Codex CLI / Gemini CLI /
       Kimi CLI) force [supports_tools = false],
@@ -53,8 +52,8 @@ val oas_capabilities_of_config
        caps.supports_tools && caps.supports_tool_choice]
     - [supports_runtime_mcp_tools] / [supports_runtime_tool_events]:
       passthrough.
-    - [supports_runtime_mcp_http_headers]: queried via
-      [Provider_adapter.supports_runtime_mcp_http_headers_for_config]. *)
+    - [supports_runtime_mcp_http_headers]: queried via the local
+      provider-tool policy projection. *)
 val capabilities_of_config : Llm_provider.Provider_config.t -> capabilities
 
 (** [provider_supports_inline_tools cfg] is shorthand for
@@ -66,6 +65,25 @@ val provider_supports_inline_tools : Llm_provider.Provider_config.t -> bool
     hold.  HTTP-header support is {b not} required at this level —
     that gate is enforced by {!provider_supports_runtime_mcp_policy}. *)
 val provider_supports_runtime_mcp_lane : Llm_provider.Provider_config.t -> bool
+
+(** [provider_requires_per_keeper_bridging_for_bound_actor_tools cfg] is
+    MASC's local runtime-MCP transport policy projection for CLI providers that
+    cannot carry arbitrary request-scoped HTTP headers. *)
+val provider_requires_per_keeper_bridging_for_bound_actor_tools
+  :  Llm_provider.Provider_config.t
+  -> bool
+
+(** Kind-only variant for call sites that have not materialized a full
+    provider config yet. *)
+val provider_kind_requires_per_keeper_bridging_for_bound_actor_tools
+  :  Llm_provider.Provider_config.provider_kind
+  -> bool
+
+(** Kind-only fallback tolerance used by catalog validation for
+    keeper-bound runtime-MCP dispatch. *)
+val provider_kind_tolerates_bound_actor_fallback
+  :  Llm_provider.Provider_config.provider_kind
+  -> bool
 
 (** [runtime_mcp_policy_requires_http_headers policy] is true iff
     [policy.servers] contains at least one
@@ -79,9 +97,8 @@ val runtime_mcp_policy_requires_http_headers
 (** [runtime_mcp_policy_requires_unsupported_http_headers cfg policy]
     is true iff [policy] contains an HTTP header that [cfg] cannot
     carry.  This is stricter than
-    {!runtime_mcp_policy_requires_http_headers}: it consults the
-    adapter's identity-header carve-out via
-    {!Provider_adapter.accepts_runtime_mcp_http_header_for_config}.
+    {!runtime_mcp_policy_requires_http_headers}: it consults the local
+    provider-tool policy's identity-header carve-out.
 
     Example: [codex_cli] declares
     [supports_runtime_mcp_http_headers = false] (no general header

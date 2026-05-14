@@ -1,9 +1,7 @@
 (** Sum-typed provider-kind resolver for cascade model specs.
 
     Resolves a ["provider:model"] spec to a {!Provider_config.provider_kind}
-    via the {!Provider_registry} plus a tiny set of repo-local
-    compatibility shims for providers not yet present in the pinned OAS
-    registry.
+    via the {!Provider_registry}.
 
     This module exists to prevent a recurring anti-pattern where
     callers classify provider kind by substring match (e.g. [String.contains
@@ -21,9 +19,8 @@ type resolution =
       model_id : string;
       kind : Llm_provider.Provider_config.provider_kind;
     }
-      (** The provider prefix is known either in {!Provider_registry} or
-          via a repo-local compatibility provider, and the returned
-          [kind] is the authoritative classification. *)
+      (** The provider prefix is known in {!Provider_registry}, and the
+          returned [kind] is the authoritative classification. *)
   | Custom_url of { model_id : string; base_url : string }
       (** The spec uses the ["custom:model\@url"] form; kind is
           {i by contract} [OpenAI_compat] because that is the protocol
@@ -41,8 +38,7 @@ type resolution =
     Resolution order:
     1. Parse [provider_name:model_id] split (reject empty halves).
     2. If [provider_name = "custom"], delegate to custom-URL parser.
-    3. Otherwise consult built-in compatibility providers, then
-       {!Provider_registry.find}. The registered [kind] wins. No
+    3. Otherwise consult {!Provider_registry.find}. The registered [kind] wins. No
        substring heuristic ever overrides this.
     4. If the provider name is not known there, return [Unknown]
        with a diagnostic. Never silently default to [OpenAI_compat]. *)

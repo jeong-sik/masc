@@ -73,19 +73,18 @@ let test_oas_registry_binding_adds_generic_provider () =
   check string "provider label" "groq" (Adapter.provider_label_of_config cfg)
 ;;
 
-let test_kimi_direct_auth_accepts_primary_and_fallback_envs () =
-  with_env "KIMI_API_KEY_SB" None (fun () ->
-    with_env "KIMI_API_KEY" (Some "kimi-key") (fun () ->
-      check
-        bool
-        "kimi direct auth available via fallback env"
-        true
-        (Adapter.provider_auth_available "kimi");
-      check
-        (list string)
-        "kimi direct env keys"
-        [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
-        (Adapter.auth_env_keys_of_provider_kind Llm_provider.Provider_config.Kimi)))
+let test_kimi_direct_auth_uses_oas_env () =
+  with_env "KIMI_API_KEY" (Some "kimi-key") (fun () ->
+    check
+      bool
+      "kimi direct auth available via OAS env"
+      true
+      (Adapter.provider_auth_available "kimi");
+    check
+      (list string)
+      "kimi direct env keys"
+      [ "KIMI_API_KEY" ]
+      (Adapter.auth_env_keys_of_provider_kind Llm_provider.Provider_config.Kimi))
 ;;
 
 let test_provider_kind_string_uses_oas_ssot () =
@@ -124,28 +123,6 @@ let test_cascade_prefix_of_provider_kind_keeps_adapter_mapping () =
     (Adapter.cascade_prefix_of_provider_kind Llm_provider.Provider_config.Codex_cli)
 ;;
 
-let test_declarative_protocol_resolves_via_adapter_boundary () =
-  let check_protocol protocol expected =
-    check
-      (option string)
-      protocol
-      (Some expected)
-      (Adapter.cascade_prefix_of_declarative_protocol protocol)
-  in
-  check_protocol "anthropic-cli" "claude_code";
-  check_protocol "anthropic-http" "claude";
-  check_protocol "openai-cli" "codex_cli";
-  check_protocol "openai-http" "openai";
-  check_protocol "google-cli" "gemini_cli";
-  check_protocol "kimi-cli" "kimi_cli";
-  check_protocol "ollama-http" "ollama";
-  check
-    (option string)
-    "unknown protocol"
-    None
-    (Adapter.cascade_prefix_of_declarative_protocol "unknown-http")
-;;
-
 let test_auth_env_keys_of_provider_kind_defaults () =
   check
     (list string)
@@ -155,7 +132,7 @@ let test_auth_env_keys_of_provider_kind_defaults () =
   check
     (list string)
     "openai compat env keys"
-    [ "OPENAI_API_KEY" ]
+    []
     (Adapter.auth_env_keys_of_provider_kind Llm_provider.Provider_config.OpenAI_compat);
   check
     (list string)
@@ -398,10 +375,10 @@ let test_runtime_mcp_header_support_uses_declared_policy () =
 let test_provider_label_of_config_preserves_cli_vs_api_identity () =
   let kimi_api_cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"kimi-k2.5"
-      ~base_url:"https://api.moonshot.ai/v1"
-      ~request_path:"/chat/completions"
+      ~kind:Llm_provider.Provider_config.Kimi
+      ~model_id:"kimi-for-coding"
+      ~base_url:"https://api.kimi.com/coding"
+      ~request_path:"/v1/messages"
       ()
   in
   let kimi_cli_cfg =
@@ -741,14 +718,6 @@ let test_apply_wire_overlay_omits_auth_header_when_key_blank () =
 ;;
 
 let test_openai_compat_provider_identity_uses_endpoint_metadata () =
-  let kimi_endpoint_cfg =
-    Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"anything"
-      ~base_url:"https://api.moonshot.ai/v1/"
-      ~request_path:"/chat/completions"
-      ()
-  in
   let openai_endpoint_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -757,11 +726,6 @@ let test_openai_compat_provider_identity_uses_endpoint_metadata () =
       ~request_path:"/v1/chat/completions"
       ()
   in
-  check
-    string
-    "moonshot endpoint maps to kimi adapter"
-    "kimi"
-    (Adapter.provider_label_of_config kimi_endpoint_cfg);
   check
     string
     "model id alone does not imply kimi"
@@ -879,9 +843,9 @@ let () =
             `Quick
             test_oas_registry_binding_adds_generic_provider
         ; test_case
-            "kimi direct auth accepts fallback envs"
+            "kimi direct auth uses OAS env"
             `Quick
-            test_kimi_direct_auth_accepts_primary_and_fallback_envs
+            test_kimi_direct_auth_uses_oas_env
         ; test_case
             "provider kind string uses oas ssot"
             `Quick
@@ -890,10 +854,6 @@ let () =
             "cascade prefix keeps adapter mapping"
             `Quick
             test_cascade_prefix_of_provider_kind_keeps_adapter_mapping
-        ; test_case
-            "declarative protocol resolves via adapter boundary"
-            `Quick
-            test_declarative_protocol_resolves_via_adapter_boundary
         ; test_case
             "provider kind auth env defaults"
             `Quick

@@ -89,7 +89,8 @@ let record_codex_cli_omission_for_agent
   : unit
   =
   let provider_label =
-    Provider_adapter.cascade_prefix_of_provider_kind Llm_provider.Provider_config.Codex_cli
+    Llm_provider.Provider_config.string_of_provider_kind
+      Llm_provider.Provider_config.Codex_cli
   in
   match tools with
   | [] -> ()
@@ -411,12 +412,11 @@ let codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
       [Authorization] header — there is no fall-through to the inbound
       policy's non-masc headers, which were removed in step 1.
 
-   Invariant: this function is only reached from the dispatch site when
-   [Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_
-   for_config = true], i.e. the adapter cannot carry arbitrary per-
-   request HTTP headers.  Body is intentionally identical in semantics
-   to the prior [codex_runtime_mcp_policy_for_agent] — the rename
-   removes the provider-name leak from the dispatch site without
+   Invariant: this function is only reached from the dispatch site when the
+   provider-tool policy says per-keeper bridging is required, i.e. the runtime
+   cannot carry arbitrary per-request HTTP headers.  Body is intentionally
+   identical in semantics to the prior [codex_runtime_mcp_policy_for_agent] —
+   the rename removes the provider-name leak from the dispatch site without
    altering behavior.
 
    A future adapter with [requires_per_keeper_bridging = true] but
@@ -450,13 +450,12 @@ let runtime_mcp_policy_for_provider
     let trimmed = String.trim agent_name in
     if String.equal trimmed "" then None else Some trimmed
   in
-  (* Dispatch by capability flag from [Provider_adapter.tool_policy], not
-     by provider name (RFC-0058 §2.4).  [requires_per_keeper_bridging]
-     gates the strip-and-bridge path; Codex CLI is currently the only
-     adapter that returns [true]. *)
+  (* Dispatch by local tool-delivery policy, not by provider name
+     (RFC-0058 §2.4).  [requires_per_keeper_bridging] gates the
+     strip-and-bridge path. *)
   let requires_per_keeper_bridging =
-    Provider_adapter
-    .requires_per_keeper_bridging_for_bound_actor_tools_for_config
+    Provider_tool_support
+    .provider_requires_per_keeper_bridging_for_bound_actor_tools
       provider_cfg
   in
   match policy_opt, requires_per_keeper_bridging, agent_name with
@@ -632,7 +631,9 @@ let kimi_cli_auth_value (provider_cfg : Llm_provider.Provider_config.t) =
   | Some key -> Some key
   | None ->
     first_nonempty_env
-      (Provider_adapter.auth_env_keys_of_provider_kind Llm_provider.Provider_config.Kimi)
+      (Llm_provider.Provider_config.default_api_key_env
+         Llm_provider.Provider_config.Kimi
+       |> Option.to_list)
 ;;
 
 let kimi_cli_base_url () =
@@ -705,8 +706,8 @@ let resolve_tool_lane_for_oas_tools
     | _ -> []
   in
   let requires_per_keeper_bridging =
-    Provider_adapter
-    .requires_per_keeper_bridging_for_bound_actor_tools_for_config
+    Provider_tool_support
+    .provider_requires_per_keeper_bridging_for_bound_actor_tools
       provider_cfg
   in
   let codex_can_auth_keeper_bound_actor_tools =

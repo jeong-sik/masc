@@ -394,11 +394,12 @@ let record_response_content_quality_metric ~keeper_name
         ]
       ()
 
+let default_context_max = 0
 let context_max_of_telemetry
     (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
   | Some { effective_context_window = Some n; _ } when n > 0 -> n
-  | _ -> 0
+  | _ -> default_context_max
 
 let classify_usage_trust ?usage ~model ~telemetry () =
   let _ = model in

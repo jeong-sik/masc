@@ -16,6 +16,7 @@ Prometheus / Grafana files that live alongside the masc-mcp source so deployment
 | `keeper-turn-fsm-alerts.yml` | keeper turn FSM | alerts | `docs/observability/keeper-turn-fsm-metrics.md` |
 | `keeper-turn-fsm-slo.yml` | keeper turn FSM | recording rules | `docs/observability/keeper-turn-fsm-metrics.md` |
 | `grafana-dashboard-surface-dashboard.json` | dashboard IA | Grafana dashboard | `docs/observability/dashboard-surface-metrics.md` |
+| `auth-credential-alerts.yml` | auth credential surface | alerts | PR #15112 (`lib/auth.ml` doc comments + commit messages) |
 
 ## Domains
 
@@ -51,6 +52,14 @@ The two domains overlap *only* at `cascade_routing` — when the keeper FSM ente
 - `masc_cascade_strategy_decisions_total{kind="exhausted",cascade=...}` — cascade view
 
 Both should fire for the same turn; if only one fires the runtime path skipped a layer.
+
+### Auth credential surface
+
+Tracks the boot-time and runtime state of the bare-form keeper alias files written by `Auth.ensure_credential_alias` (PR-#10440) against the archive policy in `Auth.archive_bare_for_canonical` (PR-3b2). After PR #15112 the γ classifier distinguishes alive aliases (redirect stubs aimed at the canonical credential's UUID) from dead bares; the surface is refreshed every 60s by a periodic Eio fiber so mid-run regressions surface within one tick.
+
+Gauges: `masc_auth_bare_alias{state=alive|dead|no_bare}` — classifier counts. `state="dead" > 0` is the ping-pong regression alert hook. `masc_auth_archive_epochs` — current `.archive/<epoch>/` subdir count after the retention sweep. Counter: `masc_auth_archive_pruned_total` — cumulative epoch dirs removed.
+
+Producer code: `lib/auth.ml: classify_bare_for_canonical / bare_alias_audit / prune_archive / start_bare_alias_audit_fiber`, `lib/server/server_runtime_bootstrap.ml: startup_prune_auth_archive`, `lib/server/server_bootstrap_loops.ml` wiring. Alerts: `auth-credential-alerts.yml`.
 
 ## Apply
 

@@ -271,8 +271,10 @@ let run_try_provider
   | Ok config ->
     let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
     (* MASC stores one neutral runtime-lane budget; concrete provider/model
-       identities remain on the OAS side. *)
+       identities remain on the OAS side.  Prometheus receives only the public,
+       bounded provider bucket for TTFT/inter-chunk grouping. *)
     let candidate_key = Cascade_attempt_liveness_config.runtime_candidate_key in
+    let provider_label = Cascade_runtime_candidate.provider_label candidate in
     let liveness_observer_opt =
       match liveness_mode with
       | Cascade_attempt_liveness_config.Off -> None
@@ -282,9 +284,10 @@ let run_try_provider
           Cascade_attempt_liveness_config.budget_for_candidate ~candidate_key
         in
         Log.Misc.debug
-          "cascade_attempt_liveness: candidate=%s budget_source=%s ttft=%.1fs \
+          "cascade_attempt_liveness: candidate=%s provider=%s budget_source=%s ttft=%.1fs \
            inter_chunk=%.1fs wall=%.1fs"
           candidate_key
+          provider_label
           (Cascade_attempt_liveness_config.budget_source_label
              resolved_budget.source)
           resolved_budget.budget.Cascade_attempt_liveness.ttft_max
@@ -295,6 +298,7 @@ let run_try_provider
             ~mode:liveness_mode
             ~budget:resolved_budget.budget
             ~cascade_label:ctx.cascade_name
+            ~provider_label
             ~external_wait:(fun () ->
               Keeper_approval_queue.has_pending_for_keeper
                 ~keeper_name:ctx.keeper_name)

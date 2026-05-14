@@ -18,9 +18,16 @@ module Obs = Cascade_attempt_liveness_observer
 
 let mk_observer ?(mode = Cfg.Observe) ?(budget = L.bootstrap)
     ?(cascade = "test_cascade") ?(provider = "test_provider")
-    ?candidate_key ?(started_at = 0.0) () =
+    ?provider_label ?candidate_key ?(started_at = 0.0) () =
   ignore provider;
-  Obs.create ~mode ~budget ~cascade_label:cascade ?candidate_key ~started_at ()
+  Obs.create
+    ~mode
+    ~budget
+    ~cascade_label:cascade
+    ?provider_label
+    ?candidate_key
+    ~started_at
+    ()
 
 let public_provider = "runtime"
 
@@ -45,6 +52,23 @@ let observed_value cascade provider outcome =
     ]
 
 let stop = Agent_sdk.Types.MessageStop
+
+let histogram_count name labels =
+  Prometheus.metric_value_or_zero (name ^ "_count") ~labels ()
+
+let ttfb_count cascade provider =
+  histogram_count
+    Prometheus.metric_cascade_ttfb_seconds
+    [ ("cascade", cascade); ("provider", provider) ]
+
+let inter_chunk_count cascade provider =
+  histogram_count
+    Prometheus.metric_cascade_inter_chunk_seconds
+    [ ("cascade", cascade); ("provider", provider) ]
+
+let text_delta text =
+  Agent_sdk.Types.ContentBlockDelta
+    { index = 0; delta = Agent_sdk.Types.TextDelta text }
 
 (* -- Off mode: wrap_on_event returns the original ------------------ *)
 
@@ -138,6 +162,65 @@ let test_observe_done_completes () =
         (match Obs.current_state_for_test obs with
          | L.Success -> true
          | _ -> false)
+
+let test_observe_timing_histograms_use_bounded_provider_label () =
+  let cascade = "observe_provider_bucket_cascade" in
+  let provider = "openai" in
+  let obs =
+    mk_observer
+      ~mode:Cfg.Observe
+      ~cascade
+      ~provider_label:"openai:gpt-5"
+      ~started_at:(Time_compat.now () -. 1.0)
+      ()
+  in
+  let wrapped = Obs.wrap_on_event obs None in
+  match wrapped with
+  | None -> Alcotest.fail "Observe should return Some wrapper"
+  | Some f ->
+    let ttfb_before = ttfb_count cascade provider in
+    let inter_before = inter_chunk_count cascade provider in
+    f (text_delta "first");
+    f (text_delta "second");
+    let ttfb_after = ttfb_count cascade provider in
+    let inter_after = inter_chunk_count cascade provider in
+    Alcotest.(check (float 1e-6))
+      "TTFT histogram uses bounded provider bucket"
+      (ttfb_before +. 1.0)
+      ttfb_after;
+    Alcotest.(check (float 1e-6))
+      "inter-chunk histogram uses bounded provider bucket"
+      (inter_before +. 1.0)
+      inter_after
+
+let test_unknown_provider_label_buckets_other_not_raw () =
+  let cascade = "observe_other_provider_bucket_cascade" in
+  let raw_provider = "private-provider" in
+  let obs =
+    mk_observer
+      ~mode:Cfg.Observe
+      ~cascade
+      ~provider_label:(raw_provider ^ ":private-model")
+      ~started_at:0.0
+      ()
+  in
+  let wrapped = Obs.wrap_on_event obs None in
+  (match wrapped with
+   | Some f -> f stop
+   | None -> Alcotest.fail "Observe should return Some wrapper");
+  let other_before = observed_value cascade "other" "success" in
+  let raw_before = observed_value cascade raw_provider "success" in
+  Obs.finalize obs;
+  let other_after = observed_value cascade "other" "success" in
+  let raw_after = observed_value cascade raw_provider "success" in
+  Alcotest.(check (float 1e-6))
+    "unknown provider bucketed to other"
+    (other_before +. 1.0)
+    other_after;
+  Alcotest.(check (float 1e-6))
+    "raw provider label not emitted"
+    raw_before
+    raw_after
 
 let test_observe_finalize_emits_outcome () =
   let cascade = "observe_finalize_cascade" in
@@ -326,6 +409,14 @@ let () =
             test_observe_parse_failure_is_wire_error;
           Alcotest.test_case "Done completes to Success" `Quick
             test_observe_done_completes;
+          Alcotest.test_case
+            "timing histograms use bounded provider label"
+            `Quick
+            test_observe_timing_histograms_use_bounded_provider_label;
+          Alcotest.test_case
+            "unknown provider label buckets to other"
+            `Quick
+            test_unknown_provider_label_buckets_other_not_raw;
           Alcotest.test_case "finalize emits outcome and is idempotent"
             `Quick test_observe_finalize_emits_outcome;
           Alcotest.test_case "success sample waits for accept gate" `Quick

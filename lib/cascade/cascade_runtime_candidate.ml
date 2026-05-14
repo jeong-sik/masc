@@ -187,6 +187,10 @@ let threshold_multipliers_of_runtime_id runtime_id =
 
 let health_key candidate = candidate.health_key
 let model_health_key candidate = candidate.model_health_key
+let provider_label candidate =
+  Provider_adapter.provider_of_model_label
+    ~provider_kind:candidate.provider_cfg.kind
+    (Provider_adapter.model_label_of_config candidate.provider_cfg)
 
 let health_keys candidate =
   if String.equal candidate.health_key candidate.model_health_key then

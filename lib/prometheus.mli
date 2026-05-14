@@ -538,11 +538,13 @@ val metric_cascade_attempt_liveness_kill : string
 val metric_cascade_attempt_liveness_observed : string
 
 (** Histogram: time from cascade attempt start to first non-Done chunk (TTFT).
-    Labels: [cascade], [provider]. *)
+    Labels: [cascade], [provider] where [provider] is a bounded public
+    provider bucket. *)
 val metric_cascade_ttfb_seconds : string
 
 (** Histogram: inter-chunk gap during streaming (TBT).
-    Labels: [cascade], [provider]. *)
+    Labels: [cascade], [provider] where [provider] is a bounded public
+    provider bucket. *)
 val metric_cascade_inter_chunk_seconds : string
 
 (** Gauge: composite health score per cascade provider.

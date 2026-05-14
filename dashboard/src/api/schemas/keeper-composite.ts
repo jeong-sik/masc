@@ -164,6 +164,8 @@ const KeeperCompositeExecutionSchema = object({
       required_tools: array(string()),
     }),
   ),
+  claim_scope: optional(unknown()),
+  config_drift: optional(unknown()),
 })
 
 const KeeperRuntimeAttentionSchema = object({

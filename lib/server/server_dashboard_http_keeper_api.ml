@@ -502,6 +502,7 @@ type runtime_manifest_scan =
   ; mutable latest_tool_surface_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
+  ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
   ; mutable context_injected_count : int
   ; mutable context_compacted_event_count : int
   ; mutable provider_started_count : int
@@ -536,6 +537,7 @@ let make_runtime_manifest_scan ~path ~limit =
   ; latest_tool_surface_decision = None
   ; latest_provider_lane_decision = None
   ; latest_provider_lane_row = None
+  ; latest_pre_dispatch_blocked_row = None
   ; context_injected_count = 0
   ; context_compacted_event_count = 0
   ; provider_started_count = 0
@@ -589,6 +591,8 @@ let update_runtime_manifest_scan scan row =
    | Keeper_runtime_manifest.Provider_lane_resolved ->
      scan.latest_provider_lane_decision <- Some row.Keeper_runtime_manifest.decision;
      scan.latest_provider_lane_row <- Some row
+   | Keeper_runtime_manifest.Pre_dispatch_blocked ->
+     scan.latest_pre_dispatch_blocked_row <- Some row
    | Keeper_runtime_manifest.Context_injected ->
      scan.context_injected_count <- scan.context_injected_count + 1
    | Keeper_runtime_manifest.Context_compacted ->
@@ -768,6 +772,244 @@ let first_string_opt values =
 let first_int_opt values =
   List.find_map (fun value -> value) values
 
+let string_has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+
+let string_contains ~needle value =
+  let value = String.lowercase_ascii value in
+  let needle = String.lowercase_ascii needle in
+  let value_len = String.length value in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= value_len
+      && (String.equal (String.sub value idx needle_len) needle || loop (idx + 1))
+    in
+    loop 0
+
+let json_assoc_member_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `Assoc _ as value -> Some value
+  | _ -> None
+
+let json_string_value_opt = function
+  | `String value -> Some value
+  | _ -> None
+
+let tool_call_output_text_opt json =
+  match Yojson.Safe.Util.member "output" json with
+  | `String value -> Some value
+  | `Assoc _ as output -> (
+    match json_assoc_member_opt "_blob" output with
+    | Some blob -> json_string_member_opt "preview" blob
+    | None -> None)
+  | _ -> None
+
+let parse_tool_output_json_opt json =
+  match tool_call_output_text_opt json with
+  | None -> None
+  | Some output -> (
+    match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
+    | Ok parsed -> Some parsed
+    | Error _ -> None)
+
+let tool_call_runtime_contract json =
+  match json_assoc_member_opt "runtime_contract" json with
+  | Some contract -> contract
+  | None -> `Assoc []
+
+let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
+  let contract = tool_call_runtime_contract json in
+  let keeper_matches =
+    match json_string_member_opt "keeper" json with
+    | Some keeper -> String.equal keeper keeper_name
+    | None -> true
+  in
+  let trace_matches =
+    match
+      ( json_string_member_opt "trace_id" json,
+        json_string_member_opt "trace_id" contract )
+    with
+    | Some value, _ | _, Some value -> String.equal value trace_id
+    | None, None -> false
+  in
+  let turn_matches =
+    match turn_id with
+    | None -> true
+    | Some wanted ->
+      json_int_member_opt "keeper_turn_id" json = Some wanted
+      || json_int_member_opt "keeper_turn_id" contract = Some wanted
+  in
+  keeper_matches && trace_matches && turn_matches
+
+let claim_status_of_output output =
+  let result =
+    match json_string_member_opt "result" output with
+    | Some value -> String.trim value
+    | None -> ""
+  in
+  match json_assoc_member_opt "claimed_task" output with
+  | Some _ -> "claimed"
+  | None when string_has_prefix ~prefix:"No eligible tasks" result -> "no_eligible"
+  | None when string_has_prefix ~prefix:"No unclaimed tasks" result -> "no_unclaimed"
+  | None when string_has_prefix ~prefix:"Error:" result -> "error"
+  | None when result = "" -> "unknown"
+  | None -> "observed"
+
+let claim_scope_summary_absent =
+  `Assoc
+    [ ("present", `Bool false)
+    ; ("source", `String "keeper_task_claim_tool_call")
+    ; ("status", `String "not_observed")
+    ; ("result", `Null)
+    ; ("mode", `Null)
+    ; ("scoped", `Null)
+    ; ("active_goal_ids", `List [])
+    ; ("effective_goal_ids", `List [])
+    ; ("fallback_reason", `Null)
+    ; ("matched_goal_id", `Null)
+    ; ("excluded_count", `Null)
+    ; ("claimed_task_id", `Null)
+    ; ("claimed_goal_id", `Null)
+    ; ("trace_id", `Null)
+    ; ("keeper_turn_id", `Null)
+    ]
+
+let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
+  let entries = Keeper_tool_call_log.read_recent ~keeper_name ~n:200 () in
+  let matching_claim =
+    entries
+    |> List.find_opt (fun json ->
+      String.equal
+        (Option.value ~default:"" (json_string_member_opt "tool" json))
+        "keeper_task_claim"
+      && tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json)
+  in
+  match matching_claim with
+  | None -> claim_scope_summary_absent
+  | Some call ->
+    let output =
+      match parse_tool_output_json_opt call with
+      | Some (`Assoc _ as output) -> output
+      | _ -> `Assoc []
+    in
+    let claim_scope =
+      match json_assoc_member_opt "claim_scope" output with
+      | Some scope -> scope
+      | None -> `Assoc []
+    in
+    let claimed_task = json_assoc_member_opt "claimed_task" output in
+    `Assoc
+      [ ("present", `Bool true)
+      ; ("source", `String "keeper_task_claim_tool_call")
+      ; ("status", `String (claim_status_of_output output))
+      ; ("result", json_string_opt (json_string_member_opt "result" output))
+      ; ("mode", json_string_opt (json_string_member_opt "mode" claim_scope))
+      ; ( "scoped",
+          match json_bool_member_opt "scoped" claim_scope with
+          | Some value -> `Bool value
+          | None -> `Null )
+      ; ( "active_goal_ids",
+          json_string_list (json_string_list_member "active_goal_ids" claim_scope) )
+      ; ( "effective_goal_ids",
+          json_string_list
+            (json_string_list_member "effective_goal_ids" claim_scope) )
+      ; ( "fallback_reason",
+          json_string_opt (json_string_member_opt "fallback_reason" claim_scope) )
+      ; ( "matched_goal_id",
+          json_string_opt (json_string_member_opt "matched_goal_id" claim_scope) )
+      ; ( "excluded_count",
+          match json_int_member_opt "excluded_count" claim_scope with
+          | Some value -> `Int value
+          | None -> `Null )
+      ; ( "claimed_task_id",
+          match claimed_task with
+          | Some task -> json_string_opt (json_string_member_opt "task_id" task)
+          | None -> `Null )
+      ; ( "claimed_goal_id",
+          match claimed_task with
+          | Some task -> json_string_opt (json_string_member_opt "goal_id" task)
+          | None -> `Null )
+      ; ("trace_id", json_string_opt (json_string_member_opt "trace_id" call))
+      ; ( "keeper_turn_id",
+          match json_int_member_opt "keeper_turn_id" call with
+          | Some value -> `Int value
+          | None -> `Null )
+      ]
+
+let find_override_field_source field sources =
+  match Yojson.Safe.Util.member "override_field_sources" sources with
+  | `List values ->
+    List.find_opt
+      (fun value -> json_string_member_opt "field" value = Some field)
+      values
+  | _ -> None
+
+let config_drift_summary_json ~config ~keeper_name =
+  match Keeper_types.read_meta config keeper_name with
+  | Error message ->
+    `Assoc
+      [ ("present", `Bool false)
+      ; ("status", `String "read_error")
+      ; ("error", `String message)
+      ; ("has_live_override", `Bool false)
+      ; ("cascade_override", `Bool false)
+      ; ("override_fields", `List [])
+      ; ("default_cascade_name", `Null)
+      ; ("live_cascade_name", `Null)
+      ; ("active_config_root", `Null)
+      ; ("active_config_root_source", `Null)
+      ]
+  | Ok None ->
+    `Assoc
+      [ ("present", `Bool false)
+      ; ("status", `String "keeper_missing")
+      ; ("error", `Null)
+      ; ("has_live_override", `Bool false)
+      ; ("cascade_override", `Bool false)
+      ; ("override_fields", `List [])
+      ; ("default_cascade_name", `Null)
+      ; ("live_cascade_name", `Null)
+      ; ("active_config_root", `Null)
+      ; ("active_config_root_source", `Null)
+      ]
+  | Ok (Some meta) ->
+    let sources = Keeper_status_bridge.source_provenance_json config meta in
+    let override_fields = json_string_list_member "override_fields" sources in
+    let cascade_detail = find_override_field_source "model.cascade_name" sources in
+    let default_cascade_name, live_cascade_name =
+      match cascade_detail with
+      | Some detail ->
+        ( Yojson.Safe.Util.member "default_value" detail |> json_string_value_opt,
+          Yojson.Safe.Util.member "live_value" detail |> json_string_value_opt )
+      | None -> (None, None)
+    in
+    let cascade_override = Option.is_some cascade_detail in
+    `Assoc
+      [ ("present", `Bool true)
+      ; ("status", `String (if cascade_override then "drift" else "ok"))
+      ; ("error", `Null)
+      ; ( "has_live_override",
+          `Bool
+            (Option.value
+               (json_bool_member_opt "has_live_override" sources)
+               ~default:false) )
+      ; ("cascade_override", `Bool cascade_override)
+      ; ("override_fields", json_string_list override_fields)
+      ; ("default_cascade_name", json_string_opt default_cascade_name)
+      ; ("live_cascade_name", json_string_opt live_cascade_name)
+      ; ( "active_config_root",
+          json_string_opt (json_string_member_opt "active_config_root" sources) )
+      ; ( "active_config_root_source",
+          json_string_opt
+            (json_string_member_opt "active_config_root_source" sources) )
+      ; ( "default_manifest_path",
+          json_string_opt (json_string_member_opt "default_manifest_path" sources) )
+      ]
+
 let runtime_lens_tool_surface_parts scan =
   (* sound-partial: allow absent runtime-lens decisions as empty evidence while
      preserving explicit decision payloads when the scanner emits them. *)
@@ -819,7 +1061,7 @@ let runtime_lens_gap_json gap =
       ("detail", json_string_opt gap.detail);
     ]
 
-let runtime_lens_gaps ~terminal_event_present scan =
+let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
   let ( _
       , _
       , _
@@ -844,6 +1086,24 @@ let runtime_lens_gaps ~terminal_event_present scan =
     || scan.context_compacted_event_count > 0
     || scan.event_bus_count > 0
   in
+  let claim_status = json_string_member_opt "status" claim_scope in
+  let claim_mode = json_string_member_opt "mode" claim_scope in
+  let claim_excluded_count = json_int_member_opt "excluded_count" claim_scope in
+  let cascade_override =
+    Option.value
+      (json_bool_member_opt "cascade_override" config_drift)
+      ~default:false
+  in
+  let pre_dispatch_reason =
+    match scan.latest_pre_dispatch_blocked_row with
+    | Some row ->
+      first_string_opt
+        [ json_string_member_opt "reason" row.Keeper_runtime_manifest.decision
+        ; json_string_member_opt "terminal_reason_code" row.Keeper_runtime_manifest.decision
+        ; Some row.Keeper_runtime_manifest.status
+        ]
+    | None -> None
+  in
   let add gap gaps = gap :: gaps in
   []
   |> (fun gaps ->
@@ -856,6 +1116,66 @@ let runtime_lens_gaps ~terminal_event_present scan =
            }
            gaps
        else gaps)
+  |> (fun gaps ->
+       match claim_status with
+       | Some "no_eligible" ->
+         add
+           { code = "claim_scope_no_eligible"
+           ; severity = "warn"
+           ; lane = "keeper"
+           ; detail =
+               Some
+                 (Printf.sprintf
+                    "keeper_task_claim found no eligible tasks in mode=%s excluded=%s"
+                    (Option.value claim_mode ~default:"unknown")
+                    (match claim_excluded_count with
+                     | Some value -> string_of_int value
+                     | None -> "unknown"))
+           }
+           gaps
+       | _ -> gaps)
+  |> (fun gaps ->
+       match claim_status, claim_mode with
+       | Some "no_eligible", Some "active_goal_ids" ->
+         add
+           { code = "claim_scope_global_backlog_outside_keeper"
+           ; severity = "warn"
+           ; lane = "keeper"
+           ; detail =
+               Some
+                 "active_goal_ids scope found no eligible work; global backlog may be outside this keeper or blocked by policy"
+           }
+           gaps
+       | _ -> gaps)
+  |> (fun gaps ->
+       if cascade_override then
+         add
+           { code = "keeper_cascade_override_drift"
+           ; severity = "warn"
+           ; lane = "masc_policy_cascade"
+           ; detail =
+               Some
+                 (Printf.sprintf "default=%s live=%s"
+                    (Option.value
+                       (json_string_member_opt "default_cascade_name" config_drift)
+                       ~default:"unknown")
+                    (Option.value
+                       (json_string_member_opt "live_cascade_name" config_drift)
+                       ~default:"unknown"))
+           }
+           gaps
+       else gaps)
+  |> (fun gaps ->
+       match pre_dispatch_reason with
+       | Some reason when string_contains ~needle:"no_tool_capable_provider" reason ->
+         add
+           { code = "route_tool_capability_gap"
+           ; severity = "bad"
+           ; lane = "masc_policy_cascade"
+           ; detail = Some "pre-dispatch blocked because route cannot materialize required tools"
+           }
+           gaps
+       | _ -> gaps)
   |> (fun gaps ->
        if missing_required_tools <> [] then
          add
@@ -991,7 +1311,7 @@ let runtime_lens_memory_terminal_status scan =
   then "context"
   else "empty"
 
-let runtime_lens_json ~trace_id ?turn_id scan =
+let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
   let ( tool_decision
       , lane_decision
       , requested_tools
@@ -1005,7 +1325,11 @@ let runtime_lens_json ~trace_id ?turn_id scan =
   let terminal_event_present =
     terminal_event_present_for_turn ?keeper_turn_id scan
   in
-  let gaps = runtime_lens_gaps ~terminal_event_present scan in
+  let claim_scope = claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () in
+  let config_drift = config_drift_summary_json ~config ~keeper_name in
+  let gaps =
+    runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan
+  in
   let has_provider_lane =
     runtime_manifest_scan_event_count scan
       Keeper_runtime_manifest.Provider_lane_resolved
@@ -1154,6 +1478,8 @@ let runtime_lens_json ~trace_id ?turn_id scan =
                          (fun row -> row.Keeper_runtime_manifest.status)
                          scan.provider_terminal_row) );
                 ] );
+            ("claim_scope", claim_scope);
+            ("config_drift", config_drift);
             ( "context",
               `Assoc
                 [
@@ -1532,7 +1858,8 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
               ("event_bus", event_bus_summary_json manifest_scan);
               ("memory", memory_summary_json manifest_scan);
               ( "runtime_lens",
-                runtime_lens_json ~trace_id ?turn_id manifest_scan );
+                runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
+                  manifest_scan );
               ("health", `String health);
               ( "stale_reason",
                 match stale_reason with

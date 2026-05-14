@@ -17,18 +17,19 @@ How to read the boot-time and runtime credential state exposed by `/metrics` and
 
 ## Background
 
-The credential subsystem exposes its state on **six surfaces**:
+The credential subsystem exposes its state on **seven surfaces** (six original + flow/heartbeat counters added by the 2026-05-14 audit pass):
 
-| Surface | Location | Use case |
-|---------|----------|----------|
-| 1. API (mli)            | `lib/auth.mli`                                            | Compile-time contract |
-| 2. Tests                | `test/test_auth.ml` (credentials group 22-30)             | CI / pre-merge guards |
-| 3. Boot log             | `[Server] startup bare alias audit: alive_aliases=...`    | Single-shot boot snapshot |
-| 4. Prometheus gauge     | `GET /metrics`                                            | Time-series + alerting (this doc) |
-| 5. Periodic fiber       | `Auth.start_bare_alias_audit_fiber` (60s)                 | Mid-run regression refresh |
-| 6. AlertManager rule    | `infrastructure/monitoring/auth-credential-alerts.yml`    | Operator-facing alarm |
+| Surface | Location | Information shape | Use case |
+|---------|----------|-------------------|----------|
+| 1. API (mli)            | `lib/auth.mli`                                            | typed contract              | Compile-time |
+| 2. Tests                | `test/test_auth.ml` (credentials group 22-32)             | assertions                  | CI guards |
+| 3. Boot log             | `[Server] startup bare alias audit: ...`                  | text (operator-readable)    | One-shot boot |
+| 4. Prom gauge (snapshot)| `masc_auth_bare_alias{state=...}`                          | numeric end-state           | Time-series + alert |
+| 5. Periodic fiber       | `start_bare_alias_audit_fiber` (60s default)              | gauge refresh + heartbeat   | Mid-run regression |
+| 6. Prom counter (flow)  | `masc_auth_bare_alias_outcome_total{outcome=...}`         | per-call dispatch events    | Transient regression catch |
+| 7. AlertManager rule    | `infrastructure/monitoring/auth-credential-alerts.yml`    | derived alarm               | Operator page |
 
-Surfaces 4-6 together form the *reliable observability path* — surface 3 covers boot-time only, and a regression introduced mid-run would otherwise stay invisible until the next server restart.
+Surfaces 3 and 4 carry the *same data* — by design — but for different consumers (log grep vs Prometheus scrape). Surfaces 4 and 6 are complementary: the gauge gives end-state visible per scrape, the counter gives per-call events visible via `rate(...)`. The audit pass (2026-05-14) confirmed no genuine duplication; the only addition needed was flow + heartbeat surfaces to catch what the snapshot gauges cannot show.
 
 ## γ Classifier (lib/auth.ml)
 
@@ -84,6 +85,24 @@ Retention defaults: `MASC_AUTH_ARCHIVE_RETENTION_DAYS=30`, `MASC_AUTH_ARCHIVE_MI
 
 Unlabeled counter. Incremented by `Auth.prune_archive` with the count of epoch directories removed in one sweep. A surge (`increase(... [1d]) > 100`) is the secondary regression signal — either a one-time drain after PR #15112 deployment against an already-bloated `.archive/`, or a new regression producing archive events at the historical rate.
 
+### `masc_auth_bare_alias_outcome_total`
+
+Flow counter — increments on every `archive_bare_for_canonical` dispatch. Labels: `outcome ∈ {alive_skip, dead_archive, absent}`.
+
+| Outcome | Steady state | Meaning |
+|---------|--------------|---------|
+| `alive_skip` | ↑ on every boot per keeper with PR-#10440 alias | γ guard preserved the alias |
+| `absent` | ↑ on first boot of a clean keeper | No bare file existed |
+| `dead_archive` | **0 after PR #15112 deploy + initial drain** | Non-zero ongoing = regression |
+
+The snapshot gauge `masc_auth_bare_alias` shows *end-state* after a boot; this counter shows the *transition events* that produced it. After the regression is fixed the cumulative `dead_archive` counter remains at its historical value but the *rate* must be 0.
+
+### `masc_auth_bare_alias_audit_ticks_total`
+
+Heartbeat counter — increments on every successful tick of `start_bare_alias_audit_fiber`. Unlabeled. Default tick rate is 1/60s ≈ 0.0166 ticks/s.
+
+A `rate(...[5m]) < 0.01` for 2m means the fiber stopped publishing heartbeats — the gauges may retain their last set value indefinitely while no longer reflecting reality. This is a *narrower* signal than `absent(masc_auth_bare_alias)`: gauges stay present (last value held by Prometheus), only the heartbeat stops.
+
 ## Alert rules
 
 `infrastructure/monitoring/auth-credential-alerts.yml` carries five rules:
@@ -95,6 +114,8 @@ Unlabeled counter. Incremented by `Auth.prune_archive` with the count of epoch d
 | `masc_auth_bare_alias`          | `AuthBareAliasNoBareElevated`      | warning  | `state="no_bare" > 0` for 10m -- alias writer failing |
 | `masc_auth_archive`             | `AuthArchiveEpochsExcessive`       | warning  | `archive_epochs > 100` for 10m -- retention not keeping up |
 | `masc_auth_archive`             | `AuthArchivePruneSurge`            | warning  | `> 100 epochs pruned in 24h` -- one-time drain or regression |
+| `masc_auth_bare_alias_flow`     | `AuthBareAliasDeadArchiveOngoing`  | critical | `rate(outcome="dead_archive") > 0` for 5m -- transient regression caught before snapshot |
+| `masc_auth_bare_alias_flow`     | `AuthBareAliasAuditFiberStalled`   | warning  | `rate(audit_ticks) < 0.01` for 2m -- fiber stalled, gauges stale-but-present |
 
 Evaluation interval 30s matches `masc_goal_loop_observe_contract` so the operator cadence stays consistent across surfaces.
 

@@ -1173,10 +1173,22 @@ let classify_bare_for_canonical config ~canonical_name =
       | _ -> Bare_dead)
 ;;
 
+let inc_bare_alias_outcome ~outcome =
+  Prometheus.inc_counter
+    Prometheus.metric_auth_bare_alias_outcome_total
+    ~labels:[ "outcome", outcome ]
+    ~delta:1.0
+    ()
+;;
+
 let archive_bare_for_canonical config ~canonical_name =
   match classify_bare_for_canonical config ~canonical_name with
-  | Bare_absent | Bare_alive_alias -> ()
+  | Bare_absent ->
+    inc_bare_alias_outcome ~outcome:"absent"
+  | Bare_alive_alias ->
+    inc_bare_alias_outcome ~outcome:"alive_skip"
   | Bare_dead ->
+    inc_bare_alias_outcome ~outcome:"dead_archive";
     (match bare_keeper_name_from_canonical canonical_name with
      | None -> ()
      | Some bare_name ->
@@ -1622,7 +1634,10 @@ let start_bare_alias_audit_fiber ~sw ~clock ~base_path
            bare_alias_audit ~base_path
              ~canonical_names:(canonical_names_fn ())
          in
-         ()
+         Prometheus.inc_counter
+           Prometheus.metric_auth_bare_alias_audit_ticks_total
+           ~delta:1.0
+           ()
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

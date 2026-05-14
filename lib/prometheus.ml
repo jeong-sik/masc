@@ -1010,6 +1010,23 @@ let metric_auth_bare_alias = "masc_auth_bare_alias"
 let metric_auth_archive_epochs = "masc_auth_archive_epochs"
 let metric_auth_archive_pruned_total = "masc_auth_archive_pruned_total"
 
+(* Flow counter for [Auth.archive_bare_for_canonical] dispatch outcomes.
+   Snapshot gauges ({!metric_auth_bare_alias}) show steady-state classifier
+   counts but invisible the per-call decision flow. This counter increments
+   on every dispatch so operators can see archive frequency over time and
+   alert on a [dead_archive] surge that would precede a gauge change.
+   Labels: [outcome=alive_skip|dead_archive|absent]. *)
+let metric_auth_bare_alias_outcome_total =
+  "masc_auth_bare_alias_outcome_total"
+
+(* Heartbeat counter for the periodic [start_bare_alias_audit_fiber] tick.
+   {!metric_auth_bare_alias} gauges are *set* by every tick but absent-after-
+   crash detection requires a 5m absent window. A heartbeat counter lets
+   alerts detect a stalled fiber within 1.5 expected ticks via a rate query,
+   distinguishing fiber-stall from scrape-stall or binary-version. *)
+let metric_auth_bare_alias_audit_ticks_total =
+  "masc_auth_bare_alias_audit_ticks_total"
+
 (* #9786 runtime complement: every [find_credential_by_token]
    lookup that hits N>=2 matches fires this counter.  The
    boot-time audit ({!metric_auth_credential_token_duplicate})
@@ -2460,6 +2477,19 @@ let init () =
     metric_auth_archive_pruned_total
     "Total .archive/<epoch>/ subdirectories removed by the boot-time retention \
      sweep. Increments by the per-boot prune count."
+    Counter;
+  add
+    metric_auth_bare_alias_outcome_total
+    "Total dispatch outcomes of Auth.archive_bare_for_canonical. Labels: \
+     outcome=alive_skip|dead_archive|absent. The dead_archive rate surfaces \
+     per-call archive frequency that the snapshot gauge cannot show; \
+     alive_skip counts confirm the γ guard is preserving PR-#10440 aliases."
+    Counter;
+  add
+    metric_auth_bare_alias_audit_ticks_total
+    "Heartbeat counter for the periodic bare_alias_audit fiber. Increments on \
+     every successful tick. rate([5m]) < 0.01 indicates fiber stall, \
+     distinguishable from scrape-stall (which would absent all auth metrics)."
     Counter;
   add
     metric_telemetry_coverage_gap

@@ -359,7 +359,7 @@ let test_json_roundtrip () =
         "manifest decision omits response model"
         false
         (json_has_key "response_model" emitted_decision);
-      let legacy_json =
+      let retired_top_level_json =
         `Assoc
           [
             ("schema_version", `Int 1);
@@ -379,22 +379,38 @@ let test_json_roundtrip () =
             ("links", `Assoc []);
           ]
       in
-      match M.of_json legacy_json with
-      | Error msg -> Alcotest.fail ("legacy manifest parse failed: " ^ msg)
-      | Ok legacy ->
-          Alcotest.(check string)
-            "legacy trace parses"
-            "trace-legacy"
-            legacy.trace_id;
-          let legacy_emitted = M.to_json legacy in
-          Alcotest.(check bool)
-            "legacy manifest JSON omits provider kind"
-            false
-            (json_has_key "provider_kind" legacy_emitted);
-          Alcotest.(check bool)
-            "legacy manifest JSON omits model id"
-            false
-            (json_has_key "model_id" legacy_emitted)
+      (match M.of_json retired_top_level_json with
+       | Ok _ -> Alcotest.fail "retired top-level provider/model fields parsed"
+       | Error msg ->
+         Alcotest.(check bool)
+           "retired top-level provider/model fields rejected"
+           true
+           (contains_substring msg "retired runtime manifest field"));
+      let retired_decision_json =
+        `Assoc
+          [
+            ("schema_version", `Int 1);
+            ("ts", `String "2026-05-12T00:00:00Z");
+            ("keeper_name", `String "sangsu");
+            ("agent_name", `Null);
+            ("trace_id", `String "trace-retired-decision");
+            ("generation", `Null);
+            ("keeper_turn_id", `Null);
+            ("oas_turn_count", `Null);
+            ("event", `String "provider_attempt_started");
+            ("cascade_name", `String "default");
+            ("status", `String "started");
+            ("decision", `Assoc [ ("response_model", `String "gpt-test") ]);
+            ("links", `Assoc []);
+          ]
+      in
+      match M.of_json retired_decision_json with
+      | Ok _ -> Alcotest.fail "retired decision provider/model fields parsed"
+      | Error msg ->
+        Alcotest.(check bool)
+          "retired decision provider/model fields rejected"
+          true
+          (contains_substring msg "retired runtime manifest decision field")
 
 let test_of_json_rejects_unknown_event () =
   let json =

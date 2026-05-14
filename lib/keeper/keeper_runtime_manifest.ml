@@ -203,6 +203,23 @@ let redacts_provider_model_key key =
    || string_contains_substring key "model"
    || String.equal key "configured_labels")
 
+let rec retired_provider_model_key_path ?(prefix = "decision") = function
+  | `Assoc fields ->
+      List.find_map
+        (fun (key, value) ->
+          let path = prefix ^ "." ^ key in
+          if redacts_provider_model_key key then Some path
+          else retired_provider_model_key_path ~prefix:path value)
+        fields
+  | `List values ->
+      values
+      |> List.mapi (fun idx value -> idx, value)
+      |> List.find_map (fun (idx, value) ->
+        retired_provider_model_key_path
+          ~prefix:(Printf.sprintf "%s[%d]" prefix idx)
+          value)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> None
+
 let rec redact_provider_model_json = function
   | `Assoc fields ->
       `Assoc
@@ -275,8 +292,29 @@ let links_of_json = function
                   Ok { receipt_path; checkpoint_path; tool_call_log_path })))
   | _ -> Error "field \"links\" must be an object"
 
+let reject_retired_manifest_fields fields =
+  match List.find_opt (fun (key, _) -> redacts_provider_model_key key) fields with
+  | Some (key, _) ->
+      Error
+        (Printf.sprintf
+           "retired runtime manifest field %S is no longer accepted" key)
+  | None -> Ok ()
+
+let reject_retired_decision_fields decision =
+  match retired_provider_model_key_path decision with
+  | Some path ->
+      Error
+        (Printf.sprintf
+           "retired runtime manifest decision field %S is no longer accepted"
+           path)
+  | None -> Ok ()
+
 let of_json = function
   | `Assoc fields -> (
+      let ( >>= ) result f =
+        match result with Ok value -> f value | Error _ as err -> err
+      in
+      reject_retired_manifest_fields fields >>= fun () ->
       match required_int "schema_version" fields with
       | Error _ as err -> err
       | Ok parsed_schema_version ->
@@ -285,7 +323,6 @@ let of_json = function
               (Printf.sprintf "unsupported schema_version: %d"
                  parsed_schema_version)
           else
-            let ( >>= ) result f = match result with Ok value -> f value | Error _ as err -> err in
             required_string "ts" fields >>= fun ts ->
             required_string "keeper_name" fields >>= fun keeper_name ->
             optional_string "agent_name" fields >>= fun agent_name ->
@@ -301,6 +338,7 @@ let of_json = function
             optional_string "cascade_name" fields >>= fun cascade_name ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
+            reject_retired_decision_fields decision >>= fun () ->
             field "links" fields >>= fun links_json ->
             links_of_json links_json >>= fun links ->
             Ok

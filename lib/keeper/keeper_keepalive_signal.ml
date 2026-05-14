@@ -333,9 +333,13 @@ let wakeup_relevant_keeper_for_board_signal
          wake_meta meta reason;
          Eio_guard.yield_step yield_meter);
   if dropped > 0 then begin
+    (* Counter tracks wakeups dropped by the cap, not capped events; under
+       high fanout [dropped] can be >1 per signal, so add the actual amount
+       (not a fixed 1) to keep BOARD-CAPPED accurate on the compact dashboard. *)
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
       ~labels:[("kind", signal_kind_label)]
+      ~delta:(float_of_int dropped)
       ();
     Log.Keeper.info
       "board signal wakeup capped by configured fanout: dropped=%d post=%s \

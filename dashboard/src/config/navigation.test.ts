@@ -176,7 +176,7 @@ describe('monitoring navigation labels', () => {
     const sections = sectionItemsForTab('monitoring')
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
-    expect(hiddenIds).toEqual(['journey', 'observatory', 'cognition', 'memory-subsystems'])
+    expect(hiddenIds).toEqual(['journey', 'observatory', 'cognition'])
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {
@@ -236,16 +236,6 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(result.view).toBe('live')
   })
 
-  it('redirects legacy memory-subsystems links to cognition memory view', () => {
-    const result = normalizeRouteParams('monitoring', {
-      section: 'memory-subsystems',
-      keeper: 'nova',
-    })
-    expect(result.section).toBe('cognition')
-    expect(result.view).toBe('memory')
-    expect(result.keeper).toBe('nova')
-  })
-
   it('redirects standalone runtime diagnostics into runtime views', () => {
     expect(normalizeRouteParams('monitoring', { section: 'cascade-inspector' })).toMatchObject({
       section: 'runtime',
@@ -281,13 +271,6 @@ describe('SECTION_REDIRECTS table (consolidation Phase -1)', () => {
 
   it('exposes the activity → observatory redirect as reference contract', () => {
     expect(SECTION_REDIRECTS['monitoring:activity']).toEqual({ section: 'observatory' })
-  })
-
-  it('keeps legacy memory-subsystems redirect as reference contract', () => {
-    expect(SECTION_REDIRECTS['monitoring:memory-subsystems']).toEqual({
-      section: 'cognition',
-      params: { view: 'memory' },
-    })
   })
 
   it('is the single source of truth for legacy section remaps', () => {

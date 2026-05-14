@@ -74,7 +74,6 @@ function renderSection(section: StatusSection) {
 }
 
 export function normalizeStatusSection(section: string | undefined): StatusSection {
-  if (section === 'memory-subsystems') return 'cognition'
   if (
     section === 'observatory'
     || section === 'journey'

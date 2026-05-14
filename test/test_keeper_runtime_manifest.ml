@@ -847,6 +847,8 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
       let provider_attempt =
         Yojson.Safe.Util.(axes |> member "provider_attempt")
       in
+      let claim_scope = Yojson.Safe.Util.(axes |> member "claim_scope") in
+      let config_drift = Yojson.Safe.Util.(axes |> member "config_drift") in
       Alcotest.(check (list string))
         "lens requested tools"
         [ "read_file" ]
@@ -883,6 +885,14 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         "lens provider attempt hides terminal model id"
         false
         (json_has_key "terminal_model_id" provider_attempt);
+      Alcotest.(check bool)
+        "lens claim scope absent by default"
+        false
+        (json_bool_member "present" claim_scope);
+      Alcotest.(check string)
+        "lens config drift surfaces missing keeper meta"
+        "keeper_missing"
+        Yojson.Safe.Util.(config_drift |> member "status" |> to_string);
       let api_manifest_rows =
         Yojson.Safe.Util.(json |> member "manifest_rows" |> to_list)
       in

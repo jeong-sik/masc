@@ -222,6 +222,12 @@ describe('KeeperShellDrawer event mapping', () => {
       'Telemetry',
       'Keeper',
     ])
+    const badge = mounted.querySelector<HTMLElement>('.keeper-shell-context-badge')
+    expect(badge?.textContent?.trim()).toBe('CTX 6')
+    expect(badge?.getAttribute('data-context-route-count')).toBe('6')
+    expect(badge?.getAttribute('title')).toBe('Linked context: Code, Goal, Task, Git, Telemetry, Keeper')
+    expect(badge?.getAttribute('aria-label'))
+      .toBe('Keeper shell has 6 linked context routes: Code, Goal, Task, Git, Telemetry, Keeper')
 
     fireEvent.click(routeLinks.find(link => link.textContent === 'Code')!)
     expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Terminal&label=keeper+shell+task-123&source_id=keeper-shell%3Asangsu%3Atask-123&keeper=sangsu')

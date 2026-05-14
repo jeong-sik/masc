@@ -23,7 +23,7 @@ implementation_prs: []
 
 Two operator-facing defects in masc-mcp's telemetry view of OAS streams are addressed here. Per-chunk noise — the third defect originally bundled in the closed RFC-0073 — is the upstream `agent_sdk` repo's emission surface and is now scoped under **RFC-OAS-019** in `~/me/workspace/yousleepwhen/oas`.
 
-1. **Envelope context null** — every `oas:telemetry_event` record written to `.masc/telemetry/YYYY-MM/DD.jsonl` has `agent_name`, `task_id`, `turn` as `null`. The receive path (`lib/keeper/keeper_telemetry_consumer.ml`) deliberately skips deserialization, and no other site stamps the envelope. Operators cannot answer "which keeper, which turn, which goal produced this record?"
+1. **Envelope context null** — every `oas:telemetry_event` record written to `.masc/oas-events/YYYY-MM/DD.jsonl` (the durable OAS-event store; see `lib/telemetry_unified.ml:105` and `lib/cascade/cascade_event_bridge.ml:1086`) has `agent_name`, `task_id`, `turn` as `null`. The receive path (`lib/keeper/keeper_telemetry_consumer.ml`) deliberately skips deserialization, and no other site stamps the envelope. Operators cannot answer "which keeper, which turn, which goal produced this record?"
 
 2. **Pivot impossibility** — there is no `(keeper_name | goal_id) → ordered events` query path. `tool_agent_timeline` (6-source merger) is keyed on `agent_name` only; `telemetry_unified` exposes no keeper/goal filter; the dashboard `keeper-detail-state.ts` mounts a trajectory slot but the backend it talks to has no turn-grouped event endpoint. Goal detail has no timeline tab.
 
@@ -31,7 +31,7 @@ This RFC scopes the receive-side and pivot-side fix. The emission-side change is
 
 ## 1. Cross-repo boundary (why this RFC exists separately)
 
-`agent_sdk` is consumed via opam pin `git+https://github.com/jeong-sik/oas.git#<sha>` (`dune-project` line 44: `(agent_sdk (>= 0.193.10))`). The `Streaming_chunk_n` payload variant lives in `lib/llm_provider/telemetry_event.ml:20-24` of the `oas` repo, not in masc-mcp. masc-mcp receives `Event_bus.Custom("telemetry_event", json)` payloads via the upstream SDK, filters them in `keeper_telemetry_consumer.ml`, and forwards to a dated JSONL store at `lib/telemetry_eio.ml:114`.
+`agent_sdk` is consumed via opam pin `git+https://github.com/jeong-sik/oas.git#<sha>` (`dune-project` line 44: `(agent_sdk (>= 0.193.10))`). The `Streaming_chunk_n` payload variant lives in `lib/llm_provider/telemetry_event.ml:20-24` of the `oas` repo, not in masc-mcp. masc-mcp receives `Event_bus.Custom("telemetry_event", json)` payloads via the upstream SDK, filters them in `keeper_telemetry_consumer.ml` (counter-only, no deserialization), and relays them to a dated JSONL store at `lib/cascade/cascade_event_bridge.ml:1086` under `.masc/oas-events/<YYYY-MM>/<DD>.jsonl`. (Earlier drafts of this RFC referenced `lib/telemetry_eio.ml:114` for this surface; that path is the *agent_event* surface, `.masc/telemetry/`, with a different typed event set — corrected here after grep verification.)
 
 | Concern | Owner repo | RFC |
 |---|---|---|
@@ -52,7 +52,7 @@ Mixing the two would break the SDK Independence Gate that `oas` enforces on Read
 ## 3. Non-goals
 
 - Re-emit, throttle, or deduplicate any upstream `oas:telemetry_event` payload. The bus contents are RFC-OAS-019's responsibility. masc-mcp consumes whatever the SDK publishes.
-- Promote `Eio.Fiber.with_binding` as a general OCaml/Eio idiom outside the keeper subsystem. Scope is `lib/keeper/` ↔ `lib/telemetry_eio.ml`.
+- Promote `Eio.Fiber.with_binding` as a general OCaml/Eio idiom outside the keeper subsystem. Scope is `lib/keeper/` ↔ `lib/cascade/cascade_event_bridge.ml` (the oas-events relay).
 - Rewrite the dashboard timeline framework. `vis-timeline` is already loaded by `fsm-hub-timeline-panels.ts` — reuse, don't replace.
 - Add a new aggregation engine. Extend `tool_agent_timeline` 6-source merger by adding key branches; do not duplicate the merger.
 
@@ -80,7 +80,7 @@ let with_turn_context ~ctx fn =
   Eio.Fiber.with_binding Keeper_context.current_key ctx fn
 ```
 
-`lib/telemetry_eio.ml` emit functions read the binding and stamp the envelope:
+The oas-events relay in `lib/cascade/cascade_event_bridge.ml` reads the binding and stamps the envelope at the point each `Custom("telemetry_event", json)` payload is composed for the `.masc/oas-events/` JSONL write:
 
 ```ocaml
 let stamp_envelope ~base_envelope =
@@ -187,7 +187,7 @@ If RFC-0081 ships and RFC-OAS-019 stalls, masc-mcp does *not* take on receive-si
 
 ### Gate 1 — Envelope context (Phase 1)
 
-1. `jq 'select(.turn == null or .keeper_name == null) | length' .masc/telemetry/<…>.jsonl` < 10% of total records on a post-deploy day (10% allows for pre-binding emission paths and known boundary cases).
+1. `jq 'select(.turn == null or .keeper_name == null) | length' .masc/oas-events/<…>.jsonl` < 10% of total records on a post-deploy day (10% allows for pre-binding emission paths and known boundary cases).
 2. `.masc/run-index/<YYYY-MM>/<DD>.jsonl`: one line per `keeper_turn_id` from `keeper_runtime_manifest`. No duplicates, no gaps in `keeper_turn_id` sequence.
 3. `bash scripts/procedural-memory/validate-run-index.sh .masc/run-index/<…>.jsonl` exits 0.
 4. RFC-0063 boot-hang regression unchanged: server boot reaches `phase=ready` within 5s; CPU < 20% at idle.

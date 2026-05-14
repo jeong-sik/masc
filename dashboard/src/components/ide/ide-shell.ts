@@ -31,6 +31,20 @@ export { activeIdeFile }
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
+type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok'
+
+export interface IdeStatusbarChip {
+  readonly id: string
+  readonly label: string
+  readonly tone: IdeStatusbarChipTone
+  readonly title: string
+}
+
+export interface IdeStatusbarModel {
+  readonly workspaceLabel: string
+  readonly chips: ReadonlyArray<IdeStatusbarChip>
+  readonly connectionLabel: string
+}
 
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
 const IDE_LAYER_LABELS = new Map(IDE_LAYERS.map(layer => [layer.kind, layer.label]))
@@ -38,6 +52,33 @@ const IDE_ACTIVITY_POLL_MS = 10_000
 export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'approve', 'notes'] as const
 const REVIEW_FOCUS_LAYER_PARAM = REVIEW_FOCUS_LAYERS.join(',')
 const EMPTY_LAYER_PARAM = 'none'
+const STATUSBAR_LAYER_PRIORITY: ReadonlyArray<string> = [
+  'keeper-trace',
+  'approve',
+  'notes',
+  'cascade',
+  'time',
+  'parallel',
+  'tools',
+  'explode',
+]
+const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
+  source: 'SOURCE',
+  unified: 'UNIFIED',
+  'split-diff': 'SPLIT DIFF',
+  blame: 'BLAME',
+}
+
+interface IdeStatusbarInput {
+  readonly activeView: ViewTab
+  readonly activeLayers: ReadonlySet<string>
+  readonly activeFilePath: string
+  readonly findOpen: boolean
+  readonly terminalOpen: boolean
+  readonly railsCollapsed: boolean
+  readonly reviewFocusActive: boolean
+  readonly routeParams: Record<string, string>
+}
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
   const normalized = raw
@@ -100,6 +141,119 @@ function routeParam(params: Record<string, string>, ...keys: ReadonlyArray<strin
     if (value) return value
   }
   return undefined
+}
+
+function shortStatusbarPath(path: string): string {
+  const trimmed = path.trim()
+  if (!trimmed) return 'no file'
+  const parts = trimmed.split('/').filter(Boolean)
+  if (parts.length <= 2) return trimmed
+  return `${parts.at(-2)}/${parts.at(-1)}`
+}
+
+function statusbarLayerLabel(activeLayers: ReadonlySet<string>): string | null {
+  if (activeLayers.size === 0) return null
+  const labels = STATUSBAR_LAYER_PRIORITY
+    .filter(layer => activeLayers.has(layer))
+    .map(layer => IDE_LAYER_LABELS.get(layer) ?? layer)
+  if (labels.length === 0) return `${activeLayers.size} layers`
+  return labels.length === 1 ? labels[0]! : `${labels[0]} +${labels.length - 1}`
+}
+
+function normalizePrLabel(value: string): string {
+  const normalized = value.trim().replace(/^#/, '')
+  return normalized ? `#${normalized}` : value.trim()
+}
+
+function statusbarTelemetryLabel(params: Record<string, string>): string | undefined {
+  const session = routeParam(params, 'session_id')
+  const operation = routeParam(params, 'operation_id', 'op')
+  const worker = routeParam(params, 'worker_run_id', 'worker')
+  const query = routeParam(params, 'telemetry_q', 'q') ?? routeParam(params, 'log_id', 'log')
+  const first = session ?? operation ?? worker ?? query
+  return first ? `Telemetry ${first}` : undefined
+}
+
+function addStatusbarChip(
+  chips: IdeStatusbarChip[],
+  id: string,
+  label: string | undefined,
+  tone: IdeStatusbarChipTone,
+  title: string,
+) {
+  const trimmed = label?.trim()
+  if (!trimmed) return
+  chips.push({ id, label: trimmed, tone, title })
+}
+
+export function deriveIdeStatusbarModel({
+  activeView,
+  activeLayers,
+  activeFilePath,
+  findOpen,
+  terminalOpen,
+  railsCollapsed,
+  reviewFocusActive,
+  routeParams,
+}: IdeStatusbarInput): IdeStatusbarModel {
+  const chips: IdeStatusbarChip[] = []
+  const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
+  addStatusbarChip(chips, 'view', viewLabel, reviewFocusActive ? 'brass' : 'ghost', `View: ${viewLabel}`)
+  addStatusbarChip(
+    chips,
+    'file',
+    shortStatusbarPath(activeFilePath),
+    'ghost',
+    `Active file: ${activeFilePath.trim() || 'no file'}`,
+  )
+
+  const layerLabel = statusbarLayerLabel(activeLayers)
+  addStatusbarChip(chips, 'layers', layerLabel ?? undefined, 'info', layerLabel ? `Active layers: ${layerLabel}` : '')
+  if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Keeper shell drawer open')
+  if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
+  if (railsCollapsed) addStatusbarChip(chips, 'rails', 'rails hidden', 'ghost', 'IDE side rails hidden')
+
+  const routeLine = routeFocusLine(routeParams)
+  const routeSurface = routeParams.surface?.trim()
+  const routeLabel = routeParams.label?.trim()
+  const routeFocusParts = [
+    routeSurface,
+    routeLine ? `L${routeLine}` : undefined,
+    routeLabel,
+  ].filter((part): part is string => Boolean(part?.trim()))
+  addStatusbarChip(
+    chips,
+    'focus',
+    routeFocusParts.length > 0 ? routeFocusParts.join(' ') : undefined,
+    'brass',
+    'Route-focused IDE context',
+  )
+
+  const goal = routeParam(routeParams, 'goal_id', 'goal')
+  const task = routeParam(routeParams, 'task_id', 'task')
+  const board = routeParam(routeParams, 'board_post_id', 'post')
+  const comment = routeParam(routeParams, 'comment_id', 'comment')
+  const pr = routeParam(routeParams, 'pr_id', 'pr')
+  const git = routeParam(routeParams, 'git_ref', 'ref')
+  const log = routeParam(routeParams, 'log_id', 'log')
+  const telemetry = statusbarTelemetryLabel(routeParams)
+  const keeper = routeParam(routeParams, 'keeper')
+
+  addStatusbarChip(chips, 'goal', goal ? `Goal ${goal}` : undefined, 'brass', 'Focused goal')
+  addStatusbarChip(chips, 'task', task ? `Task ${task}` : undefined, 'brass', 'Focused task')
+  addStatusbarChip(chips, 'board', board ? `Board ${board}` : undefined, 'info', 'Focused board post')
+  addStatusbarChip(chips, 'comment', comment ? `Comment ${comment}` : undefined, 'info', 'Focused comment')
+  addStatusbarChip(chips, 'pr', pr ? `PR ${normalizePrLabel(pr)}` : undefined, 'info', 'Focused pull request')
+  addStatusbarChip(chips, 'git', git ? `Git ${git}` : undefined, 'ghost', 'Focused git reference')
+  addStatusbarChip(chips, 'log', log ? `Log ${log}` : undefined, 'info', 'Focused runtime log')
+  addStatusbarChip(chips, 'telemetry', telemetry, 'info', 'Focused fleet telemetry')
+  addStatusbarChip(chips, 'keeper', keeper ? `Keeper ${keeper}` : undefined, 'ok', 'Focused keeper')
+
+  return {
+    workspaceLabel: 'LIVE WORKSPACE',
+    chips,
+    connectionLabel: 'mcp · connected',
+  }
 }
 
 function paramsWithLayers(
@@ -238,6 +392,16 @@ export function IdeShell() {
   const findOpen = route.value.params.find === 'open'
   const terminalKeeper = keeperFromRoute()
   const railsCollapsed = route.value.params.rails === 'hidden'
+  const statusbar = deriveIdeStatusbarModel({
+    activeView,
+    activeLayers,
+    activeFilePath,
+    findOpen,
+    terminalOpen,
+    railsCollapsed,
+    reviewFocusActive,
+    routeParams: route.value.params,
+  })
 
   useEffect(() => {
     const next = viewFromRoute(route.value.params.view)
@@ -302,15 +466,30 @@ export function IdeShell() {
     >
       <header
         class="ide-plane-statusbar"
+        aria-label="IDE operational status"
+        data-testid="ide-statusbar"
       >
         <span class="ide-plane-statusbar-title">MASC IDE</span>
         <span>·</span>
         <span
           class="chip sm is-brass"
           style=${{ flexShrink: 0 }}
-        >LIVE WORKSPACE</span>
+        >${statusbar.workspaceLabel}</span>
+        <div
+          class="ide-plane-statusbar-meta"
+          aria-label="IDE operational context"
+        >
+          ${statusbar.chips.map(chip => html`
+            <span
+              key=${chip.id}
+              class=${`chip sm is-${chip.tone}`}
+              title=${chip.title}
+              data-testid=${`ide-statusbar-chip-${chip.id}`}
+            >${chip.label}</span>
+          `)}
+        </div>
         <${IdePresenceStrip} />
-        <span class="ide-plane-connection">● mcp · connected</span>
+        <span class="ide-plane-connection">● ${statusbar.connectionLabel}</span>
       </header>
       <${IdeToolbar}
         activeView=${activeView}

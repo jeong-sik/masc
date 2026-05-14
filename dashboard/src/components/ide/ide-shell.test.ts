@@ -46,7 +46,7 @@ vi.mock('./ide-conversation-rail', () => ({
   IdeConversationRail: () => null,
 }))
 
-import { IdeShell } from './ide-shell'
+import { deriveIdeStatusbarModel, IdeShell } from './ide-shell'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { activeIdeFile, ideContextFocus } from './ide-state'
@@ -239,6 +239,94 @@ describe('IdeShell', () => {
     expect(window.location.hash).toBe(
       '#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-42',
     )
+  })
+
+  it('derives compact operational statusbar chips from IDE route context', () => {
+    const model = deriveIdeStatusbarModel({
+      activeView: 'split-diff',
+      activeLayers: new Set(['keeper-trace', 'approve']),
+      activeFilePath: 'dashboard/src/components/ide/ide-shell.ts',
+      findOpen: true,
+      terminalOpen: true,
+      railsCollapsed: true,
+      reviewFocusActive: false,
+      routeParams: {
+        surface: 'PR',
+        label: 'Runtime review',
+        line: '42',
+        goal: 'goal-runtime',
+        task: 'task-runtime',
+        post: 'post-runtime',
+        comment: 'comment-runtime',
+        pr: '15035',
+        ref: 'main',
+        log_id: 'turn-42',
+        session_id: 'sess-runtime',
+        keeper: 'sangsu',
+      },
+    })
+
+    expect(model.workspaceLabel).toBe('LIVE WORKSPACE')
+    expect(model.connectionLabel).toBe('mcp · connected')
+    expect(model.chips.map(chip => chip.label)).toEqual([
+      'SPLIT DIFF',
+      'ide/ide-shell.ts',
+      'Trace +1',
+      'terminal',
+      'find',
+      'rails hidden',
+      'PR L42 Runtime review',
+      'Goal goal-runtime',
+      'Task task-runtime',
+      'Board post-runtime',
+      'Comment comment-runtime',
+      'PR #15035',
+      'Git main',
+      'Log turn-42',
+      'Telemetry sess-runtime',
+      'Keeper sangsu',
+    ])
+  })
+
+  it('renders statusbar operational chips for the focused PR/task/log route', async () => {
+    route.value = {
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/runtime.ml',
+        line: '42',
+        surface: 'PR',
+        label: 'Runtime review',
+        source_id: 'trace:evt-42',
+        keeper: 'sangsu',
+        task: 'task-runtime',
+        pr: '15035',
+        log_id: 'turn-42',
+      },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))
+
+    const statusbar = container.querySelector('[data-testid="ide-statusbar"]')
+    expect(statusbar?.getAttribute('aria-label')).toBe('IDE operational status')
+    const chipLabels = [
+      ...container.querySelectorAll<HTMLElement>('[data-testid^="ide-statusbar-chip-"]'),
+    ].map(chip => chip.textContent)
+    expect(chipLabels).toEqual([
+      'SOURCE',
+      'lib/runtime.ml',
+      'terminal',
+      'PR L42 Runtime review',
+      'Task task-runtime',
+      'PR #15035',
+      'Log turn-42',
+      'Telemetry turn-42',
+      'Keeper sangsu',
+    ])
   })
 
   it('rejects unsafe IDE route file focus params', async () => {

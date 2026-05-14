@@ -21,6 +21,7 @@ let cascade_profile_gate () : cascade_profile_gate =
   let config_path = Cascade_runtime.cascade_config_path () in
   let keeper_profiles =
     Keeper_cascade_profile.keeper_catalog_names ?config_path ()
+    |> Dashboard_cascade.public_profile_names
     |> List.sort_uniq String.compare
   in
   let fallback_invalid_profiles =

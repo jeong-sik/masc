@@ -101,3 +101,5 @@ type session_context =
   ; session_dir : string
   ; mutable checkpoints : checkpoint list
   }
+
+let legacy_provider_filter_name = "allowed_providers"

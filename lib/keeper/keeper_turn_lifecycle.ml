@@ -51,7 +51,7 @@ let handle_keeper_down ctx args : tool_result =
              paused = true;
            }
          in
-         ((match write_meta ctx.config retained with
+         ((match write_meta_with_retry ctx.config retained with
            | Ok () -> ()
            | Error err ->
                Prometheus.inc_counter

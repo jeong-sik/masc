@@ -216,6 +216,13 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'cognition' },
       hidden: true,
     },
+    {
+      id: 'memory-subsystems',
+      label: 'Memory Subsystems',
+      description: 'Legacy memory subsystem drill-down (redirects to cognition).',
+      params: { section: 'memory-subsystems' },
+      hidden: true,
+    },
   ],
   command: [
     {

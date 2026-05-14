@@ -8,6 +8,8 @@ type gate_result =
   | Allow
   | Reject of string
 
+let review_warning_artifact = "evidence/review_warning.json"
+
 let check_verdict (v : Cdal_types.contract_verdict) : gate_result =
   match v.status with
   | Cdal_types.Satisfied -> Allow
@@ -35,7 +37,7 @@ let check_verdict (v : Cdal_types.contract_verdict) : gate_result =
       ) blocking_gaps in
       let review_guidance =
         if List.exists (fun (g : Cdal_types.completeness_gap) ->
-             String.equal g.artifact "evidence/review_warning.json")
+             String.equal g.artifact review_warning_artifact)
             blocking_gaps
         then
           " Submit for verification and approve via the verification FSM before marking done."

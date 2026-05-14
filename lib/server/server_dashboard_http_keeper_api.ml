@@ -2135,7 +2135,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               updated_at = Keeper_types.now_iso ();
             }
           in
-          (match Keeper_types.write_meta ~force:true config updated_meta with
+          (match Keeper_types.write_meta_with_retry config updated_meta with
            | Ok () -> ()
            | Error err ->
                Log.Keeper.warn
@@ -2247,7 +2247,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         then (
           resume_booted_keeper_if_needed ();
           refresh_keeper_execution_surfaces ~config ~name "started")
-        else invalidate_keeper_execution_surfaces ~config ();
+        else (
+          (match Keeper_registry.get_phase ~base_path:config.base_path name with
+           | Some Keeper_state_machine.Paused -> persist_keeper_paused_state true
+           | Some _ | None -> ());
+          invalidate_keeper_execution_surfaces ~config ());
         Http.Response.json ~compress:true ~request:req
           (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
              (String.escaped action)
@@ -2256,7 +2260,9 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           reqd
     | Some (true, _body) ->
         (match action with
-         | "shutdown" -> refresh_keeper_execution_surfaces ~config ~name "stopped"
+         | "shutdown" ->
+             persist_keeper_paused_state true;
+             refresh_keeper_execution_surfaces ~config ~name "stopped"
          | _ -> invalidate_keeper_execution_surfaces ~config ());
         Http.Response.json ~compress:true ~request:req
           (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}

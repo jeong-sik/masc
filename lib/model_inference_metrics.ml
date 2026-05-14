@@ -1,6 +1,8 @@
 module StringMap = Map.Make (String)
 module IntMap = Map.Make (Int)
 
+let model_id_unknown = "unknown"
+
 (** Model_inference_metrics — per-model aggregate inference statistics.
 
     Reads keeper decisions.jsonl files plus inference-level costs.jsonl
@@ -241,7 +243,7 @@ let infer_usage_trust_from_fields
         if not (List.mem reason !reasons) then reasons := reason :: !reasons
       in
       let model = String.trim model in
-      if model = "" || String.equal model "unknown" then add "missing_model_id";
+      if model = "" || String.equal model model_id_unknown then add "missing_model_id";
       (match input_tokens with
        | Some n when n < 0 -> add "negative_input_tokens"
        | Some n when n > usage_absurd_token_threshold -> add "input_tokens_gt_1m"

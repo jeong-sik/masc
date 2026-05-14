@@ -1054,7 +1054,6 @@ let composite_execution_config_drift execution =
 let composite_execution_blocked execution =
   composite_execution_tool_required execution
   || composite_execution_claim_no_eligible execution
-  || composite_execution_config_drift execution
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match lower_string_opt (json_string "terminal_reason_code" execution) with
       | Some terminal -> terminal <> "" && terminal <> "completed"
@@ -1100,8 +1099,6 @@ let composite_runtime_attention ~snapshot ~execution =
   let reason =
     if composite_execution_claim_no_eligible execution
     then Some "claim_scope_no_eligible"
-    else if composite_execution_config_drift execution
-    then Some "keeper_cascade_override_drift"
     else match json_string "operator_disposition_reason" execution with
     | Some value when String.trim value <> "" -> Some value
     | _ ->
@@ -1110,6 +1107,8 @@ let composite_runtime_attention ~snapshot ~execution =
        | _ when fiber_stop_requested -> Some "fiber_stop_requested"
        | _ when idle_attention -> Some "idle_composite"
        | _ when stale_without_live_turn -> Some "not_live"
+       | _ when needs_attention && composite_execution_config_drift execution ->
+         Some "keeper_cascade_override_drift"
        | _ when blocked -> Some "runtime_blocked"
        | _ -> None)
   in
@@ -1235,11 +1234,6 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
     then
       [ probe ("Inspect keeper claim scope: " ^ reason)
       ; message ("Resolve keeper claim scope before retry: " ^ reason)
-      ]
-    else if composite_execution_config_drift execution
-    then
-      [ probe ("Inspect keeper cascade override drift: " ^ reason)
-      ; message ("Resolve keeper cascade override drift: " ^ reason)
       ]
     else if composite_execution_tool_required execution
     then

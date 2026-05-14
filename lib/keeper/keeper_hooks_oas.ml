@@ -80,12 +80,18 @@ let current_keeper_model meta =
   let _ = meta in
   runtime_lane_label
 
+let stop_reason_label_end_turn = "end_turn"
+let stop_reason_label_tool_use = "tool_use"
+let stop_reason_label_max_tokens = "max_tokens"
+let stop_reason_label_stop_sequence = "stop_sequence"
+let stop_reason_label_unknown = "unknown"
+
 let stop_reason_to_label = function
-  | Agent_sdk.Types.EndTurn -> "end_turn"
-  | Agent_sdk.Types.StopToolUse -> "tool_use"
-  | Agent_sdk.Types.MaxTokens -> "max_tokens"
-  | Agent_sdk.Types.StopSequence -> "stop_sequence"
-  | Agent_sdk.Types.Unknown _ -> "unknown"
+  | Agent_sdk.Types.EndTurn -> stop_reason_label_end_turn
+  | Agent_sdk.Types.StopToolUse -> stop_reason_label_tool_use
+  | Agent_sdk.Types.MaxTokens -> stop_reason_label_max_tokens
+  | Agent_sdk.Types.StopSequence -> stop_reason_label_stop_sequence
+  | Agent_sdk.Types.Unknown _ -> stop_reason_label_unknown
 
 let idle_severity_to_label = function
   | Agent_sdk.Hooks.Idle_severity.Nudge -> "nudge"
@@ -112,10 +118,13 @@ let render_pre_tool_gate_source_hint
     Printf.sprintf " source_path=%s source_line=%d"
       (Keeper_guards.escape_field path) line
 
+let tool_approval_required_tag = "[tool_approval_required]"
+
 let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
   if event.decision = Keeper_guards.Gate_approval_required then
     Printf.sprintf
-      "[tool_approval_required] tool=%s source=keeper_hook code=%s reason=%s%s"
+      "%s tool=%s source=keeper_hook code=%s reason=%s%s"
+      tool_approval_required_tag
       (Keeper_guards.escape_field event.tool_name)
       (Keeper_guards.escape_field event.reason_code)
       (Keeper_guards.escape_field event.reason_text)
@@ -140,8 +149,9 @@ let pre_tool_gate_error (event : Keeper_guards.gate_decision_event) =
   Printf.sprintf "%s:%s: %s"
     decision event.reason_code event.reason_text
 
+let min_duration_ms = 0.0
 let trajectory_duration_ms duration_ms =
-  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
+  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms min_duration_ms <= 0
   then 0
   else max 1 (int_of_float (Float.round duration_ms))
 
@@ -172,9 +182,10 @@ let record_pre_tool_gate_attempt
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
+       let callback_label_gate_tool_call_log = "gate_tool_call_log" in
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_lifecycle_callback_failures
-         ~labels:[("keeper", keeper_name); ("callback", "gate_tool_call_log")]
+         ~labels:[("keeper", keeper_name); ("callback", callback_label_gate_tool_call_log)]
          ();
        Log.Keeper.warn
          "keeper:%s pre_tool_use gate tool_call log failed tool=%s err=%s"
@@ -226,15 +237,19 @@ let record_pre_tool_gate_attempt
         ~runtime_contract
         ~action_radius
         ~on_persist_error:(fun exn ->
+          let dashboard_surface_tool_stats = "/api/v1/keepers/:name/tool-stats" in
+          let stale_reason_trajectory_append = "trajectory_append_failed" in
+          let telemetry_source_trajectory = "trajectory_tool_call" in
+          let telemetry_producer_pre_tool = "keeper_hooks_oas.pre_tool_use" in
           Telemetry_coverage_gap.record
             ~masc_root:acc.Trajectory.masc_root
-            ~source:"trajectory_tool_call"
-            ~producer:"keeper_hooks_oas.pre_tool_use"
+            ~source:telemetry_source_trajectory
+            ~producer:telemetry_producer_pre_tool
             ~durable_store:
               (Trajectory.trajectory_path acc.Trajectory.masc_root
                  acc.Trajectory.keeper_name trace_id)
-            ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
-            ~stale_reason:"trajectory_append_failed"
+            ~dashboard_surface:dashboard_surface_tool_stats
+            ~stale_reason:stale_reason_trajectory_append
             ~keeper_name
             ~trace_id
             ~error:(Printexc.to_string exn)
@@ -298,6 +313,8 @@ let is_runtime_selector_alias model =
   in
   String.equal leaf "auto"
 
+let ms_per_second = 1000.0
+
 (* #10083: keep the missing/alias observability, but return the keeper-facing
    runtime lane instead of reconstructing OAS-owned model identity. *)
 let resolve_after_turn_model ~keeper_name
@@ -305,9 +322,11 @@ let resolve_after_turn_model ~keeper_name
   let raw_model = String.trim response.model in
   if String.equal raw_model "" then begin
     let source =
+      let source_telemetry_resolved = "telemetry_resolved" in
+      let source_unknown_sentinel = "unknown_sentinel" in
       if telemetry_has_canonical_model_id response.telemetry then
-        "telemetry_resolved"
-      else "unknown_sentinel"
+        source_telemetry_resolved
+      else source_unknown_sentinel
     in
     Prometheus.inc_counter empty_response_model_metric
       ~labels:[ ("keeper", keeper_name); ("source", source) ] ();
@@ -320,9 +339,10 @@ let resolve_after_turn_model ~keeper_name
       Prometheus.inc_counter alias_response_model_metric
         ~labels:
           [
+            let source_telemetry_canonical = "telemetry_canonical" in
             ("keeper", keeper_name);
             ("alias", runtime_lane_label);
-            ("source", "telemetry_canonical");
+            ("source", source_telemetry_canonical);
           ]
         ();
       Log.Keeper.warn
@@ -348,16 +368,20 @@ let content_block_has_visible_or_tool_progress = function
   | Agent_sdk.Types.Audio _ -> true
   | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> false
 
+let shape_empty = "empty"
+let shape_thinking_only = "thinking_only"
+let shape_blank_text = "blank_text"
+
 let response_content_empty_shape content =
-  if content = [] then "empty"
+  if content = [] then shape_empty
   else if
     List.exists
       (function
         | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> true
         | _ -> false)
       content
-  then "thinking_only"
-  else "blank_text"
+  then shape_thinking_only
+  else shape_blank_text
 
 let record_response_content_quality_metric ~keeper_name
     (response : Agent_sdk.Types.api_response) =
@@ -372,11 +396,12 @@ let record_response_content_quality_metric ~keeper_name
         ]
       ()
 
+let default_context_max = 0
 let context_max_of_telemetry
     (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
   | Some { effective_context_window = Some n; _ } when n > 0 -> n
-  | _ -> 0
+  | _ -> default_context_max
 
 let classify_usage_trust ?usage ~model ~telemetry () =
   let _ = model in
@@ -404,7 +429,7 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
 	           ~labels:
 	             [
 	               ("keeper_name", keeper_name);
-	               ("model", "runtime");
+	               ("model", runtime_lane_label);
 	               ("reason", reason);
 	             ]
            ())
@@ -424,23 +449,42 @@ type cost_status =
   | Cost_runtime_unknown
   | Cost_oas_cost_unreported
 
+let cost_label_reported = "reported"
+let cost_label_known_free = "known_free"
+let cost_label_no_tokens = "no_tokens"
+let cost_label_usage_missing = "usage_missing"
+let cost_label_usage_untrusted = "usage_untrusted"
+let cost_label_runtime_unknown = "runtime_unknown"
+let cost_label_oas_cost_unreported = "oas_cost_unreported"
+
+let cost_reason_reported = "oas_reported_cost"
+let cost_reason_known_free = "known_structurally_unmetered_or_zero_price"
+let cost_reason_no_tokens = "no_billable_tokens"
+let cost_reason_usage_missing = "usage_missing"
+let cost_reason_usage_untrusted = "usage_untrusted"
+let cost_reason_runtime_unknown = "runtime_unknown"
+let cost_reason_oas_cost_unreported = "oas_cost_unreported"
+
+let cost_source_unmetered_provider = "unmetered_provider"
+let cost_source_computed = "computed"
+
 let cost_status_to_string = function
-  | Cost_reported -> "reported"
-  | Cost_known_free -> "known_free"
-  | Cost_no_tokens -> "no_tokens"
-  | Cost_usage_missing -> "usage_missing"
-  | Cost_usage_untrusted -> "usage_untrusted"
-  | Cost_runtime_unknown -> "runtime_unknown"
-  | Cost_oas_cost_unreported -> "oas_cost_unreported"
+  | Cost_reported -> cost_label_reported
+  | Cost_known_free -> cost_label_known_free
+  | Cost_no_tokens -> cost_label_no_tokens
+  | Cost_usage_missing -> cost_label_usage_missing
+  | Cost_usage_untrusted -> cost_label_usage_untrusted
+  | Cost_runtime_unknown -> cost_label_runtime_unknown
+  | Cost_oas_cost_unreported -> cost_label_oas_cost_unreported
 
 let cost_status_reason = function
-  | Cost_reported -> "oas_reported_cost"
-  | Cost_known_free -> "known_structurally_unmetered_or_zero_price"
-  | Cost_no_tokens -> "no_billable_tokens"
-  | Cost_usage_missing -> "usage_missing"
-  | Cost_usage_untrusted -> "usage_untrusted"
-  | Cost_runtime_unknown -> "runtime_unknown"
-  | Cost_oas_cost_unreported -> "oas_cost_unreported"
+  | Cost_reported -> cost_reason_reported
+  | Cost_known_free -> cost_reason_known_free
+  | Cost_no_tokens -> cost_reason_no_tokens
+  | Cost_usage_missing -> cost_reason_usage_missing
+  | Cost_usage_untrusted -> cost_reason_usage_untrusted
+  | Cost_runtime_unknown -> cost_reason_runtime_unknown
+  | Cost_oas_cost_unreported -> cost_reason_oas_cost_unreported
 
 let cost_status_for_event
     ~(runtime_unknown : bool)
@@ -491,7 +535,7 @@ let record_keeper_tool_duration_metric
       ; "tool", summary.tool_name
       ; "outcome", summary.outcome
       ]
-    (summary.duration_ms /. 1000.0)
+    (summary.duration_ms /. ms_per_second)
 
 (** Emit prompt/decode tokens-per-second histograms from an OAS turn
     response.  Safe to call with [telemetry = None] (no-op) and with
@@ -513,11 +557,11 @@ let record_llm_tok_s_metrics
       t.prompt_per_second, t.predicted_per_second
     | _ -> None, None
   in
-  let provider_kind_label = "runtime" in
+  let provider_kind_label = runtime_lane_label in
   let _ = model in
-  let provider = "runtime" in
+  let provider = runtime_lane_label in
   let labels =
-    [ "model", "runtime"
+    [ "model", runtime_lane_label
     ; "provider", provider
     ; "provider_kind", provider_kind_label
     ]
@@ -542,7 +586,7 @@ let record_llm_inference_latency_metric
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
   let _ = model in
-  let labels = [("model", "runtime")] in
+  let labels = [("model", runtime_lane_label)] in
   Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
   match telemetry with
   | Some t ->
@@ -558,7 +602,7 @@ let record_llm_inference_latency_metric
     Prometheus.observe_histogram
       Prometheus.metric_llm_inference_duration
       ~labels
-      (Float.of_int observed_latency_ms /. 1000.0)
+      (Float.of_int observed_latency_ms /. ms_per_second)
   | None ->
     Prometheus.inc_counter
       Prometheus.metric_after_turn_telemetry_missing
@@ -575,7 +619,7 @@ let wall_tokens_per_second
       | Some request_latency_ms when request_latency_ms > 0 ->
       Some
         (Float.of_int output_tokens
-         /. (Float.of_int request_latency_ms /. 1000.0))
+         /. (Float.of_int request_latency_ms /. ms_per_second))
       | _ -> None)
   | _ -> None
 
@@ -613,14 +657,14 @@ let () =
 
 let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
     ~cost_usd =
-  if usage_missing then "missing_usage"
-  else if not usage_trusted then "untrusted_usage"
-  else if runtime_unmetered then "unmetered_provider"
-  else if cost_usd > 0.0 then "computed"
-  else "oas_cost_unreported"
+  if usage_missing then cost_label_usage_missing
+  else if not usage_trusted then cost_label_usage_untrusted
+  else if runtime_unmetered then cost_source_unmetered_provider
+  else if cost_usd > 0.0 then cost_source_computed
+  else cost_label_oas_cost_unreported
 
 let record_cost_emit_source source =
-  if not (String.equal source "computed") then
+  if not (String.equal source cost_source_computed) then
     Prometheus.inc_counter cost_emit_source_metric
       ~labels:[ ("source", source) ]
       ()
@@ -695,6 +739,7 @@ let assemble_cost_event_payload
       ~output_tokens
       ~cost_usd
   in
+  let default_safe_cost_usd = 0.0
   let safe_cost_usd =
     match cost_status with
     | Cost_reported -> cost_usd
@@ -703,7 +748,7 @@ let assemble_cost_event_payload
     | Cost_usage_missing
     | Cost_usage_untrusted
     | Cost_runtime_unknown
-    | Cost_oas_cost_unreported -> 0.0
+    | Cost_oas_cost_unreported -> default_safe_cost_usd
   in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in
@@ -746,8 +791,8 @@ let assemble_cost_event_payload
   let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
-    ("provider", `String "runtime");
-    ("model", `String "runtime");
+    ("provider", `String runtime_lane_label);
+    ("model", `String runtime_lane_label);
     ("input_tokens", `Int safe_input_tokens);
     ("output_tokens", `Int safe_output_tokens);
     ("cost_usd", `Float safe_cost_usd);
@@ -757,7 +802,8 @@ let assemble_cost_event_payload
     ("cost_usd_source", `String cost_usd_source);
     ("usage_missing", `Bool usage_missing);
     ("timestamp", `String (Masc_domain.now_iso ()));
-    ("source", `String "auto_trajectory");
+    let source_auto_trajectory = "auto_trajectory" in
+    ("source", `String source_auto_trajectory);
   ]
   @ Keeper_usage_trust.json_fields usage_trust
   @ raw_usage_fields
@@ -2095,7 +2141,7 @@ let make_hooks
         let duration_ms =
           if hook_duration_ms > 0.0
           then hook_duration_ms
-          else (Time_compat.now () -. !tool_start_time) *. 1000.0
+          else (Time_compat.now () -. !tool_start_time) *. ms_per_second
         in
         let model =
           current_keeper_model !meta_ref

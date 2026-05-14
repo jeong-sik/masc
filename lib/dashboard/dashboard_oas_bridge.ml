@@ -1,6 +1,8 @@
 (** See [Dashboard_oas_bridge.mli]. *)
 
 let per_provider_cap = 200
+let default_duration_ms = 0.0
+let default_ttfb_ms = 0.0
 
 type status =
   | Success
@@ -188,7 +190,7 @@ let duration_from_response ?total_duration_ms
     | Some ttfb_ms, Some decode_ms -> ttfb_ms +. decode_ms
     | Some ttfb_ms, None -> ttfb_ms
     | None, Some decode_ms -> decode_ms
-    | None, None -> 0.0
+    | None, None -> default_duration_ms
   in
   match total_duration_ms, response.telemetry with
   | Some ms, _ when ms > 0.0 -> ms
@@ -196,12 +198,12 @@ let duration_from_response ?total_duration_ms
       match telemetry.request_latency_ms with
       | Some ms when ms > 0 -> Float.of_int ms
       | _ -> duration_from_telemetry telemetry)
-  | _ -> 0.0
+  | _ -> default_ttfb_ms
 
 let ttfb_from_response (response : Agent_sdk.Types.api_response) =
   match response.telemetry with
-  | Some telemetry -> Option.value ~default:0.0 (ttfb_from_telemetry telemetry)
-  | _ -> 0.0
+  | Some telemetry -> Option.value ~default:default_ttfb_ms (ttfb_from_telemetry telemetry)
+  | _ -> default_ttfb_ms
 
 let cache_hit_from_response ~(usage : Agent_sdk.Types.api_usage option)
     (response : Agent_sdk.Types.api_response) =

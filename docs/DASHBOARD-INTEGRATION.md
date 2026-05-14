@@ -121,6 +121,8 @@ code_refs:
   - fleet-health attribution view
 - `GET /api/v1/dashboard/safe-autonomy`
   - operations safety view
+- `GET /api/v1/dashboard/transport-health`
+  - runtime transport health + connection freshness view
 - `GET /api/v1/dashboard/keeper-feature-proof`
   - keeper autonomy feature proof gates, including 24h turn-span and web-search tool evidence
   - tool gates count only calls from known keeper names and expose `keeper_evidence.provenance_scope=known_keeper_tool_call_log`, per-tool successful/failing keepers, sandbox/network modes, task IDs, and goal IDs

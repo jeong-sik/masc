@@ -1117,6 +1117,11 @@
  (libraries masc_test_deps))
 
 (executable
+ (name test_procedural_memory)
+ (modules test_procedural_memory)
+ (libraries masc_test_deps))
+
+(executable
  (name tool_matrix_manifest)
  (modules tool_matrix_manifest)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))

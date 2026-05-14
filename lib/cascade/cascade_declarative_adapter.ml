@@ -299,12 +299,7 @@ let apply_alias_overrides (base : Llm_provider.Provider_config.t)
 let map_strategy_kind (decl : cascade_strategy) : Cascade_strategy.kind =
   match decl with
   | Failover -> Cascade_strategy.Failover
-  | Capacity_aware -> Cascade_strategy.Capacity_aware
-  | Weighted_random -> Cascade_strategy.Weighted_random
-  | Circuit_breaker_cycling -> Cascade_strategy.Circuit_breaker_cycling
   | Priority_tier -> Cascade_strategy.Priority_tier
-  | Sticky -> Cascade_strategy.Sticky
-  | Round_robin -> Cascade_strategy.Round_robin
 
 let map_cycle_policy (cp : cascade_cycle_policy) :
     Cascade_strategy.cycle_policy =

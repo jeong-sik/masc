@@ -274,42 +274,31 @@ let validate_strategy_fields (cfg : cascade_config) : validation_error list =
   List.concat_map
     (fun (t : cascade_tier) ->
        let path = Printf.sprintf "tier.%s" t.name in
-       let mismatch_errors field_name expected_strategy =
+       let retired_field_errors field_name retired_strategy =
          err
            "R10"
            (Printf.sprintf "%s.%s" path field_name)
            (Printf.sprintf
-              "%s is only valid with strategy %S, but tier uses %s"
+              "%s belongs to retired internal strategy %S and is not \
+               supported by cascade.toml strategy %s"
               field_name
-              expected_strategy
+              retired_strategy
               (show_cascade_strategy t.strategy))
        in
        let cycle_errs =
          match t.cycle_policy with
          | None -> []
-         | Some _ ->
-           (match t.strategy with
-            | Circuit_breaker_cycling -> []
-            | Failover | Capacity_aware | Weighted_random | Priority_tier | Sticky
-            | Round_robin -> mismatch_errors "cycle-policy" "circuit_breaker_cycling")
+         | Some _ -> retired_field_errors "cycle-policy" "circuit_breaker_cycling"
        in
        let sticky_errs =
          match t.sticky_ttl_ms with
          | None -> []
-         | Some _ ->
-           (match t.strategy with
-            | Sticky -> []
-            | Failover | Capacity_aware | Weighted_random | Circuit_breaker_cycling
-            | Priority_tier | Round_robin -> mismatch_errors "sticky-ttl-ms" "sticky")
+         | Some _ -> retired_field_errors "sticky-ttl-ms" "sticky"
        in
        let scoring_errs =
          match t.scoring_params with
          | None -> []
-         | Some _ ->
-           (match t.strategy with
-            | Weighted_random -> []
-            | Failover | Capacity_aware | Circuit_breaker_cycling | Priority_tier
-            | Sticky | Round_robin -> mismatch_errors "scoring-params" "weighted_random")
+         | Some _ -> retired_field_errors "scoring-params" "weighted_random"
        in
        cycle_errs @ sticky_errs @ scoring_errs)
     cfg.tiers

@@ -53,6 +53,12 @@ val sync_oas_context : working_context -> working_context
 (** {1 Working-context projections} *)
 
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
+val resume_checkpoint_of_context :
+  max_checkpoint_messages:int -> working_context -> Agent_sdk.Checkpoint.t
+(** Project [working_context] to the checkpoint passed to OAS resume,
+    applying the same message count, old-tool-result, per-block, and
+    total-content caps used by {!save_oas_checkpoint}. *)
+
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
 val system_prompt_of_context : working_context -> string
 val messages_of_context : working_context -> Agent_sdk.Types.message list

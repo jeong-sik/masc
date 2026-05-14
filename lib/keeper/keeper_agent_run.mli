@@ -101,9 +101,9 @@ type run_result =
 (** Result of pre-dispatch resume checkpoint hygiene.
 
     [resume_checkpoint] is the only checkpoint passed to OAS resume.  It is
-    derived from the sanitized MASC working context, optionally after
-    pre-dispatch compaction, so run_turn does not reload a separate raw
-    checkpoint immediately before dispatch. *)
+    derived from the sanitized and checkpoint-capped MASC working context,
+    optionally after pre-dispatch compaction, so run_turn does not reload a
+    separate raw checkpoint immediately before dispatch. *)
 type pre_dispatch_checkpoint_hygiene_result =
   { context : Keeper_types.working_context
   ; resume_checkpoint : Agent_sdk.Checkpoint.t option

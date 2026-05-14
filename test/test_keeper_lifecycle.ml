@@ -2402,6 +2402,79 @@ let test_pre_dispatch_resume_checkpoint_uses_loaded_working_context () =
   check bool "fresh context does not force Agent.resume" false
     (Option.is_some fresh_result.resume_checkpoint)
 
+let test_pre_dispatch_resume_checkpoint_caps_loaded_context_without_save () =
+  let base_meta = make_keeper_meta () in
+  let meta =
+    {
+      base_meta with
+      compaction =
+        {
+          base_meta.compaction with
+          ratio_gate = 1.0;
+          message_gate = 0;
+          token_gate = 0;
+          max_checkpoint_messages = 120;
+        };
+    }
+  in
+  let large_text =
+    String.make (KCC.default_max_checkpoint_content_chars_total / 8) 'q'
+  in
+  let messages =
+    List.init 40 (fun i ->
+      Agent_sdk.Types.user_msg
+        (Printf.sprintf "resume-bulk-checkpoint-%02d %s" i large_text))
+  in
+  let ctx =
+    KEC.create ~system_prompt:"sp" ~max_tokens:10_000_000
+    |> fun c -> KEC.append_many c messages
+    |> KEC.sync_oas_context
+  in
+  let checkpoint =
+    {
+      (KEC.checkpoint_of_context ctx) with
+      turn_count = 13;
+      messages = KEC.messages_of_context ctx;
+    }
+  in
+  let ctx = { ctx with checkpoint } in
+  let save_called = ref false in
+  let result =
+    KAR.prepare_resume_checkpoint_for_dispatch
+      ~meta
+      ~now_ts:1000.0
+      ~loaded_checkpoint_present:true
+      ~save_checkpoint:(fun _ ->
+        save_called := true;
+        Error "unexpected save without compaction")
+      ctx
+  in
+  check bool "no compaction save for below-threshold bulk context" false
+    !save_called;
+  check bool "bulk context stays below compaction gates" false result.applied;
+  let resume_checkpoint =
+    match result.resume_checkpoint with
+    | Some checkpoint -> checkpoint
+    | None -> Alcotest.fail "expected capped resume checkpoint"
+  in
+  check int "resume turn count is preserved" 13 resume_checkpoint.turn_count;
+  check bool "resume checkpoint enforces total content cap" true
+    (checkpoint_counted_content_chars resume_checkpoint.messages
+     <= KCC.default_max_checkpoint_content_chars_total);
+  check bool "older messages dropped at resume total cap" true
+    (List.length resume_checkpoint.messages < List.length messages);
+  let newest =
+    resume_checkpoint.messages
+    |> List.rev
+    |> List.hd
+    |> Agent_sdk.Types.text_of_message
+  in
+  check bool "newest message retained in resume checkpoint" true
+    (contains_substring newest "resume-bulk-checkpoint-39");
+  check int "context carries capped resume checkpoint"
+    (List.length resume_checkpoint.messages)
+    (List.length result.context.checkpoint.messages)
+
 let test_pre_dispatch_resume_checkpoint_saves_compacted_context () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2821,6 +2894,8 @@ let () =
             test_compact_if_needed_records_saved_tokens_metric;
           test_case "pre-dispatch resume uses loaded working context" `Quick
             test_pre_dispatch_resume_checkpoint_uses_loaded_working_context;
+          test_case "pre-dispatch resume caps loaded context without save" `Quick
+            test_pre_dispatch_resume_checkpoint_caps_loaded_context_without_save;
           test_case "pre-dispatch resume saves compacted context" `Quick
             test_pre_dispatch_resume_checkpoint_saves_compacted_context;
           test_case "pre-dispatch resume blocks unsaved compaction" `Quick

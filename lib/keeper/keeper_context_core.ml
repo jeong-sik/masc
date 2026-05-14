@@ -1329,6 +1329,47 @@ let sanitize_oas_checkpoint
   in
   ({ cp with messages }, stats)
 
+let capped_checkpoint_messages_of_context
+      ~(max_checkpoint_messages : int)
+      (ctx : working_context)
+  : Agent_sdk.Types.message list
+  =
+  (* Shared by checkpoint persistence and pre-dispatch resume: both paths
+     must honor the load-time message cap plus content-size guards. *)
+  let original_messages = messages_of_context ctx in
+  let capped_messages =
+    trim_messages_preserving_pairs original_messages
+      ~max_count:max_checkpoint_messages
+  in
+  let capped_messages_were_truncated =
+    List.length capped_messages < List.length original_messages
+  in
+  let capped_messages =
+    Agent_sdk.Context_reducer.reduce
+      (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
+      capped_messages
+  in
+  let capped_messages, sanitize_stats =
+    sanitize_checkpoint_messages capped_messages
+  in
+  if capped_messages_were_truncated || checkpoint_sanitize_changed sanitize_stats
+  then repair_broken_tool_call_pairs capped_messages
+  else capped_messages
+
+let resume_checkpoint_of_context
+      ~(max_checkpoint_messages : int)
+      (ctx : working_context) : Agent_sdk.Checkpoint.t
+  =
+  let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
+  {
+    ctx.checkpoint with
+    version = Agent_sdk.Checkpoint.checkpoint_version;
+    system_prompt = Some (system_prompt_of_context ctx);
+    messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
+    max_total_tokens = Some (max_tokens_of_context ctx);
+    context = checkpoint_context;
+  }
+
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
   match cp.max_total_tokens with
@@ -1337,7 +1378,7 @@ let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
       match cp.working_context with
       | Some (`Assoc _ as sidecar) ->
           sidecar |> member "max_tokens" |> to_int_option
-          |> Option.value ~default:fallback
+      |> Option.value ~default:fallback
       | _ -> fallback)
 
 let context_of_oas_checkpoint
@@ -1390,32 +1431,6 @@ let save_oas_checkpoint
   let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
-  (* Truncate messages at save time to match the load-time cap.
-     Without this, checkpoints grow unbounded between compaction cycles,
-     causing multi-GB transient allocations when loaded by concurrent keepers. *)
-  let original_messages = messages_of_context ctx in
-  let capped_messages =
-    trim_messages_preserving_pairs original_messages
-      ~max_count:max_checkpoint_messages
-  in
-  let capped_messages_were_truncated =
-    List.length capped_messages < List.length original_messages
-  in
-  (* Stub old tool results at save time: keep only the most recent turn's
-     results in full. During Agent.run the reducer uses keep_recent:3, but
-     at checkpoint persistence we are more aggressive — older tool results
-     are unlikely to be useful on resume and bloat disk/memory. *)
-  let capped_messages =
-    Agent_sdk.Context_reducer.reduce
-      (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
-      capped_messages
-  in
-  let capped_messages, sanitize_stats = sanitize_checkpoint_messages capped_messages in
-  let capped_messages =
-    if capped_messages_were_truncated || checkpoint_sanitize_changed sanitize_stats
-    then repair_broken_tool_call_pairs capped_messages
-    else capped_messages
-  in
   let checkpoint =
     {
       ctx.checkpoint with
@@ -1424,7 +1439,7 @@ let save_oas_checkpoint
       agent_name;
       model;
       system_prompt = Some (system_prompt_of_context ctx);
-      messages = capped_messages;
+      messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
       created_at = Time_compat.now ();
       max_total_tokens = Some (max_tokens_of_context ctx);
       context = checkpoint_context;

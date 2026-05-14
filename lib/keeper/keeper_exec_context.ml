@@ -29,6 +29,8 @@ let token_count = Keeper_context_core.token_count
 let message_count = Keeper_context_core.message_count
 let context_ratio = Keeper_context_core.context_ratio
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
+let resume_checkpoint_of_context =
+  Keeper_context_core.resume_checkpoint_of_context
 let oas_context_of_context = Keeper_context_core.oas_context_of_context
 let with_max_tokens = Keeper_context_core.with_max_tokens
 let system_prompt_of_context = Keeper_context_core.system_prompt_of_context

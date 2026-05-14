@@ -40,7 +40,12 @@ let prepare_resume_checkpoint_for_dispatch
     if not loaded_checkpoint_present
     then None, None
     else if not applied
-    then Some (Keeper_exec_context.checkpoint_of_context compacted_ctx), None
+    then
+      ( Some
+          (Keeper_exec_context.resume_checkpoint_of_context
+             ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
+             compacted_ctx),
+        None )
     else (
       match save_checkpoint compacted_ctx with
       | Ok checkpoint -> Some checkpoint, None

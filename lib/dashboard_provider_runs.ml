@@ -362,7 +362,14 @@ let response_text_of_api_response (response : Agent_sdk.Types.api_response) =
 let provider_label_for_model provider model =
   match Provider_adapter.resolve_direct_adapter provider with
   | Some adapter ->
-    Ok (Provider_adapter.cascade_prefix_of_adapter adapter ^ ":" ^ model)
+    let prefix = Provider_adapter.cascade_prefix_of_adapter adapter in
+    (match Provider_adapter.provider_model_label prefix model with
+     | Some label -> Ok label
+     | None ->
+       Error
+         (Printf.sprintf
+            "Missing model for dashboard single-agent provider '%s'"
+            provider))
   | None ->
     Error
       (Printf.sprintf

@@ -182,16 +182,32 @@ let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
   remember_provider ~model_id ~provider;
   match seconds_of_ms ttfrc_ms with
   | Some seconds ->
+    Otel_spans.add_event
+      ~name:"ttfrc.received"
+      ~attrs:
+        [ "gen_ai.provider.name", `String provider
+        ; "gen_ai.request.model", `String model_id
+        ; "masc.gen_ai.streaming.ttfrc_ms", `Float ttfrc_ms
+        ]
+      ();
     Prometheus.observe_histogram streaming_first_chunk_metric
       ~labels:[("provider", provider); ("model", model_id)]
       seconds
   | None -> ()
 
 let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
-  let _ = chunk_index in
   remember_provider ~model_id ~provider;
   match seconds_of_ms inter_chunk_ms with
   | Some seconds ->
+    Otel_spans.add_event
+      ~name:"streaming.chunk"
+      ~attrs:
+        [ "gen_ai.provider.name", `String provider
+        ; "gen_ai.request.model", `String model_id
+        ; "masc.gen_ai.streaming.chunk_index", `Int chunk_index
+        ; "masc.gen_ai.streaming.inter_chunk_ms", `Float inter_chunk_ms
+        ]
+      ();
     Prometheus.observe_histogram streaming_inter_chunk_metric
       ~labels:[("provider", provider); ("model", model_id)]
       seconds

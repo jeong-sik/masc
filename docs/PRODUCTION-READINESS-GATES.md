@@ -42,9 +42,14 @@ Command:
 ```bash
 scripts/keeper-production-readiness-gate.py \
   --base-path /Users/dancer/me \
-  --keeper <keeper-name> \
-  --min-terminal-turns 3 \
-  --min-success-turns 3 \
+  --expected-keepers 18 \
+  --max-turns-per-keeper 3 \
+  --min-terminal-turns 54 \
+  --min-success-turns 54 \
+  --min-terminal-turns-per-keeper 3 \
+  --min-success-turns-per-keeper 3 \
+  --min-provider-turns-per-keeper 3 \
+  --min-success-provider-turns-per-keeper 3 \
   --output .release-evidence/keeper-production-readiness.json
 ```
 
@@ -52,8 +57,13 @@ Default thresholds:
 
 | metric | required value |
 |---|---:|
-| terminal turns | >= 3 |
-| successful turns | >= 3 |
+| keepers with runtime manifest evidence | >= 18 |
+| terminal turns | >= 54 |
+| successful turns | >= 54 |
+| terminal turns per keeper | >= 3 |
+| successful turns per keeper | >= 3 |
+| provider-dispatched turns per keeper | >= 3 |
+| successful provider turns per keeper | >= 3 |
 | receipt coverage | 100% |
 | checkpoint coverage for successful provider turns | 100% |
 | provider attempt closure | 100% |
@@ -68,7 +78,8 @@ Default thresholds:
 
 This gate is intentionally stricter than `keeper-runtime-truth-gate.sh`.  The
 runtime-truth gate proves one turn.  The production gate proves a minimum sample
-of terminal turns and reports percentages that can be compared across releases.
+of terminal turns across the 18+ keeper fleet, enforces per-keeper evidence
+minimums, and reports percentages that can be compared across releases.
 
 ## Gate 3: Performance SLO
 

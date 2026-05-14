@@ -44,6 +44,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             keepers=[keeper],
             trace_ids=[trace],
             max_traces_per_keeper=5,
+            max_turns_per_keeper=0,
             thresholds=gate.Thresholds(),
         )
 
@@ -61,16 +62,76 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             self.assertEqual(summary.derived["checkpoint_coverage_pct"], 100.0)
             self.assertEqual(summary.derived["tool_log_coverage_pct"], 100.0)
 
-    def test_missing_checkpoint_fails_zero_missing_artifact_gate(self):
-        tmp, root, keeper, trace = self.make_fixture()
-        with tmp:
-            checkpoint = (
+    def test_shared_receipt_file_tools_match_selected_turn(self):
+        with tempfile.TemporaryDirectory() as tmp_name:
+            root = Path(tmp_name)
+            keeper = "prod-readiness"
+            trace = "trace-prod-readiness"
+            gate.write_fixture_turn(root, keeper, trace, 1, tools=False)
+            gate.write_fixture_turn(root, keeper, trace, 2, tools=True)
+
+            receipt_dir = (
+                root / ".masc" / "keepers" / keeper / "execution-receipts" / "2026-05"
+            )
+            shared_receipt = receipt_dir / "14.jsonl"
+            receipt_rows = []
+            for receipt_path in (receipt_dir / "01.jsonl", receipt_dir / "02.jsonl"):
+                receipt_rows.extend(
+                    json.loads(line)
+                    for line in receipt_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+            gate.write_jsonl(shared_receipt, receipt_rows)
+
+            manifest = (
                 root
                 / ".masc"
                 / "keepers"
                 / keeper
-                / "checkpoints"
-                / "turn-1.json"
+                / "runtime-manifests"
+                / f"{trace}.jsonl"
+            )
+            manifest_rows = [
+                json.loads(line)
+                for line in manifest.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            for row in manifest_rows:
+                links = row.get("links")
+                if isinstance(links, dict) and links.get("receipt_path"):
+                    links["receipt_path"] = str(shared_receipt)
+            manifest.write_text(
+                "".join(
+                    json.dumps(row, sort_keys=True) + "\n" for row in manifest_rows
+                ),
+                encoding="utf-8",
+            )
+
+            summary = gate.evaluate(
+                base_path=root,
+                keepers=[keeper],
+                trace_ids=[trace],
+                max_traces_per_keeper=5,
+                max_turns_per_keeper=0,
+                thresholds=gate.Thresholds(
+                    min_terminal_turns=2,
+                    min_success_turns=2,
+                    min_terminal_turns_per_keeper=2,
+                    min_success_turns_per_keeper=2,
+                    min_provider_turns_per_keeper=2,
+                    min_success_provider_turns_per_keeper=2,
+                ),
+            )
+
+            self.assertEqual(summary.status, "PASS", summary.failures)
+            self.assertEqual(summary.metrics["tool_used_turns"], 1)
+            self.assertEqual(summary.metrics["tool_log_ok_turns"], 1)
+
+    def test_missing_checkpoint_fails_zero_missing_artifact_gate(self):
+        tmp, root, keeper, trace = self.make_fixture()
+        with tmp:
+            checkpoint = (
+                root / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
             )
             checkpoint.unlink()
 
@@ -142,10 +203,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             self.assertEqual(summary.status, "FAIL")
             self.assertLess(summary.derived["provider_closure_pct"], 100.0)
             self.assertTrue(
-                any(
-                    "provider_closure_pct" in failure
-                    for failure in summary.failures
-                )
+                any("provider_closure_pct" in failure for failure in summary.failures)
             )
 
     def test_missing_timestamp_fails_coverage_gate(self):
@@ -175,10 +233,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             self.assertEqual(summary.status, "FAIL")
             self.assertLess(summary.derived["timestamp_coverage_pct"], 100.0)
             self.assertTrue(
-                any(
-                    "timestamp_coverage_pct" in failure
-                    for failure in summary.failures
-                )
+                any("timestamp_coverage_pct" in failure for failure in summary.failures)
             )
 
 

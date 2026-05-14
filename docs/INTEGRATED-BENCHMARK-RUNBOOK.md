@@ -14,7 +14,7 @@
 ## Layer Map
 
 - `control`
-  - direct read model / detachment / heartbeat proof
+  - 18+ keeper runtime evidence proof
   - harness: `./scripts/harness_agent_swarm_live.sh`
 - `search`
   - `legacy` vs `best_first_v1` synthetic comparison
@@ -49,8 +49,9 @@ INTEGRATED_BENCH_PHASES=control,search \
 ## Reading Failures
 
 - `control` fail
-  - managed-operation proof lane가 깨진 상태다.
-  - detachment materialization, heartbeat, current task binding, final marker를 먼저 본다.
+  - keeper fleet runtime evidence가 부족한 상태다.
+  - observed keeper count, per-keeper successful provider turns, receipt/checkpoint
+    links, memory injection rows, tool-call log links를 먼저 본다.
 - `search` fail
   - `best_first_v1` policy layer regression 가능성이 높다.
   - `depends_on_operation_ids`, readiness gating, assigned unit, detachment delta를 먼저 본다.

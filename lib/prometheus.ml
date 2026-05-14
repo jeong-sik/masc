@@ -3268,22 +3268,18 @@ let to_prometheus_text () =
 ;;
 
 (** {1 Convenience Functions} *)
-
 let record_request () = inc_counter metric_mcp_requests ()
 
 let record_task_completed () =
   inc_counter metric_tasks ~labels:[ "status", "completed" ] ()
 ;;
-
 let record_task_failed () = inc_counter metric_tasks ~labels:[ "status", "failed" ] ()
 
 let record_error ?(error_type = "unknown") () =
   inc_counter metric_errors ~labels:[ "type", error_type ] ()
 ;;
-
 let set_active_agents count = set_gauge metric_active_agents (float_of_int count)
 let set_pending_tasks count = set_gauge "masc_pending_tasks" (float_of_int count)
-
 (** Reconcile active_agents gauge with existing agent files on disk.
     Call after Coord/server initialization to sync Prometheus state. *)
 let reconcile_active_agents_gauge masc_dir =

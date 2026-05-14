@@ -103,6 +103,7 @@ def parse_section_items() -> dict[str, list[str]]:
     if end < 0:
         fail("DASHBOARD_SECTION_ITEMS unbalanced braces")
     block = text[open_idx:end]
+    redirect_only_sections = parse_section_redirect_keys(text)
 
     # Match top-level `<tab>: [` followed by a balanced `[ ... ]`.
     out: dict[str, list[str]] = {}
@@ -128,10 +129,47 @@ def parse_section_items() -> dict[str, list[str]]:
             fail(f"unbalanced section array for tab {tab}")
         arr_text = block[arr_start:arr_end]
         # section IDs appear as `id: '<value>'`
-        ids = re.findall(r"\bid\s*:\s*'([^']+)'", arr_text)
+        ids = [
+            section_id
+            for section_id in re.findall(r"\bid\s*:\s*'([^']+)'", arr_text)
+            if (tab, section_id) not in redirect_only_sections
+        ]
         out[tab] = ids
         pos = arr_end
     return out
+
+
+def parse_section_redirect_keys(text: str) -> set[tuple[str, str]]:
+    """Extract same-surface section redirects from SECTION_REDIRECTS.
+
+    Redirects are applied before section validation in navigation.ts, so a
+    section item with a direct redirect entry is a legacy compatibility target,
+    not a resolved nav-event target.
+    """
+    anchor_idx = text.find("SECTION_REDIRECTS")
+    if anchor_idx < 0:
+        return set()
+    open_idx = text.find("{", anchor_idx)
+    if open_idx < 0:
+        fail("SECTION_REDIRECTS '{' not found")
+    depth = 0
+    end = -1
+    for i in range(open_idx, len(text)):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end < 0:
+        fail("SECTION_REDIRECTS unbalanced braces")
+    block = text[open_idx:end]
+    return {
+        (surface, section)
+        for surface, section in re.findall(r"'([^']+):([^']+)'\s*:", block)
+    }
 
 
 def client_inventory() -> dict[str, object]:

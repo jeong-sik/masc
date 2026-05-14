@@ -33,23 +33,29 @@ code_refs:
 ## Canonical v1 Surfaces
 
 ### Top-level tabs
+- `cockpit` (hidden)
 - `overview`
 - `monitoring`
 - `command`
 - `connectors`
 - `workspace`
 - `lab`
+- `code`
 - `logs`
 
 ### Section inventory
+- `cockpit`
+  - `#cockpit` (hidden)
 - `overview`
   - `#overview`
 - `monitoring`
-  - `#monitoring?section=journey`
-  - `#monitoring?section=observatory` (hidden diagnostic)
-  - `#monitoring?section=agents`
   - `#monitoring?section=runtime`
+  - `#monitoring?section=agents`
+  - `#monitoring?section=goal-loop`
   - `#monitoring?section=fleet-health`
+  - `#monitoring?section=journey` (hidden diagnostic)
+  - `#monitoring?section=observatory` (hidden diagnostic)
+  - `#monitoring?section=cognition` (hidden diagnostic)
 - `command`
   - `#command?section=operations`
   - sub-view는 `view=ops|governance|safety|inspector|connectors` 로 분기한다.
@@ -58,18 +64,18 @@ code_refs:
   - `#connectors?section=connector-status`
 - `workspace`
   - `#workspace?section=board`
+  - `#workspace?section=sub-boards`
   - `#workspace?section=planning`
   - `#workspace?section=repositories`
-  - `#workspace?section=collab-mvp` (hidden diagnostic)
   - `#workspace?section=verification`
 - `lab`
   - `#lab?section=tools`
   - `#lab?section=autoresearch`
   - `#lab?section=harness`
+- `code`
+  - `#code?section=ide-shell`
 - `logs`
   - `#logs`
-- hidden route
-  - `#code?section=ide-shell`
 
 ## Legacy Redirect Contract
 - `monitoring:sessions -> monitoring:agents`
@@ -90,6 +96,7 @@ code_refs:
 - `command:governance -> command:operations`
 - `command:connectors -> command:operations&view=connectors`
 - `command:inspector -> command:operations&view=inspector`
+- `monitoring:memory-subsystems -> monitoring:cognition&view=memory`
 - `connectors:connector-discord -> connectors:connector-status&connector=discord`
 - `connectors:connector-imessage -> connectors:connector-status&connector=imessage`
 - `connectors:connector-slack -> connectors:connector-status&connector=slack`
@@ -108,7 +115,7 @@ code_refs:
 - `GET /api/v1/dashboard/telemetry/summary`
   - fleet-health summary
 - `GET /api/v1/dashboard/memory-subsystems`
-  - memory subsystem health
+  - cognition memory sub-view read model
 - `GET /api/v1/attribution/summary`
   - fleet-health attribution view
 - `GET /api/v1/dashboard/safe-autonomy`

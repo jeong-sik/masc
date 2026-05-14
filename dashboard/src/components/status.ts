@@ -73,8 +73,8 @@ function renderSection(section: StatusSection) {
   }
 }
 
-function currentSection(): StatusSection {
-  const section = route.value.params.section
+export function normalizeStatusSection(section: string | undefined): StatusSection {
+  if (section === 'memory-subsystems') return 'cognition'
   if (
     section === 'observatory'
     || section === 'journey'
@@ -84,7 +84,11 @@ function currentSection(): StatusSection {
     || section === 'cognition'
     || section === 'agents'
   ) return section
-  return 'journey'
+  return 'runtime'
+}
+
+function currentSection(): StatusSection {
+  return normalizeStatusSection(route.value.params.section)
 }
 
 export function Status() {

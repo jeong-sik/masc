@@ -21,7 +21,9 @@ let valid_surfaces =
 ;;
 
 (* Mirror of dashboard/src/config/navigation.ts:DASHBOARD_SECTION_ITEMS.
-   Includes hidden sections that remain reachable and continue to fire telemetry. *)
+   Includes hidden sections because they remain directly reachable and
+   continue to fire telemetry. Retired sections are accepted only in
+   redirected_from, not as resolved targets. *)
 let valid_sections =
   [ ( "monitoring"
     , [ "journey"

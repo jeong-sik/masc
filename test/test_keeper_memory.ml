@@ -631,6 +631,34 @@ let test_read_continuity_summary_prefers_progress_log () =
     check bool "reads next plan from progress log" true
       (Astring.String.is_infix ~affix:"verify only progress path is used" continuity))
 
+let test_read_continuity_summary_caps_progress_log () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
+    let config = make_test_room_config dir in
+    let keeper = "progress-cap-keeper" in
+    let meta = keeper_meta ~name:keeper ~mention_targets:[keeper] () in
+    let progress_path = Keeper_types.keeper_progress_path config keeper in
+    Keeper_types.mkdir_p (Filename.dirname progress_path);
+    let max_chars =
+      Masc_mcp.Keeper_memory_policy.default_continuity_summary_max_chars
+    in
+    let long_goal = String.make (max_chars * 2) 'g' in
+    (match
+       Fs_compat.save_file_atomic progress_path
+         ("# Keeper Progress\nGoal: "
+          ^ long_goal
+          ^ "\nNEXT: verify progress cap is enforced\n")
+     with
+     | Ok () -> ()
+     | Error err -> fail ("failed to seed progress log: " ^ err));
+    let continuity =
+      Keeper_world_observation.read_continuity_summary ~config ~meta
+    in
+    check bool "progress log continuity capped" true
+      (String.length continuity <= max_chars + 3);
+    check bool "progress log continuity ellipsis" true
+      (Astring.String.is_suffix ~affix:"…" continuity))
+
 let test_keeper_context_status_reports_recovery_source_and_tiers () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
@@ -1593,6 +1621,8 @@ let () =
         [
           test_case "continuity prefers progress log" `Quick
             test_read_continuity_summary_prefers_progress_log;
+          test_case "continuity caps progress log" `Quick
+            test_read_continuity_summary_caps_progress_log;
           test_case "context status reports recovery source + tiers" `Quick
             test_keeper_context_status_reports_recovery_source_and_tiers;
           test_case "progress cache tracks generation" `Quick

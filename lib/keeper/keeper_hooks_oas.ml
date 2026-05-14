@@ -239,10 +239,12 @@ let record_pre_tool_gate_attempt
         ~on_persist_error:(fun exn ->
           let dashboard_surface_tool_stats = "/api/v1/keepers/:name/tool-stats" in
           let stale_reason_trajectory_append = "trajectory_append_failed" in
+          let telemetry_source_trajectory = "trajectory_tool_call" in
+          let telemetry_producer_pre_tool = "keeper_hooks_oas.pre_tool_use" in
           Telemetry_coverage_gap.record
             ~masc_root:acc.Trajectory.masc_root
-            ~source:"trajectory_tool_call"
-            ~producer:"keeper_hooks_oas.pre_tool_use"
+            ~source:telemetry_source_trajectory
+            ~producer:telemetry_producer_pre_tool
             ~durable_store:
               (Trajectory.trajectory_path acc.Trajectory.masc_root
                  acc.Trajectory.keeper_name trace_id)

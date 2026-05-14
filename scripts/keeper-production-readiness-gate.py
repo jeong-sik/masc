@@ -378,9 +378,6 @@ def evaluate(
         keeper_metrics(manifest_keeper).manifest_files += 1
         for row in iter_jsonl(manifest):
             metrics.manifest_rows += 1
-            metrics.timestamp_rows += 1
-            if parse_ts(row.get("ts")) is not None:
-                metrics.parseable_timestamp_rows += 1
             keeper = str(row.get("keeper_name") or manifest.parent.parent.name)
             trace = str(row.get("trace_id") or manifest.stem)
             generation_value = row.get("generation")
@@ -413,6 +410,10 @@ def evaluate(
         }
 
     for (keeper, _trace, _generation, _turn), rows in selected_rows_by_turn.items():
+        for row in rows:
+            metrics.timestamp_rows += 1
+            if parse_ts(row.get("ts")) is not None:
+                metrics.parseable_timestamp_rows += 1
         if not event_rows(rows, "turn_finished"):
             continue
         keeper_metric = keeper_metrics(keeper)

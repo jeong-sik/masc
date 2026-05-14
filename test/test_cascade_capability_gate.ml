@@ -8,8 +8,10 @@ open Alcotest
 module CI = Masc_mcp.Cascade_inference
 module CE = Masc_mcp.Cascade_error_classify
 module CR = Masc_mcp.Cascade_runtime
+module P = Masc_mcp.Prometheus
 
 let cascade_name = Masc_mcp.Keeper_cascade_profile.Runtime_name "keeper_unified"
+let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 
 let validate ?(provider_ceiling = Some 40960) max_tokens =
   CI.validate_max_tokens_within_ceiling
@@ -191,13 +193,55 @@ target = "tier-group.strict_tool_candidates"
     (fun () ->
       let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
       check (option int) "mixed cascade output ceiling" (Some 16384) ceiling;
+      let before =
+        P.metric_value_or_zero metric_max_tokens_clamped ()
+      in
       let resolved =
         CI.resolve_max_tokens ~cascade_name ~fallback:(fun () -> 65536)
       in
       check int "automatic max_tokens capped to ceiling" 16384 resolved;
+      let resolved_again =
+        CI.resolve_max_tokens ~cascade_name ~fallback:(fun () -> 65536)
+      in
+      check int "repeat automatic max_tokens capped to ceiling" 16384 resolved_again;
+      check
+        (float 0.0001)
+        "clamp metric counts every automatic clamp"
+        (before +. 2.0)
+        (P.metric_value_or_zero metric_max_tokens_clamped ());
       CI.validate_max_tokens_within_ceiling ~cascade_name
         ~provider_ceiling:ceiling resolved
       |> check_ok "capped value accepted" 16384)
+
+let test_auto_max_tokens_clamp_warning_dedupes_by_tuple () =
+  CI.For_testing.reset_auto_max_tokens_clamp_warnings ();
+  check
+    bool
+    "first tuple logs"
+    true
+    (CI.For_testing.should_log_auto_max_tokens_clamp
+       ~cascade_name
+       ~source:"fallback"
+       ~max_tokens:65536
+       ~ceiling:16384);
+  check
+    bool
+    "same tuple suppressed"
+    false
+    (CI.For_testing.should_log_auto_max_tokens_clamp
+       ~cascade_name
+       ~source:"fallback"
+       ~max_tokens:65536
+       ~ceiling:16384);
+  check
+    bool
+    "different ceiling logs"
+    true
+    (CI.For_testing.should_log_auto_max_tokens_clamp
+       ~cascade_name
+       ~source:"fallback"
+       ~max_tokens:65536
+       ~ceiling:8192)
 
 let test_resolve_provider_derived_max_tokens_matches_failover_ceiling () =
   with_temp_cascade_toml
@@ -310,6 +354,10 @@ let () =
         "automatic max_tokens respects mixed failover ceiling"
         `Quick
         test_resolve_max_tokens_caps_automatic_value_to_cascade_ceiling;
+      test_case
+        "automatic max_tokens clamp warning dedupes by tuple"
+        `Quick
+        test_auto_max_tokens_clamp_warning_dedupes_by_tuple;
       test_case
         "provider-derived max_tokens matches failover ceiling"
         `Quick

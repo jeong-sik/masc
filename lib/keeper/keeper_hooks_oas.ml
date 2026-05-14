@@ -313,6 +313,8 @@ let is_runtime_selector_alias model =
   in
   String.equal leaf "auto"
 
+let ms_per_second = 1000.0
+
 (* #10083: keep the missing/alias observability, but return the keeper-facing
    runtime lane instead of reconstructing OAS-owned model identity. *)
 let resolve_after_turn_model ~keeper_name
@@ -514,7 +516,7 @@ let record_keeper_tool_duration_metric
       ; "tool", summary.tool_name
       ; "outcome", summary.outcome
       ]
-    (summary.duration_ms /. 1000.0)
+    (summary.duration_ms /. ms_per_second)
 
 (** Emit prompt/decode tokens-per-second histograms from an OAS turn
     response.  Safe to call with [telemetry = None] (no-op) and with
@@ -581,7 +583,7 @@ let record_llm_inference_latency_metric
     Prometheus.observe_histogram
       Prometheus.metric_llm_inference_duration
       ~labels
-      (Float.of_int observed_latency_ms /. 1000.0)
+      (Float.of_int observed_latency_ms /. ms_per_second)
   | None ->
     Prometheus.inc_counter
       Prometheus.metric_after_turn_telemetry_missing
@@ -598,7 +600,7 @@ let wall_tokens_per_second
       | Some request_latency_ms when request_latency_ms > 0 ->
       Some
         (Float.of_int output_tokens
-         /. (Float.of_int request_latency_ms /. 1000.0))
+         /. (Float.of_int request_latency_ms /. ms_per_second))
       | _ -> None)
   | _ -> None
 
@@ -2118,7 +2120,7 @@ let make_hooks
         let duration_ms =
           if hook_duration_ms > 0.0
           then hook_duration_ms
-          else (Time_compat.now () -. !tool_start_time) *. 1000.0
+          else (Time_compat.now () -. !tool_start_time) *. ms_per_second
         in
         let model =
           current_keeper_model !meta_ref

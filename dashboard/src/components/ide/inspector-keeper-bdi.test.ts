@@ -121,6 +121,7 @@ describe('InspectorKeeperBDI', () => {
     expect(container.textContent).toContain('line ownership needs inspection')
     expect(container.textContent).toContain('165 tok')
     expect(container.textContent).toContain('keeper_bash')
+    expect(container.textContent).toContain('42ms')
 
     render(null, container)
   })

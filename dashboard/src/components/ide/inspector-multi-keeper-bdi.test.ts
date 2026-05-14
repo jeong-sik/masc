@@ -312,6 +312,10 @@ describe('InspectorMultiKeeperBDI — focus-mode layout (RFC-0027 §5, exactly P
     expect(chips.length).toBe(3)
     const chipNames = Array.from(chips).map(c => c.getAttribute('data-keeper'))
     expect(chipNames).toEqual(['luna', 'moth', 'scholar'])
+    await vi.waitFor(() => {
+      const chipText = Array.from(chips).map(c => c.textContent ?? '').join(' ')
+      expect(chipText).toContain('165 tok')
+    })
   })
 
   it('clicking a chip promotes that keeper to the focused slot', async () => {

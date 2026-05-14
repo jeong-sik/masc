@@ -423,7 +423,7 @@ function KeeperChip({ entry, slot, dropIdx, presence, overlay, onFocus, onUnpin 
           />
         ` : null}
         ${entry.line !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>L${entry.line}</span>` : null}
-        ${tokens !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>${tokens.toLocaleString()}</span>` : null}
+        ${tokens !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>${formatTokenCount(tokens)}</span>` : null}
       </button>
       ${focusLabel ? html`
         <button

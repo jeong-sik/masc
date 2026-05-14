@@ -16,6 +16,24 @@ interface LogData {
   total: number
 }
 
+export interface LogCauseCount {
+  cause: string
+  count: number
+}
+
+export interface LogModuleCount {
+  module: string
+  count: number
+}
+
+export interface LogWindowSummary {
+  errors: number
+  warnings: number
+  failureEnvelopes: number
+  topCauses: LogCauseCount[]
+  topModules: LogModuleCount[]
+}
+
 const logResource = createAsyncResource<LogData>()
 const levelFilter = signal('INFO')
 const moduleInput = signal('')
@@ -169,6 +187,85 @@ function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   }
 }
 
+function classifyMessageCause(message: string): string | null {
+  const lower = message.toLowerCase()
+  if (lower.includes('oas_timeout_budget') || lower.includes('oas execution timed out')) {
+    return 'oas_timeout_budget'
+  }
+  if (lower.includes('inter_chunk_idle')) return 'inter_chunk_idle'
+  if (lower.includes('no_first_token')) return 'no_first_token'
+  if (lower.includes('cascade_exhausted') || lower.includes('all cascades exhausted')) {
+    return 'cascade_exhausted'
+  }
+  if (lower.includes('stale watchdog')) return 'stale_watchdog'
+  if (lower.includes('required tool contract') || lower.includes('tool_required_unsatisfied')) {
+    return 'tool_required_unsatisfied'
+  }
+  if (lower.includes('semaphore wait')) return 'queue_wait_timeout'
+  if (lower.includes('legacy verification directory')) return 'legacy_verification_dir'
+  if (lower.includes('zero_token_usage_reported')) return 'usage_zero_tokens'
+  if (lower.includes('usage telemetry untrusted')) return 'usage_telemetry_untrusted'
+  if (lower.includes('usage telemetry unavailable')) return 'usage_telemetry_unavailable'
+  if (lower.includes('orphan threshold breached')) return 'registry_orphan_threshold'
+  if (lower.includes('entry not found, update dropped')) return 'registry_orphan_update'
+  if (lower.includes('archived credential')) return 'credential_archive'
+  if (lower.includes('retired pg runtime env')) return 'retired_pg_env'
+  if (lower.includes('rate limited') || lower.includes('temporarily limiting requests')) {
+    return 'provider_rate_limit'
+  }
+  if (lower.includes('invalid request')) return 'provider_invalid_request'
+  return null
+}
+
+export function logDiagnosticCause(entry: LogEntry): string | null {
+  const failure = failureEnvelope(entry)
+  if (failure) return failure.cause_code
+  const details = entryDetails(entry)
+  const event = detailLabel(details, 'event')
+  if (event) return event
+  return classifyMessageCause(entry.message)
+}
+
+function topCounts(map: Map<string, number>, limit = 3): LogCauseCount[] {
+  return [...map.entries()]
+    .map(([cause, count]) => ({ cause, count }))
+    .sort((a, b) => b.count - a.count || a.cause.localeCompare(b.cause))
+    .slice(0, limit)
+}
+
+export function summarizeLogWindow(entries: LogEntry[]): LogWindowSummary {
+  const causes = new Map<string, number>()
+  const modules = new Map<string, number>()
+  let errors = 0
+  let warnings = 0
+  let failureEnvelopes = 0
+
+  for (const entry of entries) {
+    const level = normalizedLevel(entry)
+    if (level === 'ERROR') errors += 1
+    if (level === 'WARN') warnings += 1
+
+    const mod = entry.module?.trim() || '(root)'
+    modules.set(mod, (modules.get(mod) ?? 0) + 1)
+
+    const failure = failureEnvelope(entry)
+    if (failure) failureEnvelopes += 1
+    const cause = failure?.cause_code ?? logDiagnosticCause(entry)
+    if (cause) causes.set(cause, (causes.get(cause) ?? 0) + 1)
+  }
+
+  return {
+    errors,
+    warnings,
+    failureEnvelopes,
+    topCauses: topCounts(causes),
+    topModules: topCounts(modules).map(({ cause, count }) => ({
+      module: cause,
+      count,
+    })),
+  }
+}
+
 function renderLogMessage(entry: LogEntry): string {
   const details = entryDetails(entry)
   const message = interpolateStructuredMessage(entry.message, details)
@@ -239,7 +336,9 @@ function renderLogRow(entry: LogEntry) {
   const requestId = detailLabel(details, 'request_id')
   const sessionId = detailLabel(details, 'session_id')
   const fixes = detailLabel(details, 'fixes')
+  const event = detailLabel(details, 'event')
   const failure = failureEnvelope(entry)
+  const diagnosticCause = failure?.cause_code ?? logDiagnosticCause(entry)
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
   let backgroundClass = 'bg-[var(--color-bg-surface)]'
@@ -283,6 +382,9 @@ function renderLogRow(entry: LogEntry) {
         ${phase
           ? html`<${MetaTag}>${phase}</${MetaTag}>`
           : null}
+        ${event
+          ? html`<${MetaTag}>event ${event}</${MetaTag}>`
+          : null}
         ${requestId
           ? html`<${MetaTag}>req ${requestId}</${MetaTag}>`
           : null}
@@ -291,6 +393,11 @@ function renderLogRow(entry: LogEntry) {
           : null}
         ${failure
           ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
+          : diagnosticCause
+            ? html`<${StatusChip} tone=${level === 'ERROR' ? 'bad' : 'warn'} uppercase=${false}>${diagnosticCause}</${StatusChip}>`
+            : null}
+        ${failure
+          ? html`<${StatusChip} tone="info" uppercase=${false}>${failure.surface}</${StatusChip}>`
           : null}
         ${failure
           ? html`<${MetaTag}>${failure.recoverability}</${MetaTag}>`
@@ -311,6 +418,27 @@ function renderLogRow(entry: LogEntry) {
       >
         ${renderedMessage}
       </div>
+    </div>
+  `
+}
+
+function renderSummaryChip(label: string, value: string | number, tone = 'neutral') {
+  return html`
+    <${StatusChip} tone=${tone} uppercase=${false}>
+      <span>${label}</span>
+      <span class="font-mono tabular-nums">${value}</span>
+    </${StatusChip}>
+  `
+}
+
+function renderLogSummary(summary: LogWindowSummary) {
+  return html`
+    <div class="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
+      ${renderSummaryChip('ERROR', summary.errors, summary.errors > 0 ? 'bad' : 'neutral')}
+      ${renderSummaryChip('WARN', summary.warnings, summary.warnings > 0 ? 'warn' : 'neutral')}
+      ${renderSummaryChip('failure envelope', summary.failureEnvelopes, summary.failureEnvelopes > 0 ? 'info' : 'neutral')}
+      ${summary.topModules.map(item => renderSummaryChip(`module ${item.module}`, item.count))}
+      ${summary.topCauses.map(item => renderSummaryChip(`cause ${item.cause}`, item.count, 'info'))}
     </div>
   `
 }
@@ -364,6 +492,7 @@ export function LogViewer() {
   const logTotal = logData?.total ?? 0
   const logLoading = s.status === 'loading'
   const logError = s.status === 'error' ? s.message : null
+  const summary = summarizeLogWindow(logEntries)
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
@@ -445,6 +574,8 @@ export function LogViewer() {
         ${logError ? html`
           <div class="mx-4 mt-4 rounded-[var(--r-1)] border border-solid border-[var(--err-border)] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[var(--err-fg)]">${logError}</div>
         ` : null}
+
+        ${renderLogSummary(summary)}
 
         <div class="px-3 pt-3">
           <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">

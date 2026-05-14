@@ -122,15 +122,23 @@ let provider_kind_for_http_provider ?registry_entry (provider : cascade_provider
   | Chat_completions_api ->
     Some
       (match registry_entry with
-       | Some entry -> entry.Llm_provider.Provider_registry.defaults.kind
+       | Some entry ->
+         let kind = entry.Llm_provider.Provider_registry.defaults.kind in
+         if kind = Llm_provider.Provider_config.Ollama
+         then Llm_provider.Provider_config.OpenAI_compat
+         else kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api -> None
 
-let request_path_for_http_provider ~registry_entry ~kind ~base_url =
+let request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url =
   let request_path =
-    match registry_entry with
-    | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
-    | None -> Llm_provider.Provider_config.request_path_default_for_kind kind
+    match provider.api_format, kind with
+    | Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
+      Llm_provider.Provider_config.request_path_default_for_kind kind
+    | _ ->
+      (match registry_entry with
+       | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
+       | None -> Llm_provider.Provider_config.request_path_default_for_kind kind)
   in
   match kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
@@ -156,7 +164,9 @@ let provider_config_from_declared_provider
   | Http base_url ->
     (match provider_kind_for_http_provider ?registry_entry provider with
      | Some kind ->
-       let request_path = request_path_for_http_provider ~registry_entry ~kind ~base_url in
+       let request_path =
+         request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
+       in
        let api_key = api_key_of_credential ?registry_entry provider.credentials in
        let headers = Cascade_config.headers_with_auth ~kind ~api_key in
        Some

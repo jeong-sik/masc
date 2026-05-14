@@ -378,6 +378,63 @@ strategy = "failover"
            (List.length configs))
 ;;
 
+let test_ollama_cloud_openai_protocol_uses_chat_completions () =
+  with_env "OLLAMA_CLOUD_API_KEY" "ollama-cloud-adapter-test-key" @@ fun () ->
+    let toml =
+      {|
+[providers.ollama_cloud]
+protocol = "openai-http"
+endpoint = "https://ollama.com/v1"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[models.qwen3-5]
+max-context = 128000
+api-name = "qwen3.5"
+tools-support = true
+
+[models.qwen3-5.capabilities]
+supports-tool-choice = true
+
+[ollama_cloud.qwen3-5]
+max-concurrent = 1
+
+[tier.ollama_cloud_primary]
+members = ["ollama_cloud.qwen3-5"]
+strategy = "failover"
+|}
+    in
+    let catalog = adapt_toml toml in
+    no_errors catalog.errors;
+    let primary =
+      List.find
+        (fun (p : adapted_profile) -> p.name = "tier.ollama_cloud_primary")
+        catalog.profiles
+    in
+    match primary.provider_configs with
+    | [ cfg ] ->
+      check
+        bool
+        "explicit openai-http wins over ollama_cloud registry defaults"
+        true
+        (cfg.Llm_provider.Provider_config.kind
+         = Llm_provider.Provider_config.OpenAI_compat);
+      check string "uses versioned endpoint" "https://ollama.com/v1" cfg.base_url;
+      check string "uses chat completions path" "/chat/completions" cfg.request_path;
+      check
+        (option bool)
+        "tool_choice support preserved"
+        (Some true)
+        cfg.Llm_provider.Provider_config.supports_tool_choice_override
+    | configs ->
+      fail
+        (Printf.sprintf
+           "expected one resolved provider config, got %d"
+           (List.length configs))
+;;
+
 let test_model_capabilities_tool_choice_reaches_provider_config () =
   let toml =
     {|
@@ -948,6 +1005,10 @@ let () =
             "ollama_cloud HTTP provider adds bearer auth header"
             `Quick
             test_ollama_cloud_http_provider_adds_bearer_auth_header
+        ; test_case
+            "ollama_cloud openai-http uses chat completions"
+            `Quick
+            test_ollama_cloud_openai_protocol_uses_chat_completions
         ; test_case
             "model supports-tool-choice reaches provider config"
             `Quick

@@ -60,6 +60,78 @@ let provider_attempt_provenance_fields p =
   | Some source_cascade ->
       ("provider_source_cascade", `String source_cascade) :: base
 
+let health_error_kind label =
+  Cascade_health_tracker.error_kind_of_string label
+
+let record_candidate_health_success candidate ~latency_ms =
+  Cascade_runtime_candidate.health_keys candidate
+  |> List.iter (fun provider_key ->
+    Cascade_health_tracker.record_success
+      Cascade_health_tracker.global
+      ~provider_key
+      ~latency_ms
+      ())
+
+let record_candidate_health_rejected candidate ~reason =
+  let error_kind = health_error_kind "accept_rejected" in
+  Cascade_runtime_candidate.health_keys candidate
+  |> List.iter (fun provider_key ->
+    Cascade_health_tracker.record_rejected
+      Cascade_health_tracker.global
+      ~provider_key
+      ~error_kind
+      ~error_reason:reason
+      ())
+
+let record_candidate_health_error candidate sdk_err =
+  let error_reason = Agent_sdk.Error.to_string sdk_err in
+  let health_keys = Cascade_runtime_candidate.health_keys candidate in
+  if sdk_error_is_hard_quota sdk_err
+  then (
+    let error_kind = health_error_kind "hard_quota" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      Cascade_health_tracker.record_hard_quota
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
+  else if sdk_error_is_terminal_provider_runtime_failure sdk_err
+  then (
+    let error_kind = health_error_kind "terminal_provider_runtime_failure" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      Cascade_health_tracker.record_terminal_failure
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
+  else
+    match sdk_error_soft_rate_limited sdk_err with
+    | Some retry_after_s ->
+      let error_kind = health_error_kind "soft_rate_limited" in
+      health_keys
+      |> List.iter (fun provider_key ->
+        Cascade_health_tracker.record_soft_rate_limited
+          Cascade_health_tracker.global
+          ~provider_key
+          ?retry_after_s
+          ~error_kind
+          ~error_reason
+          ())
+    | None ->
+      let error_kind = health_error_kind "provider_error" in
+      health_keys
+      |> List.iter (fun provider_key ->
+        Cascade_health_tracker.record_failure
+          Cascade_health_tracker.global
+          ~provider_key
+          ~error_kind
+          ~error_reason
+          ())
+
 let runtime_candidate_label = "runtime"
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
@@ -626,6 +698,7 @@ let run_named
       (match result with
       | Ok result when accept result.response ->
         record_accepted_liveness_sample ();
+        record_candidate_health_success candidate ~latency_ms:attempt_latency_ms;
         let _ = attempt_latency_ms in
         (* FSM: Call_ok → Accept *)
         let observation =
@@ -658,6 +731,7 @@ let run_named
         (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
          | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
            record_accepted_liveness_sample ();
+           record_candidate_health_success candidate ~latency_ms:attempt_latency_ms;
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
@@ -675,6 +749,7 @@ let run_named
            (* Demoted from WARN to INFO (task-239): cascade will retry the
               next tier.  Tagged [cascade-fallback] so dashboard filters
               can distinguish recovery-in-progress from hard failures. *)
+           record_candidate_health_rejected candidate ~reason;
            Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next" cascade_name runtime_candidate_label reason;
            Cascade_legacy_runner.record_fallback_event capture
              ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label ~reason;
@@ -683,6 +758,7 @@ let run_named
               replay of the rejected empty/schema-invalid turn. *)
            try_cascade ?resume_checkpoint rest new_err
          | Cascade_fsm.Exhausted _ ->
+           record_candidate_health_rejected candidate ~reason;
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
@@ -703,7 +779,7 @@ let run_named
                      model = Some runtime_candidate_label;
                      reason;
                    }))
-         | Cascade_fsm.Accept _resp ->
+           | Cascade_fsm.Accept _resp ->
            (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully.
               Iter 42: tick an invariant-violation counter so this
               never-supposed-to-fire arm becomes a hard alert if it
@@ -712,6 +788,7 @@ let run_named
            Cascade_metrics.on_cascade_invariant_violation ();
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (runtime=%s)" cascade_name runtime_candidate_label;
            record_accepted_liveness_sample ();
+           record_candidate_health_success candidate ~latency_ms:attempt_latency_ms;
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
@@ -741,6 +818,7 @@ let run_named
            cascade turns on a provider that is terminal for the current runtime
            state. *)
         let err_str = Agent_sdk.Error.to_string sdk_err in
+        record_candidate_health_error candidate sdk_err;
         let (_ : Provider_error.t option) =
           emit_sdk_provider_error_metric ~cascade_name:error_cascade_name
             ~provider:runtime_candidate_label sdk_err

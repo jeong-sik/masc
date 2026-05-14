@@ -37,6 +37,10 @@ let dir_exists path =
   try Sys.file_exists path && Sys.is_directory path with
   | Sys_error _ -> false
 
+let dir_entry_count path =
+  try Sys.readdir path |> Array.length with
+  | Sys_error _ -> 0
+
 let warn_if_legacy_verifications_dir_present ~base_path ~active_dir =
   let legacy_dir = legacy_verifications_dir base_path in
   if dir_exists legacy_dir then (
@@ -46,9 +50,20 @@ let warn_if_legacy_verifications_dir_present ~base_path ~active_dir =
       (fun () ->
         if not (Hashtbl.mem warned_legacy_dirs legacy_dir) then (
           Hashtbl.add warned_legacy_dirs legacy_dir ();
-          Log.Task.warn
-            "Ignoring legacy verification directory %s; active store is %s"
-            legacy_dir active_dir)))
+          let entry_count = dir_entry_count legacy_dir in
+          Log.Task.emit Log.Info
+            ~details:
+              (`Assoc
+                [
+                  ("event", `String "legacy_verification_dir_ignored");
+                  ("legacy_dir", `String legacy_dir);
+                  ("active_dir", `String active_dir);
+                  ("legacy_entry_count", `Int entry_count);
+                ])
+            (Printf.sprintf
+               "Ignoring legacy verification directory %s; active store is %s \
+                (legacy_entries=%d)"
+               legacy_dir active_dir entry_count))))
 
 let verifications_dir base_path =
   let dir = active_verifications_dir base_path in

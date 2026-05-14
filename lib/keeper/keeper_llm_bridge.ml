@@ -2,6 +2,38 @@
 (* OAS Adapter bridging Eio structured concurrency, multi-turn cascade rollbacks,
    and strict global stop preemptions as formally verified in KeeperOASAdvanced.tla. *)
 
+let json_field name value = Some (name, value)
+let json_string_field name value = json_field name (`String value)
+let json_float_field name value = json_field name (`Float value)
+
+let bridge_failure_envelope
+    ?entity_id
+    ?operator_action
+    ~cause_code
+    ~severity
+    ~summary
+    ~recoverability
+    ~evidence_ref
+    ()
+  : Failure_envelope.t =
+  {
+    surface = "keeper_oas_bridge";
+    entity_kind = "oas_execution";
+    entity_id;
+    cause_code;
+    severity;
+    summary;
+    recoverability;
+    operator_action;
+    evidence_ref;
+  }
+;;
+
+let bridge_details fields envelope =
+  let fields = List.filter_map Fun.id fields in
+  Failure_envelope.attach_to_details (`Assoc fields) envelope
+;;
+
 (** Runs a generic Eio execution (usually an OAS Agent.run or Model.call) with a strict
     structural timeout. If the execution is cancelled by a timeout or global stop,
     the exception is caught, OAS-local context mutations are discarded
@@ -26,7 +58,33 @@ let run_with_timeout_and_fallback ~timeout_s fn =
       Keeper_metrics.metric_keeper_llm_bridge_failures
       ~labels:[ "site", "no_clock" ]
       ();
-    Log.Keeper.error "%s" message;
+    let envelope =
+      bridge_failure_envelope
+        ~cause_code:"eio_clock_unavailable"
+        ~severity:Failure_envelope.Critical
+        ~summary:message
+        ~recoverability:Failure_envelope.Operator_action_required
+        ~operator_action:"check_masc_eio_env"
+        ~evidence_ref:
+          (`Assoc
+            [
+              ("site", `String site);
+              ("timeout_sec", `Float timeout_s);
+              ("timeout_enforced", `Bool false);
+            ])
+        ()
+    in
+    Log.Keeper.emit Log.Error
+      ~details:
+        (bridge_details
+           [
+             json_string_field "event" "keeper_oas_bridge_no_clock";
+             json_string_field "site" site;
+             json_float_field "timeout_sec" timeout_s;
+             json_field "timeout_enforced" (`Bool false);
+           ]
+           envelope)
+      message;
     Error (Agent_sdk.Error.Internal message)
   in
   match Masc_eio_env.get_opt () with
@@ -73,11 +131,44 @@ let run_with_timeout_and_fallback ~timeout_s fn =
          Keeper_metrics.metric_keeper_llm_bridge_failures
          ~labels:[ "site", "timeout" ]
          ();
-       Log.Keeper.warn
-         "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS \
-          context rollback only; external tool side effects are not reverted)"
-         wall
-         timeout_s;
+       let message =
+         Printf.sprintf
+           "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS \
+            context rollback only; external tool side effects are not reverted)"
+           wall
+           timeout_s
+       in
+       let envelope =
+         bridge_failure_envelope
+           ~cause_code:"oas_timeout_budget"
+           ~severity:Failure_envelope.Bad
+           ~summary:"OAS execution exceeded its keeper bridge timeout budget"
+           ~recoverability:Failure_envelope.Operator_action_required
+           ~operator_action:"inspect_timeout_budget"
+           ~evidence_ref:
+             (`Assoc
+               [
+                 ("timeout_sec", `Float timeout_s);
+                 ("wall_sec", `Float wall);
+                 ("overshoot_sec", `Float (Float.max 0.0 (wall -. timeout_s)));
+                 ("rollback_scope", `String "oas_context_only");
+                 ("external_tool_side_effects_reverted", `Bool false);
+               ])
+           ()
+       in
+       Log.Keeper.emit Log.Info
+         ~details:
+           (bridge_details
+              [
+                json_string_field "event" "keeper_oas_bridge_timeout";
+                json_float_field "timeout_sec" timeout_s;
+                json_float_field "wall_sec" wall;
+                json_float_field "overshoot_sec" (Float.max 0.0 (wall -. timeout_s));
+                json_string_field "rollback_scope" "oas_context_only";
+                json_field "external_tool_side_effects_reverted" (`Bool false);
+              ]
+              envelope)
+         message;
        Error
          (Agent_sdk.Error.Api
             (Timeout
@@ -120,13 +211,45 @@ let run_with_timeout_and_fallback ~timeout_s fn =
          Keeper_metrics.metric_keeper_llm_bridge_failures
          ~labels:[ "site", "cancelled" ]
          ();
-       Log.Keeper.warn
-         "keeper_llm_bridge: OAS execution cancelled after %.1fs bucket=%s inner=%s \
-          (re-raising; OAS context rollback only; external tool side effects are not \
-          reverted)"
-         wall
-         bucket
-         inner_str;
+       let message =
+         Printf.sprintf
+           "keeper_llm_bridge: OAS execution cancelled after %.1fs bucket=%s inner=%s \
+            (re-raising; OAS context rollback only; external tool side effects are not \
+            reverted)"
+           wall
+           bucket
+           inner_str
+       in
+       let envelope =
+         bridge_failure_envelope
+           ~cause_code:"oas_execution_cancelled"
+           ~severity:Failure_envelope.Warn
+           ~summary:"OAS execution was cancelled by parent fiber or shutdown"
+           ~recoverability:Failure_envelope.Retryable
+           ~evidence_ref:
+             (`Assoc
+               [
+                 ("wall_sec", `Float wall);
+                 ("bucket", `String bucket);
+                 ("inner_exception", `String inner_str);
+                 ("rollback_scope", `String "oas_context_only");
+                 ("external_tool_side_effects_reverted", `Bool false);
+               ])
+           ()
+       in
+       Log.Keeper.emit Log.Warn
+         ~details:
+           (bridge_details
+              [
+                json_string_field "event" "keeper_oas_bridge_cancelled";
+                json_float_field "wall_sec" wall;
+                json_string_field "bucket" bucket;
+                json_string_field "inner_exception" inner_str;
+                json_string_field "rollback_scope" "oas_context_only";
+                json_field "external_tool_side_effects_reverted" (`Bool false);
+              ]
+              envelope)
+         message;
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_oas_cancel
          ~labels:[ "bucket", bucket ]
@@ -143,9 +266,28 @@ let run_with_timeout_and_fallback ~timeout_s fn =
          Keeper_metrics.metric_keeper_llm_bridge_failures
          ~labels:[ "site", "execution_error" ]
          ();
-       Log.Keeper.error
-         "keeper_llm_bridge: OAS execution error: %s\n%s"
-         (Printexc.to_string exn)
-         bt;
-       Error (Agent_sdk.Error.Internal (Printexc.to_string exn)))
+       let error = Printexc.to_string exn in
+       let message =
+         Printf.sprintf "keeper_llm_bridge: OAS execution error: %s\n%s" error bt
+       in
+       let envelope =
+         bridge_failure_envelope
+           ~cause_code:"oas_execution_error"
+           ~severity:Failure_envelope.Bad
+           ~summary:"OAS execution raised an unexpected exception"
+           ~recoverability:Failure_envelope.Operator_action_required
+           ~operator_action:"inspect_oas_bridge_error"
+           ~evidence_ref:(`Assoc [ ("error", `String error) ])
+           ()
+       in
+       Log.Keeper.emit Log.Error
+         ~details:
+           (bridge_details
+              [
+                json_string_field "event" "keeper_oas_bridge_execution_error";
+                json_string_field "error" error;
+              ]
+              envelope)
+         message;
+       Error (Agent_sdk.Error.Internal error))
 ;;

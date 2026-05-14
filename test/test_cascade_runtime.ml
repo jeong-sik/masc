@@ -61,6 +61,15 @@ let test_oas_failure_classification_keeps_terminal_branches_non_cascading () =
         (H.should_cascade_to_next local_resource)
   | _ -> fail "expected local resource exhaustion classification"
 
+let test_openai_compat_declarative_labels_do_not_require_registry_entry () =
+  check
+    bool
+    "typed declarative OpenAI-compatible labels are provider-config owned"
+    true
+    (Result.is_ok
+       (Masc_mcp.Cascade_runtime.ensure_api_keys_for_labels
+          [ "openai_compat:qwen3.5" ]))
+
 let () =
   run "Cascade_runtime"
     [
@@ -70,5 +79,7 @@ let () =
             test_oas_http_error_classification_is_typed;
           test_case "OAS terminal classes stay non-cascading" `Quick
             test_oas_failure_classification_keeps_terminal_branches_non_cascading;
+          test_case "typed openai_compat labels skip registry api-key gate" `Quick
+            test_openai_compat_declarative_labels_do_not_require_registry_entry;
         ] );
     ]

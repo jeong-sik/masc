@@ -926,6 +926,50 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
     Alcotest.(check bool) "lists beta too" true
       (contains_substring msg "alpha, beta")
 
+let test_sandbox_root_git_cwd_multi_repo_uses_cd_target_in_hint () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repos = Filename.concat playground "repos" in
+  let repo_a = Filename.concat repos "alpha" in
+  let repo_b = Filename.concat repos "beta" in
+  ensure_dir repo_a;
+  ensure_dir repo_b;
+  run_ok ~cwd:repo_a "git init -q";
+  run_ok ~cwd:repo_b "git init -q";
+  let _cwd, error =
+    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+      ~cwd:playground
+      ~cmd:"cd repos/beta && git worktree list 2>/dev/null"
+  in
+  match error with
+  | None -> Alcotest.fail "expected multi repo cwd guidance"
+  | Some msg ->
+    Alcotest.(check bool) "uses visible Bash tool" true
+      (contains_substring msg "Bash {");
+    Alcotest.(check bool) "selects cd target cwd" true
+      (contains_substring msg "\"cwd\": \"repos/beta\"");
+    Alcotest.(check bool) "strips redundant cd" false
+      (contains_substring msg "cd repos/beta");
+    Alcotest.(check bool) "keeps safe command" true
+      (contains_substring msg "\"cmd\": \"git worktree list\"");
+    Alcotest.(check bool) "does not suggest internal handler" false
+      (contains_substring msg "keeper_bash")
+
+let test_docker_exec_failure_message_classifies_git_c_missing_cwd () =
+  let msg =
+    Keeper_shell_docker.docker_exec_failure_message
+      ~image:"masc-keeper-sandbox:local"
+      ~status:(Unix.WEXITED 128)
+      ~output:
+        "fatal: cannot change to \
+         'repos/masc-mcp/.worktrees/keeper-task-210': No such file or \
+         directory\n"
+  in
+  Alcotest.(check bool) "adds cwd_not_directory hint" true
+    (contains_substring msg "hint=cwd_not_directory");
+  Alcotest.(check bool) "mentions worktree repair" true
+    (contains_substring msg "create or repair the sandbox repo/worktree")
+
 let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1289,5 +1333,11 @@ let () =
           Alcotest.test_case
             "sandbox-root git with multiple repos gives cwd correction"
             `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;
+          Alcotest.test_case
+            "sandbox-root git hint uses cd target cwd"
+            `Quick test_sandbox_root_git_cwd_multi_repo_uses_cd_target_in_hint;
+          Alcotest.test_case
+            "docker exec failure classifies git -C missing cwd"
+            `Quick test_docker_exec_failure_message_classifies_git_c_missing_cwd;
         ] );
     ]

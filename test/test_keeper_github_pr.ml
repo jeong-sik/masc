@@ -219,6 +219,8 @@ let setup_docker_pr_tool f =
   in
   ensure_dir repo;
   run_ok ~cwd:repo "git init -q";
+  run_ok ~cwd:repo
+    "git remote add origin https://github.com/jeong-sik/masc-mcp.git";
   ensure_github_identity_bundle ~config
     Masc_mcp.Keeper_gh_env.root_github_identity;
   f ~config ~meta
@@ -379,6 +381,28 @@ let test_pr_create_recovers_visible_pr_after_transient_504 () =
   check bool "returns recovered PR metadata" true
     (contains_substring raw "https://github.com/jeong-sik/masc-mcp/pull/13799")
 
+let test_pr_list_repo_shorthand_resolves_sandbox_origin () =
+  with_fake_gh @@ fun () ->
+  with_fake_docker @@ fun () ->
+  setup_docker_pr_tool @@ fun ~config ~meta ->
+  let raw =
+    K.handle_keeper_pr_list ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("repo", `String "masc-mcp");
+            ("state", `String "open");
+            ("limit", `Int 5);
+          ])
+  in
+  (match parse_bool_field raw "ok" with
+   | Some true -> ()
+   | _ -> Alcotest.failf "pr list response was not ok: %s" raw);
+  check bool "resolved shorthand to owner/repo" true
+    (contains_substring raw "jeong-sik/masc-mcp");
+  check bool "does not pass shorthand to gh" false
+    (contains_substring raw "-R masc-mcp")
+
 (* Classifier-level pin: gh CLI's verbatim "a pull request for branch ...
    already exists" prefix must classify as the deterministic
    [pr_already_exists] recovery reason; transient 504/timeout payloads
@@ -500,6 +524,8 @@ let () =
             test_pr_create_hard_mode_routes_through_broker;
           test_case "pr create recovers visible PR after transient 504" `Quick
             test_pr_create_recovers_visible_pr_after_transient_504;
+          test_case "pr list resolves repo shorthand from sandbox origin"
+            `Quick test_pr_list_repo_shorthand_resolves_sandbox_origin;
         ] );
       ( "recovery_classifier",
         [

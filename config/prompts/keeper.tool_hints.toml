@@ -54,8 +54,8 @@ call = "`keeper_shell` { op: \"gh\", cmd: \"pr list --state open\" }"
 description = "inspect GitHub after a task/worktree is bound"
 
 [[hints]]
-name = "keeper_bash"
-call = "`keeper_bash` { cmd: \"<single shell command>\" }"
+name = "Bash"
+call = "`Bash` { cmd: \"<single shell command>\" }"
 description = "run one shell command in the keeper workspace"
 
 [[hints]]

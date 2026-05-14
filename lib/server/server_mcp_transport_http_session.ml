@@ -21,15 +21,25 @@ let default_base_path () =
      own .masc must not silently inherit a stale parent MASC_BASE_PATH.
      When no explicit base path is set, prefer HOME so runtime artifacts land
      under ~/.masc instead of the current checkout. *)
-  let requested_path =
-    match Env_config_core.base_path_opt () with
-    | Some _ -> Sys.getcwd ()
-    | None -> (
-        match Env_config_core.home_dir_opt () with
-        | Some home -> home
-        | None -> Sys.getcwd ())
+  let resolve_requested_quiet path =
+    let requested = Coord_utils_backend_setup.normalize_base_path path in
+    match Coord_utils_backend_setup.find_git_root requested with
+    | Some git_root -> git_root
+    | None -> requested
   in
-  Coord_utils_backend_setup.resolve_server_default_base_path requested_path
+  match Env_config_core.base_path_opt () with
+  | Some _
+    when Coord_utils_backend_setup.running_under_test_executable ()
+         && not (Coord_utils_backend_setup.test_base_path_override_enabled ()) ->
+    resolve_requested_quiet (Sys.getcwd ())
+  | Some explicit -> Env_config.normalize_masc_base_path_input explicit
+  | None ->
+    let requested_path =
+      match Env_config_core.home_dir_opt () with
+      | Some home -> home
+      | None -> Sys.getcwd ()
+    in
+    resolve_requested_quiet requested_path
 
 let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions

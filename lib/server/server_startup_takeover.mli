@@ -6,6 +6,22 @@ val pid_lock_path : int -> string
 
 val base_path_lock_path : string -> string
 
+val exit_receipt_dir : string -> string
+
+val exit_receipt_path : ?now:float -> string -> string
+
+val release_pid_file : path:string -> pid:int -> unit
+
+val write_exit_receipt :
+  ?now:float ->
+  base_path:string ->
+  port:int ->
+  pid:int ->
+  reason:string ->
+  status:string ->
+  unit ->
+  unit
+
 val status_line_is_healthy : string -> bool
 
 val looks_like_server_command : string -> bool

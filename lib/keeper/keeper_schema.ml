@@ -144,8 +144,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("cascade_name", `Assoc [
           ("type", `String "string");
-          ("default", `String Persona_contract.default_generation_cascade_name);
-          ("description", `String "Named cascade used to draft the persona.");
+          ("description", `String "Named cascade used to draft the persona. Omit to use the active persona-generation route.");
         ]);
         ("temperature", `Assoc [
           ("type", `String "number");

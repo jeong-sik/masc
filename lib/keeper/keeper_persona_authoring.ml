@@ -402,7 +402,7 @@ let normalize_cascade_name raw =
     | _ -> []
   in
   let known =
-    Keeper_config.phase_routing_cascade_names
+    Keeper_config.phase_routing_cascade_names ()
     @ catalog
   in
   if List.mem (String.lowercase_ascii normalized) known
@@ -919,12 +919,12 @@ let handle_persona_generate ctx args =
       | Error msg -> false, error_response_typed ~code:Validation_error msg
       | Ok archetype_axes ->
            let cascade_name =
-             get_string args "cascade_name" Archetypes.default_generation_cascade_name
+             get_string args "cascade_name" (Archetypes.default_generation_cascade_name ())
              |> String.trim
            in
            let cascade_name =
              if cascade_name = ""
-             then Archetypes.default_generation_cascade_name
+             then Archetypes.default_generation_cascade_name ()
              else cascade_name
            in
            let temperature =

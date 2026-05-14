@@ -384,8 +384,8 @@ let test_ksm_kmc_join_auto_compact_triggers_compacting () =
 
 let expected_routing (phase : SM.phase) ~base : string =
   match phase with
-  | SM.Failing -> Keeper_config.local_recovery_cascade_name
-  | SM.Compacting | SM.HandingOff -> Keeper_config.local_only_cascade_name
+  | SM.Failing -> Keeper_config.local_recovery_cascade_name ()
+  | SM.Compacting | SM.HandingOff -> Keeper_config.local_only_cascade_name ()
   | SM.Running | SM.Draining | SM.Paused | SM.Overflowed
   | SM.Offline | SM.Stopped | SM.Crashed | SM.Restarting | SM.Dead | SM.Zombie -> base
 

@@ -49,6 +49,7 @@ val sorted_hooks : unit -> hook list
 
 (** {1 Global Shutdown Flag} *)
 
+val mark_shutting_down_global : unit -> unit
 val is_shutting_down_global : unit -> bool
 
 (** {1 Phase Execution} *)

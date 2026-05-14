@@ -149,13 +149,79 @@ let parsed_pid path =
   | None -> None
 ;;
 
+let release_pid_file ~path ~pid =
+  match parsed_pid path with
+  | Some current when current = pid ->
+    Safe_ops.protect ~default:() (fun () -> Sys.remove path)
+  | Some _ -> ()
+  | None -> ()
+;;
+
 let register_pid_cleanup ~path ~pid =
-  at_exit (fun () ->
-    match parsed_pid path with
-    | Some current when current = pid ->
-      Safe_ops.protect ~default:() (fun () -> Sys.remove path)
-    | Some _ -> ()
-    | None -> ())
+  at_exit (fun () -> release_pid_file ~path ~pid)
+;;
+
+let exit_receipt_dir base_path =
+  Filename.concat
+    (Filename.concat base_path Common.masc_dirname)
+    "server-exit-receipts"
+;;
+
+let utc_parts now =
+  let tm = Unix.gmtime now in
+  ( tm.Unix.tm_year + 1900
+  , tm.Unix.tm_mon + 1
+  , tm.Unix.tm_mday
+  , tm.Unix.tm_hour
+  , tm.Unix.tm_min
+  , tm.Unix.tm_sec )
+;;
+
+let exit_receipt_path ?(now = Unix.gettimeofday ()) base_path =
+  let year, month, day, _, _, _ = utc_parts now in
+  let month_dir = Printf.sprintf "%04d-%02d" year month in
+  let day_file = Printf.sprintf "%02d.jsonl" day in
+  Filename.concat (Filename.concat (exit_receipt_dir base_path) month_dir) day_file
+;;
+
+let utc_timestamp now =
+  let year, month, day, hour, minute, second = utc_parts now in
+  Printf.sprintf
+    "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    year
+    month
+    day
+    hour
+    minute
+    second
+;;
+
+let write_exit_receipt
+      ?(now = Unix.gettimeofday ())
+      ~base_path
+      ~port
+      ~pid
+      ~reason
+      ~status
+      ()
+  =
+  let path = exit_receipt_path ~now base_path in
+  let json =
+    `Assoc
+      [ "schema_version", `Int 1
+      ; "event", `String "server_exit"
+      ; "ts", `Float now
+      ; "time", `String (utc_timestamp now)
+      ; "pid", `Int pid
+      ; "port", `Int port
+      ; "base_path", `String base_path
+      ; "status", `String status
+      ; "reason", `String reason
+      ; "pid_lock", `String (pid_lock_path port)
+      ; "base_path_lock", `String (base_path_lock_path base_path)
+      ]
+  in
+  Safe_ops.protect ~default:() (fun () -> Fs_compat.append_jsonl path json)
 ;;
 
 let write_pid_file path pid =

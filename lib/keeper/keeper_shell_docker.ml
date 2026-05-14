@@ -24,7 +24,8 @@ let docker_exec_failure_message ~image ~status ~output =
   let output_label = if String.trim truncated = "" then "<no output>" else truncated in
   let missing_cwd_hint =
     if
-      String_util.contains_substring output "cd:"
+      (String_util.contains_substring output "cd:"
+       || String_util.contains_substring output "fatal: cannot change to")
       && String_util.contains_substring output "No such file or directory"
     then
       " hint=cwd_not_directory: create or repair the sandbox repo/worktree first \
@@ -376,6 +377,62 @@ let cmd_targets_gh cmd =
     List.exists (fun tok -> tok = "gh") tokens)
 ;;
 
+let strip_simple_outer_quotes s =
+  let s = String.trim s in
+  let len = String.length s in
+  if
+    len >= 2
+    && ((s.[0] = '\'' && s.[len - 1] = '\'')
+        || (s.[0] = '"' && s.[len - 1] = '"'))
+  then String.sub s 1 (len - 2)
+  else s
+;;
+
+let repo_of_repos_path path =
+  match
+    path
+    |> strip_simple_outer_quotes
+    |> String.split_on_char '/'
+    |> List.filter (fun segment -> segment <> "")
+  with
+  | "repos" :: repo :: _ -> Some repo
+  | _ -> None
+;;
+
+let sanitize_hint_command cmd =
+  cmd
+  |> String.trim
+  |> String_util.replace_substring ~needle:" 2>/dev/null" ~by:""
+  |> String.trim
+;;
+
+let leading_cd_recovery_hint ~available_repos cmd =
+  let cmd = String.trim cmd in
+  let prefix = "cd " in
+  if not (String.starts_with ~prefix cmd)
+  then None
+  else
+    let after_cd =
+      String.sub cmd (String.length prefix) (String.length cmd - String.length prefix)
+    in
+    match String_util.find_substring after_cd "&&" with
+    | None -> None
+    | Some idx ->
+      let cwd = String.sub after_cd 0 idx |> String.trim |> strip_simple_outer_quotes in
+      let rest =
+        String.sub after_cd (idx + 2) (String.length after_cd - idx - 2)
+        |> sanitize_hint_command
+      in
+      (match repo_of_repos_path cwd with
+       | Some repo when rest <> "" && List.mem repo available_repos -> Some (cwd, rest)
+       | _ -> None)
+;;
+
+let truncate_hint_command cmd =
+  let cmd = String.trim cmd in
+  if String.length cmd > 120 then String.sub cmd 0 117 ^ "..." else cmd
+;;
+
 let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) ~cwd ~cmd =
   let host_root =
     keeper_playground_root ~config ~meta
@@ -427,20 +484,21 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
          self-correcting: include the original cmd and the exact
          next-call shape so the LLM can copy-paste rather than
          re-derive the cwd convention from prose. *)
-      let cmd_preview =
-        let s = String.trim cmd in
-        if String.length s > 120 then String.sub s 0 117 ^ "..." else s
+      let hint_cwd, hint_cmd =
+        match leading_cd_recovery_hint ~available_repos:many cmd with
+        | Some (cwd, cmd) -> cwd, truncate_hint_command cmd
+        | None -> "repos/" ^ example_repo, truncate_hint_command cmd
       in
       ( cwd
       , Some
           (Printf.sprintf
              "sandbox root cannot run git/gh: mount point %s is not a git repository and \
               multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-              next call: keeper_bash { \"cmd\": %S, \"cwd\": \"repos/%s\" }. Available \
+              next call: Bash { \"cmd\": %S, \"cwd\": %S }. Available \
               repos: %s. Do not retry the same cmd from sandbox root."
              host_root
-             cmd_preview
-             example_repo
+             hint_cmd
+             hint_cwd
              (String.concat ", " many)) ))
   else cwd, None
 ;;

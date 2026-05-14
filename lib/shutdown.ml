@@ -93,6 +93,8 @@ type hook = {
     callers must be aware that the flag stays [true]. *)
 let shutting_down_flag = Atomic.make false
 
+let mark_shutting_down_global () = Atomic.set shutting_down_flag true
+
 let is_shutting_down_global () = Atomic.get shutting_down_flag
 
 let hooks : hook list ref = ref []
@@ -177,7 +179,7 @@ let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
     Log.Server.warn "[Shutdown] already in progress (phase=%s), ignoring"
       (phase_to_string state.phase);
   end else begin
-    Atomic.set shutting_down_flag true;
+    mark_shutting_down_global ();
     state.started_at <- Eio.Time.now clock;
     state.reason <- reason;
     Log.Server.info "[Shutdown] initiated: %s" reason;

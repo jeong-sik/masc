@@ -798,6 +798,7 @@ let start ?(config = default_config) ?(routes = default_routes) () =
   let initiate_shutdown signal_name =
     if not (Atomic.get shutdown_initiated) then begin
       Atomic.set shutdown_initiated true;
+      Shutdown.mark_shutting_down_global ();
       Log.Http.info "MASC MCP: Received %s, shutting down gracefully..." signal_name;
       match Atomic.get switch_ref with
       | Some sw -> Eio.Switch.fail sw Shutdown

@@ -44,10 +44,9 @@ let sandbox_profile_to_string = function
   | Local -> "local"
   | Docker -> "docker"
 
-let reserved_cascade_names =
+let reserved_cascade_names () =
   List.sort_uniq String.compare
-    (phase_routing_cascade_names
-     @ [ tool_use_strict_cascade_name ])
+    (phase_routing_cascade_names () @ [ tool_use_strict_cascade_name () ])
 
 (** Parse a sandbox profile string. Canonical values are ["local"] and
     ["docker"]. Legacy names ["legacy_local"], ["docker_hardened"], and
@@ -766,6 +765,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         match str "cascade_name" with
         | None -> Ok ()
         | Some raw ->
+            let reserved_cascade_names = reserved_cascade_names () in
             let raw_normalized = String.trim raw |> String.lowercase_ascii in
             let normalized =
               Keeper_cascade_profile.normalize_declared_name raw

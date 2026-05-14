@@ -33,6 +33,79 @@ let with_repo_arg repo argv =
   let repo = String.trim repo in
   if repo = "" then argv else argv @ [ "-R"; repo ]
 
+let repo_basename slug =
+  match String.split_on_char '/' (String.trim slug) with
+  | [ _owner; repo ] -> Some repo
+  | _ -> None
+;;
+
+let repo_slug_matches_name ~name slug =
+  match repo_basename slug with
+  | Some repo -> String.equal repo name
+  | None -> false
+;;
+
+let safe_repo_dir_name name =
+  let name = String.trim name in
+  name <> ""
+  && (not (String.equal name "."))
+  && (not (String.equal name ".."))
+  && not (String.contains name '/')
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '-' | '_' -> true
+         | _ -> false)
+       name
+;;
+
+let resolve_repo_arg ~(config : Coord.config) ~(meta : keeper_meta) ~cwd raw_repo =
+  let repo = String.trim raw_repo in
+  if repo = ""
+  then Ok ""
+  else
+    match Keeper_gh_shared.validate_repo_slug repo with
+    | Ok slug -> Ok slug
+    | Error _ when String.contains repo '/' ->
+      Error
+        (Printf.sprintf
+           "repo must be an owner/repo slug or a single sandbox repo directory name; \
+            got %S"
+           repo)
+    | Error _ when not (safe_repo_dir_name repo) ->
+      Error
+        (Printf.sprintf
+           "repo %S is invalid. Use owner/repo or a single directory name under \
+            repos/."
+           repo)
+    | Error _ -> (
+      match Keeper_gh_shared.repo_slug_of_git_root ~git_root:cwd with
+      | Some slug when repo_slug_matches_name ~name:repo slug -> Ok slug
+      | Some _ | None ->
+        let repo_dir =
+          Filename.concat
+            (Filename.concat (keeper_playground_root ~config ~meta) "repos")
+            repo
+        in
+        if safe_is_dir repo_dir
+        then (
+          match Keeper_gh_shared.repo_slug_of_git_root ~git_root:repo_dir with
+          | Some slug -> Ok slug
+          | None ->
+            Error
+              (Printf.sprintf
+                 "repo %S resolved to sandbox path %s, but that git checkout has no \
+                  readable GitHub origin remote"
+                 repo
+                 repo_dir))
+        else
+          Error
+            (Printf.sprintf
+               "repo %S is not owner/repo and no sandbox checkout exists at repos/%s. \
+                Pass repo as owner/repo or create/link the sandbox repo first."
+               repo
+               repo))
+;;
+
 let opt_flag flag = function
   | None -> []
   | Some value ->
@@ -266,7 +339,24 @@ let output_json ?(extra_fields = []) ~ok ~tool ~operation ~meta ~binding
        ]
        @ extra_fields))
 
-let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
+let repo_resolution_error_json ~tool ~operation ~(meta : keeper_meta) ~cwd ~repo
+    ~reason =
+  Yojson.Safe.to_string
+    (`Assoc
+      [
+        "ok", `Bool false;
+        "tool", `String tool;
+        "operation", `String operation;
+        "error", `String "repo_resolution_failed";
+        "reason", `String reason;
+        "keeper", `String meta.name;
+        "sandbox_profile", `String (sandbox_profile_string meta);
+        "cwd", `String cwd;
+        "repo", `String repo;
+      ])
+
+let run_gh ~recover_pr_create_head ~tool ~operation ~config ~meta ~args
+    ~write ~repo build_argv =
   match scoped_credential_or_error ~config ~meta with
   | Error json -> Yojson.Safe.to_string json
   | Ok (binding, state, env) -> (
@@ -293,39 +383,47 @@ let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
               ~caller:(if write then Pr_review_post else Pr_review)
               ()
           in
-          let result =
-            run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec argv
-          in
-          let result_ok = status_ok result.status in
-          let recovered =
-            match recover_pr_create with
-            | Some (repo, head) when not result_ok -> (
-                match classify_pr_create_recovery result.output with
-                | None -> None
-                | Some reason ->
-                    let recovery =
-                      run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec
-                        (build_pr_view_recovery_argv ~repo ~head)
-                    in
-                    if status_ok recovery.status then Some (recovery, reason)
-                    else None)
-            | _ -> None
-          in
-          (match recovered with
-           | Some (recovery, reason) ->
-               output_json ~ok:true ~tool ~operation ~meta ~binding ~state
-                 ~cwd ~via:recovery.via ~output:recovery.output
-                 ~extra_fields:
-                   [
-                     "recovered_from_error", `String reason;
-                     "original_ok", `Bool false;
-                     "original_output", `String result.output;
-                     "recovery_tool", `String "gh pr view";
-                   ]
-                 ()
-           | None ->
-               output_json ~ok:result_ok ~tool ~operation ~meta ~binding
-                 ~state ~cwd ~via:result.via ~output:result.output ()))
+          match resolve_repo_arg ~config ~meta ~cwd repo with
+          | Error reason ->
+              repo_resolution_error_json ~tool ~operation ~meta ~cwd ~repo
+                ~reason
+          | Ok repo ->
+              let argv = build_argv ~repo in
+              let result =
+                run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec argv
+              in
+              let result_ok = status_ok result.status in
+              let recovered =
+                match recover_pr_create_head with
+                | Some head when not result_ok -> (
+                    match classify_pr_create_recovery result.output with
+                    | None -> None
+                    | Some reason ->
+                        let recovery =
+                          run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec
+                            (build_pr_view_recovery_argv ~repo ~head)
+                        in
+                        if status_ok recovery.status
+                        then Some (recovery, reason)
+                        else None)
+                | _ -> None
+              in
+              (match recovered with
+               | Some (recovery, reason) ->
+                   output_json ~ok:true ~tool ~operation ~meta ~binding
+                     ~state ~cwd ~via:recovery.via ~output:recovery.output
+                     ~extra_fields:
+                       [
+                         "recovered_from_error", `String reason;
+                         "original_ok", `Bool false;
+                         "original_output", `String result.output;
+                         "recovery_tool", `String "gh pr view";
+                       ]
+                     ()
+               | None ->
+                   output_json ~ok:result_ok ~tool ~operation ~meta
+                     ~binding ~state ~cwd ~via:result.via
+                     ~output:result.output ()))
 
 let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
@@ -335,7 +433,8 @@ let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
   | Error reason -> error_json reason
   | Ok state ->
       run_gh ~tool:"keeper_pr_list" ~operation:"pr_list" ~config ~meta
-        ~args ~write:false (build_pr_list_argv ~repo ~state ~limit)
+        ~args ~write:false ~repo ~recover_pr_create_head:None
+        (fun ~repo -> build_pr_list_argv ~repo ~state ~limit)
 
 let handle_keeper_pr_status ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
@@ -345,7 +444,8 @@ let handle_keeper_pr_status ~(config : Coord.config) ~(meta : keeper_meta)
     error_json "pr_number is required. Good: pr_number=123."
   else
     run_gh ~tool:"keeper_pr_status" ~operation:"pr_status" ~config ~meta
-      ~args ~write:false (build_pr_status_argv ~repo ~pr_number)
+      ~args ~write:false ~repo ~recover_pr_create_head:None
+      (fun ~repo -> build_pr_status_argv ~repo ~pr_number)
 
 let handle_keeper_pr_create ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
@@ -370,8 +470,8 @@ let handle_keeper_pr_create ~(config : Coord.config) ~(meta : keeper_meta)
         ])
   else
     run_gh ~tool:"keeper_pr_create" ~operation:"pr_create" ~config ~meta
-      ~args ~write:true ~recover_pr_create:(repo, head)
-      (build_pr_create_argv ~repo ~title ~body ~base ~head)
+      ~args ~write:true ~repo ~recover_pr_create_head:(Some head)
+      (fun ~repo -> build_pr_create_argv ~repo ~title ~body ~base ~head)
 
 module For_testing = struct
   let build_pr_list_argv = build_pr_list_argv
@@ -383,6 +483,7 @@ module For_testing = struct
     pr_create_failure_may_have_created_pr
   let pr_create_failure_already_exists = pr_create_failure_already_exists
   let classify_pr_create_recovery = classify_pr_create_recovery
+  let resolve_repo_arg = resolve_repo_arg
 
   let quote_argv = quote_argv
   let mutation_preset_ok = mutation_preset_ok

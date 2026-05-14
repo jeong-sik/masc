@@ -487,7 +487,8 @@ let record_require_tool_use_violation
     ()
 ;;
 
-let actionable_tool_contract_violation_reason
+let actionable_tool_contract_violation_reason_with_context
+      ~(context_description : string)
       ~(claim_context_allowed : bool)
       ~(actionable_signal_context : bool)
       ~(tool_names : string list)
@@ -498,21 +499,23 @@ let actionable_tool_contract_violation_reason
   else (
     match tool_names with
     | [] ->
-      Some "actionable keeper signal was present, but the model called no keeper tools"
+      Some (context_description ^ ", but the model called no keeper tools")
     | names when List.exists is_owned_task_progress_tool_name names -> None
     | names
       when (not claim_context_allowed)
            && not (List.exists is_owned_task_progress_tool_name names) ->
       Some
         (Printf.sprintf
-           "actionable keeper signal was present for an owned active task, but the model \
+           "%s for an owned active task, but the model \
             only used passive/claim/stay_silent tools without execution progress: %s"
+           context_description
            (String.concat ", " names))
     | names when List.exists is_stay_silent_tool_name names ->
       Some
         (Printf.sprintf
-           "actionable keeper signal was present, but the model used keeper_stay_silent \
+           "%s, but the model used keeper_stay_silent \
             without typed no-work proof: %s"
+           context_description
            (String.concat ", " names))
     | names
       when List.for_all
@@ -520,17 +523,32 @@ let actionable_tool_contract_violation_reason
              names ->
       Some
         (Printf.sprintf
-           "actionable keeper signal was present, but the model only used passive \
+           "%s, but the model only used passive \
             status/read tools: %s"
+           context_description
            (String.concat ", " names))
     | names
       when (not claim_context_allowed) && List.for_all is_claim_context_tool_name names ->
       Some
         (Printf.sprintf
-           "actionable keeper signal was present, but the model only used claim/context \
+           "%s, but the model only used claim/context \
             tools without execution progress: %s"
+           context_description
            (String.concat ", " names))
     | _ -> None)
+;;
+
+let actionable_tool_contract_violation_reason
+      ~(claim_context_allowed : bool)
+      ~(actionable_signal_context : bool)
+      ~(tool_names : string list)
+  : string option
+  =
+  actionable_tool_contract_violation_reason_with_context
+    ~context_description:"actionable keeper signal was present"
+    ~claim_context_allowed
+    ~actionable_signal_context
+    ~tool_names
 ;;
 
 let normalize_response_text ~(text : string) ~(tool_names : string list) ()

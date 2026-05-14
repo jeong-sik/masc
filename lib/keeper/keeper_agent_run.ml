@@ -991,8 +991,16 @@ let run_turn
                        turn_affordances
                      || Keeper_contract_classifier.is_actionable actionable_signal_kind
                    in
+                   let contract_context_description =
+                     if
+                       Keeper_contract_classifier.is_actionable actionable_signal_kind
+                     then "actionable keeper signal was present"
+                     else "turn affordance required an action-capable tool"
+                   in
                    let actionable_tool_contract_violation_reason =
-                     Keeper_tool_disclosure.actionable_tool_contract_violation_reason
+                     Keeper_tool_disclosure
+                     .actionable_tool_contract_violation_reason_with_context
+                       ~context_description:contract_context_description
                        ~claim_context_allowed:(not had_owned_active_task_at_turn_start)
                        ~actionable_signal_context
                        ~tool_names:actual_keeper_tool_names

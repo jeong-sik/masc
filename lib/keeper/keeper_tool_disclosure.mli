@@ -191,6 +191,16 @@ val actionable_tool_contract_violation_reason
   -> tool_names:string list
   -> string option
 
+(** Like [actionable_tool_contract_violation_reason], but overrides the
+    leading context text in the reason. Used when a strict tool gate came from
+    turn affordances rather than a structured actionable world signal. *)
+val actionable_tool_contract_violation_reason_with_context
+  :  context_description:string
+  -> claim_context_allowed:bool
+  -> actionable_signal_context:bool
+  -> tool_names:string list
+  -> string option
+
 (** Keep [text] when non-blank; otherwise synthesize a
     "Completed without a textual reply. Tools used: ..." line if
     [tool_names] is non-empty, else error. *)

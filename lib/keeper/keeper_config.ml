@@ -23,22 +23,22 @@ let default_cascade_name () =
 (** Cascade name for recovery turns when keeper is in Failing phase.
     Two-profile deployments no longer maintain a separate local recovery lane;
     recovery reuses the canonical keeper cascade. *)
-let local_recovery_cascade_name =
+let local_recovery_cascade_name () =
   Keeper_cascade_profile.cascade_name_for_use
     Keeper_cascade_profile.Phase_recovery
 
 (** Cascade name for buffer operations (compacting, handing off). *)
-let local_only_cascade_name =
+let local_only_cascade_name () =
   Keeper_cascade_profile.cascade_name_for_use
     Keeper_cascade_profile.Phase_buffer
 
-let phase_routing_cascade_names =
-  [ local_only_cascade_name; local_recovery_cascade_name ]
+let phase_routing_cascade_names () =
+  [ local_only_cascade_name (); local_recovery_cascade_name () ]
   |> List.sort_uniq String.compare
 ;;
 
 (** Cascade name for turns that must use a tool-capable provider lane. *)
-let tool_use_strict_cascade_name =
+let tool_use_strict_cascade_name () =
   Keeper_cascade_profile.cascade_name_for_use
     Keeper_cascade_profile.Tool_required
 

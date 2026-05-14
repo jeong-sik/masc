@@ -590,7 +590,7 @@ max-concurrent = 4
 is-default = false
 max-concurrent = 4
 
-[openai_compat.qwen3-5]
+[openai_compat.qwen3]
 is-default = false
 max-concurrent = 4
 
@@ -616,7 +616,7 @@ max-output = 32768
 [openai_compat.deepseek-v4-flash.for-keeper-turn]
 max-output = 32768
 
-[openai_compat.qwen3-5.for-keeper-turn]
+[openai_compat.qwen3.for-keeper-turn]
 max-output = 32768
 
 
@@ -635,7 +635,7 @@ strategy = "failover"
 [tier.keeper_diverse]
 # Fallback tier for contract violation retry. Different model
 # composition from primary to break correlated failure.
-members = ["gemini_cli.gemini-flash", "codex_cli.codex-spark", "openai_compat.qwen3-5.for-keeper-turn"]
+members = ["gemini_cli.gemini-flash", "codex_cli.codex-spark", "openai_compat.qwen3.for-keeper-turn"]
 strategy = "failover"
 
 [tier.scoring]
@@ -654,9 +654,10 @@ members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-
 strategy = "failover"
 
 [tier.tier_small]
-# Operator opt-in slot for 4B-class local models. Empty by default;
-# routes fall through to tier_medium via tier-group fallback.
-members = []
+# Operator opt-in slot for 4B-class local models. The checked-in seed must stay
+# non-empty because the startup validator rejects empty profiles; replace these
+# safe default candidates when a local small-model lane is installed.
+members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
 strategy = "failover"
 
 [tier.tier_medium]

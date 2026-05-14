@@ -271,6 +271,7 @@ let canonical_keeper_meta_key_names =
       [ "name", `String "__keeper-meta-key-seed__"
       ; "agent_name", `String "__keeper-meta-key-seed__"
       ; "trace_id", `String "__keeper-meta-key-seed__"
+      ; "cascade_name", `String "__keeper-meta-key-seed__"
       ; "sandbox_profile", `String "local"
       ; "network_mode", `String "none"
       ]

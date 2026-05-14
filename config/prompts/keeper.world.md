@@ -59,8 +59,9 @@ Always change directory first, or use `git -C` to scope a single command:
 - `git -C repos/<REPO_NAME> log --oneline -5`
 - `cd repos/<REPO_NAME>/.worktrees/{your-name}-<task_id> && git diff`
 
-When invoking `keeper_bash`, supply `cwd: "repos/<REPO_NAME>"` (or the
-worktree path) instead of relying on the sandbox-root default cwd.  This
+When invoking `Bash` (or `keeper_bash` only when that exact schema is
+visible), supply `cwd: "repos/<REPO_NAME>"` (or the worktree path)
+instead of relying on the sandbox-root default cwd.  This
 is the most common cause of `sandbox docker exec failed` events in the
 fleet log (#10424: 9x increase from 2 to 56 events/day across 04-24..26).
 

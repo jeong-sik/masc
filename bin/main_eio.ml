@@ -667,6 +667,31 @@ let run_cmd host port base_path =
   Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;
   acquire_base_path_lock normalized_base_path;
+  let server_pid = Unix.getpid () in
+  let port_lock_path = Server_startup_takeover.pid_lock_path port in
+  let base_path_lock_path =
+    Server_startup_takeover.base_path_lock_path normalized_base_path
+  in
+  let exit_receipt_recorded = Atomic.make false in
+  let record_exit_receipt ~status reason =
+    if Atomic.compare_and_set exit_receipt_recorded false true then
+      Server_startup_takeover.write_exit_receipt
+        ~base_path:normalized_base_path
+        ~port
+        ~pid:server_pid
+        ~reason
+        ~status
+        ()
+  in
+  let release_startup_locks () =
+    Server_startup_takeover.release_pid_file ~path:port_lock_path ~pid:server_pid;
+    Server_startup_takeover.release_pid_file ~path:base_path_lock_path ~pid:server_pid
+  in
+  let record_exit_and_release ~status reason =
+    record_exit_receipt ~status reason;
+    release_startup_locks ()
+  in
+  at_exit (fun () -> record_exit_and_release ~status:"process_exit" "at_exit");
   Log.init_from_env ();
   if stripped_base_path <> ""
      && String.equal (Filename.basename stripped_base_path) Common.masc_dirname
@@ -717,6 +742,8 @@ let run_cmd host port base_path =
   in
   Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown "SIGTERM"));
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown "SIGINT"));
+  Sys.set_signal Sys.sighup (Sys.Signal_handle (fun _ -> request_shutdown "SIGHUP"));
+  let completed_shutdown_signal = Atomic.make None in
 
   let max_bind_retries = 5 in
   let rec try_start attempt =
@@ -729,6 +756,8 @@ let run_cmd host port base_path =
             Eio.Time.sleep clock 0.05;
             await_shutdown_signal ()
         | Some signal_name ->
+            Atomic.set completed_shutdown_signal (Some signal_name);
+            Masc_mcp.Shutdown.mark_shutting_down_global ();
             let shutdown_cfg = Masc_mcp.Shutdown.config_from_env () in
             let force_timeout = shutdown_cfg.force_timeout_s in
             let t_shutdown_start = Unix.gettimeofday () in
@@ -741,6 +770,9 @@ let run_cmd host port base_path =
                 Log.Server.error
                   "[MASC] Graceful shutdown timed out after %.1fs (limit=%.0fs), forcing exit."
                   elapsed force_timeout;
+                record_exit_and_release
+                  ~status:"forced_exit"
+                  "graceful_shutdown_timeout";
                 exit 1);
             (* Phase 1: Notify SSE clients *)
             let t_phase = Unix.gettimeofday () in
@@ -842,23 +874,34 @@ let run_cmd host port base_path =
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
         Log.Server.error "[FATAL] Port %d is still in use after %d retries. Try: lsof -i :%d | grep LISTEN"
           port max_bind_retries port;
+        record_exit_and_release ~status:"fatal" "eaddrinuse";
         exit 1
     | Unix.Unix_error (Unix.EACCES, _, _) ->
         Log.Server.error "[FATAL] Permission denied binding to port %d" port;
+        record_exit_and_release ~status:"fatal" "eacces";
         exit 1
     | Out_of_memory ->
         Printf.eprintf "[FATAL] Out_of_memory\n%!";
+        record_exit_and_release ~status:"fatal" "out_of_memory";
         exit 1
     | Stack_overflow ->
         Printf.eprintf "[FATAL] Stack_overflow\n%!";
+        record_exit_and_release ~status:"fatal" "stack_overflow";
         exit 1
     | exn ->
         let bt = Printexc.get_backtrace () in
         Log.Server.error "[FATAL] Unhandled exception: %s" (Printexc.to_string exn);
         if bt <> "" then Log.Server.error "[FATAL] Backtrace:\n%s" bt;
+        record_exit_and_release ~status:"fatal" (Printexc.to_string exn);
         exit 1)
   in
   try_start 0;
+  let exit_reason =
+    match Atomic.get completed_shutdown_signal with
+    | Some signal_name -> "signal:" ^ signal_name
+    | None -> "server_returned"
+  in
+  record_exit_and_release ~status:"stopped" exit_reason;
   Log.Server.info "MASC MCP: Shutdown complete."
 
 let run_cmd_exit host port base_path =

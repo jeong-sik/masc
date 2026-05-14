@@ -171,6 +171,24 @@ let pid_from_file path =
   | Some pid -> pid
   | None -> Alcotest.failf "invalid pid file contents in %s" path
 
+let json_member key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let json_string key json =
+  match json_member key json with
+  | Some (`String value) -> value
+  | _ -> Alcotest.failf "missing JSON string field %s" key
+
+let json_int key json =
+  match json_member key json with
+  | Some (`Int value) -> value
+  | Some (`Intlit raw) ->
+      (match int_of_string_opt raw with
+       | Some value -> value
+       | None -> Alcotest.failf "invalid JSON int field %s" key)
+  | _ -> Alcotest.failf "missing JSON int field %s" key
+
 let test_status_line_parser () =
   Alcotest.(check bool) "200 ok" true
     (Server_startup_takeover.status_line_is_healthy "HTTP/1.1 200 OK");
@@ -281,6 +299,59 @@ let test_base_path_lock_reclaims_stale_pid_file () =
           | Server_startup_takeover.Already_running _ ->
               Alcotest.fail "stale base-path owner should be reclaimed"))
 
+let test_release_pid_file_removes_matching_pid () =
+  with_temp_dir "startup-takeover-release-matching" (fun dir ->
+      let path = lock_path dir in
+      let pid = Unix.getpid () in
+      write_file path (Printf.sprintf "%d\n" pid);
+      Server_startup_takeover.release_pid_file ~path ~pid;
+      Alcotest.(check bool) "matching pid file removed" false (Sys.file_exists path))
+
+let test_release_pid_file_preserves_other_pid () =
+  with_temp_dir "startup-takeover-release-other" (fun dir ->
+      let path = lock_path dir in
+      let owner_pid = Unix.getpid () + 1 in
+      write_file path (Printf.sprintf "%d\n" owner_pid);
+      Server_startup_takeover.release_pid_file ~path ~pid:(Unix.getpid ());
+      Alcotest.(check bool) "other pid file preserved" true (Sys.file_exists path);
+      Alcotest.(check int) "owner pid preserved" owner_pid (pid_from_file path))
+
+let test_write_exit_receipt_appends_dated_jsonl () =
+  with_temp_dir "startup-takeover-exit-receipt" (fun dir ->
+      let now = 1_767_225_600.0 in
+      Server_startup_takeover.write_exit_receipt
+        ~now
+        ~base_path:dir
+        ~port:8935
+        ~pid:12345
+        ~reason:"signal:SIGHUP"
+        ~status:"stopped"
+        ();
+      let path = Server_startup_takeover.exit_receipt_path ~now dir in
+      Alcotest.(check bool) "receipt file exists" true (Sys.file_exists path);
+      let lines =
+        read_file path
+        |> String.split_on_char '\n'
+        |> List.filter (fun line -> String.trim line <> "")
+      in
+      match lines with
+      | [ line ] ->
+          let json = Yojson.Safe.from_string line in
+          Alcotest.(check string) "event" "server_exit" (json_string "event" json);
+          Alcotest.(check string) "status" "stopped" (json_string "status" json);
+          Alcotest.(check string) "reason" "signal:SIGHUP" (json_string "reason" json);
+          Alcotest.(check int) "pid" 12345 (json_int "pid" json);
+          Alcotest.(check int) "port" 8935 (json_int "port" json);
+          Alcotest.(check string)
+            "base_path"
+            dir
+            (json_string "base_path" json);
+          Alcotest.(check string)
+            "time"
+            "2026-01-01T00:00:00Z"
+            (json_string "time" json)
+      | _ -> Alcotest.failf "expected one receipt line in %s" path)
+
 let () =
   Alcotest.run "Server_startup_takeover"
     [
@@ -305,5 +376,11 @@ let () =
             test_base_path_lock_rejects_live_server_holder;
           Alcotest.test_case "stale base-path owner is reclaimed" `Quick
             test_base_path_lock_reclaims_stale_pid_file;
+          Alcotest.test_case "release removes matching pid file" `Quick
+            test_release_pid_file_removes_matching_pid;
+          Alcotest.test_case "release preserves other pid file" `Quick
+            test_release_pid_file_preserves_other_pid;
+          Alcotest.test_case "exit receipt appends dated JSONL" `Quick
+            test_write_exit_receipt_appends_dated_jsonl;
         ] );
     ]

@@ -250,7 +250,7 @@ let fallback_cascade_for_unavailable_profile
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
   else if
-    String.equal normalized_effective Keeper_config.local_only_cascade_name
+    String.equal normalized_effective (Keeper_config.local_only_cascade_name ())
     || String.equal normalized_effective (Keeper_config.default_cascade_name ())
   then None
   else Some (Keeper_config.default_cascade_name ())
@@ -263,25 +263,25 @@ let degraded_retry_after_recoverable_error
     Keeper_cascade_profile.normalize_declared_name effective_cascade
   in
   let effective_is_declared_local_only =
-    is_declared_phase_alias effective_cascade Keeper_config.local_only_cascade_name
+    is_declared_phase_alias effective_cascade (Keeper_config.local_only_cascade_name ())
   in
   let effective_is_declared_local_recovery =
     is_declared_phase_alias
       effective_cascade
-      Keeper_config.local_recovery_cascade_name
+      (Keeper_config.local_recovery_cascade_name ())
   in
   let local_recovery_retry fallback_reason =
     Some
       {
-        next_cascade = Keeper_config.local_recovery_cascade_name;
+        next_cascade = Keeper_config.local_recovery_cascade_name ();
         fallback_reason;
       }
   in
   if tool_requirement = Required
      || effective_is_declared_local_only
      || effective_is_declared_local_recovery
-     || String.equal normalized_effective Keeper_config.local_only_cascade_name
-     || String.equal normalized_effective Keeper_config.local_recovery_cascade_name
+     || String.equal normalized_effective (Keeper_config.local_only_cascade_name ())
+     || String.equal normalized_effective (Keeper_config.local_recovery_cascade_name ())
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     local_recovery_retry Hard_quota
@@ -420,9 +420,9 @@ let normalized_cascade_name ~catalog_names name =
      fallback_cascade does not collapse back to routes.phase_recovery. *)
   if
     is_live_catalog_profile
-    || String.equal trimmed Keeper_config.local_only_cascade_name
-    || String.equal trimmed Keeper_config.local_recovery_cascade_name
-    || String.equal trimmed Keeper_config.tool_use_strict_cascade_name
+    || String.equal trimmed (Keeper_config.local_only_cascade_name ())
+    || String.equal trimmed (Keeper_config.local_recovery_cascade_name ())
+    || String.equal trimmed (Keeper_config.tool_use_strict_cascade_name ())
   then trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
 
@@ -435,7 +435,7 @@ let required_tool_rotation_candidate
   let routed_local_only_is_distinct =
     not
       (String.equal
-         Keeper_config.local_only_cascade_name
+         (Keeper_config.local_only_cascade_name ())
          (Keeper_config.default_cascade_name ()))
   in
   (* Required-tool turns may still use [local_recovery] when the catalog
@@ -444,11 +444,11 @@ let required_tool_rotation_candidate
      historical [local_recovery] spelling, so requiring an explicit hint avoids
      accidentally sending required-tool turns into a control/recovery lane. *)
   not
-    ((routed_local_only_is_distinct
-      && String.equal normalized Keeper_config.local_only_cascade_name))
+    (routed_local_only_is_distinct
+     && String.equal normalized (Keeper_config.local_only_cascade_name ()))
   && (allow_local_recovery
       || not
-           (String.equal normalized Keeper_config.local_recovery_cascade_name))
+           (String.equal normalized (Keeper_config.local_recovery_cascade_name ())))
   && not (Cascade_capability_profile.is_system_cascade_name normalized)
 
 let legacy_degraded_rotation_candidates

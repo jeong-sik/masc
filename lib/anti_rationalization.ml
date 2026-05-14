@@ -451,7 +451,7 @@ let parse_verdict (text : string) : (verdict, string) result =
     Cross-model evaluation is more effective than same-model different-role
     because different model architectures have different blindspots.
     See: Anthropic "Harness Design" blog analysis. *)
-let default_evaluator_cascade =
+let default_evaluator_cascade () =
   Keeper_cascade_profile.cascade_name_for_use Keeper_cascade_profile.Cross_verifier
 ;;
 
@@ -485,7 +485,7 @@ let check_contract ~(notes : string) ~(contract : string list) : string list =
 ;;
 
 let review
-      ?(evaluator_cascade = default_evaluator_cascade)
+      ?(evaluator_cascade = default_evaluator_cascade ())
       ?generator_cascade
       ?(completion_contract : string list option)
       ?(on_verdict : (review_result -> unit) option)

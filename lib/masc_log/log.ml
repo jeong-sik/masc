@@ -438,8 +438,9 @@ module Ring = struct
 
   let init_file_sink dir =
     close_sink ();
+    let before_restore = Atomic.get total in
     load_from_file dir;
-    let loaded = Atomic.get total in
+    let loaded = Atomic.get total - before_restore in
     open_sink dir;
     if loaded > 0 then
       Printf.eprintf "[%s] [INFO] [Log] Restored %d log entries from disk\n%!" (timestamp ()) loaded

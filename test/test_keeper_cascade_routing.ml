@@ -30,17 +30,20 @@ let test_running_uses_base () =
 let test_failing_uses_local_recovery () =
   let r = select SM.Failing in
   check string "Failing -> local_recovery"
-    Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade
+    (Masc_mcp.Keeper_config.local_recovery_cascade_name ())
+    r.effective_cascade
 
 let test_compacting_uses_local_only () =
   let r = select SM.Compacting in
   check string "Compacting -> local_only"
-    Masc_mcp.Keeper_config.local_only_cascade_name r.effective_cascade
+    (Masc_mcp.Keeper_config.local_only_cascade_name ())
+    r.effective_cascade
 
 let test_handing_off_uses_local_only () =
   let r = select SM.HandingOff in
   check string "HandingOff -> local_only"
-    Masc_mcp.Keeper_config.local_only_cascade_name r.effective_cascade
+    (Masc_mcp.Keeper_config.local_only_cascade_name ())
+    r.effective_cascade
 
 let test_overflowed_uses_base () =
   let r = select SM.Overflowed in
@@ -78,9 +81,11 @@ let test_restarting_uses_base () =
 
 let test_failing_with_local_only_base () =
   let r = Routing.select_cascade
-    ~base_cascade:Masc_mcp.Keeper_config.local_only_cascade_name ~phase:SM.Failing in
+    ~base_cascade:(Masc_mcp.Keeper_config.local_only_cascade_name ())
+    ~phase:SM.Failing in
   check string "Failing overrides even local_only base"
-    Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade
+    (Masc_mcp.Keeper_config.local_recovery_cascade_name ())
+    r.effective_cascade
 
 let test_running_with_custom_base () =
   let r = Routing.select_cascade ~base_cascade:"coding_first" ~phase:SM.Running in
@@ -95,17 +100,18 @@ let test_tool_required_turn_preserves_routed_cascade () =
   check string "required tool turns preserve routed cascade"
     "primary" r.effective_cascade;
   check bool "required tool turns do not rewrite to strict cascade" false
-    (String.equal Masc_mcp.Keeper_config.tool_use_strict_cascade_name
+    (String.equal (Masc_mcp.Keeper_config.tool_use_strict_cascade_name ())
        r.effective_cascade)
 
 let test_tool_required_turn_preserves_local_recovery () =
   let r =
     Routing.route_effective_cascade_for_tool_requirement
-      ~effective_cascade:Masc_mcp.Keeper_config.local_recovery_cascade_name
+      ~effective_cascade:(Masc_mcp.Keeper_config.local_recovery_cascade_name ())
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
   in
   check string "required tool turns preserve local recovery"
-    Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade
+    (Masc_mcp.Keeper_config.local_recovery_cascade_name ())
+    r.effective_cascade
 
 let test_all_phases_have_reason () =
   List.iter (fun phase ->

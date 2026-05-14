@@ -4864,7 +4864,7 @@ let test_append_decision_record_persists_tool_calls () =
            ~latency_ms:42
            ~outcome:"success"
            ~degraded_retry_applied:true
-           ~degraded_retry_cascade:KC.local_recovery_cascade_name
+           ~degraded_retry_cascade:(KC.local_recovery_cascade_name ())
            ~fallback_reason:"turn_timeout"
            ~turn_mode:UM.Tool_use
            ~result:(Some result)
@@ -4936,7 +4936,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          (option string)
          "degraded retry cascade persisted"
-         (Some KC.local_recovery_cascade_name)
+         (Some (KC.local_recovery_cascade_name ()))
          Yojson.Safe.Util.(json |> member "degraded_retry_cascade" |> to_string_option);
        check
          (option string)
@@ -5974,7 +5974,7 @@ let test_decide_local_only_liveness_keeps_phase_buffer_route () =
   match
     UT.decide_local_only_liveness
       ~base_cascade:"scoring"
-      ~effective_cascade:KC.local_only_cascade_name
+      ~effective_cascade:(KC.local_only_cascade_name ())
       [ label; label ]
   with
   | UT.Keep_effective_cascade cascade ->
@@ -5991,7 +5991,7 @@ let test_fail_open_local_only_when_probe_fails () =
     UT.fail_open_local_only_when_unavailable
       ~probe_base_url:(fun _ -> false)
       ~base_cascade:"scoring"
-      ~effective_cascade:KC.local_only_cascade_name
+      ~effective_cascade:(KC.local_only_cascade_name ())
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
   check
@@ -6025,7 +6025,7 @@ let test_fail_open_local_only_preserves_healthy_local_only () =
     UT.fail_open_local_only_when_unavailable
       ~probe_base_url:(fun _ -> true)
       ~base_cascade:"scoring"
-      ~effective_cascade:KC.local_only_cascade_name
+      ~effective_cascade:(KC.local_only_cascade_name ())
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
   check
@@ -6099,7 +6099,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quo
   in
   expect_degraded_retry
     "hard quota degraded retry"
-    KC.local_recovery_cascade_name
+    (KC.local_recovery_cascade_name ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6122,7 +6122,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
   in
   expect_degraded_retry
     "resumable session degraded retry"
-    KC.local_recovery_cascade_name
+    (KC.local_recovery_cascade_name ())
     "resumable_cli_session"
     degraded_retry
 ;;
@@ -6141,7 +6141,7 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
   in
   expect_degraded_retry
     "admission queue timeout degraded retry"
-    KC.local_recovery_cascade_name
+    (KC.local_recovery_cascade_name ())
     "admission_queue_timeout"
     degraded_retry
 ;;
@@ -6156,7 +6156,7 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
   in
   expect_degraded_retry
     "turn timeout degraded retry"
-    KC.local_recovery_cascade_name
+    (KC.local_recovery_cascade_name ())
     "turn_timeout"
     degraded_retry
 ;;
@@ -6179,7 +6179,7 @@ let test_degraded_retry_after_recoverable_error_includes_oas_timeout_budget () =
   in
   expect_degraded_retry
     "oas timeout budget degraded retry"
-    KC.local_recovery_cascade_name
+    (KC.local_recovery_cascade_name ())
     "oas_timeout_budget"
     degraded_retry
 ;;
@@ -6193,7 +6193,7 @@ let test_degraded_retry_after_recoverable_error_includes_max_turns () =
   in
   expect_degraded_retry
     "max turns degraded retry"
-    KC.local_recovery_cascade_name
+    (KC.local_recovery_cascade_name ())
     "max_turns"
     degraded_retry
 ;;
@@ -6211,7 +6211,7 @@ let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
 let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:KC.local_only_cascade_name
+      ~effective_cascade:(KC.local_only_cascade_name ())
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
@@ -6221,7 +6221,7 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
 let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:KC.local_recovery_cascade_name
+      ~effective_cascade:(KC.local_recovery_cascade_name ())
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
@@ -6249,7 +6249,7 @@ let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_overr
   let fallback =
     EC.fallback_cascade_for_unavailable_profile
       ~base_cascade:"scoring"
-      ~effective_cascade:KC.local_recovery_cascade_name
+      ~effective_cascade:(KC.local_recovery_cascade_name ())
   in
   check
     (option string)
@@ -6299,7 +6299,7 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
       ~attempted_cascades:
         [ "scoring"
         ; KC.default_cascade_name ()
-        ; KC.local_recovery_cascade_name
+        ; KC.local_recovery_cascade_name ()
         ; safe_lane_cascade_name
         ]
       (wrapped_claude_limit_error ())
@@ -6359,12 +6359,12 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~rotation_cascades:
-        [ KC.default_cascade_name (); KC.local_recovery_cascade_name; "ollama_only" ]
+        [ KC.default_cascade_name (); KC.local_recovery_cascade_name (); "ollama_only" ]
       ~base_cascade:"scoring"
       ~effective_cascade:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       ~attempted_cascades:
-        [ "scoring"; KC.default_cascade_name (); KC.local_recovery_cascade_name ]
+        [ "scoring"; KC.default_cascade_name (); KC.local_recovery_cascade_name () ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6394,7 +6394,7 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
 let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; "required_safe" ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name (); "required_safe" ]
       ~base_cascade:(KC.default_cascade_name ())
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6411,7 +6411,7 @@ let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog
 let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ KC.local_recovery_cascade_name ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name () ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6428,7 +6428,7 @@ let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_ca
 let test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; " primary " ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name (); " primary " ]
       ~base_cascade:"strict_exec"
       ~effective_cascade:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
@@ -6480,7 +6480,7 @@ let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly (
 let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; "primary" ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name (); "primary" ]
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6498,7 +6498,7 @@ let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
 let test_degraded_rotation_skips_already_attempted_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; "primary" ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name (); "primary" ]
       ~fallback_hint:"local_with_kimi_coding_with_glm"
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6508,7 +6508,7 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
   in
   expect_degraded_retry
     "exhausted hint falls through to catalog"
-    KC.local_recovery_cascade_name
+    (KC.local_recovery_cascade_name ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6516,7 +6516,7 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
 let test_degraded_rotation_ignores_blank_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; "primary" ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name (); "primary" ]
       ~fallback_hint:"   "
       ~base_cascade:"ollama_only"
       ~effective_cascade:"ollama_only"
@@ -6526,7 +6526,7 @@ let test_degraded_rotation_ignores_blank_fallback_hint () =
   in
   expect_degraded_retry
     "blank hint behaves like no hint"
-    KC.local_recovery_cascade_name
+    (KC.local_recovery_cascade_name ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6535,7 +6535,7 @@ let test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable
   let rotation =
     UT.fail_open_rotation_cascades_from_catalog
       ~catalog_names:
-        [ KC.default_cascade_name (); KC.local_recovery_cascade_name; "ollama_only" ]
+        [ KC.default_cascade_name (); KC.local_recovery_cascade_name (); "ollama_only" ]
       ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
       ()
   in
@@ -6550,7 +6550,7 @@ let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
   let rotation =
     UT.fail_open_rotation_cascades_from_catalog
       ~catalog_names:
-        [ "ollama_only"; KC.local_recovery_cascade_name; KC.default_cascade_name () ]
+        [ "ollama_only"; KC.local_recovery_cascade_name (); KC.default_cascade_name () ]
       ~keeper_assignable:[ KC.default_cascade_name (); "ollama_only" ]
       ()
   in
@@ -8861,6 +8861,28 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~claim_context_allowed:true
        ~actionable_signal_context:false
        ~tool_names:[])
+;;
+
+let test_actionable_tool_contract_uses_custom_context_description () =
+  match
+    KTD.actionable_tool_contract_violation_reason_with_context
+      ~context_description:"turn affordance required an action-capable tool"
+      ~claim_context_allowed:true
+      ~actionable_signal_context:true
+      ~tool_names:[ "keeper_tasks_list" ]
+  with
+  | Some reason ->
+    check
+      bool
+      "reason names affordance gate"
+      true
+      (contains_substring reason "turn affordance required an action-capable tool");
+    check
+      bool
+      "reason does not claim actionable signal"
+      false
+      (contains_substring reason "actionable keeper signal was present")
+  | None -> fail "expected affordance-gate passive-only violation"
 ;;
 
 let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
@@ -11530,6 +11552,10 @@ let () =
             "actionable signal allows execution tools"
             `Quick
             test_actionable_tool_contract_allows_execution_tools
+        ; test_case
+            "affordance gate reason is distinct from actionable signal"
+            `Quick
+            test_actionable_tool_contract_uses_custom_context_description
         ; test_case
             "stay_silent needs typed no-work proof on actionable signal"
             `Quick

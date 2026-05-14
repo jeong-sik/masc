@@ -193,6 +193,10 @@ val inc_ws_bytes_cache_hit : unit -> unit
 (** Increments [masc_ws_bytes_cache_misses_total]. *)
 val inc_ws_bytes_cache_miss : unit -> unit
 
+(** Records [dashboard/hello] processing latency in seconds.
+    [success] is encoded as bounded [outcome=success|error]. *)
+val observe_ws_dashboard_hello_latency : success:bool -> float -> unit
+
 (** [observe_ws_client_buffered_bytes n] records
     [masc_ws_client_buffered_bytes] (clamped to [max 0 n]) AND
     increments [masc_ws_client_acks_total].  Paired observation

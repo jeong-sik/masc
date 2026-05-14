@@ -333,15 +333,22 @@ let verify_dashboard_token ~base_path token =
             | Error err -> Error (Masc_domain.masc_error_to_string err)))
 
 let dashboard_hello ~base_path ~session_id ?token () =
-  match find_session session_id with
-  | None -> Error "WebSocket session not found"
-  | Some session -> (
-      match verify_dashboard_token ~base_path token with
-      | Error msg -> Error msg
-      | Ok agent ->
-          session.dashboard_authenticated <- true;
-          session.dashboard_agent <- agent;
-          Ok (dashboard_auth_success_payload session))
+  let start_time = Unix.gettimeofday () in
+  let result =
+    match find_session session_id with
+    | None -> Error "WebSocket session not found"
+    | Some session -> (
+        match verify_dashboard_token ~base_path token with
+        | Error msg -> Error msg
+        | Ok agent ->
+            session.dashboard_authenticated <- true;
+            session.dashboard_agent <- agent;
+            Ok (dashboard_auth_success_payload session))
+  in
+  Transport_metrics.observe_ws_dashboard_hello_latency
+    ~success:(match result with Ok _ -> true | Error _ -> false)
+    (Unix.gettimeofday () -. start_time);
+  result
 
 let dashboard_snapshot session =
   let slices =

@@ -644,6 +644,7 @@ let metric_ws_parse_cache_hits = "masc_ws_parse_cache_hits_total"
 let metric_ws_parse_cache_misses = "masc_ws_parse_cache_misses_total"
 let metric_ws_bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
+let metric_ws_dashboard_hello_latency_seconds = "masc_ws_dashboard_hello_latency_seconds"
 
 let metric_dashboard_execution_render_phase_sec =
   "masc_dashboard_execution_render_phase_seconds"
@@ -2901,6 +2902,20 @@ let init () =
     metric_ws_bytes_cache_misses
     "WS raw-SSE-forward Bytes cache misses (fresh allocation required)"
     Counter;
+  register_histogram
+    ~name:metric_ws_dashboard_hello_latency_seconds
+    ~help:
+      "dashboard/hello JSON-RPC processing latency in seconds. Labels: \
+       outcome=success|error."
+    ~labels:[ "outcome", "success" ]
+    ();
+  register_histogram
+    ~name:metric_ws_dashboard_hello_latency_seconds
+    ~help:
+      "dashboard/hello JSON-RPC processing latency in seconds. Labels: \
+       outcome=success|error."
+    ~labels:[ "outcome", "error" ]
+    ();
   add
     metric_http_accepts
     "TCP connections accepted by the primary HTTP listener. Labels: mode (h1|h2|auto)."

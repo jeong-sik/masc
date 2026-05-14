@@ -67,6 +67,12 @@ let test_init () =
        let _ = Str.search_forward
          (Str.regexp_string "masc_http_accepts_total") text 0 in
        true
+     with Not_found -> false);
+  check bool "ws hello latency metric registered" true
+    (try
+       let _ = Str.search_forward
+         (Str.regexp_string "masc_ws_dashboard_hello_latency_seconds") text 0 in
+       true
      with Not_found -> false)
 
 (* ============================================================
@@ -187,6 +193,41 @@ let test_ws_sessions () =
     "masc_ws_sessions_total" () in
   check (float 0.01) "ws sessions" 4.0 v
 
+let test_ws_dashboard_hello_latency () =
+  let metric = Prometheus.metric_ws_dashboard_hello_latency_seconds in
+  let success_labels = [ ("outcome", "success") ] in
+  let error_labels = [ ("outcome", "error") ] in
+  let success_before = Prometheus.metric_value_or_zero metric ~labels:success_labels () in
+  let success_count_before =
+    Prometheus.metric_value_or_zero (metric ^ "_count") ~labels:success_labels ()
+  in
+  let error_before = Prometheus.metric_value_or_zero metric ~labels:error_labels () in
+  let error_count_before =
+    Prometheus.metric_value_or_zero (metric ^ "_count") ~labels:error_labels ()
+  in
+  TM.observe_ws_dashboard_hello_latency ~success:true 0.25;
+  TM.observe_ws_dashboard_hello_latency ~success:false (-1.0);
+  let success_after = Prometheus.metric_value_or_zero metric ~labels:success_labels () in
+  let success_count_after =
+    Prometheus.metric_value_or_zero (metric ^ "_count") ~labels:success_labels ()
+  in
+  let error_after = Prometheus.metric_value_or_zero metric ~labels:error_labels () in
+  let error_count_after =
+    Prometheus.metric_value_or_zero (metric ^ "_count") ~labels:error_labels ()
+  in
+  check (float 0.001) "success latency sum delta" 0.25 (success_after -. success_before);
+  check
+    (float 0.001)
+    "success latency count delta"
+    1.0
+    (success_count_after -. success_count_before);
+  check (float 0.001) "negative error latency clamped" 0.0 (error_after -. error_before);
+  check
+    (float 0.001)
+    "error latency count delta"
+    1.0
+    (error_count_after -. error_count_before)
+
 let test_ws_enabled_blank_env_matches_runtime () =
   with_env "MASC_WS_ENABLED" (Some "") (fun () ->
     check bool "transport metrics treats blank as enabled" true
@@ -300,6 +341,14 @@ let test_transport_health_json () =
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
   Prometheus.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
+  let hello_latency_sum_before =
+    Prometheus.metric_total Prometheus.metric_ws_dashboard_hello_latency_seconds
+  in
+  let hello_latency_count_before =
+    Prometheus.metric_total
+      (Prometheus.metric_ws_dashboard_hello_latency_seconds ^ "_count")
+  in
+  TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
   Masc_mcp.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   let json = TM.transport_health_json ~config in
   let sse_json = json |> U.member "sse" in
@@ -408,10 +457,23 @@ let test_transport_health_json () =
     ; "client_acks", "client_acks"
     ; "throttled_deliveries", "throttled_deliveries"
     ; "client_buffered_bytes_count", "client_buffered_bytes_count"
+    ; "hello_latency_count", "hello_latency_count"
     ];
   check bool "client_buffered_bytes_sum field present (float)" true
     (match delivery_json |> U.member "client_buffered_bytes_sum" with
      | `Float _ | `Int _ -> true | _ -> false);
+  check bool "hello_latency_sum_seconds field present (float)" true
+    (match delivery_json |> U.member "hello_latency_sum_seconds" with
+     | `Float _ | `Int _ -> true | _ -> false);
+  check bool "hello latency count is aggregated into health json" true
+    (float_of_int (delivery_json |> U.member "hello_latency_count" |> U.to_int)
+     >= hello_latency_count_before +. 1.0);
+  check bool "hello latency sum is aggregated into health json" true
+    ((match delivery_json |> U.member "hello_latency_sum_seconds" with
+      | `Float f -> f
+      | `Int i -> float_of_int i
+      | _ -> 0.0)
+     >= hello_latency_sum_before +. 0.125);
   ignore (Masc_mcp.Sse.close_all_clients ());
   cleanup_dir base_dir
 
@@ -494,6 +556,8 @@ let () =
     ]);
     ("websocket", [
       test_case "set_ws_sessions" `Quick test_ws_sessions;
+      test_case "observe dashboard hello latency" `Quick
+        test_ws_dashboard_hello_latency;
       test_case "blank env stays enabled" `Quick
         test_ws_enabled_blank_env_matches_runtime;
       test_case "normalized env matches runtime" `Quick

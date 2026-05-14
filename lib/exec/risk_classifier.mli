@@ -18,7 +18,8 @@ type risk_class =
 val classify : string -> risk_class
 (** Classify a command string by its prefix and argument patterns.
     Normalizes simple shell whitespace, then uses prefix matching and
-    flag inspection for escalation (e.g. [ls -rf] → Destructive). *)
+    flag/redirection inspection for escalation (e.g. [ls -rf] → Destructive,
+    [echo x > file] → Write). *)
 
 val risk_class_to_string : risk_class -> string
 

@@ -75,6 +75,7 @@ let test_classify_write () =
     "chmod 644 file"; "chown user file"; "chgrp staff file";
     "dune build"; "cargo build"; "cargo test"; "npm test";
     "npm run build"; "make"; "make test"; "docker build .";
+    "echo hello > out.txt"; "printf '%s' x >> out.txt";
   ] in
   List.iter (fun cmd ->
     match RC.classify cmd with
@@ -83,6 +84,15 @@ let test_classify_write () =
       Alcotest.fail (Printf.sprintf "expected Write for '%s', got %s"
         cmd (RC.risk_class_to_string other))
   ) write_cmds
+
+let test_quoted_redirect_stays_read () =
+  match RC.classify "echo '>'" with
+  | RC.Read -> ()
+  | other ->
+    Alcotest.fail
+      (Printf.sprintf
+         "quoted redirect should stay Read, got %s"
+         (RC.risk_class_to_string other))
 
 (* --- classify: network commands --- *)
 
@@ -207,10 +217,11 @@ let () =
   test_default_timeout_ms ();
   test_classify_read ();
   test_classify_write ();
+  test_quoted_redirect_stays_read ();
   test_classify_network ();
   test_classify_destructive ();
   test_flag_escalation ();
   test_classify_unknown ();
   test_whitespace_handling ();
   test_empty_string ();
-  print_endline "test_risk_classifier: 13/13 passed"
+  print_endline "test_risk_classifier: 14/14 passed"

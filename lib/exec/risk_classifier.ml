@@ -1,6 +1,6 @@
 (* P20: Command Risk Classifier
    Pure-function command classification by risk level.
-   Prefix matching + flag inspection for escalation. *)
+   Prefix matching + flag/redirection inspection for escalation. *)
 
 type risk_class =
   | Read
@@ -68,6 +68,21 @@ let first_token cmd =
   while !i < len && not (is_shell_whitespace cmd.[!i]) do incr i done;
   if start >= !i then ""
   else String.sub cmd start (!i - start)
+
+let has_shell_write_redirection cmd =
+  let len = String.length cmd in
+  let rec loop i in_single in_double escaped =
+    if i >= len then false
+    else
+      match cmd.[i] with
+      | _ when escaped -> loop (i + 1) in_single in_double false
+      | '\\' when not in_single -> loop (i + 1) in_single in_double true
+      | '\'' when not in_double -> loop (i + 1) (not in_single) in_double false
+      | '"' when not in_single -> loop (i + 1) in_single (not in_double) false
+      | '>' when not in_single && not in_double -> true
+      | _ -> loop (i + 1) in_single in_double false
+  in
+  loop 0 false false false
 
 (* Pre-compiled regexes for flag detection *)
 let destructive_flag_re =
@@ -161,6 +176,8 @@ let classify cmd =
     if has_destructive_flag cmd then Destructive
     else Network
   end
+  else if has_shell_write_redirection cmd then
+    Write
   else if prefix_matches write_prefixes cmd then begin
     if has_destructive_flag cmd then Destructive
     else if has_force_flag cmd && has_recursive_flag cmd then Destructive

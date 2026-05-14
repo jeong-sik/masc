@@ -211,21 +211,36 @@ let handle_registered_keeper_tool
       ~(name : string)
       ~(args : Yojson.Safe.t)
   : string option =
-  match Tool_dispatch.lookup_tag name with
-  | Some Tool_dispatch.Mod_autoresearch ->
-    (match
-       find_registry_meta ~keeper_name ~source_layer:"masc_path_resolver"
-     with
-     | None ->
-       Some
-         (error_json
-            (Printf.sprintf "keeper not found in registry: %s" keeper_name))
-     | Some meta -> Some (handle_keeper_autoresearch_tool ~config ~meta ~name ~args))
-  | Some _ ->
-    Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
-  | None when Tool_dispatch.is_registered name ->
-    Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
-  | None -> None
+  let dispatch_registered_handler () =
+    match Tool_dispatch.mint_token ~name with
+    | Error _ -> None
+    | Ok token ->
+      (match Tool_dispatch.dispatch ~token ~args with
+       | None -> None
+       | Some tr ->
+         let msg = Tool_result.message tr in
+         Some (if tr.success then msg else error_json msg))
+  in
+  match dispatch_registered_handler () with
+  | Some _ as result -> result
+  | None ->
+    begin
+      match Tool_dispatch.lookup_tag name with
+      | Some Tool_dispatch.Mod_autoresearch ->
+        (match
+           find_registry_meta ~keeper_name ~source_layer:"masc_path_resolver"
+         with
+         | None ->
+           Some
+             (error_json
+                (Printf.sprintf "keeper not found in registry: %s" keeper_name))
+         | Some meta -> Some (handle_keeper_autoresearch_tool ~config ~meta ~name ~args))
+      | Some _ ->
+        Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
+      | None when Tool_dispatch.is_registered name ->
+        Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
+      | None -> None
+    end
 ;;
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)

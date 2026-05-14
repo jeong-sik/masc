@@ -57,13 +57,16 @@ let test_legacy_traceln_records_metadata () =
   let message =
     Printf.sprintf "[WARN] legacy warning %f" (Unix.gettimeofday ())
   in
-  Log.legacy_traceln ~module_name message;
+  Log.legacy_traceln ~level:Log.Warn ~module_name message;
   match find_entry ~module_name ~message with
   | None -> Alcotest.fail "legacy traceln entry not found"
   | Some (entry : Log.Ring.entry) ->
-      Alcotest.(check string) "source" "legacy_traceln" entry.source;
-      Alcotest.(check string) "normalized level" "WARN" entry.normalized_level;
-      Alcotest.(check bool) "legacy classified" true entry.legacy_classified
+      Alcotest.(check string)
+        "source" "legacy_traceln"
+        (Log.source_to_string entry.source);
+      Alcotest.(check string)
+        "level" "WARN"
+        (Log.level_to_string entry.level)
 
 let test_recent_since_seq_returns_only_new_entries () =
   let module_name = "TestLogDelta" in

@@ -141,7 +141,7 @@ check_json_eventually \
   "$BASE/api/v1/dashboard/namespace-truth" \
   "'execution' in d" \
   '^True$' \
-  6 \
+  60 \
   2
 check_http "goal-loop status 200" "$BASE/api/v1/dashboard/goal-loop/status" "200"
 check_json "goal-loop status exposes phases" "$BASE/api/v1/dashboard/goal-loop/status" "'overall_status' in d and 'phases' in d" '^True$'

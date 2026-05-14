@@ -22,6 +22,20 @@ let cleanup_dir dir =
   in
   rm dir
 
+let invalid_utf8_byte_count s =
+  let len = String.length s in
+  let rec loop i count =
+    if i >= len
+    then count
+    else (
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec
+      then loop (i + dlen) count
+      else loop (i + 1) (count + 1))
+  in
+  loop 0 0
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -323,6 +337,18 @@ let test_dashboard_planning_http_json_includes_coordination_fsm () =
      | `List _ -> true
      | _ -> false)
 
+let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+  let hangul_ga = "\234\176\128" in
+  let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
+  (match Lib.Goal_store.upsert_goal config ~title () with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let json = Lib.Server_dashboard_http.dashboard_planning_http_json ~config in
+  let serialized = Yojson.Safe.to_string json in
+  check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
+
 let credential_archived_starvation_total () =
   int_of_float
     (Lib.Prometheus.metric_total
@@ -513,6 +539,8 @@ let () =
             test_dashboard_shell_timeout_fallback_reports_timing_context;
           test_case "planning payload includes coordination FSM" `Quick
             test_dashboard_planning_http_json_includes_coordination_fsm;
+          test_case "planning payload keeps UTF-8 valid after truncation" `Quick
+            test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "credential monitoring surfaces archive counter" `Quick
             test_credential_monitoring_json_surfaces_archive_counter;
           test_case "batch payload includes credential monitoring" `Quick

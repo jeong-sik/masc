@@ -1867,11 +1867,12 @@ let run_turn
                | None -> `Null
                | Some ok -> `Bool ok );
            ]
-       in
-       let append_receipt_manifest ?status ?decision ~site event =
-         let status =
-           match status with
-           | Some status -> status
+         in
+         let append_receipt_manifest ?status ?decision ~site event =
+           let oas_turn_count = receipt.turn_count in
+           let status =
+             match status with
+             | Some status -> status
            | None ->
              Keeper_execution_receipt.outcome_kind_to_string receipt.outcome
          in
@@ -1889,6 +1890,7 @@ let run_turn
            ~keeper_name:receipt.keeper_name ~agent_name:receipt.agent_name
            ~trace_id:receipt.trace_id ~generation:receipt.generation
            ~keeper_turn_id:manifest_keeper_turn_id ~event
+           ?oas_turn_count
            ~cascade_name:
              (Keeper_execution_receipt.cascade_name_to_string receipt.cascade_name)
            ~status ~decision ~receipt_path ?tool_call_log_path ()

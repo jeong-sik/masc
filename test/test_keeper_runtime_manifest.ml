@@ -1252,6 +1252,10 @@ let test_successful_provider_turn_links_runtime_artifacts () =
             "latest tool name"
             "keeper_tool_search"
             Yojson.Safe.Util.(latest_tool |> member "tool" |> to_string);
+          Alcotest.(check int)
+            "tool-call log uses keeper turn id"
+            keeper_turn_id
+            (json_int_member "keeper_turn_id" latest_tool);
           let trace_id =
             Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
           in
@@ -1322,6 +1326,10 @@ let test_successful_provider_turn_links_runtime_artifacts () =
           let receipt_path =
             require_some "receipt manifest link" receipt_row.M.links.receipt_path
           in
+          Alcotest.(check (option int))
+            "receipt manifest preserves OAS turn count"
+            (Some result.turn_count)
+            receipt_row.M.oas_turn_count;
           Alcotest.(check bool)
             "receipt file exists"
             true

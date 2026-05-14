@@ -25,6 +25,16 @@ export function DashboardSurfaceTabs({ items, currentTab }: DashboardSurfaceTabs
       ?.scrollIntoView({ block: 'nearest', inline: 'center' })
   }, [currentTab])
 
+  // Roving-tabindex contract: exactly one tab in the tablist must carry
+  // tabIndex=0 so keyboard users can reach the surface tabs via normal Tab
+  // navigation. When [currentTab] is a hidden surface (e.g. #cockpit, which
+  // VISIBLE_DASHBOARD_NAV_ITEMS filters out), no `item.id === currentTab`
+  // matches and the active-only branch leaves every tab at tabIndex=-1 —
+  // an unreachable tablist. Fall back to the first visible item in that case;
+  // aria-selected stays "false" because nothing in [items] is actually the
+  // current surface, but keyboard reachability is preserved.
+  const hasMatchingTab = items.some(item => item.id === currentTab)
+
   return html`
     <nav class="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] max-[520px]:w-full" aria-label="Dashboard surfaces">
       <div
@@ -32,15 +42,16 @@ export function DashboardSurfaceTabs({ items, currentTab }: DashboardSurfaceTabs
         aria-label="Dashboard surfaces"
         class="inline-flex min-w-max items-center gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-0.5"
       >
-        ${items.map(item => {
+        ${items.map((item, index) => {
           const active = item.id === currentTab
+          const tabbable = active || (!hasMatchingTab && index === 0)
           return html`
             <${RouteLink}
               id=${dashboardSurfaceTabId(item.id)}
               role="tab"
               tab=${item.id}
               params=${item.defaultParams}
-              tabIndex=${active ? 0 : -1}
+              tabIndex=${tabbable ? 0 : -1}
               ariaControls="main-content"
               ariaCurrent=${active ? 'page' : undefined}
               ariaSelected=${active ? 'true' : 'false'}

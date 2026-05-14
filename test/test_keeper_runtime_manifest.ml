@@ -1191,7 +1191,18 @@ let test_successful_provider_turn_links_runtime_artifacts () =
         ~finally:Masc_mcp.Keeper_tool_call_log.reset_for_testing
         (fun () ->
           Masc_mcp.Keeper_tool_call_log.init ~base_path:base_dir ();
-          let meta = make_meta ~name:"runtime-manifest-success" () in
+          let meta =
+            make_meta ~name:"runtime-manifest-success" ()
+            |> fun meta ->
+            {
+              meta with
+              runtime =
+                {
+                  meta.runtime with
+                  usage = { meta.runtime.usage with total_turns = 23 };
+                };
+            }
+          in
           let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
           let session_base_dir = Filename.concat base_dir "sessions" in
           Fs_compat.mkdir_p session_base_dir;
@@ -1269,9 +1280,18 @@ let test_successful_provider_turn_links_runtime_artifacts () =
               M.Receipt_appended;
               M.Turn_finished;
             ];
-          let provider_lane_row =
-            require_manifest_event M.Provider_lane_resolved rows
+          let provider_started_row =
+            require_manifest_event M.Provider_attempt_started rows
           in
+          Alcotest.(check (option int))
+            "provider start uses keeper turn id"
+            (Some keeper_turn_id)
+            provider_started_row.M.keeper_turn_id;
+          let provider_lane_row = require_manifest_event M.Provider_lane_resolved rows in
+          Alcotest.(check (option int))
+            "provider lane uses keeper turn id"
+            (Some keeper_turn_id)
+            provider_lane_row.M.keeper_turn_id;
           Alcotest.(check (option string))
             "provider lane records keeper cascade engine"
             (Some
@@ -1463,7 +1483,18 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
             ~finally:Masc_mcp.Keeper_tool_call_log.reset_for_testing
             (fun () ->
               Masc_mcp.Keeper_tool_call_log.init ~base_path:base_dir ();
-              let meta = make_meta ~name:"runtime-manifest-provider-timeout" () in
+              let meta =
+                make_meta ~name:"runtime-manifest-provider-timeout" ()
+                |> fun meta ->
+                {
+                  meta with
+                  runtime =
+                    {
+                      meta.runtime with
+                      usage = { meta.runtime.usage with total_turns = 17 };
+                    };
+                }
+              in
               let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
               let session_base_dir = Filename.concat base_dir "sessions" in
               Fs_compat.mkdir_p session_base_dir;
@@ -1517,6 +1548,10 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
               let started_row =
                 require_manifest_event M.Provider_attempt_started rows
               in
+              Alcotest.(check (option int))
+                "timeout provider start uses keeper turn id"
+                (Some keeper_turn_id)
+                started_row.M.keeper_turn_id;
               Alcotest.(check (option string))
                 "declared cascade attempt records model source"
                 (Some "named_cascade")
@@ -1540,6 +1575,10 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
               let finished_row =
                 require_manifest_event M.Provider_attempt_finished rows
               in
+              Alcotest.(check (option int))
+                "timeout provider finish uses keeper turn id"
+                (Some keeper_turn_id)
+                finished_row.M.keeper_turn_id;
               Alcotest.(check string)
                 "provider timeout closes attempt"
                 "timeout"

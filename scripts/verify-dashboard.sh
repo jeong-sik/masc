@@ -197,6 +197,10 @@ check_http "verification requests 200" "$BASE/api/v1/verification/requests" "200
 check_json "verification requests exposes list" "$BASE/api/v1/verification/requests" "'requests' in d" '^True$'
 check_http "verification summary 200" "$BASE/api/v1/verification/summary" "200"
 check_json "verification summary exposes status buckets" "$BASE/api/v1/verification/summary" "'by_status' in d" '^True$'
+check_http "verification specs 200" "$BASE/api/v1/verification/specs" "200"
+check_json "verification specs exposes index" "$BASE/api/v1/verification/specs" "'entries' in d and 'count' in d" '^True$'
+check_http "verification tlc results 200" "$BASE/api/v1/verification/tlc-results" "200"
+check_json "verification tlc results exposes entries" "$BASE/api/v1/verification/tlc-results" "'entries' in d and 'count' in d" '^True$'
 
 echo "[5/7] Connectors + Lab"
 check_http "gate connectors 200" "$BASE/api/v1/gate/connectors" "200"

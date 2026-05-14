@@ -366,16 +366,20 @@ let content_block_has_visible_or_tool_progress = function
   | Agent_sdk.Types.Audio _ -> true
   | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> false
 
+let shape_empty = "empty"
+let shape_thinking_only = "thinking_only"
+let shape_blank_text = "blank_text"
+
 let response_content_empty_shape content =
-  if content = [] then "empty"
+  if content = [] then shape_empty
   else if
     List.exists
       (function
         | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> true
         | _ -> false)
       content
-  then "thinking_only"
-  else "blank_text"
+  then shape_thinking_only
+  else shape_blank_text
 
 let record_response_content_quality_metric ~keeper_name
     (response : Agent_sdk.Types.api_response) =

@@ -45,6 +45,9 @@ val classify_empty_candidates :
   tool_filtered_candidate_count:int ->
   empty_candidate_classification
 
+val empty_candidate_classification_code :
+  empty_candidate_classification -> string
+
 val provider_rejections_for_no_tool_error :
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->

@@ -652,17 +652,27 @@ let launch_supervised_fiber
    The visibility ERROR is bounded by fleet size (~14 keepers) and
    only fires on first registration — the [is_registered] guard above
    skips repeat calls. *)
+let persona_name_for_drift_check (meta : keeper_meta) =
+  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
+  | Ok defaults ->
+    Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name defaults
+  | Error _ -> meta.name
+;;
+
+let persona_path_for_drift_check ~base_path persona_name =
+  match Config_dir_resolver.personas_dir_opt () with
+  | Some dir -> Filename.concat dir persona_name
+  | None ->
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
+      persona_name
+;;
+
 let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
-  match
-    Keeper_identity.normalize_all_names
-      ~input_agent_name:meta.name
-      ~base_path
-      ~check_persona:true
-      ~check_credential:false
-      ()
-  with
-  | Ok _ -> ()
-  | Error (Keeper_identity.Persona_not_found { resolved; searched; _ }) ->
+  let persona_name = persona_name_for_drift_check meta in
+  let searched = persona_path_for_drift_check ~base_path persona_name in
+  if Sys.file_exists searched then ()
+  else (
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_persona_drift_missing
       ~labels:[ "keeper", meta.name ]
@@ -672,13 +682,8 @@ let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
        runtime falls through to logging-only RFC P3-a path; operator action: create \
        persona file or remove keeper from registry"
       meta.name
-      resolved
-      searched
-  | Error _ ->
-    (* Other validation errors (Empty_input, Credential_missing — but
-         we passed check_credential:false) are not the silent-drift
-         class this hook is documenting. Stay silent to avoid noise. *)
-    ()
+      persona_name
+      searched)
 ;;
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =

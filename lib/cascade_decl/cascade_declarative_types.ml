@@ -126,8 +126,7 @@ type cascade_thinking_control_format =
     so the cascade.toml [\[models.<id>.capabilities\]] sub-table becomes
     the SSOT for per-model feature flags. Currently OAS derives these
     via [for_model_id_static] substring match on the upstream *API model
-    identifier* — e.g. [starts_with "claude-opus-4"], [starts_with
-    "gpt-5"]. That input is the api-name (cascade_model_spec.api_name /
+    identifier*. That input is the api-name (cascade_model_spec.api_name /
     Provider_config.model_id), not the cascade [\[models.<id>\]] key.
     M2 replaces that derivation with a cascade.toml lookup keyed on the
     cascade [<id>] (the cascade key) so OAS no longer needs to "know

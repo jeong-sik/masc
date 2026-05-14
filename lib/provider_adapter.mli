@@ -141,15 +141,6 @@ type gemini_direct_auth =
   | Gemini_api_key
   | Gemini_auth_missing of string
 
-type auth_detail =
-  { auth_kind : string
-  ; status : string
-  ; available : bool
-  ; supports_run : bool
-  ; endpoint_url : string option
-  ; note : string option
-  }
-
 (** {1 Canonical Provider Names} *)
 
 val cn_llama : string
@@ -237,12 +228,6 @@ val default_model_id_for_cascade_prefix
   :  ?getenv:(string -> string option)
   -> string
   -> string option
-
-(** Resolve declared auto-model expansion for a provider canonical name/alias. *)
-val auto_models_for_provider
-  :  ?getenv:(string -> string option)
-  -> string
-  -> string list option
 
 (** Resolve declared auto-model expansion for a cascade prefix. *)
 val auto_models_for_cascade_prefix
@@ -344,9 +329,6 @@ val provider_auth_available : string -> bool
 
 (** Derive auth_kind string for a provider canonical name. *)
 val auth_kind_for_canonical_name : string -> string
-
-(** Provider-agnostic auth detail for dashboard display. *)
-val auth_detail_of_provider : string -> auth_detail
 
 (** Cascade prefix from adapter record. *)
 val cascade_prefix_of_adapter : adapter -> string

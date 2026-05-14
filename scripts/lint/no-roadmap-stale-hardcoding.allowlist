@@ -16,12 +16,10 @@
 lib/keeper/keeper_hooks_oas.mli:22
 
 # lib/provider_adapter.ml model list — gap #6, queued for Sprint 2/3
-lib/provider_adapter.ml:365
-lib/provider_adapter.ml:366
-lib/provider_adapter.ml:367
-lib/provider_adapter.ml:368
-lib/provider_adapter.ml:369
-lib/provider_adapter.ml:370
-lib/provider_adapter.ml:402
-lib/provider_adapter.ml:403
-lib/provider_adapter.ml:405
+lib/provider_adapter.ml:382
+lib/provider_adapter.ml:383
+lib/provider_adapter.ml:384
+lib/provider_adapter.ml:385
+lib/provider_adapter.ml:386
+lib/provider_adapter.ml:387
+lib/provider_adapter.ml:407

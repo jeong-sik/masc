@@ -237,10 +237,6 @@ let openrouter_api_url () =
   env_url_or ~env:"OPENROUTER_API_URL" ~default:(registry_default_base_url "openrouter")
 ;;
 
-let gemini_generative_api_url () =
-  env_url_or ~env:"GEMINI_API_URL" ~default:(registry_default_base_url "gemini")
-;;
-
 let glm_api_url () =
   env_url_or ~env:"ZAI_BASE_URL" ~default:Llm_provider.Zai_catalog.general_base_url
 ;;
@@ -780,14 +776,6 @@ let resolve_auto_models ?getenv (policy : model_policy) =
 let default_model_id_for_cascade_prefix ?getenv provider_name =
   match resolve_adapter_by_cascade_prefix provider_name with
   | Some adapter -> resolve_model_policy_default ?getenv adapter.model_policy
-  | None -> None
-;;
-
-let auto_models_for_provider ?getenv provider_name =
-  match find_direct_adapter_by_alias provider_name with
-  | Some adapter when adapter.model_policy.expand_auto ->
-    resolve_auto_models ?getenv adapter.model_policy
-  | Some _ -> None
   | None -> None
 ;;
 
@@ -1470,20 +1458,6 @@ let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
   Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config cfg
 ;;
 
-(* ── Generic provider auth detail ─────────────────────────────── *)
-
-(** Provider-agnostic auth detail for dashboard display.
-    Encapsulates vendor-specific auth logic (e.g. Gemini Vertex/API key)
-    so consumers do not branch on vendor names. *)
-type auth_detail =
-  { auth_kind : string
-  ; status : string
-  ; available : bool
-  ; supports_run : bool
-  ; endpoint_url : string option
-  ; note : string option
-  }
-
 (** Cascade config prefix from adapter record. No match needed. *)
 let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
 
@@ -1525,76 +1499,6 @@ let provider_kind_of_declarative_protocol raw =
 let cascade_prefix_of_declarative_protocol raw =
   provider_kind_of_declarative_protocol raw
   |> Option.map cascade_prefix_of_provider_kind
-;;
-
-(** Resolve auth detail for any provider by canonical name or alias.
-    Gemini-specific Vertex ADC vs API Key logic is internal. *)
-let auth_detail_of_provider provider =
-  match resolve_direct_adapter provider with
-  | None ->
-    { auth_kind = "unknown"
-    ; status = "unsupported"
-    ; available = false
-    ; supports_run = false
-    ; endpoint_url = None
-    ; note = Some "Unsupported provider"
-    }
-  | Some adapter ->
-    let auth_kind_base =
-      if adapter.canonical_name = cn_kimi_api
-      then "api_key:KIMI_API_KEY"
-      else string_of_auth_mode adapter.auth_mode
-    in
-    if adapter.canonical_name = cn_gemini_api
-    then (
-      match resolve_gemini_direct_auth () with
-      | Gemini_api_key ->
-        { auth_kind = "api_key:GEMINI_API_KEY"
-        ; status = "configured"
-        ; available = true
-        ; supports_run = true
-        ; endpoint_url = Some (gemini_generative_api_url ())
-        ; note = None
-        }
-      | Gemini_vertex_adc { project; location } ->
-        { auth_kind = Printf.sprintf "vertex_adc:%s:%s" project location
-        ; status = "vertex_adc"
-        ; available = true
-        ; supports_run = false
-        ; endpoint_url = Some (gemini_vertex_openai_base_url ~project ~location)
-        ; note =
-            Some
-              "Dashboard run MVP only supports Gemini via GEMINI_API_KEY. Vertex ADC \
-               inventory is visible but run is disabled."
-        }
-      | Gemini_auth_missing message ->
-        { auth_kind = auth_kind_base
-        ; status = "missing_auth"
-        ; available = false
-        ; supports_run = false
-        ; endpoint_url = None
-        ; note = Some message
-        })
-    else if adapter.runtime_kind = Cli_agent
-    then (
-      let available = provider_auth_available provider in
-      { auth_kind = auth_kind_base
-      ; status = (if available then "configured" else "missing_auth")
-      ; available
-      ; supports_run = available
-      ; endpoint_url = None
-      ; note =
-          Some "Cached CLI login is assumed; final validation happens at execution time."
-      })
-    else (
-      let available = provider_auth_available provider in
-      { auth_kind = auth_kind_base
-      ; status = (if available then "configured" else "missing_auth")
-      ; available
-      ; supports_run = available
-      ; endpoint_url = endpoint_url_of_adapter adapter
-      ; note = None
-      })
 ;;
 
 let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind)

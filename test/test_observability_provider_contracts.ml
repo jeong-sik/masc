@@ -93,16 +93,22 @@ let test_resolve_canonical_wraps_adapter () =
 let test_dashboard_provider_snapshots_include_cli_and_api () =
   Eio_main.run (fun _env ->
     let open Masc_mcp.Dashboard_provider_runs in
-    let claude_cli = provider_snapshot_by_name "claude" in
-    let claude_api = provider_snapshot_by_name "claude-api" in
-    let gemini_cli = provider_snapshot_by_name "gemini" in
-    let glm_api = provider_snapshot_by_name "glm-api" in
-    let glm_coding_plan = provider_snapshot_by_name "glm-coding-plan" in
+    let claude_cli = provider_snapshot_by_name "claude_code" in
+    let claude_api = provider_snapshot_by_name "claude" in
+    let gemini_cli = provider_snapshot_by_name "gemini_cli" in
+    let glm_api = provider_snapshot_by_name "glm" in
+    let glm_coding_plan = provider_snapshot_by_name "glm-coding" in
+    let legacy_claude_api = provider_snapshot_by_name "claude-api" in
+    let legacy_glm_api = provider_snapshot_by_name "glm-api" in
     check bool "cli snapshot present" true (Option.is_some claude_cli);
     check bool "api snapshot present" true (Option.is_some claude_api);
     check bool "gemini cli snapshot present" true (Option.is_some gemini_cli);
     check bool "glm api snapshot present" true (Option.is_some glm_api);
     check bool "glm coding snapshot present" true (Option.is_some glm_coding_plan);
+    check bool "legacy claude-api snapshot removed" false
+      (Option.is_some legacy_claude_api);
+    check bool "legacy glm-api snapshot removed" false
+      (Option.is_some legacy_glm_api);
     check string "cli runtime kind" "cli_agent"
       (Option.get claude_cli).runtime_kind;
     check string "api runtime kind" "direct_api"
@@ -111,10 +117,10 @@ let test_dashboard_provider_snapshots_include_cli_and_api () =
       (Option.get glm_api).runtime_kind;
     check string "glm coding runtime kind" "direct_api"
       (Option.get glm_coding_plan).runtime_kind;
-    check bool "gemini cli expands concrete models" true
-      ((Option.get gemini_cli).models <> []);
-    check bool "gemini cli does not expose bare auto" false
-      (List.mem "auto" (Option.get gemini_cli).models))
+    check string "cli source" "oas/provider-runtime-binding"
+      (Option.get claude_cli).source;
+    check string "api source" "oas/provider-runtime-binding"
+      (Option.get claude_api).source)
 
 let test_default_registry_populated () =
   (* Verify default_registry is usable by resolving a known provider.

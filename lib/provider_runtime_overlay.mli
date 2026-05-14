@@ -14,10 +14,14 @@ val find_by_candidates : string list -> binding option
 val find_unique_by_kind : Llm_provider.Provider_config.provider_kind -> binding option
 val endpoint_url : binding -> string option
 val default_model_id : binding -> string option
+val supported_models : binding -> string list
+val available : binding -> bool
+val auth_kind : binding -> string
 val primary_api_key_env : binding -> string option
 val auth_env_keys : binding -> string list
 val runtime_kind : binding -> [ `Local | `Cli_agent | `Direct_api ]
 val supports_runtime_mcp_http_headers : binding -> bool
 val uses_prompt_caching : binding -> bool
 val usage_missing_by_design : binding -> bool
+val resolve_model : ?requested_model:string -> binding -> string
 val provider_config : ?model:string -> binding -> Llm_provider.Provider_config.t

@@ -212,6 +212,27 @@ export function fetchDashboardExecution(opts?: AbortableRequestOptions): Promise
   return get('/api/v1/dashboard/execution', { signal: opts?.signal })
 }
 
+export type DashboardExecutionTrustKeeper = Record<string, unknown> & {
+  name?: string
+  agent_name?: string | null
+  keeper_id?: string | null
+  phase?: string | null
+  pipeline_stage?: string | null
+  status?: string | null
+  trace_id?: string | null
+  trust?: unknown
+}
+
+export type DashboardExecutionTrustResponse = TelemetryFreshnessMetadata & {
+  generated_at?: string
+  total: number
+  keepers: DashboardExecutionTrustKeeper[]
+}
+
+export function fetchDashboardExecutionTrust(opts?: AbortableRequestOptions): Promise<DashboardExecutionTrustResponse> {
+  return get<DashboardExecutionTrustResponse>('/api/v1/dashboard/execution-trust', { signal: opts?.signal })
+}
+
 type ToolQualityToolStat = {
   name: string
   calls: number

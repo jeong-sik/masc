@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { TelemetrySummaryResponse, ToolQualityResponse } from '../api/dashboard'
+import type { DashboardExecutionTrustResponse, TelemetrySummaryResponse, ToolQualityResponse } from '../api/dashboard'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import type { DashboardExecutionResponse, DashboardNamespaceTruthResponse } from '../types'
 const executionResponse = {
@@ -53,6 +53,20 @@ const toolQualityResponse: ToolQualityResponse = {
     },
   ],
   hourly_trend: [],
+}
+
+const executionTrustResponse: DashboardExecutionTrustResponse = {
+  generated_at: '2026-04-09T08:10:30Z',
+  source: 'execution_receipt',
+  producer: 'keeper_agent_run.execution_receipt',
+  durable_store: '.masc/keepers/*/execution-receipts',
+  dashboard_surface: '/api/v1/dashboard/execution-trust',
+  freshness_slo_s: 900,
+  latest_age_s: 37,
+  health: 'ok',
+  entry_count: 2,
+  total: 2,
+  keepers: [],
 }
 
 const telemetrySummaryResponse: TelemetrySummaryResponse = {
@@ -182,6 +196,7 @@ function requireResolver<T>(
 
 async function loadPanel(mocks: {
   fetchDashboardExecution: (opts?: { signal?: AbortSignal }) => Promise<DashboardExecutionResponse>
+  fetchDashboardExecutionTrust?: (opts?: { signal?: AbortSignal }) => Promise<DashboardExecutionTrustResponse>
   fetchToolQuality: (opts?: { n?: number; windowHours?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
   fetchTelemetrySummary: (opts?: { signal?: AbortSignal }) => Promise<TelemetrySummaryResponse>
   fetchDashboardNamespaceTruth?: (opts?: { signal?: AbortSignal }) => Promise<DashboardNamespaceTruthResponse>
@@ -189,6 +204,9 @@ async function loadPanel(mocks: {
   vi.resetModules()
   vi.doMock('../api/dashboard', () => ({
     fetchDashboardExecution: mocks.fetchDashboardExecution,
+    fetchDashboardExecutionTrust:
+      mocks.fetchDashboardExecutionTrust
+      ?? vi.fn().mockResolvedValue(executionTrustResponse),
     fetchToolQuality: mocks.fetchToolQuality,
     fetchTelemetrySummary: mocks.fetchTelemetrySummary,
     fetchDashboardNamespaceTruth:
@@ -253,9 +271,55 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Keeper 턴 로그')
     expect(container.textContent).toContain('실패 분류')
     expect(container.textContent).toContain('함대 통제실')
+    expect(container.textContent).toContain('Execution Trust')
+    expect(container.textContent).toContain('keeper_agent_run.execution_receipt')
+    expect(container.textContent).toContain('/api/v1/dashboard/execution-trust')
     expect(container.textContent).toContain('Telemetry_unified.summary_json')
     expect(container.textContent).toContain('.masc/metrics/keeper.jsonl')
     expect(container.textContent).toContain('/api/v1/dashboard/telemetry/summary')
+  }, 60_000)
+
+  it('renders execution trust coverage gap provenance', async () => {
+    const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
+    const fetchDashboardExecutionTrust = vi.fn().mockResolvedValue({
+      ...executionTrustResponse,
+      health: 'coverage_gap',
+      stale_reason: 'execution_receipt_append_failed',
+      coverage_gap_count: 1,
+      coverage_gaps: [
+        {
+          schema: 'masc.telemetry_coverage_gap.v1',
+          source: 'execution_receipt',
+          producer: 'keeper_agent_run.execution_receipt',
+          durable_store: '.masc/keepers/*/execution-receipts',
+          dashboard_surface: '/api/v1/dashboard/execution-trust',
+          stale_reason: 'execution_receipt_append_failed',
+          keeper_name: 'sangsu',
+          trace_id: 'trace-exec-gap',
+        },
+      ],
+    } satisfies DashboardExecutionTrustResponse)
+    const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(telemetrySummaryResponse)
+    const { FleetTelemetryPanel } = await loadPanel({
+      fetchDashboardExecution,
+      fetchDashboardExecutionTrust,
+      fetchToolQuality,
+      fetchTelemetrySummary,
+    })
+
+    await act(async () => {
+      render(html`<${FleetTelemetryPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchDashboardExecutionTrust).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain('coverage gaps 1: execution_receipt_append_failed')
+    expect(container.textContent).toContain('producer keeper_agent_run.execution_receipt')
+    expect(container.textContent).toContain('store .masc/keepers/*/execution-receipts')
+    expect(container.textContent).toContain('surface /api/v1/dashboard/execution-trust')
+    expect(container.textContent).toContain('trace trace-exec-gap')
   }, 60_000)
 
   it('renders readiness cards, attention events, and keeper goal or sandbox badges', async () => {

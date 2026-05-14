@@ -1,16 +1,6 @@
-(** Prometheus-Compatible Metrics for masc-mcp
-
-    Provides lightweight metrics collection and Prometheus text format export.
-
-    Usage:
-    {[
-      let () = Prometheus.inc_counter "masc_tasks_total" ~labels:[("status", "completed")]
-      let () = Prometheus.set_gauge "masc_active_agents" 5.0
-      let text = Prometheus.to_prometheus_text ()
-    ]}
-
-    @since 0.4.0
-*)
+(** Prometheus-compatible metrics collection and text export for masc-mcp.
+    Example: [inc_counter "masc_tasks_total" ~labels:[("status", "completed")] ()].
+    @since 0.4.0 *)
 (** {1 Metric Types} *)
 type label = string * string
 

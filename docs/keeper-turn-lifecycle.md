@@ -125,10 +125,11 @@ correlator the receipt does.
   a structured outcome before the cascade fires HTTP.  401-after-silent-
   fall-back is no longer the first signal an operator sees.
 
-- **`Cascade_catalog_validator.codex_with_bound_actor_only_issue`** (#11164)
-  — boot-time warn for cascades that include `codex_cli` without a
-  bound-actor-tolerant fallback.  Surfaces the misconfiguration once
-  instead of paying per-turn `no_tool_capable_provider` events.
+- **`Cascade_catalog_validator.bridging_required_without_fallback_issue`** (#11164)
+  — boot-time warn for cascades that include a provider requiring
+  per-keeper bound-actor bridging without a bound-actor-tolerant fallback.
+  Surfaces the misconfiguration once instead of paying per-turn
+  `no_tool_capable_provider` events.
 
 - **`masc_keeper_turn_fsm_transitions_total`** (#11326) — Prometheus
   counter bumped inside `Keeper_turn_fsm.emit_transition`.  Labels

@@ -558,7 +558,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =
           [
-            { OWN.reason = "codex_keeper_bound_actor_required" };
+            { OWN.reason = "keeper_bound_actor_bridge_required" };
           ];
       }
   in
@@ -595,7 +595,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
     (has_substring surfaced_summary "masc_worktree_create");
   check bool "summary names rejection reason" true
     (has_substring surfaced_summary
-       "codex_keeper_bound_actor_required");
+       "keeper_bound_actor_bridge_required");
   check bool "summary omits rejected provider identity" false
     (has_substring surfaced_summary "codex_cli:codex")
 

@@ -20,6 +20,12 @@ let with_test_env f =
     Unix.rmdir tmp_dir;
     raise e
 
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
 let test_get_messages_raw_limit_and_order () =
   with_test_env (fun config ->
     let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 1" in
@@ -64,6 +70,18 @@ let test_get_messages_raw_large_history_keeps_newest_window () =
       [ "Message 20"; "Message 19"; "Message 18" ] contents
   )
 
+let test_get_messages_raw_ignores_atomic_tmp_orphans () =
+  with_test_env (fun config ->
+    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Message 1" in
+    let tmp_name = "999999999_keeper-agent_broadcast.json.tmp-atomic" in
+    let tmp_path = Filename.concat (Coord.messages_dir config) tmp_name in
+    write_file tmp_path {|{"partial":true}|};
+    let msgs = Coord.get_messages_raw config ~since_seq:0 ~limit:1 in
+    let contents = List.map (fun (msg : Masc_domain.message) -> msg.content) msgs in
+    Alcotest.(check (list string)) "atomic tmp orphan does not consume newest slot"
+      [ "Message 1" ] contents
+  )
+
 let () =
   Alcotest.run "Coord raw message regression" [
     ("messages_raw", [
@@ -73,5 +91,7 @@ let () =
         test_get_messages_raw_since_seq_stops_early;
       Alcotest.test_case "large history keeps newest window" `Quick
         test_get_messages_raw_large_history_keeps_newest_window;
+      Alcotest.test_case "atomic temp orphan is ignored" `Quick
+        test_get_messages_raw_ignores_atomic_tmp_orphans;
     ]);
   ]

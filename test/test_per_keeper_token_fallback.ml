@@ -113,7 +113,7 @@ let test_per_keeper_token_label_is_observable () =
     "per_keeper_token_file"
     (Auth_resolve.token_source_label Per_keeper_token_file)
 
-let test_codex_keeper_bound_policy_uses_per_keeper_bearer () =
+let test_provider_bound_policy_uses_per_keeper_bearer () =
   with_temp_dir "f1-codex-keeper-bound" @@ fun base_path ->
   let agent_name = "keeper-analyst-agent" in
   seed_raw_token base_path agent_name "keeper-bearer-xyz";
@@ -127,8 +127,8 @@ let test_codex_keeper_bound_policy_uses_per_keeper_bearer () =
   in
   check bool "actor-bound approval tool preserved" true
     (List.mem "masc_transition" policy.allowed_tool_names);
-  check bool "codex can authenticate keeper-bound policy" true
-    (Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp
+  check bool "provider can authenticate keeper-bound policy" true
+    (Cascade_runner.provider_can_auth_keeper_bound_runtime_mcp
        ~agent_name policy);
   let codex = codex_provider_cfg () in
   let codex_policy =
@@ -172,6 +172,6 @@ let () =
       ( "codex_cli",
         [
           test_case "keeper-bound policy uses per-keeper bearer approval" `Quick
-            test_codex_keeper_bound_policy_uses_per_keeper_bearer;
+            test_provider_bound_policy_uses_per_keeper_bearer;
         ] );
     ]

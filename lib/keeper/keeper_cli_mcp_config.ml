@@ -6,7 +6,7 @@
    [mcpServers] entry and the keeper cannot reach the masc-mcp HTTP
    endpoint; tool calls surface as "keeper_shell not in session's tool
    registry". See #10049 for the full root-cause analysis and the
-   codex_cli sibling path in [server_runtime_bootstrap.sync_codex_mcp_config].
+   shared config sync path in [server_runtime_bootstrap.sync_codex_mcp_config].
 
    Gated behind [MASC_AUTO_CONSTRUCT_CLAUDE_MCP] (default true since
    #10059 validation; the legacy explicit-env path still wins when

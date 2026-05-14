@@ -190,7 +190,7 @@ val runtime_mcp_policy_with_masc_agent_name :
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy
-val codex_cli_can_auth_keeper_bound_runtime_mcp :
+val provider_can_auth_keeper_bound_runtime_mcp :
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   bool

@@ -2093,10 +2093,10 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
   check_source_omits "lib/keeper/keeper_turn_driver.mli" "config_for_label";
   check_source_omits
     "lib/keeper/keeper_turn_driver.mli"
-    "codex_cli_prompt_preflight";
+    "argv_prompt_preflight";
   check_source_omits
     "lib/keeper/keeper_turn_driver.mli"
-    "with_codex_cli_preflight";
+    "with_argv_prompt_preflight";
   check_source_omits
     "lib/keeper/keeper_turn_driver.mli"
     "Llm_provider.Provider_config";

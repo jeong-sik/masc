@@ -70,19 +70,19 @@ val runtime_mcp_policy_for_provider :
 (** Normalise a runtime MCP policy for a specific provider, injecting the
     keeper's agent name when applicable. *)
 
-val codex_cli_cannot_carry_keeper_bound_runtime_mcp :
+val provider_cannot_bridge_keeper_bound_runtime_mcp :
   keeper_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   bool
-(** [true] when the provider is codex_cli and the policy includes tools that
-    require a bound-actor (keeper-scoped) runtime MCP — codex_cli cannot
-    carry these across its CLI subprocess boundary. *)
+(** [true] when the provider adapter requires per-keeper bridging and the
+    policy includes bound-actor runtime MCP tools, but no keeper-scoped bearer
+    is available. *)
 
 (** {1 Provider filter rejection classification} *)
 
 type filter_rejection_reason =
-  | Codex_keeper_bound_actor_required
+  | Provider_bound_actor_bridge_required
   | Tool_lane_unsupported
   | Required_tool_use of Provider_tool_support.rejection_reason
 (** Why a provider was rejected by the cascade filter.  Order mirrors the

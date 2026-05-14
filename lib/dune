@@ -134,6 +134,7 @@
   keeper_agent_error
   keeper_agent_memory_episode
   cascade_agent_context
+  cascade_exec_config
   keeper_oas_checkpoint
   keeper_cascade_engine
   keeper_turn_driver

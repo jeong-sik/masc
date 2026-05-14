@@ -16,8 +16,7 @@ type cli_transport_overrides =
      stdout line arrives within [s] seconds. Currently honoured only
      by [Kimi_cli_transport_local], which calls
      [Cli_common_subprocess.run_stream_lines] directly. The other CLI
-     transports (claude_code, gemini_cli, codex_cli) route through
-     agent_sdk [Transport_*_cli.create] whose configs do not yet
+     transports route through agent_sdk [Transport_*_cli.create] whose configs do not yet
      expose [stdout_idle_timeout_s]; an OAS upstream change is needed
      to honour this field there. *)
   }
@@ -33,8 +32,8 @@ let claude_code_max_turns_hard_cap =
 
 let provider_effective_max_turns _kind requested = requested
 
-(* #10097: codex_cli can only expose keeper-bound runtime MCP tools when the
-   keeper has a raw bearer token that OAS can route through bearer_token_env_var.
+(* #10097: Some CLI adapters can only expose keeper-bound runtime MCP tools
+   when the keeper has a raw bearer token that OAS can bridge into the request.
    Missing-token omissions are still a structural lane/auth setup issue, not a
    per-call incident:
 
@@ -45,53 +44,53 @@ let provider_effective_max_turns _kind requested = requested
 
    Fingerprint = sorted, comma-joined tool list.  Stdlib.Mutex guards
    concurrent access from heartbeat/turn fibers across domains. *)
-let codex_omission_state_mu = Stdlib.Mutex.create ()
-let codex_omission_state : (string, string) Hashtbl.t = Hashtbl.create 16
+let mcp_tool_omission_state_mu = Stdlib.Mutex.create ()
+let mcp_tool_omission_state : (string, string) Hashtbl.t = Hashtbl.create 16
 
-let codex_cli_omission_fingerprint (tools : string list) : string =
+let runtime_mcp_omission_fingerprint (tools : string list) : string =
   tools |> List.sort String.compare |> String.concat ","
 ;;
 
-let codex_omission_agent_key = function
+let mcp_tool_omission_agent_key = function
   | Some agent_name ->
     let agent_name = String.trim agent_name in
     if String.equal agent_name "" then "<no_agent>" else agent_name
   | None -> "<no_agent>"
 ;;
 
-let codex_omission_should_log ~agent_name ~tool_fingerprint =
-  Stdlib.Mutex.lock codex_omission_state_mu;
+let mcp_tool_omission_should_log ~provider ~agent_name ~tool_fingerprint =
+  let key = provider ^ "\000" ^ agent_name in
+  Stdlib.Mutex.lock mcp_tool_omission_state_mu;
   Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock codex_omission_state_mu)
+    ~finally:(fun () -> Stdlib.Mutex.unlock mcp_tool_omission_state_mu)
     (fun () ->
-       match Hashtbl.find_opt codex_omission_state agent_name with
+       match Hashtbl.find_opt mcp_tool_omission_state key with
        | Some prev when String.equal prev tool_fingerprint -> false
        | _ ->
-         Hashtbl.replace codex_omission_state agent_name tool_fingerprint;
+         Hashtbl.replace mcp_tool_omission_state key tool_fingerprint;
          true)
 ;;
 
-let codex_cli_omission_fingerprint_seen fingerprint =
-  not (codex_omission_should_log ~agent_name:"<no_agent>" ~tool_fingerprint:fingerprint)
+let runtime_mcp_omission_fingerprint_seen fingerprint =
+  not
+    (mcp_tool_omission_should_log ~provider:"unknown_provider"
+       ~agent_name:"<no_agent>" ~tool_fingerprint:fingerprint)
 ;;
 
 (* For tests: reset the dedup state so each test starts clean. *)
-let reset_codex_cli_omission_dedup_for_tests () =
-  Stdlib.Mutex.lock codex_omission_state_mu;
+let reset_runtime_mcp_omission_dedup_for_tests () =
+  Stdlib.Mutex.lock mcp_tool_omission_state_mu;
   Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock codex_omission_state_mu)
-    (fun () -> Hashtbl.clear codex_omission_state)
+    ~finally:(fun () -> Stdlib.Mutex.unlock mcp_tool_omission_state_mu)
+    (fun () -> Hashtbl.clear mcp_tool_omission_state)
 ;;
 
-let record_codex_cli_omission_for_agent
+let record_provider_mcp_tool_omission_for_agent
+      ~(provider : string)
       ~(agent_name : string option)
       ~(tools : string list)
   : unit
   =
-  let provider_label =
-    Llm_provider.Provider_config.string_of_provider_kind
-      Llm_provider.Provider_config.Codex_cli
-  in
   match tools with
   | [] -> ()
   | _ ->
@@ -99,26 +98,30 @@ let record_codex_cli_omission_for_agent
       (fun tool ->
          Prometheus.inc_counter
            Prometheus.metric_provider_mcp_tool_omission
-           ~labels:[ "provider", provider_label; "tool", tool ]
+           ~labels:[ "provider", provider; "tool", tool ]
            ())
       tools;
-    let tool_fingerprint = codex_cli_omission_fingerprint tools in
-    let agent_name_key = codex_omission_agent_key agent_name in
-    if codex_omission_should_log ~agent_name:agent_name_key ~tool_fingerprint
+    let tool_fingerprint = runtime_mcp_omission_fingerprint tools in
+    let agent_name_key = mcp_tool_omission_agent_key agent_name in
+    if
+      mcp_tool_omission_should_log ~provider ~agent_name:agent_name_key
+        ~tool_fingerprint
     then
       Log.warn
         ~ctx:"oas_worker_exec"
-        "codex_cli omitting keeper-bound runtime MCP tool(s) that require request-scoped \
+        "%s omitting keeper-bound runtime MCP tool(s) that require request-scoped \
          auth headers: %s (no per-keeper bearer-token lane available for %s; subsequent \
          omissions of this same set are counted in \
          masc_provider_mcp_tool_omission_total{provider=\"%s\"} and not re-logged)"
+        provider
         (String.concat ", " (List.sort String.compare tools))
-        agent_name_key
-        provider_label
+        agent_name_key provider
 ;;
 
-let record_codex_cli_omission ~(tools : string list) : unit =
-  record_codex_cli_omission_for_agent ~agent_name:None ~tools
+let record_provider_mcp_tool_omission ~(provider : string) ~(tools : string list)
+    : unit =
+  record_provider_mcp_tool_omission_for_agent ~provider ~agent_name:None
+    ~tools
 ;;
 
 (** Resolve a model label string to an OAS Provider.config.
@@ -385,7 +388,7 @@ let add_masc_authorization_header
   { policy with servers }
 ;;
 
-let codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
+let provider_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
   runtime_mcp_policy_uses_bound_actor_tools policy
   && Option.is_some (per_keeper_authorization_header ~agent_name)
 ;;
@@ -570,9 +573,8 @@ let runtime_mcp_policy_of_tool_names
           let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
           (* Phase A F1: when MASC_MCP_TOKEN is unset, fall back to the
              per-keeper raw token at <base_path>/.masc/auth/<agent_name>.token.
-             This wires CLI-spawned subprocesses (codex_cli/gemini_cli/kimi_cli)
-             that callback to masc-mcp tools but do not inherit the parent
-             process env. *)
+             This wires CLI-spawned subprocesses that callback to masc-mcp
+             tools but do not inherit the parent process env. *)
           let per_keeper_token =
             match env_token, agent_name with
             | None, Some name ->
@@ -710,7 +712,7 @@ let resolve_tool_lane_for_oas_tools
     .provider_requires_per_keeper_bridging_for_bound_actor_tools
       provider_cfg
   in
-  let codex_can_auth_keeper_bound_actor_tools =
+  let provider_can_auth_keeper_bound_actor_tools =
     match requested_agent_name with
     | Some agent_name
       when requires_per_keeper_bridging
@@ -718,35 +720,37 @@ let resolve_tool_lane_for_oas_tools
       Option.is_some (per_keeper_authorization_header ~agent_name)
     | _ -> false
   in
-  let codex_keeper_bound_actor_tools =
+  let unbridgeable_keeper_bound_actor_tools =
     match requested_agent_name with
     | Some agent_name
       when requires_per_keeper_bridging
            && Option.is_some (keeper_name_of_agent_name agent_name)
-           && not codex_can_auth_keeper_bound_actor_tools ->
+           && not provider_can_auth_keeper_bound_actor_tools ->
       List.filter
         runtime_mcp_tool_requires_bound_actor
         (public_tool_names @ keeper_internal_tool_names)
     | _ -> []
   in
   (* #10097: WARN once per distinct fingerprint + always-emit
-     per-tool counter.  See [record_codex_cli_omission] docs. *)
-  record_codex_cli_omission_for_agent
+     per-tool counter.  See [record_provider_mcp_tool_omission] docs. *)
+  record_provider_mcp_tool_omission_for_agent
+    ~provider:(provider_label provider_cfg)
     ~agent_name:requested_agent_name
-    ~tools:codex_keeper_bound_actor_tools;
-  if tool_requirement = `Required && codex_keeper_bound_actor_tools <> []
+    ~tools:unbridgeable_keeper_bound_actor_tools;
+  if tool_requirement = `Required && unbridgeable_keeper_bound_actor_tools <> []
   then (
     let detail =
       Printf.sprintf
-        "%s cannot satisfy required keeper-bound runtime MCP tools omitted by codex_cli: \
-         %s"
+        "%s cannot satisfy required keeper-bound runtime MCP tools omitted by \
+         provider bridge: %s"
         (provider_label provider_cfg)
-        (String.concat ", " (List.sort String.compare codex_keeper_bound_actor_tools))
+        (String.concat ", "
+           (List.sort String.compare unbridgeable_keeper_bound_actor_tools))
     in
     Error (invalid_runtime_config "tool_support" detail))
   else (
     let public_tool_names =
-      if codex_keeper_bound_actor_tools = []
+      if unbridgeable_keeper_bound_actor_tools = []
       then public_tool_names
       else
         List.filter
@@ -754,7 +758,7 @@ let resolve_tool_lane_for_oas_tools
           public_tool_names
     in
     let keeper_internal_tool_names =
-      if codex_keeper_bound_actor_tools = []
+      if unbridgeable_keeper_bound_actor_tools = []
       then keeper_internal_tool_names
       else
         List.filter
@@ -764,14 +768,15 @@ let resolve_tool_lane_for_oas_tools
     let runtime_tool_names =
       dedupe_preserve_order (public_tool_names @ keeper_internal_tool_names)
     in
-    (* #12676: When all tools were bound-actor and got stripped for codex_cli
-       on an optional turn, runtime_tool_names is empty. The keeper may still
-       use an MCP connection for discovery, so build a minimal connect-only
-       policy with the server URL and auth but no allowed_tool_names. Required
-       turns reject above because a zero-tool policy cannot satisfy the tool
-       contract. *)
+    (* #12676: When all tools were bound-actor and got stripped on an optional
+       turn, runtime_tool_names is empty. The keeper may still use an MCP
+       connection for discovery, so build a minimal connect-only policy with
+       the server URL and auth but no allowed_tool_names. Required turns reject
+       above because a zero-tool policy cannot satisfy the tool contract. *)
     let runtime_mcp_policy =
-      if runtime_tool_names = [] && codex_keeper_bound_actor_tools <> []
+      if
+        runtime_tool_names = []
+        && unbridgeable_keeper_bound_actor_tools <> []
       then (
         let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
         let per_keeper_token =

@@ -64,21 +64,19 @@ type tool_policy =
           explicit per-keeper bridging at the cascade layer; otherwise the
           filter must reject the policy for this provider.
 
-          Codex CLI is currently the only adapter that sets this to [true]:
-          its cached login does not allow per-keeper authorization headers
-          to be injected on each request without bridging. *)
+          This is a capability flag. Callers must not dispatch on a vendor or
+          provider name to decide whether the bridge is needed. *)
   ; identity_runtime_mcp_header_keys : string list
     (** Header keys the provider can carry even when
           [supports_runtime_mcp_http_headers = false].  Empty for most
-          providers.  Codex CLI carries [authorization] (via
-          [bearer_token_env_var]) plus the non-secret MASC identity
-          headers ([x-masc-agent-name], [x-masc-keeper-name]).
+          providers. Adapters that require per-keeper bridging may still carry
+          selected non-secret MASC identity headers such as
+          [x-masc-agent-name] and [x-masc-keeper-name].
           Keys are matched case-insensitively after trimming. *)
   ; argv_prompt_preflight : bool
     (** When true, callers must run a prompt argv/context-window preflight
           before spawning a turn (the runtime serialises the full prompt on
-          a single argv vector and rejects oversize input). Codex CLI's
-          [codex exec] subprocess transport is the canonical case.
+          a single argv vector and rejects oversize input).
           RFC-0058 §2.4: capability flag, not a vendor match. *)
   ; uses_anthropic_caching : bool
     (** When true, the provider's wire format supports Anthropic-style
@@ -92,16 +90,17 @@ type tool_policy =
           single subprocess attempt.  [None] means the provider does not
           impose a sub-keeper cap; [Some n] clamps the keeper-level
           [max_turns] to [n] before handing it to the underlying CLI.
-          Only Claude Code currently sets this (loop hard cap = 30).
+          Adapter entries supply this when their runtime has a smaller
+          per-attempt loop cap than the keeper-level budget.
           RFC-0058 §2.4: capability flag, not a vendor match. *)
   ; tolerates_bound_actor_fallback : bool
     (** When true, this adapter is considered a viable fallback target
           when the operator's catalog also contains an adapter that
           [requires_per_keeper_bridging_for_bound_actor_tools = true]
-          (e.g. Codex CLI). Catalog static validation
-          ({!Cascade_catalog_validator.codex_with_bound_actor_only_issue})
-          uses this flag to decide whether a "Codex CLI present without a
-          bound-actor-tolerant fallback" warning should fire.
+          Catalog static validation
+          ({!Cascade_catalog_validator.bridging_required_without_fallback_issue})
+          uses this flag to decide whether a bridging-required profile lacks a
+          bound-actor-tolerant fallback.
 
           Currently set to [true] for CLI agents with native per-keeper
           MCP support: Claude Code, Gemini CLI, Kimi CLI, and the local
@@ -131,6 +130,8 @@ type adapter =
   ; model_policy : model_policy
   ; tool_policy : tool_policy
   ; telemetry_policy : telemetry_policy
+  ; telemetry_bucket : string option
+  ; telemetry_model_prefixes : string list
   }
 
 type gemini_direct_auth =
@@ -210,6 +211,16 @@ val resolve_adapter_by_cascade_prefix : string -> adapter option
 
 (** Resolve the canonical name for a provider label. *)
 val resolve_direct_canonical_name : string -> string option
+
+(** Low-cardinality telemetry bucket declared on an adapter. *)
+val telemetry_bucket_of_adapter : adapter -> string option
+
+(** Resolve a low-cardinality telemetry bucket from a provider label. *)
+val telemetry_bucket_of_provider_label : string -> string option
+
+(** Resolve a low-cardinality telemetry bucket from a response model id or
+    provider-prefixed model label. *)
+val telemetry_bucket_of_model_id : string -> string option
 
 (** Resolve spawn_key for an agent label. *)
 val resolve_spawn_key : string -> string option
@@ -402,8 +413,8 @@ val supports_runtime_mcp_http_headers_for_config : Llm_provider.Provider_config.
 (** Whether the resolved adapter requires explicit per-keeper bridging in
     order to carry a runtime MCP policy that uses bound-actor tools.
 
-    Currently only [codex_cli] returns [true]; the cascade filter uses this
-    flag to gate entries without dispatching on provider name. *)
+    The cascade filter uses this flag to gate entries without dispatching on
+    provider name. *)
 val requires_per_keeper_bridging_for_bound_actor_tools_for_config
   :  Llm_provider.Provider_config.t
   -> bool
@@ -452,10 +463,10 @@ val requires_per_keeper_bridging_for_bound_actor_tools_for_kind
   -> bool
 
 (** Whether the resolved adapter for [kind] is a viable fallback when
-    the catalog also contains a bridging-required adapter (Codex CLI).
+    the catalog also contains a bridging-required adapter.
     Returns [false] when no adapter resolves for [kind] (including
     PK.Glm and PK.OpenAI_compat, which have no single canonical adapter).
-    Used by {!Cascade_catalog_validator.codex_with_bound_actor_only_issue}.
+    Used by {!Cascade_catalog_validator.bridging_required_without_fallback_issue}.
     RFC-0058 §2.4: capability flag, not a vendor match. *)
 val tolerates_bound_actor_fallback_for_kind
   :  Llm_provider.Provider_config.provider_kind
@@ -470,8 +481,8 @@ val oas_capabilities_of_config
 
 (** Whether a runtime-MCP HTTP header key is acceptable for the resolved
     adapter, even when general HTTP-header support is off.  Covers the
-    Codex CLI identity header carve-out
-    ([authorization], [x-masc-agent-name], [x-masc-keeper-name]).
+    per-adapter identity header carve-out
+    (for example [x-masc-agent-name] and [x-masc-keeper-name]).
     Returns [true] unconditionally for adapters with
     [supports_runtime_mcp_http_headers = true]. *)
 val accepts_runtime_mcp_http_header_for_config

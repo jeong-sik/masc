@@ -19,8 +19,8 @@ let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
     that have already resolved the adapter (e.g. [oas_capabilities_of_config]
     below) can avoid re-resolving for the same provider.
 
-    Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
-    Kimi CLI) do not expose inline function-calling to this gate. Runtime MCP
+    Override semantics: CLI providers do not expose inline function-calling to
+    this gate. Runtime MCP
     support remains adapter/OAS-owned because not every CLI can consume
     request-scoped MCP policy; Gemini CLI is the known false case. *)
 let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
@@ -185,8 +185,8 @@ let supports_required_tool_use
 
 (* #10474: when [supports_required_tool_use] returns false, attribute
    the rejection to the most actionable single cause so dashboards
-   can show "5 codex_cli + 1 kimi_cli rejected for
-   runtime_mcp_http_headers_required" instead of a flat counter.
+   can show provider-specific rejection counts for
+   [runtime_mcp_http_headers_required] instead of a flat counter.
 
    Priority order (most-specific first):
    1. [runtime_mcp_http_headers_required] — runtime_mcp caps are

@@ -1180,7 +1180,7 @@
 (include stanzas/test_channel_gate_metrics.inc)
 (include stanzas/test_ci_hardening_source.inc)
 (include stanzas/test_ci_run_tests_script.inc)
-(include stanzas/test_codex_cli_omission_dedup_10097.inc)
+(include stanzas/test_provider_mcp_tool_omission_dedup_10097.inc)
 (include stanzas/test_context_max_observed_9953.inc)
 (include stanzas/test_continuity_forward_filter.inc)
 (include stanzas/test_coord_bootstrap.inc)

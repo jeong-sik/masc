@@ -3310,8 +3310,8 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
   in
   let codex_provider = make_codex_cli_provider_cfg () in
   (* Post-#13149 review: this test originally pinned the
-     [codex_keeper_bound_skip_log_message] pure helper.  That left
-     the production [log_codex_keeper_bound_skip] emission path
+     [keeper_bound_bridge_skip_log_message] pure helper.  That left
+     the production [log_keeper_bound_bridge_skip] emission path
      uncovered (removing it / changing its level / suppressing the
      first emission would still pass) and forced the helper to be
      part of [Keeper_turn_driver]'s public API.  Drive the actual
@@ -3339,7 +3339,7 @@ let test_filter_candidate_providers_for_tool_support_drops_codex_cli_keeper_boun
   let codex_skip_entries =
     Log.Ring.recent ~limit:50 ~module_filter:"Misc" ?since_seq:before_seq ()
     |> List.filter (fun (entry : Log.Ring.entry) ->
-      contains_substring ~needle:"reason=codex_keeper_bound_actor_required" entry.message)
+      contains_substring ~needle:"reason=keeper_bound_actor_bridge_required" entry.message)
   in
   (match codex_skip_entries with
    | [] ->
@@ -3604,7 +3604,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   (* Rejected primary, secondary that *also* fails the gate (another
      codex_cli with bound-actor tools). Detail format is
      [rejected:<secondary_kind>:<rejection_reason_label>]. *)
-  let detail = "rejected:codex_cli:codex_keeper_bound_actor_required" in
+  let detail = "rejected:codex_cli:keeper_bound_actor_bridge_required" in
   let before = count_swap_metric ~detail in
   let _ =
     Masc_mcp.Cascade_oas_runner.filter_candidate_providers_for_tool_support
@@ -3632,7 +3632,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
    classification — these tests pin the classifier to its 3-stage
    short-circuit so a regression in any check surfaces here instead
    of in production WARN spam.  *)
-let test_classify_filter_rejection_codex_keeper_bound_actor () =
+let test_classify_filter_rejection_provider_bound_actor () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
@@ -3667,11 +3667,11 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
   in
   Alcotest.(check (option string))
     "codex_cli with bound-actor policy classified as keeper_bound_actor"
-    (Some "codex_keeper_bound_actor_required")
+    (Some "keeper_bound_actor_bridge_required")
     (Option.map Masc_mcp.Cascade_oas_runner.filter_rejection_reason_label reason)
 ;;
 
-let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token
+let test_classify_filter_rejection_provider_bound_actor_passes_with_per_keeper_token
       ()
   =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935"
@@ -4629,7 +4629,7 @@ let test_sdk_error_terminal_provider_runtime_detects_jsonrpc_sse_parse_storm () 
     (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
 ;;
 
-let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
+let test_argv_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
     Cascade_runner.default_config
@@ -4639,7 +4639,7 @@ let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Cascade_error_classify.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Cascade_exec_config.argv_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
     Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
     Alcotest.(check bool) "context limit hit" true preflight.hits_context_window;
@@ -4651,10 +4651,10 @@ let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
       "retry limit reduced"
       true
       (preflight.retry_limit_tokens < preflight.prompt_tokens)
-  | None -> Alcotest.fail "expected codex preflight overflow"
+  | None -> Alcotest.fail "expected argv prompt preflight overflow"
 ;;
 
-let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
+let test_argv_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
   let provider_cfg = make_codex_cli_provider_cfg ~model_id:"gpt-4.1" () in
   let config =
     Cascade_runner.default_config
@@ -4664,7 +4664,7 @@ let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow ()
       ~tools:[]
   in
   let huge_goal = String.make 600_000 'a' in
-  match Cascade_error_classify.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  match Cascade_exec_config.argv_prompt_preflight ~config ~goal:huge_goal with
   | Some preflight ->
     Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
     Alcotest.(check bool) "context limit not hit" false preflight.hits_context_window;
@@ -4680,7 +4680,7 @@ let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow ()
       "retry limit below full context window"
       true
       (preflight.retry_limit_tokens < preflight.context_window_tokens)
-  | None -> Alcotest.fail "expected argv-only codex preflight overflow"
+  | None -> Alcotest.fail "expected argv-only preflight overflow"
 ;;
 
 let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
@@ -6509,13 +6509,13 @@ let () =
             `Quick
             test_classify_masc_internal_error_roundtrip
         ; Alcotest.test_case
-            "codex preflight uses pipeline context fallback"
+            "argv preflight uses pipeline context fallback"
             `Quick
-            test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback
+            test_argv_prompt_preflight_uses_pipeline_context_window_fallback
         ; Alcotest.test_case
-            "codex preflight scales retry limit for argv overflow"
+            "argv preflight scales retry limit for argv overflow"
             `Quick
-            test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow
+            test_argv_prompt_preflight_scales_retry_limit_for_argv_only_overflow
         ; Alcotest.test_case
             "codex argv scrubber cleans request text"
             `Quick
@@ -6619,12 +6619,12 @@ let () =
         ; Alcotest.test_case
             "classify_filter_rejection: codex bound-actor policy → keeper_bound_actor"
             `Quick
-            test_classify_filter_rejection_codex_keeper_bound_actor
+            test_classify_filter_rejection_provider_bound_actor
         ; Alcotest.test_case
             "classify_filter_rejection: codex bound-actor policy passes with per-keeper \
              bearer"
             `Quick
-            test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keeper_token
+            test_classify_filter_rejection_provider_bound_actor_passes_with_per_keeper_token
         ; Alcotest.test_case
             "classify_filter_rejection: returns None when provider passes"
             `Quick

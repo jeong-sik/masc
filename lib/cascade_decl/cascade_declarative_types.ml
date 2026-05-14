@@ -46,7 +46,8 @@ type cascade_capabilities =
   ; identity_runtime_mcp_header_keys : string list
     (** Header keys honored by the runtime's auth surface even when
           [supports_runtime_mcp_http_headers] is false. A.3 will have
-          [Provider_tool_support] read this list for Codex CLI. *)
+          [Provider_tool_support] read this list for adapters that declare
+          identity header carve-outs. *)
   ; argv_prompt_preflight : bool
     (** Runtime needs prompt length / argv-byte preflight before
           invocation to avoid silent OS-level argv overflow. *)
@@ -58,12 +59,11 @@ type cascade_capabilities =
   ; tolerates_bound_actor_fallback : bool
     (** Catalog-level static-validation flag: when [true], this provider
           is intended to be a viable fallback target if the operator's
-          catalog also lists an adapter that requires per-keeper bridging
-          (e.g. Codex CLI).
+          catalog also lists an adapter that requires per-keeper bridging.
 
           **Current data flow (parsed-only).** This PR adds the schema and
           parser path so cascade.toml can declare the value, but
-          [Cascade_catalog_validator.codex_with_bound_actor_only_issue]
+          [Cascade_catalog_validator.bridging_required_without_fallback_issue]
           still reads the local provider-tool support projection. Editing
           this value in cascade.toml has no runtime effect on the catalog
           warning until the declarative capability cutover lands.
@@ -184,8 +184,8 @@ type cascade_model_capabilities =
     (** True when the provider's standard response carries
           [input_tokens]/[output_tokens] (direct APIs like Anthropic,
           OpenAI, Gemini, Kimi-API, GLM, Ollama). False for CLI-class
-          wrappers that strip usage before returning (codex_cli,
-          gemini_cli, kimi_cli). Default-true matches OAS. *)
+          wrappers that strip usage before returning. Default-true matches
+          OAS. *)
   ; (* Advanced modalities *)
     supports_computer_use : bool
   }

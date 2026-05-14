@@ -145,8 +145,8 @@ let model_entry_json ~path value =
                        validator rejected weight=0, breaking dashboard
                        cascade.toml rendering on every hot-reload
                        once #10097 introduced explicit weight=0 entries
-                       to disable codex_cli without removing it from the
-                       seed list.  Negative weights stay rejected — they
+                       to disable a seeded provider without removing it from
+                       the seed list.  Negative weights stay rejected — they
                        have no operational meaning. *)
               (match int_value ~path:(path ^ ".weight") field_value with
                | Ok value when value >= 0 ->

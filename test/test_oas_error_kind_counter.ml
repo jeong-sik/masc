@@ -135,7 +135,7 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =
           [
-            { OWN.reason = "codex_keeper_bound_actor_required" };
+            { OWN.reason = "keeper_bound_actor_bridge_required" };
             { OWN.reason = "tool_lane_unsupported" };
           ];
       }
@@ -157,7 +157,7 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
     (json |> member "rejected_candidate_count" |> to_int);
   Alcotest.(check (list string))
     "rejection reasons serialized without provider identity"
-    [ "codex_keeper_bound_actor_required"; "tool_lane_unsupported" ]
+    [ "keeper_bound_actor_bridge_required"; "tool_lane_unsupported" ]
     (json |> member "rejection_reasons" |> to_list |> List.map to_string);
   Alcotest.(check bool)
     "provider rejection identities omitted"
@@ -172,7 +172,7 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
             (contains_substring summary "masc_worktree_create");
           Alcotest.(check bool) "summary names rejection reason" true
             (contains_substring summary
-               "codex_keeper_bound_actor_required");
+               "keeper_bound_actor_bridge_required");
           Alcotest.(check bool) "summary omits rejected provider identity" false
             (contains_substring summary "codex_cli:codex")
       | None -> Alcotest.fail "expected no-tool summary")
@@ -193,7 +193,7 @@ let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
                 [
                   ("provider_label", `String "codex_cli:codex");
                   ("provider_kind", `String "codex_cli");
-                  ("reason", `String "codex_keeper_bound_actor_required");
+                  ("reason", `String "keeper_bound_actor_bridge_required");
                 ];
             ] );
       ]
@@ -210,7 +210,7 @@ let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
         (redacted |> member "provider_rejections" = `Null);
       Alcotest.(check (list string))
         "legacy rejection reason survives"
-        [ "codex_keeper_bound_actor_required" ]
+        [ "keeper_bound_actor_bridge_required" ]
         (redacted |> member "rejection_reasons" |> to_list
          |> List.map to_string);
       match OWN.summary_of_masc_internal_error parsed with

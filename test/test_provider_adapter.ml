@@ -27,6 +27,34 @@ let test_resolve_direct_aliases () =
   check string "openrouter canonical" "openrouter" openrouter.canonical_name
 ;;
 
+let test_telemetry_buckets_use_adapter_registry () =
+  check
+    (option string)
+    "provider alias bucket"
+    (Some "openai")
+    (Adapter.telemetry_bucket_of_provider_label "openai");
+  check
+    (option string)
+    "cli cascade prefix bucket"
+    (Some "gemini")
+    (Adapter.telemetry_bucket_of_provider_label "gemini_cli");
+  check
+    (option string)
+    "response model bucket"
+    (Some "openai")
+    (Adapter.telemetry_bucket_of_model_id "gpt-5");
+  check
+    (option string)
+    "provider-prefixed model bucket"
+    (Some "glm")
+    (Adapter.telemetry_bucket_of_model_id "glm-coding:glm-5.1");
+  check
+    (option string)
+    "architecture fallback bucket"
+    (Some "qwen")
+    (Adapter.telemetry_bucket_of_model_id "qwen3.5:35b")
+;;
+
 let test_resolve_cli_canonical_names () =
   let claude = Option.get (Adapter.resolve_direct_adapter "claude_code") in
   check string "claude canonical" "claude_code" claude.canonical_name;
@@ -837,6 +865,10 @@ let () =
     "Provider Adapter"
     [ ( "registry"
       , [ test_case "resolve direct aliases" `Quick test_resolve_direct_aliases
+        ; test_case
+            "telemetry buckets use adapter registry"
+            `Quick
+            test_telemetry_buckets_use_adapter_registry
         ; test_case "resolve cli canonicals" `Quick test_resolve_cli_canonical_names
         ; test_case
             "oas registry binding adds generic provider"

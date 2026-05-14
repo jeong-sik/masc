@@ -75,6 +75,11 @@ type adapter =
   ; model_policy : model_policy
   ; tool_policy : tool_policy
   ; telemetry_policy : telemetry_policy
+  ; telemetry_bucket : string option
+    (** Low-cardinality metrics bucket owned by the adapter registry. *)
+  ; telemetry_model_prefixes : string list
+    (** Model-id prefixes that should resolve to [telemetry_bucket] when
+        an event only carries a response model id and not its provider label. *)
   }
 
 type gemini_direct_auth =
@@ -361,13 +366,56 @@ let model_family_of_binding (binding : Runtime_binding.t) =
   | _ -> Generic
 ;;
 
+(* Runtime bindings do not yet expose every provider's auto-model rotation.
+   Keep fallback model IDs here for providers that require a concrete model,
+   while provider identity still comes from OAS. *)
+let gemini_auto_models =
+  [ "gemini-3-flash-preview"
+  ; "gemini-3.1-flash-lite-preview"
+  ; "gemini-3.1-pro-preview"
+  ]
+;;
+
+let codex_cli_auto_models =
+  [ "gpt-5.2"
+  ; "gpt-5.3-codex-spark"
+  ; "gpt-5.3-codex"
+  ; "gpt-5.4-mini"
+  ; "gpt-5.4"
+  ; "gpt-5.5"
+  ]
+;;
+
+let fallback_auto_models_of_binding (binding : Runtime_binding.t) =
+  match model_family_of_binding binding, binding.Runtime_binding.id with
+  | Glm_general, _ -> Llm_provider.Zai_catalog.glm_auto_models ()
+  | Glm_coding, _ -> Llm_provider.Zai_catalog.glm_coding_auto_models ()
+  | Generic, "gemini" | Generic, "gemini_cli" -> gemini_auto_models
+  | Generic, "claude_code" -> [ "auto" ]
+  | Generic, "codex_cli" -> codex_cli_auto_models
+  | Generic, _ | Kimi_api_family, _ -> []
+;;
+
+let fallback_default_model_id_of_binding (binding : Runtime_binding.t) =
+  match model_family_of_binding binding, binding.Runtime_binding.id with
+  | Glm_general, _ | Glm_coding, _ | Generic, "gemini" | Generic, "gemini_cli" ->
+    (match fallback_auto_models_of_binding binding with
+     | first :: _ -> Some first
+     | [] -> None)
+  | Generic, "claude_code" | Generic, "codex_cli" -> Some "auto"
+  | Generic, _ | Kimi_api_family, _ -> None
+;;
+
 let default_model_id_of_binding (binding : Runtime_binding.t) =
   match binding_default_model_id binding with
   | Some _ as value -> value
   | None ->
-    (match runtime_kind_of_binding binding with
-     | Local -> None
-     | Cli_agent | Direct_api -> Some "auto")
+    (match fallback_default_model_id_of_binding binding with
+     | Some _ as value -> value
+     | None ->
+       (match runtime_kind_of_binding binding with
+        | Local -> None
+        | Cli_agent | Direct_api -> Some "auto"))
 ;;
 
 let auto_models_of_binding binding default_model_id =
@@ -376,7 +424,13 @@ let auto_models_of_binding binding default_model_id =
     Some
       (Env_csv_or_default
          { env_var = "MASC_" ^ binding_env_fragment binding ^ "_AUTO_MODELS"
-         ; defaults = [ Option.value default_model_id ~default:"auto" ]
+         ; defaults =
+             (match fallback_auto_models_of_binding binding with
+              | [] ->
+                (match default_model_id with
+                 | Some model_id -> [ model_id ]
+                 | None -> [])
+              | models -> models)
          ; prefer_default_model_env = false
          })
   | Local | Direct_api ->
@@ -425,6 +479,19 @@ let telemetry_policy_of_binding (binding : Runtime_binding.t) =
   else telemetry_reported
 ;;
 
+let telemetry_bucket_and_prefixes_of_binding (binding : Runtime_binding.t) =
+  match model_family_of_binding binding, binding.Runtime_binding.id with
+  | Glm_general, _ | Glm_coding, _ -> Some "glm", [ "glm-" ]
+  | Kimi_api_family, _ | Generic, "kimi_cli" | Generic, "kimi-coding" ->
+    Some "kimi", [ "kimi-" ]
+  | Generic, "claude" | Generic, "claude_code" -> Some "anthropic", [ "claude-" ]
+  | Generic, "openai" | Generic, "codex_cli" ->
+    Some "openai", [ "gpt-"; "o1"; "o3"; "o4"; "o5" ]
+  | Generic, "gemini" | Generic, "gemini_cli" -> Some "gemini", [ "gemini-" ]
+  | Generic, "llama" -> Some "llama", [ "llama" ]
+  | Generic, _ -> None, []
+;;
+
 let spawn_key_of_binding (binding : Runtime_binding.t) =
   match binding.Runtime_binding.command with
   | Some ("claude" | "codex" | "gemini" | "llama" as command) -> Some command
@@ -434,6 +501,9 @@ let spawn_key_of_binding (binding : Runtime_binding.t) =
 let generic_adapter_of_binding (binding : Runtime_binding.t) =
   let default_model_id = default_model_id_of_binding binding in
   let auto_models = auto_models_of_binding binding default_model_id in
+  let telemetry_bucket, telemetry_model_prefixes =
+    telemetry_bucket_and_prefixes_of_binding binding
+  in
   { canonical_name = binding.Runtime_binding.id
   ; runtime_kind = runtime_kind_of_binding binding
   ; auth_mode = auth_mode_of_binding binding
@@ -452,6 +522,8 @@ let generic_adapter_of_binding (binding : Runtime_binding.t) =
       }
   ; tool_policy = tool_policy_of_binding binding
   ; telemetry_policy = telemetry_policy_of_binding binding
+  ; telemetry_bucket
+  ; telemetry_model_prefixes
   }
 ;;
 
@@ -582,6 +654,74 @@ let resolve_direct_canonical_name label =
   Option.map
     (fun (adapter : adapter) -> adapter.canonical_name)
     (resolve_direct_adapter label)
+;;
+
+let telemetry_bucket_of_adapter (adapter : adapter) = adapter.telemetry_bucket
+
+let telemetry_bucket_of_provider_label label =
+  let label = String.trim label in
+  if String.equal label ""
+  then None
+  else
+    match resolve_direct_adapter label with
+    | Some adapter -> telemetry_bucket_of_adapter adapter
+    | None ->
+      (match resolve_adapter_by_cascade_prefix label with
+       | Some adapter -> telemetry_bucket_of_adapter adapter
+       | None -> None)
+;;
+
+let starts_with_ci ~prefix value =
+  let prefix = normalize_label prefix in
+  let value = normalize_label value in
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+;;
+
+let split_model_label_provider label =
+  match String.index_opt label ':' with
+  | None -> None
+  | Some idx when idx = 0 || idx >= String.length label - 1 -> None
+  | Some idx -> Some (String.sub label 0 idx)
+;;
+
+let architecture_telemetry_model_prefixes = [ "qwen", "qwen" ]
+
+let telemetry_bucket_of_model_prefix model_id =
+  match
+    List.find_map
+      (fun (adapter : adapter) ->
+         match adapter.telemetry_bucket with
+         | None -> None
+         | Some bucket ->
+           if
+             List.exists
+               (fun prefix -> starts_with_ci ~prefix model_id)
+               adapter.telemetry_model_prefixes
+           then Some bucket
+           else None)
+      direct_adapters
+  with
+  | Some _ as bucket -> bucket
+  | None ->
+    List.find_map
+      (fun (prefix, bucket) ->
+         if starts_with_ci ~prefix model_id then Some bucket else None)
+      architecture_telemetry_model_prefixes
+;;
+
+let telemetry_bucket_of_model_id model_id =
+  let model_id = String.trim model_id in
+  if String.equal model_id ""
+  then None
+  else
+    match split_model_label_provider model_id with
+    | Some provider ->
+      (match telemetry_bucket_of_provider_label provider with
+       | Some _ as bucket -> bucket
+       | None -> telemetry_bucket_of_model_prefix model_id)
+    | None -> telemetry_bucket_of_model_prefix model_id
 ;;
 
 (** Resolve spawn_key for an agent label.

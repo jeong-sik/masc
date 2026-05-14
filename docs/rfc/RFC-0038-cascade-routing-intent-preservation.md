@@ -126,7 +126,7 @@ Capability 정적 분류 (root of L1):
 
 **사고 흐름** (Kimi `executor_reanalysis.md` §3 인용):
 
-1. `local_with_kimi_coding_with_glm` cascade 의 모든 provider 가 tool-use gate reject (`codex_keeper_bound_actor_required`)
+1. `local_with_kimi_coding_with_glm` cascade 의 모든 provider 가 tool-use gate reject (`keeper_bound_actor_bridge_required`)
 2. **`ollama:qwen3.6:27b-coding-nvfp4` 로 cross-cascade fallback** ← 본 RFC L0 가 차단하려는 path
 3. Provider 가 응답을 시작했으나 (`turn started` 17:21:40) tool call 을 생성하지 않고 `end_turn`/`stop_reason` 도 발생시키지 않음
 4. Turn FSM Axis 1 에서 `streaming` 상태에 11분+ 갇힘

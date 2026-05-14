@@ -21,6 +21,17 @@ let sanitize_name (name : string) : string =
       else '_')
     name
 
+let is_valid_name_char c =
+  (c >= 'A' && c <= 'Z')
+  || (c >= 'a' && c <= 'z')
+  || (c >= '0' && c <= '9')
+  || c = '-'
+  || c = '_'
+  || c = '.'
+
+let validate_name name =
+  name <> "" && String.for_all is_valid_name_char name
+
 let keeper_git_author ~(keeper_name : string) : string =
   let safe = sanitize_name keeper_name in
   Printf.sprintf "%s (MASC Keeper)" safe
@@ -57,7 +68,7 @@ let parse_keeper_agent_name ~prefix ~suffix agent_name =
      && String.sub agent_name (alen - slen) slen = suffix
   then
     let keeper_name = String.sub agent_name plen (alen - plen - slen) in
-    if Keeper_config.validate_name keeper_name then Some keeper_name else None
+    if validate_name keeper_name then Some keeper_name else None
   else
     None
 
@@ -82,9 +93,7 @@ let keeper_name_from_agent_name agent_name =
               with
               | Some keeper_name -> Some keeper_name
               | None ->
-                  if Nickname.is_generated_nickname agent_name
-                     && Keeper_config.validate_name agent_name
-                  then
+                  if Nickname.is_generated_nickname agent_name && validate_name agent_name then
                     Some agent_name
                   else
                     None)))
@@ -105,14 +114,14 @@ let canonical_keeper_name_from_agent_name agent_name =
   | Some keeper_name when is_keeper_agent_alias trimmed -> Some keeper_name
   | Some _ when Nickname.is_generated_nickname trimmed -> (
       match Nickname.extract_agent_type trimmed with
-      | Some candidate when Keeper_config.validate_name candidate -> Some candidate
+      | Some candidate when validate_name candidate -> Some candidate
       | _ -> None)
   | Some keeper_name -> Some keeper_name
   | None ->
       if Nickname.is_generated_nickname trimmed
       then
         match Nickname.extract_agent_type trimmed with
-        | Some candidate when Keeper_config.validate_name candidate -> Some candidate
+        | Some candidate when validate_name candidate -> Some candidate
         | _ -> None
       else
         None
@@ -136,11 +145,11 @@ let canonical_keeper_name raw_name =
     canonical_keeper_name_from_agent_name trimmed
   else
     match strip_keeper_prefix trimmed with
-    | Some candidate when Keeper_config.validate_name candidate ->
+    | Some candidate when validate_name candidate ->
       Some candidate
     | Some _ -> None
     | None ->
-      if Keeper_config.validate_name trimmed then Some trimmed
+      if validate_name trimmed then Some trimmed
       else canonical_keeper_name_from_agent_name trimmed
 
 let explicit_keeper_name raw_name =
@@ -148,11 +157,10 @@ let explicit_keeper_name raw_name =
   if trimmed = "" then None
   else
     match strip_keeper_prefix trimmed with
-    | Some candidate when Keeper_config.validate_name candidate ->
+    | Some candidate when validate_name candidate ->
       Some candidate
     | Some _ -> None
-    | None ->
-      if Keeper_config.validate_name trimmed then Some trimmed else None
+    | None -> if validate_name trimmed then Some trimmed else None
 
 type name_bundle = {
   persona_name : string;
@@ -215,7 +223,7 @@ let validation_error_outcome_label = function
 let strip_nickname_once name =
   if Nickname.is_generated_nickname name then
     match Nickname.extract_agent_type name with
-    | Some prefix when Keeper_config.validate_name prefix -> prefix
+    | Some prefix when validate_name prefix -> prefix
     | _ -> name
   else name
 

@@ -21,7 +21,7 @@ on `feat/rfc-0058-phase4`:
 | `lib/cascade/cascade_attempt_liveness_config.ml:54-56` | Liveness tunables keyed by literal `"codex_cli"` / `"claude_code"` / `"glm-coding"` etc. |
 | `lib/cascade/cascade_catalog_validator.ml:162-168` | Warn message and detection logic enumerate provider names |
 | `lib/cascade/cascade_config.mli:152-154` | `auto` expansion logic referencing `"gemini_cli:auto"` etc. |
-| `lib/cascade/cascade_error_classify.mli:147-168` | `codex_cli_prompt_preflight` type and helpers — preflight is provider-specific by design |
+| `lib/cascade/cascade_exec_config.mli` | `argv_prompt_preflight` helpers — preflight is a provider capability, not a vendor check |
 | `lib/prometheus.ml:530` | Metric name `masc_codex_cli_mcp_tool_omission_total` baked into code |
 | `lib/dashboard_cascade.mli` | Documentation literals (`cli:claude_code`, `kimi_cli`, …) — driven by runtime data but the contract surface still spells them out |
 
@@ -183,9 +183,8 @@ For each Phase 5.N PR:
 1. Should provider `aliases` (synonym strings like `"claude"`/`"claude-code"`/`"claude_code"`)
    be moved to TOML or eliminated entirely by canonicalizing all callers
    to the TOML id? Eliminating is cleaner but touches more call sites.
-2. Per-provider preflight (`codex_cli_prompt_preflight`) — is the argv/prompt
-   length check truly Codex-specific, or a general constraint that should
-   live as a TOML `[providers.<p>.preflight]` policy?
+2. Per-provider preflight (`argv_prompt_preflight`) — keep driving this from
+   provider capability/policy data instead of naming a vendor at call sites.
 3. Dashboard contract literals (`dashboard_cascade.mli` docstrings, JSON
    shape examples) — leave them as documentation, or drive examples from
    the live config snapshot at doc-generation time?

@@ -44,7 +44,7 @@ let run_model_by_label
   : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
-    Cascade_error_classify.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
+    Cascade_exec_config.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer ?memory
       ?tool_retry_policy
@@ -70,7 +70,7 @@ let run_model_by_label
           ~keeper_name:"oas-label-model"
           ~cascade_name:admission_cascade_name
           (fun () ->
-            Cascade_error_classify.with_codex_cli_preflight
+            Cascade_exec_config.with_argv_prompt_preflight
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
@@ -179,7 +179,7 @@ let run_model_with_masc_tools
   : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
-    Cascade_error_classify.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
+    Cascade_exec_config.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ?stream_idle_timeout_s ?guardrails ?hooks ?memory ?tool_retry_policy ?enable_thinking
       ?compact_ratio
@@ -203,7 +203,7 @@ let run_model_with_masc_tools
           ~keeper_name:"oas-explicit-model"
           ~cascade_name:admission_cascade_name
           (fun () ->
-            Cascade_error_classify.with_codex_cli_preflight
+            Cascade_exec_config.with_argv_prompt_preflight
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->

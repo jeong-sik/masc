@@ -239,16 +239,15 @@ let priority_tier_issue ~profile configured_specs raw_tiers =
     else
       None
 
-(* Catalog warn: a cascade carrying [codex_cli] with no
-   bound-actor-tolerant fallback will reject every keeper-bound
-   dispatch at runtime (oas_worker_named.ml:109).  Surface this at
-   validation time so the operator sees it before each turn pays the
-   cost.  Severity is [Catalog_warn] for now — the operator may have
-   private cascade configs that legitimately omit bound-actor support
-   (private operator-only profiles, for example offline scoring).  Strict-mode
-   ([Catalog_error]) gating is left to a follow-up that knows which
-   profiles are keeper-assignable. *)
-let codex_with_bound_actor_only_issue ~profile model_specs =
+(* Catalog warn: a cascade carrying a bridging-required provider with no
+   bound-actor-tolerant fallback will reject every keeper-bound dispatch at
+   runtime. Surface this at validation time so the operator sees it before
+   each turn pays the cost. Severity is [Catalog_warn] for now — the operator
+   may have private cascade configs that legitimately omit bound-actor support
+   (private operator-only profiles, for example offline scoring). Strict-mode
+   ([Catalog_error]) gating is left to a follow-up that knows which profiles
+   are keeper-assignable. *)
+let bridging_required_without_fallback_issue ~profile model_specs =
   let module PK = Llm_provider.Provider_kind in
   let kinds =
     model_specs
@@ -257,10 +256,9 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
     |> List.filter_map (fun (provider_name, _model_id) ->
            PK.of_string provider_name)
   in
-  (* "Has any kind that needs per-keeper bridging?" — Codex CLI is the
-     current canonical case; reading the capability flag keeps this
-     check open for future adapters that share the cached-login quirk
-     without rewriting the validator. RFC-0058 §2.4: capability, not match. *)
+  (* "Has any kind that needs per-keeper bridging?" Reading the capability flag
+     keeps this check open for future adapters without rewriting the validator.
+     RFC-0058 §2.4: capability, not match. *)
   let has_bridging_required_kind =
     List.exists
       Provider_tool_support
@@ -287,13 +285,11 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
         severity = Catalog_warn;
         message =
           Printf.sprintf
-            "Cascade preset %s carries codex_cli with no \
-             bound-actor-tolerant fallback \
-             (claude_code|gemini_cli|kimi_cli|ollama|glm). codex_cli \
-             cannot route keeper-bound runtime MCP tools (masc_*, \
-             decision.*); every keeper-bound dispatch on this preset \
-             will be rejected at oas_worker_named.ml. Add at least \
-             one tolerant provider or remove codex_cli."
+            "Cascade preset %s carries a bridging-required provider with no \
+             bound-actor-tolerant fallback. It cannot route keeper-bound \
+             runtime MCP tools (masc_*, decision.*); every keeper-bound \
+             dispatch on this preset will be rejected. Add at least one \
+             tolerant provider or remove the bridging-required provider."
             profile;
       }
   else None
@@ -466,7 +462,7 @@ let diagnose_profile ~materialized_json ~declarative_snapshot ~emit_telemetry
         }
   in
   let bound_actor_issue =
-    codex_with_bound_actor_only_issue ~profile model_specs
+    bridging_required_without_fallback_issue ~profile model_specs
   in
   let issues =
     [ invalid_model_issue; bound_actor_issue ]

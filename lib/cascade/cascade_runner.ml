@@ -167,8 +167,8 @@ let runtime_mcp_tool_requires_bound_actor =
 let runtime_mcp_policy_with_masc_agent_name =
   Cascade_transport.runtime_mcp_policy_with_masc_agent_name
 
-let codex_cli_can_auth_keeper_bound_runtime_mcp =
-  Cascade_transport.codex_cli_can_auth_keeper_bound_runtime_mcp
+let provider_can_auth_keeper_bound_runtime_mcp =
+  Cascade_transport.provider_can_auth_keeper_bound_runtime_mcp
 
 let runtime_mcp_policy_for_provider =
   Cascade_transport.runtime_mcp_policy_for_provider

@@ -1,16 +1,15 @@
-(** Cascade_error_classify — masc_internal_error type, error conversion, codex CLI preflight.
+(** Cascade_error_classify — masc_internal_error type and error conversion.
 
     Extracted from oas_worker_named.ml (God file decomposition).
-    Defines the [masc_internal_error] variant type, JSON serialization,
-    SDK error conversion, error classification, and codex CLI prompt
-    preflight checks.
+    Defines the [masc_internal_error] variant type, JSON serialization, SDK
+    error conversion, and error classification.
 
     This module is [include]d by {!Keeper_turn_driver}; all bindings are
     re-exported by the facade.  @since God file decomposition *)
 
 (** {1 MASC internal error type} *)
 
-type cascade_name = Keeper_cascade_profile.runtime_name
+type cascade_name = Cascade_ref.runtime_name
 
 val cascade_name_of_string : string -> cascade_name
 val cascade_name_to_string : cascade_name -> string
@@ -119,59 +118,3 @@ val admission_wait_timeout_error :
   int ->
   (string, Agent_sdk.Error.sdk_error) result
 (** Build an [Admission_queue_timeout] error from a wait duration in ms. *)
-
-(** {1 Config construction} *)
-
-val config_for_label :
-  name:string ->
-  model_label:string ->
-  system_prompt:string ->
-  tools:Agent_sdk.Tool.t list ->
-  max_turns:int ->
-  max_tokens:int ->
-  ?max_input_tokens:int ->
-  ?max_cost_usd:float ->
-  temperature:float ->
-  ?max_idle_turns:int ->
-  ?stream_idle_timeout_s:float ->
-  ?guardrails:Agent_sdk.Guardrails.t ->
-  ?hooks:Agent_sdk.Hooks.hooks ->
-  ?context_reducer:Agent_sdk.Context_reducer.t ->
-  ?memory:Agent_sdk.Memory.t ->
-  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
-  ?enable_thinking:bool ->
-  ?compact_ratio:float ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
-  ?approval:Agent_sdk.Hooks.approval_callback ->
-  description:string option ->
-  unit ->
-  (Cascade_runner.config, Agent_sdk.Error.sdk_error) result
-(** Build an [Cascade_runner.config] from a model label string.  Resolves
-    the provider config and fills in defaults. *)
-
-(** {1 Codex CLI preflight} *)
-
-type codex_cli_prompt_preflight = {
-  prompt_bytes : int;
-  prompt_tokens : int;
-  context_window_tokens : int;
-  retry_limit_tokens : int;
-  hits_argv_limit : bool;
-  hits_context_window : bool;
-}
-
-val codex_cli_prompt_preflight :
-  config:Cascade_runner.config -> goal:string -> codex_cli_prompt_preflight option
-(** Check whether a codex_cli invocation would exceed the argv or context
-    window limit.  Returns [Some] when limits are hit, [None] when safe
-    (or when the provider is not codex_cli). *)
-
-val with_codex_cli_preflight :
-  scope:string ->
-  config:Cascade_runner.config ->
-  goal:string ->
-  (unit -> ('a, Agent_sdk.Error.sdk_error) result) ->
-  ('a, Agent_sdk.Error.sdk_error) result
-(** Wrap an execution with a codex_cli preflight check.  If the prompt
-    exceeds limits, returns [Error] immediately without calling [run].
-    Otherwise delegates to [run]. *)

@@ -38,31 +38,28 @@ val sanitize_cli_completion_request_for_argv :
   Llm_provider.Llm_transport.completion_request
 (** Scrub request text that CLI transports may flatten into argv.
 
-    Codex CLI passes sub-threshold prompts as a positional argument, so any
+    Some CLI transports pass sub-threshold prompts as positional argv, so any
     invalid UTF-8 in history, system prompt, or request-scoped MCP overrides
     can make the subprocess fail before the cascade reaches provider logic. *)
 
 (** Sorted, comma-joined fingerprint of a tool list.  Used as the dedup key
     by the [#10097] omission machinery — identical sets fingerprint to the
     same string regardless of input order. *)
-val codex_cli_omission_fingerprint : string list -> string
+val runtime_mcp_omission_fingerprint : string list -> string
 
 (** Whether a fingerprint has already been observed by the omission machinery
     for the [<no_agent>] bucket.  Returns [false] only when the fingerprint
     is new (and updates dedup state as a side effect, equivalent to a
     [should_log] probe with the [<no_agent>] key). *)
-val codex_cli_omission_fingerprint_seen : string -> bool
+val runtime_mcp_omission_fingerprint_seen : string -> bool
 
-(** Record a [#10097] codex_cli MCP-tool omission for an unspecified agent.
+(** Record a [#10097] provider MCP-tool omission for an unspecified agent.
     Increments per-tool Prometheus counters every call; the structural WARN
-    log fires only when a new tool fingerprint is seen.  See
-    {!record_codex_cli_omission_for_agent} for the per-agent variant used by
-    the cascade pipeline. *)
-val record_codex_cli_omission : tools:string list -> unit
+    log fires only when a new tool fingerprint is seen. *)
+val record_provider_mcp_tool_omission : provider:string -> tools:string list -> unit
 
-(** Reset the codex_cli omission dedup state.  Test-only helper exposed for
-    [test_codex_cli_omission_dedup_10097]. *)
-val reset_codex_cli_omission_dedup_for_tests : unit -> unit
+(** Reset provider MCP-tool omission dedup state.  Test-only helper. *)
+val reset_runtime_mcp_omission_dedup_for_tests : unit -> unit
 
 (** Failure modes for {!resolve_provider_config_of_label}. *)
 type label_resolution_error =
@@ -146,29 +143,26 @@ val public_mcp_tool_requires_bound_actor : string -> bool
     the [masc] HTTP server entry of [policy] when [agent_name] is non-empty.
     [x-masc-internal-token] is also injected by default when
     [MASC_INTERNAL_MCP_TOKEN] is available; pass
-    [~include_internal_token:false] for providers such as [codex_cli] that
-    cannot carry auth-bearing request headers.  Other servers are passed
-    through. *)
+    [~include_internal_token:false] for providers that cannot carry
+    auth-bearing request headers. Other servers are passed through. *)
 val runtime_mcp_policy_with_masc_agent_name :
   ?include_internal_token:bool ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy
 
-val codex_cli_can_auth_keeper_bound_runtime_mcp :
+val provider_can_auth_keeper_bound_runtime_mcp :
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   bool
 (** [true] when [agent_name] maps to a keeper with a persisted raw bearer
-    token and [policy] contains actor-bound runtime MCP tools.  Codex CLI
-    can carry that token via OAS [bearer_token_env_var] without placing it in
-    argv. *)
+    token and [policy] contains actor-bound runtime MCP tools. *)
 
-(** Provider-specific shaping of the runtime MCP policy.  For Codex_cli the
-    policy is stripped to Codex-safe headers: [Authorization: Bearer ...]
-    plus non-secret MASC identity headers.  Other providers receive the policy
-    with [runtime_mcp_policy_with_masc_agent_name] applied when [agent_name] is
-    non-empty. *)
+(** Provider-specific shaping of the runtime MCP policy.  Providers that
+    require per-keeper bridging receive stripped headers plus non-secret MASC
+    identity headers and, when available, a per-keeper bearer.  Other providers
+    receive the policy with [runtime_mcp_policy_with_masc_agent_name] applied
+    when [agent_name] is non-empty. *)
 val runtime_mcp_policy_for_provider :
   provider_cfg:Llm_provider.Provider_config.t ->
   agent_name:string ->

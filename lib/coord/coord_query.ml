@@ -177,6 +177,9 @@ let is_valid_filename name =
     c = '_' || c = '-' || c = '.'
   ) name
 
+let is_complete_message_filename name =
+  is_valid_filename name && Filename.check_suffix name ".json"
+
 (** Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_codex_broadcast.json" *)
 let extract_seq_from_filename name =
   match String.index_opt name '_' with
@@ -224,7 +227,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
     let names =
       Sys.readdir msgs_path
       |> Array.to_list
-      |> List.filter is_valid_filename
+      |> List.filter is_complete_message_filename
       |> select_recent_message_names ~since_seq ~limit
     in
     let rec loop remaining acc = function
@@ -266,7 +269,7 @@ let get_all_messages_raw config ~since_seq =
       let names =
         Sys.readdir msgs_path
         |> Array.to_list
-        |> List.filter is_valid_filename
+        |> List.filter is_complete_message_filename
         |> select_all_message_names ~since_seq
       in
       let rec loop acc = function

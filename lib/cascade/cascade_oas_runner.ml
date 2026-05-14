@@ -116,7 +116,7 @@ let runtime_mcp_policy_for_provider
   let agent_name = keeper_agent_name_opt keeper_name |> Option.value ~default:"" in
   Cascade_runner.runtime_mcp_policy_for_provider ~provider_cfg ~agent_name policy_opt
 
-let codex_cli_cannot_carry_keeper_bound_runtime_mcp
+let provider_cannot_bridge_keeper_bound_runtime_mcp
       ~(keeper_name : string)
       ~(provider_cfg : Llm_provider.Provider_config.t)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
@@ -133,7 +133,7 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
     | Some agent_name, Some policy
       when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name) ->
       (not
-         (Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
+         (Cascade_runner.provider_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
       && List.exists
            Cascade_runner.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names
@@ -147,8 +147,8 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
    pinpoints the failing check on the first read.
 
    Order of preference (mirrors the filter's short-circuit):
-   1. [Codex_keeper_bound_actor_required] — codex_cli cannot carry a
-      runtime MCP policy that requires bound-actor tools (keeper-scoped).
+   1. [Provider_bound_actor_bridge_required] — the provider adapter requires
+      per-keeper bridging but no usable keeper-scoped bearer is available.
    2. [Tool_lane_unsupported] — [resolve_tool_lane_for_oas_tools]
       returned [Error], typically transport/auth/capability mismatch
       surfaced by [Cascade_runner].
@@ -157,35 +157,43 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
       existing [rejection_reason] so dashboards stay consistent with
       [masc_cascade_filter_rejection_total]. *)
 type filter_rejection_reason =
-  | Codex_keeper_bound_actor_required
+  | Provider_bound_actor_bridge_required
   | Tool_lane_unsupported
   | Required_tool_use of Provider_tool_support.rejection_reason
 
 let filter_rejection_reason_label = function
-  | Codex_keeper_bound_actor_required -> "codex_keeper_bound_actor_required"
+  | Provider_bound_actor_bridge_required -> "keeper_bound_actor_bridge_required"
   | Tool_lane_unsupported -> "tool_lane_unsupported"
   | Required_tool_use r -> Provider_tool_support.rejection_reason_label r
 
-let codex_keeper_bound_skip_seen : (string, float) Hashtbl.t = Hashtbl.create 16
-let codex_keeper_bound_skip_seen_mutex = Mutex.create ()
-let codex_keeper_bound_skip_restate_sec = 3600.0
+let keeper_bound_bridge_skip_seen : (string, float) Hashtbl.t =
+  Hashtbl.create 16
+;;
 
-let codex_keeper_bound_skip_should_emit ~label ~provider_label ~keeper_name ~reason_label =
+let keeper_bound_bridge_skip_seen_mutex = Mutex.create ()
+let keeper_bound_bridge_skip_restate_sec = 3600.0
+
+let keeper_bound_bridge_skip_should_emit
+      ~label
+      ~provider_label
+      ~keeper_name
+      ~reason_label
+  =
   let key = Printf.sprintf "%s|%s|%s|%s" label provider_label keeper_name reason_label in
   let now = Unix.gettimeofday () in
-  Mutex.lock codex_keeper_bound_skip_seen_mutex;
+  Mutex.lock keeper_bound_bridge_skip_seen_mutex;
   let first =
-    match Hashtbl.find_opt codex_keeper_bound_skip_seen key with
+    match Hashtbl.find_opt keeper_bound_bridge_skip_seen key with
     | None -> true
-    | Some last -> now -. last >= codex_keeper_bound_skip_restate_sec
+    | Some last -> now -. last >= keeper_bound_bridge_skip_restate_sec
   in
-  if first then Hashtbl.replace codex_keeper_bound_skip_seen key now;
-  Mutex.unlock codex_keeper_bound_skip_seen_mutex;
+  if first then Hashtbl.replace keeper_bound_bridge_skip_seen key now;
+  Mutex.unlock keeper_bound_bridge_skip_seen_mutex;
   first
 
-let codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason =
+let keeper_bound_bridge_skip_log_message ~label ~keeper_name provider_cfg reason =
   match reason with
-  | Codex_keeper_bound_actor_required ->
+  | Provider_bound_actor_bridge_required ->
     Some
       (Printf.sprintf
          "cascade %s: skipped provider=%s for keeper=%s reason=%s"
@@ -195,14 +203,14 @@ let codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason 
          (filter_rejection_reason_label reason))
   | Tool_lane_unsupported | Required_tool_use _ -> None
 
-let log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason =
-  match codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason with
+let log_keeper_bound_bridge_skip ~label ~keeper_name provider_cfg reason =
+  match keeper_bound_bridge_skip_log_message ~label ~keeper_name provider_cfg reason with
   | None -> ()
   | Some message ->
     let provider_label = Provider_tool_support.provider_debug_label provider_cfg in
     let reason_label = filter_rejection_reason_label reason in
     if
-      codex_keeper_bound_skip_should_emit
+      keeper_bound_bridge_skip_should_emit
         ~label
         ~provider_label
         ~keeper_name
@@ -211,7 +219,7 @@ let log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason =
       Log.Misc.info
         "%s; repeated identical skip decisions demoted to DEBUG for the next %.0fs"
         message
-        codex_keeper_bound_skip_restate_sec
+        keeper_bound_bridge_skip_restate_sec
     else Log.Misc.debug "%s" message
 
 let classify_filter_rejection
@@ -224,11 +232,11 @@ let classify_filter_rejection
   : filter_rejection_reason option
   =
   if
-    codex_cli_cannot_carry_keeper_bound_runtime_mcp
+    provider_cannot_bridge_keeper_bound_runtime_mcp
       ~keeper_name
       ~provider_cfg
       runtime_mcp_policy
-  then Some Codex_keeper_bound_actor_required
+  then Some Provider_bound_actor_bridge_required
   else (
     let normalized_runtime_mcp_policy =
       runtime_mcp_policy_for_provider ~keeper_name ~provider_cfg runtime_mcp_policy
@@ -267,8 +275,9 @@ let classify_filter_rejection
 (* #11060: cascade-empty WARN dedupe.
 
    When the tool-use gate empties a cascade (every configured
-   provider rejected — e.g. [keeper_unified] with only [codex_cli]
-   providers under a keeper-bound runtime MCP policy), the WARN
+   provider rejected — e.g. a cascade with only providers that require
+   per-keeper bridging but lack a keeper bearer under a keeper-bound runtime
+   MCP policy), the WARN
    fires once per filtering invocation. Field log: 18 identical
    WARN events / 49 min for a single misconfigured cascade — the
    genuine signal (operator must edit cascade.toml) drowns in its
@@ -408,7 +417,7 @@ let filter_candidate_providers_for_tool_support
            with
            | None -> provider_cfg :: kept, rejected, provider_index + 1
            | Some reason ->
-             log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason;
+             log_keeper_bound_bridge_skip ~label ~keeper_name provider_cfg reason;
              let swap =
                match secondary_resolver with
                | None -> Either.Right (provider_cfg, reason)
@@ -459,12 +468,12 @@ let filter_candidate_providers_for_tool_support
           "[#11060/#11356] cascade %s: provider-normalized tool-use gate removed all \
            providers (rejections=[%s]) — operator action: add a runtime-MCP-capable \
            fallback provider to this cascade in cascade.toml. Verified-capable \
-           providers: claude_code, kimi_cli, anthropic, glm, openrouter (any non-cli \
-           direct API). Note: gemini_cli and codex_cli reject request-scoped runtime MCP \
-           HTTP headers (gemini-cli upstream lacks --mcp-config flag; codex_cli strips \
-           most per-request headers) — they cannot satisfy this gate. Alternatively \
-           detach the keeper from this cascade. Subsequent identical-signature \
-           rejections demoted to DEBUG for the next %.0fs"
+           providers: any provider whose adapter declares runtime MCP support and can \
+           preserve the required request auth, or a direct API provider with inline \
+           tool support. Providers whose adapter cannot carry request-scoped runtime \
+           MCP HTTP headers cannot satisfy this gate unless the per-keeper bridge is \
+           available. Alternatively detach the keeper from this cascade. Subsequent \
+           identical-signature rejections demoted to DEBUG for the next %.0fs"
           label
           signature
           cascade_empty_warn_restate_sec

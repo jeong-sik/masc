@@ -11,9 +11,7 @@
 
     @since 0.4.0
 *)
-
 (** {1 Metric Types} *)
-
 type label = string * string
 
 let add_key_segment buf s =
@@ -72,8 +70,7 @@ type metric =
     initialisation ([let () = init ()] at EOF runs before any Eio
     scheduler exists), must hold across OCaml 5 domains (Executor_pool
     workers), and are individually cheap (a Hashtbl op + a float add) so
-    the lock is never held long. [Stdlib.Mutex] fits all three. *)
-
+   the lock is never held long. [Stdlib.Mutex] fits all three. *)
 let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
 let metrics_mutex = Stdlib.Mutex.create ()
 
@@ -104,7 +101,6 @@ let with_lock f =
 let last_deadlock_backtrace_for_test () = Atomic.get last_deadlock_backtrace
 
 (** {1 Metric Registration} *)
-
 let register_counter ~name ~help ?(labels = []) () =
   let key = metric_key name labels in
   with_lock (fun () ->

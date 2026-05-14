@@ -15,6 +15,8 @@ import {
 } from './ide-context-lens'
 
 type BranchTone = 'current' | 'dirty' | 'conflict' | 'stale'
+
+const DETACHED_HEAD_BRANCH = 'detached' as const
 type PanelState = 'loading' | 'ready' | 'empty' | 'error'
 
 export interface IdeBranchChip {
@@ -107,7 +109,7 @@ export function buildIdeBranchContextModel(
 
   if (!repo) return null
 
-  const currentBranch = repo.current_branch ?? 'detached'
+  const currentBranch = repo.current_branch ?? DETACHED_HEAD_BRANCH
   const repoNodes = graph.nodes.filter(node => node.repo_id === repo.id)
   const branches = repoNodes
     .filter(node => node.kind === 'branch')
@@ -129,7 +131,7 @@ export function buildIdeBranchContextModel(
     .map(agent => ({
       id: agent.id,
       label: agent.label,
-      branch: agent.branch ?? 'detached',
+      branch: agent.branch ?? DETACHED_HEAD_BRANCH,
       path: compactPath(agent.worktree_path),
       color: agent.color,
       keeperId: keeperIdForAgentLane(agent),
@@ -318,7 +320,7 @@ export function IdeBranchContextPanel({
 
 function BranchRepoRow({ model }: { readonly model: IdeBranchContextModel }) {
   const branchLink = branchRepoGitLink(
-    model.currentBranch && model.currentBranch !== 'detached' ? model.currentBranch : null,
+    model.currentBranch && model.currentBranch !== DETACHED_HEAD_BRANCH ? model.currentBranch : null,
     `${model.repoLabel} current branch`,
   )
   const headLink = branchRepoGitLink(
@@ -460,7 +462,7 @@ function laneRouteLinks(
     surface: 'Git',
     label: `${lane.label} ${branch}`,
     sourceId: `branch-lane:${lane.id}`,
-    gitRef: branch && branch !== 'detached' ? branch : undefined,
+    gitRef: branch && branch !== DETACHED_HEAD_BRANCH ? branch : undefined,
     keeperId,
   })
 }

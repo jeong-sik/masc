@@ -332,11 +332,13 @@ val bare_alias_audit
   :  base_path:string
   -> canonical_names:string list
   -> bare_alias_audit_result
-(** Read-only audit of bare/canonical alignment for the supplied
-    canonical agent names. Does not mutate state. Intended for boot-
-    time observability so the operator sees ping-pong regressions as
-    a non-zero [dead_bares] count surfacing on every boot, not as the
-    absence of WARN lines. *)
+(** Audit bare/canonical alignment for the supplied canonical agent
+    names. Read-only with respect to credential files. Side effect:
+    mirrors the counts into Prometheus gauges
+    [masc_auth_bare_alias{state=alive|dead|no_bare}] so the values
+    are repeatedly visible on every scrape, not only as a one-shot
+    boot log line. A non-zero [dead_bares] surfaces a ping-pong
+    regression candidate (PR #15112 γ guard). *)
 
 (** {1 Credential Archive Retention} *)
 

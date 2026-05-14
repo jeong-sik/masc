@@ -852,6 +852,45 @@ let test_no_ping_pong_across_repeated_boots () =
       check int "audit dead_bares=0" 0 audit.dead_bares;
       check int "audit no_bares=0" 0 audit.no_bares)
 
+(* Surface assertion: [bare_alias_audit] mirrors counts into the
+   Prometheus gauges so every scrape (not only the boot INFO line)
+   exposes the current alive/dead/no_bare split. A regression that
+   stops emitting the gauges fails this test even if the in-process
+   return value is still correct. *)
+let test_bare_alias_audit_emits_prometheus_gauges () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-sangsu-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      (match
+         Auth.ensure_credential_alias dir
+           ~canonical_name:"keeper-sangsu-agent" ~alias_name:"sangsu"
+       with
+       | Ok () -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      let _ : Auth.bare_alias_audit_result =
+        Auth.bare_alias_audit ~base_path:dir
+          ~canonical_names:["keeper-sangsu-agent"]
+      in
+      let read state =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_auth_bare_alias
+          ~labels:[("state", state)]
+          ()
+      in
+      check (float 0.0001) "alive gauge = 1" 1.0 (read "alive");
+      check (float 0.0001) "dead gauge = 0" 0.0 (read "dead");
+      check (float 0.0001) "no_bare gauge = 0" 0.0 (read "no_bare"))
+
 let test_bare_alias_audit_classifies_states () =
   let dir = setup_test_room () in
   Fun.protect
@@ -1310,6 +1349,8 @@ let () =
         test_no_ping_pong_across_repeated_boots;
       test_case "bare_alias_audit classifies states" `Quick
         test_bare_alias_audit_classifies_states;
+      test_case "bare_alias_audit emits Prometheus gauges" `Quick
+        test_bare_alias_audit_emits_prometheus_gauges;
       test_case "prune_archive drops aged epoch dirs" `Quick
         test_prune_archive_retains_recent_and_drops_old;
       test_case "prune_archive honors min_keep" `Quick

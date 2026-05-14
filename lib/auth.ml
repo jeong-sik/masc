@@ -1196,17 +1196,35 @@ let empty_bare_alias_audit_result =
   { alive_aliases = 0; dead_bares = 0; no_bares = 0 }
 
 let bare_alias_audit ~base_path ~canonical_names =
-  List.fold_left
-    (fun acc canonical_name ->
-       match classify_bare_for_canonical base_path ~canonical_name with
-       | Bare_absent ->
-         { acc with no_bares = acc.no_bares + 1 }
-       | Bare_alive_alias ->
-         { acc with alive_aliases = acc.alive_aliases + 1 }
-       | Bare_dead ->
-         { acc with dead_bares = acc.dead_bares + 1 })
-    empty_bare_alias_audit_result
-    canonical_names
+  let result =
+    List.fold_left
+      (fun acc canonical_name ->
+         match classify_bare_for_canonical base_path ~canonical_name with
+         | Bare_absent ->
+           { acc with no_bares = acc.no_bares + 1 }
+         | Bare_alive_alias ->
+           { acc with alive_aliases = acc.alive_aliases + 1 }
+         | Bare_dead ->
+           { acc with dead_bares = acc.dead_bares + 1 })
+      empty_bare_alias_audit_result
+      canonical_names
+  in
+  (* Observability sink: gauges idempotently mirror the current
+     classifier state so every Prometheus scrape (post-call) reports
+     the same value, not just the boot-time INFO line. *)
+  Prometheus.set_gauge
+    Prometheus.metric_auth_bare_alias
+    ~labels:[ "state", "alive" ]
+    (float_of_int result.alive_aliases);
+  Prometheus.set_gauge
+    Prometheus.metric_auth_bare_alias
+    ~labels:[ "state", "dead" ]
+    (float_of_int result.dead_bares);
+  Prometheus.set_gauge
+    Prometheus.metric_auth_bare_alias
+    ~labels:[ "state", "no_bare" ]
+    (float_of_int result.no_bares);
+  result
 ;;
 
 let ensure_keeper_credential config ~agent_name

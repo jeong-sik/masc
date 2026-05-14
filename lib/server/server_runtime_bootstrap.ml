@@ -1065,6 +1065,11 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
      structured INFO so the steady-state ("alive_aliases=N dead=0")
      is visible on every boot; a non-zero [dead_bares] is the canary
      for ping-pong regression. *)
+  (* [Auth.bare_alias_audit] mirrors the result into the
+     [masc_auth_bare_alias{state=...}] gauges so the boot signal
+     stays surfaced on every Prometheus scrape. The INFO line below
+     is the one-shot boot log mirror; the WARN that follows is the
+     regression canary. *)
   let audit =
     Auth.bare_alias_audit ~base_path ~canonical_names:keeper_agent_names
   in
@@ -1271,11 +1276,16 @@ let startup_prune_auth_archive (state : Mcp_server.server_state) =
          ~retention_days:days
          ~min_keep
      in
-     if pruned > 0 then
+     Prometheus.set_gauge Prometheus.metric_auth_archive_epochs
+       (float_of_int kept);
+     if pruned > 0 then (
+       Prometheus.inc_counter Prometheus.metric_auth_archive_pruned_total
+         ~delta:(float_of_int pruned)
+         ();
        Log.Misc.info
          "startup auth archive prune: pruned=%d kept=%d (retention=%dd \
           min_keep=%d)"
-         pruned kept days min_keep
+         pruned kept days min_keep)
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->

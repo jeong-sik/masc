@@ -574,6 +574,17 @@ let test_compact_syncs_oas_context () =
 (* ================================================================ *)
 let test_agent_completed_includes_usage () =
   let open Agent_sdk in
+  let cost_labels =
+    [ ("provider", "openai"); ("model_bucket", "openai") ]
+  in
+  let cost_metric = Prometheus.metric_oas_inference_cost_usd in
+  let before_cost =
+    Prometheus.metric_value_or_zero cost_metric ~labels:cost_labels ()
+  in
+  let before_cost_count =
+    Prometheus.metric_value_or_zero (cost_metric ^ "_count")
+      ~labels:cost_labels ()
+  in
   let usage : Llm_provider.Types.api_usage =
     {
       input_tokens = 500;
@@ -586,7 +597,7 @@ let test_agent_completed_includes_usage () =
   let resp : Llm_provider.Types.api_response =
     {
       id = "msg-test";
-      model = "test-model";
+      model = "gpt-5";
       stop_reason = EndTurn;
       content = [];
       usage = Some usage;
@@ -629,7 +640,7 @@ let test_agent_completed_includes_usage () =
       Alcotest.(check bool) "success" true (bool_field "success");
       Alcotest.(check string) "result" "ok" (string_field "result");
       Alcotest.(check string) "response_id" "msg-test" (string_field "response_id");
-      Alcotest.(check string) "model" "test-model" (string_field "model");
+      Alcotest.(check string) "model" "gpt-5" (string_field "model");
       Alcotest.(check string) "stop_reason" "end_turn" (string_field "stop_reason");
       Alcotest.(check bool) "usage_reported" true (bool_field "usage_reported");
       Alcotest.(check int) "input_tokens" 500 (int_field "input_tokens");
@@ -642,7 +653,16 @@ let test_agent_completed_includes_usage () =
       Alcotest.(check string) "event_type" "agent_completed"
         (match List.assoc_opt "event_type" fields with
          | Some (`String s) -> s
-         | _ -> "")
+         | _ -> "");
+      Alcotest.(check (float 0.0001))
+        "cost histogram labels provider"
+        (before_cost +. 0.003)
+        (Prometheus.metric_value_or_zero cost_metric ~labels:cost_labels ());
+      Alcotest.(check (float 0.0001))
+        "cost histogram count"
+        (before_cost_count +. 1.0)
+        (Prometheus.metric_value_or_zero (cost_metric ^ "_count")
+           ~labels:cost_labels ())
   | Some _ -> Alcotest.fail "expected assoc"
 
 let test_agent_completed_omits_usage_fields_when_success_has_no_usage () =

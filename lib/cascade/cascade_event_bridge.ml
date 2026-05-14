@@ -66,6 +66,13 @@ let inference_model_bucket ~provider ~model =
   else "other"
 ;;
 
+let inference_provider_bucket ~provider ~model =
+  let provider = String.trim provider in
+  if provider = ""
+  then inference_model_bucket ~provider ~model
+  else inference_model_bucket ~provider ~model:""
+;;
+
 let positive_finite value =
   value > 0.0
   &&
@@ -117,11 +124,11 @@ let observe_inference_telemetry
     decode_tok_s
 ;;
 
-let observe_inference_cost ~model_bucket = function
+let observe_inference_cost ~provider ~model_bucket = function
   | Some cost when positive_finite cost ->
     Prometheus.observe_histogram
       Prometheus.metric_oas_inference_cost_usd
-      ~labels:[ "model_bucket", model_bucket ]
+      ~labels:[ "provider", provider; "model_bucket", model_bucket ]
       cost
   | _ -> ()
 ;;
@@ -553,13 +560,16 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
   | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
     (match result with
      | Ok (response : Agent_sdk.Types.api_response) ->
+       let provider =
+         inference_provider_bucket ~provider:"" ~model:response.model
+       in
        let model_bucket = inference_model_bucket ~provider:"" ~model:response.model in
        let cost_usd =
          match response.usage with
          | Some usage -> usage.cost_usd
          | None -> None
        in
-       observe_inference_cost ~model_bucket cost_usd
+       observe_inference_cost ~provider ~model_bucket cost_usd
      | Error _ -> ());
     let payload =
       `Assoc

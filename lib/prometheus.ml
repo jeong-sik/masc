@@ -790,18 +790,9 @@ let metric_tool_call = "masc_tool_call_total"
 let metric_tool_call_duration = "masc_tool_call_duration_seconds"
 let metric_llm_provider_http_status = "masc_llm_provider_http_status_total"
 let metric_llm_provider_request_latency = "masc_llm_provider_request_latency_seconds"
-let metric_llm_provider_request_latency_clamped =
-  "masc_llm_provider_request_latency_clamped_total"
-;;
-
-let metric_llm_provider_streaming_first_chunk =
-  "masc_llm_provider_streaming_first_chunk_seconds"
-;;
-
-let metric_llm_provider_streaming_inter_chunk =
-  "masc_llm_provider_streaming_inter_chunk_seconds"
-;;
-
+let metric_llm_provider_request_latency_clamped = "masc_llm_provider_request_latency_clamped_total"
+let metric_llm_provider_streaming_first_chunk = "masc_llm_provider_streaming_first_chunk_seconds"
+let metric_llm_provider_streaming_inter_chunk = "masc_llm_provider_streaming_inter_chunk_seconds"
 let metric_llm_provider_capability_drops = "masc_llm_provider_capability_drops_total"
 let metric_llm_provider_cache_hits = "masc_llm_provider_cache_hits_total"
 let metric_llm_provider_cache_misses = "masc_llm_provider_cache_misses_total"

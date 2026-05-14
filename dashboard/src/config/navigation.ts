@@ -20,6 +20,7 @@ type SurfaceSectionId =
   | 'runtime'
   | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
+  | 'memory-subsystems' // Legacy redirect target (cognition > memory tab)
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)

@@ -3,7 +3,7 @@
     replacing SSE for dashboard / agent connections that
     need full-duplex.
 
-    External surface (16 entries + 3 types):
+    External surface (17 entries + 3 types):
     - {b session record} ({!ws_session}) — concrete because
       [server_ws_standalone] passes session values to
       {!read_inbound_message_frame} /
@@ -24,7 +24,8 @@
       ({!read_inbound_message_frame}).
     - {b dashboard JSON-RPC handlers}
       ({!dashboard_hello}, {!dashboard_subscribe},
-      {!dashboard_unsubscribe}, {!dashboard_ack},
+      {!dashboard_unsubscribe}, {!dashboard_ping},
+      {!dashboard_ack},
       {!set_dashboard_snapshot_provider}).
     - {b outbound delivery}
       ({!send_to_session_result},
@@ -220,6 +221,14 @@ val dashboard_unsubscribe :
 (** Drops [slices] from the subscription set.  When
     [?slices] is [None], unsubscribes from every slice.
     Requires a prior {!dashboard_hello}. *)
+
+val dashboard_ping :
+  session_id:string ->
+  unit ->
+  (Yojson.Safe.t, string) result
+(** Lightweight heartbeat endpoint for browser dashboards.
+    Requires a prior {!dashboard_hello}; stale or unauthenticated sessions
+    fail so the client can reconnect and re-handshake. *)
 
 val dashboard_ack :
   session_id:string ->

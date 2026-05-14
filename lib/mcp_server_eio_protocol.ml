@@ -478,6 +478,15 @@ let handle_dashboard_unsubscribe_eio id ?mcp_session_id params =
   | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
 ;;
 
+let handle_dashboard_ping_eio id ?mcp_session_id params =
+  match mcp_session_id, params with
+  | None, _ -> make_error ~id (-32600) "dashboard/ping requires a WebSocket session"
+  | Some session_id, None | Some session_id, Some (`Assoc _) ->
+    Server_mcp_transport_ws.dashboard_ping ~session_id ()
+    |> dashboard_response_or_error id
+  | Some _, Some _ -> make_error ~id (-32602) "Invalid params: expected object"
+;;
+
 let handle_dashboard_ack_eio id ?mcp_session_id params =
   match mcp_session_id, params with
   | None, _ -> make_error ~id (-32600) "dashboard/ack requires a WebSocket session"
@@ -635,6 +644,8 @@ let handle_request
                 handle_dashboard_subscribe_eio state id ?mcp_session_id req.params
               | "dashboard/unsubscribe" ->
                 handle_dashboard_unsubscribe_eio id ?mcp_session_id req.params
+              | "dashboard/ping" ->
+                handle_dashboard_ping_eio id ?mcp_session_id req.params
               | "dashboard/ack" -> handle_dashboard_ack_eio id ?mcp_session_id req.params
               | "prompts/list" ->
                 (match TP.parse_cursor_only_params req.params with

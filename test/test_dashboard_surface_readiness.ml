@@ -146,6 +146,29 @@ let test_live_spotcheck_keeps_script_values_as_scripts () =
            check string "live_spotcheck kind" "script"
              Yojson.Safe.Util.(ref_json |> member "kind" |> to_string))
 
+let test_cognition_readiness_uses_cognition_read_model () =
+  let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.cognition" () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match List.find_opt
+          (fun surface ->
+            Yojson.Safe.Util.(surface |> member "id" |> to_string = "monitoring.cognition"))
+          surfaces
+  with
+  | None -> fail "monitoring.cognition missing"
+  | Some surface ->
+      (match find_verification_ref surface "live_spotcheck" with
+       | None -> fail "monitoring.cognition live_spotcheck missing"
+       | Some ref_json ->
+           let open Yojson.Safe.Util in
+           check string "live_spotcheck kind" "route"
+             (ref_json |> member "kind" |> to_string);
+           check string "live_spotcheck value"
+             "/api/v1/dashboard/memory-subsystems"
+             (ref_json |> member "value" |> to_string);
+           check string "surface verification ref labels"
+             "live_spotcheck+logs+metrics"
+             (surface |> member "verification_ref_bar" |> to_string))
+
 let test_verification_ref_bar_reflects_declared_refs () =
   let overview_json = Dashboard_surface_readiness.json ~surface_id:"overview" () in
   let open Yojson.Safe.Util in
@@ -235,6 +258,8 @@ let () =
             test_live_spotcheck_serializes_route_values_as_routes;
           test_case "script live spotchecks stay scripts" `Quick
             test_live_spotcheck_keeps_script_values_as_scripts;
+          test_case "cognition readiness uses cognition read model" `Quick
+            test_cognition_readiness_uses_cognition_read_model;
           test_case "verification ref bar reflects declared refs" `Quick
             test_verification_ref_bar_reflects_declared_refs;
           test_case "legacy surfaces removed from readiness inventory" `Quick

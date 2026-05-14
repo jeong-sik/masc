@@ -47,12 +47,17 @@
 
 (** Build the JSON snapshot of verification requests.
 
+    - [base_path]: when provided, read that runtime root instead of the
+      process-wide fallback. HTTP routes pass the active server config so a
+      dashboard bound to a non-default base path does not show stale
+      verification state.
     - [task_id]: when [Some id] (non-empty), return only requests whose
       [task_id] equals [id]. When absent or empty, return all tasks.
     - [limit]: clamped into [\[1, 500\]]; defaults to 100. Sort is
       reverse-chronological by [created_at] so the newest request wins
       when the cap trims. *)
 val requests_json :
+  ?base_path:string ->
   ?task_id:string ->
   ?limit:int ->
   unit ->
@@ -60,6 +65,8 @@ val requests_json :
 
 (** Build a one-shot summary snapshot: status bucket counts plus the most
     recent rejections (carriers of verdict_reason / PR / issue refs).
+
+    [base_path] has the same meaning as on {!requests_json}.
 
     The [recent] parameter is clamped into [\[0, 20\]] and defaults to 3.
     When [0], the ["recent_rejections"] array is empty but still present.
@@ -82,4 +89,4 @@ val requests_json :
         ]
       }
     ]} *)
-val summary_json : ?recent:int -> unit -> Yojson.Safe.t
+val summary_json : ?base_path:string -> ?recent:int -> unit -> Yojson.Safe.t

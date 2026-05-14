@@ -693,6 +693,14 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json =
+           dashboard_proof_http_json ~config:state.Mcp_server.room_config req
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/resolve" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

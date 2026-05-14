@@ -201,6 +201,10 @@ check_http "attribution recent 200" "$BASE/api/v1/attribution/recent?limit=1" "2
 check_json "attribution recent exposes events" "$BASE/api/v1/attribution/recent?limit=1" "'events' in d and 'count' in d" '^True$'
 check_http "safe autonomy 200" "$BASE/api/v1/dashboard/safe-autonomy" "200"
 check_json "safe autonomy exposes scorecard" "$BASE/api/v1/dashboard/safe-autonomy" "'summary' in d and 'domains' in d and 'per_keeper' in d" '^True$'
+check_http "dashboard governance 200" "$BASE/api/v1/dashboard/governance" "200"
+check_json "dashboard governance exposes judge and queue" "$BASE/api/v1/dashboard/governance" "'summary' in d and 'judge' in d and 'approval_queue' in d" '^True$'
+check_http "dashboard proof 200" "$BASE/api/v1/dashboard/proof" "200"
+check_json "dashboard proof exposes verification and sources" "$BASE/api/v1/dashboard/proof" "'summary' in d and 'verification' in d and 'proof_sources' in d" '^True$'
 check_http "keeper feature proof 200" "$BASE/api/v1/dashboard/keeper-feature-proof?window_hours=24" "200"
 check_json "keeper feature proof exposes features" "$BASE/api/v1/dashboard/keeper-feature-proof?window_hours=24" "'summary' in d and 'features' in d and 'evidence_refs' in d" '^True$'
 check_http "feature health 200" "$BASE/api/v1/dashboard/feature-health" "200"

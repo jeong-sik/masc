@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-05-01
+last_verified: 2026-05-15
 code_refs:
   - dashboard/src/config/navigation.ts
   - dashboard/src/components/status.ts
@@ -178,6 +178,7 @@ code_refs:
 - `GET /api/v1/dashboard/execution`
 - `GET /api/v1/dashboard/governance`
 - `GET /api/v1/dashboard/proof`
+  - compatibility proof index over verification requests, TLA result refs, keeper feature proof, safe autonomy, execution trust, and surface readiness routes
 - `GET /api/v1/dashboard/goals`
 - `GET /api/v1/dashboard/config`
 - `GET /api/v1/dashboard/feature-health`

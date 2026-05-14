@@ -364,6 +364,58 @@ let test_dashboard_planning_http_json_includes_coordination_fsm () =
      | `List _ -> true
      | _ -> false)
 
+let test_dashboard_proof_http_json_surfaces_verification_index () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let module V = Lib.Verification in
+  let output =
+    `Assoc
+      [
+        ("evidence_refs", `List [ `String "artifact://proof-route" ]);
+        ("task_title", `String "Proof route fixture");
+      ]
+  in
+  (match
+     V.create_request
+       ~base_path:config.base_path
+       ~task_id:"task-proof-route"
+       ~output
+       ~criteria:[ V.Custom "proof route must expose verification evidence" ]
+       ~worker:"keeper-proof"
+       ()
+   with
+   | Ok _ -> ()
+   | Error message -> fail message);
+  let json =
+    Lib.Server_dashboard_http.dashboard_proof_http_json
+      ~config
+      (request "/api/v1/dashboard/proof?limit=5&recent=2")
+  in
+  let open Yojson.Safe.Util in
+  check int "verification total" 1
+    (json |> member "summary" |> member "verification_total" |> to_int);
+  check int "pending total" 1
+    (json |> member "summary" |> member "verification_pending" |> to_int);
+  check bool "verification requests exposed" true
+    (match json |> member "verification" |> member "requests" |> member "requests" with
+     | `List [ _ ] -> true
+     | _ -> false);
+  check bool "proof sources include execution trust route" true
+    (json
+     |> member "proof_sources"
+     |> to_list
+     |> List.exists (fun source ->
+       String.equal
+         (source |> member "route" |> to_string)
+         "/api/v1/dashboard/execution-trust"))
+
+let test_dashboard_proof_route_registered_in_http_routers () =
+  let http1 = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
+  let h2 = read_file "lib/server/server_h2_gateway.ml" in
+  check bool "HTTP/1 dashboard proof route registered" true
+    (contains_substring http1 "\"/api/v1/dashboard/proof\"");
+  check bool "HTTP/2 dashboard proof route registered" true
+    (contains_substring h2 "\"/api/v1/dashboard/proof\"")
+
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
@@ -568,6 +620,10 @@ let () =
             test_dashboard_shell_timeout_fallback_reports_timing_context;
           test_case "planning payload includes coordination FSM" `Quick
             test_dashboard_planning_http_json_includes_coordination_fsm;
+          test_case "proof payload exposes verification index" `Quick
+            test_dashboard_proof_http_json_surfaces_verification_index;
+          test_case "proof route registered in HTTP routers" `Quick
+            test_dashboard_proof_route_registered_in_http_routers;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "credential monitoring surfaces archive counter" `Quick

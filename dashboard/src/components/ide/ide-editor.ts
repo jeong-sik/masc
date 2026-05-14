@@ -30,7 +30,13 @@ import {
   internalDocumentSync,
   syntaxHighlightExt,
 } from './ide-editor-extensions'
-import { lspExtension, getSelectedAnnotation, clearSelectedAnnotation, type SelectedAnnotation } from './ide-lsp-client'
+import {
+  lspDiagnosticSnapshot,
+  lspExtension,
+  getSelectedAnnotation,
+  clearSelectedAnnotation,
+  type SelectedAnnotation,
+} from './ide-lsp-client'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
 import { keeperCursorExtension } from './keeper-cursor-cm-extension'
@@ -41,8 +47,9 @@ import {
   type KeeperPresenceSnapshot,
   type KeeperPresenceStatus,
 } from './keeper-presence-store'
-import { openIdeContextRouteLink, type IdeContextRouteLink } from './ide-context-lens'
-import { ideContextFocus, type IdeContextFocus } from './ide-state'
+import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from './ide-context-lens'
+import { ideContextFocus, normalizeIdeContextFilePath, type IdeContextFocus } from './ide-state'
+import { ideConversationThreadSnapshot } from './ide-context-bridge'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -62,6 +69,13 @@ interface IdeEditorProps {
   readonly onFindClose?: () => void
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
   readonly annotations?: ReadonlyArray<IdeAnnotation>
+}
+
+interface CurrentFileSignal {
+  readonly id: string
+  readonly label: string
+  readonly count: number
+  readonly title: string
 }
 
 export interface FindOptions {
@@ -122,6 +136,14 @@ export function IdeEditor({
     const unsub = ideContextFocus.subscribe(() => forceRender(tick => tick + 1))
     return () => unsub()
   }, [])
+  useEffect(() => {
+    const unsub = ideConversationThreadSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = lspDiagnosticSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const document = documentStore.document()
   const lines = documentStore.lines()
@@ -134,6 +156,12 @@ export function IdeEditor({
   const activeCursors = keepersWithCursorInFile(overlay.cursors, document.file_path)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
   const currentDiffRows = diffRows()
+  const currentFileSignals = buildCurrentFileSignals({
+    filePath: document.file_path,
+    annotations,
+    diffRows: currentDiffRows,
+    activeKeeperCount: activeCursors.length,
+  })
   const gridTemplateRows = editorGridRows(activeLayerKinds.length > 0, findOpen)
 
   return html`
@@ -172,6 +200,7 @@ export function IdeEditor({
         <span style=${{ marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ${lines.length} lines · ownership · ${keepers.length} keepers · ${activeLayerKinds.length} layers
         </span>
+        <${EditorCurrentFileSignals} signals=${currentFileSignals} />
         ${currentFileFocus ? html`
           <div
             role="status"
@@ -255,6 +284,91 @@ export function IdeEditor({
             />`
       }
     </div>
+  `
+}
+
+function buildCurrentFileSignals({
+  filePath,
+  annotations,
+  diffRows,
+  activeKeeperCount,
+}: {
+  readonly filePath: string
+  readonly annotations: ReadonlyArray<IdeAnnotation>
+  readonly diffRows: ReadonlyArray<UnifiedDiffRow>
+  readonly activeKeeperCount: number
+}): ReadonlyArray<CurrentFileSignal> {
+  const normalizedFile = normalizeIdeContextFilePath(filePath)
+  const matchesCurrentFile = (value: string): boolean =>
+    normalizedFile !== null && normalizeIdeContextFilePath(value) === normalizedFile
+  const diagnosticCount = normalizedFile
+    ? lspDiagnosticSnapshot.value.get(normalizedFile)?.length ?? 0
+    : 0
+  const annotationCount = annotations.filter(annotation =>
+    matchesCurrentFile(annotation.file_path),
+  ).length
+  const threadSnapshot = ideConversationThreadSnapshot.value
+  const threadCount = matchesCurrentFile(threadSnapshot.filePath)
+    ? threadSnapshot.threads.length
+    : 0
+  const changedRows = diffRows.filter(row => row.kind === 'add' || row.kind === 'delete')
+  return [
+    {
+      id: 'lsp',
+      label: 'LSP',
+      count: diagnosticCount,
+      title: `${diagnosticCount} current-file diagnostic${diagnosticCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'notes',
+      label: 'Notes',
+      count: annotationCount,
+      title: `${annotationCount} current-file annotation${annotationCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'threads',
+      label: 'Threads',
+      count: threadCount,
+      title: `${threadCount} current-file anchored thread${threadCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'diff',
+      label: 'Diff',
+      count: changedRows.length,
+      title: `${changedRows.length} current-file changed row${changedRows.length === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'keepers',
+      label: 'Keepers',
+      count: activeKeeperCount,
+      title: `${activeKeeperCount} keeper${activeKeeperCount === 1 ? '' : 's'} active in this file`,
+    },
+  ]
+}
+
+function EditorCurrentFileSignals({
+  signals,
+}: {
+  readonly signals: ReadonlyArray<CurrentFileSignal>
+}) {
+  return html`
+    <ul
+      class="ide-editor-file-signals"
+      role="list"
+      aria-label="Current file operational signals"
+    >
+      ${signals.map(signal => html`
+        <li
+          key=${signal.id}
+          role="listitem"
+          data-active=${signal.count > 0 ? 'true' : 'false'}
+          title=${signal.title}
+        >
+          <span>${signal.label}</span>
+          <strong>${signal.count}</strong>
+        </li>
+      `)}
+    </ul>
   `
 }
 
@@ -1039,6 +1153,7 @@ function AnnotationPopover({
 
   const top = coords.bottom - shellRect.top + 4
   const left = Math.max(8, coords.left - shellRect.left)
+  const routeLinks = annotationRouteLinks(annotation)
 
   return html`
     <div
@@ -1093,6 +1208,15 @@ function AnnotationPopover({
       <div style=${{ color: 'var(--color-fg-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         ${annotation.content}
       </div>
+      ${routeLinks.length > 0 ? html`
+        <div
+          class="ide-editor-context-route-links"
+          aria-label="Annotation operational links"
+          style=${{ marginTop: 'var(--sp-2)' }}
+        >
+          ${routeLinks.map(link => EditorContextRouteLink(link))}
+        </div>
+      ` : null}
       <div style=${{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)', flexWrap: 'wrap' }}>
         ${annotation.keeper_id ? html`
           <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
@@ -1112,4 +1236,17 @@ function AnnotationPopover({
       </div>
     </div>
   `
+}
+
+export function annotationRouteLinks(annotation: SelectedAnnotation): ReadonlyArray<IdeContextRouteLink> {
+  return routeLinksForContext({
+    filePath: annotation.file_path,
+    line: annotation.line_start,
+    surface: annotation.kind,
+    label: annotation.content,
+    sourceId: `annotation-${annotation.id}`,
+    goalId: annotation.goal_id ?? undefined,
+    taskId: annotation.task_id ?? undefined,
+    keeperId: annotation.keeper_id,
+  })
 }

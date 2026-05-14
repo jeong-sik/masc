@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { currentFileFindMatches, IdeEditor } from './ide-editor'
+import { annotationRouteLinks, currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
 import { activeIdeFile, focusIdeContextAnchor, ideContextFocus } from './ide-state'
+import { ideConversationThreadSnapshot } from './ide-context-bridge'
+import { lspDiagnosticSnapshot } from './ide-lsp-client'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 
 describe('IdeEditor', () => {
@@ -22,6 +25,14 @@ describe('IdeEditor', () => {
     render(null, container)
     ideContextFocus.value = null
     clearTraces()
+    lspDiagnosticSnapshot.value = new Map()
+    ideConversationThreadSnapshot.value = { filePath: '', threads: [] }
+    cursorOverlaySignal.value = {
+      cursors: new Map(),
+      heatmap: new Map(),
+      collisions: [],
+      active_file: null,
+    }
     window.location.hash = ''
   })
 
@@ -207,6 +218,101 @@ describe('IdeEditor', () => {
     expect(container.querySelectorAll('.cm-trace-dot')).toHaveLength(1)
   })
 
+  it('summarizes current-file operational signals in the editor header', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst other = 2\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    lspDiagnosticSnapshot.value = new Map([[
+      'runtime.ts',
+      [{
+        file_path: 'runtime.ts',
+        line: 1,
+        severity: 2,
+        source: 'tsserver',
+        message: 'runtime is never reassigned',
+      }],
+    ]])
+    ideConversationThreadSnapshot.value = {
+      filePath: 'runtime.ts',
+      threads: [{
+        id: 'thread-1',
+        kind: 'question',
+        author_keeper_id: 'sangsu',
+        anchor: {
+          file_path: 'runtime.ts',
+          line_start: 2,
+          line_end: 2,
+          symbol_hint: 'runtime',
+        },
+        body: 'Is this task still tied to the active goal?',
+        created_ms: 1,
+        resolved: false,
+        reply_count: 1,
+      }],
+    }
+    cursorOverlaySignal.value = {
+      cursors: new Map([[
+        'sangsu',
+        {
+          keeper_id: 'sangsu',
+          file_path: 'runtime.ts',
+          line: 2,
+          column: 1,
+          focus_mode: 'editing',
+          last_update: Date.now(),
+        },
+      ]]),
+      heatmap: new Map(),
+      collisions: [],
+      active_file: 'runtime.ts',
+    }
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [
+          { kind: 'add', oldLine: null, newLine: 1, text: '+const runtime = 1' },
+          { kind: 'delete', oldLine: 2, newLine: null, text: '-const old = 1' },
+        ] as const,
+        annotations: [{
+          id: 'ann-1',
+          file_path: 'runtime.ts',
+          line_start: 1,
+          line_end: 1,
+          keeper_id: 'sangsu',
+          kind: 'Comment',
+          content: 'Keep this task linked to the line',
+          goal_id: 'goal-1',
+          task_id: 'task-1',
+          created_at_ms: 1,
+          updated_at_ms: 1,
+        }],
+      }),
+      container,
+    )
+
+    const signals = [...container.querySelectorAll<HTMLLIElement>('.ide-editor-file-signals > li')]
+    expect(signals.map(item => item.textContent)).toEqual([
+      'LSP1',
+      'Notes1',
+      'Threads1',
+      'Diff2',
+      'Keepers1',
+    ])
+    expect(signals.every(item => item.getAttribute('data-active') === 'true')).toBe(true)
+    expect(signals.map(item => item.title)).toEqual([
+      '1 current-file diagnostic',
+      '1 current-file annotation',
+      '1 current-file anchored thread',
+      '2 current-file changed rows',
+      '1 keeper active in this file',
+    ])
+  })
+
   it('counts loaded annotations in the notes overlay summary', () => {
     const documentStore = createCodeDocumentStore({
       file_path: 'runtime.ts',
@@ -308,6 +414,46 @@ describe('IdeEditor', () => {
     expect(container.querySelectorAll('.cm-masc-annotation-chip')).toHaveLength(1)
     expect(container.querySelector('.cm-masc-annotation-chip')?.getAttribute('aria-label'))
       .toBe('Line 1 annotation context: Comment · goal goal-1 · task task-1 · keeper sangsu · +1')
+  })
+
+  it('maps annotation detail context into operational route links', () => {
+    const links = annotationRouteLinks({
+      id: 'ann-1',
+      file_path: 'runtime.ts',
+      line_start: 7,
+      line_end: 7,
+      keeper_id: 'sangsu',
+      kind: 'Comment',
+      content: 'Keep this task linked to the active goal',
+      goal_id: 'goal-runtime',
+      task_id: 'task-runtime',
+    })
+
+    expect(links.map(link => link.label)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
+    expect(links.find(link => link.label === 'Code')).toMatchObject({
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'runtime.ts',
+        line: '7',
+        surface: 'Comment',
+        source_id: 'annotation-ann-1',
+        keeper: 'sangsu',
+      },
+    })
+    expect(links.find(link => link.label === 'Goal')?.params).toMatchObject({
+      section: 'planning',
+      goal: 'goal-runtime',
+    })
+    expect(links.find(link => link.label === 'Task')?.params).toMatchObject({
+      section: 'planning',
+      task: 'task-runtime',
+    })
+    expect(links.find(link => link.label === 'Keeper')?.params).toMatchObject({
+      section: 'agents',
+      keeper: 'sangsu',
+    })
   })
 
   it('shows and highlights the focused context line from the shared IDE signal', async () => {

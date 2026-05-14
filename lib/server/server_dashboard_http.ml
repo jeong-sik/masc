@@ -730,7 +730,177 @@ let json_number key json =
   | _ -> None
 ;;
 
+let json_assoc key json =
+  match json_member key json with
+  | `Assoc _ as value -> Some value
+  | _ -> None
+;;
+
+let string_has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+;;
+
+let tool_call_output_text json =
+  match json_member "output" json with
+  | `String value -> Some value
+  | `Assoc _ as output -> (
+    match json_assoc "_blob" output with
+    | Some blob -> json_string "preview" blob
+    | None -> None)
+  | _ -> None
+;;
+
+let parse_tool_call_output json =
+  match tool_call_output_text json with
+  | None -> None
+  | Some output -> (
+    match Safe_ops.parse_json_safe ~context:"composite.tool_call_output" output with
+    | Ok parsed -> Some parsed
+    | Error _ -> None)
+;;
+
+let claim_status_of_output output =
+  let result = Option.value ~default:"" (json_string "result" output) |> String.trim in
+  match json_assoc "claimed_task" output with
+  | Some _ -> "claimed"
+  | None when string_has_prefix ~prefix:"No eligible tasks" result -> "no_eligible"
+  | None when string_has_prefix ~prefix:"No unclaimed tasks" result -> "no_unclaimed"
+  | None when string_has_prefix ~prefix:"Error:" result -> "error"
+  | None when result = "" -> "unknown"
+  | None -> "observed"
+;;
+
+let composite_claim_scope_absent =
+  `Assoc
+    [ "present", `Bool false
+    ; "source", `String "keeper_task_claim_tool_call"
+    ; "status", `String "not_observed"
+    ; "result", `Null
+    ; "mode", `Null
+    ; "scoped", `Null
+    ; "active_goal_ids", `List []
+    ; "effective_goal_ids", `List []
+    ; "excluded_count", `Null
+    ; "claimed_task_id", `Null
+    ; "claimed_goal_id", `Null
+    ]
+;;
+
+let composite_claim_scope_json ~keeper_name =
+  let entries = Keeper_tool_call_log.read_recent ~keeper_name ~n:100 () in
+  match
+    entries
+    |> List.find_opt (fun json ->
+      String.equal (Option.value ~default:"" (json_string "tool" json))
+        "keeper_task_claim")
+  with
+  | None -> composite_claim_scope_absent
+  | Some call ->
+    let output =
+      match parse_tool_call_output call with
+      | Some (`Assoc _ as output) -> output
+      | _ -> `Assoc []
+    in
+    let claim_scope =
+      match json_assoc "claim_scope" output with
+      | Some value -> value
+      | None -> `Assoc []
+    in
+    let claimed_task = json_assoc "claimed_task" output in
+    `Assoc
+      [ "present", `Bool true
+      ; "source", `String "keeper_task_claim_tool_call"
+      ; "status", `String (claim_status_of_output output)
+      ; "result", Json_util.string_opt_to_json (json_string "result" output)
+      ; "mode", Json_util.string_opt_to_json (json_string "mode" claim_scope)
+      ; ( "scoped",
+          match json_bool "scoped" claim_scope with
+          | Some value -> `Bool value
+          | None -> `Null )
+      ; ( "active_goal_ids",
+          Json_util.json_string_list
+            (Json_util.get_string_list claim_scope "active_goal_ids") )
+      ; ( "effective_goal_ids",
+          Json_util.json_string_list
+            (Json_util.get_string_list claim_scope "effective_goal_ids") )
+      ; ( "excluded_count",
+          match json_int "excluded_count" claim_scope with
+          | Some value -> `Int value
+          | None -> `Null )
+      ; ( "claimed_task_id",
+          match claimed_task with
+          | Some task -> Json_util.string_opt_to_json (json_string "task_id" task)
+          | None -> `Null )
+      ; ( "claimed_goal_id",
+          match claimed_task with
+          | Some task -> Json_util.string_opt_to_json (json_string "goal_id" task)
+          | None -> `Null )
+      ]
+;;
+
+let find_override_field_source field sources =
+  match json_member "override_field_sources" sources with
+  | `List values ->
+    List.find_opt
+      (fun value -> json_string "field" value = Some field)
+      values
+  | _ -> None
+;;
+
+let composite_config_drift_json ~config ~keeper_name =
+  match Keeper_types.read_meta config keeper_name with
+  | Ok (Some meta) ->
+    let sources = Keeper_status_bridge.source_provenance_json config meta in
+    let override_fields = Json_util.get_string_list sources "override_fields" in
+    let cascade_detail = find_override_field_source "model.cascade_name" sources in
+    let string_member key json =
+      match json_member key json with
+      | `String value -> Some value
+      | _ -> None
+    in
+    let default_cascade_name, live_cascade_name =
+      match cascade_detail with
+      | Some detail -> string_member "default_value" detail, string_member "live_value" detail
+      | None -> None, None
+    in
+    let cascade_override = Option.is_some cascade_detail in
+    `Assoc
+      [ "present", `Bool true
+      ; "status", `String (if cascade_override then "drift" else "ok")
+      ; "cascade_override", `Bool cascade_override
+      ; "override_fields", Json_util.json_string_list override_fields
+      ; "default_cascade_name", Json_util.string_opt_to_json default_cascade_name
+      ; "live_cascade_name", Json_util.string_opt_to_json live_cascade_name
+      ; "active_config_root", Json_util.string_opt_to_json (json_string "active_config_root" sources)
+      ]
+  | Ok None ->
+    `Assoc
+      [ "present", `Bool false
+      ; "status", `String "keeper_missing"
+      ; "cascade_override", `Bool false
+      ; "override_fields", `List []
+      ; "default_cascade_name", `Null
+      ; "live_cascade_name", `Null
+      ; "active_config_root", `Null
+      ]
+  | Error message ->
+    `Assoc
+      [ "present", `Bool false
+      ; "status", `String "read_error"
+      ; "error", `String message
+      ; "cascade_override", `Bool false
+      ; "override_fields", `List []
+      ; "default_cascade_name", `Null
+      ; "live_cascade_name", `Null
+      ; "active_config_root", `Null
+      ]
+;;
+
 let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
+  let claim_scope = composite_claim_scope_json ~keeper_name in
+  let config_drift = composite_config_drift_json ~config ~keeper_name in
   match Keeper_execution_receipt.latest_json config keeper_name with
   | None ->
     `Assoc
@@ -747,6 +917,8 @@ let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
       ; "error", `Null
       ; "cascade", `Null
       ; "tool_surface", `Null
+      ; "claim_scope", claim_scope
+      ; "config_drift", config_drift
       ]
   | Some receipt ->
     let action_radius = json_member "action_radius" receipt in
@@ -770,6 +942,8 @@ let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
       ; "error", compact_receipt_error_json receipt
       ; "cascade", compact_receipt_cascade_json receipt
       ; "tool_surface", compact_receipt_tool_surface_json receipt
+      ; "claim_scope", claim_scope
+      ; "config_drift", config_drift
       ]
 ;;
 
@@ -858,8 +1032,24 @@ let composite_execution_saturated execution =
        [ "ollama_saturated" ]
 ;;
 
+let composite_execution_claim_no_eligible execution =
+  match json_member "claim_scope" execution with
+  | `Assoc _ as claim_scope ->
+    string_opt_is_any (json_string "status" claim_scope) [ "no_eligible" ]
+  | _ -> false
+;;
+
+let composite_execution_config_drift execution =
+  match json_member "config_drift" execution with
+  | `Assoc _ as config_drift ->
+    Option.value ~default:false (json_bool "cascade_override" config_drift)
+  | _ -> false
+;;
+
 let composite_execution_blocked execution =
   composite_execution_tool_required execution
+  || composite_execution_claim_no_eligible execution
+  || composite_execution_config_drift execution
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match lower_string_opt (json_string "terminal_reason_code" execution) with
       | Some terminal -> terminal <> "" && terminal <> "completed"
@@ -903,7 +1093,11 @@ let composite_runtime_attention ~snapshot ~execution =
     blocked || fiber_stop_requested || stale_without_live_turn || idle_attention
   in
   let reason =
-    match json_string "operator_disposition_reason" execution with
+    if composite_execution_claim_no_eligible execution
+    then Some "claim_scope_no_eligible"
+    else if composite_execution_config_drift execution
+    then Some "keeper_cascade_override_drift"
+    else match json_string "operator_disposition_reason" execution with
     | Some value when String.trim value <> "" -> Some value
     | _ ->
       (match json_string "terminal_reason_code" execution with
@@ -1032,6 +1226,16 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
   let actions =
     if not attention.cra_needs_attention
     then []
+    else if composite_execution_claim_no_eligible execution
+    then
+      [ probe ("Inspect keeper claim scope: " ^ reason)
+      ; message ("Resolve keeper claim scope before retry: " ^ reason)
+      ]
+    else if composite_execution_config_drift execution
+    then
+      [ probe ("Inspect keeper cascade override drift: " ^ reason)
+      ; message ("Resolve keeper cascade override drift: " ^ reason)
+      ]
     else if composite_execution_tool_required execution
     then
       [ probe ("Inspect tool-contract blocker: " ^ reason)

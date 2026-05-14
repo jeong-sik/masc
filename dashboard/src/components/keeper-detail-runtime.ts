@@ -1005,6 +1005,8 @@ export function RuntimeLensSection({
   const lens = trace.runtime_lens
   const tool = lens.axes.tool_surface
   const lane = lens.axes.provider_lane
+  const claim = lens.axes.claim_scope
+  const drift = lens.axes.config_drift
   const context = lens.axes.context
   const memory = lens.axes.memory
   const clock = lens.turn_clock
@@ -1027,6 +1029,11 @@ export function RuntimeLensSection({
         <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />
         <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
         <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
+        <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
+        <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
+        <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
+        <${SignalRow} label="cascade drift" value=${drift.cascade_override ? `${drift.default_cascade_name ?? '-'} -> ${drift.live_cascade_name ?? '-'}` : drift.status} />
+        <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
         <${SignalRow} label="context compaction" value=${`${context.context_compacted_count}/${context.context_compact_started_count}`} />
         <${SignalRow} label="memory flush" value=${`${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />

@@ -706,6 +706,36 @@ export interface KeeperRuntimeLensProviderAttemptAxis {
   terminal_status: string | null
 }
 
+export interface KeeperRuntimeLensClaimScopeAxis {
+  present: boolean
+  source: string
+  status: string
+  result: string | null
+  mode: string | null
+  scoped: boolean | null
+  active_goal_ids: string[]
+  effective_goal_ids: string[]
+  fallback_reason: string | null
+  matched_goal_id: string | null
+  excluded_count: number | null
+  claimed_task_id: string | null
+  claimed_goal_id: string | null
+}
+
+export interface KeeperRuntimeLensConfigDriftAxis {
+  present: boolean
+  status: string
+  error: string | null
+  has_live_override: boolean
+  cascade_override: boolean
+  override_fields: string[]
+  default_cascade_name: string | null
+  live_cascade_name: string | null
+  active_config_root: string | null
+  active_config_root_source: string | null
+  default_manifest_path: string | null
+}
+
 export interface KeeperRuntimeLensContextAxis {
   context_injected_count: number
   context_compacted_event_count: number
@@ -725,6 +755,8 @@ export interface KeeperRuntimeLensAxes {
   tool_surface: KeeperRuntimeLensToolSurfaceAxis
   provider_lane: KeeperRuntimeLensProviderLaneAxis
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
+  claim_scope: KeeperRuntimeLensClaimScopeAxis
+  config_drift: KeeperRuntimeLensConfigDriftAxis
   context: KeeperRuntimeLensContextAxis
   memory: KeeperRuntimeLensMemoryAxis
 }
@@ -1002,6 +1034,42 @@ function parseRuntimeLensProviderAttemptAxis(raw: unknown): KeeperRuntimeLensPro
   }
 }
 
+function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimScopeAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    present: obj.present === true,
+    source: stringField(obj, 'source') || 'keeper_task_claim_tool_call',
+    status: stringField(obj, 'status') || 'not_observed',
+    result: nullableStringField(obj, 'result'),
+    mode: nullableStringField(obj, 'mode'),
+    scoped: nullableBooleanField(obj, 'scoped'),
+    active_goal_ids: stringListField(obj, 'active_goal_ids'),
+    effective_goal_ids: stringListField(obj, 'effective_goal_ids'),
+    fallback_reason: nullableStringField(obj, 'fallback_reason'),
+    matched_goal_id: nullableStringField(obj, 'matched_goal_id'),
+    excluded_count: nullableNumberField(obj, 'excluded_count'),
+    claimed_task_id: nullableStringField(obj, 'claimed_task_id'),
+    claimed_goal_id: nullableStringField(obj, 'claimed_goal_id'),
+  }
+}
+
+function parseRuntimeLensConfigDriftAxis(raw: unknown): KeeperRuntimeLensConfigDriftAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    present: obj.present === true,
+    status: stringField(obj, 'status') || 'unknown',
+    error: nullableStringField(obj, 'error'),
+    has_live_override: obj.has_live_override === true,
+    cascade_override: obj.cascade_override === true,
+    override_fields: stringListField(obj, 'override_fields'),
+    default_cascade_name: nullableStringField(obj, 'default_cascade_name'),
+    live_cascade_name: nullableStringField(obj, 'live_cascade_name'),
+    active_config_root: nullableStringField(obj, 'active_config_root'),
+    active_config_root_source: nullableStringField(obj, 'active_config_root_source'),
+    default_manifest_path: nullableStringField(obj, 'default_manifest_path'),
+  }
+}
+
 function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -1024,6 +1092,8 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     tool_surface: parseRuntimeLensToolSurfaceAxis(obj.tool_surface),
     provider_lane: parseRuntimeLensProviderLaneAxis(obj.provider_lane),
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
+    claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
+    config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
     context: parseRuntimeLensContextAxis(obj.context),
     memory: parseRuntimeTraceMemory(obj.memory),
   }

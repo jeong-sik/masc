@@ -1,5 +1,6 @@
 import { get, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import type {
+  DashboardBootstrapResponse,
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
 } from '../types'
@@ -15,6 +16,10 @@ type DashboardShellRequestOptions = AbortableRequestOptions & {
 export function fetchDashboardShell(opts?: DashboardShellRequestOptions): Promise<DashboardShellResponse> {
   const qs = opts?.light ? '?light=true' : ''
   return get(`/api/v1/dashboard/shell${qs}`, { signal: opts?.signal })
+}
+
+export function fetchDashboardBootstrap(opts?: AbortableRequestOptions): Promise<DashboardBootstrapResponse> {
+  return get('/api/v1/dashboard/bootstrap', { signal: opts?.signal })
 }
 
 export function fetchDashboardNamespaceTruth(

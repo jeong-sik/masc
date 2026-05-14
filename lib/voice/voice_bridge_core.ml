@@ -46,9 +46,8 @@ let record_playback ~agent_id ~message =
   Atomic.set last_playback_ref
     (Some { agent_id; message_hash = Hashtbl.hash message; finished_at = Unix.gettimeofday () })
 
-(** Default agent voices from Provider_adapter registry (SSOT).
-    Hardcoded list removed — voices defined in Provider_adapter.direct_adapters. *)
-let default_agent_voices () = Provider_adapter.all_agent_voices ()
+(** Default agent voices from the voice runtime overlay. *)
+let default_agent_voices () = Voice_runtime_overlay.default_agent_voices ()
 
 let load_voice_config () = Voice_config.load ()
 
@@ -74,14 +73,14 @@ let local_playback_enabled_for_agent agent_id =
   | Error _ -> false
 
 let default_voice_uri path =
-  Uri.of_string (Provider_adapter.default_voice_session_url ~path)
+  Uri.of_string (Voice_runtime_overlay.default_session_url ~path)
 
 let voice_mcp_uri () =
   match load_voice_config () with
   | Ok config -> (
-      match Provider_adapter.voice_session_endpoint_result config with
+      match Voice_runtime_overlay.session_endpoint_result config with
       | Ok endpoint -> (
-          match Provider_adapter.voice_session_mcp_url_of_endpoint endpoint with
+          match Voice_runtime_overlay.session_mcp_url_of_endpoint endpoint with
           | Ok url -> Uri.of_string url
           | Error _ -> default_voice_uri "/mcp" )
       | Error _ -> default_voice_uri "/mcp")
@@ -90,9 +89,9 @@ let voice_mcp_uri () =
 let voice_health_uri () =
   match load_voice_config () with
   | Ok config -> (
-      match Provider_adapter.voice_session_endpoint_result config with
+      match Voice_runtime_overlay.session_endpoint_result config with
       | Ok endpoint -> (
-          match Provider_adapter.voice_session_health_url_of_endpoint endpoint with
+          match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
           | Ok url -> Uri.of_string url
           | Error _ -> default_voice_uri "/health" )
       | Error _ -> default_voice_uri "/health")
@@ -226,7 +225,7 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
             try
               match
                 Masc_exec.Exec_gate.run_argv_with_status
-                  ~actor:"voice/bridge_core"
+                  ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
                   ~raw_source
                   ~summary:"voice local playback"
                   ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Voice ())

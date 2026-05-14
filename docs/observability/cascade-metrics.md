@@ -12,7 +12,7 @@ How to read the cascade counters exposed by `/metrics` and the alerting rules th
 
 ## Background
 
-After the LT-* series (LT-1 through LT-7) every cycle of `Oas_worker_named.cycle_loop` produces observable state on **five surfaces**:
+After the LT-* series (LT-1 through LT-7) every cycle of `Keeper_turn_driver.cycle_loop` produces observable state on **five surfaces**:
 
 | Surface | Location | Use case |
 |---------|----------|----------|
@@ -41,13 +41,15 @@ Label cardinality: `3 × 3 = 9 series`.
 
 | Label | Values |
 |-------|--------|
-| `cascade` | cascade profile name (bounded by `cascade.json`, typically < 20) |
-| `strategy` | `failover`, `capacity_aware`, `weighted_random`, `circuit_breaker_cycling`, `priority_tier`, `sticky`, `round_robin` |
+| `cascade` | cascade profile name (bounded by `cascade.toml`, typically < 20) |
+| `strategy` | configured runtime: `failover`, `priority_tier`; internal/historical kinds may also render as `capacity_aware`, `weighted_random`, `circuit_breaker_cycling`, `sticky`, `round_robin` |
 | `kind` | `ordered`, `filtered_empty`, `exhausted` |
 
 Incremented from `Cascade_strategy_trace.record`. One event per cycle iteration of `cycle_loop`. `exhausted` is the terminal variant — cascade gave up after `max_cycles` without a successful provider pick.
 
-Label cardinality: `≈ 20 × 7 × 3 = 420 series` upper bound.
+Configured runtime label cardinality: `≈ 20 × 2 × 3 = 120 series`. The
+internal strategy enum still has seven values, so the defensive upper bound is
+`≈ 20 × 7 × 3 = 420 series`.
 
 Both counter names and label tuples are shared with the JSON projection + dashboard card, so Grafana queries join cleanly with the same identifiers that operators see.
 
@@ -116,7 +118,7 @@ Defines the happy path as an error-budget contract: at most 1% of cycles may hit
 - **1.0 – 2.0** — degraded, investigate
 - **> 2.0** — fast burn (`CascadeOrderedSLOFastBurn` alert fires at 1h window)
 
-**Error budget policy**: when 28d burn rate exceeds 2×, freeze non-critical cascade changes (cascade.json edits, strategy swaps) until burn returns below 1×. This gate is manual — the rule only surfaces the number.
+**Error budget policy**: when 28d burn rate exceeds 2×, freeze non-critical cascade changes (cascade.toml edits, strategy swaps) until burn returns below 1×. This gate is manual — the rule only surfaces the number.
 
 ### Exhaustion SLO (≤ 1/day/cascade)
 

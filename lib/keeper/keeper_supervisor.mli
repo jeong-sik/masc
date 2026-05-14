@@ -47,6 +47,26 @@ val backoff_delay : int -> float
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
 
+val persona_name_for_drift_check : keeper_meta -> string
+(** Resolve the persona handle used by supervisor persona-drift checks.
+    Honors keeper TOML [persona_name] overlays before falling back to
+    the keeper name. *)
+
+val persona_profile_path_for_drift_check :
+  base_path:string -> string -> string
+(** Return the concrete persona [profile.json] path reported by supervisor
+    drift diagnostics. *)
+
+type persona_drift_log_level =
+  | Persona_drift_warn
+  | Persona_drift_error
+
+val persona_drift_log_level_for_missing_profile :
+  keeper_meta -> persona_drift_log_level
+(** Classify a missing persona profile.  Keeper TOML with enough inline
+    identity remains operational and is WARN; keepers without TOML/persona
+    identity are ERROR. *)
+
 val supervision_cohort_size : int
 (** Target keeper count per supervisor cohort.  The first 2-level
     supervision slice groups the 64-keeper fleet as 8 cohorts of 8. *)

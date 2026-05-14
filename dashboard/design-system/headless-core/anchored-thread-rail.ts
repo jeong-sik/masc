@@ -27,7 +27,7 @@ export interface AnchoredThread {
 }
 
 export interface AnchoredThreadRailController {
-  readonly filePath: () => string
+  readonly filePath: () => string | null
   readonly visibleThreads: () => ReadonlyArray<AnchoredThread>
   readonly threadsForLine: (line: number) => ReadonlyArray<AnchoredThread>
   readonly focusedThreadId: () => string | null
@@ -38,16 +38,17 @@ export interface AnchoredThreadRailController {
 }
 
 export function createAnchoredThreadRail(opts: {
-  readonly filePath: () => string
+  readonly filePath: () => string | null
   readonly threads: () => ReadonlyArray<AnchoredThread>
 }): AnchoredThreadRailController {
   let focusedId: string | null = null
   const listeners = new Set<() => void>()
 
-  const filePath = (): string => opts.filePath()
+  const filePath = (): string | null => opts.filePath()
 
   const visibleThreads = (): ReadonlyArray<AnchoredThread> => {
     const activeFile = opts.filePath()
+    if (activeFile === null) return []
     return opts.threads()
       .filter(thread => validThreadForFile(thread, activeFile))
       .slice()

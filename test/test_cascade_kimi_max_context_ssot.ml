@@ -1,7 +1,7 @@
 (* test/test_cascade_kimi_max_context_ssot.ml
 
    #9953: Verify [Cascade_config.make_kimi_config] resolves
-   [max_context] from the OAS [Llm_provider.Capabilities] SSOT
+   [max_context] from the OAS [Provider_runtime_binding] SSOT
    rather than a drifted local constant.
 
    Prior code hard-coded [256_000] in cascade_config, while the
@@ -9,12 +9,17 @@
    in two encodings, causing per-turn [context_max] drift. *)
 
 module CC = Masc_mcp.Cascade_config
-module Caps = Llm_provider.Capabilities
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let oas_kimi_max_context () =
-  match Caps.kimi_capabilities.max_context_tokens with
-  | Some n -> n
-  | None -> Alcotest.fail "OAS kimi_capabilities missing max_context_tokens"
+  match Runtime_binding.find "kimi" with
+  | Some binding -> (
+      match binding.Runtime_binding.capabilities.max_context_tokens with
+      | Some n -> n
+      | None ->
+          Alcotest.fail "OAS runtime binding for kimi missing max_context_tokens"
+      )
+  | None -> Alcotest.fail "OAS runtime binding missing kimi"
 
 (* Sanity: the OAS SSOT still publishes a numeric cap. This pins
    the reference the resolver reads from — if the OAS pin bumps

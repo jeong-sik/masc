@@ -138,7 +138,14 @@ async def check_discord_py_version() -> Check:
 
 
 async def check_env_token() -> Check:
-    raw = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+    cfg = _config_or_none()
+    if cfg is None:
+        return Check(
+            name="DISCORD_BOT_TOKEN",
+            severity=Severity.skip,
+            message="config 로드 실패로 검증을 걸어 뜀",
+        )
+    raw = cfg.discord_bot_token.strip()
     if not raw:
         return Check(
             name="DISCORD_BOT_TOKEN",

@@ -452,10 +452,12 @@ let create_keeper env sw config name =
   | Some (false, err) -> fail err
   | None -> fail "missing masc_keeper_up dispatch"
 
-let append_execution_receipt ?(outcome = "ok")
+let append_execution_receipt
+    ?(outcome : Lib.Keeper_execution_receipt.outcome_kind = `Ok)
     ?(terminal_reason_code = "completed")
-    ?(tool_contract_result = "satisfied")
-    ?(stop_reason = Some "completed")
+    ?(tool_contract_result : Lib.Keeper_execution_receipt.tool_contract_result =
+      Contract_satisfied_completion)
+    ?(stop_reason = Some Lib.Cascade_runner.Completed)
     config ~keeper_name =
   let meta =
     match Lib.Keeper_types.read_meta config keeper_name with
@@ -487,8 +489,8 @@ let append_execution_receipt ?(outcome = "ok")
       tool_contract_result;
       tool_surface =
         {
-          turn_lane = "tool";
-          tool_surface_class = "mixed";
+          turn_lane = Masc_mcp.Keeper_agent_tool_surface.Lane_tool_required;
+          tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_mixed;
           tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
           visible_tool_count = 2;
           tool_gate_enabled = true;
@@ -499,33 +501,34 @@ let append_execution_receipt ?(outcome = "ok")
       sandbox_kind =
         Lib.Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;
-      network_mode = Lib.Keeper_types.network_mode_to_string meta.network_mode;
+      network_mode = meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name =
-        Lib.Keeper_execution_receipt.cascade_name_of_string meta.cascade_name;
+        Lib.Keeper_execution_receipt.cascade_name_of_string (Lib.Keeper_types.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
-      cascade_outcome = "passed_to_next_model";
+      cascade_outcome = Lib.Keeper_execution_receipt.Cascade_passed_to_next_model;
       degraded_retry_applied = true;
       degraded_retry_cascade =
         Some
           (Lib.Keeper_execution_receipt.cascade_name_of_string
              Lib.Keeper_config.local_recovery_cascade_name);
-      fallback_reason = Some "turn_timeout";
+      fallback_reason = Some Lib.Keeper_error_classify.Turn_timeout;
       cascade_rotation_attempts =
         [
           {
             from_cascade =
               Lib.Keeper_execution_receipt.cascade_name_of_string
-                Lib.Keeper_config.default_cascade_name;
+                Lib.(Keeper_config.default_cascade_name ());
             to_cascade =
               Lib.Keeper_execution_receipt.cascade_name_of_string
                 Lib.Keeper_config.local_recovery_cascade_name;
-            reason = "turn_timeout";
-            outcome = "retry_scheduled";
-            slot_release_at_phase = Some "productive_phase_exhausted";
+            reason = Lib.Keeper_error_classify.Turn_timeout;
+            outcome = Lib.Keeper_execution_receipt.Rotation_retry_scheduled;
+            slot_release_at_phase =
+              Some Lib.Keeper_execution_receipt.Productive_phase_exhausted;
             productive_phase_elapsed_ms = Some 174000;
             retry_phase_elapsed_ms = Some 0;
             error_kind =
@@ -680,15 +683,15 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
             check bool "diagnostic next action surfaced" true
               (row |> member "diagnostic" |> member "next_action_path" <> `Null);
             check string "raw cascade surfaced on execution keeper row"
-              Lib.Keeper_config.default_cascade_name
+              Lib.(Keeper_config.default_cascade_name ())
               (row |> member "cascade_name" |> to_string);
             check string "canonical cascade surfaced on execution keeper row"
-              Lib.Keeper_config.default_cascade_name
+              Lib.(Keeper_config.default_cascade_name ())
               (row |> member "cascade_canonical" |> to_string);
-            check bool "primary model surfaced on execution keeper row" true
-              (row |> member "primary_model" <> `Null);
-            check bool "active model label surfaced on execution keeper row" true
-              (row |> member "active_model_label" <> `Null))))
+            check bool "primary model omitted on execution keeper row" true
+              (row |> member "primary_model" = `Null);
+            check bool "active model label omitted on execution keeper row" true
+              (row |> member "active_model_label" = `Null))))
 
 let test_execution_trust_surfaces_latest_receipt () =
   let dir = test_dir () in
@@ -742,7 +745,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (compact_row |> member "trust" |> member "last_outcome"
              |> to_string);
             check string "compact keeper row exposes trust contract result"
-              "satisfied"
+              "satisfied_completion"
               (compact_row |> member "trust" |> member "tool_contract_result"
              |> to_string);
             check string "execution trust row preserves sandbox kind"
@@ -807,10 +810,9 @@ let test_execution_trust_surfaces_latest_receipt () =
             check int "execution row exposes provider attempt count" 2
               (execution_row |> member "trust" |> member "execution_summary"
              |> member "provider_attempt_count" |> to_int);
-            check string "execution row exposes provider selected model"
-              "custom:mock"
+            check bool "execution row omits provider selected model" true
               (execution_row |> member "trust" |> member "execution_summary"
-             |> member "provider_selected_model" |> to_string);
+             |> member "provider_selected_model" = `Null);
             check bool "execution row exposes provider fallback" true
               (execution_row |> member "trust" |> member "execution_summary"
              |> member "provider_fallback_applied" |> to_bool);
@@ -835,10 +837,10 @@ let test_dashboard_execution_queue_surfaces_keeper_runtime_trust () =
           (fun () ->
             create_keeper env sw config "sangsu";
             append_execution_receipt config ~keeper_name:"sangsu"
-              ~outcome:"error"
+              ~outcome:`Error
               ~terminal_reason_code:"required_tool_use_unsatisfied"
-              ~tool_contract_result:"violated"
-              ~stop_reason:(Some "completion_contract_violation:require_tool_use");
+              ~tool_contract_result:Contract_violated
+              ~stop_reason:None;
             let execution_json =
               Lib.Dashboard_execution.json
                 ~config
@@ -932,6 +934,30 @@ let test_patch_keeper_dependent_caches_tolerates_null_agent () =
     check bool "keepalive running patched"
       true
       (row |> member "keepalive_running" |> to_bool))
+
+let callback_metric_value callback =
+  Lib.Prometheus.metric_value_or_zero
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+    ~labels:[ ("callback", callback) ]
+    ()
+
+let test_invalidate_execution_cache_counts_failures () =
+  let surface_callback = "execution_surface_cache_invalidate" in
+  let light_callback = "dashboard_execution_light_cache_invalidate" in
+  let before_surface = callback_metric_value surface_callback in
+  let before_light = callback_metric_value light_callback in
+  Lib.Server_dashboard_http.invalidate_execution_cache_with_hooks_for_testing
+    ~invalidate_execution_surface:(fun () ->
+      raise (Failure "synthetic surface invalidation failure"))
+    ~invalidate_light_cache:(fun () ->
+      raise (Failure "synthetic light invalidation failure"))
+    ();
+  check (float 0.0001) "surface invalidation failure counted"
+    (before_surface +. 1.0)
+    (callback_metric_value surface_callback);
+  check (float 0.0001) "light invalidation failure counted"
+    (before_light +. 1.0)
+    (callback_metric_value light_callback)
 
 let test_patch_surface_json_for_running_keepers_tolerates_null_agent () =
   let dir = test_dir () in
@@ -1033,6 +1059,8 @@ let () =
             test_dashboard_execution_queue_surfaces_keeper_runtime_trust;
           Alcotest.test_case "execution trust surfaces coverage gap health" `Quick
             test_execution_trust_surfaces_coverage_gap_health;
+          Alcotest.test_case "cache invalidation failures are counted" `Quick
+            test_invalidate_execution_cache_counts_failures;
           Alcotest.test_case "lifecycle patch tolerates null agent" `Quick
             test_patch_keeper_dependent_caches_tolerates_null_agent;
           Alcotest.test_case "running keeper patch tolerates null agent" `Quick

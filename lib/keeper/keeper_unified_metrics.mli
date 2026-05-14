@@ -17,6 +17,10 @@ val observed_affordances_of_observation :
   Keeper_world_observation.world_observation ->
   string list
 
+(** Whether a keeper's explicit [work_discovery_sources] allow task claiming.
+    [None] and an empty list preserve the historical broad discovery default. *)
+val work_discovery_allows_task_claim : Keeper_types.keeper_meta -> bool
+
 type turn_mode =
   | Tool_use
   | Text_response
@@ -35,6 +39,9 @@ val classify_usage_trust :
   resolved_model_id:string ->
   context_max:int ->
   usage_trust
+(** Classify usage counters without reconstructing concrete provider/model
+    identity. [model_used] and [resolved_model_id] are retained for legacy
+    call sites but collapsed to the neutral runtime lane. *)
 
 val usage_trust_is_trusted : usage_trust -> bool
 
@@ -43,9 +50,9 @@ val estimate_trusted_usage_cost_usd :
   model:string ->
   Agent_sdk.Types.api_usage ->
   float
-(** Estimate turn cost for trusted usage using the OAS pricing catalog,
-    including cache creation/read token multipliers.  Returns [0.0] for
-    untrusted or missing usage. *)
+(** Return the OAS-reported turn cost for trusted usage.  MASC does not
+    estimate provider/model pricing locally; missing or non-positive cost
+    remains [0.0]. *)
 
 val usage_trust_to_string : usage_trust -> string
 
@@ -102,9 +109,9 @@ val record_context_max_observation :
 (** #9953: emit the
     [masc_keeper_context_max_observed_total
        {keeper, model_used, resolved_model_id, context_max_bucket}]
-    counter for one turn.  Intended to be called once per
-    snapshot-write so the counter rate equals the per-turn
-    rate. *)
+    counter for one turn.  The historical model labels are emitted as the
+    neutral ["runtime"] lane. Intended to be called once per snapshot-write so
+    the counter rate equals the per-turn rate. *)
 
 (** {1 #9943: long-turn observer}
 
@@ -114,7 +121,7 @@ val record_context_max_observation :
     Prometheus cardinality stays at [keeper × 5].
 
     [record_turn_latency_bucket] increments
-    {!Prometheus.metric_keeper_turn_latency_bucket} on the matching
+    {!Keeper_metrics.metric_keeper_turn_latency_bucket} on the matching
     bucket and emits a [Log.Keeper.warn] line when [latency_ms]
     crosses {!long_turn_warn_threshold_ms}.  Threshold reads
     [MASC_KEEPER_LONG_TURN_WARN_MS] (ms, default
@@ -130,9 +137,8 @@ val record_turn_latency_bucket :
   keeper:string -> latency_ms:int -> unit
 
 val provider_kind_of_model_used : string -> string
-(** Derive the bounded provider label from a keeper [model_used] surface via
-    the provider adapter registry. Empty, unprefixed, or unregistered
-    provider prefixes collapse to [unknown]. *)
+(** Legacy metric label value for provider kind.  Keeper-facing metrics emit the
+    neutral ["runtime"] lane instead of deriving provider identity. *)
 
 val record_turn_latency_by_model_bucket :
   keeper:string ->

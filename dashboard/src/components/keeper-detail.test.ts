@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { html } from 'htm/preact'
 
 import type { Keeper } from '../types'
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   resetKeeperConfig: vi.fn(),
   selectKeeper: vi.fn(),
   navigate: vi.fn(),
+  replaceRoute: vi.fn(),
   route: {
     value: {
       tab: 'monitoring',
@@ -116,6 +117,7 @@ vi.mock('../keeper-runtime', async () => {
 
 vi.mock('../router', () => ({
   navigate: mocks.navigate,
+  replaceRoute: mocks.replaceRoute,
   route: mocks.route,
 }))
 
@@ -145,6 +147,7 @@ describe('openKeeperDetail', () => {
     mocks.resetKeeperConfig.mockClear()
     mocks.selectKeeper.mockClear()
     mocks.navigate.mockClear()
+    mocks.replaceRoute.mockClear()
     mocks.route.value = {
       tab: 'monitoring',
       params: { section: 'agents', view: 'keepers' },
@@ -312,6 +315,39 @@ describe('KeeperDetailPage', () => {
     render(html`<${KeeperDetailPage} />`)
     expect(screen.getByText('analyst')).toBeTruthy()
     expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
+  })
+
+  it('surfaces and clears keeper route focus without dropping the keepers view', () => {
+    const analyst = {
+      name: 'analyst',
+      status: 'active',
+      phase: 'Running',
+      pipeline_stage: 'idle',
+      agent_name: 'keeper-analyst-agent',
+      runtime_class: 'keeper',
+      agent: {
+        exists: true,
+        name: 'keeper-analyst-agent',
+        agent_type: 'agent',
+        status: 'active',
+      },
+    } as unknown as Keeper
+    keepers.value = [analyst]
+
+    render(html`<${KeeperDetailPage} />`)
+
+    const focus = screen.getByTestId('keeper-route-focus')
+    expect(focus.textContent).toContain('ROUTE FOCUS')
+    expect(focus.textContent).toContain('KEEPER analyst')
+    expect(focus.textContent).toContain('agent keeper-analyst-agent')
+    expect(document.querySelector('[data-route-focused-keeper="analyst"]')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'CLEAR' }))
+
+    expect(mocks.replaceRoute).toHaveBeenCalledWith('monitoring', {
+      section: 'agents',
+      view: 'keepers',
+    })
   })
 })
 

@@ -1,7 +1,9 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
-import { Hash, Plus, RefreshCw, Users } from 'lucide-preact'
-import { createSubBoard, fetchSubBoards } from '../../api/board'
+import { Hash, Pencil, Plus, RefreshCw, Trash2, Users } from 'lucide-preact'
+import { createSubBoard, deleteSubBoard, fetchSubBoards, updateSubBoard } from '../../api/board'
+import { navigate } from '../../router'
+import { boardHearthFilter } from '../../store'
 import type { SubBoard, SubBoardAccess } from '../../types'
 import { ActionButton } from '../common/button'
 import { EmptyState, LoadingState } from '../common/feedback-state'
@@ -10,6 +12,7 @@ import { Select } from '../common/select'
 import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
 
 const ACCESS_OPTIONS: Array<{ value: SubBoardAccess; label: string }> = [
   { value: 'open', label: 'Open' },
@@ -36,7 +39,18 @@ function slugFromName(name: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-function SubBoardRow({ board }: { board: SubBoard }) {
+function formatMembers(members: string[]): string {
+  return members.join(', ')
+}
+
+interface SubBoardRowProps {
+  board: SubBoard
+  onEdit: (board: SubBoard) => void
+  onDelete: (board: SubBoard) => void
+  deleting: boolean
+}
+
+function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
   return html`
     <${SurfaceCard} variant="compact" testId=${`sub-board-row-${board.slug}`}>
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -45,8 +59,11 @@ function SubBoardRow({ board }: { board: SubBoard }) {
             <span class="inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]" aria-hidden="true">
               <${Hash} size=${15} />
             </span>
-            <div class="min-w-0">
-              <h3 class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${board.name || board.slug}</h3>
+            <div class="min-w-0 cursor-pointer" onClick=${() => {
+              boardHearthFilter.value = board.slug
+              navigate('workspace', { section: 'board' })
+            }}>
+              <h3 class="truncate text-sm font-semibold text-[var(--color-fg-primary)] hover:underline">${board.name || board.slug}</h3>
               <div class="truncate font-mono text-2xs text-[var(--color-fg-muted)]">/${board.slug}</div>
             </div>
           </div>
@@ -62,9 +79,28 @@ function SubBoardRow({ board }: { board: SubBoard }) {
             <span>${board.post_count} posts</span>
           </div>
         </div>
-        <div class="shrink-0 text-right text-2xs text-[var(--color-fg-muted)]">
+        <div class="shrink-0 flex flex-col items-end gap-2 text-right text-2xs text-[var(--color-fg-muted)]">
           <div class="font-medium text-[var(--color-fg-secondary)]">${board.owner || 'dashboard'}</div>
           <${TimeAgo} timestamp=${board.created_at} />
+          <div class="flex gap-1">
+            <${ActionButton}
+              variant="ghost"
+              size="sm"
+              onClick=${() => onEdit(board)}
+              ariaLabel="Edit sub-board"
+            >
+              <${Pencil} size=${12} aria-hidden="true" />
+            <//>
+            <${ActionButton}
+              variant="ghost"
+              size="sm"
+              onClick=${() => onDelete(board)}
+              disabled=${deleting}
+              ariaLabel="Delete sub-board"
+            >
+              <${Trash2} size=${12} aria-hidden="true" />
+            <//>
+          </div>
         </div>
       </div>
     <//>
@@ -81,6 +117,15 @@ export function SubBoardSurface() {
   const [access, setAccess] = useState<SubBoardAccess>('open')
   const [members, setMembers] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const [editingBoard, setEditingBoard] = useState<SubBoard | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editAccess, setEditAccess] = useState<SubBoardAccess>('open')
+  const [editMembers, setEditMembers] = useState('')
+  const [editSubmitting, setEditSubmitting] = useState(false)
+
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const effectiveSlug = useMemo(() => slug.trim() || slugFromName(name), [name, slug])
   const memberList = useMemo(() => parseMembers(members), [members])
@@ -127,6 +172,67 @@ export function SubBoardSurface() {
     }
   }
 
+  const startEdit = (board: SubBoard) => {
+    setEditingBoard(board)
+    setEditName(board.name)
+    setEditDescription(board.description)
+    setEditAccess(board.access)
+    setEditMembers(formatMembers(board.members))
+  }
+
+  const cancelEdit = () => {
+    setEditingBoard(null)
+    setEditName('')
+    setEditDescription('')
+    setEditMembers('')
+    setEditAccess('open')
+  }
+
+  const submitEdit = async (event: Event) => {
+    event.preventDefault()
+    if (!editingBoard) return
+    setEditSubmitting(true)
+    setError(null)
+    try {
+      const updates = {
+        name: editName.trim(),
+        description: editDescription.trim(),
+        access: editAccess,
+        members: parseMembers(editMembers),
+      }
+      await updateSubBoard(editingBoard.id, updates)
+      showToast('Sub-board updated', 'success')
+      cancelEdit()
+      await load()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update sub-board'
+      setError(message)
+      showToast(`Sub-board update failed: ${message}`, 'error')
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
+  const handleDelete = async (board: SubBoard) => {
+    const confirmed = await requestConfirm({
+      title: 'Delete Sub-board',
+      message: `Delete "/${board.slug}"? Posts inside will keep their hearth tag but the space itself will be removed.`,
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    setDeletingId(board.id)
+    try {
+      await deleteSubBoard(board.id)
+      showToast('Sub-board deleted', 'success')
+      await load()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete sub-board'
+      showToast(`Sub-board delete failed: ${message}`, 'error')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   return html`
     <section class="flex min-w-0 flex-col gap-4" aria-label="Sub-boards">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -148,81 +254,142 @@ export function SubBoardSurface() {
         <//>
       </div>
 
-      <form class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submit}>
-        <div class="grid gap-3 lg:grid-cols-[1fr_0.8fr_0.8fr]">
+      ${!editingBoard ? html`
+        <form class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submit}>
+          <div class="grid gap-3 lg:grid-cols-[1fr_0.8fr_0.8fr]">
+            <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+              Name
+              <${TextInput}
+                value=${name}
+                placeholder="Operations"
+                required
+                disabled=${submitting}
+                ariaLabel="Sub-board name"
+                testId="sub-board-name"
+                onInput=${(event: Event) => setName((event.target as HTMLInputElement).value)}
+              />
+            </label>
+            <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+              Slug
+              <${TextInput}
+                value=${slug}
+                placeholder=${effectiveSlug || 'operations'}
+                disabled=${submitting}
+                ariaLabel="Sub-board slug"
+                testId="sub-board-slug"
+                onInput=${(event: Event) => setSlug((event.target as HTMLInputElement).value)}
+              />
+            </label>
+            <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+              Access
+              <${Select}
+                value=${access}
+                options=${ACCESS_OPTIONS}
+                disabled=${submitting}
+                ariaLabel="Sub-board access"
+                testId="sub-board-access"
+                onInput=${(value: string) => setAccess(value as SubBoardAccess)}
+              />
+            </label>
+          </div>
           <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
-            Name
-            <${TextInput}
-              value=${name}
-              placeholder="Operations"
-              required
+            Description
+            <${TextArea}
+              value=${description}
+              rows=${3}
+              placeholder="Board lane for runtime operators"
               disabled=${submitting}
-              ariaLabel="Sub-board name"
-              testId="sub-board-name"
-              onInput=${(event: Event) => setName((event.target as HTMLInputElement).value)}
+              ariaLabel="Sub-board description"
+              onInput=${(event: Event) => setDescription((event.target as HTMLTextAreaElement).value)}
             />
           </label>
+          <div class="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+            <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+              Members
+              <${TextInput}
+                value=${members}
+                placeholder="keeper-a, keeper-b"
+                disabled=${submitting}
+                ariaLabel="Sub-board members"
+                testId="sub-board-members"
+                onInput=${(event: Event) => setMembers((event.target as HTMLInputElement).value)}
+              />
+            </label>
+            <${ActionButton}
+              type="submit"
+              variant="primary"
+              size="md"
+              disabled=${!canSubmit}
+              ariaBusy=${submitting}
+              testId="sub-board-create"
+            >
+              <span class="inline-flex items-center gap-1.5">
+                <${Plus} size=${14} aria-hidden="true" />
+                Create
+              </span>
+            <//>
+          </div>
+        </form>
+      ` : html`
+        <form class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submitEdit}>
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Edit /${editingBoard.slug}</h3>
+            <${ActionButton} variant="ghost" size="sm" onClick=${cancelEdit} ariaLabel="Cancel edit">Cancel<//>
+          </div>
+          <div class="grid gap-3 lg:grid-cols-[1fr_0.8fr]">
+            <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+              Name
+              <${TextInput}
+                value=${editName}
+                disabled=${editSubmitting}
+                ariaLabel="Sub-board name"
+                onInput=${(event: Event) => setEditName((event.target as HTMLInputElement).value)}
+              />
+            </label>
+            <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+              Access
+              <${Select}
+                value=${editAccess}
+                options=${ACCESS_OPTIONS}
+                disabled=${editSubmitting}
+                ariaLabel="Sub-board access"
+                onInput=${(value: string) => setEditAccess(value as SubBoardAccess)}
+              />
+            </label>
+          </div>
           <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
-            Slug
-            <${TextInput}
-              value=${slug}
-              placeholder=${effectiveSlug || 'operations'}
-              disabled=${submitting}
-              ariaLabel="Sub-board slug"
-              testId="sub-board-slug"
-              onInput=${(event: Event) => setSlug((event.target as HTMLInputElement).value)}
+            Description
+            <${TextArea}
+              value=${editDescription}
+              rows=${3}
+              disabled=${editSubmitting}
+              ariaLabel="Sub-board description"
+              onInput=${(event: Event) => setEditDescription((event.target as HTMLTextAreaElement).value)}
             />
           </label>
-          <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
-            Access
-            <${Select}
-              value=${access}
-              options=${ACCESS_OPTIONS}
-              disabled=${submitting}
-              ariaLabel="Sub-board access"
-              testId="sub-board-access"
-              onInput=${(value: string) => setAccess(value as SubBoardAccess)}
-            />
-          </label>
-        </div>
-        <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
-          Description
-          <${TextArea}
-            value=${description}
-            rows=${3}
-            placeholder="Board lane for runtime operators"
-            disabled=${submitting}
-            ariaLabel="Sub-board description"
-            onInput=${(event: Event) => setDescription((event.target as HTMLTextAreaElement).value)}
-          />
-        </label>
-        <div class="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
-          <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
-            Members
-            <${TextInput}
-              value=${members}
-              placeholder="keeper-a, keeper-b"
-              disabled=${submitting}
-              ariaLabel="Sub-board members"
-              testId="sub-board-members"
-              onInput=${(event: Event) => setMembers((event.target as HTMLInputElement).value)}
-            />
-          </label>
-          <${ActionButton}
-            type="submit"
-            variant="primary"
-            size="md"
-            disabled=${!canSubmit}
-            ariaBusy=${submitting}
-            testId="sub-board-create"
-          >
-            <span class="inline-flex items-center gap-1.5">
-              <${Plus} size=${14} aria-hidden="true" />
-              Create
-            </span>
-          <//>
-        </div>
-      </form>
+          <div class="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+            <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+              Members
+              <${TextInput}
+                value=${editMembers}
+                placeholder="keeper-a, keeper-b"
+                disabled=${editSubmitting}
+                ariaLabel="Sub-board members"
+                onInput=${(event: Event) => setEditMembers((event.target as HTMLInputElement).value)}
+              />
+            </label>
+            <${ActionButton}
+              type="submit"
+              variant="primary"
+              size="md"
+              disabled=${editSubmitting}
+              ariaBusy=${editSubmitting}
+            >
+              Save
+            <//>
+          </div>
+        </form>
+      `}
 
       ${error ? html`
         <div class="rounded-[var(--r-1)] border border-[var(--color-status-err)]/40 bg-[var(--color-status-err)]/10 px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">${error}</div>
@@ -234,7 +401,13 @@ export function SubBoardSurface() {
           ? html`<${EmptyState} message="No sub-boards yet." compact />`
           : html`
             <div class="grid gap-3" data-testid="sub-board-list">
-              ${boards.map(board => html`<${SubBoardRow} key=${board.id} board=${board} />`)}
+              ${boards.map(board => html`<${SubBoardRow}
+                key=${board.id}
+                board=${board}
+                onEdit=${startEdit}
+                onDelete=${handleDelete}
+                deleting=${deletingId === board.id}
+              />`)}
             </div>
           `}
     </section>

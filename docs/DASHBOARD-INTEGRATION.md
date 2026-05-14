@@ -33,24 +33,29 @@ code_refs:
 ## Canonical v1 Surfaces
 
 ### Top-level tabs
+- `cockpit` (hidden)
 - `overview`
 - `monitoring`
 - `command`
 - `connectors`
 - `workspace`
 - `lab`
+- `code`
 - `logs`
 
 ### Section inventory
+- `cockpit`
+  - `#cockpit` (hidden)
 - `overview`
   - `#overview`
 - `monitoring`
-  - `#monitoring?section=journey`
-  - `#monitoring?section=observatory` (hidden diagnostic)
-  - `#monitoring?section=agents`
   - `#monitoring?section=runtime`
+  - `#monitoring?section=agents`
+  - `#monitoring?section=goal-loop`
   - `#monitoring?section=fleet-health`
-  - `#monitoring?section=memory-subsystems` (hidden diagnostic)
+  - `#monitoring?section=journey` (hidden diagnostic)
+  - `#monitoring?section=observatory` (hidden diagnostic)
+  - `#monitoring?section=cognition` (hidden diagnostic)
 - `command`
   - `#command?section=operations`
   - sub-view는 `view=ops|governance|safety|inspector|connectors` 로 분기한다.
@@ -59,18 +64,18 @@ code_refs:
   - `#connectors?section=connector-status`
 - `workspace`
   - `#workspace?section=board`
+  - `#workspace?section=sub-boards`
   - `#workspace?section=planning`
   - `#workspace?section=repositories`
-  - `#workspace?section=collab-mvp` (hidden diagnostic)
   - `#workspace?section=verification`
 - `lab`
   - `#lab?section=tools`
   - `#lab?section=autoresearch`
   - `#lab?section=harness`
+- `code`
+  - `#code?section=ide-shell`
 - `logs`
   - `#logs`
-- hidden route
-  - `#code?section=ide-shell`
 
 ## Legacy Redirect Contract
 - `monitoring:sessions -> monitoring:agents`
@@ -104,16 +109,20 @@ code_refs:
   - overview + runtime shell metadata
 - `GET /api/v1/dashboard/namespace-truth`
   - journey / agents / shared namespace truth
+- `GET /api/v1/dashboard/goal-loop/status`
+  - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph
 - `GET /api/v1/dashboard/telemetry/summary`
   - fleet-health summary
 - `GET /api/v1/dashboard/memory-subsystems`
-  - memory subsystem health
+  - cognition memory sub-view read model
 - `GET /api/v1/attribution/summary`
   - fleet-health attribution view
 - `GET /api/v1/dashboard/safe-autonomy`
   - operations safety view
+- `GET /api/v1/dashboard/transport-health`
+  - runtime transport health + connection freshness view
 - `GET /api/v1/dashboard/keeper-feature-proof`
   - keeper autonomy feature proof gates, including 24h turn-span and web-search tool evidence
   - tool gates count only calls from known keeper names and expose `keeper_evidence.provenance_scope=known_keeper_tool_call_log`, per-tool successful/failing keepers, sandbox/network modes, task IDs, and goal IDs
@@ -121,7 +130,13 @@ code_refs:
   - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
-- `GET /api/v1/cascade/strategy-trace`, `GET /api/v1/cascade/health`
+- `GET /api/v1/providers`
+  - runtime provider inventory
+- `GET /api/v1/cascade/config`, `GET /api/v1/cascade/config/raw`
+  - runtime cascade config inspector read models
+- `GET /api/v1/cascade/client_capacity`, `GET /api/v1/cascade/client_capacity/history`, `GET /api/v1/cascade/slo`
+  - runtime cascade capacity + SLO view
+- `GET /api/v1/cascade/strategy_trace`, `GET /api/v1/cascade/health`
   - runtime inspector view
 - `GET /api/v1/operator/digest`
   - operations read model
@@ -129,18 +144,30 @@ code_refs:
   - connectors descriptor + live state
 - `GET /api/v1/dashboard/board`
   - workspace board
+- `GET /api/v1/board/hearths`, `GET /api/v1/board/curation`, `GET /api/v1/board/karma/ledger`
+  - workspace board filters, curation, and karma ledger
+- `GET /api/v1/board/sub-boards`
+  - workspace named board spaces
 - `GET /api/v1/dashboard/planning`
   - planning + goal tree
 - `GET /api/v1/git/graph`
   - workspace repository graph view
-- `GET /api/v1/verification/requests`
-  - workspace verification table
+- `GET /api/v1/repositories`, `GET /api/v1/workspace/tree`
+  - workspace repository registry and source tree browser read models
+- `GET /api/v1/verification/requests`, `GET /api/v1/verification/summary`
+  - workspace verification table and status rollup
+- `GET /api/v1/verification/specs`, `GET /api/v1/verification/tlc-results`
+  - TLA+ spec index and TLC result panels
 - `GET /api/v1/dashboard/tools`
   - lab tools inventory
+- `GET /api/v1/dashboard/tool-quality`, `GET /api/v1/tool-metrics`, `GET /api/v1/prompts`
+  - lab tool quality aggregates, unified usage metrics, and prompt registry read model
 - `GET /api/v1/autoresearch/loops`
   - lab autoresearch loops
 - `GET /api/v1/dashboard/harness-health`
   - lab harness health
+- `GET /api/v1/ide/annotations`, `GET /api/v1/ide/regions`, `GET /api/v1/ide/presence`
+  - code IDE annotations, source regions, and live collaboration presence
 - `GET /api/v1/dashboard/logs`
   - log viewer
 - `GET /api/v1/dashboard/surface-readiness`

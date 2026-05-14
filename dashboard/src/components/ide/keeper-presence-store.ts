@@ -5,18 +5,39 @@ export type KeeperPresenceStatus = 'active' | 'idle' | 'blocked'
 export interface KeeperPresenceEntry {
   readonly keeper_id: string
   readonly workspace_label: string
-  readonly branch: string
   readonly role: string
   readonly status: KeeperPresenceStatus
   readonly last_seen_ms: number
 }
 
-export interface KeeperPresenceSnapshot {
-  readonly runtime_id: string
-  readonly branch: string
-  readonly supervisor: string
-  readonly connected: boolean
-  readonly entries: ReadonlyArray<KeeperPresenceEntry>
+export type KeeperPresenceSnapshot =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'disconnected'; readonly reason: string }
+  | {
+      readonly kind: 'live'
+      readonly runtime_id: string
+      readonly branch?: string
+      readonly supervisor?: string
+      readonly entries: ReadonlyArray<KeeperPresenceEntry>
+    }
+
+export const LOADING_SNAPSHOT: KeeperPresenceSnapshot = Object.freeze({ kind: 'loading' })
+
+export function disconnectedSnapshot(reason: string): KeeperPresenceSnapshot {
+  return { kind: 'disconnected', reason }
+}
+
+export const globalPresenceSnapshot = signal<KeeperPresenceSnapshot>(LOADING_SNAPSHOT)
+
+export function updateKeeperPresenceFromSSE(snapshot: unknown): boolean {
+  const normalized = normalizeSnapshot(snapshot)
+  if (normalized === null) return false
+  globalPresenceSnapshot.value = normalized
+  return true
+}
+
+export function setGlobalPresence(snapshot: KeeperPresenceSnapshot): void {
+  globalPresenceSnapshot.value = snapshot
 }
 
 export interface KeeperPresenceStore {
@@ -29,28 +50,41 @@ export interface KeeperPresenceStore {
   readonly subscribe: (listener: () => void) => () => void
 }
 
-const EMPTY_SNAPSHOT: KeeperPresenceSnapshot = Object.freeze({
-  runtime_id: 'runtime',
-  branch: 'main',
-  supervisor: 'local',
-  connected: false,
-  entries: [],
-})
-
 const STATUS_ORDER: Record<KeeperPresenceStatus, number> = {
   active: 0,
   blocked: 1,
   idle: 2,
 }
 
+export const PRESENCE_DOT: Record<KeeperPresenceStatus, { readonly color: string; readonly label: string }> = {
+  active: { color: 'var(--color-status-ok)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', label: 'BLOCKED' },
+  idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
+}
+
 const VALID_STATUS = new Set<string>(['active', 'idle', 'blocked'])
 
+function entriesOf(snap: KeeperPresenceSnapshot): ReadonlyArray<KeeperPresenceEntry> {
+  return snap.kind === 'live' ? snap.entries : []
+}
+
+export function presenceEntries(
+  snap: KeeperPresenceSnapshot | null | undefined,
+): ReadonlyArray<KeeperPresenceEntry> {
+  if (snap === null || snap === undefined) return []
+  return entriesOf(snap)
+}
+
 export function createKeeperPresenceStore(
-  initialSnapshot: unknown = EMPTY_SNAPSHOT,
+  initialSnapshot: KeeperPresenceSnapshot = LOADING_SNAPSHOT,
 ): KeeperPresenceStore {
-  const snapshotSignal = signal<KeeperPresenceSnapshot>(EMPTY_SNAPSHOT)
+  const snapshotSignal = signal<KeeperPresenceSnapshot>(withSortedEntries(initialSnapshot))
 
   const seed = (snapshot: unknown): boolean => {
+    if (isPresenceSnapshot(snapshot)) {
+      snapshotSignal.value = withSortedEntries(snapshot)
+      return true
+    }
     const normalized = normalizeSnapshot(snapshot)
     if (normalized === null) return false
     snapshotSignal.value = normalized
@@ -58,7 +92,7 @@ export function createKeeperPresenceStore(
   }
 
   const reset = (): void => {
-    snapshotSignal.value = EMPTY_SNAPSHOT
+    snapshotSignal.value = LOADING_SNAPSHOT
   }
 
   const subscribe = (listener: () => void): (() => void) => {
@@ -72,15 +106,13 @@ export function createKeeperPresenceStore(
     })
   }
 
-  seed(initialSnapshot)
-
   return {
     seed,
     snapshot: () => snapshotSignal.value,
-    entries: () => snapshotSignal.value.entries,
-    activeEntries: () => snapshotSignal.value.entries.filter(entry => entry.status === 'active'),
+    entries: () => entriesOf(snapshotSignal.value),
+    activeEntries: () => entriesOf(snapshotSignal.value).filter(entry => entry.status === 'active'),
     entryForKeeper: (keeperId: string) =>
-      snapshotSignal.value.entries.find(entry => entry.keeper_id === keeperId) ?? null,
+      entriesOf(snapshotSignal.value).find(entry => entry.keeper_id === keeperId) ?? null,
     reset,
     subscribe,
   }
@@ -88,12 +120,21 @@ export function createKeeperPresenceStore(
 
 type UnknownRecord = Record<string, unknown>
 
+function isPresenceSnapshot(value: unknown): value is KeeperPresenceSnapshot {
+  if (!isRecord(value)) return false
+  const k = value['kind']
+  return k === 'loading' || k === 'disconnected' || k === 'live'
+}
+
+function withSortedEntries(snap: KeeperPresenceSnapshot): KeeperPresenceSnapshot {
+  if (snap.kind !== 'live') return snap
+  const sorted = [...snap.entries].sort(compareEntries)
+  return { ...snap, entries: sorted }
+}
+
 function normalizeSnapshot(value: unknown): KeeperPresenceSnapshot | null {
   if (!isRecord(value)) return null
   if (!hasNonEmptyString(value, 'runtime_id')) return null
-  if (!hasNonEmptyString(value, 'branch')) return null
-  if (!hasNonEmptyString(value, 'supervisor')) return null
-  if (typeof value.connected !== 'boolean') return null
   if (!Array.isArray(value.entries)) return null
 
   const entries = value.entries
@@ -101,31 +142,33 @@ function normalizeSnapshot(value: unknown): KeeperPresenceSnapshot | null {
     .filter((entry): entry is KeeperPresenceEntry => entry !== null)
     .sort(compareEntries)
 
-  return {
-    runtime_id: value.runtime_id as string,
-    branch: value.branch as string,
-    supervisor: value.supervisor as string,
-    connected: value.connected as boolean,
+  const branch = hasNonEmptyString(value, 'branch') ? (value['branch'] as string) : undefined
+  const supervisor = hasNonEmptyString(value, 'supervisor') ? (value['supervisor'] as string) : undefined
+
+  const live: KeeperPresenceSnapshot = {
+    kind: 'live',
+    runtime_id: value['runtime_id'] as string,
     entries,
+    ...(branch !== undefined ? { branch } : {}),
+    ...(supervisor !== undefined ? { supervisor } : {}),
   }
+  return live
 }
 
 function normalizeEntry(value: unknown): KeeperPresenceEntry | null {
   if (!isRecord(value)) return null
   if (!hasNonEmptyString(value, 'keeper_id')) return null
   if (!hasNonEmptyString(value, 'workspace_label')) return null
-  if (!hasNonEmptyString(value, 'branch')) return null
   if (!hasNonEmptyString(value, 'role')) return null
-  if (!isKeeperPresenceStatus(value.status)) return null
-  if (!Number.isFinite(value.last_seen_ms)) return null
+  if (!isKeeperPresenceStatus(value['status'])) return null
+  if (!Number.isFinite(value['last_seen_ms'])) return null
 
   return {
-    keeper_id: value.keeper_id as string,
-    workspace_label: value.workspace_label as string,
-    branch: value.branch as string,
-    role: value.role as string,
-    status: value.status as KeeperPresenceStatus,
-    last_seen_ms: value.last_seen_ms as unknown as number,
+    keeper_id: value['keeper_id'] as string,
+    workspace_label: value['workspace_label'] as string,
+    role: value['role'] as string,
+    status: value['status'] as KeeperPresenceStatus,
+    last_seen_ms: value['last_seen_ms'] as number,
   }
 }
 
@@ -140,7 +183,7 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function hasNonEmptyString(record: UnknownRecord, key: string): record is UnknownRecord & Record<typeof key, string> {
+function hasNonEmptyString(record: UnknownRecord, key: string): boolean {
   const value = record[key]
   return typeof value === 'string' && value.trim() !== ''
 }

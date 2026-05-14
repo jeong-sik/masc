@@ -36,10 +36,12 @@ let with_room f =
 let coord_ctx config : Tool_coord.context =
   { Tool_coord.config; agent_name = "planner" }
 
-let parse_json_result (result : Tool_coord.tool_result) =
-  match result with
-  | { success = true; message = body } -> Yojson.Safe.from_string body
-  | { success = false; message = body } -> fail body
+let parse_json_result (result : Tool_result.t) =
+  (* RFC-0062 Phase 4d-2: Tool_coord.tool_result alias deleted.
+     Callers now consume Tool_result.t directly. [legacy_message] preserves
+     the prior string body for backward-compatible parsing. *)
+  if result.success then Yojson.Safe.from_string result.legacy_message
+  else fail result.legacy_message
 
 let principal_json ~kind ~id =
   `Assoc [ ("kind", `String kind); ("id", `String id) ]
@@ -92,22 +94,25 @@ let make_keeper_meta ~name ~goal_id =
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
           ("goal", `String "Goal-linked keeper");
-          ("cascade_name", `String Keeper_config.default_cascade_name);
+          ("cascade_name", `String (Keeper_config.default_cascade_name ()));
         ])
   with
   | Ok meta -> { meta with active_goal_ids = [ goal_id ] }
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
-let append_keeper_receipt ?(outcome = "ok")
+let append_keeper_receipt
+    ?(outcome : Keeper_execution_receipt.outcome_kind = `Ok)
     ?(terminal_reason_code = "completed")
     ?(requested_tools = [ "keeper_fs_read" ])
     ?(reported_tools = [ "Read" ])
     ?(observed_tools = [ "keeper_fs_read" ])
     ?(canonical_tools = [ "keeper_fs_read" ])
     ?(tools_used = [ "keeper_fs_read" ])
-    ?(tool_contract_result = "satisfied")
+    ?(tool_contract_result : Keeper_execution_receipt.tool_contract_result =
+      Contract_satisfied_completion)
     ?(tool_requirement = Keeper_agent_tool_surface.Required)
-    ?(cascade_outcome = "completed") (config : Coord.config)
+    ?(cascade_outcome : Keeper_execution_receipt.cascade_outcome =
+      Cascade_completed) (config : Coord.config)
     (meta : Keeper_types.keeper_meta) =
   let started_at = Masc_domain.now_iso () in
   let ended_at = Masc_domain.now_iso () in
@@ -133,8 +138,8 @@ let append_keeper_receipt ?(outcome = "ok")
       tool_contract_result;
       tool_surface =
         {
-          turn_lane = "tool";
-          tool_surface_class = "mixed";
+          turn_lane = Keeper_agent_tool_surface.Lane_tool_required;
+          tool_surface_class = Keeper_agent_tool_surface.Surface_mixed;
           tool_requirement;
           visible_tool_count = 1;
           tool_gate_enabled = true;
@@ -144,10 +149,10 @@ let append_keeper_receipt ?(outcome = "ok")
         };
       sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;
-      network_mode = Keeper_types.network_mode_to_string meta.network_mode;
+      network_mode = meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
-      cascade_name = Keeper_cascade_profile.Runtime_name meta.cascade_name;
+      cascade_name = Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta);
       cascade_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;
@@ -156,7 +161,7 @@ let append_keeper_receipt ?(outcome = "ok")
       degraded_retry_cascade = None;
       fallback_reason = None;
       cascade_rotation_attempts = [];
-      stop_reason = Some terminal_reason_code;
+      stop_reason = Some Cascade_runner.Completed;
       error_kind = None;
       error_message = None;
       started_at;
@@ -842,7 +847,7 @@ let test_goal_detail_uses_receipt_disposition_for_required_tool_failure () =
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt ~reported_tools:[] ~observed_tools:[] ~canonical_tools:[]
-    ~tools_used:[] ~tool_contract_result:"missing_required_tool_use" config meta;
+    ~tools_used:[] ~tool_contract_result:Contract_missing_required_tool_use config meta;
   match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
   | Error msg -> fail msg
   | Ok json ->
@@ -910,8 +915,9 @@ let test_goal_detail_does_not_promote_synthetic_blocker_over_receipt () =
       runtime =
         {
           base.runtime with
-          last_blocker = "turn timed out";
-          last_blocker_class = Some Keeper_types.Turn_timeout;
+          last_blocker =
+            Some (Keeper_types.blocker_info_of_class
+                    ~detail:"turn timed out" Keeper_types.Turn_timeout);
         };
     }
   in
@@ -969,8 +975,9 @@ let test_goal_detail_promotes_newer_runtime_blocker_over_stale_receipt () =
               last_turn_ts = Unix.gettimeofday () +. 60.0;
             };
           last_blocker =
-            "Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}";
-          last_blocker_class = Some Keeper_types.Oas_timeout_budget;
+            Some (Keeper_types.blocker_info_of_class
+                    ~detail:"Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}"
+                    Keeper_types.Oas_timeout_budget);
         };
     }
   in
@@ -1035,8 +1042,9 @@ let test_goal_detail_keeps_decision_terminal_reason_over_newer_blocker () =
               last_turn_ts = Unix.gettimeofday () +. 60.0;
             };
           last_blocker =
-            "Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}";
-          last_blocker_class = Some Keeper_types.Oas_timeout_budget;
+            Some (Keeper_types.blocker_info_of_class
+                    ~detail:"Internal error: [masc_oas_error] {\"kind\":\"oas_timeout_budget\"}"
+                    Keeper_types.Oas_timeout_budget);
         };
     }
   in
@@ -1074,7 +1082,7 @@ let test_goal_detail_derives_attention_from_receipt_disposition () =
    | Ok () -> ()
    | Error err -> fail ("write_meta failed: " ^ err));
   append_keeper_receipt
-    ~tool_contract_result:"needs_execution_progress"
+    ~tool_contract_result:Contract_needs_execution_progress
     config meta;
   match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
   | Error msg -> fail msg

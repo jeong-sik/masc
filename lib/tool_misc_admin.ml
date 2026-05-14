@@ -27,7 +27,7 @@ open Tool_args
 
 module U = Yojson.Safe.Util
 
-type tool_result = bool * string
+type tool_result = Tool_result.t
 
 (** SSOT for canonical `section` values accepted by
     [masc_tool_admin_update]. Adding a new section requires:
@@ -71,7 +71,7 @@ let int_arg_opt args key =
 
 let permission_to_json tool_name =
   match Auth.permission_for_tool tool_name with
-  | Some permission -> `String (Masc_domain.show_permission permission)
+  | Some permission -> `String (Masc_domain.permission_to_string permission)
   | None -> `Null
 
 let auth_snapshot_json ctx =
@@ -167,72 +167,77 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
        Capability_registry.surface_snapshot_json Config.raw_all_tool_schemas);
     ]
 
-let enforcement_summary_json () =
-  `List
+(** Single row in the surface-enforcement inventory. *)
+type enforcement_row = {
+  surface : string;
+  status : Enforcement_status.t;
+  reason : string;
+}
+
+let enforcement_row_to_yojson (r : enforcement_row) : Yojson.Safe.t =
+  `Assoc
     [
-      `Assoc
-        [
-          ("surface", `String "room.auth.permission_map");
-          ("status", `String "conditional");
-          ("reason",
-           `String
-             "Auth permission checks are enforced only when room auth is enabled.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "tool_catalog.visibility");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Hidden tools are removed from default discovery and may be direct-call blocked.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "keeper.eval_gate.allowed_tools");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Keeper uses Eval_gate allow/deny lists at tool-call time.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "unit.policy.kill_switch");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Command-plane assignment blocks operations targeting units with kill-switch enabled.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "unit.policy.frozen");
-          ("status", `String "enforced");
-          ("reason",
-           `String
-             "Command-plane assignment blocks operations targeting frozen units.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "unit.policy.tool_allowlist");
-          ("status", `String "advisory_only");
-          ("reason",
-           `String
-             "Stored in CPv2 topology/policy JSON but not wired into runtime tool dispatch on main.");
-        ];
-      `Assoc
-        [
-          ("surface", `String "unit.policy.model_allowlist");
-          ("status", `String "advisory_only");
-          ("reason",
-           `String
-             "Stored in CPv2 topology/policy JSON but not wired into runtime model selection on main.");
-        ];
+      ("surface", `String r.surface);
+      ("status", `String (Enforcement_status.to_label r.status));
+      ("reason", `String r.reason);
     ]
+;;
+
+let enforcement_summary_rows : enforcement_row list =
+  [
+    {
+      surface = "room.auth.permission_map";
+      status = Conditional;
+      reason =
+        "Auth permission checks are enforced only when room auth is enabled.";
+    };
+    {
+      surface = "tool_catalog.visibility";
+      status = Enforced;
+      reason =
+        "Hidden tools are removed from default discovery and may be direct-call blocked.";
+    };
+    {
+      surface = "keeper.eval_gate.allowed_tools";
+      status = Enforced;
+      reason = "Keeper uses Eval_gate allow/deny lists at tool-call time.";
+    };
+    {
+      surface = "unit.policy.kill_switch";
+      status = Enforced;
+      reason =
+        "Command-plane assignment blocks operations targeting units with kill-switch enabled.";
+    };
+    {
+      surface = "unit.policy.frozen";
+      status = Enforced;
+      reason =
+        "Command-plane assignment blocks operations targeting frozen units.";
+    };
+    {
+      surface = "unit.policy.tool_allowlist";
+      status = Advisory_only;
+      reason =
+        "Stored in CPv2 topology/policy JSON but not wired into runtime tool dispatch on main.";
+    };
+    {
+      surface = "unit.policy.model_allowlist";
+      status = Advisory_only;
+      reason =
+        "Stored in CPv2 topology/policy JSON but not wired into runtime model selection on main.";
+    };
+  ]
+;;
+
+let enforcement_summary_json () =
+  `List (List.map enforcement_row_to_yojson enforcement_summary_rows)
+;;
 
 (* ================================================================ *)
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_feature_flags args : tool_result =
+let handle_feature_flags ~tool_name ~start_time args : tool_result =
   let category_filter =
     match U.member "category" args with
     | `String c when not (String.equal (String.trim c) "") -> Some (String.lowercase_ascii (String.trim c))
@@ -260,29 +265,25 @@ let handle_feature_flags args : tool_result =
     ("deprecated_tools", `Int (List.length deprecated_tools));
     ("deprecated_tool_names", `List (List.map (fun (name, _) -> `String name) deprecated_tools));
   ] in
-  (true, Yojson.Safe.to_string json)
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
-let handle_config args : tool_result =
+let handle_config ~tool_name ~start_time args : tool_result =
   let cat = get_string_opt args "category" in
   let json = Env_config_introspect.to_json_filtered ?cat () in
-  (true, Yojson.Safe.to_string json)
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
-let handle_tool_admin_snapshot ctx args =
+let handle_tool_admin_snapshot ~tool_name ~start_time ctx args =
   let include_hidden = get_bool args "include_hidden" true in
   let include_deprecated = get_bool args "include_deprecated" true in
-  let payload =
-    `Assoc
-      [
-        ("status", `String "ok");
-        ("generated_at", `String (Masc_domain.now_iso ()));
-        ("auth", auth_snapshot_json ctx);
-        ( "tool_inventory",
-          tool_inventory_json ctx ~include_hidden ~include_deprecated );
-      ]
-  in
-  (true, Yojson.Safe.to_string payload)
+  Tool_args.ok_result ~tool_name ~start_time
+    [
+      ("generated_at", `String (Masc_domain.now_iso ()));
+      ("auth", auth_snapshot_json ctx);
+      ( "tool_inventory",
+        tool_inventory_json ctx ~include_hidden ~include_deprecated );
+    ]
 
-let handle_tool_admin_update ctx args =
+let handle_tool_admin_update ~tool_name ~start_time ctx args =
   let section =
     get_string args "section" "" |> String.trim |> String.lowercase_ascii
   in
@@ -290,7 +291,7 @@ let handle_tool_admin_update ctx args =
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
       if not ((=) (U.member "default_role" args) `Null) then
-        (false, "default_role is no longer supported")
+        Tool_result.error ~tool_name ~start_time "default_role is no longer supported"
       else
       let require_token =
         match bool_arg_opt args "require_token" with
@@ -305,7 +306,7 @@ let handle_tool_admin_update ctx args =
         | None -> Ok current.token_expiry_hours
       in
       (match expiry_hours with
-      | Error err -> (false, err)
+      | Error err -> Tool_result.error ~tool_name ~start_time err
       | Ok token_expiry_hours ->
           let room_secret =
             match enabled_opt with
@@ -330,17 +331,13 @@ let handle_tool_admin_update ctx args =
             }
           in
           Auth.save_auth_config ctx.config.base_path updated;
-          let payload =
-            `Assoc
-              [
-                ("status", `String "ok");
-                ("section", `String "auth");
-                ("room_secret", json_string_option room_secret);
-                ("result", auth_snapshot_json ctx);
-              ]
-          in
-          (true, Yojson.Safe.to_string payload))
+          Tool_args.ok_result ~tool_name ~start_time
+            [
+              ("section", `String "auth");
+              ("room_secret", json_string_option room_secret);
+              ("result", auth_snapshot_json ctx);
+            ])
   | _ ->
-      (false,
-       Printf.sprintf "section must be one of: %s"
-         (String.concat " | " valid_admin_section_strings))
+      Tool_result.error ~tool_name ~start_time
+        (Printf.sprintf "section must be one of: %s"
+           (String.concat " | " valid_admin_section_strings))

@@ -386,9 +386,52 @@ def summarize_decide(decide: dict[str, Any] | None) -> PhaseStatus:
     return PhaseStatus(status=status, summary=summary)
 
 
-def summarize_act(decide: dict[str, Any] | None) -> PhaseStatus:
+def anti_stagnation_summary(
+    anti_stagnation: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if anti_stagnation is None:
+        return None
+    violations_raw = anti_stagnation.get("violations", [])
+    violations = violations_raw if isinstance(violations_raw, list) else []
+    return {
+        "status": anti_stagnation.get("status", "unknown"),
+        "checked_at": anti_stagnation.get("checked_at"),
+        "findings_total": as_int(anti_stagnation.get("findings_total")),
+        "still_present_total": as_int(anti_stagnation.get("still_present_total")),
+        "violations_total": as_int(anti_stagnation.get("violations_total")),
+        "escalations_required": as_int(anti_stagnation.get("escalations_required")),
+        "violations": [
+            {
+                "finding_id": violation.get("finding_id", "unknown"),
+                "rule_id": violation.get("rule_id", "unknown"),
+                "severity": violation.get("severity", "unknown"),
+                "age_hours": violation.get("age_hours"),
+                "deadline_hours": violation.get("deadline_hours"),
+            }
+            for violation in violations[:10]
+            if isinstance(violation, dict)
+        ],
+    }
+
+
+def summarize_act(
+    decide: dict[str, Any] | None,
+    anti_stagnation: dict[str, Any] | None = None,
+) -> PhaseStatus:
+    anti_summary = anti_stagnation_summary(anti_stagnation)
     if decide is None:
-        return PhaseStatus(status="unknown", summary={"reason": "decide_json_missing"})
+        summary: dict[str, Any] = {"reason": "decide_json_missing"}
+        if anti_summary is not None:
+            summary["anti_stagnation"] = anti_summary
+            status = (
+                "critical"
+                if anti_summary["violations_total"] > 0
+                else "ok"
+                if anti_summary["status"] == "ok"
+                else "unknown"
+            )
+            return PhaseStatus(status=status, summary=summary)
+        return PhaseStatus(status="unknown", summary=summary)
 
     decisions_total = as_int(decide.get("decisions_total"))
     act_missing_count = as_int(decide.get("act_missing_count"), default=-1)
@@ -401,23 +444,34 @@ def summarize_act(decide: dict[str, Any] | None) -> PhaseStatus:
             if decisions_total == 0 or act_linked_count > 0
             else "warning"
         )
-        return PhaseStatus(
-            status=status,
-            summary={
-                "decisions_total": decisions_total,
-                "act_linked_count": max(act_linked_count, 0),
-                "act_missing_count": act_missing_count,
-            },
-        )
+        summary = {
+            "decisions_total": decisions_total,
+            "act_linked_count": max(act_linked_count, 0),
+            "act_missing_count": act_missing_count,
+        }
+        if anti_summary is not None:
+            summary["anti_stagnation"] = anti_summary
+            if anti_summary["violations_total"] > 0:
+                status = "critical"
+        return PhaseStatus(status=status, summary=summary)
     if decisions_total > 0:
-        return PhaseStatus(
-            status="unknown",
-            summary={
-                "decisions_total": decisions_total,
-                "reason": "act_map_not_evaluated",
-            },
-        )
-    return PhaseStatus(status="ok", summary={"decisions_total": 0})
+        summary = {
+            "decisions_total": decisions_total,
+            "reason": "act_map_not_evaluated",
+        }
+        status = "unknown"
+        if anti_summary is not None:
+            summary["anti_stagnation"] = anti_summary
+            if anti_summary["violations_total"] > 0:
+                status = "critical"
+        return PhaseStatus(status=status, summary=summary)
+    summary = {"decisions_total": 0}
+    status = "ok"
+    if anti_summary is not None:
+        summary["anti_stagnation"] = anti_summary
+        if anti_summary["violations_total"] > 0:
+            status = "critical"
+    return PhaseStatus(status=status, summary=summary)
 
 
 def summarize_verify(verify: dict[str, Any] | None) -> PhaseStatus:
@@ -497,12 +551,26 @@ def system_health_signals(observe: dict[str, Any] | None) -> dict[str, Any]:
     return signals
 
 
+def attach_anti_stagnation_signal(
+    signals: dict[str, Any],
+    anti_stagnation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    anti_summary = anti_stagnation_summary(anti_stagnation)
+    if anti_summary is None:
+        return signals
+    return {
+        **signals,
+        "anti_stagnation": anti_summary,
+    }
+
+
 def build_status_report(
     *,
     observe: dict[str, Any] | None,
     orient: dict[str, Any] | None,
     decide: dict[str, Any] | None,
     verify: dict[str, Any] | None,
+    anti_stagnation: dict[str, Any] | None = None,
     generated_at: str | None = None,
     loop_iteration: str = "unknown",
 ) -> GoalLoopStatus:
@@ -510,7 +578,7 @@ def build_status_report(
         "observe": summarize_observe(observe),
         "orient": summarize_orient(orient),
         "decide": summarize_decide(decide),
-        "act": summarize_act(decide),
+        "act": summarize_act(decide, anti_stagnation),
         "verify": summarize_verify(verify),
     }
     overall = status_max([phase.status for phase in phases.values()])
@@ -521,7 +589,10 @@ def build_status_report(
         overall_status=overall,
         phases=phases,
         next_action=decide_next_action(decide),
-        system_health_signals=system_health_signals(observe),
+        system_health_signals=attach_anti_stagnation_signal(
+            system_health_signals(observe),
+            anti_stagnation,
+        ),
     )
 
 
@@ -564,6 +635,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--orient-json", help="JSON from orient_goal_loop_logs.py")
     parser.add_argument("--decide-json", help="JSON from decide_goal_loop_findings.py")
     parser.add_argument("--verify-json", help="JSON from verify_goal_loop_logs.py")
+    parser.add_argument(
+        "--anti-stagnation-json",
+        help="JSON from goal_loop_anti_stagnation.py.",
+    )
     parser.add_argument("--loop-iteration", default="unknown")
     parser.add_argument(
         "--format",
@@ -587,6 +662,7 @@ def main(argv: list[str] | None = None) -> int:
         orient=load_json_file(args.orient_json),
         decide=load_json_file(args.decide_json),
         verify=load_json_file(args.verify_json),
+        anti_stagnation=load_json_file(args.anti_stagnation_json),
         loop_iteration=args.loop_iteration,
     )
     if args.format == "json":

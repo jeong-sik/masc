@@ -537,13 +537,13 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
      Missed when #10664 introduced the actor model. *)
   Session.start_loop registry ~sw;
   (* Same sweep miss as Session.start_loop above: PR #10730 introduced
-     [Oas_worker_cascade] as an Eio actor (mailbox + Promise.await) but
+     [Cascade_legacy_runner] as an Eio actor (mailbox + Promise.await) but
      never wired its [start_actor_if_needed] into a bootstrap path.
      [cascade_metrics_json ()] (called from [tool_unified.ml:summary_report],
      which the dashboard tool inspector hits) does
      [Stream.add Get_metrics_json u; Promise.await p]. Without an actor
      fiber draining [stream], the await blocks forever. *)
-  Oas_worker_cascade.start_actor_if_needed ~sw;
+  Cascade_legacy_runner.start_actor_if_needed ~sw;
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event

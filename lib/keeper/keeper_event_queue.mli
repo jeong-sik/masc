@@ -2,14 +2,22 @@
 
     Models the contract verified in
     [specs/keeper-state-machine/KeeperEventQueue.tla]: enqueue is a
-    side-effect-free Event Layer operation, dequeue happens once per
-    Policy Layer turn, and dedup/urgency are bookkeeping concerns
-    that never delay an [enqueue].
+    side-effect-free Event Layer operation, the Policy Layer drains
+    pending stimuli once it gets a turn, and dedup/urgency are
+    bookkeeping concerns that never delay an [enqueue].
 
-    This module is data only. Wiring into
-    [keeper_keepalive_signal.wakeup_keeper] and
-    [Heartbeat_smart.should_emit] lives in a follow-up patch so
-    the queue can be exercised in isolation by tests first. *)
+    This module is data only. The enqueue side is wired:
+    [keeper_keepalive_signal.ml] calls [Keeper_registry.enqueue_event]
+    before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
+    [keeper_heartbeat_loop.ml] drains the board-signal batch within the
+    debounce window via [Keeper_registry.drain_board_events] (a CAS loop
+    over [drain_board_window]) and falls back to a single non-board
+    [dequeue_event] when that batch is empty — either path pins the
+    [Conservation] invariant. [run_smart_heartbeat_gate] then snapshots
+    the queue and forces [Emit] when it is non-empty (pinning
+    [QueueNeverStarvedBySkip] — the queue is read before any [Skip]
+    takes effect, though that read currently lives in the gate rather
+    than inside [Heartbeat_smart.should_emit] itself). *)
 
 type urgency =
   | Immediate  (** operator commands and other latency-critical signals *)
@@ -70,3 +78,10 @@ val classify : stimulus -> stimulus_class
 (** [classify s] discriminates the stimulus by inspecting its payload.
     No Yojson dependency — uses lightweight prefix matching so the Event
     Layer data module stays self-contained. *)
+
+val drain_board_window : ?window_sec:float -> t -> stimulus list * t
+(** [drain_board_window q] separates board-signal stimuli that arrived
+    within [window_sec] seconds (default [2.0]) of now from the rest of
+    the queue.  Board signals are urgency-sorted; non-board stimuli and
+    board signals outside the window remain in the returned queue in
+    their original order. *)

@@ -4,6 +4,7 @@
 // decorative separators, and the terminal crumb marked aria-current="page".
 
 import { html } from 'htm/preact'
+import { ringFocusClasses } from './ring'
 
 export interface BreadcrumbItem {
   label: string
@@ -37,7 +38,7 @@ const CRUMB_CLASS = [
 const INTERACTIVE_CLASS = [
   CRUMB_CLASS,
   'cursor-pointer hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)]',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)]',
+  ringFocusClasses({ tone: 'accent-medium', width: 2 }),
 ].join(' ')
 const CURRENT_CLASS = `${CRUMB_CLASS} text-[var(--color-fg-primary)]`
 const SEPARATOR_CLASS = 'text-[var(--color-fg-disabled)]'

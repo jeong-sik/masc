@@ -116,10 +116,27 @@ let resolve_claim_goal_scope ?agent_tool_names
           fallback_reason = None;
         }
 
+let resolve_observation_claim_goal_scope ?agent_tool_names ~(config : Coord.config)
+    ~(meta : keeper_meta) () =
+  let allow_empty_goal_scope_fallback =
+    active_goal_ids_are_auto_keeper_goals config ~meta meta.active_goal_ids
+  in
+  resolve_claim_goal_scope ?agent_tool_names ~allow_empty_goal_scope_fallback
+    ~config ~meta ()
+
 let task_is_blocked (task : Masc_domain.task) =
+  (* Enumerate every [task_status] variant so the compiler flags any new
+     constructor here. The old [_ -> false] silently extended "not blocked"
+     to any future status (e.g. a hypothetical [BlockedOnReview]) which
+     would be exactly the wrong default for a blocked-task detector. *)
   match task.task_status with
   | Masc_domain.AwaitingVerification _ -> true
-  | _ -> false
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ ->
+    false
 
 let goal_progress_json ?config (meta : keeper_meta) =
   match config with
@@ -194,26 +211,19 @@ let nonempty_list = function
   | Some values -> values
   | None -> []
 
-let provider_of_model = function
-  | None -> None
-  | Some model -> (
-      let model = String.trim model in
-      if model = "" then None
-      else
-        match String.index_opt model ':' with
-        | Some idx when idx > 0 -> Some (String.sub model 0 idx)
-        | _ -> None)
+let runtime_lane_label = "runtime"
+
+let runtime_lane_opt = function
+  | Some value when String.trim value <> "" -> Some runtime_lane_label
+  | _ -> None
 
 let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
     ?visible_tool_count ?required_tools ?missing_required_tools ?provider ?model
     ?cascade_profile () : Yojson.Safe.t =
-  let provider =
-    match provider with
-    | Some _ -> provider
-    | None -> provider_of_model model
-  in
+  let provider = runtime_lane_opt provider in
+  let model = runtime_lane_opt model in
   `Assoc
     [
       ("keeper_name", `String keeper_name);

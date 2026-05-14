@@ -11,6 +11,7 @@ import {
   type LineOwnership,
 } from './keeper-line-ownership-store'
 import type { UnifiedDiffRow } from '../../api/workspace'
+import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import {
   readOnlyExt,
   themeExt,
@@ -18,12 +19,46 @@ import {
   lineNumberExt,
   blameExtensions,
   keeperLineSelectExt,
+  keeperTraceLineGutterExt,
+  keeperTraceLinesForFile,
+  contextFocusLineExt,
+  focusEditorContextLine,
+  annotationLineChipExt,
   pushOwnership,
+  pushKeeperTraceLines,
+  pushAnnotationLines,
   internalDocumentSync,
   syntaxHighlightExt,
+  type EditorKeeperTraceLine,
+  type EditorKeeperTraceLineEvent,
 } from './ide-editor-extensions'
+import {
+  lspDiagnosticSnapshot,
+  lspExtension,
+  getSelectedAnnotation,
+  clearSelectedAnnotation,
+  type SelectedAnnotation,
+} from './ide-lsp-client'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
+import { keeperCursorExtension } from './keeper-cursor-cm-extension'
+import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
+import { filterTraceEventsByReplay, keeperTraceState, type KeeperTraceEvent } from './keeper-trace-store'
+import {
+  globalPresenceSnapshot,
+  presenceEntries,
+  type KeeperPresenceSnapshot,
+  type KeeperPresenceStatus,
+} from './keeper-presence-store'
+import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from './ide-context-lens'
+import {
+  focusIdeContextAnchor,
+  ideContextFocus,
+  normalizeIdeContextFilePath,
+  type IdeContextFocus,
+} from './ide-state'
+import { ideConversationThreadSnapshot } from './ide-context-bridge'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -42,6 +77,14 @@ interface IdeEditorProps {
   readonly onFindOpen?: () => void
   readonly onFindClose?: () => void
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
+  readonly annotations?: ReadonlyArray<IdeAnnotation>
+}
+
+interface CurrentFileSignal {
+  readonly id: string
+  readonly label: string
+  readonly count: number
+  readonly title: string
 }
 
 export interface FindOptions {
@@ -58,6 +101,7 @@ export interface FindMatch {
 }
 
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
+const EMPTY_TRACE_EVENTS: ReadonlyArray<KeeperTraceEvent> = []
 
 const VIEW_LABEL: Record<IdeEditorView, string> = {
   source: 'SOURCE',
@@ -78,18 +122,84 @@ export function IdeEditor({
   onFindOpen,
   onFindClose,
   onKeeperLineSelect,
+  annotations = [],
 }: IdeEditorProps) {
   const [, forceRender] = useState(0)
 
-  useEffect(() => documentStore.subscribe(() => forceRender(tick => tick + 1)), [documentStore])
-  useEffect(() => ownershipStore.subscribe(() => forceRender(tick => tick + 1)), [ownershipStore])
+  useEffect(() => {
+    const unsub = documentStore.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [documentStore])
+  useEffect(() => {
+    const unsub = ownershipStore.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [ownershipStore])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = ideContextFocus.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = ideConversationThreadSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = lspDiagnosticSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = keeperTraceState.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = ideReplayUntilMs.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const document = documentStore.document()
+  if (document.file_path === null) {
+    return html`
+      <div
+        role="region"
+        aria-label="ide editor"
+        data-testid="ide-editor-empty"
+        style=${{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          color: 'var(--color-fg-disabled)',
+          fontStyle: 'italic',
+        }}
+      >no active file</div>
+    `
+  }
+  const documentFilePath: string = document.file_path
   const lines = documentStore.lines()
   const ownership = ownershipStore.ownership()
   const keepers = ownershipStore.knownKeepers()
+  const overlay = cursorOverlaySignal.value
+  const presence = globalPresenceSnapshot.value
+  const contextFocus = ideContextFocus.value
+  const currentFileFocus = contextFocus?.file_path === documentFilePath ? contextFocus : null
+  const activeCursors = keepersWithCursorInFile(overlay.cursors, documentFilePath)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
   const currentDiffRows = diffRows()
+  const replayTraceEvents = filterTraceEventsByReplay(keeperTraceState.value.events, ideReplayUntilMs.value)
+  const currentFileSignals = buildCurrentFileSignals({
+    filePath: documentFilePath,
+    annotations,
+    diffRows: currentDiffRows,
+    activeKeeperCount: activeCursors.length,
+    traceEvents: replayTraceEvents,
+  })
   const gridTemplateRows = editorGridRows(activeLayerKinds.length > 0, findOpen)
 
   return html`
@@ -128,6 +238,45 @@ export function IdeEditor({
         <span style=${{ marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
           ${lines.length} lines · ownership · ${keepers.length} keepers · ${activeLayerKinds.length} layers
         </span>
+        <${EditorCurrentFileSignals} signals=${currentFileSignals} />
+        ${currentFileFocus ? html`
+          <div
+            role="status"
+            class="ide-editor-context-focus"
+            data-testid="ide-context-focus-status"
+            title=${currentFileFocus.file_path}
+          >
+            <span class="ide-editor-context-focus-label">
+              Focused ${currentFileFocus.line !== undefined ? `L${currentFileFocus.line}` : currentFileFocus.surface}
+              · ${currentFileFocus.label}
+            </span>
+            <span class="ide-editor-context-focus-meta" aria-label="Focused context metadata">
+              ${contextFocusMetaParts(currentFileFocus).map(part => html`<span>${part}</span>`)}
+            </span>
+            ${currentFileFocus.route_links && currentFileFocus.route_links.length > 0 ? html`
+              <span class="ide-editor-context-route-links" aria-label="Focused context operational links">
+                ${currentFileFocus.route_links.map(link => EditorContextRouteLink(link))}
+              </span>
+            ` : null}
+          </div>
+        ` : null}
+        ${activeCursors.length > 0 ? html`
+          <ul
+            role="status"
+            aria-label="Keepers active in this file"
+            style=${{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--sp-1)',
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            ${activeCursors.map(ac => EditorKeeperCursorChip(ac, presence, ac.keeper_id))}
+          </ul>
+        ` : null}
         ${onFindOpen || onFindClose ? html`
           <button
             type="button"
@@ -148,7 +297,7 @@ export function IdeEditor({
         ` : null}
       </div>
       ${activeLayerKinds.length > 0
-        ? LayerOverlaySummary(activeLayerKinds, ownership, keepers)
+        ? LayerOverlaySummary(activeLayerKinds, ownership, keepers, annotations)
         : null}
       ${findOpen
         ? html`<${IdeFindPanel}
@@ -158,18 +307,222 @@ export function IdeEditor({
           />`
         : null}
       ${activeView === 'split-diff'
-        ? SplitDiffView(currentDiffRows)
+        ? SplitDiffView(currentDiffRows, currentFileFocus)
         : activeView === 'unified'
-          ? UnifiedDiffView(currentDiffRows)
+          ? UnifiedDiffView(currentDiffRows, currentFileFocus)
           : html`<${CodeMirrorEditor}
               documentStore=${documentStore}
               ownershipStore=${ownershipStore}
               showBlame=${activeView === 'blame'}
               keepers=${keepers}
               onKeeperLineSelect=${onKeeperLineSelect}
+              contextFocus=${currentFileFocus}
+              traceActive=${activeLayers.has('keeper-trace')}
+              traceEvents=${replayTraceEvents}
+              annotations=${annotations}
             />`
       }
     </div>
+  `
+}
+
+function buildCurrentFileSignals({
+  filePath,
+  annotations,
+  diffRows,
+  activeKeeperCount,
+  traceEvents,
+}: {
+  readonly filePath: string
+  readonly annotations: ReadonlyArray<IdeAnnotation>
+  readonly diffRows: ReadonlyArray<UnifiedDiffRow>
+  readonly activeKeeperCount: number
+  readonly traceEvents: ReadonlyArray<KeeperTraceEvent>
+}): ReadonlyArray<CurrentFileSignal> {
+  const normalizedFile = normalizeIdeContextFilePath(filePath)
+  const matchesCurrentFile = (value: string | null): boolean => {
+    if (value === null) return false
+    return normalizedFile !== null && normalizeIdeContextFilePath(value) === normalizedFile
+  }
+  const diagnosticCount = normalizedFile
+    ? lspDiagnosticSnapshot.value.get(normalizedFile)?.length ?? 0
+    : 0
+  const annotationCount = annotations.filter(annotation =>
+    matchesCurrentFile(annotation.file_path),
+  ).length
+  const threadSnapshot = ideConversationThreadSnapshot.value
+  const threadCount = matchesCurrentFile(threadSnapshot.filePath)
+    ? threadSnapshot.threads.length
+    : 0
+  const changedRows = diffRows.filter(row => row.kind === 'add' || row.kind === 'delete')
+  const fileTraceEvents = traceEvents.filter(event => {
+    const traceFilePath = traceEventFilePath(event)
+    return traceFilePath !== null && matchesCurrentFile(traceFilePath)
+  })
+  const traceHitCount = fileTraceEvents.reduce((sum, event) => sum + event.count, 0)
+  const operationalTraceCount = fileTraceEvents.reduce((sum, event) => {
+    if (event.source !== 'activity-event') return sum
+    const surface = event.surface.trim().toLowerCase()
+    return surface !== '' && surface !== 'activity' ? sum + event.count : sum
+  }, 0)
+  return [
+    {
+      id: 'lsp',
+      label: 'LSP',
+      count: diagnosticCount,
+      title: `${diagnosticCount} current-file diagnostic${diagnosticCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'notes',
+      label: 'Notes',
+      count: annotationCount,
+      title: `${annotationCount} current-file annotation${annotationCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'threads',
+      label: 'Threads',
+      count: threadCount,
+      title: `${threadCount} current-file anchored thread${threadCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'trace',
+      label: 'Trace',
+      count: traceHitCount,
+      title: `${traceHitCount} current-file trace event${traceHitCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'ops',
+      label: 'Ops',
+      count: operationalTraceCount,
+      title: `${operationalTraceCount} current-file operational surface link${operationalTraceCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'diff',
+      label: 'Diff',
+      count: changedRows.length,
+      title: `${changedRows.length} current-file changed row${changedRows.length === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'keepers',
+      label: 'Keepers',
+      count: activeKeeperCount,
+      title: `${activeKeeperCount} keeper${activeKeeperCount === 1 ? '' : 's'} active in this file`,
+    },
+  ]
+}
+
+function traceEventFilePath(event: KeeperTraceEvent): string | null {
+  if (event.source === 'anchored-thread') return event.filePath ?? null
+  if (event.source === 'activity-event') return event.filePath
+  return null
+}
+
+function focusTraceLineContext(
+  filePath: string,
+  event: EditorKeeperTraceLineEvent,
+  line: number,
+): void {
+  setIdeReplayUntilMs(event.tsMs)
+  const surface = traceLineFocusSurface(event)
+  const label = traceLineFocusLabel(event)
+  const sourceId = event.id ? `trace:${event.id}` : `trace:${event.source}:${line}:${event.tsMs}`
+  focusIdeContextAnchor({
+    file_path: filePath,
+    line,
+    surface,
+    label,
+    source_id: sourceId,
+    keeper_id: event.keeperName,
+    route_links: routeLinksForContext({
+      filePath,
+      line,
+      surface,
+      label,
+      sourceId,
+      goalId: event.goalId,
+      taskId: event.taskId,
+      boardPostId: event.boardPostId ?? event.threadId,
+      commentId: event.commentId,
+      prId: event.prId,
+      gitRef: event.gitRef,
+      logId: event.logId,
+      sessionId: event.sessionId,
+      operationId: event.operationId,
+      workerRunId: event.workerRunId,
+      telemetryQuery: event.logId ?? event.eventId,
+      keeperId: event.keeperName,
+      telemetry: Boolean(event.logId || event.sessionId || event.operationId || event.workerRunId),
+    }),
+  })
+}
+
+function traceLineFocusSurface(event: EditorKeeperTraceLineEvent): string {
+  if (event.source === 'activity-event') return event.surface?.trim() || 'Activity'
+  if (event.source === 'anchored-thread') return 'Thread'
+  if (event.source === 'cascade-hop') return 'Cascade'
+  if (event.source === 'bdi-snapshot') return 'BDI'
+  return 'Decision'
+}
+
+function traceLineFocusLabel(event: EditorKeeperTraceLineEvent): string {
+  if (event.source === 'activity-event') {
+    const surface = traceLineFocusSurface(event)
+    return event.eventId ? `${surface} activity ${event.eventId}` : surface
+  }
+  if (event.source === 'anchored-thread') {
+    return event.threadId ? `thread ${event.threadId}` : 'thread'
+  }
+  return traceLineFocusSurface(event)
+}
+
+function EditorCurrentFileSignals({
+  signals,
+}: {
+  readonly signals: ReadonlyArray<CurrentFileSignal>
+}) {
+  return html`
+    <ul
+      class="ide-editor-file-signals"
+      role="list"
+      aria-label="Current file operational signals"
+    >
+      ${signals.map(signal => html`
+        <li
+          key=${signal.id}
+          role="listitem"
+          data-active=${signal.count > 0 ? 'true' : 'false'}
+          title=${signal.title}
+        >
+          <span>${signal.label}</span>
+          <strong>${signal.count}</strong>
+        </li>
+      `)}
+    </ul>
+  `
+}
+
+function contextFocusMetaParts(focus: IdeContextFocus): ReadonlyArray<string> {
+  const routeCount = focus.route_links?.length ?? 0
+  return [
+    focus.surface,
+    focus.keeper_id ? `keeper ${focus.keeper_id}` : null,
+    `source ${focus.source_id}`,
+    routeCount > 0 ? `${routeCount} links` : null,
+  ].filter((part): part is string => part !== null)
+}
+
+function EditorContextRouteLink(link: IdeContextRouteLink) {
+  return html`
+    <button
+      key=${link.id}
+      type="button"
+      class="ide-editor-context-route-link"
+      title=${link.evidence}
+      aria-label=${`Open ${link.evidence}`}
+      onClick=${() => openIdeContextRouteLink(link)}
+    >
+      ${link.label}
+    </button>
   `
 }
 
@@ -450,19 +803,47 @@ function CodeMirrorEditor({
   showBlame,
   keepers,
   onKeeperLineSelect,
+  annotations = [],
+  contextFocus,
+  traceActive = false,
+  traceEvents = EMPTY_TRACE_EVENTS,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
   readonly showBlame: boolean
   readonly keepers: ReadonlyArray<string>
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
+  readonly annotations?: ReadonlyArray<IdeAnnotation>
+  readonly contextFocus?: IdeContextFocus | null
+  readonly traceActive?: boolean
+  readonly traceEvents?: ReadonlyArray<KeeperTraceEvent>
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
   const [ready, setReady] = useState(false)
+  const [selectedAnn, setSelectedAnn] = useState<SelectedAnnotation | null>(null)
+  const prevAnnRef = useRef<SelectedAnnotation | null>(null)
 
   const document = documentStore.document()
+  const documentFilePath = document.file_path
   const ownership = ownershipStore.ownership()
+  const currentFileAnnotations = useMemo(
+    () => documentFilePath === null
+      ? []
+      : annotations.filter(annotation => annotation.file_path === documentFilePath),
+    [annotations, documentFilePath],
+  )
+  const traceLines = useMemo(
+    () => traceActive && documentFilePath !== null
+      ? keeperTraceLinesForFile(documentFilePath, traceEvents)
+      : [],
+    [documentFilePath, traceActive, traceEvents],
+  )
+  const traceLinesRef = useRef<ReadonlyArray<EditorKeeperTraceLine>>(traceLines)
+
+  useEffect(() => {
+    traceLinesRef.current = traceLines
+  }, [traceLines])
 
   // Mount CM6 instance
   useEffect(() => {
@@ -473,7 +854,9 @@ function CodeMirrorEditor({
 
     async function mount() {
       const mountDocument = documentStore.document()
-      const lang = await languageExt(mountDocument.file_path)
+      const mountFilePath = mountDocument.file_path
+      if (mountFilePath === null) return
+      const lang = await languageExt(mountFilePath)
       if (destroyed) return
 
       const blameExts = showBlame ? blameExtensions() : []
@@ -485,8 +868,31 @@ function CodeMirrorEditor({
           lineNumberExt(),
           syntaxHighlightExt(),
           lang,
+          lspExtension({ filePath: mountFilePath }),
+          keeperCursorExtension(),
+          contextFocusLineExt(),
+          annotationLineChipExt(),
+          EditorView.updateListener.of((update) => {
+            const sel = getSelectedAnnotation(update.view)
+            if (sel !== prevAnnRef.current) {
+              prevAnnRef.current = sel
+              setSelectedAnn(sel)
+            }
+          }),
           ...(onKeeperLineSelect
             ? [keeperLineSelectExt(() => ownershipStore.ownership(), onKeeperLineSelect)]
+            : []),
+          ...(traceActive
+            ? [
+                keeperTraceLineGutterExt({
+                  getTraceLines: () => traceLinesRef.current,
+                  onTraceLineSelect: (event, line) => {
+                    const current = documentStore.document().file_path
+                    if (current === null) return
+                    focusTraceLineContext(current, event, line)
+                  },
+                }),
+              ]
             : []),
           ...blameExts,
         ],
@@ -501,6 +907,9 @@ function CodeMirrorEditor({
       if (showBlame && ownership.size > 0) {
         pushOwnership(view, ownership)
       }
+      if (traceActive && traceLines.length > 0) {
+        pushKeeperTraceLines(view, traceLines)
+      }
       setReady(true)
     }
 
@@ -512,7 +921,7 @@ function CodeMirrorEditor({
       editorRef.current = null
       setReady(false)
     }
-  }, [document.file_path, documentStore, ownershipStore, onKeeperLineSelect, showBlame])
+  }, [document.file_path, documentStore, ownershipStore, onKeeperLineSelect, showBlame, traceActive])
 
   // Push document updates. The first file response can arrive before
   // the CM6 instance is ready or before this component subscribes, so
@@ -535,15 +944,86 @@ function CodeMirrorEditor({
     pushOwnership(view, ownership)
   }, [ownership, ready, showBlame])
 
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready || !traceActive) return
+    pushKeeperTraceLines(view, traceLines)
+  }, [ready, traceActive, traceLines])
+
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready) return
+    pushAnnotationLines(view, currentFileAnnotations.map(annotation => ({
+      id: annotation.id,
+      line: annotation.line_start,
+      kind: annotation.kind,
+      keeperId: annotation.keeper_id,
+      goalId: annotation.goal_id,
+      taskId: annotation.task_id,
+    })))
+  }, [
+    currentFileAnnotations,
+    ready,
+  ])
+
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready) return
+    if (!contextFocus || contextFocus.file_path !== documentStore.document().file_path) {
+      focusEditorContextLine(view, undefined)
+      return
+    }
+    focusEditorContextLine(view, contextFocus.line === undefined ? undefined : {
+      line: contextFocus.line,
+      surface: contextFocus.surface,
+      label: contextFocus.label,
+      keeperId: contextFocus.keeper_id,
+      linkCount: contextFocus.route_links?.length,
+    })
+  }, [
+    contextFocus?.activated_at_ms,
+    contextFocus?.file_path,
+    contextFocus?.line,
+    contextFocus?.surface,
+    contextFocus?.label,
+    contextFocus?.keeper_id,
+    contextFocus?.route_links,
+    document.file_path,
+    documentStore,
+    ready,
+  ])
+
   // Subscribe to store changes for re-render
   const [, forceRender] = useState(0)
-  useEffect(() => documentStore.subscribe(() => forceRender(n => n + 1)), [documentStore])
-  useEffect(() => ownershipStore.subscribe(() => forceRender(n => n + 1)), [ownershipStore])
+  useEffect(() => {
+    const unsub = documentStore.subscribe(() => forceRender(n => n + 1))
+    return () => unsub()
+  }, [documentStore])
+  useEffect(() => {
+    const unsub = ownershipStore.subscribe(() => forceRender(n => n + 1))
+    return () => unsub()
+  }, [ownershipStore])
+  useEffect(() => {
+    if (!traceActive) return
+    const unsub = keeperTraceState.subscribe(() => forceRender(n => n + 1))
+    return () => unsub()
+  }, [traceActive])
 
   return html`
     <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>
       ${showBlame ? BlameTimeline(ownership, keepers) : null}
       <div ref=${containerRef} class="ide-codemirror-host" />
+      ${selectedAnn && editorRef.current ? AnnotationPopover({
+        annotation: selectedAnn,
+        view: editorRef.current,
+        onClose: () => {
+          if (editorRef.current) {
+            clearSelectedAnnotation(editorRef.current)
+            prevAnnRef.current = null
+            setSelectedAnn(null)
+          }
+        },
+      }) : null}
     </div>
   `
 }
@@ -595,7 +1075,9 @@ function LayerOverlaySummary(
   activeLayerKinds: ReadonlyArray<IdeLayerKind>,
   ownership: ReadonlyMap<number, LineOwnership>,
   keepers: ReadonlyArray<string>,
+  annotations: ReadonlyArray<IdeAnnotation>,
 ) {
+  const annotationCount = annotations.length
   const latestEdit = latestEditMs(ownership)
   return html`
     <div
@@ -629,7 +1111,7 @@ function LayerOverlaySummary(
           }}
         >
           <span>${layerLabel(kind)}</span>
-          <span style=${{ color: 'var(--color-fg-muted)' }}>${layerSummary(kind, latestEdit, keepers)}</span>
+          <span style=${{ color: 'var(--color-fg-muted)' }}>${layerSummary(kind, latestEdit, keepers, annotationCount)}</span>
         </span>
       `)}
     </div>
@@ -693,14 +1175,229 @@ function layerLabel(kind: IdeLayerKind): string {
   return LAYER_LABEL[kind]
 }
 
-function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>): string {
+function layerSummary(kind: IdeLayerKind, latestEdit: number | null, keepers: ReadonlyArray<string>, annotationCount: number = 0): string {
   if (kind === 'time') return latestEdit === null ? 'no edits' : `latest ${formatTime(latestEdit)}`
   if (kind === 'parallel') return `${keepers.length} keepers`
   if (kind === 'tools') return '0 anchored'
   if (kind === 'approve') return '0 approval'
-  if (kind === 'notes') return '0 note'
+  if (kind === 'notes') return annotationCount === 1 ? '1 note' : `${annotationCount} notes`
   if (kind === 'cascade') return '0 hits'
   if (kind === 'keeper-trace') return 'stitched trace'
   if (kind === 'explode') return 'exclusive ghost view'
   return ''
+}
+
+// ── Active file cursor helpers ────────────────────────────────────
+
+interface ActiveCursorInfo {
+  keeper_id: string
+  line: number
+  tool_name?: string
+  focus_mode: string
+}
+
+function keepersWithCursorInFile(
+  cursors: ReadonlyMap<
+    string,
+    { keeper_id: string; file_path: string; line: number; focus_mode: string; tool_name?: string }
+  >,
+  filePath: string,
+): ReadonlyArray<ActiveCursorInfo> {
+  const matches: ActiveCursorInfo[] = []
+  for (const cursor of cursors.values()) {
+    // Cursor stream defaults missing line numbers to 0; filter them so
+    // the header chip never renders 'file:0' (BDI inspector applies the
+    // same 1-based guard).
+    if (cursor.file_path === filePath && cursor.line >= 1) {
+      matches.push({
+        keeper_id: cursor.keeper_id,
+        line: cursor.line,
+        tool_name: cursor.tool_name,
+        focus_mode: cursor.focus_mode,
+      })
+    }
+  }
+  return matches.sort((a, b) => a.keeper_id.localeCompare(b.keeper_id))
+}
+
+function EditorKeeperCursorChip(
+  ac: ActiveCursorInfo,
+  presence: KeeperPresenceSnapshot | null,
+  key: string,
+) {
+  const color = getKeeperColor(ac.keeper_id)
+  const status: KeeperPresenceStatus | undefined = presenceEntries(presence).find(
+    e => e.keeper_id === ac.keeper_id,
+  )?.status
+  const isActive = status === 'active'
+  return html`
+    <li
+      key=${key}
+      title=${`${ac.keeper_id} L${ac.line}${ac.tool_name ? ` · ${ac.tool_name}` : ''} · ${ac.focus_mode}`}
+      style=${{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '2px',
+        fontSize: 'var(--fs-10)',
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--color-fg-secondary)',
+        padding: '0 4px',
+        borderRadius: 'var(--r-1)',
+        background: `${color.cursor}18`,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style=${{
+          width: '5px',
+          height: '5px',
+          borderRadius: '50%',
+          background: color.cursor,
+          display: 'inline-block',
+          boxShadow: isActive ? `0 0 4px ${color.cursor}` : 'none',
+        }}
+      />
+      <span>${ac.keeper_id}</span>
+      <span style=${{ color: 'var(--color-fg-disabled)' }}>L${ac.line}</span>
+    </li>
+  `
+}
+
+// ── Annotation Popover ────────────────────────────────────────────
+
+const KIND_LABEL: Record<string, string> = {
+  Comment: 'comment',
+  Decision: 'decision',
+  Question: 'question',
+  Bookmark: 'bookmark',
+}
+
+const KIND_COLOR: Record<string, string> = {
+  Comment: 'var(--color-accent-fg)',
+  Decision: 'var(--color-success-fg)',
+  Question: 'var(--color-fg-warning)',
+  Bookmark: 'var(--color-fg-muted)',
+}
+
+function AnnotationPopover({
+  annotation,
+  view,
+  onClose,
+}: {
+  readonly annotation: SelectedAnnotation
+  readonly view: EditorView
+  readonly onClose: () => void
+}) {
+  const line = annotation.line_start
+  const lineInfo = line >= 1 && line <= view.state.doc.lines
+    ? view.state.doc.line(line)
+    : null
+  const coords = lineInfo
+    ? view.coordsAtPos(lineInfo.from)
+    : null
+
+  if (!coords) return null
+
+  const shellRect = view.dom.closest('.ide-codemirror-shell')?.getBoundingClientRect()
+  if (!shellRect) return null
+
+  const top = coords.bottom - shellRect.top + 4
+  const left = Math.max(8, coords.left - shellRect.left)
+  const routeLinks = annotationRouteLinks(annotation)
+
+  return html`
+    <div
+      class="ide-annotation-popover"
+      role="dialog"
+      aria-label="Annotation detail"
+      style=${{
+        position: 'absolute',
+        top: top + 'px',
+        left: left + 'px',
+        zIndex: 40,
+        minWidth: '240px',
+        maxWidth: '380px',
+        background: 'var(--color-bg-elevated)',
+        border: '1px solid var(--color-border-default)',
+        borderRadius: 'var(--r-2)',
+        boxShadow: 'var(--shadow-panel)',
+        padding: 'var(--sp-3)',
+        fontFamily: 'var(--font-sans)',
+        fontSize: '13px',
+        lineHeight: 1.5,
+      }}
+    >
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', marginBottom: 'var(--sp-2)' }}>
+        <span style=${{
+          padding: '1px 6px',
+          borderRadius: 'var(--r-1)',
+          fontSize: '11px',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          color: KIND_COLOR[annotation.kind] ?? 'var(--color-fg-muted)',
+          background: 'var(--color-bg-muted)',
+        }}>${KIND_LABEL[annotation.kind] ?? annotation.kind}</span>
+        <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px', flex: 1 }}>
+          L${annotation.line_start}${annotation.line_start !== annotation.line_end ? `-${annotation.line_end}` : ''}
+        </span>
+        <button
+          type="button"
+          aria-label="Close annotation"
+          onClick=${onClose}
+          style=${{
+            background: 'none',
+            border: 'none',
+            color: 'var(--color-fg-muted)',
+            cursor: 'pointer',
+            fontSize: '14px',
+            lineHeight: 1,
+            padding: '2px 4px',
+          }}
+        >&times;</button>
+      </div>
+      <div style=${{ color: 'var(--color-fg-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        ${annotation.content}
+      </div>
+      ${routeLinks.length > 0 ? html`
+        <div
+          class="ide-editor-context-route-links"
+          aria-label="Annotation operational links"
+          style=${{ marginTop: 'var(--sp-2)' }}
+        >
+          ${routeLinks.map(link => EditorContextRouteLink(link))}
+        </div>
+      ` : null}
+      <div style=${{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)', flexWrap: 'wrap' }}>
+        ${annotation.keeper_id ? html`
+          <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
+            keeper: <strong>${annotation.keeper_id}</strong>
+          </span>
+        ` : null}
+        ${annotation.goal_id ? html`
+          <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
+            goal: ${annotation.goal_id}
+          </span>
+        ` : null}
+        ${annotation.task_id ? html`
+          <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
+            task: ${annotation.task_id}
+          </span>
+        ` : null}
+      </div>
+    </div>
+  `
+}
+
+export function annotationRouteLinks(annotation: SelectedAnnotation): ReadonlyArray<IdeContextRouteLink> {
+  return routeLinksForContext({
+    filePath: annotation.file_path,
+    line: annotation.line_start,
+    surface: annotation.kind,
+    label: annotation.content,
+    sourceId: `annotation-${annotation.id}`,
+    goalId: annotation.goal_id ?? undefined,
+    taskId: annotation.task_id ?? undefined,
+    keeperId: annotation.keeper_id,
+  })
 }

@@ -927,6 +927,34 @@ let test_sub_board_delete () =
             | Ok _ -> Alcotest.fail "expected not found after delete"
             | Error e -> Alcotest.fail (Board.show_board_error e))))
 
+let sub_board_slugs_from_disk () =
+  let path = Board.sub_boards_path () in
+  if not (Fs_compat.file_exists path) then []
+  else
+    Fs_compat.load_jsonl path
+    |> List.filter_map (fun json ->
+           match Yojson.Safe.Util.member "slug" json with
+           | `String slug -> Some slug
+           | _ -> None)
+
+let test_sub_board_create_delete_persisted_snapshot () =
+  let created =
+    Board_dispatch.create_sub_board ~slug:"persisted-team" ~name:"Persisted"
+      ~description:"" ~owner:"agent-1" ()
+  in
+  let id =
+    match created with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
+  in
+  Alcotest.(check bool) "created slug persisted" true
+    (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()));
+  (match Board_dispatch.delete_sub_board ~sub_board_id:id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok () -> ());
+  Alcotest.(check bool) "deleted slug removed from persisted snapshot" false
+    (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()))
+
 let test_sub_board_access_default_open () =
   (match Board_dispatch.create_sub_board ~slug:"open-board" ~name:"Open"
            ~description:"" ~owner:"agent-1" () with
@@ -989,6 +1017,58 @@ let test_sub_board_owner_only_post_policy () =
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ())
+
+let test_sub_board_update () =
+  let id =
+    match Board_dispatch.create_sub_board ~slug:"update-target" ~name:"Before"
+             ~description:"old desc" ~owner:"agent-owner" ~access:Board.Open () with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
+  in
+  (match Board_dispatch.update_sub_board ~sub_board_id:id ~name:"After"
+           ~description:"new desc" ~access:Board.Members_only ~members:["agent-a"] () with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok sb ->
+       Alcotest.(check string) "updated name" "After" sb.Board.name;
+       Alcotest.(check string) "updated description" "new desc" sb.description;
+       Alcotest.(check bool) "updated access" true (sb.access = Board.Members_only);
+       let members = List.map Board.Agent_id.to_string sb.members in
+       Alcotest.(check (list string)) "updated members include owner" ["agent-owner"; "agent-a"] members);
+  (* lookup still works after update *)
+  (match Board_dispatch.get_sub_board ~sub_board_id:id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok sb ->
+       Alcotest.(check string) "persisted name" "After" sb.Board.name)
+
+let test_sub_board_delete_clears_orphan_hearth () =
+  let sb_id =
+    match Board_dispatch.create_sub_board ~slug:"orphan-hearth" ~name:"Orphan"
+             ~description:"" ~owner:"agent-owner" () with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
+  in
+  let post_result =
+    Board_dispatch.create_post ~author:"agent-owner" ~content:"post in orphan"
+      ~title:"Orphan post" ~hearth:"orphan-hearth" ~post_kind:Board.Human_post ()
+  in
+  let post_id =
+    match post_result with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok post ->
+       Alcotest.(check (option string)) "post has hearth before delete"
+         (Some "orphan-hearth") post.Board.hearth);
+  (match Board_dispatch.delete_sub_board ~sub_board_id:sb_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok () -> ());
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok post ->
+       Alcotest.(check (option string)) "post hearth cleared after sub-board delete"
+         None post.Board.hearth)
 
 let test_sub_board_post_count_projection () =
   ignore
@@ -1099,10 +1179,14 @@ let () =
       Alcotest.test_case "list" `Quick (with_eio test_sub_board_list);
       Alcotest.test_case "slug conflict" `Quick (with_eio test_sub_board_slug_conflict);
       Alcotest.test_case "delete" `Quick (with_eio test_sub_board_delete);
+      Alcotest.test_case "persisted create/delete snapshot" `Quick
+        (with_eio test_sub_board_create_delete_persisted_snapshot);
       Alcotest.test_case "default access open" `Quick (with_eio test_sub_board_access_default_open);
       Alcotest.test_case "members include owner" `Quick (with_eio test_sub_board_members_include_owner);
       Alcotest.test_case "members-only post policy" `Quick (with_eio test_sub_board_members_only_post_policy);
       Alcotest.test_case "owner-only post policy" `Quick (with_eio test_sub_board_owner_only_post_policy);
       Alcotest.test_case "derived post count" `Quick (with_eio test_sub_board_post_count_projection);
+      Alcotest.test_case "update" `Quick (with_eio test_sub_board_update);
+      Alcotest.test_case "delete clears orphan hearth" `Quick (with_eio test_sub_board_delete_clears_orphan_hearth);
     ];
   ]

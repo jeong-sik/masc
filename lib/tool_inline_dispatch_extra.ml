@@ -18,7 +18,10 @@ module Float = Stdlib.Float
 
 (** Tool_inline_dispatch_extra — additional inline tool dispatch arms
     (recall, board, conversation).
-    Returns [Some (success, message)] if handled, [None] otherwise. *)
+    Returns [Some (Tool_result.t)] if handled, [None] otherwise.
+
+    RFC-0062 Phase 4c-2: handlers now return [Tool_result.t] directly
+    instead of [(bool * string)]. *)
 
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   try
@@ -222,7 +225,7 @@ let ensure_board_post_author ~agent_name arguments =
   enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
     ~agent_name arguments
 
-let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name =
+let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name ~start_time =
   ignore (config, state, sw, clock);
   let arguments =
     match name with
@@ -254,19 +257,13 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   let arg_get_float_opt key =
     Safe_ops.json_float_opt key arguments in
   ignore (arg_get_string, arg_get_int, arg_get_float, arg_get_bool, arg_get_string_list, arg_get_string_opt, arg_get_float_opt);
-  let tuple_of_tool_result (result : Tool_result.t) =
-    (result.success, Tool_result.message result)
-  in
   match (name : string) with
   | "masc_board_post" ->
       let result_tr = Tool_board.handle_tool name arguments in
-      let success = result_tr.success in
-      let message = Tool_result.message result_tr in
-      let result = (success, message) in
-      if success then begin
+      if result_tr.success then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
-        let post_id = extract_board_post_id message in
+        let post_id = extract_board_post_id (Tool_result.message result_tr) in
         (* Record board activity as a fitness metric so board-active agents
            appear in agent_fitness queries (Issue #1861). *)
         (try
@@ -321,13 +318,11 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
                ~content ~mention)
          | None -> ())
       end;
-      Some result
+      Some result_tr
 
   | "masc_board_comment" ->
       let result_tr = Tool_board.handle_tool name arguments in
-      let success = result_tr.success in
-      let result = (success, Tool_result.message result_tr) in
-      if success then begin
+      if result_tr.success then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
@@ -380,14 +375,12 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
                ~content ~mention)
          | None -> ())
       end;
-      Some result
+      Some result_tr
 
   | "masc_board_vote" | "masc_board_comment_vote" ->
       let result_tr = Tool_board.handle_tool name arguments in
-      let success = result_tr.success in
-      let result = (success, Tool_result.message result_tr) in
       (* Record vote activity as a fitness metric (Issue #1861). *)
-      if success then begin
+      if result_tr.success then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
         let target_id =
           if String.equal name "masc_board_vote" then
@@ -427,13 +420,11 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
               ])
           ()
       end;
-      Some result
+      Some result_tr
 
   | "masc_board_delete" ->
       let result_tr = Tool_board.handle_tool name arguments in
-      let success = result_tr.success in
-      let result = (success, Tool_result.message result_tr) in
-      if success then begin
+      if result_tr.success then begin
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
         let notification = `Assoc [
           ("type", `String "masc/board_delete");
@@ -447,7 +438,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ~payload:(`Assoc [ ("post_id", `String post_id) ])
           ()
       end;
-      Some result
+      Some result_tr
 
   | "masc_board_list" | "masc_board_get"
   | "masc_board_stats"
@@ -455,6 +446,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_hearths"
   | "masc_board_curation_read"
   | "masc_board_curation_submit" ->
-      Some (tuple_of_tool_result (Tool_board.handle_tool name arguments))
+      Some (Tool_board.handle_tool name arguments)
 
   | _ -> None

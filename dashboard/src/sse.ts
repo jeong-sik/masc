@@ -16,10 +16,11 @@ import { appendLiveToolCall } from './components/session-trace/session-trace-liv
 import { appendAuditEntry } from './live-store'
 import { parseSSEMessage } from './schemas/sse'
 import { RingBuffer } from './lib/ring-buffer'
+import { createSseTransport } from './transports/sse-transport'
+import type { Transport } from './transports/transport'
 
 import {
   RECONNECT_BASE_MS,
-  RECONNECT_JITTER_MS,
   RECONNECT_MAX_MS,
   MAX_JOURNAL_ENTRIES,
 } from './config/constants'
@@ -171,9 +172,9 @@ function envelopeFromEvent(event: SSEEvent): Pick<JournalEntry, 'correlationId' 
 
 // --- SSE Manager ---
 
-let source: EventSource | null = null
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let reconnectAttempts = 0
+let transport: Transport | null = null
+let unsubscribe: (() => void) | null = null
+let wasDisconnected = false
 let pauseOasRuntimeIngress = false
 let queuedOasEvents: SSEEvent[] = []
 
@@ -221,101 +222,57 @@ export function normalizeSSEDispatchType(rawType: string): string {
     : rawType
 }
 
-function clearReconnectTimer(): void {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-}
 
-// Smallest exponent at which RECONNECT_BASE_MS * 2^exp meets or exceeds the
-// configured RECONNECT_MAX_MS cap. Clamping the attempt counter to this value
-// (rather than the previous hard-coded 5) keeps the backoff growth-bounded
-// while still letting Math.min reach the documented 60s cap.
-const RECONNECT_MAX_EXP = Math.max(
-  1,
-  Math.ceil(Math.log2(RECONNECT_MAX_MS / RECONNECT_BASE_MS)),
-)
-
-function scheduleReconnect(): void {
-  if (reconnectTimer) return
-  reconnectAttempts++
-  const exp = Math.min(reconnectAttempts, RECONNECT_MAX_EXP)
-  const backoff = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, exp))
-  const jitter = Math.random() * RECONNECT_JITTER_MS
-  const delay = backoff + jitter
-  console.debug(`[SSE] reconnect #${reconnectAttempts} in ${delay}ms`)
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null
-    connectSSE()
-  }, delay)
-}
 
 export function connectSSE(): void {
-  clearReconnectTimer()
-  if (source) {
-    source.close()
-    source = null
-  }
+  disconnectSSE()
 
   const sseUrl = buildDashboardSseUrl(getOrCreateSessionId())
   console.debug('[SSE] connecting', sseUrl)
-  const es = new EventSource(sseUrl)
-  source = es
+  transport = createSseTransport(sseUrl, {
+    retryBaseMs: RECONNECT_BASE_MS,
+    retryMaxMs: RECONNECT_MAX_MS,
+  })
 
-  es.onopen = () => {
-    if (source !== es) return
-    const wasDisconnected = reconnectAttempts > 0
-    if (wasDisconnected) {
-      pauseOasRuntimeIngress = true
+  unsubscribe = transport.subscribe((event) => {
+    if (event.type === 'open') {
+      if (wasDisconnected) {
+        pauseOasRuntimeIngress = true
+        reconnectCount.value++
+        console.debug(`[SSE] reconnected (count=${reconnectCount.value})`)
+      } else {
+        console.debug('[SSE] connected')
+      }
+      wasDisconnected = false
+      connected.value = true
+    } else if (event.type === 'error' || event.type === 'close') {
+      if (connected.value) {
+        lastDisconnectedAt.value = Date.now()
+      }
+      console.warn('[SSE] connection error, scheduling reconnect')
+      wasDisconnected = true
+      connected.value = false
+    } else if (event.type === 'message') {
+      const raw = event.data
+      if (typeof raw !== 'object') {
+        // Non-JSON SSE data (e.g., heartbeat text) — transports layer already
+        // parsed JSON when possible; fall back to ignoring plain strings.
+        return
+      }
+      const candidate: unknown =
+        raw && (raw as { jsonrpc?: unknown }).jsonrpc && (raw as { params?: { type?: unknown } }).params?.type
+          ? (raw as { params?: unknown }).params
+          : raw
+      const parsed = parseSSEMessage(candidate)
+      if (!parsed) return
+      const ev = parsed as unknown as SSEEvent
+      eventCount.value++
+      lastEvent.value = ev
+      handleEvent(ev)
     }
-    reconnectAttempts = 0
-    connected.value = true
-    if (wasDisconnected) {
-      reconnectCount.value++
-      console.debug(`[SSE] reconnected (count=${reconnectCount.value})`)
-    } else {
-      console.debug('[SSE] connected')
-    }
-  }
+  })
 
-  es.onerror = () => {
-    if (source !== es) return
-    if (connected.value) {
-      lastDisconnectedAt.value = Date.now()
-    }
-    console.warn('[SSE] connection error, scheduling reconnect')
-    connected.value = false
-    es.close()
-    source = null
-    scheduleReconnect()
-  }
-
-  es.onmessage = (e: MessageEvent) => {
-    let raw: unknown
-    try {
-      raw = JSON.parse(e.data as string)
-    } catch {
-      // Non-JSON SSE data (e.g., heartbeat text)
-      return
-    }
-    // Unwrap JSON-RPC notifications: extract params as the actual event.
-    // Server wraps events as {"jsonrpc":"2.0","method":"masc/event","params":{type,agent,...}}
-    const rawRecord = raw as { jsonrpc?: unknown; params?: { type?: unknown } }
-    const candidate: unknown =
-      rawRecord && rawRecord.jsonrpc && rawRecord.params?.type
-        ? rawRecord.params
-        : raw
-    const parsed = parseSSEMessage(candidate)
-    if (!parsed) return
-    // SSEMessage's field set is a superset of SSEEvent at runtime — the
-    // schema mirrors the interface. Cast here keeps downstream callers
-    // unchanged while Phase 2 migrates them to the schema-derived type.
-    const event = parsed as unknown as SSEEvent
-    eventCount.value++
-    lastEvent.value = event
-    handleEvent(event)
-  }
+  transport.connect()
 }
 
 function handleEvent(event: SSEEvent): void {
@@ -511,7 +468,7 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_turn_complete':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Turn ${event.turn ?? '?'} model=${event.model_used ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}`,
+        `Turn ${event.turn ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}`,
         'keepers',
         'unknown',
         {
@@ -519,7 +476,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)} turn ${event.turn ?? '?'}`
-            + ` (${event.model_used ?? '?'}, ${formatCost(event.cost_usd ?? 0)}, tools=${event.tool_calls_made ?? 0})`,
+            + ` (${formatCost(event.cost_usd ?? 0)}, tools=${event.tool_calls_made ?? 0})`,
         },
       )
       break
@@ -541,7 +498,7 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_handoff':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (${event.to_model ?? '?'})`,
+        `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (runtime)`,
         'keepers',
         'keeper_handoff',
         {
@@ -549,7 +506,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)}가 keeper handoff를 수행했습니다`
-            + ` (gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}, ${event.to_model ?? '?'})`,
+            + ` (gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}, runtime)`,
         },
       )
       break
@@ -571,13 +528,13 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_guardrail':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Guardrail: ${event.reason ?? 'stopped'}`,
+        `Guardrail: ${event.reason ?? '(unknown reason)'}`,
         'keepers',
         'keeper_guardrail',
         {
-          severity: event.severity ?? 'error',
+          severity: event.severity ?? '(unknown severity)',
           source: event.source,
-          narrativeText: `${actorLabel(event.name ?? agent)}가 guardrail에 의해 중단되었습니다: ${event.reason ?? 'stopped'}`,
+          narrativeText: `${actorLabel(event.name ?? agent)}가 guardrail에 의해 중단되었습니다: ${event.reason ?? '(unknown reason)'}`,
         },
       )
       break
@@ -869,11 +826,10 @@ function handleEvent(event: SSEEvent): void {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
       const turn = asNumber(p.turn)
-      const model = asString(p.model) ?? 'unknown'
       const inputTokens = asNumber(p.input_tokens) ?? 0
       addTypedJournalEntry(
         agentName,
-        `OAS durable llm_request${turn != null ? ` · T${turn}` : ''} · ${model} · ${inputTokens}tok`,
+        `OAS durable llm_request${turn != null ? ` · T${turn}` : ''} · runtime · ${inputTokens}tok`,
         'oas',
         'oas_event',
         {
@@ -946,7 +902,7 @@ function handleEvent(event: SSEEvent): void {
       const auditKind = (event.audit_kind ?? (p.kind as string)) ?? type
       const auditTarget = event.audit_target ?? (p.target as string | undefined)
       const auditSummary = (event.audit_summary ?? (p.summary as string)) ?? auditKind
-      const auditSeverity = (event.audit_severity ?? (p.severity as string)) ?? 'info'
+      const auditSeverity = (event.audit_severity ?? (p.severity as string)) ?? '(unknown severity)'
       appendAuditEntry({
         id: auditId,
         ts: auditTs,
@@ -959,6 +915,26 @@ function handleEvent(event: SSEEvent): void {
       })
       break
     }
+    case 'ide:presence': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const runtimeId = asString(p.runtime_id) ?? 'unknown'
+      const branch = asString(p.branch) ?? 'unknown'
+      // supervisor extracted for future use
+      const connected = p.connected === true
+      const entries = Array.isArray(p.entries) ? p.entries.length : 0
+      addTypedJournalEntry(
+        agent,
+        `IDE presence · ${runtimeId} · ${branch} · ${entries} keepers`,
+        'system',
+        'unknown',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `IDE presence snapshot ${runtimeId}/${branch} (${entries} keepers, connected=${connected})`,
+        },
+      )
+      break
+    }
     default:
       addTypedJournalEntry(agent, type, 'system', 'unknown', {
         narrativeText: `${actorLabel(agent)} 이벤트: ${type}`,
@@ -967,11 +943,10 @@ function handleEvent(event: SSEEvent): void {
 }
 
 export function disconnectSSE(): void {
-  clearReconnectTimer()
-  if (source) {
-    source.close()
-    source = null
-  }
+  unsubscribe?.()
+  unsubscribe = null
+  transport?.disconnect()
+  transport = null
   pauseOasRuntimeIngress = false
   queuedOasEvents = []
   connected.value = false

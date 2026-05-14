@@ -51,6 +51,35 @@ let test_canonical_disjoint_from_fallback_when_seed_parses () =
     true
     (canonical <> fallback)
 
+let test_meta_to_json_redacts_last_model_used () =
+  let json =
+    `Assoc
+      [ "name", `String "meta-redaction"
+      ; "agent_name", `String "meta-redaction"
+      ; "trace_id", `String "trace-meta-redaction"
+      ; "sandbox_profile", `String "local"
+      ; "network_mode", `String "none"
+      ; "last_model_used", `String "openai:gpt-5.4"
+      ]
+  in
+  match Keeper_meta_json.meta_of_json json with
+  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+  | Ok meta ->
+    let emitted = Keeper_meta_json.meta_to_json meta in
+    let last_model_used =
+      match emitted with
+      | `Assoc fields -> (
+        match List.assoc_opt "last_model_used" fields with
+        | Some (`String value) -> value
+        | Some _ -> Alcotest.fail "last_model_used must remain a string key"
+        | None -> Alcotest.fail "last_model_used key missing")
+      | _ -> Alcotest.fail "meta_to_json must emit an object"
+    in
+    Alcotest.(check string)
+      "legacy last_model_used key is redacted on write"
+      ""
+      last_model_used
+
 let () =
   Alcotest.run
     "keeper_meta_canonical_seed"
@@ -63,6 +92,10 @@ let () =
             "not collapsed to fallback"
             `Quick
             test_canonical_disjoint_from_fallback_when_seed_parses
+        ; Alcotest.test_case
+            "meta_to_json redacts last_model_used"
+            `Quick
+            test_meta_to_json_redacts_last_model_used
         ] )
     ]
 ;;

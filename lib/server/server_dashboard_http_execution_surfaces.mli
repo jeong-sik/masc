@@ -97,8 +97,17 @@ val execution_actor_for_request :
 val invalidate_execution_cache : unit -> unit
 (** Drops the cached execution surface so the next
     snapshot read recomputes from upstream.  Swallows
-    [Eio.Cancel.Cancelled] re-raise plus logs other
-    exceptions through [Log.Dashboard.error]. *)
+    [Eio.Cancel.Cancelled] re-raise plus logs and counts other
+    exceptions through
+    {!Keeper_metrics.metric_keeper_lifecycle_callback_failures}. *)
+
+val invalidate_execution_cache_with_hooks_for_testing :
+  invalidate_execution_surface:(unit -> unit) ->
+  invalidate_light_cache:(unit -> unit) ->
+  unit ->
+  unit
+(** Test seam for the best-effort invalidation failure path. Production
+    callers should use {!invalidate_execution_cache}. *)
 
 val patch_keeper_dependent_caches :
   keeper_name:string -> event:string -> unit

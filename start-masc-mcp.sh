@@ -75,6 +75,80 @@ release_build_lock() {
     _masc_cleanup_lock
 }
 
+make_startup_temp_log() {
+    local temp_root="${TMPDIR:-/tmp}"
+    temp_root="${temp_root%/}"
+    if [ ! -d "$temp_root" ] || [ ! -w "$temp_root" ]; then
+        temp_root="/tmp"
+    fi
+    mktemp "$temp_root/masc-dune-build.XXXXXX"
+}
+
+is_stale_dune_artifact_log() {
+    local log_file="$1"
+    grep -Eiq \
+        'make inconsistent assumptions|inconsistent assumptions over (implementation|interface)' \
+        "$log_file"
+}
+
+dune_build_with_stale_retry() {
+    local target="$1"
+    local label="$2"
+    local log_file=""
+
+    if ! log_file="$(make_startup_temp_log 2>/dev/null)"; then
+        dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" "$target" 1>&2
+        return $?
+    fi
+
+    local first_status=0
+    if dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" "$target" >"$log_file" 2>&1; then
+        cat "$log_file" >&2
+        rm -f "$log_file"
+        return 0
+    else
+        first_status=$?
+    fi
+
+    if ! is_stale_dune_artifact_log "$log_file"; then
+        cat "$log_file" >&2
+        rm -f "$log_file"
+        return "$first_status"
+    fi
+
+    cat "$log_file" >&2
+    echo "[startup] Stale Dune artifacts detected while building $label; running dune clean and retrying once." >&2
+    if ! dune clean --root "$SCRIPT_DIR" 1>&2; then
+        echo "[startup] Dune clean failed after stale artifact detection; run: dune clean --root $SCRIPT_DIR" >&2
+        rm -f "$log_file"
+        return "$first_status"
+    fi
+
+    if dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" "$target" >"$log_file" 2>&1; then
+        cat "$log_file" >&2
+        rm -f "$log_file"
+        return 0
+    fi
+
+    cat "$log_file" >&2
+    echo "[startup] Retry build failed after stale Dune cleanup; preserved Dune output above." >&2
+    rm -f "$log_file"
+    return 1
+}
+
+build_dune_target_with_lock() {
+    local target="$1"
+    local label="$2"
+    if acquire_build_lock; then
+        if ! dune_build_with_stale_retry "$target" "$label"; then
+            release_build_lock
+            return 1
+        fi
+        release_build_lock
+    fi
+    return 0
+}
+
 is_truthy() {
     case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
         1|true|yes|y|on) return 0 ;;
@@ -712,9 +786,9 @@ if [ "$HTTP_MODE" = "true" ] && [ -z "$MASC_EIO_EXE" ]; then
         echo "Error: dune not found. Install dune first." >&2
         exit 1
     fi
-    if acquire_build_lock; then
-        dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
-        release_build_lock
+    if ! build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
+        echo "Error: build failed." >&2
+        exit 1
     fi
     if [ -x "$LOCAL_EIO_EXE" ]; then
         MASC_EIO_EXE="$LOCAL_EIO_EXE"
@@ -730,9 +804,9 @@ if [ "$HTTP_MODE" = "false" ] && [ -z "$MASC_STDIO_EIO_EXE" ]; then
         echo "Error: dune not found. Cannot build stdio server." >&2
         exit 1
     fi
-    if acquire_build_lock; then
-        dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_stdio_eio.exe 1>&2
-        release_build_lock
+    if ! build_dune_target_with_lock "bin/main_stdio_eio.exe" "main_stdio_eio.exe"; then
+        echo "Error: failed to build stdio server." >&2
+        exit 1
     fi
     if [ -x "$LOCAL_STDIO_EIO_EXE" ]; then
         MASC_STDIO_EIO_EXE="$LOCAL_STDIO_EIO_EXE"
@@ -750,10 +824,10 @@ if [ "$HTTP_MODE" = "true" ] && [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/
     if find "$SCRIPT_DIR/bin" "$SCRIPT_DIR/lib" \
         -type f \( -name '*.ml' -o -name '*.mli' -o -name 'dune' \) \
         -newer "$MASC_EIO_EXE" 2>/dev/null | head -n 1 | grep -q .; then
-        if acquire_build_lock; then
-            echo "Rebuilding MASC MCP server (stale executable detected)..." >&2
-            dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
-            release_build_lock
+        echo "Rebuilding MASC MCP server (stale executable detected)..." >&2
+        if ! build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
+            echo "Error: rebuild failed." >&2
+            exit 1
         fi
 
         if [ -x "$LOCAL_EIO_EXE" ]; then
@@ -829,9 +903,9 @@ if [ "$EIO_MODE" = "true" ]; then
             echo "Error: dune not found. Cannot build Eio server." >&2
             exit 1
         fi
-        if acquire_build_lock; then
-            dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" bin/main_eio.exe 1>&2
-            release_build_lock
+        if ! build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
+            echo "Error: Failed to build Eio server (main_eio.exe)." >&2
+            exit 1
         fi
         if [ -x "$WORKSPACE_EIO_EXE" ]; then
             MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
@@ -888,6 +962,7 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     if [ -n "${MASC_SIDECAR_ROOT:-}" ]; then
         echo "  Sidecar root: $MASC_SIDECAR_ROOT" >&2
     fi
+    echo "  Executable: $SELECTED_EXE" >&2
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
         echo "  MCP endpoint: ${MASC_HTTP_BASE_URL%/}/mcp" >&2
@@ -908,6 +983,7 @@ elif [ "$HTTP_MODE" = "true" ]; then
     if [ -n "${MASC_SIDECAR_ROOT:-}" ]; then
         echo "  Sidecar root: $MASC_SIDECAR_ROOT" >&2
     fi
+    echo "  Executable: $SELECTED_EXE" >&2
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
         echo "  MCP endpoint: ${MASC_HTTP_BASE_URL%/}/mcp" >&2
@@ -926,6 +1002,7 @@ else
     if [ -n "${MASC_SIDECAR_ROOT:-}" ]; then
         echo "  Sidecar root: $MASC_SIDECAR_ROOT" >&2
     fi
+    echo "  Executable: $SELECTED_EXE" >&2
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ "$EIO_MODE" = "true" ]; then
         launch_from_base_path "$SELECTED_EXE" --base-path "$RESOLVED_BASE_PATH"

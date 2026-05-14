@@ -27,7 +27,7 @@ module Float = Stdlib.Float
 (** Unified handler type: every tool call is [name * args -> result option].
     [None] means "this handler does not know this tool" (should not happen
     when lookups go through the registry, but kept for compatibility). *)
-type handler = name:string -> args:Yojson.Safe.t -> (bool * string) option
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.t option
 
 (** Central registry — populated once during server initialisation. *)
 let registry : (string, handler) Hashtbl.t = Hashtbl.create 256
@@ -106,9 +106,9 @@ let run_pre_hooks ~name ~args =
 let run_post_hooks result =
   List.fold_left (fun r hook -> hook r) result !post_hooks
 
-(** O(1) dispatch.  Returns [Some (success, message)] when a handler is
-    found, [None] when the tool name is unknown to the registry.
-    Handler exceptions are caught and returned as error tuples so the
+(** O(1) dispatch.  Returns [Some result] when a handler is found,
+    [None] when the tool name is unknown to the registry.
+    Handler exceptions are caught and returned as error results so the
     caller gets a consistent result shape.
 
     Post-hooks fire as a side-effect after the handler completes,
@@ -122,15 +122,10 @@ let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
     let result =
       try handler ~name ~args
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Some
-          ( false,
-            Printf.sprintf "dispatch_v2 handler error for %s: %s" name
-              (Stdlib.Printexc.to_string exn) )
+        Some (Tool_result.of_exn ~tool_name:name ~start_time exn)
     in
     (match result with
-     | Some (success, message) ->
-       let tr = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
-       Some (run_post_hooks tr)
+     | Some tr -> Some (run_post_hooks tr)
      | None -> None)
   | None -> None
 
@@ -265,6 +260,11 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Board_reaction
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote
     | Approval_pending
     | Approval_get
@@ -298,6 +298,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Tool_admin_update
     | Tool_help
     | Tool_stats
+    | Web_fetch
     | Web_search
     | Webrtc_answer
     | Webrtc_offer -> Some Mod_misc

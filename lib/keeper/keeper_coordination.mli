@@ -19,13 +19,7 @@ val save_checkpoint :
 
 val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
-val compact_if_needed :
-  meta:keeper_meta ->
-  now_ts:float ->
-  Keeper_exec_context.working_context ->
-  Keeper_exec_context.working_context * string option * string
-
-val generate_trace_id : unit -> string
+val generate_trace_id : ?now:float -> unit -> string
 
 val keeper_board_write_tool_names : string list
 

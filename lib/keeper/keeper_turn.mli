@@ -20,6 +20,11 @@ val handle_keeper_up : _ Keeper_types.context -> Yojson.Safe.t -> tool_result
     If streaming fails, the function falls back to batch automatically.
 
     @since 2.110.0 *)
+val preflight_keeper_msg :
+  _ Keeper_types.context -> Yojson.Safe.t -> (unit, string) result
+(** Run synchronous validation for [handle_keeper_msg] before an async wrapper
+    accepts the turn for later execution. *)
+
 val handle_keeper_msg :
   ?on_text_delta:(string -> unit) ->
   _ Keeper_types.context -> Yojson.Safe.t -> tool_result

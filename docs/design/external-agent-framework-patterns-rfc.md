@@ -1,10 +1,10 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-05-12
 code_refs:
   - lib/keeper/
   - lib/keeper/keeper_agent_run.ml
-  - lib/proof_artifact_reader.ml
+  - lib/cdal/proof_artifact_reader.ml
 ---
 
 # External Agent Framework Patterns RFC
@@ -120,7 +120,7 @@ Implementation anchors:
 - `lib/verification.ml`
 - `lib/tool_verification.ml`
 - `lib/cdal_loader.ml`
-- `lib/proof_artifact_reader.ml`
+- `lib/cdal/proof_artifact_reader.ml`
 
 Expected output:
 

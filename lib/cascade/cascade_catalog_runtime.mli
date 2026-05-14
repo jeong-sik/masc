@@ -1,17 +1,16 @@
 (** Runtime-authoritative validated cascade catalog.
 
-    The runtime still executes from [cascade.json], but when a sibling
-    [cascade.toml] exists it becomes the authoring SSOT and [cascade.json] is
-    materialized from it on load. This module validates the active source
-    statically and keeps serving the last-known-good snapshot when a hot reload
-    is rejected. Provider liveness is advisory runtime state and does not
-    invalidate an otherwise-correct catalog.
+    The runtime executes from [cascade.toml]. This module validates the
+    active source statically and keeps serving the last-known-good snapshot
+    when a hot reload is rejected. Provider liveness is advisory runtime
+    state and does not invalidate an otherwise-correct catalog.
 
     @stability Internal *)
 
 type candidate_probe_status =
   | Probe_ok
   | Probe_skipped of string
+  | Probe_not_applicable of string
   | Probe_error of string
 
 type candidate_probe = {
@@ -22,7 +21,44 @@ type candidate_probe = {
   status : candidate_probe_status;
 }
 
-type snapshot
+type candidate_runtime = {
+  model_string : string;
+  provider_cfg : Llm_provider.Provider_config.t;
+}
+
+type profile_build = {
+  name : string;
+  weighted_entries : Cascade_config_loader.weighted_entry list;
+  inference_params : Cascade_config_loader.inference_params;
+  api_key_env_overrides : (string * string) list;
+  strategy : Cascade_strategy.t;
+  ollama_max_concurrent : int option;
+  cli_max_concurrent : int option;
+  candidates : candidate_runtime list;
+  probes : candidate_probe list;
+  required_capability_profile : string option;
+      (** Profile-scoped capability lint hint. The RFC-0058 declarative
+          namespaces ([providers], [models], [tier], [tier-group] +
+          provider binding tables) do not carry this field yet, so callers
+          normally see [None] under fully-declarative configs. *)
+}
+
+type snapshot = {
+  source_path : string;
+  mtime : float;
+  validated_at : float;
+  profiles : profile_build list;
+  default_profile_name : string;
+      (** Configured [routes.keeper_turn] target validated against
+          [profiles] at snapshot build time.  Resolved via
+          [Cascade_routes.cascade_name_for_use Keeper_turn] and known
+          to be present in [profiles] (validator rejects the snapshot
+          otherwise).  Callers that route blank cascade names through
+          this snapshot must read this field rather than
+          [List.hd profiles] — [profiles] is sorted lexicographically,
+          which is not the configured default. *)
+}
+
 type rejection
 
 type state =
@@ -130,11 +166,10 @@ val resolve_secondary_provider_for_primary :
     from {!resolve_named_providers} of [cascade_name], find the matching
     weighted entry and parse its [secondary] field (if any) into a fresh
     [Provider_config.t]. Returns [None] when the entry has no secondary,
-    when the primary is not present in the cascade (e.g. cross-cascade
-    fallback path), or when secondary parsing fails (unregistered scheme,
-    invalid syntax). The lookup is read-only and does not mutate cascade
-    state — secondary resolution is invoked only after the primary has
-    been rejected by the tool-use gate. *)
+    when the primary is not present in the declared cascade, or when
+    secondary parsing fails (unregistered scheme, invalid syntax). The lookup
+    is read-only and does not mutate cascade state — secondary resolution is
+    invoked only after the primary has been rejected by the tool-use gate. *)
 
 val resolve_inference_params :
   ?sw:Eio.Switch.t ->
@@ -195,6 +230,16 @@ val resolve_selection_trace :
 val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 val rejection_to_yojson : rejection -> Yojson.Safe.t
 val state_to_yojson : state -> Yojson.Safe.t
+
+val candidate_probe_to_yojson : candidate_probe -> Yojson.Safe.t
+(** Exposed for regression tests. Internal-observability serializer used
+    by [snapshot_to_yojson] for the server's "Validated active cascade
+    catalog" boot log. After PR #15070 this MUST emit the real
+    [model_string], [provider_kind], [model_id] and [base_url] values
+    from the probe record. The Runtime Lens redaction lives at external
+    boundaries: Prometheus labels (record_probe_metrics), the dashboard
+    OAS bridge, and the redacted variants in
+    keeper_unified_metrics. Not here. *)
 
 val invalidate_path : string -> unit
 

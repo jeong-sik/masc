@@ -1,0 +1,75 @@
+name: ocamlformat (changed files)
+
+on:
+  pull_request:
+    paths:
+      - '**/*.ml'
+      - '**/*.mli'
+      - '.ocamlformat'
+      - '.github/workflows/ocamlformat.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  ocamlformat-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.2'
+
+      - name: Install ocamlformat
+        run: |
+          version=$(grep -E '^version' .ocamlformat | head -1 | awk -F= '{gsub(/[ \t]/,"",$2); print $2}')
+          if [ -z "$version" ]; then
+            echo "::error::no version pin in .ocamlformat"
+            exit 1
+          fi
+          opam install -y "ocamlformat.${version}"
+
+      - name: Identify changed OCaml files
+        id: changed
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          if ! git cat-file -e "$base" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$base" || true
+          fi
+          files=$(git diff --name-only --diff-filter=AMR "$base...$head" -- '*.ml' '*.mli' || true)
+          if [ -z "$files" ]; then
+            echo "no_files=true" >> "$GITHUB_OUTPUT"
+            echo "No OCaml files changed in this PR; skipping ocamlformat check."
+          else
+            printf '%s\n' "$files" > /tmp/changed-ocaml-files.txt
+            echo "no_files=false" >> "$GITHUB_OUTPUT"
+            echo "Changed OCaml files:"
+            cat /tmp/changed-ocaml-files.txt
+          fi
+
+      - name: Check formatting (changed files only)
+        if: steps.changed.outputs.no_files != 'true'
+        run: |
+          set -euo pipefail
+          violations=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            [ -f "$f" ] || continue
+            if ! opam exec -- ocamlformat --check "$f" >/dev/null 2>&1; then
+              echo "::error file=$f::ocamlformat violation. Local fix: opam exec -- ocamlformat -i $f"
+              violations=$((violations+1))
+            fi
+          done < /tmp/changed-ocaml-files.txt
+          if [ "$violations" -gt 0 ]; then
+            echo "::error::$violations file(s) violate ocamlformat ($(opam exec -- ocamlformat --version))"
+            exit 1
+          fi
+          echo "All changed OCaml files match ocamlformat profile."

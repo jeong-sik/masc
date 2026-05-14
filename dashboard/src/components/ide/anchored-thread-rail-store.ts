@@ -14,7 +14,7 @@ import {
 export type { AnchoredThread, ThreadAnchor, ThreadKind } from '../../../design-system/headless-core/anchored-thread-rail'
 
 export interface AnchoredThreadRailStore {
-  readonly filePath: () => string
+  readonly filePath: () => string | null
   readonly seed: (threads: ReadonlyArray<AnchoredThread>) => void
   readonly addThread: (thread: AnchoredThread) => void
   readonly resolveThread: (id: string, resolved?: boolean) => boolean
@@ -26,14 +26,14 @@ export interface AnchoredThreadRailStore {
   readonly focusThread: (id: string) => boolean
   readonly clearFocus: () => void
   readonly knownAuthors: () => ReadonlyArray<string>
-  readonly reset: (filePath?: string) => void
+  readonly reset: (filePath?: string | null) => void
   readonly subscribe: (listener: () => void) => () => void
 }
 
 export function createAnchoredThreadRailStore(
-  initialFilePath: string,
+  initialFilePath: string | null,
 ): AnchoredThreadRailStore {
-  const activeFilePath = signal(initialFilePath)
+  const activeFilePath = signal<string | null>(initialFilePath)
   const allThreads = signal<ReadonlyArray<AnchoredThread>>([])
   const visibleThreadsSignal = signal<ReadonlyArray<AnchoredThread>>([])
   const focusedThreadIdSignal = signal<string | null>(null)
@@ -99,7 +99,7 @@ export function createAnchoredThreadRailStore(
     controller.clearFocus()
   }
 
-  const reset = (filePath?: string): void => {
+  const reset = (filePath?: string | null): void => {
     if (filePath !== undefined) activeFilePath.value = filePath
     allThreads.value = []
     if (focusedThreadIdSignal.value !== null) controller.clearFocus()

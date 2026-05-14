@@ -1,0 +1,30 @@
+# RFC-0071 §3.3.1 FSM type manifest.
+#
+# Lists OCaml type names that REPRESENT state-machine states or
+# transition keys. exhaustive-guard.sh treats fragile-match sites
+# scrutinizing one of these types as elevated-priority: codemod's
+# triage (RFC-0071 §3.4.1) defaults to (b) "closed concrete variant"
+# unless the site explicitly carries `[@warning "-4"]`.
+#
+# Format: one fully-qualified type per line. Module path matches OCaml
+# `Module.type` convention. Comments and blank lines ignored.
+#
+# Phase 1: this file is intentionally EMPTY. Phase 5 (RFC-0071 §4)
+# populates it from FSM owners (keeper, cascade, decision, verification,
+# turn_phase, compaction). Empty manifest = lint treats every site
+# uniformly; populated manifest = lint flags FSM sites with stronger
+# language.
+#
+# When adding entries, prefer types whose AT LEAST one transition
+# decision has historically caused a runtime Assert_failure or silently
+# absorbed a new state. Examples reserved for Phase 5:
+#   - Keeper_state_machine.phase
+#   - Coord_task_lifecycle.drift
+#   - Cascade_decl_validator.outcome   (TBD — type may move)
+#   - Masc_domain.task_action
+#   - Masc_domain.task_status
+#   - Execution_mode.t
+#
+# Do NOT add framework-tier types (Masc_error.t, hook_event,
+# Backend_types.error) — those are sanctioned for [@warning "-4"] per
+# RFC-0071 §3.4.1 (a)/(d) and false-positive flagging them adds noise.

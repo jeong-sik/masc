@@ -9,6 +9,7 @@ import { requestConfirm } from '../common/confirm-dialog'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
 import { TextInput } from '../common/input'
+import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
@@ -29,6 +30,9 @@ import {
   boardActorAvatarKey,
   boardActorDisplayName,
   boardActorTitle,
+  contributorQualityBadgeClass,
+  contributorQualityBandLabel,
+  contributorQualityPercent,
   navigateToAuthor,
   stripInlineMarkdown,
 } from '../../lib/board-utils'
@@ -43,6 +47,8 @@ import {
   boardHearths,
   boardHearthsLoading,
   boardHearthsError,
+  subBoardOptions,
+  subBoardOptionsLoading,
   boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,
@@ -246,6 +252,13 @@ function NewPostForm() {
     `
   }
 
+  const subBoardSelectOptions = subBoardOptions.value.map(sb => ({ value: sb.slug, label: sb.name }))
+  const activeHearth = newPostHearth.value.trim()
+  const selectedSubBoardOptions = activeHearth
+    && !subBoardSelectOptions.some(option => option.value === activeHearth)
+    ? [{ value: activeHearth, label: activeHearth }, ...subBoardSelectOptions]
+    : subBoardSelectOptions
+
   return html`
     <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] grid gap-3">
       <${TextInput}
@@ -264,13 +277,13 @@ function NewPostForm() {
         helpText="예: ts 코드펜스, 일반 URL 링크 카드, 단독 이미지 URL 자동 인라인"
         previewLimit=${2}
       />
-      <${TextInput}
-        name="board_post_hearth"
-        ariaLabel="새 글 hearth"
-        autoComplete="off"
-        placeholder="hearth (예: ops, research)"
+      <${Select}
         value=${newPostHearth.value}
-        onInput=${(e: Event) => { newPostHearth.value = (e.target as HTMLInputElement).value }}
+        options=${selectedSubBoardOptions}
+        placeholder="Sub-board (hearth) 선택"
+        disabled=${newPostSubmitting.value || subBoardOptionsLoading.value}
+        ariaLabel="새 글 hearth"
+        onInput=${(value: string) => { newPostHearth.value = value }}
       />
       <div class="flex gap-2 justify-end">
         <button type="button"
@@ -580,8 +593,15 @@ function PostCard({ post }: { post: BoardPost }) {
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const qualityPercent = contributorQualityPercent(post.contributor_quality)
+  const qualityBand = contributorQualityBandLabel(post.contributor_quality)
+  const qualityTitle = qualityPercent === null
+    ? undefined
+    : `기여자 품질 ${qualityPercent}점 · ${qualityBand}`
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
+  const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
+  const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
   const reactionPreview = post.reactions?.some(summary => summary.count > 0 || summary.reacted || summary.has_reacted)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
@@ -643,7 +663,7 @@ function PostCard({ post }: { post: BoardPost }) {
       </div>
 
       <!-- Vote column -->
-      <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-9">
+      <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-14">
         <button type="button"
           aria-label="추천"
           aria-pressed=${upvoteActive ? 'true' : 'false'}
@@ -651,7 +671,13 @@ function PostCard({ post }: { post: BoardPost }) {
           class=${`vote-btn upvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] cursor-pointer'}`}
           onClick=${(event: Event) => handleVote('up', event)}
         ><span aria-hidden="true">▲</span></button>
-        <span class="text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]">${post.votes ?? 0}</span>
+        <span
+          class=${post.vote_blind
+            ? 'max-w-14 text-center text-[10px] font-medium leading-tight text-[var(--color-fg-muted)]'
+            : 'text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]'}
+          aria-label=${voteScoreAria}
+          title=${voteScoreLabel}
+        >${voteScoreLabel}</span>
         <button type="button"
           aria-label="비추천"
           aria-pressed=${downvoteActive ? 'true' : 'false'}
@@ -696,6 +722,13 @@ function PostCard({ post }: { post: BoardPost }) {
 
           <!-- Category badges -->
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
+          ${qualityPercent !== null ? html`
+            <span
+              class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
+              aria-label=${qualityTitle}
+              title=${qualityTitle}
+            >품질 ${qualityPercent}</span>
+          ` : null}
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
           ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
           <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />

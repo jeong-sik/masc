@@ -1,11 +1,25 @@
 import { html } from 'htm/preact'
-import type { Keeper, Task } from '../../types'
-import { keepers, tasks } from '../../store'
+import { useEffect, useState } from 'preact/hooks'
+import type { Goal, Keeper, Task } from '../../types'
+import { goals, keepers, tasks } from '../../store'
 import { KeeperBadge } from '../keeper-badge'
+import {
+  formatProgressPct,
+  goalPhaseLabel,
+  goalProgressFor,
+  horizonLabel,
+  type GoalProgress,
+} from '../goals/goal-helpers'
 import {
   canonicalKeeperName,
   keeperIdentityKeys,
 } from '../common/keeper-identity'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
+import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 
 interface IdeKeeperWorkPanelProps {
   readonly keeperName: string
@@ -15,6 +29,7 @@ interface KeeperWorkSummary {
   readonly displayName: string
   readonly keeper: Keeper | null
   readonly currentTaskId: string | null
+  readonly currentGoalId: string | null
   readonly currentTask: Task | null
   readonly activeTasks: ReadonlyArray<Task>
   readonly activeTaskCount: number
@@ -32,12 +47,26 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   const summary = keeperWorkSummary(keeperName, keepers.value, tasks.value)
   const keeper = summary.keeper
   const currentTask = summary.currentTask
+  const currentGoal = summary.currentGoalId
+    ? goals.value.find(goal => goal.id === summary.currentGoalId) ?? null
+    : null
+  const currentGoalProgress = summary.currentGoalId
+    ? goalProgressFor(summary.currentGoalId)
+    : null
   const attention = Boolean(
     keeper?.needs_attention
     || keeper?.trust?.needs_attention
     || summary.terminalCode
     || summary.runtimeBlocker,
   )
+
+  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
+    return () => unsub()
+  }, [])
+
+  const cursor = resolveKeeperCursor(keeperName, overlay.cursors)
 
   return html`
     <section
@@ -58,6 +87,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
         <div class="ide-keeper-work-strip">
           ${WorkMetric('phase', keeper?.phase ?? keeper?.status ?? 'unknown')}
           ${WorkMetric('task', summary.currentTaskId ?? 'none')}
+          ${WorkMetric('goal', summary.currentGoalId ?? 'none')}
           ${WorkMetric('active', String(summary.activeTaskCount))}
         </div>
         ${currentTask
@@ -71,6 +101,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
               ${currentTask.worktree
                 ? html`<span title=${currentTask.worktree.path}>${currentTask.worktree.branch} · ${currentTask.worktree.repo_name}</span>`
                 : null}
+              ${TaskRouteLinks(currentTask, summary.currentGoalId, summary.displayName)}
             </div>
           `
           : summary.currentTaskId
@@ -82,10 +113,26 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
                 </div>
                 <strong>keeper runtime current task</strong>
                 <span>task row not present in execution projection</span>
+                ${RuntimeTaskRouteLinks(summary.currentTaskId, summary.currentGoalId, summary.displayName)}
               </div>
             `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
+        ${currentGoal
+          ? GoalProgressCard(currentGoal, currentGoalProgress, summary.currentTaskId)
+          : summary.currentGoalId
+            ? html`
+              <div class="ide-keeper-work-goal" role="status">
+                <div class="ide-keeper-work-card-top">
+                  <span>GOAL PROGRESS</span>
+                  <span>${summary.currentGoalId}</span>
+                </div>
+                <strong>goal row not present in dashboard state</strong>
+                ${GoalRouteLinks(summary.currentGoalId, summary.currentTaskId)}
+              </div>
+            `
+            : null}
         ${RuntimeBlock(summary)}
+        ${PresenceIndicator(cursor)}
         ${summary.recentOutput
           ? html`<p class="ide-keeper-work-output">${summary.recentOutput}</p>`
           : null}
@@ -99,6 +146,108 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
       </div>
     </section>
   `
+}
+
+function GoalProgressCard(
+  goal: Goal,
+  progress: GoalProgress | null,
+  taskId: string | null,
+) {
+  const pctLabel = progress ? formatProgressPct(progress) : '0%'
+  const pctValue = progress ? Math.round(progress.ratio * 100) : 0
+  return html`
+    <div class="ide-keeper-work-goal" role="status" aria-label=${`Goal ${goal.id} progress ${pctLabel}`}>
+      <div class="ide-keeper-work-card-top">
+        <span>GOAL PROGRESS</span>
+        <span>${horizonLabel(goal.horizon)} · ${goalPhaseLabel(goal.phase)}</span>
+      </div>
+      <strong title=${goal.title}>${goal.title}</strong>
+      <div class="ide-keeper-work-goal-bar" aria-hidden="true">
+        <span style=${{ width: `${pctValue}%` }} />
+      </div>
+      <div class="ide-keeper-work-goal-meta">
+        <span>${progress ? `${progress.done}/${progress.total} tasks` : '0/0 tasks'}</span>
+        <span>${pctLabel}</span>
+        ${goal.metric ? html`<span title=${goal.metric}>${goal.metric}</span>` : null}
+        ${goal.target_value ? html`<span title=${goal.target_value}>target ${goal.target_value}</span>` : null}
+      </div>
+      ${GoalRouteLinks(goal.id, taskId)}
+    </div>
+  `
+}
+
+function GoalRouteLinks(goalId: string, taskId: string | null) {
+  return KeeperWorkRouteLinks(routeLinksForContext({
+    goalId,
+    taskId: taskId ?? undefined,
+  }), 'Keeper work planning links')
+}
+
+function TaskRouteLinks(task: Task, fallbackGoalId: string | null, keeperId: string) {
+  const execution = taskExecutionRouteContext(task)
+  return KeeperWorkRouteLinks(routeLinksForContext({
+    goalId: task.goal_id ?? fallbackGoalId ?? undefined,
+    taskId: task.id,
+    gitRef: task.worktree?.branch,
+    sessionId: execution.sessionId ?? undefined,
+    operationId: execution.operationId ?? undefined,
+    telemetryQuery: execution.telemetryQuery ?? undefined,
+    telemetry: execution.hasTelemetry,
+    keeperId,
+  }), 'Keeper task operational links')
+}
+
+function RuntimeTaskRouteLinks(taskId: string, goalId: string | null, keeperId: string) {
+  return KeeperWorkRouteLinks(routeLinksForContext({
+    goalId: goalId ?? undefined,
+    taskId,
+    keeperId,
+  }), 'Keeper runtime task links')
+}
+
+function KeeperWorkRouteLinks(
+  links: ReadonlyArray<IdeContextRouteLink>,
+  label: string,
+) {
+  if (links.length === 0) return null
+  return html`
+    <div class="ide-keeper-work-links" aria-label=${label}>
+      ${links.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          title=${link.evidence}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >${link.label}</button>
+      `)}
+    </div>
+  `
+}
+
+function taskExecutionRouteContext(task: Task): {
+  readonly sessionId: string | null
+  readonly operationId: string | null
+  readonly telemetryQuery: string | null
+  readonly hasTelemetry: boolean
+} {
+  const sessionId = firstNonEmpty(
+    task.execution_links?.session_id,
+    task.contract?.links?.session_id,
+  )
+  const operationId = firstNonEmpty(
+    task.execution_links?.operation_id,
+    task.contract?.links?.operation_id,
+  )
+  const autoresearchLoopId = firstNonEmpty(
+    task.execution_links?.autoresearch_loop_id,
+    task.contract?.links?.autoresearch_loop_id,
+  )
+  return {
+    sessionId,
+    operationId,
+    telemetryQuery: firstNonEmpty(operationId, sessionId, autoresearchLoopId),
+    hasTelemetry: Boolean(sessionId || operationId || autoresearchLoopId),
+  }
 }
 
 function WorkMetric(label: string, value: string) {
@@ -117,7 +266,7 @@ function RuntimeBlock(summary: KeeperWorkSummary) {
   return html`
     <div class="ide-keeper-work-runtime" role="status">
       <div>
-        <span>${summary.terminalCode ?? 'runtime'}</span>
+        <span>${summary.terminalCode ?? '(unknown terminal code)'}</span>
         <strong>${headline ?? action}</strong>
       </div>
       ${action ? html`<span>${action}</span>` : null}
@@ -147,12 +296,17 @@ export function keeperWorkSummary(
   const currentTask = currentTaskId
     ? activeTasks.find(task => task.id === currentTaskId) ?? null
     : activeTasks[0] ?? null
+  const currentGoalId = firstNonEmpty(
+    currentTask?.goal_id,
+    activeTasks.find(task => task.goal_id)?.goal_id,
+  )
   const trust = keeper?.trust ?? null
   const latestTerminal = trust?.latest_terminal_reason ?? null
   return {
     displayName,
     keeper,
     currentTaskId,
+    currentGoalId,
     currentTask,
     activeTasks,
     activeTaskCount: currentTaskId && activeTasks.length === 0 ? 1 : activeTasks.length,
@@ -225,4 +379,91 @@ function firstNonEmpty(...values: ReadonlyArray<string | null | undefined>): str
     if (trimmed) return trimmed
   }
   return null
+}
+
+function resolveKeeperCursor(
+  keeperName: string,
+  cursors: Map<string, KeeperCursor>,
+): KeeperCursor | null {
+  if (!keeperName) return null
+  const target = keeperName.toLowerCase().trim()
+  // 1. Exact key match (cursorOverlaySignal map keys are canonical keeper ids).
+  // 2. Cursor payload's own keeper_id (server-emitted identity, may differ
+  //    from the map key when the SSE source key is e.g. a session id).
+  // Substring/includes fallbacks were removed because they pick the wrong
+  // cursor when ids share prefixes/suffixes (e.g. "kim" matches "kimchi").
+  for (const [id, cursor] of cursors) {
+    if (id.toLowerCase() === target) return cursor
+    if (cursor.keeper_id && cursor.keeper_id.toLowerCase() === target) return cursor
+  }
+  return null
+}
+
+function PresenceIndicator(cursor: KeeperCursor | null) {
+  if (!cursor) return null
+  // Defensive: SSE parser can emit file_path='' (not-yet-set) and
+  // last_update timestamps that are 0 or in the future. Without these
+  // guards the card renders ":<line>" with no filename and "-99m ago".
+  if (!cursor.file_path) return null
+  const color = getKeeperColor(cursor.keeper_id)
+  const fileName = cursor.file_path.split('/').pop() ?? cursor.file_path
+  const rawAge = Math.round((Date.now() - cursor.last_update) / 1000)
+  const ageSec = Math.max(0, rawAge)
+  const isEditing = cursor.focus_mode === 'editing'
+  return html`
+    <div
+      class="ide-keeper-presence"
+      role="status"
+      aria-label="Keeper presence"
+      style=${{
+        display: 'grid',
+        gap: 'var(--sp-1)',
+        padding: 'var(--sp-2)',
+        background: 'var(--color-bg-surface)',
+        border: '1px solid var(--color-border-default)',
+        borderRadius: 'var(--r-2)',
+      }}
+    >
+      <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+        <span
+          aria-hidden="true"
+          style=${{
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            background: color.cursor,
+            display: 'inline-block',
+            boxShadow: isEditing ? `0 0 4px ${color.cursor}` : 'none',
+          }}
+        />
+        <span style=${{
+          fontSize: 'var(--fs-11)',
+          letterSpacing: '0.05em',
+          color: isEditing ? 'var(--color-status-err)' : 'var(--color-fg-muted)',
+          fontWeight: 600,
+        }}>${cursor.focus_mode.toUpperCase()}</span>
+        ${cursor.tool_name
+          ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)', marginLeft: 'auto' }}>${cursor.tool_name}</span>`
+          : null}
+      </div>
+      <div style=${{
+        fontSize: 'var(--fs-11)',
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--color-fg-secondary)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }} title=${cursor.file_path}>
+        ${fileName}:${cursor.line}${cursor.selection_end ? `-${cursor.selection_end.line}` : ''}
+      </div>
+      ${cursor.turn != null
+        ? html`
+          <div style=${{ display: 'flex', gap: 'var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>
+            <span>turn ${cursor.turn}</span>
+            <span style=${{ marginLeft: 'auto' }}>${ageSec < 60 ? `${ageSec}s ago` : `${Math.round(ageSec / 60)}m ago`}</span>
+          </div>
+        `
+        : null}
+    </div>
+  `
 }

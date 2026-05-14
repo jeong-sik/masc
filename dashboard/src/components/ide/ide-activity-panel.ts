@@ -1,0 +1,966 @@
+import { html } from 'htm/preact'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
+import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
+import type { UnifiedDiffRow } from '../../api/workspace'
+import { KeeperBadge } from '../keeper-badge'
+import type { Goal, Task } from '../../types'
+import { goals, tasks } from '../../store'
+import {
+  formatProgressPct,
+  goalPhaseLabel,
+  horizonLabel,
+  type GoalProgress,
+} from '../goals/goal-helpers'
+import { ideConversationThreadSnapshot } from './ide-context-bridge'
+import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceSnapshot } from './keeper-presence-store'
+import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
+import {
+  IdeContextLens,
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
+import {
+  lspDiagnosticSnapshot,
+  type LspDiagnosticAnchor,
+} from './ide-lsp-client'
+import {
+  focusIdeContextAnchor,
+  normalizeIdeContextFilePath,
+  normalizeIdeContextLine,
+} from './ide-state'
+import {
+  createRunActivityStore,
+  type RunActivityContext,
+  type RunActivityEvent,
+  type RunActivityVerb,
+} from './run-activity-store'
+import { bridgeRunActivityEventsToTrace } from './run-activity-trace-bridge'
+
+const FALLBACK_VERB_MAP: Readonly<Record<string, RunActivityVerb>> = {
+  approved: 'approved',
+  committed: 'committed',
+  flagged: 'flagged',
+}
+const DEFAULT_VERB: RunActivityVerb = 'noted'
+
+interface ApiActivityEvent {
+  readonly seq: number
+  readonly ts_ms: number
+  readonly ts_iso: string
+  readonly room_id: string
+  readonly kind: string
+  readonly actor?: { readonly kind: string; readonly id: string } | null
+  readonly subject?: { readonly kind: string; readonly id: string } | null
+  readonly payload?: unknown
+  readonly tags?: ReadonlyArray<string>
+  readonly context?: RunActivityContext
+}
+
+interface ApiActivityResponse {
+  readonly events?: ReadonlyArray<ApiActivityEvent>
+  readonly latest_seq?: number
+}
+
+interface ActivityFetchResult {
+  readonly events: ReadonlyArray<RunActivityEvent>
+  readonly roomId: string
+  readonly ok: boolean
+}
+
+type ActivityRefreshTone = 'loading' | 'live' | 'stale' | 'offline'
+
+interface ActivityRefreshState {
+  readonly tone: ActivityRefreshTone
+  readonly lastOkMs: number | null
+  readonly lastAttemptMs: number | null
+  readonly failedCount: number
+}
+
+const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
+const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
+const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
+const EMPTY_DIAGNOSTICS: ReadonlyArray<LspDiagnosticAnchor> = []
+const INITIAL_REFRESH_STATE: ActivityRefreshState = {
+  tone: 'loading',
+  lastOkMs: null,
+  lastAttemptMs: null,
+  failedCount: 0,
+}
+const PROGRESS_SURFACES = [
+  ['goal_id', 'Goal'],
+  ['task_id', 'Task'],
+  ['board_post_id', 'Board'],
+  ['comment_id', 'Comment'],
+  ['pr_id', 'PR'],
+  ['git_ref', 'Git'],
+  ['log_id', 'Log'],
+] as const
+
+const DEFAULT_ROOM_ID = 'run-default'
+type MutableRunActivityContext = {
+  -readonly [K in keyof RunActivityContext]?: RunActivityContext[K]
+}
+
+export interface IdeRunProgressSummary {
+  readonly totalEvents: number
+  readonly currentFileEvents: number
+  readonly linkedEvents: number
+  readonly linkedCoveragePercent: number
+  readonly linkedCoverageLabel: string
+  readonly keeperTotalCount: number
+  readonly latestAgeLabel: string
+  readonly surfaceCounts: ReadonlyArray<IdeRunProgressSurfaceCount>
+  readonly keeperCounts: ReadonlyArray<IdeRunProgressKeeperCount>
+  readonly activeGoal: IdeRunProgressGoal | null
+}
+
+export interface IdeRunProgressSurfaceCount {
+  readonly label: string
+  readonly count: number
+  readonly routeLink: IdeContextRouteLink | null
+}
+
+export interface IdeRunProgressKeeperCount {
+  readonly keeper_id: string
+  readonly count: number
+  readonly routeLink: IdeContextRouteLink | null
+}
+
+export interface IdeRunProgressGoal {
+  readonly goalId: string
+  readonly taskId: string | null
+  readonly title: string
+  readonly horizon: string
+  readonly phase: string
+  readonly progress: GoalProgress
+  readonly progressLabel: string
+}
+
+export interface IdeActivityPanelProps {
+  readonly activeFile?: string
+  readonly annotations?: ReadonlyArray<IdeAnnotation>
+  readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
+  readonly pollMs?: number
+  readonly children?: unknown
+}
+
+function verbFromKind(kind: string): RunActivityVerb {
+  const tail = kind.includes(".") ? kind.slice(kind.lastIndexOf(".") + 1) : kind
+  return FALLBACK_VERB_MAP[tail] ?? DEFAULT_VERB
+}
+
+function targetFromSubject(subject: ApiActivityEvent['subject'], kind: string): string {
+  if (!subject) return kind
+  return `${subject.kind}:${subject.id}`
+}
+
+function detailFromPayload(payload: unknown, kind: string): string | undefined {
+  if (typeof payload === 'object' && payload !== null && !Array.isArray(payload)) {
+    const record = payload as Record<string, unknown>
+    const summary = record['summary'] ?? record['title'] ?? record['body'] ?? record['reason']
+    if (typeof summary === 'string' && summary.trim() !== '') {
+      const truncated = summary.length > 120 ? summary.slice(0, 117) + '...' : summary
+      return truncated
+    }
+  }
+  return kind
+}
+
+function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent {
+  return {
+    id: `evt-${event.seq}`,
+    run_id: roomId,
+    timestamp_ms: event.ts_ms,
+    keeper_id: event.actor?.id ?? 'system',
+    verb: verbFromKind(event.kind),
+    target: targetFromSubject(event.subject, event.kind),
+    detail: detailFromPayload(event.payload, event.kind),
+    kind: event.kind,
+    tags: event.tags ?? [],
+    context: event.context ?? contextFromPayloadAndTags(event.payload, event.tags ?? []),
+  }
+}
+
+async function fetchActivityEvents(): Promise<ActivityFetchResult> {
+  try {
+    const res = await fetch('/api/v1/activity/events?limit=50')
+    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
+    const data: ApiActivityResponse = await res.json()
+    const rawEvents = data.events
+    if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
+      return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: true }
+    }
+    const roomId = rawEvents[0].room_id || DEFAULT_ROOM_ID
+    const mapped = rawEvents.map(e => mapApiEvent(e, roomId))
+    return { events: mapped, roomId, ok: true }
+  } catch {
+    return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
+  }
+}
+
+function contextFromPayloadAndTags(
+  payload: unknown,
+  tags: ReadonlyArray<string>,
+): RunActivityContext | undefined {
+  const next: MutableRunActivityContext = {}
+  mergePayloadContext(next, payload)
+  for (const tag of tags) mergeTagContext(next, tag)
+  return Object.keys(next).length === 0 ? undefined : next
+}
+
+function mergePayloadContext(next: MutableRunActivityContext, payload: unknown): void {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return
+  const record = payload as Record<string, unknown>
+  mergeContextRecord(next, nestedRecord(record.context))
+  mergeContextRecord(next, nestedRecord(record.evidence_ref))
+  const failureEnvelope = nestedRecord(record.failure_envelope)
+  mergeContextRecord(next, nestedRecord(failureEnvelope?.evidence_ref))
+  mergeContextRecord(next, nestedRecord(record.tool_args))
+  mergeContextRecord(next, nestedRecord(record.input))
+  mergeContextRecord(next, record, true)
+}
+
+function mergeContextRecord(
+  next: MutableRunActivityContext,
+  record: Record<string, unknown> | null,
+  overwrite = false,
+): void {
+  if (!record) return
+  const filePath = stringValue(record.file_path)
+    ?? stringValue(record.path)
+    ?? stringValue(record.file)
+  const normalizedFilePath = filePath ? normalizeIdeContextFilePath(filePath) : null
+  if (normalizedFilePath && (overwrite || next.file_path === undefined)) next.file_path = normalizedFilePath
+  const line = positiveInteger(record.line)
+    ?? positiveInteger(record.line_start)
+    ?? positiveInteger(record.lineno)
+  if (line !== undefined && (overwrite || next.line === undefined)) next.line = line
+  const goalId = stringValue(record.goal_id)
+  if (goalId && (overwrite || next.goal_id === undefined)) next.goal_id = goalId
+  const taskId = stringValue(record.task_id)
+  if (taskId && (overwrite || next.task_id === undefined)) next.task_id = taskId
+  const boardPostId = stringValue(record.board_post_id) ?? stringValue(record.post_id)
+  if (boardPostId && (overwrite || next.board_post_id === undefined)) next.board_post_id = boardPostId
+  const commentId = stringValue(record.comment_id)
+    ?? stringValue(record.reply_id)
+    ?? numberString(record.comment_number)
+  if (commentId && (overwrite || next.comment_id === undefined)) next.comment_id = commentId
+  const prId = stringValue(record.pr_id)
+    ?? stringValue(record.pull_request)
+    ?? numberString(record.pr_number)
+  if (prId && (overwrite || next.pr_id === undefined)) next.pr_id = prId
+  const gitRef = stringValue(record.git_ref)
+    ?? stringValue(record.commit)
+    ?? stringValue(record.branch)
+  if (gitRef && (overwrite || next.git_ref === undefined)) next.git_ref = gitRef
+  const logId = stringValue(record.log_id)
+  if (logId && (overwrite || next.log_id === undefined)) next.log_id = logId
+  const sessionId = stringValue(record.session_id)
+  if (sessionId && (overwrite || next.session_id === undefined)) next.session_id = sessionId
+  const operationId = stringValue(record.operation_id)
+  if (operationId && (overwrite || next.operation_id === undefined)) next.operation_id = operationId
+  const workerRunId = stringValue(record.worker_run_id)
+  if (workerRunId && (overwrite || next.worker_run_id === undefined)) next.worker_run_id = workerRunId
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function mergeTagContext(next: MutableRunActivityContext, rawTag: string): void {
+  const tag = rawTag.trim()
+  if (tag === '') return
+  const separator = tag.indexOf(':')
+  if (separator <= 0) return
+  const key = tag.slice(0, separator).trim().toLowerCase()
+  const value = tag.slice(separator + 1).trim()
+  if (value === '') return
+
+  if (key === 'file') {
+    const match = value.match(/^(.+?)(?::([1-9][0-9]*))?$/)
+    const path = match?.[1]
+    const normalizedPath = path ? normalizeIdeContextFilePath(path) : null
+    if (!normalizedPath) return
+    next.file_path = normalizedPath
+    if (match?.[2]) next.line = Number.parseInt(match[2], 10)
+    return
+  }
+  if (key === 'line') {
+    const line = Number.parseInt(value, 10)
+    if (Number.isSafeInteger(line) && line >= 1) next.line = line
+    return
+  }
+  if (key === 'goal') next.goal_id = value
+  else if (key === 'task') next.task_id = value
+  else if (key === 'board' || key === 'post') next.board_post_id = value
+  else if (key === 'comment' || key === 'reply') next.comment_id = value
+  else if (key === 'pr' || key === 'pull_request' || key === 'review') next.pr_id = value
+  else if (key === 'git' || key === 'commit' || key === 'branch') next.git_ref = value
+  else if (key === 'log' || key === 'telemetry') next.log_id = value
+  else if (key === 'session' || key === 'session_id') next.session_id = value
+  else if (key === 'operation' || key === 'operation_id' || key === 'op') next.operation_id = value
+  else if (key === 'worker_run' || key === 'worker_run_id' || key === 'worker') next.worker_run_id = value
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+}
+
+function numberString(value: unknown): string | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? String(value)
+    : undefined
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? value
+    : undefined
+}
+
+function normalizedPollMs(value: number | undefined): number | null {
+  if (value === undefined || value <= 0 || !Number.isFinite(value)) return null
+  return Math.floor(value)
+}
+
+export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
+  const {
+    activeFile = '',
+    annotations = EMPTY_ANNOTATIONS,
+    diffRows = EMPTY_DIFF_ROWS,
+    pollMs = 0,
+  } = props
+  const store = useMemo(() => {
+    const store = createRunActivityStore(DEFAULT_ROOM_ID)
+    store.seed(EMPTY_ACTIVITY)
+    return store
+  }, [])
+  const [, forceRender] = useState(0)
+  const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
+  const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
+  const refreshMs = normalizedPollMs(pollMs)
+
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const load = async () => {
+      const attemptMs = Date.now()
+      setRefreshState(prev => ({
+        ...prev,
+        lastAttemptMs: attemptMs,
+        tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
+      }))
+      const { events, roomId, ok } = await fetchActivityEvents()
+      if (cancelled) return
+      if (ok) {
+        store.reset(roomId)
+        store.seed(events)
+        setRefreshState({
+          tone: 'live',
+          lastOkMs: Date.now(),
+          lastAttemptMs: attemptMs,
+          failedCount: 0,
+        })
+      } else {
+        setRefreshState(prev => ({
+          tone: prev.lastOkMs === null ? 'offline' : 'stale',
+          lastOkMs: prev.lastOkMs,
+          lastAttemptMs: attemptMs,
+          failedCount: prev.failedCount + 1,
+        }))
+      }
+      if (refreshMs !== null) timer = setTimeout(load, refreshMs)
+    }
+    void load()
+    return () => {
+      cancelled = true
+      if (timer !== null) clearTimeout(timer)
+    }
+  }, [store, refreshMs])
+
+  useEffect(() => {
+    const unsub = store.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [store])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = ideConversationThreadSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = lspDiagnosticSnapshot.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
+
+  const events = store.events()
+  const keepers = store.knownKeepers()
+  const presence = globalPresenceSnapshot.value
+  const overlay = cursorOverlaySignal.value
+  const threadSnapshot = ideConversationThreadSnapshot.value
+  const threads = threadSnapshot.filePath === activeFile ? threadSnapshot.threads : []
+  const activeFilePath = normalizeIdeContextFilePath(activeFile)
+  const diagnostics = activeFilePath === null
+    ? EMPTY_DIAGNOSTICS
+    : lspDiagnosticSnapshot.value.get(activeFilePath) ?? EMPTY_DIAGNOSTICS
+  const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value)
+
+  useEffect(() => {
+    emittedTraceIds.current = bridgeRunActivityEventsToTrace(events, emittedTraceIds.current)
+  }, [events])
+
+  return html`
+    <div
+      class="ide-rail-panel ide-activity-panel"
+      role="region"
+      aria-label="EVENT TIMELINE"
+    >
+      <div
+        class="ide-rail-head"
+      >
+        <span>EVENT TIMELINE</span>
+        <span class="ide-activity-head-meta">
+          <span>${events.length} events · ${keepers.length} keepers</span>
+          <span
+            class="ide-activity-refresh-status"
+            data-state=${refreshState.tone}
+            role="status"
+            aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
+            title=${activityRefreshTitle(refreshState, refreshMs)}
+          >
+            ${activityRefreshLabel(refreshState, refreshMs)}
+          </span>
+        </span>
+      </div>
+      <${RunProgressStrip} summary=${progress} />
+      <${IdeContextLens}
+        filePath=${activeFile}
+        annotations=${annotations}
+        diffRows=${diffRows}
+        events=${events}
+        threads=${threads}
+        diagnostics=${diagnostics}
+        overlay=${overlay}
+      />
+      <ol
+        class="ide-rail-list ide-activity-list"
+      >
+        ${events.length === 0
+          ? html`<li class="ide-rail-empty">no recent activity</li>`
+          : events.map(item => ActivityRow(item, presence, overlay))}
+      </ol>
+    </div>
+  `
+}
+
+export function deriveIdeRunProgressSummary(
+  events: ReadonlyArray<RunActivityEvent>,
+  activeFile: string,
+  goalList: ReadonlyArray<Goal> = goals.value,
+  taskList: ReadonlyArray<Task> = tasks.value,
+): IdeRunProgressSummary {
+  const activeFilePath = normalizeIdeContextFilePath(activeFile)
+  const currentFileEvents = activeFilePath === null
+    ? 0
+    : events.filter(event =>
+      event.context?.file_path !== undefined
+      && normalizeIdeContextFilePath(event.context.file_path) === activeFilePath,
+    ).length
+  const linkedEvents = events.filter(event => event.context !== undefined).length
+  const linkedCoveragePercent = events.length === 0
+    ? 0
+    : Math.round((linkedEvents / events.length) * 100)
+  const surfaceCounts: IdeRunProgressSurfaceCount[] = PROGRESS_SURFACES.map(([key, label]) => {
+    const matchingEvents = events.filter(event => event.context?.[key])
+    return {
+      label,
+      count: matchingEvents.length,
+      routeLink: latestSurfaceRouteLink(label, matchingEvents),
+    }
+  })
+  surfaceCounts.push({
+    label: 'Telemetry',
+    count: events.length,
+    routeLink: latestSurfaceRouteLink('Telemetry', events),
+  })
+  const keeperStats = new Map<string, { count: number; latestEvent: RunActivityEvent }>()
+  for (const event of events) {
+    const current = keeperStats.get(event.keeper_id)
+    if (!current) {
+      keeperStats.set(event.keeper_id, { count: 1, latestEvent: event })
+      continue
+    }
+    keeperStats.set(event.keeper_id, {
+      count: current.count + 1,
+      latestEvent: isLaterRunActivityEvent(event, current.latestEvent) ? event : current.latestEvent,
+    })
+  }
+  const keeperEntries = [...keeperStats.entries()]
+    .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0]))
+  const keeperCounts = keeperEntries
+    .slice(0, 3)
+    .map(([keeper_id, stat]) => ({
+      keeper_id,
+      count: stat.count,
+      routeLink: keeperProgressRouteLink(stat.latestEvent),
+    }))
+  return {
+    totalEvents: events.length,
+    currentFileEvents,
+    linkedEvents,
+    linkedCoveragePercent,
+    linkedCoverageLabel: `${linkedCoveragePercent}%`,
+    keeperTotalCount: keeperEntries.length,
+    latestAgeLabel: latestAgeLabel(events),
+    surfaceCounts,
+    keeperCounts,
+    activeGoal: activeRunGoal(events, goalList, taskList),
+  }
+}
+
+function RunProgressStrip({ summary }: { readonly summary: IdeRunProgressSummary }) {
+  return html`
+    <section class="ide-run-progress" aria-label="Run progress summary">
+      <div class="ide-run-progress-head">
+        <span>RUN PROGRESS</span>
+        <span>${summary.linkedEvents}/${summary.totalEvents} linked</span>
+      </div>
+      <div class="ide-run-progress-coverage">
+        <div class="ide-run-progress-coverage-head">
+          <span>CONTEXT COVERAGE</span>
+          <span>${summary.linkedCoverageLabel}</span>
+        </div>
+        <div
+          class="ide-run-progress-coverage-bar"
+          role="progressbar"
+          aria-label=${`Linked context coverage ${summary.linkedEvents} of ${summary.totalEvents} events`}
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow=${summary.linkedCoveragePercent}
+        >
+          <span style=${{ width: summary.linkedCoverageLabel }} />
+        </div>
+      </div>
+      <div class="ide-run-progress-stats" role="list" aria-label="Run progress stats">
+        <span role="listitem"><strong>${summary.totalEvents}</strong> events</span>
+        <span role="listitem"><strong>${summary.currentFileEvents}</strong> file</span>
+        <span role="listitem"><strong>${summary.keeperTotalCount}</strong> keepers</span>
+        <span role="listitem">${summary.latestAgeLabel}</span>
+      </div>
+      ${summary.activeGoal ? RunProgressGoalTrack(summary.activeGoal) : null}
+      <div class="ide-run-progress-surfaces" role="list" aria-label="Linked operational surfaces">
+        ${summary.surfaceCounts.map(surface => RunProgressSurfaceChip(surface))}
+      </div>
+      <div class="ide-run-progress-keepers" aria-label="Top active keepers">
+        ${summary.keeperCounts.length === 0
+          ? html`<span>no keeper activity</span>`
+          : summary.keeperCounts.map(entry => RunProgressKeeperChip(entry))}
+      </div>
+    </section>
+  `
+}
+
+function RunProgressKeeperChip(entry: IdeRunProgressKeeperCount) {
+  const routeLink = entry.routeLink
+  return html`
+    <span
+      title=${`${entry.keeper_id}: ${entry.count} events`}
+      data-actionable=${routeLink ? 'true' : 'false'}
+    >
+      ${routeLink
+        ? html`
+          <button
+            type="button"
+            class="ide-run-progress-keeper-link"
+            title=${routeLink.evidence}
+            aria-label=${`Open ${routeLink.evidence}`}
+            onClick=${() => openIdeContextRouteLink(routeLink)}
+          >
+            <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" />
+            <span>${entry.count}</span>
+          </button>
+        `
+        : html`
+          <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" />
+          <span>${entry.count}</span>
+        `}
+    </span>
+  `
+}
+
+function RunProgressSurfaceChip(surface: IdeRunProgressSurfaceCount) {
+  const routeLink = surface.routeLink
+  return html`
+    <span role="listitem" data-active=${surface.count > 0 ? 'true' : 'false'}>
+      ${routeLink
+        ? html`
+          <button
+            type="button"
+            class="ide-run-progress-surface-link"
+            title=${routeLink.evidence}
+            aria-label=${`Open ${routeLink.evidence}`}
+            onClick=${() => openIdeContextRouteLink(routeLink)}
+          >
+            <span>${surface.label}</span>
+            <span>${surface.count}</span>
+          </button>
+        `
+        : html`
+          <span>${surface.label}</span>
+          <span>${surface.count}</span>
+        `}
+    </span>
+  `
+}
+
+function RunProgressGoalTrack(goal: IdeRunProgressGoal) {
+  const percent = Math.round(goal.progress.ratio * 100)
+  const links = routeLinksForContext({
+    goalId: goal.goalId,
+    taskId: goal.taskId ?? undefined,
+  })
+  return html`
+    <div
+      class="ide-run-progress-goal"
+      role="status"
+      aria-label=${`Run goal ${goal.goalId} progress ${goal.progressLabel}`}
+    >
+      <div class="ide-run-progress-goal-top">
+        <span>GOAL TRACK</span>
+        <span>${goal.horizon} · ${goal.phase}</span>
+      </div>
+      <strong title=${goal.title}>${goal.title}</strong>
+      <div class="ide-run-progress-goal-bar" aria-hidden="true">
+        <span style=${{ width: `${percent}%` }} />
+      </div>
+      <div class="ide-run-progress-goal-meta">
+        <span>${goal.progress.done}/${goal.progress.total} tasks</span>
+        <span>${goal.progressLabel}</span>
+        <span title=${goal.goalId}>${goal.goalId}</span>
+      </div>
+      ${links.length > 0
+        ? html`
+          <div class="ide-run-progress-goal-links" aria-label="Run goal planning links">
+            ${links.map(link => html`
+              <button
+                key=${link.id}
+                type="button"
+                title=${link.evidence}
+                onClick=${() => openIdeContextRouteLink(link)}
+              >${link.label}</button>
+            `)}
+          </div>
+        `
+        : null}
+    </div>
+  `
+}
+
+function activeRunGoal(
+  events: ReadonlyArray<RunActivityEvent>,
+  goalList: ReadonlyArray<Goal>,
+  taskList: ReadonlyArray<Task>,
+): IdeRunProgressGoal | null {
+  const tasksById = new Map(taskList.map(task => [task.id, task]))
+  const goalHits = new Map<string, { count: number; latestMs: number; taskId: string | null }>()
+
+  for (const event of events) {
+    const taskId = cleanContextId(event.context?.task_id)
+    const taskGoalId = taskId ? cleanContextId(tasksById.get(taskId)?.goal_id) : null
+    const goalId = cleanContextId(event.context?.goal_id) ?? taskGoalId
+    if (!goalId) continue
+    const current = goalHits.get(goalId) ?? { count: 0, latestMs: Number.NEGATIVE_INFINITY, taskId: null }
+    goalHits.set(goalId, {
+      count: current.count + 1,
+      latestMs: Math.max(current.latestMs, event.timestamp_ms),
+      taskId: current.taskId ?? taskId,
+    })
+  }
+
+  const [goalId, hit] = [...goalHits.entries()]
+    .sort((left, right) =>
+      right[1].count - left[1].count
+      || right[1].latestMs - left[1].latestMs
+      || left[0].localeCompare(right[0]),
+    )[0] ?? []
+  if (!goalId || !hit) return null
+
+  const goal = goalList.find(candidate => candidate.id === goalId) ?? null
+  const progress = runGoalProgress(goalId, taskList)
+  return {
+    goalId,
+    taskId: hit.taskId,
+    title: goal?.title ?? goalId,
+    horizon: goal ? horizonLabel(goal.horizon) : 'unknown',
+    phase: goal ? goalPhaseLabel(goal.phase) : 'unknown',
+    progress,
+    progressLabel: formatProgressPct(progress),
+  }
+}
+
+function runGoalProgress(goalId: string, taskList: ReadonlyArray<Task>): GoalProgress {
+  const relevantTasks = taskList.filter(task =>
+    task.goal_id === goalId && task.status !== 'cancelled',
+  )
+  const done = relevantTasks.filter(task => task.status === 'done').length
+  const total = relevantTasks.length
+  return {
+    done,
+    total,
+    ratio: total > 0 ? done / total : 0,
+  }
+}
+
+function cleanContextId(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+function latestAgeLabel(events: ReadonlyArray<RunActivityEvent>): string {
+  const latest = events[0]
+  if (!latest) return 'idle'
+  const ageMs = Math.max(0, Date.now() - latest.timestamp_ms)
+  const seconds = Math.floor(ageMs / 1000)
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
+}
+
+function latestSurfaceRouteLink(
+  label: string,
+  events: ReadonlyArray<RunActivityEvent>,
+): IdeContextRouteLink | null {
+  const latestEvent = latestRunActivityEvent(events)
+  if (!latestEvent) return null
+  return activityRouteLinks(latestEvent).find(link => link.label === label) ?? null
+}
+
+function keeperProgressRouteLink(event: RunActivityEvent): IdeContextRouteLink | null {
+  const links = activityRouteLinks(event)
+  return links.find(link => link.label === 'Keeper')
+    ?? links.find(link => link.label === 'Telemetry')
+    ?? links[0]
+    ?? null
+}
+
+function latestRunActivityEvent(events: ReadonlyArray<RunActivityEvent>): RunActivityEvent | null {
+  let latest: RunActivityEvent | null = null
+  for (const event of events) {
+    if (latest === null || isLaterRunActivityEvent(event, latest)) {
+      latest = event
+    }
+  }
+  return latest
+}
+
+function isLaterRunActivityEvent(candidate: RunActivityEvent, current: RunActivityEvent): boolean {
+  return candidate.timestamp_ms > current.timestamp_ms
+    || (candidate.timestamp_ms === current.timestamp_ms && candidate.id > current.id)
+}
+
+function activityRouteLinks(item: RunActivityEvent): ReadonlyArray<IdeContextRouteLink> {
+  return routeLinksForContext(activityRouteContext(item))
+}
+
+function activityRouteContext(item: RunActivityEvent): IdeContextRouteContext {
+  const eventContextFile = item.context?.file_path
+  const eventFocusFile = eventContextFile === undefined ? null : normalizeIdeContextFilePath(eventContextFile)
+  return {
+    filePath: eventFocusFile ?? undefined,
+    line: normalizeIdeContextLine(item.context?.line),
+    surface: activityContextSurface(item),
+    label: item.detail ?? `${item.verb} ${item.target}`,
+    sourceId: item.id,
+    goalId: item.context?.goal_id,
+    taskId: item.context?.task_id,
+    boardPostId: item.context?.board_post_id,
+    commentId: item.context?.comment_id,
+    prId: item.context?.pr_id,
+    gitRef: item.context?.git_ref,
+    logId: item.context?.log_id,
+    sessionId: item.context?.session_id,
+    operationId: item.context?.operation_id,
+    workerRunId: item.context?.worker_run_id,
+    keeperId: item.keeper_id,
+    telemetry: true,
+  }
+}
+
+function activityRefreshLabel(state: ActivityRefreshState, refreshMs: number | null): string {
+  if (state.tone === 'loading') return 'syncing'
+  if (state.tone === 'live') return refreshMs === null ? 'loaded' : 'live'
+  const failures = state.failedCount === 1 ? '1 failed' : `${state.failedCount} failed`
+  return state.tone === 'offline' ? `offline ${failures}` : `stale ${failures}`
+}
+
+function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | null): string {
+  const parts = [`Activity refresh ${activityRefreshLabel(state, refreshMs)}`]
+  if (state.lastOkMs !== null) parts.push(`last update ${formatActivityTime(state.lastOkMs)}`)
+  if (state.lastAttemptMs !== null) parts.push(`last attempt ${formatActivityTime(state.lastAttemptMs)}`)
+  if (refreshMs !== null) parts.push(`poll ${Math.max(1, Math.round(refreshMs / 1000))}s`)
+  return parts.join(' | ')
+}
+
+function ActivityRow(
+  item: RunActivityEvent,
+  presence: KeeperPresenceSnapshot | null,
+  overlay: KeeperCursorOverlay,
+) {
+  const hue = keeperHueIndex(item.keeper_id)
+  const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
+  const entry = presenceEntries(presence).find(e => e.keeper_id === item.keeper_id)
+  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
+  const cursor = overlay.cursors.get(item.keeper_id)
+  // cursor stream normalizes missing line to 0; only render the focus
+  // label when both file_path and a 1-based line are present so we
+  // don't show `filename:0` placeholders.
+  const hasFocus = !!cursor && !!cursor.file_path && cursor.line >= 1
+  const focusFile = hasFocus ? cursor.file_path.split('/').pop() : null
+  const eventContextFile = item.context?.file_path
+  const eventFocusFile = eventContextFile === undefined ? null : normalizeIdeContextFilePath(eventContextFile)
+  const eventFocusLine = normalizeIdeContextLine(item.context?.line)
+  const hasEventContextFocus = eventFocusFile !== null
+  const routeLinks = activityRouteLinks(item)
+
+  return html`
+    <li
+      class="ide-activity-row"
+      style=${{
+        '--ide-activity-dot': dot,
+      }}
+    >
+      <span class="ide-activity-time">${formatActivityTime(item.timestamp_ms)}</span>
+      <span class="ide-activity-dot" aria-hidden="true" />
+      <div style=${{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+        <span style=${{ fontSize: 'var(--fs-11)', display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+          <${KeeperBadge} id=${item.keeper_id} variant="full" size="sm" />
+          ${' '}${item.verb}${' '}<span style=${{ color: 'var(--color-fg-muted)' }}>${item.target}</span>
+          ${statusDot ? html`
+            <span
+              role="status"
+              aria-label=${`Current: ${statusDot.label}`}
+              style=${{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                fontSize: 'var(--fs-10)',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                color: statusDot.color,
+                marginLeft: 'auto',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              <span style=${{
+                width: '4px',
+                height: '4px',
+                borderRadius: '50%',
+                background: statusDot.color,
+                display: 'inline-block',
+              }} />
+              ${statusDot.label}
+            </span>
+          ` : null}
+        </span>
+        ${item.detail ? html`<span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${item.detail}</span>` : null}
+        ${hasEventContextFocus ? html`
+          <button
+            type="button"
+            class="ide-activity-context-jump"
+            aria-label=${activityContextLabel(item, eventFocusFile, eventFocusLine)}
+            title=${activityContextTitle(eventFocusFile, eventFocusLine)}
+            onClick=${() => focusIdeContextAnchor({
+              file_path: eventFocusFile,
+              line: eventFocusLine,
+              surface: activityContextSurface(item),
+              label: item.detail ?? `${item.verb} ${item.target}`,
+              source_id: item.id,
+              keeper_id: item.keeper_id,
+              route_links: routeLinks,
+            })}
+          >
+            ↗ ${shortContextPath(eventFocusFile, eventFocusLine)}
+          </button>
+        ` : null}
+        ${routeLinks.length > 0 ? html`
+          <div class="ide-activity-route-links" aria-label="Activity operational links">
+            ${routeLinks.map(link => ActivityRouteLink(link))}
+          </div>
+        ` : null}
+        ${hasFocus ? html`
+          <span style=${{
+            fontSize: 'var(--fs-10)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-accent-fg)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title=${cursor.file_path}
+          >↗ ${focusFile}:${cursor.line}</span>
+        ` : null}
+      </div>
+    </li>
+  `
+}
+
+function ActivityRouteLink(link: IdeContextRouteLink) {
+  return html`
+    <button
+      key=${link.id}
+      type="button"
+      class="ide-activity-route-link"
+      title=${link.evidence}
+      aria-label=${`Open ${link.evidence}`}
+      onClick=${() => openIdeContextRouteLink(link)}
+    >
+      ${link.label}
+    </button>
+  `
+}
+
+function activityContextSurface(item: RunActivityEvent): string {
+  if (item.context?.pr_id) return 'PR'
+  if (item.context?.board_post_id) return 'Board'
+  if (item.context?.goal_id) return 'Goal'
+  if (item.context?.task_id) return 'Task'
+  if (item.context?.git_ref) return 'Git'
+  if (item.context?.log_id) return 'Log'
+  return 'Activity'
+}
+
+function activityContextLabel(
+  item: RunActivityEvent,
+  filePath: string,
+  line: number | undefined,
+): string {
+  const suffix = line !== undefined ? ` line ${line}` : ''
+  return `Focus ${activityContextSurface(item)} context ${filePath}${suffix}`
+}
+
+function activityContextTitle(filePath: string, line: number | undefined): string {
+  return line !== undefined ? `${filePath}:${line}` : filePath
+}
+
+function shortContextPath(filePath: string, line: number | undefined): string {
+  const fileLabel = filePath.split('/').pop() || filePath
+  return line !== undefined ? `${fileLabel}:${line}` : fileLabel
+}
+
+function formatActivityTime(ms: number): string {
+  return new Date(ms).toISOString().slice(11, 19)
+}

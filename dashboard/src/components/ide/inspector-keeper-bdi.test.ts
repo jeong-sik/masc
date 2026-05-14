@@ -10,6 +10,8 @@ import {
 } from './inspector-keeper-bdi'
 import { clearPins } from './multi-keeper-pin-store'
 import { clearTraces, pushTrace } from './keeper-trace-store'
+import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 const snapshot = {
   keeper: 'scholar',
@@ -55,8 +57,37 @@ afterEach(() => {
   activeKeeperName.value = ''
   clearPins()
   clearTraces()
+  cursorOverlaySignal.value = {
+    cursors: new Map(),
+    heatmap: new Map(),
+    collisions: [],
+    active_file: null,
+  }
+  activeIdeFile.value = 'package.json'
+  ideContextFocus.value = null
+  window.location.hash = ''
   void inspectorKeeperPin.value
 })
+
+function setCursorFor(keeperId: string, cursor: Partial<KeeperCursor> & { file_path: string; line: number }): void {
+  const full: KeeperCursor = {
+    keeper_id: keeperId,
+    file_path: cursor.file_path,
+    line: cursor.line,
+    column: cursor.column ?? 0,
+    focus_mode: cursor.focus_mode ?? 'editing',
+    last_update: cursor.last_update ?? Date.now(),
+    ...(cursor.tool_name !== undefined ? { tool_name: cursor.tool_name } : {}),
+    ...(cursor.turn !== undefined ? { turn: cursor.turn } : {}),
+    ...(cursor.selection_end !== undefined ? { selection_end: cursor.selection_end } : {}),
+  }
+  const next = new Map(cursorOverlaySignal.value.cursors)
+  next.set(keeperId, full)
+  cursorOverlaySignal.value = {
+    ...cursorOverlaySignal.value,
+    cursors: next,
+  }
+}
 
 describe('normalizeKeeperBdiSnapshot', () => {
   it('normalizes BDI fields, token spend, and the latest tool call', () => {
@@ -92,6 +123,7 @@ describe('InspectorKeeperBDI', () => {
     expect(container.textContent).toContain('line ownership needs inspection')
     expect(container.textContent).toContain('165 tok')
     expect(container.textContent).toContain('keeper_bash')
+    expect(container.textContent).toContain('42ms')
 
     render(null, container)
   })
@@ -201,6 +233,121 @@ describe('InspectorKeeperBDI', () => {
     render(null, container)
   })
 
+  it('does not render the file focus label when no cursor is present for the keeper', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = 'scholar'
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    expect(container.querySelector('[data-testid="bdi-focus-label"]')).toBeNull()
+
+    render(null, container)
+  })
+
+  it('renders the file focus label when the cursor overlay has a valid 1-based line', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = 'scholar'
+    setCursorFor('scholar', { file_path: 'src/components/ide/inspector-keeper-bdi.ts', line: 42 })
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    const focusButton = container.querySelector('[data-testid="bdi-focus-label"]')
+    expect(focusButton).not.toBeNull()
+    expect(focusButton?.tagName.toLowerCase()).toBe('button')
+    expect(focusButton?.getAttribute('type')).toBe('button')
+    expect(focusButton?.textContent).toContain('inspector-keeper-bdi.ts:42')
+
+    render(null, container)
+  })
+
+  it('hides the file focus label when the overlay only carries a placeholder line (0)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = 'scholar'
+    // Mirrors the SSE adapter default (`line: entry.line || 0`) when the
+    // producer didn't ship a real line number.
+    setCursorFor('scholar', { file_path: 'src/components/ide/inspector-keeper-bdi.ts', line: 0 })
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    expect(container.querySelector('[data-testid="bdi-focus-label"]')).toBeNull()
+
+    render(null, container)
+  })
+
+  it('updates activeIdeFile when the focus label is clicked', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = 'scholar'
+    setCursorFor('scholar', { file_path: 'src/components/ide/inspector-keeper-bdi.ts', line: 42 })
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    const focusButton = container.querySelector('[data-testid="bdi-focus-label"]') as HTMLButtonElement | null
+    expect(focusButton).not.toBeNull()
+    expect(activeIdeFile.value).toBe('package.json')
+
+    focusButton!.click()
+    expect(activeIdeFile.value).toBe('src/components/ide/inspector-keeper-bdi.ts')
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'src/components/ide/inspector-keeper-bdi.ts',
+      line: 42,
+      surface: 'BDI',
+      keeper_id: 'scholar',
+    })
+
+    render(null, container)
+  })
+
+  it('renders BDI operational route links for code, telemetry, and keeper context', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = 'scholar'
+    setCursorFor('scholar', { file_path: 'src/components/ide/inspector-keeper-bdi.ts', line: 42 })
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+
+    const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
+    expect(links.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
+
+    links.find(link => link.textContent === 'Code')!.click()
+    expect(window.location.hash.startsWith('#code?')).toBe(true)
+    expect(routeHashParams().get('file')).toBe('src/components/ide/inspector-keeper-bdi.ts')
+    expect(routeHashParams().get('line')).toBe('42')
+
+    links.find(link => link.textContent === 'Telemetry')!.click()
+    expect(routeHashParams().get('q')).toBe(
+      'bdi keeper:scholar generated:2026-05-05T13:00:00Z tool:keeper_bash',
+    )
+
+    links.find(link => link.textContent === 'Keeper')!.click()
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
+
+    render(null, container)
+  })
+
   it('does not render an unscoped keeper-trace overlay without a selected keeper', async () => {
     pushTrace({
       id: 'inspector-trace-no-keeper',
@@ -224,3 +371,7 @@ describe('InspectorKeeperBDI', () => {
     render(null, container)
   })
 })
+
+function routeHashParams(): URLSearchParams {
+  return new URLSearchParams(window.location.hash.split('?')[1] ?? '')
+}

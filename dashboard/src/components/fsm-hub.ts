@@ -8,6 +8,7 @@ import {
   fetchKeeperComposite,
   type KeeperCompositeExecution,
   type KeeperCompositeSnapshot,
+  type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { fetchGateKeepers } from '../api/gate'
 import { executionLoaded, keepers, refreshExecution } from '../store'
@@ -140,22 +141,26 @@ function executionReceiptLabel(execution: KeeperCompositeExecution | undefined):
   if (!execution) return null
   if (!execution.latest_receipt_present) return 'receipt 없음'
   const terminal = shortText(execution.terminal_reason_code, 32)
-  const model = shortText(execution.cascade?.selected_model ?? execution.model_used, 36)
   const elapsed = formatMs(execution.duration_ms)
   return [
     execution.outcome ?? 'unknown',
     terminal,
-    model,
     elapsed,
   ].filter(Boolean).join(' · ')
 }
 
 function executionReceiptTitle(execution: KeeperCompositeExecution | undefined): string {
   if (!execution?.latest_receipt_present) return '아직 execution receipt가 없습니다.'
+  const surface = execution.tool_surface
   return [
     execution.recorded_at ? `recorded_at: ${execution.recorded_at}` : '',
     execution.operator_disposition ? `operator: ${execution.operator_disposition}` : '',
     execution.operator_disposition_reason ? `reason: ${execution.operator_disposition_reason}` : '',
+    surface?.tool_requirement ? `tool_requirement: ${surface.tool_requirement}` : '',
+    surface?.turn_lane ? `turn_lane: ${surface.turn_lane}` : '',
+    surface?.tool_surface_class ? `tool_surface: ${surface.tool_surface_class}` : '',
+    typeof surface?.visible_tool_count === 'number' ? `visible_tools: ${surface.visible_tool_count}` : '',
+    surface?.tool_surface_fallback_used === true ? 'tool_surface_fallback: true' : '',
     execution.cascade?.fallback_reason ? `fallback: ${execution.cascade.fallback_reason}` : '',
     execution.error?.kind ? `error: ${execution.error.kind}` : '',
     execution.error?.message_preview ? execution.error.message_preview : '',
@@ -173,6 +178,123 @@ function executionReceiptClass(execution: KeeperCompositeExecution | undefined):
     case 'muted':
       return 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] bg-[var(--color-bg-surface)]'
   }
+}
+
+function runtimeTraceTone(trace: KeeperRuntimeTraceResponse): 'ok' | 'warn' | 'bad' | 'muted' {
+  const health = trace.health.toLowerCase()
+  if (health === 'ok' || health === 'healthy') return 'ok'
+  if (health === 'stale' || health === 'partial' || health === 'warning') return 'warn'
+  if (health === 'missing' || health === 'error' || health.includes('gap')) return 'bad'
+  return trace.manifest_path_present ? 'warn' : 'muted'
+}
+
+function runtimeTraceClass(trace: KeeperRuntimeTraceResponse): string {
+  switch (runtimeTraceTone(trace)) {
+    case 'ok':
+      return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
+    case 'bad':
+      return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
+    case 'warn':
+      return 'border-[var(--warn-20)] text-[var(--color-status-warn)] bg-[var(--warn-10)]'
+    case 'muted':
+      return 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] bg-[var(--color-bg-surface)]'
+  }
+}
+
+function runtimeProviderAttemptClass(trace: KeeperRuntimeTraceResponse): string {
+  const provider = trace.provider_attempts
+  const status = provider.terminal_status?.toLowerCase() ?? ''
+  if (provider.finished_count < provider.started_count) {
+    return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
+  }
+  if (status === 'provider_returned') {
+    return 'border-[var(--ok-20)] text-[var(--color-status-ok)] bg-[var(--ok-10)]'
+  }
+  if (status === 'timeout' || status === 'error' || status === 'exception' || status === 'cancelled') {
+    return 'border-[var(--bad-30)] text-[var(--bad-light)] bg-[var(--bad-6)]'
+  }
+  return 'border-[var(--color-border-default)] text-[var(--color-fg-muted)] bg-[var(--color-bg-surface)]'
+}
+
+function runtimeProviderAttemptLabel(trace: KeeperRuntimeTraceResponse): string {
+  const provider = trace.provider_attempts
+  const status = shortText(provider.terminal_status, 18) || 'unknown'
+  return ['prov', status].filter(Boolean).join(' ')
+}
+
+function formatRuntimeTraceUnknown(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return shortText(value, 160)
+  try {
+    return shortText(JSON.stringify(value), 160)
+  } catch {
+    return String(value)
+  }
+}
+
+function runtimeTraceTurnLabel(trace: KeeperRuntimeTraceResponse): string {
+  const keeperTurn = trace.turn_identity.requested_keeper_turn_id
+    ?? trace.turn_identity.manifest_keeper_turn_ids.at(-1)
+    ?? null
+  const oasTurn = trace.turn_identity.max_oas_turn_count
+  const keeperLabel = keeperTurn == null ? '—' : `#${keeperTurn}`
+  const oasLabel = oasTurn == null ? '—' : String(oasTurn)
+  return `turn ${keeperLabel} / oas ${oasLabel}`
+}
+
+function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
+  const turn = trace.turn_identity
+  const eventBus = trace.event_bus
+  const memory = trace.memory
+  const provider = trace.provider_attempts
+  return [
+    `trace_id: ${trace.trace_id || '(unknown)'}`,
+    trace.stale_reason ? `stale_reason: ${trace.stale_reason}` : '',
+    trace.manifest_path ? `manifest: ${trace.manifest_path}` : '',
+    `manifest rows: ${trace.manifest_returned_rows}/${trace.manifest_total_rows}`,
+    `receipt rows: ${trace.receipt_returned_rows}`,
+	    turn.manifest_keeper_turn_ids.length > 0 ? `keeper_turn_ids: ${turn.manifest_keeper_turn_ids.join(', ')}` : '',
+	    turn.receipt_turn_counts.length > 0 ? `receipt_turn_counts: ${turn.receipt_turn_counts.join(', ')}` : '',
+	    `provider attempts: ${turn.provider_attempt_started_count}/${turn.provider_attempt_finished_count}`,
+	    provider.terminal_status ? `provider terminal: ${provider.terminal_status}` : '',
+	    provider.terminal_exception_kind ? `provider exception: ${provider.terminal_exception_kind}` : '',
+	    provider.terminal_error ? `provider error: ${shortText(provider.terminal_error, 220)}` : '',
+	    eventBus.correlation_ids.length > 0 ? `correlation_ids: ${eventBus.correlation_ids.join(', ')}` : '',
+    eventBus.run_ids.length > 0 ? `run_ids: ${eventBus.run_ids.join(', ')}` : '',
+    `context compaction: ${eventBus.context_compacted_count}/${eventBus.context_compact_started_count}`,
+    formatRuntimeTraceUnknown(eventBus.last_compaction),
+    `memory injected/flushed: ${memory.memory_injected_count}/${memory.memory_flushed_count}`,
+    `memory flush ok/error: ${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`,
+  ].filter(Boolean).join('\n')
+}
+
+function RuntimeEvidenceSummary({
+  trace,
+}: {
+  trace?: KeeperRuntimeTraceResponse | null
+}) {
+  if (!trace) return null
+  const eventBus = trace.event_bus
+  const memory = trace.memory
+  const commonClass = 'px-1.5 py-0.5 rounded-[var(--r-1)] border text-3xs font-mono'
+  const title = runtimeTraceTitle(trace)
+  return html`
+    <span class=${`${commonClass} ${runtimeTraceClass(trace)}`} title=${title}>
+      증거 ${trace.health || 'unknown'}
+    </span>
+	    <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-primary)]`} title=${title}>
+	      ${runtimeTraceTurnLabel(trace)}
+	    </span>
+	    <span class=${`${commonClass} ${runtimeProviderAttemptClass(trace)}`} title=${title}>
+	      ${runtimeProviderAttemptLabel(trace)}
+	    </span>
+	    <span class=${`${commonClass} border-[var(--info-border)] text-[var(--info-fg)]`} title=${title}>
+      evt ${eventBus.event_bus_correlated_count} · ctx ${eventBus.context_compacted_count}/${eventBus.context_compact_started_count}
+    </span>
+    <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-muted)]`} title=${title}>
+      mem ${memory.memory_injected_count}/${memory.memory_flushed_count}
+    </span>
+  `
 }
 
 // ── State Reducer ──────────────────────────────────────
@@ -235,16 +357,36 @@ export interface FsmHubProps {
    *  (LT-16d) to drive drill-through. When it changes, the hub
    *  switches to the requested keeper on the next render. */
   selectedName?: string | null
+  /** Surface variant. `'fleet'` (default) renders the keeper selector
+   *  tablist for in-hub switching. `'detail'` (RFC-0046) hides the
+   *  selector — the parent surface (keeper detail page) has already
+   *  pinned a single keeper, so re-offering selection is noise. */
+  mode?: 'fleet' | 'detail'
+  /** RFC-0046 §7 #2 follow-up: parent-supplied composite snapshot.
+   *  When the prop is present (not `undefined`), this hub stops
+   *  issuing its own /composite poll and feeds the parent value into
+   *  its reducer as a `fetch_succeeded` event. `null` means the
+   *  parent is loading — wait, do not race a duplicate fetch.
+   *  Only honoured in `mode='detail'`; in `'fleet'` mode the keeper
+   *  selector tablist drives `selectedName` directly and the parent
+   *  has no single snapshot to share. */
+  externalSnapshot?: KeeperCompositeSnapshot | null
+  /** Parent-supplied runtime manifest/receipt evidence for detail mode. */
+  runtimeTrace?: KeeperRuntimeTraceResponse | null
 }
 
 export function FsmHub(props: FsmHubProps = {}) {
+  const mode = props.mode ?? 'fleet'
+  // RFC-0046 §7 #2: parent-supplied snapshot only honoured in 'detail'
+  // mode. Fleet mode drives selection internally and has no single
+  // snapshot to share, so we fall back to the existing fetch path.
+  const externalSnapshot = mode === 'detail' ? props.externalSnapshot : undefined
   const [selected, setSelected] = useState<string | null>(props.selectedName ?? null)
   useEffect(() => {
     if (props.selectedName !== undefined && props.selectedName !== selected) {
       setSelected(props.selectedName)
     }
     // Only react to external changes; local selection stays internal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedName])
   const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
   const [keeperFilter, setKeeperFilter] = useState('')
@@ -429,6 +571,25 @@ export function FsmHub(props: FsmHubProps = {}) {
 
   useEffect(() => {
     if (!activeSelected) return
+
+    // RFC-0046 §7 #2: parent supplies the snapshot in 'detail' mode.
+    // Inject it into the reducer instead of issuing a duplicate fetch.
+    // `null` = parent is still loading — emit fetch_started so the
+    // skeleton UI shows, then wait for the next prop update.
+    if (externalSnapshot !== undefined) {
+      if (externalSnapshot == null) {
+        dispatch({ type: 'fetch_started', keeperName: activeSelected })
+      } else {
+        dispatch({
+          type: 'fetch_succeeded',
+          keeperName: activeSelected,
+          snapshot: externalSnapshot,
+          fetchedAt: Date.now() / 1000,
+        })
+      }
+      return
+    }
+
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     dispatch({ type: 'fetch_started', keeperName: activeSelected })
@@ -462,7 +623,7 @@ export function FsmHub(props: FsmHubProps = {}) {
         })
       }
     })()
-  }, [activeSelected, shouldRefetchForTick, pollTick])
+  }, [activeSelected, shouldRefetchForTick, pollTick, externalSnapshot])
 
   useGlobalShortcut(
     (ev) => ev.key >= '1' && ev.key <= '9',
@@ -532,10 +693,14 @@ export function FsmHub(props: FsmHubProps = {}) {
         refreshFlash=${refreshFlash}
         transitionCount=${history.length}
         observationCount=${view.observations.length}
+        mode=${mode}
+        runtimeTrace=${mode === 'detail' ? props.runtimeTrace ?? null : null}
       />
 
       ${activeSelected == null ? html`
-        <${EmptyState} message=${keeperNames.length > 0
+        <${EmptyState} message=${mode === 'detail'
+          ? 'composite snapshot을 받지 못했습니다 — keeper 이름을 확인하거나 새로고침하세요'
+          : keeperNames.length > 0
           ? `위 탭에서 키퍼를 선택하면 composite FSM 스냅샷을 표시합니다 (${keeperNames.length}개 사용 가능)`
           : '등록된 키퍼가 없습니다 — MASC에 키퍼를 기동하면 자동으로 표시됩니다'} />
       ` : loading && !snapshot ? html`
@@ -678,6 +843,8 @@ function StatusBar({
   refreshFlash,
   transitionCount,
   observationCount,
+  mode,
+  runtimeTrace,
 }: {
   snapshot: KeeperCompositeSnapshot | null
   lastFetchAt: number
@@ -695,6 +862,8 @@ function StatusBar({
   refreshFlash: boolean
   transitionCount: number
   observationCount: number
+  mode: 'fleet' | 'detail'
+  runtimeTrace?: KeeperRuntimeTraceResponse | null
 }) {
   useNowSecondsTicker()
   const now = nowSecondsSignal.value
@@ -763,6 +932,7 @@ function StatusBar({
               receipt ${receiptLabel}
             </span>
           ` : null}
+          <${RuntimeEvidenceSummary} trace=${runtimeTrace} />
           ${loading ? html`<${InlineSpinner} size="xs" />` : null}
           ${paused ? html`
             <span
@@ -782,6 +952,7 @@ function StatusBar({
             </span>
           ` : null}
         </div>
+        ${mode === 'detail' ? null : html`
         <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper 선택">
           ${keeperNames.length > 0 ? html`
             <${TextInput}
@@ -833,6 +1004,7 @@ function StatusBar({
             `
           })}
         </div>
+        `}
       </div>
       ${snapshot ? html`
         <div class="mt-1.5 flex items-center gap-2 text-3xs font-mono flex-wrap">

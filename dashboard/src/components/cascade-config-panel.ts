@@ -1,5 +1,5 @@
-// CascadeConfigPanel — renders cascade.json profiles + health tracker state
-// side-by-side so operators can see *why* a given provider is picked first.
+// CascadeConfigPanel — renders cascade.toml profiles + health tracker state
+// side-by-side so operators can inspect routing order and candidate labels.
 //
 // Consumes:
 //   GET /api/v1/cascade/config  — profiles + per-candidate weight/health
@@ -114,13 +114,8 @@ function sourceTone(source: CascadeProfile['source']): string {
 }
 
 function catalogSourceSummary(config: CascadeConfigResponse): string {
-  if (config.source_kind === 'toml') {
-    const sourcePath = config.source_path ?? 'cascade.toml'
-    const jsonPath = config.config_path ?? 'cascade.json'
-    return `SSOT: ${sourcePath} → generated ${jsonPath}`
-  }
-  const path = config.source_path ?? config.config_path ?? 'config 없음'
-  return `SSOT: ${path} (direct runtime edit)`
+  const sourcePath = config.source_path ?? 'cascade.toml'
+  return `SSOT: ${sourcePath}`
 }
 
 interface RawConfigModeSummary {
@@ -128,38 +123,22 @@ interface RawConfigModeSummary {
   primary: string
   secondary: string
   saveLabel: string
-  previewTitle: string | null
 }
 
 function rawConfigModeSummary(
   raw: Pick<
     CascadeRawConfigResponse,
-    'source_kind' | 'source_path' | 'config_path'
+    'source_path'
   > | null,
 ): RawConfigModeSummary {
-  const sourcePath = raw?.source_path ?? raw?.config_path ?? 'unresolved'
-  const jsonPath = raw?.config_path ?? 'unresolved'
-  if (raw?.source_kind !== 'toml') {
-    return {
-      title: 'Active Cascade Source Editor',
-      primary:
-        `dashboard에서 직접 ${sourcePath} 를 수정합니다. 저장 경로는 ${jsonPath} 이고, ` +
-        '저장 후 current cascade snapshot 을 다시 읽습니다.',
-      secondary:
-        'semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.',
-      saveLabel: 'Save cascade.json',
-      previewTitle: null,
-    }
-  }
+  const sourcePath = raw?.source_path ?? 'cascade.toml'
   return {
-    title: 'Active Cascade Source Editor (TOML SSOT)',
+    title: 'Active Cascade Source',
     primary:
-      `현재 active source는 ${sourcePath} 이고, 이 editor에서 직접 cascade.toml SSOT 를 수정합니다. ` +
-      '저장 시 TOML parse 검증 뒤 generated runtime JSON을 다시 materialize 합니다.',
+      `현재 active source는 ${sourcePath} 입니다. 원본 cascade.toml 내용은 dashboard API에서 redaction됩니다.`,
     secondary:
-      `아래 preview는 ${jsonPath} 에 기록되는 generated cascade.json runtime artifact 입니다.`,
-    saveLabel: 'cascade.toml 저장',
-    previewTitle: '생성된 cascade.json 미리보기',
+      '프로필, 후보 label, weight, health, validation 상태만 노출됩니다.',
+    saveLabel: '저장 비활성',
   }
 }
 
@@ -205,12 +184,10 @@ function availableKeeperAssignments(
 }
 
 function validateSourceConfigText(
-  raw: Pick<CascadeRawConfigResponse, 'source_kind'> | null,
-  sourceText: string,
+  _raw: unknown,
+  _sourceText: string,
 ): string | null {
-  if (!raw) return null
-  if (raw?.source_kind === 'toml') return null
-  return validateJsonText(sourceText)
+  return null
 }
 
 function validationTone(status: CascadeValidationStatus): 'ok' | 'warn' | 'bad' {
@@ -236,21 +213,43 @@ function validationDescription(status: CascadeValidationStatus): string {
     case 'validated':
       return '현재 cascade catalog 이 정상 검증되었습니다.'
     case 'serving_valid_subset':
-      return '현재 cascade.json 일부 profile 이 검증에 실패해 invalid profile 은 제외하고 유효한 subset 만 계속 서빙 중입니다.'
+      return '현재 cascade.toml 일부 profile 이 검증에 실패해 invalid profile 은 제외하고 유효한 subset 만 계속 서빙 중입니다.'
     case 'serving_last_known_good':
-      return '새 cascade.json 업데이트가 검증에 실패해 마지막 검증 성공 snapshot 을 계속 서빙 중입니다.'
+      return '새 cascade.toml 업데이트가 검증에 실패해 마지막 검증 성공 snapshot 을 계속 서빙 중입니다.'
     case 'invalid':
-      return '현재 cascade.json 검증에 실패했습니다. 서버와 dashboard 는 degraded 로 계속 동작하지만 유효하지 않은 profile 은 라우팅에서 제외될 수 있습니다.'
+      return '현재 cascade.toml 검증에 실패했습니다. 서버와 dashboard 는 degraded 로 계속 동작하지만 유효하지 않은 profile 은 라우팅에서 제외될 수 있습니다.'
   }
 }
 
 function runtimeKindLabel(kind: string | null | undefined): string | null {
   switch (kind) {
-    case 'cli_agent': return 'CLI(non-interactive)'
-    case 'direct_api': return 'Direct API'
-    case 'local': return '로컬'
+    case 'cli_agent': return 'cli-agent'
+    case 'direct_api': return 'direct-api'
+    case 'local': return 'local'
     default: return null
   }
+}
+
+function candidateWeightLabel(c: CascadeCandidate): string {
+  return c.effective_weight === c.config_weight
+    ? String(c.config_weight)
+    : `${c.config_weight} -> ${c.effective_weight}`
+}
+
+function uniqueNonEmpty(values: readonly string[]): string[] {
+  return Array.from(new Set(values.map(value => value.trim()).filter(Boolean)))
+}
+
+function candidateExpandedSummary(
+  c: CascadeCandidate,
+  displayModel: string,
+): string | null {
+  const expandedModels = uniqueNonEmpty(c.expanded_models ?? [])
+  if (expandedModels.length === 0) return null
+  if (expandedModels.length === 1 && expandedModels[0] === displayModel) return null
+  const visible = expandedModels.slice(0, 3).join(', ')
+  const hidden = expandedModels.length - 3
+  return hidden > 0 ? `${visible} +${hidden}` : visible
 }
 
 function fmtCooldownExpiry(expiresAt: number | null): string {
@@ -371,7 +370,7 @@ function ProfileCard({
   }
 
   return html`
-    <article class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3">
+    <article class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3">
       <header class="flex items-center gap-2 mb-2 flex-wrap">
         <span class="font-semibold text-[var(--color-fg-primary)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
@@ -405,9 +404,6 @@ function ProfileCard({
           >
             <div class="flex items-center gap-2 flex-wrap mb-2">
               <span class="text-xs font-medium text-[var(--color-fg-primary)]">키퍼 할당</span>
-              <span class="text-xs text-[var(--color-fg-muted)]">
-                current profile로 keeper를 이동합니다.
-              </span>
             </div>
             ${availableKeepers.length > 0
               ? html`
@@ -459,44 +455,56 @@ function ProfileCard({
       ${profile.candidates.length === 0
         ? html`<div class="text-xs text-[var(--color-fg-muted)]">no candidates resolved</div>`
         : html`
-          <ol class="flex flex-col gap-1 text-xs">
+          <ol class="min-w-0 flex flex-col gap-1 text-xs">
             ${profile.candidates.map((c, idx) => {
-              const expanded = c.expanded_models ?? []
               const displayModel = c.display_model ?? c.model
-              const displayProvider = c.display_provider_name ?? c.provider_name ?? null
+              const providerLabel = c.display_provider_name ?? c.provider_name
               const runtimeLabel = runtimeKindLabel(c.runtime_kind)
+              const expandedSummary = candidateExpandedSummary(c, displayModel)
               return html`
-              <li class="flex items-start gap-2 py-1 border-b border-[var(--color-border-default)] last:border-b-0">
-                <span class="tabular-nums text-[var(--color-fg-muted)] w-5">${idx + 1}.</span>
-                <${StatusChip} tone=${candidateTone(c)}>
-                  ${c.in_cooldown ? 'cooldown' : formatPct1(c.success_rate)}
-                <//>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <code class="text-[var(--color-fg-primary)]">${displayModel}</code>
-                    ${displayProvider
-                      ? html`<span class="text-[var(--color-fg-muted)]">${displayProvider}</span>`
+              <li class="grid grid-cols-1 gap-x-2 gap-y-1 py-2 border-b border-[var(--color-border-default)] last:border-b-0 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                <div class="flex items-center gap-1.5 self-start">
+                  <span class="tabular-nums text-[var(--color-fg-muted)] w-5">${idx + 1}.</span>
+                  <${StatusChip} tone=${candidateTone(c)} class="shrink-0">
+                    ${c.in_cooldown ? 'cooldown' : formatPct1(c.success_rate)}
+                  <//>
+                </div>
+                <div class="min-w-0 grid gap-1">
+                  <div class="flex min-w-0 items-baseline gap-1.5 flex-wrap">
+                    <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">model</span>
+                    <code class="min-w-0 max-w-full break-all text-[var(--color-fg-primary)]">${displayModel}</code>
+                  </div>
+                  <div class="flex min-w-0 gap-x-3 gap-y-1 flex-wrap text-[var(--color-fg-muted)]">
+                    ${providerLabel
+                      ? html`
+                        <span class="min-w-0">
+                          <span class="text-3xs uppercase tracking-wider">provider</span>
+                          <code class="ml-1 break-all text-[var(--color-fg-primary)]">${providerLabel}</code>
+                        </span>
+                      `
                       : null}
                     ${runtimeLabel
-                      ? html`<span class="text-[var(--color-fg-muted)]">${runtimeLabel}</span>`
+                      ? html`
+                        <span>
+                          <span class="text-3xs uppercase tracking-wider">runtime</span>
+                          <code class="ml-1 text-[var(--color-fg-primary)]">${runtimeLabel}</code>
+                        </span>
+                      `
+                      : null}
+                    ${expandedSummary
+                      ? html`
+                        <span class="min-w-0">
+                          <span class="text-3xs uppercase tracking-wider">expanded</span>
+                          <code class="ml-1 break-all text-[var(--color-fg-primary)]">${expandedSummary}</code>
+                        </span>
+                      `
                       : null}
                   </div>
-                  ${c.model !== displayModel
-                    ? html`<div class="text-[length:var(--fs-11)] text-[var(--color-fg-muted)] mt-0.5">config: <code>${c.model}</code></div>`
-                    : null}
-                  ${expanded.length > 1
-                    ? html`
-                      <ol class="mt-1 flex flex-col gap-0.5 text-[length:var(--fs-11)] text-[var(--color-fg-muted)]">
-                        ${expanded.map((model, expandedIdx) => html`
-                          <li><span class="tabular-nums">${expandedIdx + 1}.</span> <code>${model}</code></li>
-                        `)}
-                      </ol>
-                    `
-                    : null}
                 </div>
-                <span class="tabular-nums text-[var(--color-fg-muted)]">
-                  w ${c.config_weight}${c.effective_weight === c.config_weight ? '' : ` → ${c.effective_weight}`}
-                </span>
+                <div class="flex items-baseline gap-1.5 text-[var(--color-fg-muted)] sm:justify-end sm:text-right">
+                  <span class="text-3xs uppercase tracking-wider">weight</span>
+                  <code class="tabular-nums text-[var(--color-fg-primary)]">${candidateWeightLabel(c)}</code>
+                </div>
               </li>
             `})}
           </ol>
@@ -606,7 +614,7 @@ function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
  * - `active`: tracker recorded events in the window (ok).
  * - `cooldown`: actively blocked (bad).
  * - `configured`: declared but untouched — neutral. Rendering this
- *   explicitly answers "why is this provider not being used?" in a way
+ *   explicitly answers "why is this runtime lane not being used?" in a way
  *   that the previous "row is absent" encoding could not.
  */
 function providerStatusTone(
@@ -640,7 +648,7 @@ function fmtPerfTokPerSec(
 }
 
 /**
- * Compact rendering of per-provider p50/p95 latency used in the Health
+ * Compact rendering of per-runtime p50/p95 latency used in the Health
  * Tracker table.  Same empty-state rules as `fmtPerfTokPerSec`.
  */
 function NumCell({ children }: { children: unknown }) {
@@ -660,11 +668,10 @@ function fmtPerfLatencyPair(
 }
 
 /**
- * Pure filter for Health Tracker provider rows.
+ * Pure filter for Health Tracker runtime rows.
  *
- * Case-insensitive substring match on `provider_key`. Also matches the
- * literal keyword `cooldown` when `in_cooldown` is true so operators can
- * isolate all providers currently being blocked.
+ * Matches status labels and the literal keyword `cooldown` when
+ * `in_cooldown` is true so operators can isolate all blocked runtimes.
  *
  * Empty/whitespace query returns the input reference unchanged so the
  * non-filter path preserves referential equality (stable render).
@@ -678,7 +685,7 @@ function filterHealthProviders(
   const needle = query.trim().toLowerCase()
   if (needle === '') return providers
   return providers.filter(p => {
-    if (p.provider_key.toLowerCase().includes(needle)) return true
+    if (p.status && p.status.toLowerCase().includes(needle)) return true
     if (p.in_cooldown && 'cooldown'.includes(needle)) return true
     return false
   })
@@ -695,7 +702,7 @@ function HealthTable({
   searchQuery,
 }: { health: CascadeHealthResponse; searchQuery: { value: string } }) {
   if (health.providers.length === 0) {
-    return html`<${EmptyState}>아직 기록된 provider 이벤트가 없습니다.<//>`
+    return html`<${EmptyState}>아직 기록된 runtime 이벤트가 없습니다.<//>`
   }
   const filtered = filterHealthProviders(health.providers, searchQuery.value)
   const isFiltering = searchQuery.value.trim() !== ''
@@ -704,8 +711,8 @@ function HealthTable({
       <${TextInput}
         type="search"
         class="max-w-70"
-        placeholder="provider 필터 (key, cooldown...)"
-        ariaLabel="health provider 검색"
+        placeholder="runtime 필터 (status, cooldown...)"
+        ariaLabel="health runtime 검색"
         value=${searchQuery.value}
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
       />
@@ -714,13 +721,13 @@ function HealthTable({
         : null}
     </div>
     ${isFiltering && filtered.length === 0
-      ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
+      ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${health.providers.length} runtimes)</div>`
       : html`
-        <table class="w-full text-xs" aria-label="cascade provider 상태">
+        <table class="w-full text-xs" aria-label="cascade runtime 상태">
           <thead>
             <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
               <th scope="col" class="text-left py-1 w-4"></th>
-              <th scope="col" class="text-left py-1">제공자</th>
+              <th scope="col" class="text-left py-1">런타임</th>
               <th
                 scope="col"
                 class="text-left py-1"
@@ -737,7 +744,7 @@ function HealthTable({
               <th
                 scope="col"
                 class="text-right py-1"
-                title="프롬프트 prefill 처리량 (이 provider 의 모델 entry-가중 평균)"
+                title="프롬프트 prefill 처리량 (runtime entry-가중 평균)"
               >Prefill tok/s</th>
               <th
                 scope="col"
@@ -747,29 +754,27 @@ function HealthTable({
               <th
                 scope="col"
                 class="text-right py-1"
-                title="Latency p50 / p95 (밀리초, 모델별 퍼센타일의 가중 평균 근사)"
+                title="Latency p50 / p95 (밀리초, 런타임 퍼센타일의 가중 평균 근사)"
               >Latency p50/p95</th>
               <th scope="col" class="text-right py-1">쿨다운</th>
             </tr>
           </thead>
           <tbody>
-            ${filtered.map((p: CascadeHealthProvider) => {
+            ${filtered.map((p: CascadeHealthProvider, index) => {
               const tone = providerTone(p)
               const rejected = p.rejected_in_window ?? 0
               const status: CascadeProviderStatus | undefined = p.status
-              // `declared = false` on a tracker-only row signals config
-              // drift (provider was tracked but is no longer referenced
-              // by cascade.json). Surface it next to the provider key so
-              // operators can prune it. `undefined` means the server is
-              // too old to carry the field — don't decorate in that case.
+              // `declared = false` on a tracker-only row signals config drift.
+              // Keep the identity redacted while still showing that a stale
+              // runtime lane exists.
               const orphaned = p.declared === false
               return html`
               <tr class="border-b border-[var(--color-border-default)] last:border-b-0">
                 <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
                 <td class="py-1">
-                  <code class="text-[var(--color-fg-primary)]">${p.provider_key}</code>
+                  <code class="text-[var(--color-fg-primary)]">runtime-${index + 1}</code>
                   ${orphaned
-                    ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Provider 가 추적되었지만 cascade.json 에 더 이상 선언되어 있지 않음">orphan</span>`
+                    ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Runtime lane 이 추적되었지만 cascade.toml 에 더 이상 선언되어 있지 않음">orphan</span>`
                     : null}
                 </td>
                 <td class="py-1">
@@ -905,7 +910,7 @@ function SloCard({ slo }: { slo: CascadeSloResponse }) {
           ? html`<span class="text-xs text-[var(--bad-light)]">violating: ${slo.violations.join(', ')}</span>`
           : null}
       </div>
-      <div class="grid grid-cols-3 gap-3">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <${StatCell}
           label="정렬 비율"
           value=${`${ratioPct}%`}
@@ -1004,7 +1009,7 @@ function ClientCapacityHistoryTable({
 
 function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResponse }) {
   if (capacity.entries.length === 0) {
-    return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (cascade가 한 번도 호출되지 않았거나 CLI/ollama provider 미사용)<//>`
+    return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (cascade가 한 번도 호출되지 않았거나 runtime lane 미사용)<//>`
   }
   return html`
     <table class="w-full text-xs" aria-label="client capacity 슬롯">
@@ -1040,15 +1045,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function validateJsonText(raw: string): string | null {
-  try {
-    JSON.parse(raw)
-    return null
-  } catch (error) {
-    return errorMessage(error)
-  }
-}
-
 function CascadeRawConfigEditor({
   raw,
   onRefresh,
@@ -1056,27 +1052,26 @@ function CascadeRawConfigEditor({
   raw: CascadeRawConfigResponse | null
   onRefresh: () => Promise<void>
 }) {
-  const editorText = useSignal(raw?.source_text ?? raw?.raw_json ?? '')
+  const editorText = useSignal(raw?.source_text ?? '')
   const editorDirty = useSignal(false)
   const saving = useSignal(false)
   const saveMessage = useSignal<string | null>(null)
   const mode = rawConfigModeSummary(raw)
-  const sourceEditable = raw?.source_editable !== false
+  const sourceEditable = raw !== null && raw.source_editable !== false
 
   useEffect(() => {
     if (!raw || editorDirty.value) return
     editorText.value = raw.source_text
-  }, [raw?.config_path, raw?.updated_at, raw?.source_path, raw?.source_text])
+  }, [raw?.updated_at, raw?.source_path, raw?.source_text])
 
   const syntaxError = validateSourceConfigText(raw, editorText.value)
   const saveDisabled = saving.value
     || !editorDirty.value
     || !sourceEditable
-    || raw?.config_path == null
     || syntaxError != null
 
   const handleReset = () => {
-    editorText.value = raw?.source_text ?? raw?.raw_json ?? ''
+    editorText.value = raw?.source_text ?? ''
     editorDirty.value = false
     saveMessage.value = 'Latest source snapshot restored in the editor.'
   }
@@ -1085,15 +1080,12 @@ function CascadeRawConfigEditor({
     event.preventDefault()
     const currentSyntaxError = validateSourceConfigText(raw, editorText.value)
     if (currentSyntaxError) {
-      saveMessage.value = `Invalid JSON: ${currentSyntaxError}`
+      saveMessage.value = `Invalid TOML: ${currentSyntaxError}`
       return
     }
-    if (raw?.config_path == null) {
-      saveMessage.value = 'Resolved cascade config path is unavailable.'
-      return
-    }
+
     if (!sourceEditable) {
-      saveMessage.value = `Active source is not editable: ${raw?.source_path ?? raw?.config_path ?? 'unresolved'}`
+      saveMessage.value = `Active source is not editable: ${raw?.source_path ?? 'unresolved'}`
       return
     }
     saving.value = true
@@ -1115,8 +1107,6 @@ function CascadeRawConfigEditor({
     }
   }
 
-  const materializationError = raw?.materialization_error ?? null
-
   return html`
     <${Card} title=${mode.title}>
       <div class="flex flex-col gap-3 p-4">
@@ -1124,21 +1114,6 @@ function CascadeRawConfigEditor({
         <p class="text-xs text-[var(--color-fg-muted)]">
           ${mode.secondary}
         </p>
-
-        ${materializationError
-          ? html`
-            <div
-              role="alert"
-              class="rounded-[var(--r-1)] border border-[var(--bad-light)] bg-[var(--bad-bg-soft, var(--color-bg-page))] px-3 py-2 text-xs text-[var(--bad-light)]"
-            >
-              <strong class="font-semibold">cascade.toml 적용 실패:</strong>
-              <span class="ml-1 font-mono break-all">${materializationError}</span>
-              <p class="mt-1 text-[var(--color-fg-muted)]">
-                아래 표시되는 raw_json 은 마지막으로 정상 머터리얼라이즈된 스냅샷입니다.
-                source_text 의 변경분은 strict-field 검증에 의해 거절되어 적용되지 않았습니다.
-              </p>
-            </div>`
-          : ''}
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
@@ -1162,7 +1137,7 @@ function CascadeRawConfigEditor({
               ? html`<span class="text-[var(--bad-light)]">syntax: ${syntaxError}</span>`
               : html`
                 <span class="text-[var(--color-status-ok)]">
-                  ${raw?.source_kind === 'toml' ? 'syntax: validated on save (TOML)' : 'syntax: valid JSON'}
+                  syntax: validated on save (TOML)
                 </span>
               `}
             ${saveMessage.value
@@ -1199,25 +1174,7 @@ function CascadeRawConfigEditor({
             <//>
           </div>
         </form>
-        ${mode.previewTitle
-          ? html`
-            <div class="flex flex-col gap-2">
-              <div class="text-xs font-medium text-[var(--color-fg-primary)]">
-                ${mode.previewTitle}
-              </div>
-              <div class="text-xs text-[var(--color-fg-muted)]">
-                ${raw?.config_path ?? 'unresolved'}
-              </div>
-              <textarea
-                aria-label="설정 미리보기"
-                class="h-72 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-primary)]"
-                spellcheck="false"
-                readonly
-                value=${raw?.raw_json ?? ''}
-              />
-            </div>
-          `
-          : null}
+
       </div>
     <//>
   `
@@ -1245,7 +1202,7 @@ export function CascadeConfigPanel() {
   const slo = current.data?.slo ?? null
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="min-w-0 flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <${Btn} onClick=${() => void loadCascadeData(resource)}>
           새로고침
@@ -1277,7 +1234,7 @@ export function CascadeConfigPanel() {
               )
               return html`
                 <${CascadeValidationBanner} config=${config} />
-                <div class="grid grid-cols-3 gap-3 mb-3">
+                <div class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 mb-3">
                   <${StatCell}
                     label="프로파일"
                     value=${config.profiles.length}
@@ -1297,7 +1254,7 @@ export function CascadeConfigPanel() {
                 ${config.profiles.length === 0
                   ? html`<${EmptyState}>표시할 유효 cascade profile 이 없습니다.<//>`
                   : html`
-                    <div class="grid gap-3 md:grid-cols-2 mb-3">
+                    <div class="grid min-w-0 gap-3 md:grid-cols-2 mb-3">
                       ${config.profiles.map(p => html`
                         <${ProfileCard}
                           profile=${p}
@@ -1325,7 +1282,7 @@ export function CascadeConfigPanel() {
       <${Card} title="헬스 트래커">
         ${health
           ? html`
-            <div class="grid grid-cols-3 gap-3 mb-3">
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 mb-3">
               <${StatCell}
                 label="윈도우"
                 value=${`${health.window_sec}s`}

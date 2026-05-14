@@ -25,7 +25,7 @@ let exec_gate_raw_source argv =
 let run_argv_line argv =
   let output =
     Masc_exec.Exec_gate.run_argv
-      ~actor:"system/notify"
+      ~actor:(Masc_exec.Agent_id.of_string "system/notify")
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"notify argv"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
@@ -44,7 +44,7 @@ let run_argv_ignore argv =
   (try
      let status, _output =
        Masc_exec.Exec_gate.run_argv_with_status
-         ~actor:"system/notify"
+         ~actor:(Masc_exec.Agent_id.of_string "system/notify")
          ~raw_source:(exec_gate_raw_source argv)
          ~summary:"notify argv"
          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())

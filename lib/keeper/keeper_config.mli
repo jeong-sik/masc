@@ -7,11 +7,15 @@
 
 (** {1 Core Constants} *)
 
-(** Default cascade name for keeper turns. Resolved from [routes.keeper_turn];
-    all keeper code must reference this constant instead of using a profile
-    string literal.
-    @since v2.128.0 *)
-val default_cascade_name : string
+(** Default cascade name for keeper turns. Resolved each call against
+    the live [Cascade_catalog_runtime] snapshot so the answer reflects
+    the currently-installed catalog rather than module-init state. Falls
+    back to [Cascade_routes.cascade_name_for_use Keeper_turn] when the
+    snapshot is not yet available (early boot).
+    @since v2.128.0
+    @since RFC-0066 Phase 1: changed from a string value to a thunk
+    (issue #14624). *)
+val default_cascade_name : unit -> string
 
 (** Cascade name for recovery turns (Failing phase). In the two-profile
     catalog this resolves to the canonical keeper cascade.
@@ -59,6 +63,7 @@ val approval_queue_stale_max_wait_sec : float
 val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
+val legacy_provider_filter_name : string
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
     Drives [normalize_self_model_text] when called from prompt rendering.
@@ -77,6 +82,12 @@ val bool_of_env_default : string -> default:bool -> bool
 
 (** Parse a boolean env var, returning [None] when unset or unrecognized. *)
 val bool_of_env_opt : string -> bool option
+
+(** Parse a raw string as a boolean.
+    Recognizes 1/true/yes/y/on and 0/false/no/n/off (case-insensitive).
+    Returns [None] for other values. Shared parsing logic for
+    [bool_of_env_default] and [bool_of_env_opt]. *)
+val bool_of_string : string -> bool option
 
 (** Parse an integer env var with default and clamping. *)
 val int_of_env_default : string -> default:int -> min_v:int -> max_v:int -> int
@@ -202,6 +213,9 @@ val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
+val keeper_board_debounce_window_sec : unit -> float
+(** Time window (seconds) to coalesce board signals into a single keeper turn.
+    Env: [MASC_KEEPER_BOARD_DEBOUNCE_SEC], default [2.0], range [0.0..30.0]. *)
 val keeper_tool_cost_max_usd : unit -> float option
 val keeper_max_tools_per_turn : unit -> int
 val keeper_retry_max_tools_per_turn : unit -> int

@@ -53,6 +53,12 @@ val sync_oas_context : working_context -> working_context
 (** {1 Working-context projections} *)
 
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
+val resume_checkpoint_of_context :
+  max_checkpoint_messages:int -> working_context -> Agent_sdk.Checkpoint.t
+(** Project [working_context] to the checkpoint passed to OAS resume,
+    applying the same message count, old-tool-result, per-block, and
+    total-content caps used by {!save_oas_checkpoint}. *)
+
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
 val system_prompt_of_context : working_context -> string
 val messages_of_context : working_context -> Agent_sdk.Types.message list
@@ -130,7 +136,7 @@ val persist_message :
 val timed : (unit -> 'a) -> 'a * int
 val zero_usage : Agent_sdk.Types.api_usage
 val usage_of_response :
-  Oas_response.api_response -> Agent_sdk.Types.api_usage
+  Agent_sdk_response.api_response -> Agent_sdk.Types.api_usage
 val total_tokens : Agent_sdk.Types.api_usage -> int
 
 (** {1 Checkpoint store delegation} *)
@@ -203,6 +209,11 @@ val default_max_checkpoint_tool_result_chars : int
     Anthropic [tool_result] blocks into a checkpoint. Beyond this
     threshold the payload collapses to a stub so a single
     orphan-repair pass cannot inflate one block to multi-MB. *)
+
+val default_max_checkpoint_content_chars_total : int
+(** Total persisted Text/tool_result content budget across the retained
+    checkpoint message list. The newest messages are kept first; older
+    messages are truncated or dropped once this budget is exhausted. *)
 
 val tool_result_text_of_block :
   tool_use_id:string ->

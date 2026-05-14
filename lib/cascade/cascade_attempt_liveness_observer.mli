@@ -7,7 +7,8 @@
     - Translation from [Agent_sdk.Types.sse_event] to
       {!Cascade_attempt_liveness.Stream_chunk.kind}.
     - Tick fiber forked under the caller's [Eio.Switch.t] that polls
-      the FSM at [min(ttft_max, inter_chunk_max) / 4] cadence.
+      the FSM at [min(ttft_max, inter_chunk_max) / 4] cadence and can be
+      stopped explicitly when the provider attempt has already returned.
     - Prometheus counter emission per outcome.
 
     {1 No-kill in Observe mode}
@@ -22,14 +23,16 @@
       side-effecting telemetry only.
     - [Enforce] mode: on the first [Outcome] the observer calls
       [Eio.Switch.fail sw {!Liveness_kill}] so the surrounding
-      [Oas_worker_exec.run] tears down via Eio cancellation.
+      [Cascade_runner.run] tears down via Eio cancellation.
 
     {1 Tick fiber lifetime}
 
     The tick fiber is forked under the same [~sw] that owns
-    [Oas_worker_exec.run]. When the OAS run switch dies (success,
-    error, parent cancellation) the tick fiber dies with it — no
-    explicit teardown is required.
+    [Cascade_runner.run], but a provider can return a terminal error
+    before the streaming FSM sees a terminal event. Callers must invoke
+    {!stop_tick_fiber} on attempt completion before leaving the switch;
+    otherwise a pending no-token tick loop can keep the attempt switch open
+    until its long bootstrap budget expires.
 
     @stability Evolving
     @since 0.190.0 *)
@@ -46,13 +49,30 @@ val create :
   mode:Cascade_attempt_liveness_config.mode ->
   budget:Cascade_attempt_liveness.budget ->
   cascade_label:string ->
-  provider_label:string ->
+  ?provider_label:string ->
+  ?external_wait:(unit -> bool) ->
+  ?candidate_key:string ->
   started_at:float ->
+  unit ->
   t
 (** Build an observer for one cascade attempt.
 
-    [started_at] is the monotonic wall-clock the caller already
-    captured for [attempt_started_at] (oas_worker_named.ml:508).
+    [provider_label], when supplied, is a public bounded provider bucket used
+    for Prometheus grouping. Empty or unrecognized labels fall back to a stable
+    non-raw bucket.
+
+    [candidate_key], when supplied, is the OAS/provider-runtime candidate key
+    used only for internal budget history and any successful timing sample
+    exposed by {!success_sample_for_candidate}. It is not emitted as a public
+    Prometheus label.
+
+    [external_wait], when supplied, returns true while the attempt is blocked
+    on a non-provider wait such as MASC HITL approval. During that window the
+    tick fiber feeds liveness heartbeats instead of idle ticks, so operator
+    latency is not classified as provider stream idleness.
+
+    [started_at] is the monotonic wall-clock the caller already captured for
+    the attempt start.
 
     The observer does not own the switch — see [start_tick_fiber]. *)
 
@@ -95,6 +115,12 @@ val start_tick_fiber :
     reference to [t] only — no other shared state — and dies with the
     parent switch (Invariant §8 cancellation cleanup). *)
 
+val stop_tick_fiber : t -> unit
+(** Request the tick fiber to stop.
+
+    This is idempotent and cancellation-safe. It does not mutate the FSM
+    outcome; callers still use {!finalize} to emit the observed outcome. *)
+
 val finalize : t -> unit
 (** Emit the [observed_total] counter once with the final outcome
     label inferred from the FSM state at finalization time:
@@ -108,6 +134,13 @@ val finalize : t -> unit
       cancellation or upstream exception).
 
     Idempotent: calling twice emits the counter once. *)
+
+val success_sample_for_candidate :
+  t -> (string * Cascade_attempt_liveness_config.success_sample) option
+(** Return the successful timing sample captured by {!finalize}, paired
+    with the concrete provider/model candidate key. This function does not
+    mutate the living budget store; callers must record the sample only after
+    their own acceptance gate has accepted the response. *)
 
 val current_state_for_test : t -> Cascade_attempt_liveness.state
 (** Test-only accessor. Production callers must not depend on this. *)

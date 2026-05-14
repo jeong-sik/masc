@@ -31,6 +31,21 @@ let make_test_dir base =
   (try Unix.mkdir tmp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   tmp_dir
 
+let rec mkdir_p path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then ()
+    else failwith (Printf.sprintf "%s exists and is not a directory" path)
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let write_file path contents =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+
 (* ============================================================ *)
 (* Backend.ml - validate_ttl Tests                               *)
 (* ============================================================ *)
@@ -151,7 +166,7 @@ let test_compression_invalid_header () =
 (* Backend.ml - Lock Operations                              *)
 (* ============================================================ *)
 
-let with_eio_backend f =
+let with_eio_backend_and_dir f =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let clock = Eio.Stdenv.clock env in
@@ -168,7 +183,10 @@ let with_eio_backend f =
         ~sw
         (fun () ->
           let backend = Backend.FileSystem.create ~fs config in
-          f backend))
+          f backend tmp_dir))
+
+let with_eio_backend f =
+  with_eio_backend_and_dir (fun backend _tmp_dir -> f backend)
 
 let test_eio_lock_acquire () =
   with_eio_backend @@ fun backend ->
@@ -461,6 +479,29 @@ let test_eio_fs_list_keys_empty () =
   | Ok _ -> fail "should return empty list"
   | Error _ -> fail "list_keys error"
 
+let test_eio_fs_rejects_reserved_atomic_tmp_suffix () =
+  match Backend.FileSystem.validate_key "keeper:state.tmp-atomic" with
+  | Error (Backend.InvalidKey _) -> ()
+  | Ok _ -> fail "reserved .tmp-atomic suffix should be rejected"
+  | Error _ -> fail "unexpected validation error"
+
+let test_eio_fs_list_keys_ignores_atomic_tmp_orphans () =
+  with_eio_backend_and_dir @@ fun backend tmp_dir ->
+  let nested_dir = Filename.concat (Filename.concat tmp_dir "team-sessions") "ts-1" in
+  mkdir_p nested_dir;
+  write_file (Filename.concat tmp_dir "root.tmp-atomic") "partial";
+  write_file (Filename.concat tmp_dir "root") "root";
+  write_file (Filename.concat nested_dir "session.json.tmp-atomic") "partial";
+  write_file (Filename.concat nested_dir "session.json") "session";
+  match Backend.FileSystem.list_keys backend ~prefix:"" with
+  | Ok keys ->
+      check bool "root key listed" true (List.mem "root" keys);
+      check bool "nested key listed" true
+        (List.mem "team-sessions:ts-1:session.json" keys);
+      check bool "atomic temp orphan hidden" false
+        (List.exists (String.ends_with ~suffix:".tmp-atomic") keys)
+  | Error _ -> fail "list_keys error"
+
 (* ============================================================ *)
 (* Test Suite                                                    *)
 (* ============================================================ *)
@@ -524,5 +565,7 @@ let () =
       test_case "get not found" `Quick test_eio_fs_get_not_found;
       test_case "delete not found" `Quick test_eio_fs_delete_not_found;
       test_case "list_keys empty" `Quick test_eio_fs_list_keys_empty;
+      test_case "reject reserved atomic suffix" `Quick test_eio_fs_rejects_reserved_atomic_tmp_suffix;
+      test_case "list_keys ignores atomic temp orphans" `Quick test_eio_fs_list_keys_ignores_atomic_tmp_orphans;
     ];
   ]

@@ -111,6 +111,43 @@ let respond_high_risk_param_blocked request reqd ~param_key ~risk =
                    param_key risk) );
           ]))
 
+let board_curation_json () =
+  match Board_dispatch.latest_curation_snapshot () with
+  | None -> `Assoc [ ("snapshot", `Null) ]
+  | Some snap -> `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
+
+let board_sub_boards_json () =
+  let sub_boards = Board_dispatch.list_sub_boards () in
+  `Assoc
+    [
+      ( "sub_boards",
+        `List (List.map Board.sub_board_to_yojson sub_boards) );
+    ]
+
+let board_karma_ledger_json req =
+  let agent = query_param req "agent" in
+  let limit = int_query_param req "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000 in
+  let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+  let totals =
+    Board_dispatch.get_all_karma ()
+    |> List.sort (fun (_, a) (_, b) -> compare b a)
+  in
+  `Assoc
+    [
+      ("events", `List (List.map Board.karma_event_to_yojson events));
+      ("count", `Int (List.length events));
+      ("scoring_rule", `String "up=+1,down=0");
+      ( "totals",
+        `List
+          (List.map
+             (fun (agent_name, k) ->
+               `Assoc [ ("agent", `String agent_name); ("karma", `Int k) ])
+             totals) );
+    ]
+
+let respond_board_json reqd json =
+  Http.Response.json (Yojson.Safe.to_string json) reqd
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
@@ -227,6 +264,7 @@ let add_routes ~sw ~clock router =
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
          let voter = board_voter_query req in
+         let blind_votes = bool_query_param req "blind_votes" ~default:false in
          let include_moderation =
            include_moderation_projection
              ~base_path:state.Mcp_server.room_config.base_path
@@ -251,6 +289,10 @@ let add_routes ~sw ~clock router =
              ~voter
          in
          let reactions_for = board_reactions_lookup reaction_rows in
+         let contributor_quality_for =
+           board_contributor_quality_lookup
+             ~config:state.Mcp_server.room_config ()
+         in
          let posts_json =
            List.map
              (fun (p : Board.post) ->
@@ -258,8 +300,10 @@ let add_routes ~sw ~clock router =
                let post_id = Board.Post_id.to_string p.id in
                let current_vote = board_current_vote_for_post ~voter ~post_id in
                let reactions = reactions_for (Board.Reaction_post, post_id) in
-               board_post_dashboard_json ~include_moderation ?current_vote
-                 ~reactions
+               let contributor_quality = contributor_quality_for author in
+               board_post_dashboard_json ~include_moderation ~blind_votes
+                 ?contributor_quality ~reactions
+                 ?current_vote
                  ~author_karma:(get_karma author) p)
              paged
          in
@@ -284,17 +328,18 @@ let add_routes ~sw ~clock router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/board/curation" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         respond_board_json reqd (board_curation_json ())
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/board/flairs" (fun _request reqd ->
        let flairs = List.map Board.flair_to_yojson Board.available_flairs in
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json (Yojson.Safe.to_string json) reqd)
 
   |> Http.Router.get "/api/v1/board/sub-boards" (fun _request reqd ->
-       let sub_boards = Board_dispatch.list_sub_boards () in
-       let json = `Assoc [
-         ("sub_boards", `List (List.map Board.sub_board_to_yojson sub_boards));
-       ] in
-       Http.Response.json (Yojson.Safe.to_string json) reqd)
+       respond_board_json reqd (board_sub_boards_json ()))
 
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
        with_tool_auth ~tool_name:"board_sub_board_create"
@@ -360,6 +405,67 @@ let add_routes ~sw ~clock router =
                       (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
                    reqd)))
 
+  |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
+       with_tool_auth ~tool_name:"board_sub_board_delete"
+         (fun _state _req reqd ->
+         let path = Http.Request.path request in
+         (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+          | None ->
+              Http.Response.json ~status:`Bad_request
+                (Yojson.Safe.to_string
+                   (`Assoc [("error", `String "sub_board_id is required")]))
+                reqd
+          | Some sub_board_id ->
+              (match Board_dispatch.delete_sub_board ~sub_board_id with
+               | Ok () ->
+                   Http.Response.json
+                     (Yojson.Safe.to_string (`Assoc [("deleted", `Bool true)])) reqd
+               | Error e ->
+                   Http.Response.json ~status:`Not_found
+                     (Yojson.Safe.to_string
+                        (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                     reqd)))
+         request reqd)
+
+  |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->
+       with_tool_auth ~tool_name:"board_sub_board_update"
+         (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body ->
+           try
+             let args = Yojson.Safe.from_string body in
+             let name = Safe_ops.json_string_opt "name" args in
+             let description = Safe_ops.json_string_opt "description" args in
+             let members = Safe_ops.json_string_list "members" args in
+             let members_arg = if members = [] then None else Some members in
+             let access =
+               match Safe_ops.json_string_opt "access" args with
+               | Some s -> Board.sub_board_access_of_string_opt s
+               | None -> None
+             in
+             let path = Http.Request.path request in
+             (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+              | None ->
+                  Http.Response.json ~status:`Bad_request
+                    (Yojson.Safe.to_string
+                       (`Assoc [("error", `String "sub_board_id is required")]))
+                    reqd
+              | Some sub_board_id ->
+                  (match Board_dispatch.update_sub_board ~sub_board_id ?name ?description ?members:members_arg ?access () with
+                   | Ok sb ->
+                       Http.Response.json
+                         (Yojson.Safe.to_string (Board.sub_board_to_yojson sb)) reqd
+                   | Error e ->
+                       Http.Response.json ~status:`Bad_request
+                         (Yojson.Safe.to_string
+                            (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                         reqd))
+           with Yojson.Json_error msg ->
+             Http.Response.json ~status:`Bad_request
+               (Yojson.Safe.to_string
+                  (`Assoc [("error", `String ("invalid JSON: " ^ msg))]))
+               reqd))
+         request reqd)
+
   |> Http.Router.prefix_get "/api/v1/board/" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let path = Http.Request.path request in
@@ -368,18 +474,28 @@ let add_routes ~sw ~clock router =
               Http.Response.json
                 (Yojson.Safe.to_string (`Assoc [("error", `String "post_id is required")]))
                 ~status:`Bad_request reqd
+          | Some "curation" ->
+              respond_board_json reqd (board_curation_json ())
+          | Some "sub-boards" ->
+              respond_board_json reqd (board_sub_boards_json ())
+          | Some "karma/ledger" ->
+              respond_board_json reqd (board_karma_ledger_json req)
           | Some post_id ->
               let format =
                 query_param req "format" |> Option.value ~default:"nested"
               in
               let voter = board_voter_query req in
+              let blind_votes =
+                bool_query_param req "blind_votes" ~default:false
+              in
               let include_moderation =
                 include_moderation_projection
                   ~base_path:state.Mcp_server.room_config.base_path
                   req
               in
               let (status, body) =
-                board_post_detail_json ~include_moderation ~voter
+                board_post_detail_json ~include_moderation ~blind_votes ~voter
+                  ~config:(Some state.Mcp_server.room_config)
                   ~response_format:format ~post_id
               in
               respond_json_with_cors ~status request reqd body)
@@ -523,27 +639,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/board/karma/ledger" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let agent = query_param req "agent" in
-         let limit =
-           int_query_param req "limit" ~default:500
-           |> clamp ~min_v:1 ~max_v:5000
-         in
-         let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-         let totals =
-           Board_dispatch.get_all_karma ()
-           |> List.sort (fun (_, a) (_, b) -> compare b a)
-         in
-         let json =
-           `Assoc [
-             ("events", `List (List.map Board.karma_event_to_yojson events));
-             ("count", `Int (List.length events));
-             ("scoring_rule", `String "up=+1,down=0");
-             ("totals", `List (List.map (fun (agent_name, k) ->
-               `Assoc [("agent", `String agent_name); ("karma", `Int k)])
-               totals));
-           ]
-         in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+         respond_board_json reqd (board_karma_ledger_json req)
        ) request reqd)
 
   (* Mention Inbox API *)

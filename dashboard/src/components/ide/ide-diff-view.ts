@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import type { UnifiedDiffRow } from '../../api/workspace'
+import { navigate } from '../../router'
 import { StatusChip } from '../common/status-chip'
+import type { IdeContextFocus, IdeContextFocusRouteLink } from './ide-state'
 
 // ── Shared diff types ─────────────────────────────────────────────
 
@@ -34,8 +36,12 @@ export interface DiffSummary {
 
 // ── Unified diff view ─────────────────────────────────────────────
 
-export function UnifiedDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
+export function UnifiedDiffView(
+  rows: ReadonlyArray<UnifiedDiffRow>,
+  contextFocus: IdeContextFocus | null = null,
+) {
   const summary = summarizeDiffRows(rows)
+  const diffFocus = diffContextFocusForRows(rows, contextFocus)
   return html`
     <div
       role="region"
@@ -50,7 +56,7 @@ export function UnifiedDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
         lineHeight: 1.6,
       }}
     >
-      <${DiffSummaryStrip} summary=${summary} mode="Unified" />
+      <${DiffSummaryStrip} summary=${summary} mode="Unified" contextFocus=${diffFocus} />
       ${summary.total === 0
         ? DiffEmptyState('No diff rows for the selected file.')
         : html`
@@ -63,8 +69,11 @@ export function UnifiedDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
               overflow: 'auto',
             }}
           >
-            ${rows.map(row => html`
+            ${rows.map(row => {
+              const focused = diffRowMatchesFocus(row, diffFocus)
+              return html`
               <li
+                data-context-focus=${focused ? 'true' : 'false'}
                 style=${{
                   display: 'grid',
                   gridTemplateColumns: '32px 40px 40px minmax(0, 1fr)',
@@ -73,6 +82,7 @@ export function UnifiedDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
                   padding: '0 var(--sp-3)',
                   background: diffBackground(row.kind),
                   color: row.kind === 'delete' ? 'var(--color-status-danger, var(--color-fg-secondary))' : 'var(--color-fg-secondary)',
+                  ...diffFocusRailStyle(focused),
                 }}
               >
                 <span style=${{ color: diffMarkerColor(row.kind), textAlign: 'center' }}>${diffMarker(row.kind)}</span>
@@ -80,7 +90,7 @@ export function UnifiedDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
                 <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${row.newLine ?? ''}</span>
                 <span style=${{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}>${row.text}</span>
               </li>
-            `)}
+            `})}
           </ol>
         `}
     </div>
@@ -92,9 +102,11 @@ export function UnifiedDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
 function DiffSummaryStrip({
   summary,
   mode,
+  contextFocus = null,
 }: {
   readonly summary: DiffSummary
   readonly mode: 'Unified' | 'Split'
+  readonly contextFocus?: IdeContextFocus | null
 }) {
   // In Split mode buildSplitDiff visually pairs each delete with its add on
   // the same row, so additions+deletions over-counts the visible "changed
@@ -136,7 +148,42 @@ function DiffSummaryStrip({
         <${StatusChip} tone="neutral" uppercase=${false}>${summary.context} context</${StatusChip}>
         <${StatusChip} tone="info" uppercase=${false}>old ${formatDiffLineRange(summary.oldRange)} -> new ${formatDiffLineRange(summary.newRange)}</${StatusChip}>
       </span>
+      ${contextFocus ? html`<${DiffContextFocus} focus=${contextFocus} />` : null}
     </div>
+  `
+}
+
+function DiffContextFocus({
+  focus,
+}: {
+  readonly focus: IdeContextFocus
+}) {
+  const line = focus.line !== undefined ? `L${focus.line}` : null
+  const links = focus.route_links ?? []
+  return html`
+    <span
+      class="ide-diff-context-focus"
+      data-testid="ide-diff-context-focus"
+      aria-label=${diffContextFocusLabel(focus)}
+      title=${`${focus.file_path}${focus.line !== undefined ? `:${focus.line}` : ''}`}
+    >
+      <span>${focus.surface}</span>
+      ${line ? html`<span>${line}</span>` : null}
+      <strong>${focus.label}</strong>
+      ${links.length > 0 ? html`
+        <span class="ide-diff-context-links" aria-label="Diff context route links">
+          ${links.map(link => html`
+            <button
+              key=${link.id}
+              type="button"
+              title=${link.evidence}
+              aria-label=${`Open ${link.evidence}`}
+              onClick=${() => openDiffContextRouteLink(link)}
+            >${link.label}</button>
+          `)}
+        </span>
+      ` : null}
+    </span>
   `
 }
 
@@ -163,9 +210,13 @@ function DiffEmptyState(label: string) {
 
 // ── Split diff view ───────────────────────────────────────────────
 
-export function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
+export function SplitDiffView(
+  rows: ReadonlyArray<UnifiedDiffRow>,
+  contextFocus: IdeContextFocus | null = null,
+) {
   const summary = summarizeDiffRows(rows)
   const splitRows: SplitDiffRow[] = buildSplitDiff(rows)
+  const diffFocus = diffContextFocusForRows(rows, contextFocus)
   return html`
     <div
       role="region"
@@ -180,7 +231,7 @@ export function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
         lineHeight: 1.6,
       }}
     >
-      <${DiffSummaryStrip} summary=${summary} mode="Split" />
+      <${DiffSummaryStrip} summary=${summary} mode="Split" contextFocus=${diffFocus} />
       <div
         style=${{
           display: 'grid',
@@ -197,17 +248,21 @@ export function SplitDiffView(rows: ReadonlyArray<UnifiedDiffRow>) {
       <div style=${{ overflow: 'auto' }}>
         ${splitRows.length === 0
           ? DiffEmptyState('No split diff rows for the selected file.')
-          : splitRows.map(row => html`
+          : splitRows.map(row => {
+            const focused = splitDiffRowMatchesFocus(row, diffFocus)
+            return html`
             <div
+              data-context-focus=${focused ? 'true' : 'false'}
               style=${{
                 display: 'grid',
                 gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                ...diffFocusRailStyle(focused),
               }}
             >
               <${SplitDiffCellView} cell=${row.before} />
               <${SplitDiffCellView} cell=${row.after} framed=${true} />
             </div>
-          `)}
+          `})}
       </div>
     </div>
   `
@@ -242,6 +297,42 @@ function SplitDiffCellView({
   `
 }
 
+export function diffContextFocusForRows(
+  rows: ReadonlyArray<UnifiedDiffRow>,
+  focus: IdeContextFocus | null,
+): IdeContextFocus | null {
+  if (!focus || focus.line === undefined) return null
+  return rows.some(row => diffRowMatchesFocus(row, focus)) ? focus : null
+}
+
+function diffRowMatchesFocus(
+  row: UnifiedDiffRow,
+  focus: IdeContextFocus | null,
+): boolean {
+  if (!focus || focus.line === undefined) return false
+  return row.newLine === focus.line || row.oldLine === focus.line
+}
+
+function splitDiffRowMatchesFocus(
+  row: SplitDiffRow,
+  focus: IdeContextFocus | null,
+): boolean {
+  if (!focus || focus.line === undefined) return false
+  return row.before?.line === focus.line || row.after?.line === focus.line
+}
+
+function diffContextFocusLabel(focus: IdeContextFocus): string {
+  const line = focus.line !== undefined ? ` line ${focus.line}` : ''
+  const links = focus.route_links?.length
+    ? `, ${focus.route_links.length} route links`
+    : ''
+  return `Diff context: ${focus.surface}${line}, ${focus.label}${links}`
+}
+
+function openDiffContextRouteLink(link: IdeContextFocusRouteLink): void {
+  navigate(link.tab, link.params)
+}
+
 // ── Diff helpers ──────────────────────────────────────────────────
 
 function diffMarker(kind: string): string {
@@ -260,6 +351,16 @@ function diffMarkerColor(kind: string): string {
   if (kind === 'add') return 'var(--color-status-ok, var(--ok))'
   if (kind === 'delete') return 'var(--color-status-danger, var(--danger))'
   return 'var(--color-fg-disabled)'
+}
+
+function diffFocusRailStyle(focused: boolean): Record<string, string> {
+  return focused
+    ? {
+        boxShadow: 'inset 3px 0 0 var(--color-accent-fg)',
+        outline: '1px solid color-mix(in srgb, var(--color-accent-fg) 36%, transparent)',
+        outlineOffset: '-1px',
+      }
+    : {}
 }
 
 // ── Summary helpers ───────────────────────────────────────────────

@@ -21,7 +21,10 @@ const REFRESH_MS = 30_000
 
 interface KeeperMemoryTierPanelProps {
   keeperName: string
-  currentPhase?: string | null
+  /** RFC-0046: parent-supplied composite snapshot. When provided,
+   *  this panel reads the SSOT from the shared FsmHub fetch instead
+   *  of issuing its own /composite call. */
+  snapshot?: KeeperCompositeSnapshot | null
 }
 
 type MemoryTierFilter = 'all' | 'saturated'
@@ -68,10 +71,11 @@ export function filterMemoryKindUsage(
  */
 export function KeeperMemoryTierPanel({
   keeperName,
-  currentPhase,
+  snapshot: externalSnapshot,
 }: KeeperMemoryTierPanelProps) {
   const [usage, setUsage] = useState<MemoryKindUsageEntry[] | null>(null)
-  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  const [internalSnapshot, setInternalSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  const snapshot = externalSnapshot ?? internalSnapshot
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -83,9 +87,16 @@ export function KeeperMemoryTierPanel({
     setError(null)
 
     const refresh = async () => {
+      // RFC-0046 §7 #1: skip composite fetch when parent supplies it.
+      // `undefined` = standalone caller (legacy fallback); `null` =
+      // parent is still loading, wait rather than dual-fetch.
+      const compositePromise: Promise<KeeperCompositeSnapshot | null> = externalSnapshot !== undefined
+        ? Promise.resolve(externalSnapshot)
+        : fetchKeeperComposite(keeperName, { signal: controller.signal })
+
       Promise.allSettled([
         fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
-        fetchKeeperComposite(keeperName, { signal: controller.signal }),
+        compositePromise,
       ])
         .then(([usageResult, compositeResult]) => {
           if (controller.signal.aborted) return
@@ -99,9 +110,9 @@ export function KeeperMemoryTierPanel({
           }
 
           if (compositeResult.status === 'fulfilled') {
-            setSnapshot(compositeResult.value)
+            setInternalSnapshot(compositeResult.value)
           } else {
-            setSnapshot(null)
+            setInternalSnapshot(null)
             nextError ||= compositeResult.reason instanceof Error
               ? compositeResult.reason.message
               : 'composite fetch failed'
@@ -149,7 +160,7 @@ export function KeeperMemoryTierPanel({
     () => filterMemoryKindUsage(usage, query, filter),
     [usage, query, filter],
   )
-  const phase = snapshot?.phase ?? currentPhase ?? null
+  const phase = snapshot?.phase ?? null
   const isCompacting = phase === 'Compacting' || phase === 'compacting'
   const compactionStage = snapshot?.compaction.stage ?? (isCompacting ? 'compacting' : 'accumulating')
   const compactionSpec = buildCompactionSpec(compactionStage, phase)

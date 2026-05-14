@@ -32,6 +32,27 @@ val resolve_auto_model_id : string -> string -> string
 
 (** {1 Model String Parsing} *)
 
+(** Normalize OpenAI-compatible request paths against versioned base URLs.
+
+    When [base_url] already carries a path segment such as [/v1],
+    [request_path] should not repeat that prefix. For example,
+    [base_url = "http://127.0.0.1:18080/v1"] and
+    [request_path = "/v1/chat/completions"] normalize to
+    ["/chat/completions"].
+
+    @since 0.193.9 *)
+val normalize_openai_compat_request_path :
+  base_url:string -> request_path:string -> string
+
+(** Build HTTP headers for a resolved provider API key.
+
+    Empty API keys return only the JSON content-type header; HTTP providers
+    with bearer-token auth receive [Authorization: Bearer ...]. *)
+val headers_with_auth :
+  kind:Llm_provider.Provider_config.provider_kind ->
+  api_key:string ->
+  (string * string) list
+
 (** Parse a "provider:model_id" string into a {!Llm_provider.Provider_config.t}.
 
     Supported providers are determined by {!Llm_provider.Provider_registry.default}.
@@ -49,9 +70,9 @@ val parse_model_string :
   ?num_ctx:int ->
   string -> Llm_provider.Provider_config.t option
 (** [api_key_env_overrides] defaults to [[]]. When non-empty, it overrides
-    the registry default API key env var for matching providers; see
-    {!parse_model_strings} for format details. Empty-string entries fall
-    through to the next level of the resolution chain.
+    the registry default API key env var for matching providers. Entries map
+    provider names, or ["*"] for all providers, to env var names. Empty-string
+    entries fall through to the next level of the resolution chain.
 
     [supports_tool_choice_override] is forwarded to
     {!Llm_provider.Provider_config.make}. [None] leaves the per-kind default
@@ -60,30 +81,24 @@ val parse_model_string :
     @since 0.122.0 api_key_env_overrides parameter added
     @since 0.150.0 supports_tool_choice_override parameter added *)
 
-(** Parse a {!Cascade_config_loader.weighted_entry} into a
-    {!Llm_provider.Provider_config.t}. Forwards
-    [entry.supports_tool_choice] as the
-    [supports_tool_choice_override]. The [weight] is not part of
-    Provider_config; it drives cascade ordering separately.
-
-    @since 0.150.0 *)
-val parse_weighted_entry :
-  ?temperature:float ->
-  ?max_tokens:int ->
-  ?system_prompt:string ->
-  ?api_key_env_overrides:(string * string) list ->
-  ?keep_alive:string ->
-  ?num_ctx:int ->
-  Cascade_config_loader.weighted_entry ->
-  Llm_provider.Provider_config.t option
+(* RFC-0058 iter 21: [val parse_weighted_entry] removed.  All
+   callers migrated to [parse_weighted_entry_with_drop_metric]
+   (iter 14).  Audit at iter 14 confirmed zero external callers.
+   See {!parse_weighted_entry_with_drop_metric} and
+   {!parse_weighted_entry_diag}. *)
 
 type weighted_entry_drop =
   | Drop_unregistered_scheme of { model : string; scheme : string }
   | Drop_unavailable_scheme of { model : string; scheme : string }
   | Drop_invalid_syntax of string
 
-(** Like {!parse_weighted_entry}, but preserves the reason a candidate was
-    rejected so callers can surface actionable validation errors.
+
+(** Parse a {!Cascade_config_loader.weighted_entry} into a
+    {!Llm_provider.Provider_config.t}, preserving the reason a
+    candidate was rejected ({!weighted_entry_drop}) so callers can
+    surface actionable validation errors.  Used by
+    {!parse_weighted_entries} and by
+    {!parse_weighted_entry_with_drop_metric}.
 
     @since 0.150.0 *)
 val parse_weighted_entry_diag :
@@ -96,13 +111,30 @@ val parse_weighted_entry_diag :
   Cascade_config_loader.weighted_entry ->
   (Llm_provider.Provider_config.t, weighted_entry_drop) result
 
+(** Resolve-path wrapper around {!parse_weighted_entry_diag} that
+    returns an [option] AND ticks
+    [Cascade_metrics.on_profile_candidate_drop ~cascade ~reason] on
+    drop.  Replaces the iter-21-removed [parse_weighted_entry] which
+    silently swallowed the drop reason; the resolve path surfaced
+    drops only as [providers = []] downstream with no WHY. *)
+val parse_weighted_entry_with_drop_metric :
+  ?temperature:float ->
+  ?max_tokens:int ->
+  ?system_prompt:string ->
+  ?api_key_env_overrides:(string * string) list ->
+  ?keep_alive:string ->
+  ?num_ctx:int ->
+  cascade:string ->
+  Cascade_config_loader.weighted_entry ->
+  Llm_provider.Provider_config.t option
+
 (** Parse a list of weighted entries, dropping ones that cannot produce a
     provider config. Preserves input order.
 
     Drops are categorised (unregistered provider scheme, unavailable
     provider, invalid syntax) and logged once per call through
     {!Log.Misc}: unregistered schemes and invalid syntax are promoted to
-    ERROR because they usually indicate cascade.json drift or a stale
+    ERROR because they usually indicate cascade.toml drift or a stale
     binary linked against an older provider registry. Unavailable
     schemes (missing API key, missing CLI binary) log at WARN. If every
     entry is filtered out the call escalates to an additional ERROR so
@@ -124,12 +156,13 @@ val parse_weighted_entries :
 val order_weighted_entries :
   ?rand_int:(int -> int) ->
   ?rotation_scope:string ->
+  ?cascade:string ->
   Cascade_config_loader.weighted_entry list ->
   Cascade_config_loader.weighted_entry list
 (** Order weighted entries using the same health-adjusted runtime logic as
     {!resolve_model_strings}. Exposed so runtime-authoritative catalog
     snapshots can preserve dynamic health ordering without rereading raw
-    [cascade.json].
+    cascade source text.
 
     When [rotation_scope] is provided, equal-weight top-level provider entries
     are round-robined within that scope, and each [provider:auto] expansion is
@@ -169,43 +202,11 @@ val expand_weighted_auto_entries :
     entries to match a parsed primary [Provider_config] back to its
     weighted entry (and therefore to its [secondary] declaration). *)
 
-(** Parse multiple model strings, skipping unavailable ones.
-    Internally calls {!expand_auto_models} before parsing.
-
-    When [api_key_env_overrides] is provided, it overrides the default
-    API key env var for matching providers. The list maps provider names
-    (or ["*"] for all) to env var names. Used by cascade execution paths
-    to apply per-cascade key configuration from cascade.json.
-
-    @since 0.122.0 api_key_env_overrides parameter added *)
-val parse_model_strings :
-  ?temperature:float ->
-  ?max_tokens:int ->
-  ?system_prompt:string ->
-  ?api_key_env_overrides:(string * string) list ->
-  string list -> Llm_provider.Provider_config.t list
-
-(** {1 JSON Config Loading} *)
-
-(** Load a named model list from a JSON config file.
-
-    The JSON file maps "{name}_models" keys to string arrays:
-    {[
-      { "primary_models":    ["llama:qwen3.5", "glm:auto"],
-        "evaluation_models": ["llama:qwen3.5", "glm:glm-4.5"] }
-    ]}
-
-    Results are cached and hot-reloaded when the file mtime changes.
-    Returns an empty list when the file is missing or the key is absent
-    (caller provides defaults). *)
-val load_profile :
-  config_path:string ->
-  name:string ->
-  string list
+(** {1 Cascade Config Loading} *)
 
 (** How a cascade name was resolved. *)
 type cascade_source =
-  | Named              (** Found as "{name}_models" in config *)
+  | Named              (** Found as a declarative profile in cascade.toml *)
   | Default_fallback   (** Name not found; used the [routes.keeper_turn] profile *)
   | Hardcoded_defaults (** Neither found; used hardcoded [defaults] *)
   | Load_failed of string
@@ -217,7 +218,7 @@ type cascade_source =
 (** Resolve model strings for a named cascade.
 
     Resolution order:
-    1. Named profile "{name}_models" from [config_path]
+    1. Named declarative profile from [config_path]
     2. [routes.keeper_turn] profile from [config_path] (fallback)
     3. Hardcoded [defaults]
 
@@ -275,7 +276,7 @@ type candidate_info = {
   display_provider_name : string option; (** User-facing provider family label *)
   runtime_kind : string option; (** "local" / "cli_agent" / "direct_api" when known *)
   expanded_models : string list; (** Concrete execution order for this configured candidate *)
-  config_weight : int;          (** Weight from [cascade.json] ([1] when absent) *)
+  config_weight : int;          (** Weight from cascade config ([1] when absent) *)
   effective_weight : int;       (** Weight after health adjustment; [0] = cooled-down *)
   success_rate : float;         (** Rolling-window success rate, [0.0]–[1.0] *)
   in_cooldown : bool;           (** Provider currently skipped by cooldown *)
@@ -303,7 +304,7 @@ type selection_trace = {
 (** Build a live selection trace from already-known weighted entries.
 
     Applies {!order_weighted_entries} and snapshots current health signals
-    without rereading raw [cascade.json]. Useful when callers already hold
+    without rereading raw cascade source text. Useful when callers already hold
     validated runtime profile data and need the same dashboard trace shape.
 
     @since 0.150.4 *)
@@ -327,15 +328,19 @@ val resolve_model_strings_with_trace :
   unit ->
   string list * selection_trace
 
-(** {1 Raw JSON Access} *)
+(** {1 Catalog Source Access} *)
 
-(** Load and cache the raw JSON config file.
-    Cached with mtime-based hot-reload.
+(** Load and cache the cascade catalog source.
+
+    Returns a [Yojson.Safe.t] in-memory view for internal consumers, but
+    reads no on-disk JSON: [cascade.toml] is the SSOT and is parsed into
+    the returned value in memory. Cached by source-path mtime.
     Exposed for consumers needing custom fields beyond model lists
     (e.g., per-cascade temperature/max_tokens overrides).
 
-    @since 0.89.1 *)
-val load_json : string -> (Yojson.Safe.t, string) result
+    @since 0.89.1
+    @since RFC-0058 §9 Phase 9.3 renamed from [load_json]. *)
+val load_catalog_source : string -> (Yojson.Safe.t, string) result
 
 (** {1 Inference Parameters} *)
 
@@ -357,7 +362,7 @@ type inference_params = {
       mapping happens downstream in OAS. *)
 }
 
-(** Resolve inference parameters from cascade.json.
+(** Resolve inference parameters from cascade.toml.
 
     Resolution order:
     1. ["{name}_temperature"] / ["{name}_max_tokens"]
@@ -368,7 +373,7 @@ type inference_params = {
 val resolve_inference_params :
   config_path:string -> name:string -> inference_params
 
-(** Resolve per-cascade API key env var overrides from cascade.json.
+(** Resolve per-cascade API key env var overrides from cascade.toml.
 
     Supports two formats:
     - String: applies to all providers.
@@ -384,22 +389,6 @@ val resolve_api_key_env :
 
 (** {1 Discovery-Aware Health Filtering} *)
 
-(** Filter a provider list by local endpoint health.
-
-    Probes local (llama-server) endpoints via {!Discovery}. When all
-    local endpoints are unhealthy, removes local providers from the list
-    so cloud providers serve as fallback.
-
-    When the list contains only local providers, passes through unchanged
-    (let the provider return a connection error rather than an empty list).
-
-    Cloud providers always pass through unfiltered. *)
-val filter_healthy :
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  Llm_provider.Provider_config.t list ->
-  Llm_provider.Provider_config.t list
-
 type health_filter_rejection =
   Cascade_health_filter.health_filter_rejection =
   | All_missing_api_key of int
@@ -407,6 +396,17 @@ type health_filter_rejection =
 
 val health_filter_rejection_to_string : health_filter_rejection -> string
 
+(** Filter a provider list by local endpoint health.
+
+    Probes local (llama-server) endpoints via {!Discovery}. When all
+    local endpoints are unhealthy, removes local providers from the list
+    so cloud providers serve as fallback.
+
+    Returns [Error] when the cascade is configurationally broken
+    (all providers missing API keys) or has drifted below the
+    live-fallback threshold (all local unhealthy with no cloud
+    fallback). Callers must handle the typed rejection — the prior
+    fail-open variant is gone. *)
 val filter_healthy_strict :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
@@ -489,46 +489,6 @@ val apply_provider_filter_strict :
     of silently broadening to the full set. Use for execution paths
     where provider drift must surface as a typed blocker. *)
 
-(** {1 Local Capacity Query} *)
-
-(** Point-in-time capacity for local LLM endpoints.
-    All [process_*] counts reflect this OAS process only —
-    other clients sharing the same server are not visible.
-    @since 0.97.0 *)
-type local_capacity = {
-  total : int;
-  (** Server slot count from discovery. *)
-  process_active : int;
-  (** Slots held by this process. *)
-  process_available : int;
-  (** [total - process_active]. May overestimate if other consumers exist. *)
-  process_queue_length : int;
-  (** Fibers waiting for a slot in this process. *)
-  all_discovered : bool;
-  (** [true] only when every contributing endpoint has [Discovered] source.
-      When [false], slot count may be a guessed default. *)
-  endpoints_found : int;
-  (** Number of local endpoints found. 0 means cloud-only selection. *)
-}
-
-val local_capacity_for_selections :
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?config_path:string ->
-  string list ->
-  local_capacity
-(** Query local endpoint capacity for cascade selection strings.
-
-    Each selection string is resolved through the same path as
-    [complete_named]: named profile lookup, then model string parsing.
-    Only local endpoints are considered; cloud providers are ignored.
-
-    Probes endpoints not yet in the throttle table via {!Discovery}
-    (~10ms on localhost), populating the table as a side-effect.
-    Returns [endpoints_found = 0] for cloud-only selections.
-
-    @since 0.97.0 *)
-
 (** {1 Pluggable strategy resolution}
 
     @since 0.9.6 *)
@@ -572,10 +532,12 @@ val resolve_ollama_max_concurrent :
   name:string ->
   unit ->
   int option
-(** Per-cascade override for the ollama client-capacity registration
-    default ({!Cascade_client_capacity.auto_register_for_candidates}).
-    [None] means "use the env-var default
-    ([MASC_OLLAMA_MAX_CONCURRENT] or 1)". *)
+(** Per-cascade override for the HTTP-probe-capable provider's
+    client-capacity registration default.  The caller in
+    {!Keeper_turn_driver} consults
+    {!Provider_adapter.is_http_probe_capable_kind} and registers
+    matching cfgs through {!Cascade_client_capacity.register}.
+    [None] means "use the literal default of 1". *)
 
 val resolve_cli_max_concurrent :
   ?config_path:string ->

@@ -313,3 +313,57 @@ val read_initial_admin : string -> string option
 (** {1 Nickname Helpers} *)
 
 val extract_agent_type_prefix : string -> string option
+
+(** {1 Bare-form Alias Audit} *)
+
+type bare_alias_audit_result =
+  { alive_aliases : int
+  ; dead_bares : int
+  ; no_bares : int
+  }
+(** Aggregate of {!bare_alias_audit}. [alive_aliases] is the count of
+    bare-form files that are legitimate PR-#10440 short-form aliases
+    (redirect stub aimed at the same UUID as the canonical credential).
+    [dead_bares] is the count that would be archived under PR-3b2
+    ([archive_bare_for_canonical] would move them). [no_bares] is the
+    count of canonical names that have no bare-form file at all. *)
+
+val bare_alias_audit
+  :  base_path:string
+  -> canonical_names:string list
+  -> bare_alias_audit_result
+(** Audit bare/canonical alignment for the supplied canonical agent
+    names. Read-only with respect to credential files. Side effect:
+    mirrors the counts into Prometheus gauges
+    [masc_auth_bare_alias{state=alive|dead|no_bare}] so the values
+    are repeatedly visible on every scrape, not only as a one-shot
+    boot log line. A non-zero [dead_bares] surfaces a ping-pong
+    regression candidate (PR #15112 γ guard). *)
+
+val start_bare_alias_audit_fiber
+  :  sw:Eio.Switch.t
+  -> clock:_ Eio.Time.clock
+  -> base_path:string
+  -> canonical_names_fn:(unit -> string list)
+  -> unit
+(** Fork an Eio fiber that re-runs [bare_alias_audit] every
+    [MASC_AUTH_BARE_ALIAS_AUDIT_INTERVAL_S] seconds (default 60). Each
+    tick refreshes the [masc_auth_bare_alias{state=...}] gauges so
+    mid-run regressions surface within one interval instead of waiting
+    for the next server boot. [canonical_names_fn] is invoked per
+    tick to follow keeper-roster changes. Exceptions inside a tick
+    are logged and absorbed; the loop continues. *)
+
+(** {1 Credential Archive Retention} *)
+
+val prune_archive
+  :  base_path:string
+  -> retention_days:int
+  -> min_keep:int
+  -> int * int
+(** [prune_archive ~base_path ~retention_days ~min_keep] deletes
+    [<base_path>/.masc/auth/.archive/<epoch>/] subdirectories that are
+    older than [retention_days * 86400] seconds, always keeping the
+    most recent [min_keep] epochs regardless of age. Returns
+    [(kept, pruned)]. Non-recursive: each epoch dir is treated as flat
+    (one .json per archived agent_name). *)

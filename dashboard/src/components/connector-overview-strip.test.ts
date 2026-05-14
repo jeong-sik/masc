@@ -136,7 +136,7 @@ describe('ConnectorOverviewStrip', () => {
     render(html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`, container)
     const root = container.querySelector('[data-overview-strip-root]') as HTMLElement
     expect(root).toBeTruthy()
-    expect(root.className).toContain('rounded-[var(--r-1)]')
+    expect(root.className).toContain('card')
     expect(root.className).not.toContain('sticky')
   })
 

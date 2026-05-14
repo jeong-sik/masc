@@ -356,8 +356,8 @@ let test_start_seeds_source_only_target_file_into_managed_worktree () =
           ])
   with
   | None -> fail "dispatch returned None"
-  | Some (false, msg) -> fail msg
-  | Some (true, payload) ->
+  | Some result when not result.success -> fail result.legacy_message
+  | Some result -> let payload = result.legacy_message in
       let open Yojson.Safe.Util in
       let json = Yojson.Safe.from_string payload in
       let managed_workdir = json |> member "workdir" |> to_string in

@@ -1,4 +1,4 @@
-(** Structured validation for cascade.json preset entries.
+(** Structured validation for cascade.toml profile entries.
 
     This module lifts the existing static cascade catalog checks out of
     {!Config_doctor} so server routes and other runtime surfaces can
@@ -15,8 +15,12 @@ type issue = {
 }
 
 val discover_profiles : config_path:string -> string list
-(** Discover named cascade presets from ["{name}_models"] keys. Returns
-    [[]] when the config cannot be loaded. *)
+(** Discover named cascade profiles from the declarative TOML catalog.
+    Returns [[]] when the config cannot be loaded. *)
+
+val discover_profiles_for_diagnostics : config_path:string -> string list
+(** Diagnostics-only variant of {!discover_profiles}; suppresses TOML
+    source-read trace / race telemetry. *)
 
 val diagnose_catalog : config_path:string -> issue list
 (** Validate every discovered preset in [config_path].
@@ -28,6 +32,10 @@ val diagnose_catalog : config_path:string -> issue list
     Provider-unavailable entries are not treated as hard failures here:
     the validator is intended to catch broken catalog structure, not
     environment-specific credential state. *)
+
+val diagnose_catalog_for_diagnostics : config_path:string -> issue list
+(** Diagnostics-only variant of {!diagnose_catalog}; suppresses catalog
+    validation telemetry and TOML source-read trace / race telemetry. *)
 
 val error_messages_by_profile :
   config_path:string ->

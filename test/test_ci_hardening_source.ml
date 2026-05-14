@@ -190,6 +190,18 @@ let test_ci_sync_and_asset_contracts () =
   check bool "ci gate aggregates live PR gate" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "PR_LIVE_GATE_RESULT");
+  check bool "meta guards verify main branch protection drift" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "bash scripts/ci/check-main-branch-protection.sh");
+  check bool "branch protection drift check exists" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "enforce_admins.enabled");
+  check bool "branch protection drift check requires draft guard context" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "Draft Auto-Merge Guard");
+  check bool "branch protection drift check requires CI gate context" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "CI Gate");
   check bool "heavy CI no longer trusts stale draft payload" true
     (file_not_contains_pattern ".github/workflows/ci.yml"
        "github.event.pull_request.draft == false");
@@ -582,7 +594,16 @@ let test_oas_pin_source_contracts () =
        "MASC_OPAM_LOCK_HELD=1");
   check bool "external opam pin script shares the opam lock path" true
     (file_contains_pattern "scripts/opam-pin-external-deps.sh"
-       "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock")
+       "MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock");
+  check bool "external opam pin script blocks stale worktree downgrades" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "refusing to downgrade shared agent_sdk pin");
+  check bool "external opam pin script exposes downgrade override" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE");
+  check bool "external opam pin script reports lock holder evidence" true
+    (file_contains_pattern "scripts/opam-pin-external-deps.sh"
+       "print_opam_lock_holder")
 
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true
@@ -1003,7 +1024,7 @@ let test_keeper_zombie_field_contracts () =
       turn_count = Some 1;
       current_task_id = Some "task-123";
       goal_ids = [ "goal-123" ];
-      outcome = "ok";
+      outcome = `Ok;
       terminal_reason_code = "turn_complete";
       response_text_present = true;
       model_used = Some "test-model";
@@ -1013,11 +1034,18 @@ let test_keeper_zombie_field_contracts () =
       canonical_tools = [ "Read" ];
       unexpected_tools = [];
       tools_used = [ "Read" ];
-      tool_contract_result = "satisfied";
+      tool_contract_result =
+        Masc_mcp.Keeper_execution_receipt.Contract_satisfied_completion;
       tool_surface =
         {
-          turn_lane = "unified";
-          tool_surface_class = "post_dispatch";
+          (* WORKAROUND: previously "unified" — invalid string never
+             emitted by producer.  Typed enum forces valid value.
+             Root: closed sum type rejects ad-hoc fixture strings. *)
+          turn_lane = Masc_mcp.Keeper_agent_tool_surface.Lane_tool_required;
+          (* WORKAROUND: previously "post_dispatch" — invalid string never
+             emitted by producer.  Typed enum forces a real value.
+             Root: closed sum type disallows ad-hoc fixture strings. *)
+          tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_mixed;
           tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
           visible_tool_count = 1;
           tool_gate_enabled = true;
@@ -1025,16 +1053,16 @@ let test_keeper_zombie_field_contracts () =
           required_tools = [ "Read" ];
           missing_required_tools = [];
         };
-      sandbox_kind = "local";
+      sandbox_kind = Masc_mcp.Keeper_types.Local;
       sandbox_root = None;
-      network_mode = "offline";
+      network_mode = Masc_mcp.Keeper_types.Network_none;
       approval_profile = None;
       approval_profile_derived = false;
       cascade_name = R.cascade_name_of_string "default";
       cascade_selected_model = Some "test-model";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;
-      cascade_outcome = "completed";
+      cascade_outcome = Masc_mcp.Keeper_execution_receipt.Cascade_completed;
       degraded_retry_applied = false;
       degraded_retry_cascade = None;
       fallback_reason = None;
@@ -1152,17 +1180,19 @@ let test_keeper_required_tool_contracts () =
        {|REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_bash,keeper_pr_create}}"|}
+          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-masc_web_search,keeper_bash,keeper_pr_create}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_pr_review_comment}}"|});
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-keeper_shell,keeper_pr_review_comment}}"|});
   check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "requires `keeper_bash` and `keeper_pr_create`"
+          "requires `masc_web_search`, `keeper_bash`, and `keeper_pr_create`"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "the review phase requires `keeper_pr_review_comment`");
+          "the review phase requires `keeper_shell` and"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "second required tool keeps approval mandatory");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
@@ -1196,6 +1226,33 @@ let test_keeper_required_tool_contracts () =
           "skipping review phase because create phase did not produce complete success evidence"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "`create-readiness-failures.jsonl`");
+  check bool "docker PR lifecycle supports review-only resume" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|PHASE_MODE="${PHASE_MODE:-both}"|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--phase create|review|both|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|--review-resume|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|if [[ "$REVIEW_RESUME" == "1" ]] || all_create_results_ready_for_review; then|}
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`--phase review --review-resume`");
+  check bool "docker PR lifecycle review resolves fork head refs" true
+    (file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "proof_head_ref_for_keeper"
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          {|gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName|}
+     && file_contains_pattern
+          "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "review_target_head"
+     && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "owner-qualified `OWNER:BRANCH` head ref");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")
@@ -1341,7 +1398,24 @@ let test_keeper_github_pr_tool_contracts () =
        "Credential_materializer.verify_state");
   check bool "keeper PR create is exposed by github group" true
     (file_contains_pattern "config/tool_policy.toml"
-       {|keeper_pr_create|})
+       {|keeper_pr_create|});
+  check bool "keeper core prompt routes PR review through native tool" true
+    (file_contains_pattern "config/prompts/keeper.core_behavior.md"
+       "PR REVIEW MUTATIONS"
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          "keeper_pr_review_comment"
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          {|event="REQUEST_CHANGES"|}
+     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
+          {|event="APPROVE"|});
+  check bool "keeper core prompt no longer teaches raw gh review mutation" true
+    (file_not_contains_pattern "config/prompts/keeper.core_behavior.md"
+       {|gh pr review <n>|});
+  check bool "keeper review schema names non-comment review policy" true
+    (file_contains_pattern "lib/tool_shard.ml"
+       "Use REQUEST_CHANGES for actionable blockers"
+     && file_contains_pattern "lib/tool_shard.ml"
+          "use APPROVE only when the draft proof preflight permits it")
 
 let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
@@ -1368,8 +1442,12 @@ let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit can scope lifecycle evidence by run id" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--evidence-run-id"
+     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          "load_harness_evidence_windows"
      && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          "--evidence-run-id \"$RUN_ID\"");
+          "--evidence-run-id \"$RUN_ID\""
+     && file_contains_pattern "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+          "--harness-run-dir \"$RUN_DIR\"");
   check bool "keeper fleet audit survives live invalid utf8 rows" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        {|errors="replace"|})
@@ -1509,6 +1587,51 @@ let test_dashboard_component_split_contracts () =
     (file_not_contains_pattern "lib/coord/coord_utils_backend_setup.ml"
        "Transaction Pooler companion")
 
+let test_keeper_continuity_harness_auth_contracts () =
+  let harness = "scripts/harness/workload/keeper_continuity_validation.sh" in
+  check bool "continuity harness accepts external MCP bearer token" true
+    (file_contains_pattern harness {|MCP_TOKEN="${MASC_MCP_TOKEN:-}"|});
+  check bool "continuity harness can load generated codex token" true
+    (file_contains_pattern harness
+       {|local token_file="$BASE_PATH/.masc/auth/codex-mcp-client.token"|});
+  check bool "continuity harness initializes MCP sessions before tool calls" true
+    (file_contains_pattern harness {|method:"initialize"|});
+  check bool "isolated continuity harness prefers generated token file" true
+    (file_contains_pattern harness {|load_mcp_token 1|});
+  check bool "continuity harness keeps empty snapshot fields nullable" true
+    (file_contains_pattern harness
+       {|snapshot_file: (if ($snapshot_file | length) > 0 then $snapshot_file else null end)|});
+  check bool "continuity harness captures MCP helper failures" true
+    (file_contains_pattern harness {|LAST_TOOL_ERROR="MCP helper failed with status $call_status"|});
+  check bool "continuity harness status snapshots do not abort phase reporting" true
+    (file_contains_pattern harness
+       {|{keepalive_running:false, agent:{exists:false}, harness_error:$error}|});
+  check bool "continuity harness records unexpected errors into phase log" true
+    (file_contains_pattern harness {|record_unexpected_error()|});
+  check bool "continuity harness sends bearer token through MCP helper" true
+    (file_contains_pattern harness
+       {|mcp_call_tool "$req_id" "$tool_name" "$args_json" "${MCP_SESSION_ID:-}" "$MCP_TOKEN" "$MCP_URL"|});
+  check bool "continuity harness uses cascade_name instead of legacy models" true
+    (file_contains_pattern harness {|cascade_name:$cascade_name|});
+  check bool "continuity harness no longer sends legacy models" true
+    (file_not_contains_pattern harness {|models:$models|});
+  check bool "continuity harness no longer sends removed keepalive args" true
+    (file_not_contains_pattern harness {|presence_keepalive:true|});
+  check bool "continuity harness no longer sends removed keeper_msg args" true
+    (file_not_contains_pattern harness {|require_existing:true|});
+  check bool "continuity harness returns failed keeper_msg calls" true
+    (file_contains_pattern harness
+       {|if ! call_mcp_tool "$request_id" "masc_keeper_msg"|});
+  check bool "continuity harness waits for queued turns to complete" true
+    (file_contains_pattern harness {|wait_for_keeper_status_condition|});
+  check bool "continuity harness proves liveness with total_turns" true
+    (file_contains_pattern harness {|.meta.total_turns|});
+  check bool "keeper_up schema exposes cascade_name" true
+    (file_contains_pattern "lib/keeper/keeper_schema.ml" {|("cascade_name"|});
+  check bool "keeper_up parser stores cascade_name arg" true
+    (file_contains_pattern "lib/keeper/keeper_turn_up_args.ml"
+       {|cascade_name_opt_res = parse_cascade_name_opt args|})
+
 let test_mission_briefing_memory_guard_contracts () =
   check bool "mission briefing snapshot disables keeper payload" true
     (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
@@ -1596,8 +1719,11 @@ let test_keeper_oas_cleanup_contracts () =
        (file_contains_pattern "lib/keeper/keeper_turn.ml"
           "Context_manager"));
   check bool "tool compact comment now references OAS-backed pipeline" true
-    (file_contains_pattern "lib/tool_compact.ml"
-       "OAS-backed compaction pipeline")
+    (file_contains_pattern "lib/context_compact_oas.mli"
+       "OAS-backed compaction pipeline");
+  check bool "provider hard errors cleanup best-effort without masking error" true
+    (file_contains_pattern "lib/cascade/cascade_runner.ml"
+       "close_agent_for_cleanup ~propagate_cancel:false ~config agent")
 
 let test_dashboard_executor_pool_contracts () =
   check bool "dashboard runtime support defines executor pool helper" true
@@ -1656,6 +1782,14 @@ let test_transport_route_contracts () =
     (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
        {|Option.is_none existing_agent
                     && Option.is_none existing_legacy_agent|});
+  check bool "h2 mcp post injects canonical http actor" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "body_with_canonical_http_actor");
+  check bool "h2 mcp post forwards internal keeper runtime" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "is_verified_internal_keeper_request"
+    && file_contains_pattern "lib/server/server_h2_gateway.ml"
+         "~internal_keeper_runtime state");
   check bool "common http deps prefer runtime captured in server_state" true
     (file_contains_pattern "lib/server/server_routes_http_common.ml"
        "state.Mcp_server.sw");
@@ -1727,7 +1861,20 @@ let test_http_cancel_response_contracts () =
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
          {|send_pong skipped|}
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
-         {|WS standalone handler closed before write completed|})
+         {|WS standalone handler closed before write completed|});
+  check bool "standalone ws close diagnostics classify cleanup causes" true
+    (file_contains_pattern "lib/server/server_ws_standalone.ml"
+       {|log_ws_client_close_payload|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|client close|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|sse-forward send failed; cleaning up|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|standalone_ws_eof_summary|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|declared_len|}
+    && file_contains_pattern "lib/server/server_ws_standalone.ml"
+         {|chunk_len <= 0|})
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
@@ -1785,19 +1932,22 @@ let test_oas_worker_capability_threading_contracts () =
 let test_oas_capacity_restore_contracts () =
   check bool "operator judge backoff uses OAS local capacity" true
     (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
-       "local_capacity_for_selections ~sw ~net");
+       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
   check bool "operator judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
        "Keeper_cascade_profile.Operator_judge");
   check bool "governance judge backoff uses OAS local capacity" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
-       "local_capacity_for_selections ~sw ~net");
+       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
   check bool "governance judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
        "Keeper_cascade_profile.Governance_judge");
   check bool "autoresearch background gating restores OAS capacity query" true
     (file_contains_pattern "lib/autoresearch_codegen.ml"
-       "local_capacity_for_selections ~sw ~net");
+       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
+  check bool "cascade config no longer exposes legacy local capacity parser" true
+    (file_not_contains_pattern "lib/cascade/cascade_config.mli"
+       "val local_capacity_for_selections");
   check bool "autoresearch uses Eio context fallback for capacity probing" true
     (file_contains_pattern "lib/autoresearch_codegen.ml"
        "Eio_context.get_switch_opt (), Eio_context.get_net_opt ()")
@@ -2150,6 +2300,45 @@ let test_dashboard_bootstrap_contracts () =
     (file_not_contains_pattern "lib/server/server_dashboard_http.ml"
        "(\"error\", `String (Printexc.to_string exn))")
 
+(* RFC-0037 PR-1 — Board_attachment_meta carrier on post.meta_json.
+
+   These guards capture the contract that ties the carrier module to the
+   post type:
+   - the carrier module + .mli exist with the agreed surface
+   - Board_types.post still carries meta_json (the carrier's storage slot)
+   - the JSON key SSOT is "attachments"
+   - of_yojson returns a result type (total, no silent raises)
+   - id generator uses the "a-" prefix (RFC §6 Q2 default)
+
+   If any of these breaks, the carrier mechanism's load-bearing assumption
+   is gone and the next reader will silently get [] instead of a parse
+   error.  See loop iter 5 / 6 for the rationale. *)
+let test_board_attachment_meta_contracts () =
+  check bool "carrier mli exists with attach helper" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val attach_to_post_meta");
+  check bool "carrier mli exposes parse total" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val of_yojson : Yojson.Safe.t -> (t, error) result");
+  check bool "carrier mli exposes meta_json_key SSOT" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "val meta_json_key : string");
+  check bool "carrier ml binds meta_json_key to \"attachments\"" true
+    (file_contains_pattern "lib/board_attachment_meta.ml"
+       "let meta_json_key = \"attachments\"");
+  check bool "carrier ml uses 'a-' id prefix (RFC-0037 Q2 default)" true
+    (file_contains_pattern "lib/board_attachment_meta.ml"
+       "Random_id.prefixed ~prefix:\"a-\"");
+  check bool "carrier kind union has all 4 variants" true
+    (file_contains_pattern "lib/board_attachment_meta.mli"
+       "| Image\n  | Video\n  | Youtube\n  | External_link");
+  check bool "Board_types.post still has meta_json carrier slot" true
+    (file_contains_pattern "lib/board_types/board_types.mli"
+       "meta_json : Yojson.Safe.t option");
+  check bool "carrier test registered in test/dune" true
+    (file_contains_pattern "test/dune"
+       "test_board_attachment_meta")
+
 let () =
   run "ci_hardening_source"
     [
@@ -2209,6 +2398,8 @@ let () =
              test_room_current_validation_contracts;
            test_case "root redirect contracts" `Quick test_root_redirect_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
+           test_case "keeper continuity harness auth contracts" `Quick
+             test_keeper_continuity_harness_auth_contracts;
            test_case "mission briefing memory guard contracts" `Quick
              test_mission_briefing_memory_guard_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
@@ -2248,5 +2439,7 @@ let () =
              test_copilot_zero_diff_cleanup_contracts;
            test_case "dashboard bootstrap contracts (loop #7)" `Quick
              test_dashboard_bootstrap_contracts;
+           test_case "board attachment meta contracts (RFC-0037 PR-1)" `Quick
+             test_board_attachment_meta_contracts;
          ]);
     ]

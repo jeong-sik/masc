@@ -1,10 +1,8 @@
 // Transport beacon — operator-facing signal for the SSE → WS cutover.
 //
-// Renders a single chip that tells the operator (a) which transport
-// regime is active (WS-only vs parallel WS+SSE) and (b) whether events
-// are actually flowing through the WS channel.  This is the eyes-on
-// rollback signal: if the beacon turns yellow or red after a cutover,
-// flip the env var and reload.
+// Renders a single chip for the browser's client channel only. Server-wide
+// transport truth lives in the Transport Health panel backed by
+// /api/v1/dashboard/transport-health.
 
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
@@ -13,18 +11,27 @@ import {
   dashboardWsConnected,
   dashboardWsEventCount60s,
   dashboardWsLastEventAt,
+  dashboardWsLastPongAt,
+  dashboardWsLastPongLatencyMs,
   dashboardWsReady,
+  dashboardWsSseFallbackActive,
+  dashboardWsSseFallbackReason,
 } from '../dashboard-ws-state'
+import {
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+} from '../config/constants'
 
 // Resolved once per mount.  The cutover flag is build-time; runtime
 // changes require a reload anyway, so caching avoids re-evaluating
 // import.meta.env on every signal change.
 const wsOnlyMode = dashboardWsOnlyEnabled()
 
-// 30s of silence on a WS-only channel turns the beacon yellow.  This is
+// 30s of silence on a client WS channel turns the beacon yellow.  This is
 // shorter than the typical heartbeat interval to flag truly idle
 // transports without nuisance-firing on quiet workloads.
 const SILENT_THRESHOLD_MS = 30_000
+const HEARTBEAT_FRESH_MS = DASHBOARD_WS_HEARTBEAT_INTERVAL_MS + DASHBOARD_WS_RPC_TIMEOUT_MS + 1_000
 
 type BeaconState = 'green' | 'yellow' | 'red' | 'gray'
 
@@ -40,34 +47,60 @@ export function computeBeaconView(args: {
   ready: boolean
   lastEventAt: number
   eventCount60s: number
+  lastPongAt: number
+  lastPongLatencyMs: number | null
+  sseFallbackActive: boolean
+  sseFallbackReason: string | null
   now: number
 }): BeaconView {
   if (!args.wsOnly) {
     return {
       state: 'gray',
-      label: 'WS+SSE (legacy)',
-      title: 'Parallel mode: both transports are active. Set VITE_DASHBOARD_WS_ONLY=true to cut over.',
+      label: 'Client WS+SSE parallel',
+      title: 'Client channel parallel mode. Server transport truth is in Transport Health. Set VITE_DASHBOARD_WS_ONLY=true to cut over.',
     }
   }
   if (!args.connected || !args.ready) {
+    if (args.sseFallbackActive) {
+      return {
+        state: 'yellow',
+        label: 'Client SSE fallback',
+        title: args.sseFallbackReason
+          ? `Client WS is degraded; SSE fallback is carrying events. Reason: ${args.sseFallbackReason}`
+          : 'Client WS is degraded; SSE fallback is carrying events.',
+      }
+    }
     return {
       state: 'red',
-      label: 'WS-only · disconnected',
-      title: 'WS-only mode, but the socket is closed. Events will pause until reconnect. Hot rollback: window.__MASC_DASHBOARD_WS_ONLY__ = false; location.reload()',
+      label: 'Client WS · disconnected',
+      title: 'Client WS cutover mode, but the browser socket is closed. Events will pause until reconnect. Server transport truth is in Transport Health.',
     }
   }
   const silentMs = args.now - args.lastEventAt
   if (args.lastEventAt === 0 || silentMs > SILENT_THRESHOLD_MS) {
+    const pongAgeMs = args.lastPongAt === 0
+      ? Number.POSITIVE_INFINITY
+      : args.now - args.lastPongAt
+    if (pongAgeMs <= HEARTBEAT_FRESH_MS) {
+      const latency = args.lastPongLatencyMs == null
+        ? 'ok'
+        : `${args.lastPongLatencyMs}ms`
+      return {
+        state: 'green',
+        label: `Client WS · heartbeat · ${latency}`,
+        title: `Client WS mode active. No route events, but heartbeat pong arrived ${Math.floor(pongAgeMs / 1000)}s ago.`,
+      }
+    }
     return {
       state: 'yellow',
-      label: 'WS-only · silent',
-      title: `WS-only mode has received no events for ${Math.floor(silentMs / 1000)}s. The workload may be idle or WS fan-out may be stuck.`,
+      label: 'Client WS · silent',
+      title: `Client WS mode has received no events for ${Math.floor(silentMs / 1000)}s and no fresh heartbeat pong. The workload may be idle or WS fan-out may be stuck.`,
     }
   }
   return {
     state: 'green',
-    label: `WS-only · open · ${args.eventCount60s} events / 60s`,
-    title: `WS-only mode active. Last event ${Math.floor(silentMs / 1000)}s ago.`,
+    label: `Client WS · open · ${args.eventCount60s} events / 60s`,
+    title: `Client WS mode active. Last event ${Math.floor(silentMs / 1000)}s ago.`,
   }
 }
 
@@ -87,6 +120,10 @@ const beaconView = computed<BeaconView>(() => computeBeaconView({
   ready: dashboardWsReady.value,
   lastEventAt: dashboardWsLastEventAt.value,
   eventCount60s: dashboardWsEventCount60s.value,
+  lastPongAt: dashboardWsLastPongAt.value,
+  lastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
+  sseFallbackActive: dashboardWsSseFallbackActive.value,
+  sseFallbackReason: dashboardWsSseFallbackReason.value,
   now: Date.now(),
 }))
 

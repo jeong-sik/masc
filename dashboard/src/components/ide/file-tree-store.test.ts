@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
+import { createFileTreeStore, summarizeFileTreeDiffs, type FileTreeNode } from './file-tree-store'
 
 const SAMPLE: ReadonlyArray<FileTreeNode> = [
   { path: 'runtime', label: 'runtime', depth: 0, parent: null, hasChildren: true, diff: null, keeperId: null, hueIndex: null },
@@ -90,6 +90,34 @@ describe('createFileTreeStore', () => {
     const s = createFileTreeStore()
     s.seed(SAMPLE)
     expect(s.knownKeepers()).toEqual(['nick0cave', 'sangsu'])
+  })
+
+  it('summarizes changed files from git diff badges across collapsed nodes', () => {
+    const s = createFileTreeStore()
+    s.seed([
+      ...SAMPLE,
+      { path: 'assets/logo.png', label: 'logo.png', depth: 0, parent: null, hasChildren: false, diff: 'bin', keeperId: null, hueIndex: null },
+      { path: 'docs/empty.md', label: 'empty.md', depth: 1, parent: 'docs', hasChildren: false, diff: '+bad -0', keeperId: null, hueIndex: null },
+    ])
+
+    expect(s.diffSummary()).toEqual({
+      changedFiles: 5,
+      additions: 25,
+      deletions: 0,
+      binaryFiles: 1,
+    })
+  })
+
+  it('returns an empty diff summary when no file node carries diff data', () => {
+    expect(summarizeFileTreeDiffs([
+      { path: 'src', label: 'src', depth: 0, parent: null, hasChildren: true, diff: null, keeperId: null, hueIndex: null },
+      { path: 'src/main.ts', label: 'main.ts', depth: 1, parent: 'src', hasChildren: false, diff: null, keeperId: null, hueIndex: null },
+    ])).toEqual({
+      changedFiles: 0,
+      additions: 0,
+      deletions: 0,
+      binaryFiles: 0,
+    })
   })
 
   it('subscribers fire on expansion changes', () => {

@@ -88,25 +88,26 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Restarting:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   Dead:         'bg-[var(--color-bg-elevated)] text-[var(--bad-light)] border-[var(--bad-20)]',
+  Zombie:       'bg-[var(--color-bg-elevated)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Offline:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
-  // KTC
-  idle:         'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  // KTC (unique keys — shared keys like idle/exhausted/compacting/donelisten under KCL/KMC below)
   prompting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
+  routing:      'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   executing:    'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
-  compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   finalizing:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   // KDP
   undecided:          'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   guard_ok:           'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   gate_rejected:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
-  // KCL
+  // KCL + KMC + shared keys (idle, exhausted, compacting, done)
+  idle:         'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   selecting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   trying:       'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   done:         'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   exhausted:    'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  // KMC
   accumulating: 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  compacting:   'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
   // "nothing happening" state; warning = amber (partial failure
   // streak); cooling = blue (at least one past trip, currently
@@ -257,6 +258,7 @@ function isIdleComposite(snapshot: KeeperCompositeSnapshot): boolean {
 
 function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   const execution = snapshot.execution
+  const surface = execution?.tool_surface
   const parts: string[] = []
   if (!snapshot.is_live) parts.push('is_live=false')
   if (execution?.operator_disposition) {
@@ -270,6 +272,24 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   }
   if (execution?.tool_contract_result) {
     parts.push(`tool=${execution.tool_contract_result}`)
+  }
+  if (surface?.tool_requirement) {
+    parts.push(`tool_requirement=${surface.tool_requirement}`)
+  }
+  if (surface?.turn_lane) {
+    parts.push(`turn_lane=${surface.turn_lane}`)
+  }
+  if (surface?.tool_surface_class) {
+    parts.push(`tool_surface=${surface.tool_surface_class}`)
+  }
+  if (typeof surface?.visible_tool_count === 'number') {
+    parts.push(`visible_tools=${surface.visible_tool_count}`)
+  }
+  if (surface?.tool_surface_fallback_used === true) {
+    parts.push('tool_surface_fallback=true')
+  }
+  if (surface?.tool_gate_enabled === false) {
+    parts.push('tool_gate=false')
   }
   if (execution?.error?.kind) {
     parts.push(`error=${execution.error.kind}`)
@@ -474,6 +494,12 @@ export function buildRuntimeAssistPrompt(
       tool_contract_result: snapshot.execution.tool_contract_result,
       required_tools: snapshot.execution.tool_surface?.required_tools ?? [],
       missing_required_tools: snapshot.execution.tool_surface?.missing_required_tools ?? [],
+      tool_requirement: snapshot.execution.tool_surface?.tool_requirement ?? null,
+      turn_lane: snapshot.execution.tool_surface?.turn_lane ?? null,
+      tool_surface_class: snapshot.execution.tool_surface?.tool_surface_class ?? null,
+      visible_tool_count: snapshot.execution.tool_surface?.visible_tool_count ?? null,
+      tool_gate_enabled: snapshot.execution.tool_surface?.tool_gate_enabled ?? null,
+      tool_surface_fallback_used: snapshot.execution.tool_surface?.tool_surface_fallback_used ?? null,
       error_kind: snapshot.execution.error?.kind ?? null,
       error_preview: snapshot.execution.error?.message_preview ?? null,
     })
@@ -757,6 +783,7 @@ export function tallyInvariantViolations(
     no_cascade_before_measurement: 0,
     compaction_atomicity: 0,
     event_priority_monotone: 0,
+    phase_derivation_agreement: 0,
   }
   for (const s of snapshots) {
     for (const k of INVARIANT_KEYS) {
@@ -923,8 +950,20 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     () => (data ? tallyInvariantViolations(data.snapshots) : null),
     [data],
   )
+  // Backend emits this Prometheus counter (`metric_fsm_guard_violation`)
+  // as a fleet-wide total duplicated onto every snapshot — see
+  // keeper_composite_observer.ml:452. Reading [0] is intentional;
+  // summing across snapshots would multiply the count by fleet size.
+  const fsmGuardViolationsTotal = useMemo(
+    () => (data ? (data.snapshots[0]?.fsm_guard_violations ?? 0) : 0),
+    [data],
+  )
   const runtimeTallies = useMemo(
     () => (data ? tallyRuntimeAttention(data.snapshots, data.generated_at) : null),
+    [data],
+  )
+  const idleCompositeCount = useMemo(
+    () => (data ? data.snapshots.filter(isIdleComposite).length : 0),
     [data],
   )
   const visibleSnapshots = useMemo(
@@ -1031,6 +1070,32 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                     </span>
                   `
                 })}
+                <span
+                  data-testid="idle-composite-chip"
+                  class="rounded-[var(--r-1)] border bg-[var(--ok-10)] px-2 py-0.5 text-xs text-[var(--color-status-ok)] border-[var(--ok-20)]"
+                  title="모든 sub-FSM이 idle인 keeper 수 (turn=idle, decision=undecided, cascade=idle, compaction=accumulating, circuit=clean)"
+                >
+                  Composite idle: ${idleCompositeCount}
+                </span>
+                ${(fsmGuardViolationsTotal ?? 0) > 0
+                  ? html`
+                      <span
+                        data-testid="fsm-guard-violation-chip"
+                        class="rounded-[var(--r-1)] border bg-[var(--bad-10)] px-2 py-0.5 text-xs text-[var(--bad-light)] border-[var(--bad-20)]"
+                        title="전체 [@@fsm_guard] 런타임 assertion 위반 횟수"
+                      >
+                        FSM guard 위반: ${fsmGuardViolationsTotal}
+                      </span>
+                    `
+                  : html`
+                      <span
+                        data-testid="fsm-guard-violation-chip"
+                        class="rounded-[var(--r-1)] border bg-[var(--ok-10)] px-2 py-0.5 text-xs text-[var(--color-status-ok)] border-[var(--ok-20)]"
+                        title="전체 [@@fsm_guard] 런타임 assertion 위반 횟수"
+                      >
+                        FSM guard 위반: 0
+                      </span>
+                    `}
               </div>
             `
           : null}

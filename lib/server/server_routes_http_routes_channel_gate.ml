@@ -40,7 +40,7 @@ module Http = Http_server_eio
         "ok": true,
         "keeper_name": "luna",
         "reply": "The project is on track...",
-        "turn_stats": { "model_used": "...", "duration_ms": 1234, "tokens_used": 567 }
+        "turn_stats": { "model_used": null, "duration_ms": 1234, "tokens_used": 567 }
       }
     ]}
 

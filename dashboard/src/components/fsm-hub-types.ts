@@ -1,7 +1,7 @@
 import type {
   KeeperCompositeSnapshot,
   KeeperCompositeInvariants,
-} from '../api/keeper'
+} from '../api/schemas/keeper-composite'
 
 export type CompositeObservation = {
   ts: number
@@ -27,7 +27,7 @@ export function extractLaneValue(
     case 'decision': return snapshot.decision.stage
     case 'cascade': return snapshot.cascade.state
     case 'compaction': return snapshot.compaction.stage
-    case 'breaker': return snapshot.circuit_breaker?.state ?? 'clean'
+    case 'breaker': return snapshot.circuit_breaker?.state ?? '(no circuit_breaker)'
   }
 }
 
@@ -98,6 +98,7 @@ const ZERO_VIOLATIONS: InvariantViolationCounts = {
   no_cascade_before_measurement: 0,
   compaction_atomicity: 0,
   event_priority_monotone: 0,
+  phase_derivation_agreement: 0,
 }
 
 export const initialHubState: HubState = {
@@ -125,6 +126,7 @@ export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> =
   no_cascade_before_measurement: 'Cascade 순서',
   compaction_atomicity: '압축 원자성',
   event_priority_monotone: '이벤트 우선순위',
+  phase_derivation_agreement: 'Phase 유도 일치',
 }
 
 export const LANE_LABELS: Record<LaneKey, string> = {
@@ -139,22 +141,23 @@ export const LANE_LABELS: Record<LaneKey, string> = {
 /** Korean display names for raw FSM state values.
     Replaces English internals in PipelineStep and Swimlane. */
 export const STATE_DISPLAY_NAMES: Record<string, string> = {
-  // KTC
-  idle: '대기',
+  // KTC (unique keys — shared keys like idle/exhausted moved below)
   prompting: '프롬프트 구성',
+  routing: '라우팅',
   executing: '실행 중',
-  compacting: '압축 중',
   finalizing: '마무리',
   // KDP
   undecided: '대기',
   guard_ok: '가드 통과',
   gate_rejected: '게이트 거부',
   tool_policy_selected: '도구 목록 적용',
-  // KCL
+  // KCL + shared keys (idle, exhausted, compacting, done)
+  idle: '대기',
   selecting: '선택 중',
   trying: '시도 중',
   done: '완료',
   exhausted: '소진',
+  compacting: '압축 중',
   // KMC
   accumulating: '수집 중',
   // KSM
@@ -169,6 +172,7 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   crashed: '비정상 종료',
   restarting: '재시작 중',
   dead: '종료됨',
+  zombie: '좀비',
   Running: '가동 중',
   Overflowed: '컨텍스트 초과',
   Compacting: '압축 중',
@@ -179,7 +183,9 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   Paused: '일시 중지',
   Stopped: '정지',
   Draining: '종료 준비',
-  Stable: '안정',
+  Restarting: '재시작 중',
+  Dead: '종료됨',
+  Zombie: '좀비',
 }
 
 /** Resolve display name: Korean label for UI, raw value preserved in tooltips. */

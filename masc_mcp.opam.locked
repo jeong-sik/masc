@@ -11,7 +11,7 @@ homepage: "https://github.com/jeong-sik/masc-mcp"
 doc: "https://github.com/jeong-sik/masc-mcp"
 bug-reports: "https://github.com/jeong-sik/masc-mcp/issues"
 depends: [
-  "agent_sdk" {= "0.184.0"}
+  "agent_sdk" {= "0.193.4"}
   "alcotest" {with-test & = "1.9.1"}
   "ambient-context-eio" {= "0.2"}
   "bigstringaf" {= "0.10.0"}
@@ -86,8 +86,8 @@ build: [
 dev-repo: "git+https://github.com/jeong-sik/masc-mcp.git"
 pin-depends: [
   [
-    "agent_sdk.0.184.0"
-    "git+https://github.com/jeong-sik/oas.git#19e3f1e58a9392ff87a8c587e4ed8c5e385765ce"
+    "agent_sdk.0.193.4"
+    "git+https://github.com/jeong-sik/oas.git#7ed9c05260dce7b813bfaf524a2799573eb6479d"
   ]
   [
     "bisect_ppx.2.8.3"

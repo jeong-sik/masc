@@ -5,31 +5,28 @@
     Authoritative spec mirror is
     [specs/keeper-state-machine/KeeperMemoryLifecycle.tla] (#8642 family).
 
-    Spec lines 17-35 already cite this module field-by-field:
+    The spec preamble cites this module field-by-field:
       short_mem / mid_mem / long_mem  -> rows with [horizon] in
                                          {"short_term", "mid_term",
                                           "long_term"}, see the
-                                         constants
-                                           [short_term_horizon] (~line 165)
-                                           [mid_term_horizon]   (next)
-                                           [long_term_horizon]  (next)
+                                         constants [short_term_horizon],
+                                         [mid_term_horizon],
+                                         [long_term_horizon].
       provenanced  -> rows with non-empty trace_id / source
                       (lives in keeper_memory_bank, not this file).
-      producer     -> [memory_horizon_of_kind_opt] (~line 171, strict)
-                      and [memory_horizon_of_kind] (~line 182,
-                      back-compat wrapper that defaults unknown kinds
-                      to mid_term with a warn — see #8826 drift note).
+      producer     -> [memory_horizon_of_kind_opt] (strict) and
+                      [memory_horizon_of_kind] (back-compat wrapper that
+                      defaults unknown kinds to mid_term with a warn —
+                      see #8826 drift note).
 
     This block is the reverse-direction citation so code search for
-    "KeeperMemoryLifecycle" lands here.
-
-    Spec line drift correction:
-      Spec line 19-21 cites "ml:155 / ml:156 / ml:157" for the three
-      horizon constants; current actual line is 165 (+10 drift).  The
-      shift is because new `compaction_outcome` record fields were
-      inserted between the spec citation and the constants.  The
-      function-name citations ([memory_horizon_of_kind_opt],
-      [memory_horizon_of_kind]) remain stable.
+    "KeeperMemoryLifecycle" lands here.  Citations are by symbol name,
+    not line number: the spec preamble used to carry "ml:155 / ml:156 /
+    ml:157" for the horizon constants but those drifted (>+30 once
+    `compaction_outcome` fields were inserted between the citation and
+    the constants) and were removed — symbol names are the stable anchor
+    (iter 64 N-2.a; guarded by scripts/audit-ocaml-spec-nav-line-refs.sh,
+    iter 72 R-1.a).
 
     Spec safety goals (line 9-13):
       - every persisted note has provenance
@@ -441,6 +438,7 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
 let default_max_string_chars = 400
 let default_max_list_items = 5
 let default_max_item_chars = 200
+let default_continuity_summary_max_chars = 5_600
 
 let cap_string ~max_chars = function
   | None -> None
@@ -477,6 +475,15 @@ let cap_snapshot
     constraints =
       cap_list ~max_items:max_list_items ~max_item_chars snapshot.constraints;
   }
+
+let cap_continuity_summary_text
+    ?(max_chars = default_continuity_summary_max_chars)
+    (text : string) : string =
+  let trimmed = String.trim text in
+  if trimmed = "" then ""
+  else
+    String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" trimmed
+    |> String_util.to_string
 
 (* RFC-MASC-001 Phase 1 post-mortem (Gen3 2026-04-17):
    [keeper_state_snapshot_to_summary_text] renders every field for audit/persistence.
@@ -719,6 +726,7 @@ let continuity_fallback_summary_text
   if trimmed = "" then
     "No continuity snapshot available."
   else
+    let bounded = cap_continuity_summary_text trimmed in
     let freshness_line =
       if last_continuity_update_ts > 0.0 then
         let age_s = max 0.0 (Time_compat.now () -. last_continuity_update_ts) in
@@ -732,7 +740,7 @@ let continuity_fallback_summary_text
         freshness_line;
         "Checkpoint note: latest checkpoint [STATE] snapshot unavailable.";
         "Treat the following as prior context only and re-verify blockers, constraints, and repo state against the live world state before acting.";
-        trimmed;
+        bounded;
       ]
 
 let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Safe.t =

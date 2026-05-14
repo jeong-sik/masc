@@ -8,6 +8,7 @@ const sseStoreMocks = vi.hoisted(() => ({
 vi.mock('./sse-store', () => sseStoreMocks)
 
 import {
+  clearDashboardWsDiscoveryCacheForTests,
   connectDashboardWS,
   dashboardSlicesForRoute,
   disconnectDashboardWS,
@@ -15,10 +16,16 @@ import {
   parseWebSocketSseFrames,
   subscribeDashboardRoute,
 } from './dashboard-ws'
-import { DASHBOARD_WS_RPC_TIMEOUT_MS } from './config/constants'
+import {
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+} from './config/constants'
 import {
   dashboardWsConnected,
   dashboardWsLastError,
+  dashboardWsLastPingAt,
+  dashboardWsLastPongAt,
+  dashboardWsLastPongLatencyMs,
   dashboardWsLastSeq,
   dashboardWsReady,
 } from './dashboard-ws-state'
@@ -141,6 +148,24 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve()
 }
 
+async function connectReadyDashboard(): Promise<MockWebSocket> {
+  await connectDashboardWS({ tab: 'overview', params: {} })
+  const socket = mockSockets[0]!
+  socket.open()
+  const hello = parseRpc(socket, 0)
+  socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+  await flushPromises()
+
+  const subscribe = parseRpc(socket, 1)
+  socket.receive({
+    jsonrpc: '2.0',
+    id: subscribe.id,
+    result: { snapshot: { seq: 1, slices: {} } },
+  })
+  await flushPromises()
+  return socket
+}
+
 beforeEach(() => {
   // Make requestAnimationFrame synchronous so the rAF accumulator
   // flushes immediately inside the same task.  Tests remain
@@ -156,9 +181,13 @@ beforeEach(() => {
 
 afterEach(() => {
   disconnectDashboardWS()
+  clearDashboardWsDiscoveryCacheForTests()
   MockParseWorker.holdResponses = false
   dashboardWsConnected.value = false
   dashboardWsLastError.value = null
+  dashboardWsLastPingAt.value = 0
+  dashboardWsLastPongAt.value = 0
+  dashboardWsLastPongLatencyMs.value = null
   dashboardWsLastSeq.value = 0
   dashboardWsReady.value = false
   vi.useRealTimers()
@@ -280,11 +309,65 @@ describe('dashboard websocket route subscriptions', () => {
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
 
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(mockSockets).toHaveLength(1)
+  })
+
+  it('reuses cached websocket discovery across reconnects after a ready socket closes', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const firstSocket = mockSockets[0]!
+    firstSocket.open()
+    const hello = parseRpc(firstSocket, 0)
+    firstSocket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(firstSocket, 1)
+    firstSocket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    firstSocket.close({ code: 1001, reason: 'server restart', wasClean: true })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.url).toBe('ws://127.0.0.1:8937/')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('invalidates cached discovery when the cached socket closes before it is ready', async () => {
+    vi.useFakeTimers()
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(wsDiscoveryResponse('ws://127.0.0.1:8937/stale'))
+      .mockResolvedValueOnce(wsDiscoveryResponse('ws://127.0.0.1:8937/fresh'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const staleSocket = mockSockets[0]!
+    expect(staleSocket.url).toBe('ws://127.0.0.1:8937/stale')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    staleSocket.close({ code: 1006, reason: 'connect failed', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.url).toBe('ws://127.0.0.1:8937/fresh')
   })
 
   it('subscribes the latest route captured while hello is still in flight', async () => {
@@ -364,6 +447,60 @@ describe('dashboard websocket route subscriptions', () => {
     expect(dashboardWsLastError.value).toBe(
       'dashboard websocket rpc timed out: dashboard/subscribe',
     )
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
+  it('sends dashboard heartbeat pings after a route subscription is ready', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    const socket = await connectReadyDashboard()
+    expect(dashboardWsReady.value).toBe(true)
+    expect(socket.sent).toHaveLength(2)
+
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_HEARTBEAT_INTERVAL_MS)
+    await flushPromises()
+
+    const ping = parseRpc(socket, 2)
+    expect(ping.method).toBe('dashboard/ping')
+    expect(ping.params).toEqual({})
+
+    socket.receive({ jsonrpc: '2.0', id: ping.id, result: { ok: true } })
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(true)
+    expect(dashboardWsReady.value).toBe(true)
+    expect(dashboardWsLastError.value).toBe(null)
+    expect(dashboardWsLastPingAt.value).toBeGreaterThan(0)
+    expect(dashboardWsLastPongAt.value).toBeGreaterThanOrEqual(dashboardWsLastPingAt.value)
+    expect(dashboardWsLastPongLatencyMs.value).not.toBeNull()
+  })
+
+  it('reconnects when a dashboard heartbeat ping never responds', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    const socket = await connectReadyDashboard()
+    expect(dashboardWsReady.value).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_HEARTBEAT_INTERVAL_MS)
+    await flushPromises()
+
+    const ping = parseRpc(socket, 2)
+    expect(ping.method).toBe('dashboard/ping')
+
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_RPC_TIMEOUT_MS)
+    await flushPromises()
+
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(dashboardWsLastError.value).toBe('dashboard websocket rpc timed out: dashboard/ping')
 
     await vi.advanceTimersByTimeAsync(1_000)
     await flushPromises()

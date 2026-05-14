@@ -46,4 +46,17 @@ module For_testing : sig
       regression tests can pin the visible/callable contract: any preset
       that grants the [github] group in [config/tool_policy.toml] must
       return [true] here. *)
+
+  val pr_create_failure_already_exists : string -> bool
+  (** [true] when [output] matches the gh CLI verbatim
+      "a pull request for branch ... already exists" prefix. Exposed so
+      tests can pin the classifier wording independently of the recovery
+      path. *)
+
+  val classify_pr_create_recovery : string -> string option
+  (** Recovery reason classifier. Returns [Some "pr_already_exists"] for
+      idempotent hits, [Some "pr_create_transient_failure"] for 504/timeout
+      patterns, or [None] when the output is not recoverable. The string
+      identifier is what gets emitted as [recovered_from_error] in the
+      keeper_pr_create JSON output. *)
 end

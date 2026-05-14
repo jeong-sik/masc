@@ -82,7 +82,7 @@ val persisted_summary_target_reached :
     [target_reached = true] while the core loop remains incomplete. *)
 
 val dispatch :
-  context -> name:string -> args:Yojson.Safe.t -> tool_result option
+  context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
 (** Routes every [masc_autoresearch_*] tool name to its
     internal handler:
     - [masc_autoresearch_start] → {!handle_start}

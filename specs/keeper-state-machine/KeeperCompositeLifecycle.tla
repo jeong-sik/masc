@@ -22,17 +22,18 @@
 \*
 \* Design intent
 \*   1. shared_measurement is the coordination hub (Context_measured event,
-\*      Keeper_state_machine.mli:139-144 [type event / Context_measured],
-\*      auto_rules_summary). Verified 2026-04-20: lines 131-136 reference
-\*      a NoDrainTransition / GhostDispatch *.mli docstring callout, not
-\*      the event type. Anchor here is the [type event] declaration that
-\*      starts at line 139 with [Context_measured] at line 144.
-\*   2. The 12-state parent phase from RFC-0002 is projected to the
+\*      Keeper_state_machine.mli — [Context_measured] constructor of
+\*      [type event], auto_rules_summary). Cite by symbol — iter 64 N-2.a
+\*      (line numbers drift on every edit; [type event] / [Context_measured]
+\*      are stable identifiers, the OCaml compiler keeps them honest).
+\*      Adjacent NoDrainTransition / GhostDispatch *.mli docstring callouts
+\*      are anchored similarly by name, not by line number.
+\*   2. The 13-state parent phase from RFC-0002 is projected to the
 \*      7-element set
 \*      {Running, Failing, Overflowed, Compacting, HandingOff, Draining,
 \*       Stable}
 \*      — exactly the phases that matter for cross-spec ordering.
-\*      (See Comment A for the explicit 12->7 mapping; the 6 phases that
+\*      (See Comment A for the explicit 13->7 mapping; the 7 phases that
 \*      collapse to "Stable" are out of scope for the joint invariants
 \*      because they sit outside the turn cycle.)
 \*   3. Parent-lifecycle recovery is modeled directly as Running/Failing
@@ -84,21 +85,55 @@ VARIABLES
     measurement_turn,   \* Turn tick at which current shared_measurement
                         \* was captured. Guards "measurement before cascade".
 
-    turn_tick           \* Monotone counter used for ordering checks.
+    turn_tick,          \* Monotone counter used for ordering checks.
+
+    \* ── RFC-0065 Phase 5.1.b projections ────────────────────
+    \* Three new sub-FSM projections coupled into this observer per
+    \* RFC-0065 §3.4.  Each is the smallest abstraction sufficient
+    \* for one joint invariant; the detailed transitions belong to
+    \* their owning specs (KeeperCascadeAttemptFSM, KeeperToolSurface,
+    \* KeeperPostTurnOrchestration).
+
+    kcaf_attempt_phase, \* B1 (KeeperCascadeAttemptFSM) projection.
+                        \* Values: "idle", "attempting", "terminal".
+                        \* Source spec: KeeperCascadeAttemptFSM.tla — its
+                        \* full 6-phase enum (idle/attempting/awaiting_
+                        \* response/success/exhausted_normal/exhausted_
+                        \* hard_quota) collapses to 3 here.
+
+    kts_surface_ready,  \* B2 (KeeperToolSurface) projection.
+                        \* BOOLEAN — TRUE iff the tool-surface pipeline
+                        \* has produced a non-empty emitted set this
+                        \* turn.  Mirrors KeeperToolSurface.tla phase =
+                        \* "computed" with emitted /= {}.
+
+    kpto_phase          \* B3 (KeeperPostTurnOrchestration) projection.
+                        \* Values: "idle", "active", "persisted".
+                        \* "active" covers the wirein A5→A6→K4b→K1 +
+                        \* lineage append run; "persisted" covers
+                        \* checkpoint persist.  Source spec:
+                        \* KeeperPostTurnOrchestration.tla.
 
 vars == <<ksm_phase, ktc_turn_phase, kdp_decision, kcl_cascade_state,
-          kmc_compaction, shared_measurement, measurement_turn, turn_tick>>
+          kmc_compaction, shared_measurement, measurement_turn, turn_tick,
+          kcaf_attempt_phase, kts_surface_ready, kpto_phase>>
 
 \* ── Enumerated value sets ───────────────────────────────
 
-\* Comment A — 12->7 phase projection (from RFC-0002 Transition Matrix):
+\* Comment A — 13->7 phase projection (from RFC-0002 Transition Matrix
+\* + Zombie extension added iter 4 #14707):
 \*   Running     -> Running
 \*   Failing     -> Failing
 \*   Overflowed  -> Overflowed     (added 2026-04, MASC-1)
 \*   Compacting  -> Compacting
 \*   HandingOff  -> HandingOff
 \*   Draining    -> Draining
-\*   Offline, Paused, Stopped, Crashed, Restarting, Dead -> Stable
+\*   Offline, Paused, Stopped, Crashed, Restarting, Dead, Zombie -> Stable
+\*                                                       (Zombie added iter 4
+\*                                                        #14707 — terminal
+\*                                                        post-Dead, outside
+\*                                                        the turn cycle ⇒
+\*                                                        structurally Stable)
 \* This is a LOSSY projection; the joint invariants here hold for all
 \* states that collapse to Stable by construction (they are outside the
 \* turn cycle). Overflowed is tracked as its own phase because it couples
@@ -106,23 +141,60 @@ vars == <<ksm_phase, ktc_turn_phase, kdp_decision, kcl_cascade_state,
 
 PhaseSet       == {"Running", "Failing", "Overflowed", "Compacting",
                    "HandingOff", "Draining", "Stable"}
-TurnPhaseSet   == {"idle", "prompting", "executing", "compacting",
-                   "finalizing"}
+
+\* TurnPhaseSet: KTC projection.  iter 39 R-E-1.a (2026-05-12) sync —
+\* KTC.tla:127 widened to 7 members in iter 28 (#14793 R-B-1.a) to match
+\* OCaml's 7-constructor `Keeper_registry.turn_phase`; KCL had carried
+\* the pre-iter-28 5-member set, creating a cross-spec drift documented
+\* in `docs/tla-audit/kcl-e1-cross-spec-projection-drift-2026-05-12.md`
+\* (PR #14822 Finding 1, HIGH risk).  Type widening only — KCL's existing
+\* observer actions don't transition into routing/exhausted; per-attempt
+\* FSM is owned by KCAF and the keeper-projection action set by KTC
+\* (B-2 audit #14809).  Action modeling deferred — see KTC R-B-2.{a,b,c}.
+TurnPhaseSet   == {"idle", "prompting", "routing", "executing",
+                   "compacting", "finalizing", "exhausted"}
+
 DecisionSet    == {"undecided", "guard_ok", "gate_rejected",
                    "tool_policy_selected"}
 CascadeSet     == {"idle", "selecting", "trying", "done", "exhausted"}
 CompactionSet  == {"accumulating", "compacting", "done"}
+
+\* KcafPhaseSet: DELIBERATE 3:6 projection collapse from KCAF.tla:79-81.
+\* iter 39 R-E-1.c (2026-05-12, this commit) documents the mapping per
+\* iter 38 KCL E-1 Finding 2 (PR #14822):
+\*
+\*   KCL abstract      ↔  KCAF concrete
+\*   "idle"            ↔  "idle"
+\*   "attempting"      ↔  "attempting", "awaiting_response"
+\*   "terminal"        ↔  "success", "exhausted_normal", "exhausted_hard_quota"
+\*
+\* The terminal collapse silently merges KCAF's distinguished terminals
+\* (exhausted_normal vs exhausted_hard_quota documented in D-2 audit
+\* #14815).  Joint invariants conditioning on `kcaf_attempt_phase` cannot
+\* distinguish hard-quota from normal exhaustion at the cross-spec level
+\* — the D-2 safety surface (HardQuotaTerminalImmediate +
+\* BugHardQuotaBypass) lives only in KCAF, not in any KCL joint property.
+\* This is INTENTIONAL: KCL operates at a coarser observation
+\* granularity; per-terminal-flavor invariants belong in KCAF.
+KcafPhaseSet   == {"idle", "attempting", "terminal"}
+
+KptoPhaseSet   == {"idle", "active", "persisted"}
 ActionSet      == {
                    "StartTurn", "MeasurementBroadcast", "DecideGuard",
-                   "SelectToolPolicy", "StartCascadeSelection",
+                   "SelectToolPolicy", "ComputeToolSurface",
+                   "StartCascadeSelection",
                    "SelectCascade", "GateRejected", "CascadeDone",
                    "CascadeExhausted", "FinishTurn", "StartCompaction",
                    "FinishCompaction", "EnterFailing", "ClearFailing",
-                   "EnterOverflowed", "OverflowedAutoCompact"
+                   "EnterOverflowed", "OverflowedAutoCompact",
+                   "EnterPostTurn", "PersistCheckpoint"
                   }
 InvariantSet   == {
                    "PhaseTurnAlignment", "NoCascadeBeforeMeasurement",
-                   "CompactionAtomicity", "EventPriorityMonotone"
+                   "CompactionAtomicity", "EventPriorityMonotone",
+                   "AttemptFSMRespectsAdmission",
+                   "ToolSurfaceFeedsAttempt",
+                   "PostTurnConsumesAttempt"
                   }
 
 TypeOK ==
@@ -134,6 +206,9 @@ TypeOK ==
     /\ shared_measurement \in Nat
     /\ measurement_turn \in Nat
     /\ turn_tick \in 0..MaxTurnTicks
+    /\ kcaf_attempt_phase \in KcafPhaseSet
+    /\ kts_surface_ready \in BOOLEAN
+    /\ kpto_phase \in KptoPhaseSet
 
 \* ── Initial state ────────────────────────────────────────
 
@@ -146,6 +221,9 @@ Init ==
     /\ shared_measurement = 0
     /\ measurement_turn = 0
     /\ turn_tick = 0
+    /\ kcaf_attempt_phase = "idle"
+    /\ kts_surface_ready = FALSE
+    /\ kpto_phase = "idle"
 
 \* ── Domain actions (abstract) ────────────────────────────
 \* Each action below is a narrow abstraction of a sub-FSM transition.
@@ -164,6 +242,10 @@ StartTurn ==
     /\ kcl_cascade_state' = "idle"
     /\ kmc_compaction' =
          IF kmc_compaction = "done" THEN "accumulating" ELSE kmc_compaction
+    \* RFC-0065 Phase 5.1.b projections — reset for the new turn.
+    /\ kcaf_attempt_phase' = "idle"
+    /\ kts_surface_ready' = FALSE
+    /\ kpto_phase' = "idle"
     /\ UNCHANGED <<ksm_phase>>
 
 MeasurementBroadcast ==                  \* Context_measured (priority 5)
@@ -172,7 +254,8 @@ MeasurementBroadcast ==                  \* Context_measured (priority 5)
     /\ shared_measurement' = turn_tick    \* any unique, nonzero value
     /\ measurement_turn' = turn_tick
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
-                   kcl_cascade_state, kmc_compaction, turn_tick>>
+                   kcl_cascade_state, kmc_compaction, turn_tick,
+                   kcaf_attempt_phase, kts_surface_ready, kpto_phase>>
 
 DecideGuard ==
     /\ ktc_turn_phase = "prompting"
@@ -181,7 +264,8 @@ DecideGuard ==
     /\ kdp_decision' = "guard_ok"
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kcl_cascade_state,
                    kmc_compaction, shared_measurement, measurement_turn,
-                   turn_tick>>
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
 
 SelectToolPolicy ==
     /\ ktc_turn_phase = "prompting"
@@ -189,25 +273,49 @@ SelectToolPolicy ==
     /\ kdp_decision' = "tool_policy_selected"
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kcl_cascade_state,
                    kmc_compaction, shared_measurement, measurement_turn,
-                   turn_tick>>
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
+
+\* ComputeToolSurface — B2 (KeeperToolSurface) projection step.  Runs
+\* after a tool policy is selected and before the cascade attempts
+\* anything; produces the kts_surface_ready ghost that ToolSurfaceFeedsAttempt
+\* checks downstream.  Mirrors the keeper_run_tools.ml::compute_tool_surface
+\* call at the start of each Agent.run loop iteration.
+ComputeToolSurface ==
+    /\ ktc_turn_phase = "prompting"
+    /\ shared_measurement /= 0
+    /\ kdp_decision = "tool_policy_selected"
+    /\ ~kts_surface_ready
+    /\ kts_surface_ready' = TRUE
+    /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
+                   kcl_cascade_state, kmc_compaction, shared_measurement,
+                   measurement_turn, turn_tick, kcaf_attempt_phase,
+                   kpto_phase>>
 
 StartCascadeSelection ==
     /\ ktc_turn_phase = "prompting"
     /\ kdp_decision = "tool_policy_selected"
     /\ shared_measurement /= 0
     /\ kcl_cascade_state = "idle"
+    \* B2 dependency: the tool surface must be ready before cascade
+    \* selection.  Enforces ToolSurfaceFeedsAttempt at the producer.
+    /\ kts_surface_ready
     /\ kcl_cascade_state' = "selecting"
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
                    kmc_compaction, shared_measurement, measurement_turn,
-                   turn_tick>>
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
 
 SelectCascade ==
     /\ kcl_cascade_state = "selecting"
     /\ shared_measurement /= 0
     /\ kcl_cascade_state' = "trying"
     /\ ktc_turn_phase' = "executing"
+    \* B1 transition: composite "trying" maps to KCAF "attempting".
+    /\ kcaf_attempt_phase' = "attempting"
     /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
-                   shared_measurement, measurement_turn, turn_tick>>
+                   shared_measurement, measurement_turn, turn_tick,
+                   kts_surface_ready, kpto_phase>>
 
 GateRejected ==
     /\ ksm_phase = "Running"
@@ -216,25 +324,35 @@ GateRejected ==
     /\ kcl_cascade_state = "trying"
     /\ kdp_decision' = "gate_rejected"
     /\ ktc_turn_phase' = "finalizing"
+    \* B1 transition: gate rejection ends the attempt at the cascade
+    \* boundary — KCAF reaches a terminal state.
+    /\ kcaf_attempt_phase' = "terminal"
     /\ UNCHANGED kcl_cascade_state
     /\ UNCHANGED <<ksm_phase, kmc_compaction, shared_measurement,
-                   measurement_turn, turn_tick>>
+                   measurement_turn, turn_tick, kts_surface_ready,
+                   kpto_phase>>
 
 CascadeDone ==
     /\ ksm_phase = "Running"
     /\ kcl_cascade_state = "trying"
     /\ kcl_cascade_state' = "done"
     /\ ktc_turn_phase' = "finalizing"
+    \* B1 transition: cascade success → KCAF "terminal".
+    /\ kcaf_attempt_phase' = "terminal"
     /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
-                   shared_measurement, measurement_turn, turn_tick>>
+                   shared_measurement, measurement_turn, turn_tick,
+                   kts_surface_ready, kpto_phase>>
 
 CascadeExhausted ==
     /\ ksm_phase = "Running"
     /\ kcl_cascade_state = "trying"
     /\ kcl_cascade_state' = "exhausted"
     /\ ktc_turn_phase' = "finalizing"
+    \* B1 transition: cascade exhaustion → KCAF "terminal".
+    /\ kcaf_attempt_phase' = "terminal"
     /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
-                   shared_measurement, measurement_turn, turn_tick>>
+                   shared_measurement, measurement_turn, turn_tick,
+                   kts_surface_ready, kpto_phase>>
 
 \* FinishTurn — closes the current turn and resets per-turn sub-FSM state.
 \* Without this, the next StartTurn would keep kcl_cascade_state stale
@@ -246,7 +364,12 @@ FinishTurn ==
     /\ kdp_decision' = "undecided"
     /\ shared_measurement' = 0
     /\ measurement_turn' = 0
-    /\ UNCHANGED <<ksm_phase, kmc_compaction, turn_tick>>
+    \* B3 transition: post-turn pipeline (compaction → wireins → persist)
+    \* enters its "active" phase here.  KCAF stays "terminal" through
+    \* the post-turn run so PostTurnConsumesAttempt holds.
+    /\ kpto_phase' = "active"
+    /\ UNCHANGED <<ksm_phase, kmc_compaction, turn_tick,
+                   kcaf_attempt_phase, kts_surface_ready>>
 
 \* Compaction is coupled: parent phase + turn phase + memory phase
 \* must co-advance (CompactionAtomicity).
@@ -259,7 +382,8 @@ StartCompaction ==
     /\ kmc_compaction' = "compacting"
     /\ kcl_cascade_state' = "idle"
     /\ kdp_decision' = "undecided"
-    /\ UNCHANGED <<shared_measurement, measurement_turn, turn_tick>>
+    /\ UNCHANGED <<shared_measurement, measurement_turn, turn_tick,
+                   kcaf_attempt_phase, kts_surface_ready, kpto_phase>>
 
 FinishCompaction ==
     /\ ksm_phase = "Compacting"
@@ -267,22 +391,73 @@ FinishCompaction ==
     /\ ksm_phase' = "Running"
     /\ ktc_turn_phase' = "idle"
     /\ kmc_compaction' = "done"
+    \* B3 transition: end of post-turn → checkpoint persisted.
+    \* StartTurn resets kpto_phase back to "idle" for the next turn.
+    /\ kpto_phase' = "persisted"
     /\ UNCHANGED <<kdp_decision, kcl_cascade_state, shared_measurement,
-                   measurement_turn, turn_tick>>
+                   measurement_turn, turn_tick, kcaf_attempt_phase,
+                   kts_surface_ready>>
 
 EnterFailing ==
     /\ ksm_phase = "Running"
     /\ ksm_phase' = "Failing"
     /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
                    kmc_compaction, shared_measurement, measurement_turn,
-                   turn_tick>>
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
 
 ClearFailing ==
     /\ ksm_phase = "Failing"
     /\ ksm_phase' = "Running"
     /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
                    kmc_compaction, shared_measurement, measurement_turn,
-                   turn_tick>>
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
+
+\* HandingOff orchestration (Gap-1 audit 2026-05-14).
+\* Until this iteration KCL declared "HandingOff" in PhaseSet but never
+\* transitioned into it, so the joint invariants conditioning on KSM phase
+\* held vacuously for the entire HandingOff cross-section.  Modeling the
+\* entry explicitly is what surfaces the mid-flight gap, and the
+\* NoMidFlightTransitionToHandingOff invariant below pins the contract.
+\*
+\* Modeling note — quiescence preconditions.
+\*   KCL is an OBSERVER, not a controller.  EnterHandingOff models the
+\*   *desired contract*: OCaml must drive the in-flight cascade attempt
+\*   to a terminal state (Eio cancel + termination) before HandingOff is
+\*   observable in the joint state.  Encoding this as a precondition
+\*   makes the contract explicit; the matching bug action
+\*   (BugMidFlightHandoffEntry below) models the contract *violation*,
+\*   so any TLC counter-example coming from the buggy spec is
+\*   attributable to the bypass, not to a benign racing trace of the
+\*   clean spec.  This is the spec-first stance: clean spec encodes
+\*   what OCaml *must* uphold, bug action encodes the silent failure
+\*   when OCaml does *not* uphold it.
+EnterHandingOff ==
+    /\ ksm_phase = "Running"
+    /\ ktc_turn_phase \in {"idle", "finalizing"}
+    /\ kcaf_attempt_phase /= "attempting"
+    /\ kcl_cascade_state \in {"idle", "done", "exhausted"}
+    /\ ksm_phase' = "HandingOff"
+    /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
+
+\* HandoffCompletes — keeper returns to Running after handoff success.
+\* Mirrors keeper_keepalive.ml::maybe_recover_from_handoff.  Quiescence
+\* preconditions match NoMidFlightTransitionToHandingOff so that the
+\* clean spec stays inside the invariant envelope.
+HandoffCompletes ==
+    /\ ksm_phase = "HandingOff"
+    /\ ktc_turn_phase \in {"idle", "finalizing"}
+    /\ kcaf_attempt_phase \in {"idle", "terminal"}
+    /\ kcl_cascade_state \in {"idle", "done", "exhausted"}
+    /\ ksm_phase' = "Running"
+    /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
 
 \* Overflowed orchestration (Context overflow detected).
 \* Runtime truth: parent phase moves to Overflowed first. The in-flight turn
@@ -296,7 +471,8 @@ EnterOverflowed ==
     /\ ksm_phase' = "Overflowed"
     /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
                    kmc_compaction, shared_measurement, measurement_turn,
-                   turn_tick>>
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
 
 \* Overflowed -> Compacting (Start_compaction entry action).
 \* Atomically moves KSM, KTC, KMC so CompactionAtomicity is preserved:
@@ -307,8 +483,13 @@ OverflowedAutoCompact ==
     /\ ksm_phase' = "Compacting"
     /\ ktc_turn_phase' = "compacting"
     /\ kmc_compaction' = "compacting"
+    \* The in-flight cascade attempt is interrupted by the overflow
+    \* event — KCAF moves to "terminal".  Mirrors the keeper_turn_driver
+    \* abort path that surfaces the overflow as a terminal outcome.
+    /\ kcaf_attempt_phase' = "terminal"
     /\ UNCHANGED <<kdp_decision, kcl_cascade_state, shared_measurement,
-                   measurement_turn, turn_tick>>
+                   measurement_turn, turn_tick, kts_surface_ready,
+                   kpto_phase>>
 
 \* ── Next-state relation ──────────────────────────────────
 
@@ -317,6 +498,7 @@ Next ==
     \/ MeasurementBroadcast
     \/ DecideGuard
     \/ SelectToolPolicy
+    \/ ComputeToolSurface
     \/ StartCascadeSelection
     \/ SelectCascade
     \/ GateRejected
@@ -329,11 +511,14 @@ Next ==
     \/ ClearFailing
     \/ EnterOverflowed
     \/ OverflowedAutoCompact
+    \/ EnterHandingOff
+    \/ HandoffCompletes
 
 Fairness ==
     /\ WF_vars(MeasurementBroadcast)
     /\ WF_vars(DecideGuard)
     /\ WF_vars(SelectToolPolicy)
+    /\ WF_vars(ComputeToolSurface)
     /\ WF_vars(StartCascadeSelection)
     /\ WF_vars(SelectCascade)
     /\ WF_vars(CascadeDone)
@@ -342,6 +527,7 @@ Fairness ==
     /\ WF_vars(FinishCompaction)
     /\ WF_vars(ClearFailing)
     /\ WF_vars(OverflowedAutoCompact)
+    /\ WF_vars(HandoffCompletes)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -350,7 +536,11 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 \* I1 — PhaseTurnAlignment
 \* When the parent phase is Compacting, the turn phase and memory phase
 \* must also be in their compacting states. Encodes the post-turn
-\* lifecycle atomicity in keeper_post_turn.ml:45-232.
+\* lifecycle atomicity in keeper_post_turn.ml — the post-turn lifecycle
+\* orchestration (apply_post_turn_lifecycle_with_resilience_handles and
+\* the compaction/rollover/wirein steps it sequences; cited by symbol,
+\* not line — iter 64 N-2.a, converted in the iter 85 scattered-singles
+\* line-ref sweep).
 PhaseTurnAlignment ==
     (ksm_phase = "Compacting") =>
         (ktc_turn_phase = "compacting" /\ kmc_compaction = "compacting")
@@ -376,12 +566,67 @@ CompactionAtomicity ==
 EventPriorityMonotone ==
     (shared_measurement = 0) \/ (measurement_turn = turn_tick)
 
+\* ── RFC-0065 Phase 5.1.b joint invariants ────────────────
+\* Three predicates spanning the existing 5 sub-FSMs and the three new
+\* RFC-0065 sub-FSMs (B1/B2/B3).  Per RFC §3.4 these stay weak —
+\* predicates over projections only, no enumeration of the full
+\* product state space.
+
+\* I5 — AttemptFSMRespectsAdmission (RFC §3.4, historical name)
+\* B1.KCAF cannot enter "attempting" unless the turn measurement hub has fired
+\* in the current turn. The former MASC-side KeeperAdmissionLiveness provider
+\* gate was retired; this projection now models the live turn-semaphore entry
+\* signal only.
+AttemptFSMRespectsAdmission ==
+    (kcaf_attempt_phase = "attempting") =>
+        (shared_measurement /= 0 /\ measurement_turn = turn_tick)
+
+\* I6 — ToolSurfaceFeedsAttempt (RFC §3.4)
+\* B2.KTS must have produced a non-empty surface (kts_surface_ready)
+\* before B1.KCAF enters "attempting".  Models the producer/consumer
+\* dependency: an empty surface cannot feed a cascade attempt.
+ToolSurfaceFeedsAttempt ==
+    (kcaf_attempt_phase = "attempting") => kts_surface_ready
+
+\* I7 — PostTurnConsumesAttempt (RFC §3.4)
+\* B3.KPTO begins only when B1.KCAF has reached a terminal state.
+\* "active" must not be observed alongside an in-flight attempt;
+\* either the cascade was not attempted this turn (kcaf = "idle")
+\* or it terminated before post-turn started.
+PostTurnConsumesAttempt ==
+    (kpto_phase = "active") => (kcaf_attempt_phase /= "attempting")
+
+\* ── Gap-1 invariant (audit 2026-05-14) ───────────────────
+\* This invariant closes the "mid-flight transitional phase"
+\* silent-failure family.  KCL previously declared HandingOff in
+\* PhaseSet but had no action transitioning into it, so any joint
+\* property conditioning on KSM=HandingOff held vacuously.  Adding
+\* EnterHandingOff with quiescence preconditions makes that subspace
+\* reachable, and I8 below pins the cross-FSM contract.  Pairs with
+\* SpecBuggyMidFlightHandoff (BugMidFlightHandoffEntry) which models
+\* the contract bypass — the silent failure path.
+
+\* I8 — NoMidFlightTransitionToHandingOff
+\* If KSM is in HandingOff, the turn cycle must be quiescent: no
+\* attempting cascade, no in-flight cascade attempt (state in trying
+\* or selecting), and the turn phase must not be in an active stage.
+\* The clean spec preserves this by construction (EnterHandingOff
+\* preconditions); the buggy spec violates it via the bypass action.
+NoMidFlightTransitionToHandingOff ==
+    (ksm_phase = "HandingOff") =>
+        (kcaf_attempt_phase /= "attempting" /\
+         kcl_cascade_state \in {"idle", "done", "exhausted"})
+
 SafetyInvariant ==
     /\ TypeOK
     /\ PhaseTurnAlignment
     /\ NoCascadeBeforeMeasurement
     /\ CompactionAtomicity
     /\ EventPriorityMonotone
+    /\ AttemptFSMRespectsAdmission
+    /\ ToolSurfaceFeedsAttempt
+    /\ PostTurnConsumesAttempt
+    /\ NoMidFlightTransitionToHandingOff
 
 \* ── Liveness ─────────────────────────────────────────────
 
@@ -415,7 +660,8 @@ BugCascadeBeforeMeasurement ==
     /\ kdp_decision' = "tool_policy_selected"
     /\ kcl_cascade_state' = "selecting"
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kmc_compaction,
-                   shared_measurement, measurement_turn, turn_tick>>
+                   shared_measurement, measurement_turn, turn_tick,
+                   kcaf_attempt_phase, kts_surface_ready, kpto_phase>>
 
 NextBuggyCascade == Next \/ BugCascadeBeforeMeasurement
 
@@ -427,12 +673,77 @@ BugCompactionDesync ==
     /\ kmc_compaction' = "compacting"     \* BUG: KSM and KTC stay put
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
                    kcl_cascade_state, shared_measurement, measurement_turn,
-                   turn_tick>>
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
 
 NextBuggyCompaction == Next \/ BugCompactionDesync
 
-SpecBuggyCascade    == Init /\ [][NextBuggyCascade]_vars /\ Fairness
+\* RFC-0065 Phase 5.1.b bug actions — each violates a distinct
+\* joint invariant introduced by this phase.
+
+\* BugAttemptWithoutSurface — cascade selection bypasses the
+\* ComputeToolSurface step entirely: the clean StartCascadeSelection
+\* requires kts_surface_ready, this variant jumps idle → trying with
+\* the surface still empty.  Models a refactor that elides the
+\* compute_tool_surface call between SelectToolPolicy and cascade
+\* dispatch.  Violates ToolSurfaceFeedsAttempt.
+BugAttemptWithoutSurface ==
+    /\ ktc_turn_phase = "prompting"
+    /\ kdp_decision = "tool_policy_selected"
+    /\ shared_measurement /= 0
+    /\ kcl_cascade_state = "idle"
+    /\ ~kts_surface_ready
+    /\ kcl_cascade_state' = "trying"
+    /\ ktc_turn_phase' = "executing"
+    /\ kcaf_attempt_phase' = "attempting"
+    /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
+                   shared_measurement, measurement_turn, turn_tick,
+                   kts_surface_ready, kpto_phase>>
+
+\* BugPostTurnDuringAttempt — post-turn pipeline starts while the
+\* cascade is still in flight.  Models a control-flow refactor that
+\* fires the post-turn finalizer before the attempt FSM reaches a
+\* terminal state.  Violates PostTurnConsumesAttempt.
+BugPostTurnDuringAttempt ==
+    /\ kcaf_attempt_phase = "attempting"
+    /\ kpto_phase = "idle"
+    /\ kpto_phase' = "active"
+    /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
+                   kcl_cascade_state, kmc_compaction, shared_measurement,
+                   measurement_turn, turn_tick, kcaf_attempt_phase,
+                   kts_surface_ready>>
+
+NextBuggyAttempt  == Next \/ BugAttemptWithoutSurface
+NextBuggyPostTurn == Next \/ BugPostTurnDuringAttempt
+
+\* Gap-1 bug action (audit 2026-05-14).
+\* BugMidFlightHandoffEntry — bypass of the EnterHandingOff quiescence
+\* preconditions.  An external signal (handoff_active=true from
+\* operator/credential/budget) sets the keeper's phase to HandingOff
+\* *while* a cascade attempt is still in flight; the OCaml runtime
+\* fails to cooperatively cancel the cascade fiber before the phase
+\* change is observable.  Post-state: KSM=HandingOff, cascade in
+\* "trying", KCAF in "attempting" — exactly the joint state the clean
+\* EnterHandingOff forbids.  Violates NoMidFlightTransitionToHandingOff.
+BugMidFlightHandoffEntry ==
+    /\ ksm_phase = "Running"
+    /\ ktc_turn_phase = "executing"
+    /\ kcl_cascade_state = "trying"
+    /\ kcaf_attempt_phase = "attempting"
+    /\ ksm_phase' = "HandingOff"
+    /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
+
+NextBuggyMidFlightHandoff == Next \/ BugMidFlightHandoffEntry
+
+SpecBuggyCascade  == Init /\ [][NextBuggyCascade]_vars  /\ Fairness
 SpecBuggyCompaction == Init /\ [][NextBuggyCompaction]_vars /\ Fairness
+SpecBuggyAttempt  == Init /\ [][NextBuggyAttempt]_vars  /\ Fairness
+SpecBuggyPostTurn == Init /\ [][NextBuggyPostTurn]_vars /\ Fairness
+SpecBuggyMidFlightHandoff ==
+    Init /\ [][NextBuggyMidFlightHandoff]_vars /\ Fairness
 
 \* ── Boundary comments (reviewer gate) ────────────────────
 \* This spec must NOT introduce any of the following, per:

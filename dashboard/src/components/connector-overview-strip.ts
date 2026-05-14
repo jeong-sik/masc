@@ -12,6 +12,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
+import { SurfaceCard } from './common/card'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, connectorStateLabel, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
@@ -257,11 +258,11 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
   const summary = summarizeOverviewTile(connector, keeperCount)
 
   return html`
-    <div
-      class=${`flex min-w-0 flex-col gap-3 rounded-[var(--r-1)] border bg-[var(--color-bg-surface)] p-3 transition-colors ${
+    <${SurfaceCard}
+      class=${`flex min-w-0 flex-col gap-3 !bg-[var(--color-bg-surface)] !p-3 transition-colors ${
         selected
-          ? 'border-[var(--color-accent-fg)] shadow-[0_0_0_1px_var(--accent-18)]'
-          : 'border-[var(--color-border-default)] hover:border-[var(--color-border-default)]'
+          ? '!border-[var(--color-accent-fg)] shadow-[0_0_0_1px_var(--accent-18)]'
+          : '!border-[var(--color-border-default)] hover:!border-[var(--color-border-default)]'
       }`}
       data-overview-tile=${id}
       data-overview-selected=${selected ? 'true' : 'false'}
@@ -311,7 +312,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
       <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
       <${TileErrorNotice} connector=${connector} />
       <${TileHeartbeatStrip} id=${id} />
-    </div>
+    </${SurfaceCard}>
   `
 }
 
@@ -459,8 +460,8 @@ function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null })
   const tone = TILE_NOTICE_TONE_CLASS[notice.tone]
   const glyph = TILE_NOTICE_GLYPH[notice.tone]
   return html`
-    <div
-      class=${`flex min-w-0 items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-1 text-3xs ${tone}`}
+    <${SurfaceCard}
+      class=${`flex min-w-0 items-center gap-1.5 !px-2 !py-1 text-3xs ${tone}`}
       role="alert"
       aria-label=${`${notice.label}: ${notice.detail}`}
       title=${notice.detail}
@@ -469,7 +470,7 @@ function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null })
       <span aria-hidden="true" class="shrink-0">${glyph}</span>
       <span class="shrink-0 font-semibold uppercase tracking-2">${notice.label}</span>
       <span class="min-w-0 truncate font-normal normal-case tracking-normal opacity-80">${notice.detail}</span>
-    </div>
+    </${SurfaceCard}>
   `
 }
 
@@ -703,15 +704,15 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     .map(id => CONNECTOR_DISPLAY_NAMES[id as KnownConnectorId] ?? id)
     .join(', ')
   return html`
-    <div
-      class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
+    <${SurfaceCard}
+      class="mb-2 flex items-center gap-2 !border-[var(--bad-20)] !bg-[var(--bad-10)] !px-3 !py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
       data-incident-banner
       role="alert"
     >
       <span aria-hidden="true">⚠</span>
       <span>최근 5분 내 연결 끊김 — ${names}</span>
       <span class="ml-auto text-3xs font-normal text-[var(--bad-light)]/80">아래 Start 버튼으로 복구</span>
-    </div>
+    </${SurfaceCard}>
   `
 }
 
@@ -745,10 +746,7 @@ export function ConnectorOverviewStrip({
   const droppedIds = detectRecentDrops(stripMemory.value, connectors, Date.now())
   const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
-    <div
-      class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
-      data-overview-strip-root
-    >
+    <${SurfaceCard} class="mb-4 !p-3" data-overview-strip-root>
       <${IncidentBanner} droppedIds=${droppedIds} />
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
@@ -766,7 +764,7 @@ export function ConnectorOverviewStrip({
           />
         `)}
       </div>
-    </div>
+    </${SurfaceCard}>
   `
 }
 

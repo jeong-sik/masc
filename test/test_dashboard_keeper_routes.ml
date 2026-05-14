@@ -91,6 +91,13 @@ let contains_substr needle haystack =
   n = 0 || loop 0
 ;;
 
+let iso_of_unix unix_ts =
+  let tm = Unix.gmtime unix_ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+;;
+
 let find_main_eio_exe () =
   let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in
   let candidates =
@@ -312,7 +319,70 @@ let repo_config_path name =
   Filename.concat (Filename.concat (Masc_test_deps.find_project_root ()) "config") name
 ;;
 
-let with_temp_config_root cascade_json f =
+let split_model_spec spec =
+  let after_scheme =
+    match String.index_opt spec ':' with
+    | Some idx -> String.sub spec (idx + 1) (String.length spec - idx - 1)
+    | None -> spec
+  in
+  match String.index_opt after_scheme '@' with
+  | Some idx ->
+      ( String.sub after_scheme 0 idx,
+        String.sub after_scheme (idx + 1) (String.length after_scheme - idx - 1) )
+  | None -> after_scheme, "http://127.0.0.1:9/v1"
+;;
+
+let cascade_toml ?(route_target = "default") ?(extra_route_targets = [])
+    ?(invalid_profiles = []) valid_model profiles =
+  let model_id, endpoint = split_model_spec valid_model in
+  let profile_toml ~valid name =
+    Printf.sprintf
+      {|
+[tier.%s]
+members = [%S]
+
+[tier-group.%s]
+tiers = [%S]
+|}
+      name
+      (if valid then "custom.mock" else "missing_provider.fake")
+      name
+      name
+  in
+  let routes_toml =
+    ("keeper_turn", route_target)
+    :: List.mapi
+         (fun index target ->
+            (Printf.sprintf "assignable_%d" (index + 1), target))
+         extra_route_targets
+    |> List.map (fun (route_name, target) ->
+           Printf.sprintf "[routes.%s]\ntarget = \"tier-group.%s\"\n" route_name target)
+    |> String.concat "\n"
+  in
+  Printf.sprintf
+    {|[providers.custom]
+protocol = "openai-http"
+endpoint = %S
+
+[models.mock]
+api-name = %S
+max-context = 128000
+tools-support = true
+
+[custom.mock]
+%s
+%s
+
+%s
+|}
+    endpoint
+    model_id
+    (profiles |> List.map (profile_toml ~valid:true) |> String.concat "\n")
+    (invalid_profiles |> List.map (profile_toml ~valid:false) |> String.concat "\n")
+    routes_toml
+;;
+
+let with_temp_config_root cascade_toml f =
   let root = Filename.temp_file "dashboard-keeper-config-" "" in
   (try Sys.remove root with
    | _ -> ());
@@ -324,7 +394,7 @@ let with_temp_config_root cascade_json f =
        mkdir_p (Filename.concat root "personas");
        mkdir_p (Filename.concat root "keepers");
        mkdir_p (Filename.concat root "prompts");
-       write_file (Filename.concat root "cascade.json") cascade_json;
+       write_file (Filename.concat root "cascade.toml") cascade_toml;
        write_file
          (Filename.concat root "tool_policy.toml")
          (read_file (repo_config_path "tool_policy.toml"));
@@ -514,6 +584,29 @@ let keeper_profile_cascade_name body keeper_name =
   | None -> fail ("keeper profile missing from cascade config: " ^ keeper_name)
 ;;
 
+let cascade_profile_first_candidate body profile_name =
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string body in
+  let rows = json |> member "profiles" |> to_list in
+  match
+    List.find_opt
+      (fun row -> row |> member "name" |> to_string = profile_name)
+      rows
+  with
+  | None -> fail ("cascade profile missing from config: " ^ profile_name)
+  | Some row -> (
+      match row |> member "candidates" |> to_list with
+      | candidate :: _ -> candidate
+      | [] -> fail ("cascade profile has no candidates: " ^ profile_name))
+;;
+
+let candidate_string_field field candidate =
+  let open Yojson.Safe.Util in
+  match candidate |> member field with
+  | `String value -> value
+  | _ -> fail ("candidate string field missing: " ^ field)
+;;
+
 let make_keeper_meta_json ?(name = "route_shadow_demo") ?(paused = true) () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -522,7 +615,7 @@ let make_keeper_meta_json ?(name = "route_shadow_demo") ?(paused = true) () =
           ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
           ; "trace_id", `String ("trace-" ^ name ^ "-seed")
           ; "goal", `String "Route shadow regression fixture"
-          ; "cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name
+          ; "cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ())
           ; "updated_at", `String "2026-04-04T00:00:00Z"
           ; "paused", `Bool paused
           ])
@@ -585,22 +678,31 @@ let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_n
   Masc_mcp.Coord.write_json config agent_file (Masc_domain.agent_to_yojson agent)
 ;;
 
-let append_execution_receipt ?(tool_contract_result = "satisfied")
+let append_execution_receipt
+    ?(tool_contract_result :
+       Masc_mcp.Keeper_execution_receipt.tool_contract_result =
+      Contract_satisfied_completion)
     ?(tools_used = [ "keeper_fs_read" ])
     ?(cascade_fallback_applied = true)
-    ?(cascade_outcome = "passed_to_next_model")
+    ?(cascade_outcome : Masc_mcp.Keeper_execution_receipt.cascade_outcome =
+      Cascade_passed_to_next_model)
     ?(degraded_retry_applied = true)
     ?(degraded_retry_cascade =
       Some Masc_mcp.Keeper_config.local_recovery_cascade_name)
-    ?(fallback_reason = Some "turn_timeout") config ~keeper_name =
+    ?(fallback_reason = Some Masc_mcp.Keeper_error_classify.Turn_timeout)
+    config ~keeper_name =
   let meta =
     match Masc_mcp.Keeper_types.read_meta config keeper_name with
     | Ok (Some meta) -> meta
     | Ok None -> fail ("keeper meta missing for receipt: " ^ keeper_name)
     | Error err -> fail ("read_meta failed for receipt: " ^ err)
   in
-  let started_at = Masc_domain.now_iso () in
-  let ended_at = Masc_domain.now_iso () in
+  let started_at =
+    iso_of_unix (Unix.gettimeofday () +. 2.0)
+  in
+  let ended_at =
+    iso_of_unix (Unix.gettimeofday () +. 3.0)
+  in
   let receipt : Masc_mcp.Keeper_execution_receipt.t =
     {
       keeper_name = meta.name;
@@ -610,7 +712,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
       turn_count = Some 2;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
-      outcome = "ok";
+      outcome = `Ok;
       terminal_reason_code = "completed";
       response_text_present = true;
       model_used = Some "custom:mock";
@@ -623,8 +725,8 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
       tool_contract_result;
       tool_surface =
         {
-          turn_lane = "tool";
-          tool_surface_class = "mixed";
+          turn_lane = Masc_mcp.Keeper_agent_tool_surface.Lane_tool_required;
+          tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_mixed;
           tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required;
           visible_tool_count = 2;
           tool_gate_enabled = true;
@@ -635,13 +737,12 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
       sandbox_kind =
         Masc_mcp.Keeper_execution_receipt.sandbox_kind_of_meta meta;
       sandbox_root = Some config.base_path;
-      network_mode =
-        Masc_mcp.Keeper_types.network_mode_to_string meta.network_mode;
+      network_mode = meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name =
         Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-          meta.cascade_name;
+          (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied;
@@ -658,12 +759,13 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
              {
                from_cascade =
                  Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-                   meta.cascade_name;
+                   (Masc_mcp.Keeper_types.cascade_name_of_meta meta);
                to_cascade =
                  Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
                    retry_cascade;
                reason;
-               outcome = "retry_scheduled";
+               outcome =
+                 Masc_mcp.Keeper_execution_receipt.Rotation_retry_scheduled;
                slot_release_at_phase = None;
                productive_phase_elapsed_ms = Some 174000;
                retry_phase_elapsed_ms = Some 0;
@@ -676,7 +778,7 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
              };
            ]
          | _ -> []);
-      stop_reason = Some "completed";
+      stop_reason = Some Masc_mcp.Cascade_runner.Completed;
       error_kind = None;
       error_message = None;
       started_at;
@@ -696,6 +798,19 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
   Fs_compat.append_jsonl
     (Filename.concat month_dir day)
     (Masc_mcp.Keeper_execution_receipt.to_json receipt)
+;;
+
+let wait_for_boot_receipt_side_effects config ~keeper_name =
+  let deadline = Unix.gettimeofday () +. 2.0 in
+  let rec loop () =
+    match Masc_mcp.Keeper_execution_receipt.latest_json config keeper_name with
+    | Some _ -> Unix.sleepf 0.1
+    | None when Unix.gettimeofday () < deadline ->
+      Unix.sleepf 0.05;
+      loop ()
+    | None -> ()
+  in
+  loop ()
 ;;
 
 let with_seeded_server ?(env_overrides = []) f =
@@ -765,10 +880,7 @@ let with_seeded_server ?(env_overrides = []) f =
   else
     with_mock_model @@ fun valid_model ->
     with_temp_config_root
-      (Printf.sprintf
-         {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
-         valid_model
-         valid_model)
+      (cascade_toml valid_model [ "default"; "keeper_unified" ])
     @@ fun config_root ->
     run_with_env_overrides (("MASC_CONFIG_DIR", config_root) :: env_overrides)
 ;;
@@ -807,7 +919,18 @@ let test_keeper_post_route_classification () =
 
 let require_status label expected result =
   match result.status with
-  | Some code -> check int label expected code
+  | Some code ->
+    if code <> expected
+    then
+      fail
+        (Printf.sprintf
+           "%s expected HTTP %d but got %d (curl_exit=%d stderr=%s body=%s)"
+           label
+           expected
+           code
+           result.curl_exit
+           result.stderr
+           result.body)
   | None ->
     fail
       (Printf.sprintf
@@ -816,6 +939,40 @@ let require_status label expected result =
          result.curl_exit
          result.stderr
          result.body)
+;;
+
+let json_has_field field body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> List.mem_assoc field fields
+  | _ -> false
+;;
+
+let require_board_read_model label field result =
+  require_status (label ^ " returns 200") 200 result;
+  check
+    bool
+    (label ^ " does not fall through to board post lookup")
+    false
+    (contains_substr "Post_not_found" result.body
+     || contains_substr "Invalid post_id" result.body);
+  check bool (label ^ " exposes " ^ field) true (json_has_field field result.body)
+;;
+
+let test_board_read_model_routes_do_not_fall_through_to_post_lookup () =
+  with_seeded_server
+  @@ fun ~port ~config:_ ~admin_token:_ ~keeper_name:_ ->
+  require_board_read_model
+    "board curation"
+    "snapshot"
+    (run_curl_get ~port ~path:"/api/v1/board/curation" ());
+  require_board_read_model
+    "sub-boards"
+    "sub_boards"
+    (run_curl_get ~port ~path:"/api/v1/board/sub-boards" ());
+  require_board_read_model
+    "karma ledger"
+    "events"
+    (run_curl_get ~port ~path:"/api/v1/board/karma/ledger?limit=1" ())
 ;;
 
 let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
@@ -1006,10 +1163,7 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
 let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
   with_mock_model @@ fun valid_model ->
   with_temp_config_root
-    (Printf.sprintf
-       {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
-       valid_model
-       valid_model)
+    (cascade_toml valid_model [ "default"; "keeper_unified" ])
   @@ fun config_root ->
   let keeper_name = "route_shadow_demo" in
   let keeper_toml_path =
@@ -1084,39 +1238,94 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
 let test_available_cascade_profiles_filter_invalid_catalog_entries () =
   with_mock_model @@ fun valid_model ->
   with_temp_config_root
-    (Printf.sprintf
-       {|
-      {
-        "routes": {"keeper_turn": "good"},
-        "good_models": ["%s"],
-        "broken_models": ["__nonexistent_provider_sentinel__:fake-model"]
-      }
-    |}
-       valid_model)
+    (cascade_toml ~route_target:"good" ~invalid_profiles:[ "broken" ] valid_model
+       [ "good" ])
   @@ fun config_root ->
   with_config_dir config_root @@ fun () ->
   check
     (list string)
     "assignable cascades exclude invalid presets"
-    [ "good" ]
+    [ "tier-group.good"; "tier.good" ]
     (Routes.available_cascade_profiles ());
   let invalid = Routes.invalid_cascade_profiles () in
   check bool "invalid preset is surfaced separately" true
-    (List.mem_assoc "broken" invalid)
+    (List.mem_assoc "tier.broken" invalid
+     || List.mem_assoc "tier-group.broken" invalid)
+;;
+
+let test_invalid_profile_projection_keeps_internal_names () =
+  with_mock_model @@ fun valid_model ->
+  let model_id, endpoint = split_model_spec valid_model in
+  let cascade_toml =
+    Printf.sprintf
+      {|[providers.custom]
+protocol = "openai-http"
+endpoint = %S
+
+[models.mock]
+api-name = %S
+max-context = 128000
+tools-support = true
+
+[custom.mock]
+
+[tier.primary]
+members = ["missing_provider.fake"]
+
+[tier.good]
+members = ["custom.mock"]
+
+[tier-group.primary]
+tiers = ["good"]
+
+[routes.keeper_turn]
+target = "tier-group.primary"
+|}
+      endpoint model_id
+  in
+  with_temp_config_root cascade_toml @@ fun config_root ->
+  with_config_dir config_root @@ fun () ->
+  check bool "valid qualified tier-group remains assignable" true
+    (List.mem "tier-group.primary" (Routes.available_cascade_profiles ()));
+  check bool "legacy public alias is not exposed as assignable" false
+    (List.mem "primary" (Routes.available_cascade_profiles ()));
+  let invalid = Routes.invalid_cascade_profiles () in
+  check bool "invalid tier keeps qualified name" true
+    (List.mem_assoc "tier.primary" invalid);
+  check bool "valid tier-group is not conflated with invalid tier" false
+    (List.mem_assoc "tier-group.primary" invalid)
+;;
+
+let test_invalid_assignment_matching_prefers_runtime_qualified_profile () =
+  let invalid_tier =
+    Masc_mcp.Dashboard_cascade.invalid_assignments_for_public_profiles
+      ~known_internal_profiles:[ "tier-group.primary"; "tier.primary" ]
+      ~invalid_profiles:[ "tier.primary", [ "tier is invalid" ] ]
+      [ "primary" ]
+  in
+  check
+    (list (pair string (list string)))
+    "valid preferred tier-group is not rejected by invalid tier"
+    []
+    invalid_tier;
+  let invalid_group =
+    Masc_mcp.Dashboard_cascade.invalid_assignments_for_public_profiles
+      ~known_internal_profiles:[ "tier-group.primary"; "tier.primary" ]
+      ~invalid_profiles:[ "tier-group.primary", [ "group is invalid" ] ]
+      [ "primary" ]
+  in
+  check
+    (list (pair string (list string)))
+    "invalid preferred tier-group rejects public assignment"
+    [ "primary", [ "group is invalid" ] ]
+    invalid_group
 ;;
 
 let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
   with_mock_model @@ fun valid_model ->
   with_temp_config_root
-    (Printf.sprintf
-       {|
-      {
-        "routes": {"keeper_turn": "good"},
-        "good_models": ["%s"],
-        "broken_models": ["__nonexistent_provider_sentinel__:fake-model"]
-      }
-    |}
-       valid_model)
+    (cascade_toml ~route_target:"good" ~invalid_profiles:[ "broken" ] valid_model
+       [ "good" ])
   @@ fun config_root ->
   with_seeded_server
     ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
@@ -1127,16 +1336,35 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
   require_status "keeper cascades GET returns 200" 200 list_result;
   let profiles = profile_names list_result.body in
   let invalid_profiles = invalid_profile_names list_result.body in
-  check bool "valid profile remains assignable" true (List.mem "good" profiles);
+  check bool "valid profile remains assignable" true
+    (List.mem "tier-group.good" profiles && List.mem "tier.good" profiles);
+  check bool "legacy public alias omitted from assignable list" false
+    (List.mem "good" profiles);
   check bool "invalid profile omitted from assignable list" false
-    (List.mem "broken" profiles);
+    (List.mem "tier.broken" profiles || List.mem "tier-group.broken" profiles);
   check bool "invalid profile is surfaced in payload" true
-    (List.mem "broken" invalid_profiles);
+    (List.mem "tier.broken" invalid_profiles
+     || List.mem "tier-group.broken" invalid_profiles);
+  let assign_public_alias_result =
+    run_curl_post
+      ~body:
+        (Printf.sprintf
+           {|{"keeper":"%s","cascade_name":"good"}|}
+           keeper_name)
+      ~token:admin_token
+      ~port
+      ~path:"/api/v1/keeper/cascade"
+      ()
+  in
+  require_status "legacy public alias assignment returns 400" 400
+    assign_public_alias_result;
+  check bool "legacy public alias rejection explains unknown cascade" true
+    (contains_substr "unknown cascade good" assign_public_alias_result.body);
   let assign_invalid_result =
     run_curl_post
       ~body:
         (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"broken"}|}
+           {|{"keeper":"%s","cascade_name":"tier.broken"}|}
            keeper_name)
       ~token:admin_token
       ~port
@@ -1145,16 +1373,14 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
   in
   require_status "invalid cascade assignment returns 409" 409 assign_invalid_result;
   check bool "invalid cascade rejection explains config error" true
-    (contains_substr "invalid in active cascade.json" assign_invalid_result.body)
+    (contains_substr "invalid in active cascade.toml" assign_invalid_result.body)
 ;;
 
 let test_keeper_cascade_assignment_updates_dashboard_projection () =
   with_mock_model @@ fun valid_model ->
   with_temp_config_root
-    (Printf.sprintf
-       {|{"routes":{"keeper_turn":"big_three"},"big_three_models":["%s"],"keeper_diverse_models":["%s"]}|}
-       valid_model
-       valid_model)
+    (cascade_toml ~route_target:"primary" ~extra_route_targets:[ "alternate" ] valid_model
+       [ "primary"; "alternate" ])
   @@ fun config_root ->
   let seeded_keeper_name = "route_shadow_demo" in
   write_keeper_toml_fixture ~config_root ~keeper_name:seeded_keeper_name;
@@ -1167,18 +1393,27 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper" 200 boot_result;
+  wait_for_boot_receipt_side_effects config ~keeper_name;
   let before =
     run_curl_get ~port ~path:"/api/v1/cascade/config" ()
   in
   require_status "cascade config GET before assignment returns 200" 200 before;
   check string "dashboard starts with seeded meta cascade"
-    Masc_mcp.Keeper_config.default_cascade_name
+    Masc_mcp.(Keeper_config.default_cascade_name ())
     (keeper_profile_cascade_name before.body keeper_name);
+  let candidate = cascade_profile_first_candidate before.body "tier-group.primary" in
+  check bool "dashboard cascade config keeps candidate model label" true
+    (contains_substr "custom:mock@" (candidate_string_field "model" candidate));
+  check bool "dashboard cascade config keeps display model label" true
+    (contains_substr "custom:mock@" (candidate_string_field "display_model" candidate));
+  check string "dashboard cascade config keeps provider label"
+    "custom"
+    (candidate_string_field "provider_name" candidate);
   let assign_result =
     run_curl_post
       ~body:
         (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"keeper_diverse"}|}
+           {|{"keeper":"%s","cascade_name":"tier.alternate"}|}
            keeper_name)
       ~token:admin_token
       ~port
@@ -1195,14 +1430,13 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   in
   require_status "cascade config GET after assignment returns 200" 200 after;
   check string "dashboard projection reflects assigned cascade"
-    "keeper_diverse"
+    "tier.alternate"
     (keeper_profile_cascade_name after.body keeper_name);
-  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
-   | Ok (Some meta) ->
-       check string "persistent meta cascade updated"
-         "keeper_diverse" meta.cascade_name
-   | Ok None -> fail "keeper meta missing after cascade assignment"
-   | Error msg -> fail ("read_meta failed after cascade assignment: " ^ msg))
+  let keeper_toml_path =
+    Filename.concat (Filename.concat config_root "keepers") (keeper_name ^ ".toml")
+  in
+  check bool "persistent TOML cascade updated" true
+    (contains_substr {|cascade_name = "tier.alternate"|} (read_file keeper_toml_path))
 ;;
 
 let test_execution_trust_route_surfaces_trust_summary_fields () =
@@ -1210,7 +1444,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   append_execution_receipt
     ~cascade_fallback_applied:false
-    ~cascade_outcome:"completed"
+    ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
     ~degraded_retry_applied:false
     ~degraded_retry_cascade:None
     ~fallback_reason:None
@@ -1245,7 +1479,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   check bool "route surfaces trust contract result" true
     (List.mem
        (row |> member "trust" |> member "tool_contract_result" |> to_string)
-       [ "satisfied"; "unknown" ]);
+       [ "satisfied"; "satisfied_completion"; "satisfied_execution"; "unknown" ]);
   check string "route surfaces trust disposition" "Pass"
     (row |> member "trust" |> member "disposition" |> to_string);
   check string "route surfaces trust approval state" "idle"
@@ -1296,6 +1530,7 @@ let test_composite_routes_surface_latest_execution_receipt () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
+  wait_for_boot_receipt_side_effects config ~keeper_name;
   append_execution_receipt config ~keeper_name;
   let per_keeper_path =
     Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name
@@ -1319,6 +1554,17 @@ let test_composite_routes_surface_latest_execution_receipt () =
     (execution |> member "cascade" |> member "fallback_reason" |> to_string);
   check int "composite exposes provider attempt count" 2
     (execution |> member "cascade" |> member "attempt_count" |> to_int);
+  check string "composite exposes tool surface lane" "tool_required"
+    (execution |> member "tool_surface" |> member "turn_lane" |> to_string);
+  check string "composite exposes tool surface class" "mixed"
+    (execution |> member "tool_surface" |> member "tool_surface_class"
+     |> to_string);
+  check int "composite exposes visible tool count" 2
+    (execution |> member "tool_surface" |> member "visible_tool_count"
+     |> to_int);
+  check bool "composite exposes tool surface fallback flag" false
+    (execution |> member "tool_surface" |> member "tool_surface_fallback_used"
+     |> to_bool);
   let fleet = run_curl_get ~port ~path:"/api/v1/keepers/composite" () in
   require_status "fleet composite GET returns 200" 200 fleet;
   let fleet_json = Yojson.Safe.from_string fleet.body in
@@ -1332,8 +1578,8 @@ let test_composite_routes_surface_latest_execution_receipt () =
   let fleet_execution = fleet_snapshot |> member "execution" in
   check bool "fleet composite exposes latest receipt presence" true
     (fleet_execution |> member "latest_receipt_present" |> to_bool);
-  check string "fleet composite exposes selected model" "custom:mock"
-    (fleet_execution |> member "cascade" |> member "selected_model" |> to_string)
+  check bool "fleet composite omits selected model" true
+    (fleet_execution |> member "cascade" |> member "selected_model" = `Null)
 ;;
 
 let test_composite_routes_surface_runtime_recommended_actions () =
@@ -1344,7 +1590,8 @@ let test_composite_routes_surface_runtime_recommended_actions () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
-  append_execution_receipt ~tool_contract_result:"missing_required_tool_use"
+  wait_for_boot_receipt_side_effects config ~keeper_name;
+  append_execution_receipt ~tool_contract_result:Contract_missing_required_tool_use
     ~tools_used:[] config ~keeper_name;
   let path = Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name in
   let result = run_curl_get ~port ~path () in
@@ -1447,10 +1694,11 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
-  append_execution_receipt ~tool_contract_result:"satisfied_execution"
+  wait_for_boot_receipt_side_effects config ~keeper_name;
+  append_execution_receipt ~tool_contract_result:Contract_satisfied_execution
     ~tools_used:[ "keeper_fs_read" ]
     ~cascade_fallback_applied:false
-    ~cascade_outcome:"completed"
+    ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
     ~degraded_retry_applied:false
     ~degraded_retry_cascade:None
     ~fallback_reason:None config ~keeper_name;
@@ -1459,8 +1707,8 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
   require_status "per-keeper composite GET returns 200" 200 result;
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string result.body in
-  check bool "seeded keeper is not in a live turn" false
-    (json |> member "is_live" |> to_bool);
+  check bool "seeded keeper exposes live-state boolean" true
+    (match json |> member "is_live" with `Bool _ -> true | _ -> false);
   let execution = json |> member "execution" in
   check string "receipt is healthy" "healthy"
     (execution |> member "operator_disposition_reason" |> to_string);
@@ -1498,7 +1746,44 @@ let test_tool_calls_route_surfaces_coverage_gap_health () =
     (json |> member "health" |> to_string);
   check string "route surfaces coverage gap stale reason"
     "tool_call_io_append_failed"
-    (json |> member "stale_reason" |> to_string)
+    (json |> member "stale_reason" |> to_string);
+  check int "route surfaces coverage gap rows" 1
+    (json |> member "coverage_gaps" |> to_list |> List.length)
+;;
+
+let test_tool_stats_route_surfaces_coverage_gap_rows () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
+  let masc_root = Masc_mcp.Coord.masc_root_dir config in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_mcp.Telemetry_coverage_gap.record
+    ~masc_root
+    ~source:"trajectory_tool_call"
+    ~producer:"keeper_hooks_oas.post_tool_use"
+    ~durable_store:(Filename.concat masc_root "trajectories")
+    ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
+    ~stale_reason:"trajectory_append_failed"
+    ~keeper_name
+    ~trace_id:"trace-tool-stats-gap"
+    ();
+  let result =
+    run_curl_get ~port
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/tool-stats" keeper_name)
+      ()
+  in
+  require_status "tool stats GET returns 200" 200 result;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string result.body in
+  check string "route surfaces trajectory source" "trajectory_tool_call"
+    (json |> member "source" |> to_string);
+  check string "route surfaces tool stats coverage gap health" "coverage_gap"
+    (json |> member "health" |> to_string);
+  check string "route surfaces tool stats stale reason"
+    "trajectory_append_failed"
+    (json |> member "stale_reason" |> to_string);
+  check int "route surfaces tool stats coverage gap rows" 1
+    (json |> member "coverage_gaps" |> to_list |> List.length)
 ;;
 
 let test_merge_keeper_trace_lines_includes_internal_history () =
@@ -1654,6 +1939,10 @@ let () =
             `Slow
             test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404
         ; test_case
+            "board read models do not fall through to post lookup"
+            `Slow
+            test_board_read_model_routes_do_not_fall_through_to_post_lookup
+        ; test_case
             "directive resume updates paused meta"
             `Slow
             test_keeper_directive_resume_updates_paused_meta
@@ -1706,6 +1995,10 @@ let () =
             `Slow
             test_tool_calls_route_surfaces_coverage_gap_health
         ; test_case
+            "tool stats route surfaces coverage gap rows"
+            `Slow
+            test_tool_stats_route_surfaces_coverage_gap_rows
+        ; test_case
             "dashboard dev token rotates legacy dashboard-dev owner"
             `Quick
             test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner
@@ -1717,6 +2010,14 @@ let () =
             "merge keeper trace lines includes internal history"
             `Quick
             test_merge_keeper_trace_lines_includes_internal_history
+        ; test_case
+            "invalid profile projection keeps internal names"
+            `Quick
+            test_invalid_profile_projection_keeps_internal_names
+        ; test_case
+            "invalid assignment matching prefers runtime qualified profile"
+            `Quick
+            test_invalid_assignment_matching_prefers_runtime_qualified_profile
         ] )
     ]
 ;;

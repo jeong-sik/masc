@@ -100,7 +100,9 @@ val failure_reason_cohort_key : failure_reason option -> string
 val stale_watchdog_failure_reason :
   prior:failure_reason option -> kill_class:stale_kill_class -> failure_reason option
 (** Preserve authoritative terminal failure reasons when the stale watchdog
-    fires after a failed turn. *)
+    fires after a failed turn, but do not carry stale-watchdog cohort labels
+    across fresh watchdog kills. Storm/fleet labels are relatched only by the
+    current threshold or batch detector. *)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
@@ -108,29 +110,365 @@ val stale_watchdog_failure_reason :
 exception Keeper_fiber_crash
 
 type turn_phase =
-  | Turn_idle
-  | Turn_prompting
-  | Turn_executing
-  | Turn_compacting
-  | Turn_finalizing
+  | Turn_idle [@tla.idle]
+  | Turn_prompting [@tla.active]
+  | Turn_routing [@tla.active]
+  | Turn_executing [@tla.active]
+  | Turn_compacting [@tla.active]
+  | Turn_finalizing [@tla.active]
+  | Turn_exhausted [@tla.terminal]
+[@@deriving tla]
+
+(** {1 Turn phase GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type turn_idle
+type turn_prompting
+type turn_routing
+type turn_executing
+type turn_compacting
+type turn_finalizing
+type turn_exhausted
+
+type 'a turn_phase_witness =
+  | Turn_idle : turn_idle turn_phase_witness
+  | Turn_prompting : turn_prompting turn_phase_witness
+  | Turn_routing : turn_routing turn_phase_witness
+  | Turn_executing : turn_executing turn_phase_witness
+  | Turn_compacting : turn_compacting turn_phase_witness
+  | Turn_finalizing : turn_finalizing turn_phase_witness
+  | Turn_exhausted : turn_exhausted turn_phase_witness
+
+type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
+
+val witness_to_turn_phase : packed_turn_phase -> turn_phase
+val turn_phase_to_witness : turn_phase -> packed_turn_phase
+
+(** Diagnostic label using the constructor name (e.g. ["Turn_routing"]).
+    Used by the [Turn_phase_transition_violation] [Printexc] printer to
+    render the rejected pair.  Distinct from
+    [Keeper_composite_observer.turn_phase_to_string] which emits a
+    snake_case form for dashboards. *)
+val packed_turn_phase_label : packed_turn_phase -> string
+
+val validate_turn_phase_transition : from:packed_turn_phase -> to_:packed_turn_phase -> unit
+
+(** RFC-0072 Phase 4: GADT-encoded turn_phase transitions, aligned with
+    [Cascade_transition].  Enumerates the 23 valid cross-state transitions
+    of the 7-variant [turn_phase] FSM.  The 19 forbidden pairs have no
+    constructor and are therefore type-unrepresentable.  Idempotent
+    self-loops are not represented (mutator-boundary no-ops). *)
+module Turn_phase_transition : sig
+  type ('from, 'to_) t =
+    | Idle_to_prompting : (turn_idle, turn_prompting) t
+    | Prompting_to_routing : (turn_prompting, turn_routing) t
+    | Prompting_to_executing : (turn_prompting, turn_executing) t
+    | Prompting_to_finalizing : (turn_prompting, turn_finalizing) t
+    | Prompting_to_exhausted : (turn_prompting, turn_exhausted) t
+    | Routing_to_prompting : (turn_routing, turn_prompting) t
+    | Routing_to_executing : (turn_routing, turn_executing) t
+    | Routing_to_exhausted : (turn_routing, turn_exhausted) t
+    | Executing_to_prompting : (turn_executing, turn_prompting) t
+    | Executing_to_routing : (turn_executing, turn_routing) t
+    | Executing_to_compacting : (turn_executing, turn_compacting) t
+    | Executing_to_finalizing : (turn_executing, turn_finalizing) t
+    | Executing_to_exhausted : (turn_executing, turn_exhausted) t
+    | Compacting_to_prompting : (turn_compacting, turn_prompting) t
+    | Compacting_to_finalizing : (turn_compacting, turn_finalizing) t
+    | Compacting_to_exhausted : (turn_compacting, turn_exhausted) t
+    | Finalizing_to_prompting : (turn_finalizing, turn_prompting) t
+    | Finalizing_to_routing : (turn_finalizing, turn_routing) t
+    | Finalizing_to_executing : (turn_finalizing, turn_executing) t
+    | Finalizing_to_exhausted : (turn_finalizing, turn_exhausted) t
+    | Exhausted_to_prompting : (turn_exhausted, turn_prompting) t
+    | Exhausted_to_routing : (turn_exhausted, turn_routing) t
+    | Exhausted_to_executing : (turn_exhausted, turn_executing) t
+
+  type packed = Packed_transition : ('a, 'b) t -> packed
+
+  val to_tag : ('from, 'to_) t -> string
+end
+
+(** RFC-0072 Phase 4: typed error for turn_phase transition spec violations. *)
+type turn_phase_transition_spec_violation =
+  | Idle_to_routing
+  | Idle_to_executing
+  | Idle_to_compacting
+  | Idle_to_finalizing
+  | Idle_to_exhausted
+  | Prompting_to_idle
+  | Prompting_to_compacting
+  | Routing_to_idle
+  | Routing_to_compacting
+  | Routing_to_finalizing
+  | Executing_to_idle
+  | Compacting_to_idle
+  | Compacting_to_routing
+  | Compacting_to_executing
+  | Finalizing_to_idle
+  | Finalizing_to_compacting
+  | Exhausted_to_idle
+  | Exhausted_to_compacting
+  | Exhausted_to_finalizing
+
+val turn_phase_transition_spec_violation_to_tag
+  :  turn_phase_transition_spec_violation
+  -> string
+
+(** RFC-0072 Phase 5: raised by [validate_turn_phase_transition] and
+    [set_turn_phase] on a forbidden turn_phase transition, carrying the
+    typed [turn_phase_transition_spec_violation] payload (replaces the
+    prior string-formatted [Invalid_argument]).  [where] is a diagnostic
+    label naming the raising function.  A [Printexc] printer is registered
+    so [Printexc.to_string] reproduces the original message text. *)
+exception
+  Turn_phase_transition_violation of
+    { where : string
+    ; from : packed_turn_phase
+    ; to_ : packed_turn_phase
+    ; violation : turn_phase_transition_spec_violation
+    }
+
+(** RFC-0072 Phase 4: resolve a (from, target) packed pair to one of three
+    outcomes.  Mirrors [resolve_cascade_transition]. *)
+type turn_phase_resolve_outcome =
+  | Resolved_turn_transition of Turn_phase_transition.packed
+  | Resolved_turn_idempotent
+  | Resolved_turn_violation of turn_phase_transition_spec_violation
+
+val resolve_turn_phase_transition
+  :  from:packed_turn_phase
+  -> target:packed_turn_phase
+  -> turn_phase_resolve_outcome
 
 type decision_stage =
-  | Decision_undecided
-  | Decision_guard_ok
-  | Decision_gate_rejected
-  | Decision_tool_policy_selected
+  | Decision_undecided [@tla.idle]
+  | Decision_guard_ok [@tla.active]
+  | Decision_gate_rejected [@tla.terminal]
+  | Decision_tool_policy_selected [@tla.active]
+[@@deriving tla]
+
+(** {1 Decision stage GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type decision_undecided
+type decision_guard_ok
+type decision_gate_rejected
+type decision_tool_policy_selected
+
+type 'a decision_stage_witness =
+  | Decision_undecided : decision_undecided decision_stage_witness
+  | Decision_guard_ok : decision_guard_ok decision_stage_witness
+  | Decision_gate_rejected : decision_gate_rejected decision_stage_witness
+  | Decision_tool_policy_selected : decision_tool_policy_selected decision_stage_witness
+
+type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decision_stage
+
+val witness_to_stage : 'a decision_stage_witness -> decision_stage
+val stage_to_witness : decision_stage -> packed_decision_stage
+
+(** Decision stages valid as ADVANCE targets within a turn.  Excludes
+    [Decision_undecided] (the initial state set only by [mark_turn_started]
+    / [mark_sdk_turn_started]).  The 3 spec-forbidden [<active>_to_undecided]
+    transitions are unrepresentable through this type, replacing the prior
+    runtime [invalid_arg] inside [set_turn_decision_stage]. *)
+type decision_stage_active =
+  | Decision_active_guard_ok
+  | Decision_active_gate_rejected
+  | Decision_active_tool_policy_selected
+
+val decision_stage_active_to_packed
+  :  decision_stage_active
+  -> packed_decision_stage
+
+(** Diagnostic label using the constructor name (e.g.
+    ["Decision_guard_ok"]).  Used by [validate_cascade_transition] /
+    [validate_turn_phase_transition] for [Invalid_argument] messages. *)
+val packed_decision_stage_label : packed_decision_stage -> string
+
+(** Living-matrix documentation of the decision-stage transition relation.
+    Forbidden [<active>_to_undecided] pairs are unrepresentable through the
+    [decision_stage_active] target type, so this validator no longer raises;
+    it exists as a compile-time fixture that enumerates every admitted pair.
+    Adding a new variant to either side will trigger Warning 8 here, forcing
+    the maintainer to classify the new pair. *)
+val validate_decision_transition
+  :  from:decision_stage
+  -> to_:decision_stage_active
+  -> unit
+
+module Decision_transition : sig
+  type ('from, 'to_) t =
+    | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
+    | Undecided_to_gate_rejected : (decision_undecided, decision_gate_rejected) t
+    | Undecided_to_tool_policy_selected : (decision_undecided, decision_tool_policy_selected) t
+    | Guard_ok_to_gate_rejected : (decision_guard_ok, decision_gate_rejected) t
+    | Guard_ok_to_tool_policy_selected : (decision_guard_ok, decision_tool_policy_selected) t
+    | Gate_rejected_to_guard_ok : (decision_gate_rejected, decision_guard_ok) t
+    | Gate_rejected_to_tool_policy_selected : (decision_gate_rejected, decision_tool_policy_selected) t
+    | Tool_policy_selected_to_guard_ok : (decision_tool_policy_selected, decision_guard_ok) t
+    | Tool_policy_selected_to_gate_rejected : (decision_tool_policy_selected, decision_gate_rejected) t
+
+  val to_tag : ('from, 'to_) t -> string
+end
 
 type cascade_state =
-  | Cascade_idle
-  | Cascade_selecting
-  | Cascade_trying
-  | Cascade_done
-  | Cascade_exhausted
+  | Cascade_idle [@tla.idle]
+  | Cascade_selecting [@tla.active]
+  | Cascade_trying [@tla.active]
+  | Cascade_done [@tla.terminal]
+  | Cascade_exhausted [@tla.terminal]
+[@@deriving tla]
+
+(** {1 Cascade state GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type cascade_idle
+type cascade_selecting
+type cascade_trying
+type cascade_done
+type cascade_exhausted
+
+type 'a cascade_state_witness =
+  | Cascade_idle : cascade_idle cascade_state_witness
+  | Cascade_selecting : cascade_selecting cascade_state_witness
+  | Cascade_trying : cascade_trying cascade_state_witness
+  | Cascade_done : cascade_done cascade_state_witness
+  | Cascade_exhausted : cascade_exhausted cascade_state_witness
+
+type packed_cascade_state =
+  | Packed : 'a cascade_state_witness -> packed_cascade_state
+
+val cascade_state_to_witness : cascade_state -> packed_cascade_state
+val witness_to_cascade_state : packed_cascade_state -> cascade_state
+
+(** Diagnostic label using the constructor name (e.g.
+    ["Cascade_exhausted"]).  Used by the [Cascade_transition_violation]
+    [Printexc] printer to render the rejected pair. *)
+val packed_cascade_state_label : packed_cascade_state -> string
+
+val validate_cascade_transition : from:packed_cascade_state -> to_:packed_cascade_state -> unit
+
+(** RFC-0072 Phase 1: GADT-encoded cascade transitions.
+
+    Enumerates the 13 valid cross-state transitions of the 5-variant
+    [cascade_state] FSM.  The 7 forbidden pairs ([Idle -> Trying/Done/
+    Exhausted], [Selecting -> Done/Exhausted], [Done <-> Exhausted]) have
+    no constructor and are therefore type-unrepresentable.  Idempotent
+    self-loops are not represented (they are mutator-boundary no-ops). *)
+module Cascade_transition : sig
+  type ('from, 'to_) t =
+    | Idle_to_selecting : (cascade_idle, cascade_selecting) t
+    | Selecting_to_idle : (cascade_selecting, cascade_idle) t
+    | Selecting_to_trying : (cascade_selecting, cascade_trying) t
+    | Trying_to_idle : (cascade_trying, cascade_idle) t
+    | Trying_to_selecting : (cascade_trying, cascade_selecting) t
+    | Trying_to_done : (cascade_trying, cascade_done) t
+    | Trying_to_exhausted : (cascade_trying, cascade_exhausted) t
+    | Done_to_idle : (cascade_done, cascade_idle) t
+    | Done_to_selecting : (cascade_done, cascade_selecting) t
+    | Done_to_trying : (cascade_done, cascade_trying) t
+    | Exhausted_to_idle : (cascade_exhausted, cascade_idle) t
+    | Exhausted_to_selecting : (cascade_exhausted, cascade_selecting) t
+    | Exhausted_to_trying : (cascade_exhausted, cascade_trying) t
+
+  type packed = Packed_transition : ('a, 'b) t -> packed
+
+  val to_tag : ('a, 'b) t -> string
+end
+
+(** RFC-0072 Phase 1: typed error for cascade transition spec violations.
+    Each forbidden pair has its own constructor; replaces the prior
+    string-formatted [Invalid_argument] payload at the validator. *)
+type cascade_transition_spec_violation =
+  | Idle_to_trying
+  | Idle_to_done
+  | Idle_to_exhausted
+  | Selecting_to_done
+  | Selecting_to_exhausted
+  | Done_to_exhausted
+  | Exhausted_to_done
+
+val cascade_transition_spec_violation_to_tag
+  :  cascade_transition_spec_violation
+  -> string
+
+(** RFC-0072 Phase 5: raised by [validate_cascade_transition] and
+    [set_turn_cascade_state] on a forbidden cascade transition, carrying
+    the typed [cascade_transition_spec_violation] payload (replaces the
+    prior string-formatted [Invalid_argument]).  [where] is a diagnostic
+    label naming the raising function.  A [Printexc] printer is registered
+    so [Printexc.to_string] reproduces the original message text. *)
+exception
+  Cascade_transition_violation of
+    { where : string
+    ; from : packed_cascade_state
+    ; to_ : packed_cascade_state
+    ; violation : cascade_transition_spec_violation
+    }
+
+(** RFC-0072 Phase 1: resolve a (from, target) packed pair to one of
+    three outcomes: a typed transition value, an idempotent no-op, or a
+    typed spec violation.  Phase 2 will route [set_turn_cascade_state]
+    through this resolver. *)
+type cascade_resolve_outcome =
+  | Resolved_transition of Cascade_transition.packed
+  | Resolved_idempotent
+  | Resolved_violation of cascade_transition_spec_violation
+
+val resolve_cascade_transition
+  :  from:packed_cascade_state
+  -> target:packed_cascade_state
+  -> cascade_resolve_outcome
 
 type compaction_stage =
-  | Compaction_accumulating
-  | Compaction_compacting
-  | Compaction_done
+  | Compaction_accumulating [@tla.idle]
+  | Compaction_compacting [@tla.active]
+  | Compaction_done [@tla.terminal]
+[@@deriving tla]
+
+(** {1 Compaction stage GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type compaction_accumulating
+type compaction_compacting
+type compaction_done
+
+type 'a compaction_stage_witness =
+  | Compaction_accumulating : compaction_accumulating compaction_stage_witness
+  | Compaction_compacting : compaction_compacting compaction_stage_witness
+  | Compaction_done : compaction_done compaction_stage_witness
+
+type packed_compaction_stage =
+  | Packed : 'a compaction_stage_witness -> packed_compaction_stage
+
+val compaction_stage_to_witness : compaction_stage -> packed_compaction_stage
+val witness_to_compaction_stage : packed_compaction_stage -> compaction_stage
+
+(** Diagnostic label using the constructor name (e.g. ["Compaction_done"]).
+    Used by the [Compaction_transition_violation] [Printexc] printer. *)
+val packed_compaction_stage_label : packed_compaction_stage -> string
+
+(** RFC-0072 Phase 6: typed error for the 3 forbidden compaction-stage
+    transitions (3 idempotent + 3 valid + 3 forbidden = 9 = 3×3). *)
+type compaction_transition_spec_violation =
+  | Accumulating_to_done
+  | Done_to_accumulating
+  | Done_to_compacting
+
+val compaction_transition_spec_violation_to_tag
+  :  compaction_transition_spec_violation
+  -> string
+
+(** RFC-0072 Phase 6: raised by [validate_compaction_transition] on a
+    forbidden compaction transition, carrying the typed
+    [compaction_transition_spec_violation] payload (replaces the prior bare
+    [assert] / [Assert_failure]).  [where] is a diagnostic label naming the
+    raising function.  A [Printexc] printer is registered so
+    [Printexc.to_string] renders the labelled message. *)
+exception
+  Compaction_transition_violation of
+    { where : string
+    ; from : packed_compaction_stage
+    ; to_ : packed_compaction_stage
+    ; violation : compaction_transition_spec_violation
+    }
 
 type turn_measurement = {
   tm_captured_at : float;
@@ -142,7 +480,8 @@ type registry_entry = {
   name : string;
   meta : keeper_meta;
   phase : Keeper_state_machine.phase;
-      (** Keeper lifecycle phase (RFC-0002 11-state machine). *)
+      (** Keeper lifecycle phase (RFC-0002 13-state machine; 11 at #5229
+          → 12 with Overflowed (MASC-1) → 13 with Zombie #14707). *)
   conditions : Keeper_state_machine.conditions;
       (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;
@@ -221,7 +560,7 @@ type registry_entry = {
           [Keeper_stale_watchdog] to enrich the kill warn line so an
           [idle_stale=true] termination is no longer indistinguishable
           from a *stuck* fiber. *)
-  compaction_stage : compaction_stage;
+  compaction_stage : packed_compaction_stage;
       (** Explicit KMC projection owned by the runtime, not derived from
           parent phase on read. This lets the observer surface
           [done] without guessing from conditions. *)
@@ -233,9 +572,9 @@ and turn_observation = {
           [meta.runtime.usage.total_turns] + 1). *)
   started_at : float;
       (** Unix timestamp when this turn record was installed. *)
-  turn_phase : turn_phase;
-  decision_stage : decision_stage;
-  cascade_state : cascade_state;
+  turn_phase : packed_turn_phase;
+  decision_stage : packed_decision_stage;
+  cascade_state : packed_cascade_state;
   measurement : turn_measurement option;
   measurement_bind_count : int;
       (** Number of [Context_measured] snapshots bound to this live turn.
@@ -248,8 +587,8 @@ and completed_turn_observation = {
   ct_turn_id : int;
   ct_started_at : float;
   ct_ended_at : float;
-  ct_decision_stage : decision_stage;
-  ct_cascade_state : cascade_state;
+  ct_decision_stage : packed_decision_stage;
+  ct_cascade_state : packed_cascade_state;
   ct_selected_model : string option;
 }
 
@@ -267,10 +606,25 @@ val register : base_path:string -> string -> keeper_meta -> registry_entry
     runtime actually launches the fiber. *)
 val register_offline : base_path:string -> string -> keeper_meta -> registry_entry
 
+(** R-A-6.a — error variant for [register_restarting].
+    [Budget_already_exhausted] is returned (not raised — the API is
+    Result-based) when the caller attempts to revive a keeper whose
+    [restart_budget_remaining] was previously cleared, which would
+    violate TLA+ §S3 BudgetNeverRevives. *)
+type register_restarting_error =
+  | Budget_already_exhausted of { name : string }
+
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the
-    replacement fiber launches. *)
-val register_restarting : base_path:string -> string -> keeper_meta -> registry_entry
+    replacement fiber launches.
+
+    Refuses to revive a keeper whose [restart_budget_remaining] was
+    previously cleared — preserves the TLA+ §S3 BudgetNeverRevives
+    invariant.  See [docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md]
+    for the three revival vectors this guard closes. *)
+val register_restarting :
+  base_path:string -> string -> keeper_meta ->
+  (registry_entry, register_restarting_error) result
 
 (** Prepare a registry entry for a newly launched keepalive fiber.
     Clears stale per-fiber atomic latches before applying [Fiber_started] so
@@ -311,23 +665,76 @@ val set_last_correlation_id : base_path:string -> string -> string -> unit
     Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
 val mark_turn_started : base_path:string -> string -> unit
 
+(** Mark the beginning of an SDK turn within an existing keeper turn.
+
+    The Agent SDK [run_loop] iterates N SDK turns inside a single MASC
+    keeper-turn window. Each SDK turn fires [before_turn_params] which
+    leads to [prepare_agent_setup] writing
+    [Cascade_selecting]/[Decision_tool_policy_selected]/[Turn_prompting].
+    Without this boundary signal, the second-and-later SDK turn writes
+    transition from the previous SDK turn's terminal phase
+    ([Turn_finalizing] after [Cascade_done]/[Cascade_exhausted]), which
+    [validate_turn_phase_transition] rejects with
+    [Turn_phase_transition_violation].
+
+    This function resets the in-turn FSM fields ([turn_phase],
+    [cascade_state], [decision_stage]) on the existing observation, the
+    same way [mark_turn_started] bypasses the validator with a fresh
+    install. [turn_id], [started_at], [selected_model], [measurement],
+    and [measurement_bind_count] are preserved across SDK turns inside
+    one keeper turn (they are keeper-turn-scoped, not SDK-turn-scoped).
+
+    No-op when [current_turn_observation = None] (defensive: should not
+    happen in normal flow because [mark_turn_started] runs first).
+
+    See RFC-0045 (SDK turn boundary alignment with MASC keeper FSM). *)
+val mark_sdk_turn_started : base_path:string -> string -> unit
+
 (** Attach the most recent [Context_measured] snapshot to the live turn.
     No-op if no turn is active or no pending measurement exists. *)
 val mark_turn_measurement : base_path:string -> string -> unit
 
-(** Advance the live turn's projected decision stage. No-op if idle. *)
+(** Advance the live turn's projected decision stage. No-op if idle.
+    Input type [decision_stage_active] excludes [Decision_undecided];
+    the 3 spec-forbidden [<active>_to_undecided] transitions are therefore
+    unrepresentable at the call site (replaces prior runtime [invalid_arg]). *)
 val set_turn_decision_stage :
-  base_path:string -> string -> decision_stage -> unit
+  base_path:string -> string -> decision_stage_active -> unit
 
 (** Advance the live turn's projected cascade state. No-op if idle.
     Sets [turn_phase] to [Turn_executing] for [Cascade_trying] and to
     [Turn_finalizing] for terminal cascade states. *)
 val set_turn_cascade_state :
-  base_path:string -> string -> cascade_state -> unit
+  base_path:string -> string -> packed_cascade_state -> unit
+
+(** Mark cascade exhaustion on the live turn.
+
+    When provider selection fails before the tool-disclosure hook runs, the
+    live cascade axis can still be [Cascade_idle]. This helper materializes the
+    spec-valid pre-terminal path ([idle -> selecting -> trying -> exhausted])
+    instead of allowing callers to jump directly to [Cascade_exhausted]. No-op
+    when no turn is active. *)
+val mark_turn_cascade_exhausted : base_path:string -> string -> unit
 
 (** Update the live turn's phase directly. No-op if idle. *)
 val set_turn_phase :
-  base_path:string -> string -> turn_phase -> unit
+  base_path:string -> string -> packed_turn_phase -> unit
+
+(** Runtime transition guards against the TLA+ transition matrix.
+    [validate_turn_phase_transition] dispatches through
+    [resolve_turn_phase_transition] and raises the typed
+    [Turn_phase_transition_violation] on a forbidden pair (RFC-0072
+    Phase 4b + 5).  [validate_compaction_transition] is an exhaustive
+    3×3 match raising the typed [Compaction_transition_violation] on a
+    forbidden pair (RFC-0072 Phase 6 — no GADT/resolver indirection,
+    the axis has 3 states and a single consumer).  Both bump
+    [Prometheus.metric_fsm_guard_violation] via
+    [Keeper_fsm_guard_runtime.wrap_unit]. *)
+val validate_turn_phase_transition :
+  from:packed_turn_phase -> to_:packed_turn_phase -> unit
+
+val validate_compaction_transition :
+  from:packed_compaction_stage -> to_:packed_compaction_stage -> unit
 
 (** Record the surface model selected for the current turn. No-op if idle. *)
 val set_turn_selected_model :
@@ -490,18 +897,33 @@ val restore_tool_usage : base_path:string -> string -> unit
 
 (** {1 RFC-0002 Event Dispatch} *)
 
+(** Dispatch origin for paired post-turn lifecycle events.
+
+    [Compaction_started]/[Compaction_completed]/[Compaction_failed] and
+    [Handoff_started]/[Handoff_completed]/[Handoff_failed] are same-turn
+    lifecycle pairs. The registry rejects them from [Generic_dispatch] so
+    keepalive/guard/manual callers cannot emit half of a pair outside the
+    owner path. *)
+type lifecycle_event_origin =
+  | Generic_dispatch
+  | Post_turn_lifecycle
+  | Operator_compact
+
 (** Dispatch a typed event through the state machine.
     Updates conditions, derives new phase, syncs legacy state.
     Returns the transition result or an error for invalid transitions.
     Prefer this over [set_state] for new code. *)
 val dispatch_event :
-  base_path:string -> string -> Keeper_state_machine.event ->
+  base_path:string ->
+  ?origin:lifecycle_event_origin ->
+  string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** Like [dispatch_event], but preserves richer audit metadata when the event
     causes a phase transition. *)
 val dispatch_event_with_audit :
   base_path:string ->
+  ?origin:lifecycle_event_origin ->
   ?snapshot:Keeper_measurement.measurement_snapshot ->
   ?events_fired:Keeper_state_machine.event list ->
   ?selected_event:Keeper_state_machine.event ->
@@ -512,18 +934,23 @@ val dispatch_event_with_audit :
     [Error] so silent-failure call sites do not lose the signal.
     Same return type — callers that need the result can still match. *)
 val dispatch_event_and_log :
-  base_path:string -> string -> Keeper_state_machine.event ->
+  base_path:string ->
+  ?origin:lifecycle_event_origin ->
+  string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** [dispatch_event_unit] wraps [dispatch_event_and_log] and logs a warning
     on [Error] instead of returning the result. Replaces [ignore (...)] call sites
     that previously swallowed transition errors silently. *)
 val dispatch_event_unit :
-  base_path:string -> string -> Keeper_state_machine.event -> unit
+  base_path:string ->
+  ?origin:lifecycle_event_origin ->
+  string -> Keeper_state_machine.event -> unit
 (** Like [dispatch_event_with_audit], but logs and emits a Prometheus
     counter on [Error]. *)
 val dispatch_event_with_audit_and_log :
   base_path:string ->
+  ?origin:lifecycle_event_origin ->
   ?snapshot:Keeper_measurement.measurement_snapshot ->
   ?events_fired:Keeper_state_machine.event list ->
   ?selected_event:Keeper_state_machine.event ->
@@ -566,3 +993,11 @@ val event_queue_snapshot :
     ([dequeued_total <= enqueued_total]). *)
 val dequeue_event :
   base_path:string -> string -> Keeper_event_queue.stimulus option
+
+val drain_board_events :
+  ?window_sec:float ->
+  base_path:string -> string -> Keeper_event_queue.stimulus list
+(** Drain all board-signal stimuli within [window_sec] from the keeper's
+    event queue using a CAS loop.  Returns the coalesced board signals
+    (urgency-sorted) and updates the queue atomically.  Returns []
+    when the keeper is not found or the queue has no board signals. *)

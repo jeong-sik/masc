@@ -1,10 +1,16 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
+  BdiRouteLinks,
   InspectorKeeperBDI,
   KeeperBdiSnapshot,
+  bdiRouteLinks,
   normalizeKeeperBdiSnapshot,
 } from './inspector-keeper-bdi'
+import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry, type KeeperPresenceSnapshot } from './keeper-presence-store'
+import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
+import { useSignalValue } from './use-signal-value'
+import { focusIdeContextAnchor } from './ide-state'
 import {
   pinKeeper,
   pinnedKeepers,
@@ -193,7 +199,10 @@ function useKeeperBdiSnapshot(keeperName: string, pollMs: number): KeeperBdiSlot
 
 function usePinnedKeepers(): ReadonlyArray<PinnedKeeperEntry> {
   const [snapshot, setSnapshot] = useState(pinnedKeepers.value)
-  useEffect(() => pinnedKeepers.subscribe(value => setSnapshot(value)), [])
+  useEffect(() => {
+    const unsub = pinnedKeepers.subscribe(value => setSnapshot(value))
+    return () => unsub()
+  }, [])
   return snapshot.entries
 }
 
@@ -235,14 +244,41 @@ interface KeeperPanelProps {
   readonly compact: boolean
   readonly focused: boolean
   readonly dropIdx: number
+  readonly presence: KeeperPresenceSnapshot | null
+  readonly overlay: KeeperCursorOverlay
   readonly onUnpin: (keeperName: string) => void
 }
 
-function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: KeeperPanelProps) {
+function KeeperPanel({ entry, slot, compact, focused, dropIdx, presence, overlay, onUnpin }: KeeperPanelProps) {
   const snapshot = slot.snapshot
   const error = slot.error
   const lastTool = snapshot?.last_tool_call ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
+  const cursor = overlay.cursors.get(entry.keeperName)
+  const pEntries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
+  const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
+  const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
+  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
+  const routeLinks = bdiRouteLinks({
+    keeperName: entry.keeperName,
+    snapshot,
+    filePath: cursor && cursor.file_path && cursor.line >= 1 ? cursor.file_path : undefined,
+    line: cursor && cursor.file_path && cursor.line >= 1 ? cursor.line : undefined,
+  })
+  const navigateToFocus = (): void => {
+    if (!cursor?.file_path || cursor.line < 1) return
+    focusIdeContextAnchor({
+      file_path: cursor.file_path,
+      line: cursor.line,
+      surface: 'BDI',
+      label: snapshot?.intention ?? `keeper BDI ${entry.keeperName}`,
+      source_id: `bdi-${entry.keeperName}-${snapshot?.generated_at ?? 'live'}`,
+      keeper_id: entry.keeperName,
+      route_links: routeLinks,
+    })
+  }
 
   return html`
     <article
@@ -261,9 +297,58 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, onUnpin }: Keeper
         <span style=${{ color: 'var(--color-accent-fg)', fontSize: 'var(--fs-12)' }}>
           ${entry.keeperName}
         </span>
+        ${statusDot ? html`
+          <span
+            role="status"
+            aria-label=${`Keeper status: ${statusDot.label}`}
+            style=${{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px',
+              fontSize: 'var(--fs-10)',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              color: statusDot.color,
+            }}
+          >
+            <span style=${{
+              width: '4px',
+              height: '4px',
+              borderRadius: '50%',
+              background: statusDot.color,
+              display: 'inline-block',
+            }} />
+            ${statusDot.label}
+          </span>
+        ` : null}
         ${entry.line !== null
           ? html`<span style=${{ color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${entry.line}</span>`
           : null}
+        ${focusLabel ? html`
+          <button
+            type="button"
+            aria-label=${`focus file ${cursor?.file_path ?? ''}`}
+            onClick=${navigateToFocus}
+            title=${cursor?.file_path ?? ''}
+            style=${{
+              color: 'var(--color-accent-fg)',
+              fontSize: 'var(--fs-11)',
+              maxWidth: '160px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+              border: 'none',
+              background: 'transparent',
+              borderRadius: 'var(--r-0)',
+              padding: '0 var(--sp-1)',
+            }}
+          >${focusLabel}</button>
+        ` : null}
+        <${BdiRouteLinks}
+          links=${routeLinks}
+          ariaLabel=${`${entry.keeperName} BDI operational links`}
+        />
         <button
           type="button"
           aria-label=${`unpin ${entry.keeperName}`}
@@ -307,13 +392,40 @@ interface KeeperChipProps {
   readonly entry: PinnedKeeperEntry
   readonly slot: KeeperBdiSlot
   readonly dropIdx: number
+  readonly presence: KeeperPresenceSnapshot | null
+  readonly overlay: KeeperCursorOverlay
   readonly onFocus: (entry: PinnedKeeperEntry) => void
   readonly onUnpin: (keeperName: string) => void
 }
 
-function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps) {
+function KeeperChip({ entry, slot, dropIdx, presence, overlay, onFocus, onUnpin }: KeeperChipProps) {
   const tokens = slot.snapshot?.recent_token_spend?.[0]?.total_tokens ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
+  const cursor = overlay.cursors.get(entry.keeperName)
+  const pEntries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
+  const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
+  const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
+  const focusLabel = cursor && cursor.file_path && cursor.line >= 1
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
+  const routeLinks = bdiRouteLinks({
+    keeperName: entry.keeperName,
+    snapshot: slot.snapshot,
+    filePath: cursor && cursor.file_path && cursor.line >= 1 ? cursor.file_path : undefined,
+    line: cursor && cursor.file_path && cursor.line >= 1 ? cursor.line : undefined,
+  })
+  const navigateToFocus = (): void => {
+    if (!cursor?.file_path || cursor.line < 1) return
+    focusIdeContextAnchor({
+      file_path: cursor.file_path,
+      line: cursor.line,
+      surface: 'BDI',
+      label: slot.snapshot?.intention ?? `keeper BDI ${entry.keeperName}`,
+      source_id: `bdi-${entry.keeperName}-${slot.snapshot?.generated_at ?? 'live'}`,
+      keeper_id: entry.keeperName,
+      route_links: routeLinks,
+    })
+  }
   return html`
     <span
       role="listitem"
@@ -332,9 +444,44 @@ function KeeperChip({ entry, slot, dropIdx, onFocus, onUnpin }: KeeperChipProps)
         style=${CHIP_BUTTON_STYLE}
       >
         <span>${entry.keeperName}</span>
+        ${statusDot ? html`
+          <span
+            role="status"
+            aria-label=${statusDot.label}
+            style=${{
+              width: '4px',
+              height: '4px',
+              borderRadius: '50%',
+              background: statusDot.color,
+              display: 'inline-block',
+              flexShrink: '0',
+            }}
+          />
+        ` : null}
         ${entry.line !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>L${entry.line}</span>` : null}
-        ${tokens !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>${tokens.toLocaleString()}</span>` : null}
+        ${tokens !== null ? html`<span style=${{ color: 'var(--color-fg-muted)' }}>${formatTokenCount(tokens)}</span>` : null}
       </button>
+      ${focusLabel ? html`
+        <button
+          type="button"
+          aria-label=${`focus file ${cursor?.file_path ?? ''}`}
+          onClick=${navigateToFocus}
+          title=${cursor?.file_path ?? ''}
+          style=${{
+            ...CHIP_BUTTON_STYLE,
+            color: 'var(--color-accent-fg)',
+            fontSize: 'var(--fs-10)',
+            maxWidth: '90px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >${focusLabel}</button>
+      ` : null}
+      <${BdiRouteLinks}
+        links=${routeLinks}
+        ariaLabel=${`${entry.keeperName} BDI operational links`}
+      />
       <button
         type="button"
         aria-label=${`unpin ${entry.keeperName}`}
@@ -364,6 +511,8 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
   const slot2 = useKeeperBdiSnapshot(entries[2]?.keeperName ?? '', pollMs)
   const slot3 = useKeeperBdiSnapshot(entries[3]?.keeperName ?? '', pollMs)
   const slots: ReadonlyArray<KeeperBdiSlot> = [slot0, slot1, slot2, slot3]
+  const presence = useSignalValue(globalPresenceSnapshot)
+  const overlay = useSignalValue(cursorOverlaySignal)
 
   if (entries.length <= 1) {
     return html`<${InspectorKeeperBDI} pollMs=${pollMs} />`
@@ -390,6 +539,8 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
             compact=${idx > 0}
             focused=${idx === 0}
             dropIdx=${idx}
+            presence=${presence}
+            overlay=${overlay}
             onUnpin=${unpinKeeper}
           />
         `)}
@@ -417,6 +568,8 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
         compact=${false}
         focused=${true}
         dropIdx=${0}
+        presence=${presence}
+        overlay=${overlay}
         onUnpin=${unpinKeeper}
       />
       <div role="group" aria-label="other pinned keepers" style=${CHIP_GROUP_STYLE}>
@@ -426,6 +579,8 @@ export function InspectorMultiKeeperBDI({ pollMs = 5000 }: { readonly pollMs?: n
             entry=${entry}
             slot=${activeSlots[idx + 1] ?? EMPTY_SLOT}
             dropIdx=${idx + 1}
+            presence=${presence}
+            overlay=${overlay}
             onFocus=${focusEntry}
             onUnpin=${unpinKeeper}
           />

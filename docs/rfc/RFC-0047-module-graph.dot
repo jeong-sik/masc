@@ -1,0 +1,60 @@
+// RFC-0047 module graph (frozen at Phase 1)
+// Edges: oas_*.ml → external domain category, label = ref count.
+digraph rfc_0047 {
+  rankdir=LR;
+  node [shape=box, fontname="Helvetica"];
+  edge [fontname="Helvetica", fontsize=10];
+
+  // OAS adapter family
+  "oas_event_bridge" [style=filled, fillcolor="#fce4ec"];
+  "oas_events" [style=filled, fillcolor="#fce4ec"];
+  "oas_model_resolve" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_cascade" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_exec_agent" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_exec_checkpoint" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_exec_transport" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_exec" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_named_cascade" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_named_error" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_named_fsm" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker_named" [style=filled, fillcolor="#fce4ec"];
+  "oas_worker" [style=filled, fillcolor="#fce4ec"];
+
+  // Target domain categories
+  "Cascade_*" [style=filled, fillcolor="#e3f2fd"];
+  "Keeper_*" [style=filled, fillcolor="#e3f2fd"];
+  "Masc_*" [style=filled, fillcolor="#e3f2fd"];
+  "Dashboard_*" [style=filled, fillcolor="#e3f2fd"];
+  "Auth_*" [style=filled, fillcolor="#e3f2fd"];
+  "Coord_*" [style=filled, fillcolor="#e3f2fd"];
+  "Pulse_*" [style=filled, fillcolor="#e3f2fd"];
+  "Briefing_*" [style=filled, fillcolor="#e3f2fd"];
+  "Board_*" [style=filled, fillcolor="#e3f2fd"];
+
+  // Cross-domain references
+  "oas_event_bridge" -> "Keeper_*" [label="4"];
+  "oas_events" -> "Keeper_*" [label="9"];
+  "oas_events" -> "Masc_*" [label="6"];
+  "oas_model_resolve" -> "Cascade_*" [label="3"];
+  "oas_worker_cascade" -> "Keeper_*" [label="6"];
+  "oas_worker_exec_agent" -> "Keeper_*" [label="1"];
+  "oas_worker_exec_agent" -> "Masc_*" [label="3"];
+  "oas_worker_exec_checkpoint" -> "Masc_*" [label="1"];
+  "oas_worker_exec_transport" -> "Cascade_*" [label="3"];
+  "oas_worker_exec_transport" -> "Keeper_*" [label="3"];
+  "oas_worker_exec_transport" -> "Auth_*" [label="10"];
+  "oas_worker_exec" -> "Cascade_*" [label="1"];
+  "oas_worker_exec" -> "Keeper_*" [label="1"];
+  "oas_worker_exec" -> "Masc_*" [label="6"];
+  "oas_worker_exec" -> "Dashboard_*" [label="8"];
+  "oas_worker_named_cascade" -> "Cascade_*" [label="15"];
+  "oas_worker_named_cascade" -> "Keeper_*" [label="10"];
+  "oas_worker_named_error" -> "Cascade_*" [label="7"];
+  "oas_worker_named_error" -> "Keeper_*" [label="6"];
+  "oas_worker_named_fsm" -> "Cascade_*" [label="15"];
+  "oas_worker_named_fsm" -> "Keeper_*" [label="3"];
+  "oas_worker_named_fsm" -> "Dashboard_*" [label="1"];
+  "oas_worker_named" -> "Cascade_*" [label="77"];
+  "oas_worker_named" -> "Keeper_*" [label="24"];
+  "oas_worker_named" -> "Masc_*" [label="7"];
+}

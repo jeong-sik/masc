@@ -3,10 +3,33 @@
     Keeps OAS memory persistence details out of [Keeper_agent_run], preserving
     the keeper runner as a thin orchestration layer. *)
 
+let record_activity_emit_gap ~config ~keeper_name ~outcome_label ~error =
+  let masc_root = Coord_utils.masc_dir config in
+  try
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"keeper_memory_activity"
+      ~producer:"keeper_agent_memory_episode.emit_flush_activity"
+      ~durable_store:(Filename.concat masc_root "activity-events")
+      ~dashboard_surface:"/api/v1/agent-timeline"
+      ~stale_reason:"episode_flush_activity_emit_failed"
+      ~keeper_name
+      ~error:
+        (Printf.sprintf "outcome=%s error=%s" outcome_label error)
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | gap_exn ->
+    Log.Keeper.warn
+      "keeper:%s episode.flush activity coverage-gap record failed \
+       outcome=%s: %s"
+      keeper_name outcome_label (Printexc.to_string gap_exn)
+
 let emit_flush_activity
     ~(config : Coord_utils.config)
     ~(keeper_name : string)
     ~(turn : int)
+    ?(oas_turn_count : int option)
     ~(episodes : int)
     ~(procedures : int)
     ?outcome
@@ -19,10 +42,12 @@ let emit_flush_activity
       ; ("procedures", `Int procedures)
       ; ("turn", `Int turn)
       ]
-      @
-      match outcome with
-      | None -> []
-      | Some value -> [ ("outcome", `String value) ]
+      @ (match oas_turn_count with
+         | None -> []
+         | Some count -> [ ("oas_turn_count", `Int count) ])
+      @ (match outcome with
+         | None -> []
+         | Some value -> [ ("outcome", `String value) ])
     in
     try
       (Atomic.get Coord_hooks.activity_emit_fn) config
@@ -40,24 +65,27 @@ let emit_flush_activity
         | Some value -> value
       in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_memory_activity_emit_failures
+        Keeper_metrics.metric_keeper_memory_activity_emit_failures
         ~labels:[("keeper", keeper_name); ("outcome", outcome_label)]
         ();
+      let error = Printexc.to_string exn in
+      record_activity_emit_gap ~config ~keeper_name ~outcome_label ~error;
       Log.Keeper.error
         "keeper:%s episode.flush activity emit failed outcome=%s: %s"
-        keeper_name outcome_label (Printexc.to_string exn)
+        keeper_name outcome_label error
 
 let record_success
     ~(config : Coord_utils.config)
     ~(keeper_name : string)
     ~(memory : Agent_sdk.Memory.t)
     ~(turn : int)
+    ?(oas_turn_count : int option)
     ~(trace_id : string)
     ~(snapshot : Keeper_memory_policy.keeper_state_snapshot)
     () : unit =
   try
     Memory_oas_bridge.store_episode_from_snapshot ~memory
-      ~keeper_name ~turn ~trace_id snapshot;
+      ~keeper_name ~turn ?oas_turn_count ~trace_id snapshot;
     let episodes, procedures =
       Memory_oas_bridge.flush_incremental ~memory ~agent_name:keeper_name
     in
@@ -65,7 +93,7 @@ let record_success
       Log.Keeper.debug
         "keeper:%s post-run flush episodes=%d procedures=%d"
         keeper_name episodes procedures;
-      emit_flush_activity ~config ~keeper_name ~turn
+      emit_flush_activity ~config ~keeper_name ~turn ?oas_turn_count
         ~episodes ~procedures
         ~tags:[ "memory"; "episode"; "flush" ]
         ()
@@ -73,7 +101,7 @@ let record_success
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter Prometheus.metric_keeper_episode_create_failures
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_episode_create_failures
       ~labels:[("keeper", keeper_name)]
       ();
     Log.Keeper.error "keeper:%s episode_create failed: %s"
@@ -127,13 +155,14 @@ let record_failure
     ~(keeper_name : string)
     ~(memory : Agent_sdk.Memory.t)
     ~(turn : int)
+    ?(oas_turn_count : int option)
     ~(trace_id : string)
     ~(error_kind : Memory_oas_bridge.error_kind)
     ~(error_message : string)
     () : unit =
   try
     Memory_oas_bridge.store_failed_turn_episode ~memory
-      ~keeper_name ~turn ~trace_id ~error_kind ~error_message ();
+      ~keeper_name ~turn ?oas_turn_count ~trace_id ~error_kind ~error_message ();
     (* #10341: surface non-keepalive failure modes (timeout, parse) into
        the Agent_stress ledger so the stress dimensions defined in
        agent_stress.mli stop being write-only-for-Failure_streak. *)
@@ -154,7 +183,7 @@ let record_failure
       Log.Keeper.debug
         "keeper:%s post-run failure flush episodes=%d procedures=%d"
         keeper_name episodes procedures;
-      emit_flush_activity ~config ~keeper_name ~turn
+      emit_flush_activity ~config ~keeper_name ~turn ?oas_turn_count
         ~episodes ~procedures ~outcome:"failure"
         ~tags:[ "memory"; "episode"; "flush"; "failure" ]
         ()
@@ -162,7 +191,7 @@ let record_failure
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter Prometheus.metric_keeper_episode_create_failures
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_episode_create_failures
       ~labels:[("keeper", keeper_name)]
       ();
     Log.Keeper.error "keeper:%s failed_turn_episode_create failed: %s"

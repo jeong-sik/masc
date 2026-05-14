@@ -4,8 +4,8 @@
     public [Agent.t] type and OAS-internal {!Agent_turn_budget} for
     budget tracking, idle checks, and cost guards.
 
-    Previously this module reimplemented the budget logic and called the
-    internal [Agent.set_state] API.  Using the public wrapper avoids the
+    Previously this module reimplemented the budget logic and called an
+    internal state-mutating API.  Using the public wrapper avoids the
     internal-API dependency and keeps budget enforcement in OAS. *)
 
 (** Default absolute ceiling on total turns.

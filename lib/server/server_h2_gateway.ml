@@ -455,9 +455,19 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
                                    in
+                                   let body_with_agent =
+                                     Server_mcp_transport_http.body_with_canonical_http_actor
+                                       ~base_path ~auth_token httpun_request body_str
+                                   in
+                                   let internal_keeper_runtime =
+                                     Server_auth.is_verified_internal_keeper_request
+                                       ~base_path httpun_request
+                                   in
                                    let response_json =
                                      Mcp_eio.handle_request ~clock ~sw ~profile
-                                       ~mcp_session_id:session_id ?auth_token state body_str
+                                       ~mcp_session_id:session_id ?auth_token
+                                       ~internal_keeper_runtime state
+                                       body_with_agent
                                    in
                                    (match protocol_version_from_body body_str with
                                    | Some v -> remember_protocol_version session_id v
@@ -641,6 +651,34 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let json =
               Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me
                 ~limit ()
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/heuristics"
+      | `GET, "/api/v1/heuristics" ->
+          let json =
+            Server_routes_http_routes_provider_runs.dashboard_heuristics_json
+              httpun_request
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/heuristics/coverage"
+      | `GET, "/api/v1/heuristics/coverage" ->
+          let json =
+            Server_routes_http_routes_provider_runs.dashboard_heuristics_coverage_json
+              httpun_request
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/stress"
+      | `GET, "/api/v1/agent_stress" ->
+          with_server_state h2_reqd (fun state ->
+            let json =
+              Server_routes_http_routes_provider_runs.dashboard_stress_json
+                ~config:state.Mcp_server.room_config httpun_request
             in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json)
               ~extra_headers:cors)
@@ -947,7 +985,15 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       (* ═══════════════════════════════════════════════════════════════════════
          Delegated route groups
          ═══════════════════════════════════════════════════════════════════════ *)
-      | _ when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request ~cors ~path httpun_meth -> ()
+      | _
+        when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request
+               ~cors ~path
+               ~config:
+                 (Option.map
+                    (fun state -> state.Mcp_server.room_config)
+                    !server_state)
+               httpun_meth ->
+          ()
 
       (* ─────────────────────────────────────────────────────────────────────
          Fallback

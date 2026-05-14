@@ -57,13 +57,16 @@ let test_legacy_traceln_records_metadata () =
   let message =
     Printf.sprintf "[WARN] legacy warning %f" (Unix.gettimeofday ())
   in
-  Log.legacy_traceln ~module_name message;
+  Log.legacy_traceln ~level:Log.Warn ~module_name message;
   match find_entry ~module_name ~message with
   | None -> Alcotest.fail "legacy traceln entry not found"
   | Some (entry : Log.Ring.entry) ->
-      Alcotest.(check string) "source" "legacy_traceln" entry.source;
-      Alcotest.(check string) "normalized level" "WARN" entry.normalized_level;
-      Alcotest.(check bool) "legacy classified" true entry.legacy_classified
+      Alcotest.(check string)
+        "source" "legacy_traceln"
+        (Log.source_to_string entry.source);
+      Alcotest.(check string)
+        "level" "WARN"
+        (Log.level_to_string entry.level)
 
 let test_recent_since_seq_returns_only_new_entries () =
   let module_name = "TestLogDelta" in
@@ -97,7 +100,7 @@ let oas_record ?(level = Agent_sdk.Log.Info) ~module_name ~message fields =
 
 let test_oas_bridge_interpolates_placeholder_messages () =
   let rendered =
-    Masc_mcp.Oas_log_bridge.render_record_message
+    Masc_mcp.Agent_sdk_log_bridge.render_record_message
       (oas_record
          ~module_name:"agent_tools"
          ~message:"tool %s: correction_pipeline fixed %d field(s)"
@@ -110,7 +113,7 @@ let test_oas_bridge_interpolates_placeholder_messages () =
 
 let test_oas_bridge_normalizes_generic_correction_messages () =
   let rendered =
-    Masc_mcp.Oas_log_bridge.render_record_message
+    Masc_mcp.Agent_sdk_log_bridge.render_record_message
       (oas_record
          ~module_name:"agent_tools"
          ~message:"correction_pipeline fixed tool input fields"
@@ -123,7 +126,7 @@ let test_oas_bridge_normalizes_generic_correction_messages () =
 
 let test_oas_bridge_promotes_mcp_server_failures_to_error () =
   let level =
-    Masc_mcp.Oas_log_bridge.effective_level
+    Masc_mcp.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_config"
@@ -136,7 +139,7 @@ let test_oas_bridge_promotes_mcp_server_failures_to_error () =
 
 let test_oas_bridge_promotes_context_injector_failures_to_error () =
   let level =
-    Masc_mcp.Oas_log_bridge.effective_level
+    Masc_mcp.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_turn"
@@ -149,7 +152,7 @@ let test_oas_bridge_promotes_context_injector_failures_to_error () =
 
 let test_oas_bridge_promotes_missing_approval_callback_to_error () =
   let level =
-    Masc_mcp.Oas_log_bridge.effective_level
+    Masc_mcp.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_tools"

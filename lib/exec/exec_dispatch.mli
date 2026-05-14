@@ -8,7 +8,7 @@ val resolve_arg : Shell_ir.arg -> string
 (** Resolve a Shell_ir.arg to a concrete string value. *)
 
 val dispatch : Shell_ir.t -> dispatch_result
-(** Execute a [Shell_ir.t] AST directly via Process_eio without
+(** Execute a [Shell_ir.t] AST directly via Exec_gate without
     going through /bin/bash.  Simple commands use argv-based spawn;
     pipelines chain stdout to stdin across stages. *)
 

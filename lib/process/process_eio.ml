@@ -101,12 +101,17 @@ let default_env = function
   | Some env -> env
   | None -> Unix.environment ()
 
+(* [@@warning "-4"]: scrutinee is [exn] (extensible) — a wildcard arm is
+   mandatory because new exception constructors can never be enumerated.
+   RFC-0071 §3.4.1 sanctioned open-variant exemption, not a lazy
+   catch-all over a closed sum. *)
 let rec should_retry_unix_fallback = function
   | Unix.Unix_error
       ((Unix.EADDRINUSE | Unix.EADDRNOTAVAIL | Unix.EACCES | Unix.EPERM), "bind", _) ->
       true
   | Eio.Cancel.Cancelled exn -> should_retry_unix_fallback exn
   | _ -> false
+[@@warning "-4"]
 
 let close_quietly fd =
   try Unix.close fd with

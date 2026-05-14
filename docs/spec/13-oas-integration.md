@@ -174,11 +174,11 @@ type run_result = {
 
 `run_named`가 cascade 이름 기반 MODEL 호출을 제공한다:
 
-1. `cascade.json`에서 `{name}_models` 목록 조회 (hot-reloadable)
-2. `Cascade_config.parse_model_strings`로 `Provider_config.t list` 생성
-3. MASC가 `Cascade_fsm.decide`로 cascade FSM을 직접 구동
-4. 각 provider에 대해 OAS single-provider `Agent.run` 호출
-5. `accept` 콜백으로 응답 유효성 검증
+1. `cascade.toml`의 `[routes.*]` 대상 또는 호출자가 지정한 프로필 이름을 RFC-0058 declarative catalog에서 해석한다.
+2. 대상은 `[tier.<name>]` / `[tier-group.<name>]` / binding alias로 resolve되고, `Cascade_catalog_runtime`이 ordered weighted entries를 `Provider_config.t list`로 변환한다.
+3. MASC가 `Cascade_fsm.decide`로 cascade FSM을 직접 구동한다.
+4. 각 provider에 대해 OAS single-provider `Agent.run`을 호출한다.
+5. `accept` 콜백으로 응답 유효성을 검증한다.
 
 관측 경계:
 - MASC는 configured labels, resolved candidate models, 최종 selected model은 관측 가능
@@ -186,11 +186,11 @@ type run_result = {
 - `raw_trace`에는 아직 provider attempt record가 없으므로 raw-trace만으로는 opaque 하다
 - 따라서 attempt details source는 `oas_metrics_callbacks` 또는 `no_oas_observation`처럼 경계를 명시한다
 
-Hardcoded fallback (cascade.json 없을 때):
+Hardcoded fallback (cascade.toml 없을 때):
 - `llama:{MASC_DEFAULT_MODEL}` (로컬)
 - `glm:auto` (ZAI_API_KEY 존재 시)
 
-이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/cascade.json`
+이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/cascade.toml`
 기본값과 동일시하지 않는다.
 
 ### 4.6 MASC Tool Bridge
@@ -230,19 +230,28 @@ MASC Types.tool_schema
 
 ### 6.1 Cascade Name Resolution
 
-MASC는 직접 model_spec을 관리하지 않는다. `cascade_name`을 OAS에 넘기고, OAS `Cascade_config`가 실제 provider 선택을 수행한다.
+MASC owns cascade name resolution. The keeper path resolves `cascade_name`
+through the active MASC catalog and then calls OAS as a single-provider runtime
+for each selected attempt. OAS provider catalog and capability manifests are
+generic execution contracts; they are not the MASC cascade plane.
 
 ```
 cascade_name (e.g. "keeper", "verifier", "context_router")
-  -> config/cascade.json 에서 "{name}_models" 목록 조회
-  -> OAS Cascade_config.resolve_model_strings
-  -> OAS Cascade_config.parse_model_strings
-  -> Provider_config.t list (ordered by priority)
+  -> config/cascade.toml [routes] / profile lookup
+  -> MASC catalog model labels
+  -> MASC/OAS adapter resolves labels against OAS Provider_registry/catalog
+  -> Provider_config.t list (ordered by MASC policy)
+  -> OAS Agent.run single provider per attempt
 ```
+
+Provider/model-free here means MASC policy code does not branch on vendor or
+model literals. Provider/model ids remain operator-authored config data and may
+come from an OAS provider catalog for cloud APIs, local OpenAI-compatible
+servers, or non-interactive subscription CLI runtimes.
 
 ### 6.2 Cascade Inference Parameters
 
-`cascade_inference.ml`이 cascade.json에서 per-cascade 추론 파라미터를 읽는다:
+`cascade_inference.ml`이 cascade.toml에서 per-cascade 추론 파라미터를 읽는다:
 
 ```json
 {
@@ -285,7 +294,7 @@ val tool_result : ?is_error:bool -> tool_use_id:string -> content:string
   -> unit -> Agent_sdk.Types.message
 ```
 
-### 7.2 Oas_response
+### 7.2 Agent_sdk_response
 
 `oas_response.ml`은 OAS 응답 읽기 헬퍼:
 
@@ -368,7 +377,7 @@ SSOT rules:
 PreToolUse event
   -> should_skip? (read-only 패턴 매칭)
     -> Yes: Pass (MODEL 호출 없음)
-    -> No: build_prompt -> Oas_worker.run_named(cascade="verifier")
+    -> No: build_prompt -> Keeper_turn_driver.run_named(cascade="verifier")
       -> parse_verdict (PASS/WARN/FAIL)
 ```
 
@@ -432,7 +441,7 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 | Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_exec_context.ml`의 wrapper + serialized context를 유지 |
 | Memory bridge | Partial | Long_term + Episodic + Procedural bridged. Working/Scratchpad는 OAS 내부. 전체 통합은 미완 |
 | Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
-| Cascade config | Complete | cascade_name -> OAS Provider_registry -> Provider_config.t |
+| Cascade config | Complete | cascade_name -> MASC catalog/profile -> OAS Provider_registry/catalog -> Provider_config.t |
 | Verifier | Complete | PreToolUse hook + Guardrails adapter |
 | Model resolution | Complete | oas_model_resolve.ml이 Provider_Registry SSOT 사용 |
 | Tool bridge | Complete | MASC tool_schema -> OAS Tool.t 변환 |
@@ -498,7 +507,7 @@ Detailed implementation checklist lives in
 1. **의존 방향은 단방향이다**: MASC -> OAS. OAS 코드에 MASC import가 존재하면 설계 위반이다.
 2. **MASC는 OAS Agent.run을 사용한다**: 에이전트 생명주기를 자체 재구현하지 않는다. `Cascade.call` 직접 사용은 금지.
 3. **Message 타입은 공유한다**: `Agent_sdk.Types.message`가 MASC와 OAS 모두의 메시지 타입이다. 변환 레이어 없음.
-4. **Cascade name이 model을 추상화한다**: MASC 코드에 구체적 모델 이름이 하드코딩되지 않는다. cascade_name -> cascade.json -> Provider_Registry 체인.
+4. **Cascade name이 model을 추상화한다**: MASC policy code에 구체적 provider/model 이름이 하드코딩되지 않는다. cascade_name -> cascade.toml/catalog -> Provider_registry/catalog 체인.
 5. **Event_bus prefix는 `masc:`이다**: MASC 이벤트는 반드시 이 prefix를 사용한다. SSE bridge가 이 prefix로 필터링한다.
 6. **Verifier는 read-only를 건너뛴다**: read/grep/search/status 류 도구는 MODEL 호출 없이 Pass를 반환한다.
 7. **Checkpoint는 session_id로 네임스페이스된다**: 동일 agent의 다른 세션 checkpoint와 충돌하지 않는다.
@@ -516,7 +525,7 @@ Detailed implementation checklist lives in
 | `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | 5 | OAS Memory store 기본 importance |
 | `ZAI_API_KEY` | (없음) | GLM Cloud cascade fallback 활성화 |
 
-cascade.json 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
+cascade.toml 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
 
 ---
 

@@ -6,11 +6,11 @@ type signal_ctx = {
   now : float;
   rand_int : int -> int;
   keeper_name : string;
-  cascade_name : Keeper_cascade_profile.runtime_name;
+  cascade_name : Cascade_ref.runtime_name;
 }
 
 let signal_cascade_name ctx =
-  Keeper_cascade_profile.runtime_name_to_string ctx.cascade_name
+  Cascade_ref.runtime_name_to_string ctx.cascade_name
 
 (* ── Scoring parameters (configurable via TOML / env vars) ─────────
 
@@ -219,8 +219,7 @@ let latency_score_of_p50 ~baseline p50 =
 
 let latency_score_for_provider health ~provider_key =
   (* Public API: uses the env-var-backed global default baseline so
-     external callers (e.g. Cascade_inventory) do not need to thread
-     a [scoring_params] record. *)
+     callers do not need to thread a [scoring_params] record. *)
   match Cascade_health_tracker.provider_info health ~provider_key with
   | None -> 1.0
   | Some info ->
@@ -369,6 +368,8 @@ let all_kinds = [
 
 let valid_kind_strings = List.map kind_to_string all_kinds
 
+let config_kind_strings = [ "failover"; "priority_tier" ]
+
 let parse_kind = function
   | "failover" -> Ok Failover
   | "capacity_aware" -> Ok Capacity_aware
@@ -381,6 +382,22 @@ let parse_kind = function
     Error (Printf.sprintf
              "unknown cascade strategy %S (expected one of: %s)"
              other (String.concat ", " valid_kind_strings))
+
+let parse_config_kind raw =
+  match parse_kind raw with
+  | Error _ ->
+    Error
+      (Printf.sprintf
+         "unsupported cascade config strategy %S (expected one of: %s)"
+         raw (String.concat ", " config_kind_strings))
+  | Ok ((Failover | Priority_tier) as kind) -> Ok kind
+  | Ok kind ->
+    Error
+      (Printf.sprintf
+         "unsupported cascade config strategy %S (expected one of: %s); \
+          %s is retained for internal strategy tests only"
+         raw (String.concat ", " config_kind_strings)
+         (kind_to_string kind))
 
 let default_sticky_ttl_ms = 300_000
 
@@ -532,15 +549,27 @@ let priority_tier_order adapter ctx ~tiers ~cycle cands =
   match allowed with
   | [] -> []
   | _ ->
-    let in_tier c = List.mem (adapter.health_key c) allowed in
+    (* Materialise [allowed] as a Hashtbl once so the per-candidate
+       membership check is O(1); prior shape did [List.mem health_key
+       allowed] per candidate, i.e. O(C x A) per ordering call. *)
+    let allowed_set = Hashtbl.create (List.length allowed) in
+    List.iter (fun name -> Hashtbl.replace allowed_set name ()) allowed;
+    let in_tier c = Hashtbl.mem allowed_set (adapter.health_key c) in
     let tier_cands = List.filter in_tier cands in
     (* Starvation guard: if every tier candidate reports capacity=0, fall
        through with the unfiltered tier list so at least one call is
        attempted and the real upstream error (rate limit, auth) surfaces
        instead of silently exhausting the cascade.  Mirrors
-       weighted_shuffle's guard at [weighted_shuffle]:140-145. *)
+       weighted_shuffle guard at [weighted_shuffle]:140-145.  Iter 22
+       telemetry: ticks [Cascade_metrics.on_strategy_starvation_guard]
+       so the fail-open rate is observable per cascade. *)
     let with_capacity = filter_capacity adapter ctx tier_cands in
-    if with_capacity = [] then tier_cands else with_capacity
+    if with_capacity = [] then (
+      Cascade_metrics.on_strategy_starvation_guard
+        ~cascade:(signal_cascade_name ctx)
+        ~strategy:"priority_tier";
+      tier_cands)
+    else with_capacity
 
 (* ── Sticky ─────────────────────────────────────────────────────── *)
 
@@ -561,7 +590,12 @@ let sticky_order adapter ctx cands =
      | Some c -> [c]
      | None ->
        (* Pinned provider no longer in candidate list (config drift,
-          cascade.json reload).  Fall back to plain Failover. *)
+          cascade.toml reload, provider deprecation).  Fall back to
+          plain Failover.  Iter 23 telemetry: ticks
+          [Cascade_metrics.on_sticky_drift] so the drift rate is
+          observable per cascade rather than living only in this
+          comment. *)
+       Cascade_metrics.on_sticky_drift ~cascade;
        cands)
 
 (* ── Round-robin ────────────────────────────────────────────────── *)
@@ -604,9 +638,16 @@ let order_candidates t ~adapter ~ctx ~cycle cands =
     (* Starvation guard: same pattern as priority_tier_order.  When all
        candidates report capacity=0 the cascade would otherwise exit
        with no real call attempt — prefer to try once and let the real
-       error surface. *)
+       error surface.  Iter 22 telemetry: ticks
+       [Cascade_metrics.on_strategy_starvation_guard] so the fail-open
+       rate is observable per cascade. *)
     let with_capacity = filter_capacity adapter ctx cooled in
-    if with_capacity = [] then cooled else with_capacity
+    if with_capacity = [] then (
+      Cascade_metrics.on_strategy_starvation_guard
+        ~cascade:(signal_cascade_name ctx)
+        ~strategy:"circuit_breaker_cycling";
+      cooled)
+    else with_capacity
   | Priority_tier ->
     priority_tier_order adapter ctx ~tiers:t.tiers ~cycle cands
   | Sticky ->

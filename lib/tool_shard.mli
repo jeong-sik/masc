@@ -79,7 +79,7 @@ val get_shard : string -> shard option
 
 val default_shard_names : string list
 (** Default shards for a new keeper: base, board, filesystem, shell,
-    library, taskboard, coding, autoresearch. *)
+    library, taskboard, coding. Autoresearch is opt-in. *)
 
 val tools_of_shards : string list -> Masc_domain.tool_schema list
 (** Combine tools from multiple shard names. *)

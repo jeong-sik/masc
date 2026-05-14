@@ -204,7 +204,7 @@ let check_missing_interface inputs =
         match input with
         | Changed_file { path; _ } ->
             if Filename.check_suffix path ".ml" then Some path else None
-        | _ -> None)
+        | Diff _ | Type_signature _ | Interface_contract _ -> None)
       inputs
   in
   let mli_files =
@@ -212,7 +212,7 @@ let check_missing_interface inputs =
       (fun input ->
         match input with
         | Interface_contract { path; _ } -> Some path
-        | _ -> None)
+        | Diff _ | Changed_file _ | Type_signature _ -> None)
       inputs
   in
   List.filter_map
@@ -274,7 +274,7 @@ let check_unsafe_patterns inputs =
                   }
               else None)
             unsafe_patterns
-      | _ -> [])
+      | Diff _ | Type_signature _ | Interface_contract _ -> [])
     inputs
 
 (** Check for added files without tests. *)
@@ -284,7 +284,7 @@ let check_untested_additions inputs =
       (fun input ->
         match input with
         | Changed_file { path; _ } -> Some path
-        | _ -> None)
+        | Diff _ | Type_signature _ | Interface_contract _ -> None)
       inputs
   in
   let has_test_file =

@@ -375,6 +375,33 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_startup_preflight_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    if [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+      printf '[]\\n'\n\
+      exit 0\n\
+    fi\n\
+    printf 'missing image\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+  run)\n\
+    printf 'startup preflight must not run image command inventory\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
 let fake_docker_cleanup_script =
   "#!/bin/sh\n\
 log_file=${KEEPER_DOCKER_LOG:-}\n\
@@ -548,6 +575,29 @@ let test_docker_preflight_surfaces_missing_image_actions () =
         (contains_substring
            (Keeper_sandbox_runtime.docker_preflight_failure_message preflight)
            "scripts/build-keeper-sandbox-image.sh")
+
+let test_startup_preflight_skips_required_command_inventory () =
+  with_fake_docker fake_docker_startup_preflight_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base = temp_dir () in
+  let log_path = Filename.concat base "docker.log" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  match
+    Keeper_sandbox_runtime.ensure_keeper_startup_preflight
+      ~timeout_sec:5.0 ~sandbox_profile:Keeper_types.Docker
+  with
+  | Error err -> Alcotest.failf "expected startup preflight to pass: %s" err
+  | Ok () ->
+    let log = read_file log_path in
+    Alcotest.(check bool) "checks image presence" true
+      (contains_substring log "image inspect alpine:test");
+    Alcotest.(check bool) "skips docker run inventory" false
+      (contains_substring log "run")
 
 let test_run_command_nonzero_exit_errors_by_default () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
@@ -825,6 +875,8 @@ let run_tests () =
             test_docker_preflight_reports_ready_image;
           Alcotest.test_case "missing image surfaces remediation" `Quick
             test_docker_preflight_surfaces_missing_image_actions;
+          Alcotest.test_case "startup skips command inventory" `Quick
+            test_startup_preflight_skips_required_command_inventory;
         ] );
       ( "docker_cleanup",
         [

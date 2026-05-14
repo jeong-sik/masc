@@ -1,13 +1,13 @@
-// MASC Dashboard — O4 · Cost & Latency dashboard
+// MASC Dashboard — runtime cost & latency dashboard
 //
 // Phase 2 spec (`design-system/preview/cb-group-f.jsx:CostPerAgent`)
 // renders a 4-cell totals header (cost / tokens / p50 / p95) plus a
 // per-agent table with cost bar + p95 latency bar. Production has
-// rich cost + latency telemetry on `DashboardRuntimeModelMetric`
-// (`/api/v1/models/metrics`) but no surface that consolidates it
-// into a "where is the money going / where is the latency going" view.
+// redacted runtime-lane cost + latency telemetry on
+// `DashboardRuntimeModelMetric` (`/api/v1/models/metrics`), consolidated into
+// a "where is the money going / where is the latency going" view.
 //
-// This component now supports both per-model and per-keeper views,
+// This component now supports both per-runtime and per-keeper views,
 // toggled via a segmented control. The per-keeper view consumes the
 // new `/api/v1/dashboard/keeper-costs` endpoint.
 
@@ -28,6 +28,7 @@ import {
   type HeuristicCoverage,
   type CoverageSite,
   type StressEvent,
+  type AgentStressRow,
   type AuditEntry,
   type AuditLedgerResponse,
   type KeeperDecision,
@@ -38,37 +39,44 @@ import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
 import { formatCost, formatPct1 } from '../lib/format-number'
 import { replaceRoute, route } from '../router'
+import {
+  type ViewMode,
+  type CostFocus,
+  type AuditFocus,
+  type CostView,
+  isCostView,
+  isCostFocus,
+  viewModeForCostFocus,
+  isAuditFocus,
+  auditRouteParams,
+  auditLogRouteParams,
+} from './cost/cost-types'
+import { formatTokens, severityClass } from './cost/cost-formatters'
+import {
+  severityBuckets,
+  auditEntryMatchesLogId,
+  prioritizeAuditEntriesByLogId,
+  summarizeAuditActors,
+  summarizeAuditKinds,
+} from './cost/audit-summarizer'
 
-type ViewMode = 'model' | 'keeper'
-export type CostFocus = 'agent' | 'matrix' | 'latency'
-export type AuditFocus = 'actor' | 'summary'
-
-export type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
-
-const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
-const COST_FOCUSES: CostFocus[] = ['agent', 'matrix', 'latency']
-const AUDIT_FOCUSES: AuditFocus[] = ['actor', 'summary']
-
-export function isCostView(v: string | undefined): v is CostView {
-  return !!v && (COST_VIEWS as string[]).includes(v)
-}
-
-export function isCostFocus(v: string | undefined): v is CostFocus {
-  return !!v && (COST_FOCUSES as string[]).includes(v)
-}
-
-export function viewModeForCostFocus(focus: CostFocus | null): ViewMode {
-  return focus === 'agent' ? 'keeper' : 'model'
-}
-
-export function isAuditFocus(v: string | undefined): v is AuditFocus {
-  return !!v && (AUDIT_FOCUSES as string[]).includes(v)
-}
-
-export function auditRouteParams(focus: 'ledger' | AuditFocus): Record<string, string> {
-  return focus === 'ledger'
-    ? { section: 'runtime', view: 'audit' }
-    : { section: 'runtime', view: 'audit', focus }
+// Re-export RFC-0050 PR-1 — preserve every public symbol callers import
+// from this module so the per-domain split is mechanical.
+export {
+  type CostFocus,
+  type AuditFocus,
+  type CostView,
+  isCostView,
+  isCostFocus,
+  viewModeForCostFocus,
+  isAuditFocus,
+  auditRouteParams,
+  auditLogRouteParams,
+  formatTokens,
+  auditEntryMatchesLogId,
+  prioritizeAuditEntriesByLogId,
+  summarizeAuditActors,
+  summarizeAuditKinds,
 }
 
 type ModelLoadState =
@@ -92,7 +100,7 @@ type HeuristicLoadState =
 type StressLoadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'loaded'; data: StressEvent[]; limit: number }
+  | { status: 'loaded'; events: StressEvent[]; board: AgentStressRow[]; limit: number }
   | { status: 'error'; message: string }
 
 type CoverageLoadState =
@@ -121,6 +129,11 @@ const stressState = signal<StressLoadState>({ status: 'idle' })
 const coverageState = signal<CoverageLoadState>({ status: 'idle' })
 const auditLedgerState = signal<AuditLedgerLoadState>({ status: 'idle' })
 const keeperDecisionsState = signal<KeeperDecisionsLoadState>({ status: 'idle' })
+function cleanRouteParam(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
 const activeCostFocus = computed<CostFocus | null>(() => {
   const focus = route.value.params.focus
   return isCostFocus(focus) ? focus : null
@@ -129,6 +142,7 @@ const activeAuditFocus = computed<AuditFocus | null>(() => {
   const focus = route.value.params.focus
   return isAuditFocus(focus) ? focus : null
 })
+const activeAuditLogId = computed<string | null>(() => cleanRouteParam(route.value.params.log_id))
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -245,7 +259,7 @@ async function loadStress(limit = 100) {
   stressState.value = { status: 'loading' }
   try {
     const resp = await fetchStress(limit)
-    stressState.value = { status: 'loaded', data: resp.events, limit: resp.limit }
+    stressState.value = { status: 'loaded', events: resp.events, board: resp.agent_stress, limit: resp.limit }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'stress events 불러오기 실패'
     stressState.value = { status: 'error', message }
@@ -356,12 +370,6 @@ const keeperTotals = computed(() => {
   return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length }
 })
 
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return `${n}`
-}
-
 function ThRight({ children }: { children: unknown }) {
   return html`<th scope="col" class="px-2 py-1.5 text-right">${children}</th>`
 }
@@ -462,23 +470,23 @@ function KeeperRow({
         </div>
       </td>
       <td class="px-2 py-1.5 text-left font-mono text-2xs text-text-muted">
-        ${topModel ? `${topModel.model} (${formatCost(topModel.cost_usd)})` : '—'}
+        ${topModel ? formatCost(topModel.cost_usd) : '—'}
       </td>
     </tr>
   `
 }
 
 function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
-  const providers = Array.from(new Set(models.map(m => m.provider ?? 'unknown'))).sort()
+  const providers = models.length > 0 ? ['runtime'] : []
   const modelIds = Array.from(new Set(models.map(m => m.model_id))).sort((a, b) => {
     const ca = models.find(m => m.model_id === a)?.total_cost_usd ?? 0
     const cb = models.find(m => m.model_id === b)?.total_cost_usd ?? 0
     return cb - ca
   })
 
-  const grid: number[][] = providers.map(p =>
+  const grid: number[][] = providers.map(() =>
     modelIds.map(mid => {
-      const match = models.find(m => m.model_id === mid && (m.provider ?? 'unknown') === p)
+      const match = models.find(m => m.model_id === mid)
       return match?.total_cost_usd ?? 0
     })
   )
@@ -507,12 +515,12 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
   }
 
   return html`
-    <section class="flex flex-col gap-2" aria-label="Provider × Model cost matrix">
+    <section class="flex flex-col gap-2" aria-label="Runtime lane cost matrix">
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">provider × model · $ spent</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">runtime lanes · $ spent</span>
       </div>
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Provider by model cost matrix">
+        <table class="w-full" aria-label="Runtime lane cost matrix">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left"></th>
@@ -598,7 +606,7 @@ function CostLatency({ buckets, p50, p95 }: {
           `
         })}
       </div>
-      <div class="grid grid-cols-4 gap-px rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
+      <div class="grid grid-cols-2 gap-1 md:grid-cols-4 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
         ${bands.map(b => html`
           <div key=${b.label} class="flex flex-col gap-0.5 bg-[var(--backdrop-deep)] p-2" role="listitem" aria-label=${`${b.label}: ${b.count} calls (${total > 0 ? Math.round((b.count / total) * 100) : 0}%)`}>
             <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">${b.label}</span>
@@ -662,7 +670,7 @@ function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: numb
   `
 }
 
-function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }) {
+function StressBoard({ rows, events, limit }: { rows: AgentStressRow[]; events: StressEvent[]; limit: number }) {
   const fmtTime = (ts: number): string => {
     const d = new Date(ts * 1000)
     return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -693,14 +701,56 @@ function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }
     }
   }
 
+  const pressureTone = (value: number): string => {
+    if (value >= 0.75) return 'text-[var(--color-status-err)]'
+    if (value >= 0.45) return 'text-[var(--color-status-warn)]'
+    return 'text-[var(--color-status-ok)]'
+  }
+
+  const sourceHint = (row: AgentStressRow): string => {
+    return [
+      row.budget_pressure_source ? `budget=${row.budget_pressure_source}` : '',
+      row.ctx_pressure_source ? `ctx=${row.ctx_pressure_source}` : '',
+      row.queue_depth_source ? `queue=${row.queue_depth_source}` : '',
+    ].filter(Boolean).join(' · ')
+  }
+
   return html`
-    <section class="flex flex-col gap-2" aria-label=${`Stress board · ${events.length} events`}>
+    <section class="flex flex-col gap-2" aria-label=${`Stress board · ${rows.length} agents · ${events.length} events`}>
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">stress board · ${events.length} events</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">stress board · ${rows.length} agents · ${events.length} events</span>
         <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
       </div>
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Stress events">
+        <table class="w-full" aria-label="Agent stress board">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left">agent</th>
+              <th scope="col" class="px-2 py-1.5 text-right">budget</th>
+              <th scope="col" class="px-2 py-1.5 text-right">context</th>
+              <th scope="col" class="px-2 py-1.5 text-right">queue</th>
+              <th scope="col" class="px-2 py-1.5 text-left">blocked</th>
+              <th scope="col" class="px-2 py-1.5 text-left">source</th>
+              <th scope="col" class="px-2 py-1.5 text-left">time</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row, i) => html`
+              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+                <td class="px-2 py-1.5 text-text-strong">${row.agent}</td>
+                <td class=${`px-2 py-1.5 text-right font-mono ${pressureTone(row.budget_pressure)}`}>${formatPct1(row.budget_pressure)}</td>
+                <td class=${`px-2 py-1.5 text-right font-mono ${pressureTone(row.ctx_pressure)}`}>${formatPct1(row.ctx_pressure)}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${row.queue_depth}</td>
+                <td class="px-2 py-1.5 text-text-muted">${row.blocked_on ?? '—'}</td>
+                <td class="px-2 py-1.5 text-text-muted">${sourceHint(row)}</td>
+                <td class="px-2 py-1.5 font-mono text-text-muted">${row.ts > 0 ? fmtTime(row.ts) : '—'}</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <table class="w-full" aria-label="Recent stress events">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
@@ -786,93 +836,15 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
 
 type AuditChip = 'ledger' | AuditFocus
 
-interface AuditActorSummary {
-  actor: string
-  count: number
-  error: number
-  warn: number
-  info: number
-  latest: string
-  topKind: string
-}
-
-interface AuditKindSummary {
-  kind: string
-  count: number
-  error: number
-  warn: number
-  info: number
-  latest: string
-}
-
-function severityClass(sev: string): string {
-  if (sev === 'error') return 'text-[var(--color-danger-fg)]'
-  if (sev === 'warn') return 'text-[var(--color-warning-fg)]'
-  return 'text-text-muted'
-}
-
-function severityBuckets(entries: readonly AuditEntry[]): { error: number; warn: number; info: number } {
-  let error = 0
-  let warn = 0
-  for (const entry of entries) {
-    if (entry.severity === 'error') error += 1
-    else if (entry.severity === 'warn') warn += 1
-  }
-  return { error, warn, info: Math.max(0, entries.length - error - warn) }
-}
-
-function latestTs(entries: readonly AuditEntry[]): string {
-  return entries.reduce((latest, entry) => entry.ts > latest ? entry.ts : latest, '')
-}
-
-function mostFrequentKind(entries: readonly AuditEntry[]): string {
-  const counts = new Map<string, number>()
-  for (const entry of entries) {
-    const kind = entry.kind.trim() || '(unknown)'
-    counts.set(kind, (counts.get(kind) ?? 0) + 1)
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? '—'
-}
-
-export function summarizeAuditActors(entries: readonly AuditEntry[]): AuditActorSummary[] {
-  const byActor = new Map<string, AuditEntry[]>()
-  for (const entry of entries) {
-    const actor = entry.actor.trim() || '(unknown)'
-    const bucket = byActor.get(actor) ?? []
-    bucket.push(entry)
-    byActor.set(actor, bucket)
-  }
-  return [...byActor.entries()]
-    .map(([actor, actorEntries]) => ({
-      actor,
-      count: actorEntries.length,
-      ...severityBuckets(actorEntries),
-      latest: latestTs(actorEntries),
-      topKind: mostFrequentKind(actorEntries),
-    }))
-    .sort((a, b) => b.count - a.count || a.actor.localeCompare(b.actor))
-}
-
-export function summarizeAuditKinds(entries: readonly AuditEntry[]): AuditKindSummary[] {
-  const byKind = new Map<string, AuditEntry[]>()
-  for (const entry of entries) {
-    const kind = entry.kind.trim() || '(unknown)'
-    const bucket = byKind.get(kind) ?? []
-    bucket.push(entry)
-    byKind.set(kind, bucket)
-  }
-  return [...byKind.entries()]
-    .map(([kind, kindEntries]) => ({
-      kind,
-      count: kindEntries.length,
-      ...severityBuckets(kindEntries),
-      latest: latestTs(kindEntries),
-    }))
-    .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind))
-}
-
 function updateAuditFocusParam(focus: AuditChip): void {
   replaceRoute('monitoring', auditRouteParams(focus))
+}
+
+function clearAuditLogFocusParam(): void {
+  const params: Record<string, string> = { ...route.value.params, section: 'runtime', view: 'audit' }
+  delete params.log
+  delete params.log_id
+  replaceRoute('monitoring', params)
 }
 
 function AuditFocusRail({ focus, count }: { focus: AuditFocus | null; count: number }) {
@@ -991,7 +963,8 @@ function AuditSummaryBoard({ entries, count }: { entries: AuditEntry[]; count: n
   `
 }
 
-function AuditLedgerTable({ entries }: { entries: AuditEntry[] }) {
+function AuditLedgerTable({ entries, logId }: { entries: AuditEntry[]; logId: string | null }) {
+  const orderedEntries = prioritizeAuditEntriesByLogId(entries, logId)
   return html`
       <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
         <table class="w-full" aria-label="Audit ledger entries">
@@ -1005,34 +978,70 @@ function AuditLedgerTable({ entries }: { entries: AuditEntry[] }) {
             </tr>
           </thead>
           <tbody>
-            ${entries.map((e, i) => html`
-              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+            ${orderedEntries.map((e, i) => {
+              const matched = auditEntryMatchesLogId(e, logId)
+              return html`
+              <tr key=${`${e.id}-${i}`} class=${`border-b text-2xs ${matched ? 'border-[var(--brass-3)] bg-[var(--accent-12)]' : 'border-[var(--color-border-default)]/50'}`}>
                 <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.ts}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${e.actor}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.kind}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-text-muted max-w-[24ch] truncate" title=${e.summary}>${e.summary}</td>
                 <td class="px-2 py-1.5 text-left font-mono ${severityClass(e.severity)}">${e.severity}</td>
               </tr>
-            `)}
+            `})}
           </tbody>
         </table>
       </div>
   `
 }
 
-function AuditLedgerBoard({ entries, count, focus }: { entries: AuditEntry[]; count: number; focus: AuditFocus | null }) {
+function AuditLedgerBoard({ entries, count, focus, logId }: { entries: AuditEntry[]; count: number; focus: AuditFocus | null; logId: string | null }) {
+  const focusedEntries = logId ? entries.filter(entry => auditEntryMatchesLogId(entry, logId)) : []
+  const focusLabel = focusedEntries.length > 0
+    ? (focus === null
+        ? `${focusedEntries.length} matches pinned`
+        : `${focusedEntries.length} matches`)
+    : 'no match in loaded ledger'
   return html`
     <section class="flex flex-col gap-4" aria-label="Audit ledger">
       <div class="flex flex-col items-start gap-2 rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit ledger · ${count} entries</span>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">audit ledger · ${count} entries${logId ? ` · log ${logId}` : ''}</span>
         <${AuditFocusRail} focus=${focus} count=${count} />
       </div>
+      ${logId ? html`
+        <section
+          class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+          data-testid="audit-log-focus"
+          aria-label="Audit log route focus"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+                ROUTE FOCUS
+              </div>
+              <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
+                <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                  LOG ${logId}
+                </span>
+                <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${focusLabel}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+              onClick=${clearAuditLogFocusParam}
+            >
+              CLEAR
+            </button>
+          </div>
+        </section>
+      ` : null}
 
       ${focus === 'actor'
         ? html`<${AuditActorBoard} entries=${entries} />`
         : focus === 'summary'
           ? html`<${AuditSummaryBoard} entries=${entries} count=${count} />`
-          : html`<${AuditLedgerTable} entries=${entries} />`}
+          : html`<${AuditLedgerTable} entries=${entries} logId=${logId} />`}
     </section>
   `
 }
@@ -1058,7 +1067,7 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
               <th scope="col" class="px-2 py-1.5 text-left">keeper</th>
               <th scope="col" class="px-2 py-1.5 text-left">event</th>
               <th scope="col" class="px-2 py-1.5 text-left">outcome</th>
-              <th scope="col" class="px-2 py-1.5 text-left">model</th>
+              <th scope="col" class="px-2 py-1.5 text-left">runtime</th>
               <th scope="col" class="px-2 py-1.5 text-right">latency</th>
               <th scope="col" class="px-2 py-1.5 text-right">cost</th>
               <th scope="col" class="px-2 py-1.5 text-center">tool</th>
@@ -1071,7 +1080,7 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
                 <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${e.keeper_name}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.event_type}</td>
                 <td class="px-2 py-1.5 text-left font-mono ${e.outcome === 'success' ? 'text-[var(--color-status-ok)]' : e.outcome === 'error' ? 'text-[var(--color-status-err)]' : 'text-text-muted'}">${e.outcome ?? '—'}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.model_used ?? '—'}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">—</td>
                 <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.latency_ms == null ? '—' : `${Math.round(e.latency_ms)}ms`}</td>
                 <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.cost_usd == null ? '—' : formatCost(e.cost_usd)}</td>
                 <td class="px-2 py-1.5 text-center font-mono text-text-muted">${e.tool ?? '—'}</td>
@@ -1103,7 +1112,7 @@ function CostFocusRail({
       <${FilterChips}
         chips=${[
           { key: 'agent', label: 'Keeper별 비용', count: keeperCount, title: 'keeper별 비용 / 토큰 / 지연 테이블' },
-          { key: 'matrix', label: '비용 매트릭스', count: modelCount, title: 'provider x model 비용 heatmap' },
+          { key: 'matrix', label: '비용 매트릭스', count: modelCount, title: 'runtime lane 비용 heatmap' },
           { key: 'latency', label: '지연 분포', count: bucketCount, title: 'latency histogram과 p50/p95 분포' },
         ]}
         value=${active}
@@ -1158,9 +1167,9 @@ function CostDashboardContent({ view }: { view: CostView }) {
     const showLatency = modelLoadedState != null && latencyBuckets.length > 0 && (focus == null || focus === 'latency')
     const showTable = focus !== 'matrix' && focus !== 'latency'
     const focusedEmptyMessage = focus === 'matrix' && data.length === 0
-      ? '이 시간 창에서 기록된 모델 비용 매트릭스가 없습니다.'
+      ? '이 시간 창에서 기록된 Runtime 비용 매트릭스가 없습니다.'
       : focus === 'latency' && latencyBuckets.length === 0
-        ? '이 시간 창에서 기록된 모델 지연 분포가 없습니다.'
+        ? '이 시간 창에서 기록된 Runtime 지연 분포가 없습니다.'
         : null
 
     return html`
@@ -1168,7 +1177,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
         <header class="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <h2 class="text-base font-semibold text-text-strong">비용 / 지연 대시보드</h2>
-            <p class="text-2xs text-text-muted">최근 ${activeState.windowMinutes}분 · ${mode === 'model' ? '모델별' : 'Keeper별'} 토큰 / 비용 / latency</p>
+            <p class="text-2xs text-text-muted">최근 ${activeState.windowMinutes}분 · ${mode === 'model' ? 'Runtime별' : 'Keeper별'} 토큰 / 비용 / latency</p>
           </div>
           <div class="flex items-center gap-2">
             <div class="flex rounded-[var(--r-1)] border border-card-border/40 p-0.5" role="group" aria-label="보기 모드">
@@ -1181,7 +1190,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   : 'text-text-muted hover:text-text-strong'}"
                 onClick=${() => { setCostViewMode('model') }}
               >
-                모델
+                Runtime
               </button>
               <button
                 type="button"
@@ -1228,7 +1237,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
               label="Total Cost"
               value=${formatCost(t.totalCost)}
               status="ok"
-              delta=${{ direction: 'up', text: `${t.count} ${mode === 'model' ? 'models' : 'keepers'}` }}
+              delta=${{ direction: 'up', text: `${t.count} ${mode === 'model' ? 'runtime lanes' : 'keepers'}` }}
             />
             <${StatTile}
               label="Tokens In / Out"
@@ -1266,14 +1275,14 @@ function CostDashboardContent({ view }: { view: CostView }) {
 
         ${!showTable ? null : data.length === 0 ? html`
           <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-6 text-center text-sm text-text-muted">
-            이 시간 창에서 기록된 ${mode === 'model' ? '모델' : 'Keeper'} 비용이 없습니다.
+            이 시간 창에서 기록된 ${mode === 'model' ? 'Runtime' : 'Keeper'} 비용이 없습니다.
           </div>
         ` : html`
           <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-            <table class="w-full" aria-label=${`${data.length}개 ${mode === 'model' ? '모델' : 'Keeper'}의 비용 / 지연`}>
+            <table class="w-full" aria-label=${`${data.length}개 ${mode === 'model' ? 'Runtime' : 'Keeper'}의 비용 / 지연`}>
               <thead>
                 <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-                  <th scope="col" class="px-2 py-1.5 text-left">${mode === 'model' ? 'model' : 'keeper'}</th>
+                  <th scope="col" class="px-2 py-1.5 text-left">${mode === 'model' ? 'runtime' : 'keeper'}</th>
                   <${ThRight}>in tok</${ThRight}>
                   <${ThRight}>out tok</${ThRight}>
                   <${ThRight}>$ cost</${ThRight}>
@@ -1281,7 +1290,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   <${ThRight}>p50</${ThRight}>
                   <${ThRight}>p95</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">p95 trend</th>
-                  ${mode === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">top model</th>` : null}
+                  ${mode === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">runtime cost</th>` : null}
                 </tr>
               </thead>
               <tbody>
@@ -1330,7 +1339,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <h2 class="text-base font-semibold text-text-strong">스트레스 이벤트</h2>
         </header>
         ${stressState.value.status === 'loaded'
-          ? html`<${StressBoard} events=${stressState.value.data} limit=${stressState.value.limit} />`
+          ? html`<${StressBoard} rows=${stressState.value.board} events=${stressState.value.events} limit=${stressState.value.limit} />`
           : stressState.value.status === 'error'
             ? html`<${ErrorState} message=${stressState.value.message} onRetry=${() => void loadStress()} />`
             : html`<${LoadingState} />`}
@@ -1352,6 +1361,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
               entries=${auditLedgerState.value.data.entries}
               count=${auditLedgerState.value.data.count}
               focus=${activeAuditFocus.value}
+              logId=${activeAuditLogId.value}
             />`
           : auditLedgerState.value.status === 'error'
             ? html`<${ErrorState}

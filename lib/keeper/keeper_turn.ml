@@ -26,24 +26,9 @@ let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
 let resolved_model_id_for_result ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result) : string =
-  let strip_latest s =
-    if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest"
-    then String.sub s 0 (String.length s - 7)
-    else s
-  in
-  let used = strip_latest result.model_used in
-  let cascade_models =
-    Keeper_model_labels.configured_model_labels_of_meta meta
-  in
-  let cfgs = Cascade_config.parse_model_strings cascade_models in
-  match
-    List.find_opt
-      (fun (c : Llm_provider.Provider_config.t) ->
-        c.model_id = result.model_used || c.model_id = used)
-      cfgs
-  with
-  | Some c -> c.model_id
-  | None -> (match cfgs with c :: _ -> c.model_id | [] -> result.model_used)
+  Cascade_runtime_candidate.resolve_reported_runtime_id
+    ~labels:(Keeper_model_labels.configured_model_labels_of_meta meta)
+    ~reported_runtime_id:result.model_used
 
 let turn_cost_for_result ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result) : float =
@@ -107,7 +92,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
               meta.runtime.usage.total_tokens + trusted_total_tokens;
             total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
             last_turn_ts = now_ts;
-            last_model_used = surface_model_used;
+            last_model_used = "";
             last_input_tokens = trusted_input_tokens;
             last_output_tokens = trusted_output_tokens;
             last_total_tokens = trusted_total_tokens;
@@ -144,7 +129,7 @@ let direct_turn_observation (meta : keeper_meta) :
   }
 
 let resolve_turn_cascade_name (meta : keeper_meta) =
-  let raw_name = String.trim meta.cascade_name in
+  let raw_name = String.trim (Keeper_types.cascade_name_of_meta meta) in
   match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
   | Ok cascade_name -> Ok cascade_name
   | Error detail ->
@@ -160,6 +145,45 @@ let keeper_msg_timeout_override args =
     when Float.is_finite timeout_sec && timeout_sec > 0.0 ->
       Ok (Some timeout_sec)
   | Some _ -> Error "timeout_sec must be a positive finite number"
+
+let preflight_keeper_msg ctx args : (unit, string) result =
+  let name = get_string args "name" "" in
+  let message = get_string args "message" "" in
+  if not (validate_name name) then
+    Error "invalid keeper name"
+  else if message = "" then
+    Error "message is required"
+  else
+    let direct_reply = get_bool args "direct_reply" false in
+    match keeper_msg_timeout_override args with
+    | Error e -> Error e
+    | Ok _ ->
+    (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error ("" ^ e)
+    | Ok () ->
+    (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error ("" ^ e)
+    | Ok () ->
+    (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error ("" ^ e)
+    | Ok () ->
+    match ensure_keeper_exists ~ctx ~name with
+    | Error e -> Error ("" ^ e)
+    | Ok meta ->
+      match resolve_turn_cascade_name meta with
+      | Error e -> Error e
+      | Ok turn_cascade_name ->
+        let effective_models =
+          if direct_reply then
+            Cascade_runtime.models_of_cascade_name
+              (Keeper_cascade_profile.Runtime_name turn_cascade_name)
+          else
+            effective_model_labels_for_turn meta
+        in
+        match ensure_api_keys_for_labels effective_models with
+        | Error e -> Error ("" ^ e)
+        | Ok () ->
+          Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
@@ -494,17 +518,19 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ~on_compaction_started:(fun () ->
                     Keeper_exec_context.dispatch_keeper_phase_event
                       ~config:ctx.config
+                      ~origin:Keeper_registry.Post_turn_lifecycle
                       ~keeper_name:meta.name
                       Keeper_state_machine.Compaction_started)
                   ~on_handoff_started:(fun () ->
                     Keeper_exec_context.dispatch_keeper_phase_event
                       ~config:ctx.config
+                      ~origin:Keeper_registry.Post_turn_lifecycle
                       ~keeper_name:meta.name
                       Keeper_state_machine.Handoff_started)
                   ~meta
                   ~model:result.model_used
                   ~primary_model_max_tokens:max_cascade_context
-                  ~current_turn_overflow_blocker:None
+                  ~current_turn_blocker_info:None
                   ~checkpoint:result.checkpoint
                 |> resilience_handles.sync_lifecycle_meta
               in
@@ -532,7 +558,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                | Ok () -> ()
                | Error msg ->
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_write_meta_failures
+                     Keeper_metrics.metric_keeper_write_meta_failures
                      ~labels:
                        [ ("keeper", updated_meta.name);
                          ("phase",
@@ -575,14 +601,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       to miss and operators trusted metric jsonl as
                       ground truth. *)
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_metric_emit_dropped
+                     Keeper_metrics.metric_keeper_metric_emit_dropped
                      ~labels:[
                        ("keeper", updated_meta.name);
                        ("channel", "turn");
                        ("site", "keeper_turn_msg");
                      ] ();
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_turn_metrics_snapshot_failures
+                     Keeper_metrics.metric_keeper_turn_metrics_snapshot_failures
                      ~labels:[("keeper", updated_meta.name); ("site", "turn")]
                      ();
                    Log.Keeper.error
@@ -654,7 +680,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 `Assoc [
                   ("reply", `String result.response_text);
                   ("model", `String surface_model_used);
-                  ("model_used_raw", `String result.model_used);
+                  ("model_used_raw", `String surface_model_used);
                   ("turns", `Int result.turn_count);
                   ("tool_calls", `Int result.tool_calls_made);
                   ( "tool_call_evidence",

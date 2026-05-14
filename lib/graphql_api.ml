@@ -375,6 +375,14 @@ let message_typ =
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
         ~resolve:(fun _ (message : Masc_domain.message) -> message.timestamp);
+      Schema.field "expiresAt"
+        ~typ:Schema.float
+        ~args:Arg.[]
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.expires_at);
+      Schema.field "relevance"
+        ~typ:(Schema.non_null Schema.string)
+        ~args:Arg.[]
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.relevance);
     ]
 
 let room_state_typ =

@@ -35,6 +35,11 @@ let test_parse_json_safe_invalid () =
 let test_parse_json_safe_repairs_invalid_utf8_inside_string () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
+  let metric_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_persistence_utf8_repair
+      ()
+  in
   let replacement = "\xEF\xBF\xBD" in
   let result = parse_json_safe ~context:"utf8-fixture" "{\"msg\":\"ok\xffbad\"}" in
   match result with
@@ -44,7 +49,15 @@ let test_parse_json_safe_repairs_invalid_utf8_inside_string () =
     check string "invalid byte replaced" ("ok" ^ replacement ^ "bad") msg;
     let stats = persistence_utf8_repair_stats () in
     check int "one repaired read" 1 stats.repaired_reads;
-    check int "one invalid byte" 1 stats.repaired_bytes
+    check int "one invalid byte" 1 stats.repaired_bytes;
+    let metric_after =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        Masc_mcp.Prometheus.metric_persistence_utf8_repair
+        ()
+    in
+    check (float 0.0001) "UTF-8 repair counter +1"
+      (metric_before +. 1.0)
+      metric_after
 
 let test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair () =
   let open Safe_ops in
@@ -79,6 +92,33 @@ let test_parse_json_safe_rate_limits_repeated_utf8_repair_logs () =
   let stats = persistence_utf8_repair_stats () in
   check int "both repairs counted" 2 stats.repaired_reads;
   check int "duplicate repair warning suppressed" 1 (List.length logs)
+
+let test_repair_utf8_text_with_stats_reports_changed_payload () =
+  let open Safe_ops in
+  reset_persistence_utf8_repair_stats_for_tests ();
+  let replacement = "\xEF\xBF\xBD" in
+  let result =
+    repair_utf8_text_with_stats ~surface:"test" ~path:"with-stats"
+      "left\xffright"
+  in
+  check bool "changed" true result.changed;
+  check int "invalid byte count" 1 result.invalid_bytes;
+  check string "text repaired" ("left" ^ replacement ^ "right") result.text;
+  let stats = persistence_utf8_repair_stats () in
+  check int "repair counted" 1 stats.repaired_reads
+
+let test_repair_utf8_text_with_stats_keeps_clean_payload_unchanged () =
+  let open Safe_ops in
+  reset_persistence_utf8_repair_stats_for_tests ();
+  let input = "already valid" in
+  let result =
+    repair_utf8_text_with_stats ~surface:"test" ~path:"clean" input
+  in
+  check bool "unchanged" false result.changed;
+  check int "no invalid bytes" 0 result.invalid_bytes;
+  check bool "text physically reused" true (result.text == input);
+  let stats = persistence_utf8_repair_stats () in
+  check int "repair not counted" 0 stats.repaired_reads
 
 let test_sanitize_json_utf8_covers_safe_constructors () =
   let open Safe_ops in
@@ -498,6 +538,10 @@ let () =
         test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair;
       test_case "rate limits repeated utf8 repair logs" `Quick
         test_parse_json_safe_rate_limits_repeated_utf8_repair_logs;
+      test_case "repair with stats reports changed payload" `Quick
+        test_repair_utf8_text_with_stats_reports_changed_payload;
+      test_case "repair with stats keeps clean payload unchanged" `Quick
+        test_repair_utf8_text_with_stats_keeps_clean_payload_unchanged;
       test_case "sanitizes safe constructors" `Quick
         test_sanitize_json_utf8_covers_safe_constructors;
       test_case "sanitizes with raw preserved" `Quick

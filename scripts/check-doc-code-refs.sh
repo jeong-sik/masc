@@ -52,7 +52,7 @@ missing=()
 
 extract_code_refs() {
   local file="$1"
-  awk -v stamp="$stamp_filter" '
+  LC_ALL=C awk -v stamp="$stamp_filter" '
     BEGIN { fm = 0; in_refs = 0; stamp_ok = (stamp == "") ? 1 : 0 }
     /^---[[:space:]]*$/ {
       fm++

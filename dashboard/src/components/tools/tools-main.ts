@@ -17,7 +17,7 @@ import { ConfigResolutionPanel } from './config-resolution-panel'
 import { ActionButton } from '../common/button'
 import { ToolExecutor } from '../tool-executor/tool-executor'
 import { formatElapsedCompact } from '../../lib/format-time'
-import { sourceHealthClass } from '../common/source-health'
+import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 
 type ToolsView = 'inventory' | 'executor'
 const activeView = signal<ToolsView>('inventory')
@@ -35,6 +35,7 @@ export function Tools() {
   const error = toolsError.value
   const inventory = data?.tool_inventory.tools ?? []
   const usage = data?.tool_usage ?? null
+  const usageCoverageGap = usage ? coverageGapDisplay(usage) : null
 
   useEffect(() => {
     if (!toolsData.value && !toolsLoading.value) {
@@ -71,7 +72,7 @@ export function Tools() {
                 등록됨 ${usage.registered_count} (모든 MCP 서버 합산) · 사용된 ${usage.distinct_tools_called} · 미사용 ${usage.never_called_count}
               </div>
               <div class="text-3xs text-[var(--color-fg-muted)] mb-2">
-                <span class="font-mono">${usage.source ?? 'tool_usage'}</span>
+                <span class="font-mono">${usage.source ?? '(unknown source)'}</span>
                 <span class="mx-1">·</span>
                 <span class="font-mono ${sourceHealthClass(usage.health)}">${usage.health ?? 'unknown'}</span>
                 <span class="mx-1">·</span>
@@ -79,6 +80,12 @@ export function Tools() {
                 <span class="mx-1">·</span>
                 <span>${(usage.entry_count ?? 0).toLocaleString()} durable rows</span>
               </div>
+              ${usageCoverageGap ? html`
+                <div class="mb-2 grid gap-0.5 text-3xs text-[var(--color-status-warn)]">
+                  <span>${usageCoverageGap.summary}</span>
+                  ${usageCoverageGap.details.map(detail => html`<span class="font-mono break-all">${detail}</span>`)}
+                </div>
+              ` : null}
             `
           : null}
         <${ToolMetrics} />

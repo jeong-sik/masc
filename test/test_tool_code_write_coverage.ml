@@ -29,7 +29,7 @@ let json_string_field key text =
 
 let tool_code_write_policy_load_failure_metric () =
   Prometheus.metric_value_or_zero
-    Prometheus.metric_keeper_tool_policy_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_tool_policy_failures
     ~labels:[("site", "tool_code_write_load_failed"); ("preset", "n/a")]
     ()
 
@@ -192,7 +192,7 @@ let make_ctx () : Tool_code_write.context =
 
 let dispatch_exn ctx ~name ~args =
   match Tool_code_write.dispatch ctx ~name ~args with
-  | Some result -> result
+  | Some result -> (result.success, result.legacy_message)
   | None -> fail ("dispatch returned None for " ^ name)
 
 let test_allowed_org () =

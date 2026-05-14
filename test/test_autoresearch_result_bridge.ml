@@ -179,6 +179,10 @@ let test_attribution_evidence_has_loop_identity () =
       (match List.assoc_opt "cycle" fields with
        | Some (`Int n) -> Some n
        | _ -> None);
+    Alcotest.(check bool) "model_used redacted" true
+      (match List.assoc_opt "model_used" fields with
+       | Some `Null -> true
+       | _ -> false);
     Alcotest.(check bool) "has rationale for Passed" true
       (List.mem_assoc "rationale" fields)
   | _ -> Alcotest.fail "evidence must be object"

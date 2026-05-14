@@ -560,8 +560,10 @@ function StaleTerminationPanel({
 
 type ReactivityView = 'health' | 'lifecycle' | 'events' | 'pause' | 'proactive' | 'stale'
 
+const DEFAULT_REACTIVITY_VIEW: ReactivityView = 'health'
+
 const VIEW_CHIPS: Array<{ key: ReactivityView; label: string; title?: string }> = [
-  { key: 'health',           label: '상태 그리드',     title: '전체 키퍼 phase/활동 빠른 뷰' },
+  { key: DEFAULT_REACTIVITY_VIEW, label: '상태 그리드',     title: '전체 키퍼 phase/활동 빠른 뷰' },
   { key: 'lifecycle',        label: '상태 전환',       title: '키퍼 FSM 전환 타임라인' },
   { key: 'events', label: '생명주기 이벤트', title: '수퍼바이저 생명주기 이벤트 (Started, Restarted, Dead_cleaned 등)' },
   { key: 'pause',            label: '자동 일시정지',   title: '스톰/버짓 자동 일시정지 이벤트' },
@@ -573,7 +575,7 @@ const VIEW_CHIPS: Array<{ key: ReactivityView; label: string; title?: string }> 
 
 /** Keeper Reactivity Monitor — real-time keeper lifecycle observability. */
 export function KeeperReactivityMonitor({ defaultView }: { defaultView?: ReactivityView }) {
-  const activeView = useSignal<ReactivityView>(defaultView ?? 'health')
+  const activeView = useSignal<ReactivityView>(defaultView ?? DEFAULT_REACTIVITY_VIEW)
   const metricsLoading = useSignal(false)
   const metricsError = useSignal<string | null>(null)
   const parsedMetrics = useSignal<ParsedMetric[]>([])
@@ -621,9 +623,6 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
       <div class="flex items-center justify-between">
         <div class="flex flex-col gap-0.5">
           <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">키퍼 반응성 모니터</h3>
-          <p class="text-2xs text-[var(--color-fg-muted)]">
-            phase 전환, 자동 일시정지, 프로액티브 스킵 이유, stale 종료 패턴을 한 곳에서 봅니다
-          </p>
         </div>
         ${isNonLifecycle ? html`
           <div class="flex items-center gap-2">

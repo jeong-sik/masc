@@ -13,21 +13,12 @@ type budget = {
   attempt_wall_max : float;
 }
 
-(* §4.1 Recommended starting points. Final values must be empirically
-   calibrated against [scripts/diag-keeper-cycle.sh] output after
-   PR-2 wiring is enabled in [observe] mode. *)
-
-let cloud_fast : budget =
-  { ttft_max = 30.0; inter_chunk_max = 20.0; attempt_wall_max = 180.0 }
-
-let cloud_thinking : budget =
-  { ttft_max = 60.0; inter_chunk_max = 30.0; attempt_wall_max = 300.0 }
-
-let local_27b : budget =
-  { ttft_max = 120.0; inter_chunk_max = 60.0; attempt_wall_max = 900.0 }
-
-let local_70b_plus : budget =
-  { ttft_max = 240.0; inter_chunk_max = 90.0; attempt_wall_max = 1800.0 }
+(* Conservative first-attempt budget used before the runtime has observed a
+   successful sample for the concrete provider/model candidate. Later attempts
+   are tuned from successful TTFT/inter-chunk/wall samples in
+   [Cascade_attempt_liveness_config]. *)
+let bootstrap : budget =
+  { ttft_max = 600.0; inter_chunk_max = 120.0; attempt_wall_max = 1800.0 }
 
 module Stream_chunk = struct
   type kind =
@@ -75,6 +66,21 @@ type output =
   | Outcome of failure
   | Completed
 
+(** Metric recorder — caller (e.g. cascade_attempt_liveness_observer)
+    supplies callbacks for TTFT seconds, TBT seconds, and liveness outcome.
+    Pure FSM stays IO-free; side effects live in the recorder. *)
+type recorder = {
+  record_ttft : float -> unit;
+  record_inter_chunk : float -> unit;
+  record_liveness_outcome : failure option -> unit;
+}
+
+let null_recorder = {
+  record_ttft = (fun _ -> ());
+  record_inter_chunk = (fun _ -> ());
+  record_liveness_outcome = (fun _ -> ());
+}
+
 (* Decision table — RFC-0022 §4.5.
 
    Invariants enforced here:
@@ -85,7 +91,8 @@ type output =
          on the same tick (caller of cascade_fsm gets the most specific
          kill class; matches §1 invariant L2 "no double kill"). *)
 
-let step (b : budget) (s : state) (e : event) : state * output =
+let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
+  : state * output =
   match s, e with
   (* Terminal states absorb every event without moving. The FSM does
      not re-enter Awaiting once it has left. *)
@@ -101,6 +108,8 @@ let step (b : budget) (s : state) (e : event) : state * output =
 
   (* Awaiting × chunk(any non-Done): transition to Streaming. *)
   | Awaiting { started_at }, Chunk (_, received_at) ->
+      let ttft_seconds = received_at -. started_at in
+      recorder.record_ttft ttft_seconds;
       ( Streaming { started_at; last_chunk_at = received_at }
       , Continue )
 
@@ -108,6 +117,7 @@ let step (b : budget) (s : state) (e : event) : state * output =
      [now - started_at >= ttft_max] kills the attempt. *)
   | Awaiting { started_at }, Tick now
     when now -. started_at >= b.ttft_max ->
+      recorder.record_liveness_outcome (Some No_first_token);
       (Failed No_first_token, Outcome No_first_token)
 
   | Awaiting _, Tick _ -> (s, Continue)
@@ -115,6 +125,7 @@ let step (b : budget) (s : state) (e : event) : state * output =
   (* Awaiting × Provider_wire_error: provider failed before any chunk;
      classify as wire error, not liveness — let cascade FSM decide. *)
   | Awaiting _, Provider_wire_error msg ->
+      recorder.record_liveness_outcome (Some (Provider_error msg));
       ( Failed (Provider_error msg)
       , Outcome (Provider_error msg) )
 
@@ -123,7 +134,9 @@ let step (b : budget) (s : state) (e : event) : state * output =
       (Success, Completed)
 
   (* Streaming × chunk(any non-Done): advance last_chunk_at. *)
-  | Streaming { started_at; last_chunk_at = _ }, Chunk (_, received_at) ->
+  | Streaming { started_at; last_chunk_at = prev_last }, Chunk (_, received_at) ->
+      let tbt_seconds = received_at -. prev_last in
+      recorder.record_inter_chunk tbt_seconds;
       ( Streaming { started_at; last_chunk_at = received_at }
       , Continue )
 
@@ -134,13 +147,16 @@ let step (b : budget) (s : state) (e : event) : state * output =
   | Streaming { started_at; last_chunk_at }, Tick now ->
       let gap = now -. last_chunk_at in
       let wall = now -. started_at in
-      if gap >= b.inter_chunk_max then
+      if gap >= b.inter_chunk_max then begin
+        recorder.record_liveness_outcome (Some Inter_chunk_idle);
         (Failed Inter_chunk_idle, Outcome Inter_chunk_idle)
-      else if wall >= b.attempt_wall_max then
+      end else if wall >= b.attempt_wall_max then begin
+        recorder.record_liveness_outcome (Some Wall_exceeded);
         (Failed Wall_exceeded, Outcome Wall_exceeded)
-      else
+      end else
         (s, Continue)
 
   | Streaming _, Provider_wire_error msg ->
+      recorder.record_liveness_outcome (Some (Provider_error msg));
       ( Failed (Provider_error msg)
       , Outcome (Provider_error msg) )

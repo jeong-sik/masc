@@ -74,7 +74,7 @@ let contains_substring haystack needle =
 
 let with_config_dir f =
   with_temp_dir "keeper-config-ssot" @@ fun config_dir ->
-  let cascade_path = Filename.concat config_dir "cascade.json" in
+  let cascade_path = Filename.concat config_dir "cascade.toml" in
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
@@ -86,14 +86,31 @@ let with_config_dir f =
     (fun () ->
       write_file
         cascade_path
-        {|{
-  "big_three_models": ["test-only:model"]
-}|};
+        {|[providers.custom]
+protocol = "openai-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.mock]
+api-name = "mock"
+max-context = 128000
+tools-support = true
+
+[custom.mock]
+
+[tier.keeper_unified]
+members = ["custom.mock"]
+
+[tier-group.keeper_unified]
+tiers = ["keeper_unified"]
+
+[routes.keeper_turn]
+target = "tier-group.keeper_unified"
+|};
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
       Cascade_catalog_runtime.install_snapshot_for_tests
         ~source_path:cascade_path
-        ~profile_names:[ Keeper_config.default_cascade_name ];
+        ~profile_names:[ (Keeper_config.default_cascade_name ()) ];
       f config_dir)
 
 (** Test: TOML personality fields overwrite stale runtime JSON values. *)
@@ -1018,7 +1035,7 @@ preset = "social"
   | Ok updated ->
       check string "goal" "TOML goal" updated.Keeper_types.goal;
       check string "cascade_name reset to keeper default"
-        Keeper_config.default_cascade_name updated.cascade_name
+        ((Keeper_config.default_cascade_name ())) (Keeper_types.cascade_name_of_meta updated)
 
 let test_social_model_resynced_from_declarative_defaults () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -1096,7 +1113,7 @@ cascade_name = "missing_profile"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Ok updated ->
       failf "expected unknown cascade_name to be rejected, got %s"
-        updated.cascade_name
+        (Keeper_types.cascade_name_of_meta updated)
   | Error detail ->
       check bool "points at profile.cascade_name" true
         (contains_substring detail "profile.cascade_name");

@@ -21,17 +21,19 @@
 let counter_for ~program ~timeout_sec =
   Masc_mcp.Prometheus.metric_value_or_zero
     Masc_mcp.Coord.process_timeout_metric
-    ~labels:[
-      ("program", program);
-      ("timeout_sec", Printf.sprintf "%.0f" timeout_sec);
-    ]
+    ~labels:
+      [ "program", program
+      ; ("timeout_bucket", Masc_mcp.Timeout_bucket.(to_label (of_seconds timeout_sec)))
+      ]
     ()
+;;
 
 let test_metric_name_stable () =
   Alcotest.(check string)
     "process timeout canonical metric name"
     Masc_mcp.Prometheus.metric_process_timeout
     Masc_mcp.Coord.process_timeout_metric
+;;
 
 let test_metric_registered_at_init () =
   let text = Masc_mcp.Prometheus.to_prometheus_text () in
@@ -39,7 +41,8 @@ let test_metric_registered_at_init () =
     try
       ignore (Str.search_forward (Str.regexp_string literal) text 0);
       true
-    with Not_found -> false
+    with
+    | Not_found -> false
   in
   Alcotest.(check bool)
     "process timeout HELP registered"
@@ -49,23 +52,22 @@ let test_metric_registered_at_init () =
     "process timeout TYPE registered"
     true
     (has "# TYPE masc_process_timeout_total counter")
+;;
 
 let test_argv_program_basename () =
   Alcotest.(check string)
     "absolute path → basename"
     "git"
-    (Process_eio.argv_program
-       [ "/usr/bin/git"; "status"; "--porcelain" ]);
+    (Process_eio.argv_program [ "/usr/bin/git"; "status"; "--porcelain" ]);
   Alcotest.(check string)
     "bare command → unchanged"
     "gh"
     (Process_eio.argv_program [ "gh"; "auth"; "status" ])
+;;
 
 let test_argv_program_empty () =
-  Alcotest.(check string)
-    "empty argv → sentinel"
-    "<empty>"
-    (Process_eio.argv_program [])
+  Alcotest.(check string) "empty argv → sentinel" "<empty>" (Process_eio.argv_program [])
+;;
 
 let test_record_increments () =
   let program = "test_program_9632" in
@@ -81,6 +83,7 @@ let test_record_increments () =
     "+1 again"
     (before +. 2.0)
     (counter_for ~program ~timeout_sec)
+;;
 
 let test_program_isolation () =
   (* Two programs with the same timeout must not bleed. *)
@@ -93,6 +96,7 @@ let test_program_isolation () =
     "program A unchanged"
     before_a
     (counter_for ~program:prog_a ~timeout_sec)
+;;
 
 let test_timeout_sec_isolation () =
   (* Same program with two budgets must split into separate series. *)
@@ -108,30 +112,60 @@ let test_timeout_sec_isolation () =
     "60s budget unchanged"
     before_60
     (counter_for ~program ~timeout_sec:60.0)
+;;
+
+(* Pin the boundary semantics + label vocabulary so a future refactor
+   that drifts [of_seconds] thresholds or [to_label] strings surfaces
+   as a test failure here, not as a silent dashboard regression. *)
+let test_bucket_matrix () =
+  let cases =
+    [ -1.0, "lt_1s", "negative routes to lt_1s"
+    ; 0.0, "lt_1s", "zero routes to lt_1s"
+    ; 0.999, "lt_1s", "sub-1s"
+    ; 1.0, "ge_1s_lt_15s", "1.0 boundary lands in next bucket"
+    ; 14.999, "ge_1s_lt_15s", "just under 15"
+    ; 15.0, "ge_15s_lt_60s", "15.0 boundary"
+    ; 59.999, "ge_15s_lt_60s", "just under 60"
+    ; 60.0, "ge_60s_lt_300s", "60.0 boundary"
+    ; 299.999, "ge_60s_lt_300s", "just under 300"
+    ; 300.0, "ge_300s", "300.0 boundary"
+    ; 9999.0, "ge_300s", "very long"
+    ; Float.nan, "lt_1s", "NaN routes to lt_1s"
+    ; Float.infinity, "lt_1s", "+infinity routes to lt_1s"
+    ; Float.neg_infinity, "lt_1s", "-infinity routes to lt_1s"
+    ]
+  in
+  List.iter
+    (fun (f, expected_label, label) ->
+      let actual = Masc_mcp.Timeout_bucket.(to_label (of_seconds f)) in
+      Alcotest.(check string) label expected_label actual)
+    cases
+;;
 
 let () =
-  Alcotest.run "process_timeout_counter_9632"
-    [
-      ( "metric_name",
-        [
-          Alcotest.test_case "canonical name stable" `Quick
-            test_metric_name_stable;
-          Alcotest.test_case "registered in Prometheus init" `Quick
-            test_metric_registered_at_init;
-        ] );
-      ( "argv_program",
-        [
-          Alcotest.test_case "basename" `Quick test_argv_program_basename;
-          Alcotest.test_case "empty sentinel" `Quick test_argv_program_empty;
-        ] );
-      ( "record",
-        [
-          Alcotest.test_case "increments on call" `Quick test_record_increments;
-        ] );
-      ( "isolation",
-        [
-          Alcotest.test_case "programs isolated" `Quick test_program_isolation;
-          Alcotest.test_case "timeout_sec isolated" `Quick
-            test_timeout_sec_isolation;
-        ] );
+  Alcotest.run
+    "process_timeout_counter_9632"
+    [ ( "metric_name"
+      , [ Alcotest.test_case "canonical name stable" `Quick test_metric_name_stable
+        ; Alcotest.test_case
+            "registered in Prometheus init"
+            `Quick
+            test_metric_registered_at_init
+        ] )
+    ; ( "argv_program"
+      , [ Alcotest.test_case "basename" `Quick test_argv_program_basename
+        ; Alcotest.test_case "empty sentinel" `Quick test_argv_program_empty
+        ] )
+    ; "record", [ Alcotest.test_case "increments on call" `Quick test_record_increments ]
+    ; ( "isolation"
+      , [ Alcotest.test_case "programs isolated" `Quick test_program_isolation
+        ; Alcotest.test_case "timeout_sec isolated" `Quick test_timeout_sec_isolation
+        ] )
+    ; ( "bucket_matrix"
+      , [ Alcotest.test_case
+            "of_seconds × to_label boundary + non-finite matrix"
+            `Quick
+            test_bucket_matrix
+        ] )
     ]
+;;

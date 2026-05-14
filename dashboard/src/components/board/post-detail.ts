@@ -11,13 +11,16 @@ import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
 import { TextInput } from '../common/input'
 import { stripStateBlocks } from '../../keeper-message'
-import { navigate } from '../../router'
+import { navigate, replaceRoute, route } from '../../router'
 import { ModerationBadge } from './moderation-badge'
 import { ReactionBar } from './reaction-bar'
 import {
   boardActorAvatarKey,
   boardActorDisplayName,
   boardActorTitle,
+  contributorQualityBadgeClass,
+  contributorQualityBandLabel,
+  contributorQualityPercent,
   navigateToAuthor,
 } from '../../lib/board-utils'
 import {
@@ -43,6 +46,21 @@ import type { BoardComment, BoardPost } from './board-state'
 
 const MAX_INLINE_COMMENT_DEPTH = 5
 const INITIAL_CHILD_REPLY_LIMIT = 5
+
+function cleanCommentRouteParam(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+function clearCommentRouteFocus(postId: string): void {
+  const params: Record<string, string> = {
+    ...route.value.params,
+    section: 'board',
+    post: postId,
+  }
+  delete params.comment
+  replaceRoute('workspace', params)
+}
 
 // ── Expiry chip (returns html, kept in UI layer) ───────────────────
 function expiryChip(post: BoardPost) {
@@ -169,6 +187,7 @@ function CommentItem({
   depth = 0,
   childrenMap,
   descendantCounts,
+  focusedCommentId = null,
   forceThreadExpanded = false,
   suppressCollapseToggle = false,
 }: {
@@ -177,6 +196,7 @@ function CommentItem({
   depth?: number
   childrenMap: ReadonlyMap<string, readonly BoardComment[]>
   descendantCounts: ReadonlyMap<string, number>
+  focusedCommentId?: string | null
   forceThreadExpanded?: boolean
   suppressCollapseToggle?: boolean
 }) {
@@ -206,11 +226,22 @@ function CommentItem({
   const hiddenSiblingReplyCount = Math.max(0, replies.length - visibleReplies.length)
   const canLoadMoreSiblingReplies = showReplies && !forceThreadExpanded && hiddenSiblingReplyCount > 0
   const score = comment.vote_balance ?? comment.votes ?? ((comment.votes_up ?? 0) - (comment.votes_down ?? 0))
+  const scoreLabel = comment.vote_blind ? '투표 후 공개' : String(score)
+  const scoreAria = comment.vote_blind ? '댓글 점수 투표 후 공개' : `댓글 점수 ${score}`
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
   const authorTitle = boardActorTitle(comment.author, comment.author_identity)
   const upvoteActive = comment.current_vote === 'up'
   const downvoteActive = comment.current_vote === 'down'
+  const isRouteFocused = focusedCommentId === comment.id
+  const commentToneClass = isRouteFocused
+    ? 'border-[var(--color-brass-border)] bg-[var(--color-brass-soft)]'
+    : 'border-[var(--color-border-divider)] bg-[var(--color-bg-surface)]'
+  const depthBorderClass = depth > 0
+    ? isRouteFocused
+      ? 'border-l-2 border-l-[var(--color-brass-border)]'
+      : 'border-l-2 border-l-[var(--accent-20)]'
+    : ''
 
   const handleCommentVote = async (dir: 'up' | 'down') => {
     try {
@@ -225,7 +256,10 @@ function CommentItem({
 
   return html`
     <div style=${indentStyle}>
-      <div class="board-comment rounded-[var(--r-1)] p-3 bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
+      <div
+        class=${`board-comment rounded-[var(--r-1)] border p-3 ${commentToneClass} ${depthBorderClass}`}
+        data-route-focused-comment=${isRouteFocused ? comment.id : undefined}
+      >
         <div class="flex items-center gap-2 mb-1.5">
           ${canToggleReplies ? html`
             <button
@@ -249,7 +283,13 @@ function CommentItem({
               disabled=${upvoteActive}
               onClick=${() => handleCommentVote('up')}
             >▲</button>
-            <span class="min-w-5 text-center text-2xs font-semibold tabular-nums text-[var(--color-fg-secondary)]">${score}</span>
+            <span
+              class=${comment.vote_blind
+                ? 'min-w-14 text-center text-[10px] font-medium leading-tight text-[var(--color-fg-muted)]'
+                : 'min-w-5 text-center text-2xs font-semibold tabular-nums text-[var(--color-fg-secondary)]'}
+              aria-label=${scoreAria}
+              title=${scoreLabel}
+            >${scoreLabel}</span>
             <button
               type="button"
               class=${`h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]'}`}
@@ -316,7 +356,7 @@ function CommentItem({
       </div>
       ${showReplies ? html`
         <div class="flex flex-col gap-1.5 mt-1.5">
-          ${visibleReplies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${childForceExpanded} suppressCollapseToggle=${suppressCollapseToggle} />`)}
+          ${visibleReplies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} descendantCounts=${descendantCounts} focusedCommentId=${focusedCommentId} forceThreadExpanded=${childForceExpanded} suppressCollapseToggle=${suppressCollapseToggle} />`)}
           ${canLoadMoreSiblingReplies ? html`
             <button
               type="button"
@@ -331,7 +371,15 @@ function CommentItem({
 }
 
 // ── Comment thread ─────────────────────────────────────────────────
-export function CommentThread({ comments, postId }: { comments: BoardComment[]; postId: string }) {
+export function CommentThread({
+  comments,
+  postId,
+  focusedCommentId = null,
+}: {
+  comments: BoardComment[]
+  postId: string
+  focusedCommentId?: string | null
+}) {
   const query = useSignal('')
   const [expanded, setExpanded] = useState(false)
   const INITIAL_SHOW = 5
@@ -350,7 +398,8 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
 
   const isFiltering = query.value.trim() !== ''
   const hiddenCount = filteredRoots.length - INITIAL_SHOW
-  const visible = expanded || filteredRoots.length <= INITIAL_SHOW
+  const forceFocusedThreadOpen = focusedCommentId !== null
+  const visible = forceFocusedThreadOpen || expanded || filteredRoots.length <= INITIAL_SHOW
     ? filteredRoots
     : filteredRoots.slice(-INITIAL_SHOW)
 
@@ -370,7 +419,7 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
       ${isFiltering && filteredRoots.length === 0 ? html`
         <${EmptyState} message=${`"${query.value.trim()}" 일치하는 댓글 없음`} compact />
       ` : null}
-      ${!expanded && hiddenCount > 0 ? html`
+      ${!forceFocusedThreadOpen && !expanded && hiddenCount > 0 ? html`
         <${ActionButton}
           variant="subtle"
           size="sm"
@@ -378,8 +427,8 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기<//>
       ` : null}
-      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} descendantCounts=${descendantCounts} forceThreadExpanded=${isFiltering} suppressCollapseToggle=${isFiltering} />`)}
-      ${expanded && hiddenCount > 0 ? html`
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} descendantCounts=${descendantCounts} focusedCommentId=${focusedCommentId} forceThreadExpanded=${isFiltering || forceFocusedThreadOpen} suppressCollapseToggle=${isFiltering || forceFocusedThreadOpen} />`)}
+      ${!forceFocusedThreadOpen && expanded && hiddenCount > 0 ? html`
         <${ActionButton}
           variant="subtle"
           size="sm"
@@ -388,6 +437,54 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
         >접기<//>
       ` : null}
     </div>
+  `
+}
+
+function findCommentById(comments: readonly BoardComment[], commentId: string): BoardComment | null {
+  return comments.find(comment => comment.id === commentId) ?? null
+}
+
+function CommentRouteFocusPanel({
+  commentId,
+  comments,
+  postId,
+}: {
+  commentId: string
+  comments: readonly BoardComment[]
+  postId: string
+}) {
+  const comment = findCommentById(comments, commentId)
+  const authorLabel = comment ? boardActorDisplayName(comment.author, comment.author_identity) : null
+
+  return html`
+    <section
+      class="mb-3 rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      data-testid="board-comment-route-focus"
+      aria-label="Board comment route focus"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+            ROUTE FOCUS
+          </div>
+          <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
+            <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+              COMMENT ${commentId}
+            </span>
+            <span class="font-mono text-3xs text-[var(--color-fg-muted)]">
+              ${comment ? `author ${authorLabel}` : 'comment not loaded'}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          onClick=${() => clearCommentRouteFocus(postId)}
+        >
+          CLEAR
+        </button>
+      </div>
+    </section>
   `
 }
 
@@ -441,8 +538,16 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const qualityPercent = contributorQualityPercent(post.contributor_quality)
+  const qualityBand = contributorQualityBandLabel(post.contributor_quality)
+  const qualityTitle = qualityPercent === null
+    ? undefined
+    : `기여자 품질 ${qualityPercent}점 · ${qualityBand}`
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
+  const postVoteLabel = post.vote_blind ? '투표 후 공개' : `${post.votes ?? 0} votes`
+  const postVoteAria = post.vote_blind ? '게시글 점수 투표 후 공개' : `게시글 점수 ${post.votes ?? 0}`
+  const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
 
   return html`
     <div>
@@ -468,17 +573,28 @@ export function PostDetail({ post }: { post: BoardPost }) {
             <span class="text-sm">${authorAvatar(authorAvatarKey)}</span>
             <${ActionButton} variant="subtle" size="sm" class="text-xs text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(post.author, undefined, post.author_identity)}>${authorLabel}<//>
             <span class="text-2xs text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
-            <span class="text-2xs text-[var(--color-fg-muted)]">${post.votes ?? 0} votes</span>
+            <span
+              class="text-2xs text-[var(--color-fg-muted)]"
+              aria-label=${postVoteAria}
+              title=${postVoteLabel}
+            >${postVoteLabel}</span>
           </div>
 
           <!-- Badges -->
-          ${(post.hearth || post.visibility || post.expires_at || post.classification_reason || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
+          ${(post.hearth || post.visibility || post.expires_at || post.classification_reason || qualityPercent !== null || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
                     ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
                     ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
+                    ${qualityPercent !== null ? html`
+                      <span
+                        class=${`inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
+                        aria-label=${qualityTitle}
+                        title=${qualityTitle}
+                      >품질 ${qualityPercent}</span>
+                    ` : null}
                     ${expiryChip(post)}
                     <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
                   </div>
@@ -530,9 +646,12 @@ export function PostDetail({ post }: { post: BoardPost }) {
 
       <div class="mt-4">
         <${Card} title="댓글">
+          ${focusedCommentId ? html`
+            <${CommentRouteFocusPanel} commentId=${focusedCommentId} comments=${detailComments.value} postId=${post.id} />
+          ` : null}
           ${detailLoading.value
             ? html`<${LoadingState}>댓글 불러오는 중...<//>`
-            : html`<${CommentThread} comments=${detailComments.value} postId=${post.id} />`}
+            : html`<${CommentThread} comments=${detailComments.value} postId=${post.id} focusedCommentId=${focusedCommentId} />`}
           <${CommentForm} postId=${post.id} />
         <//>
       </div>

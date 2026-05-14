@@ -132,6 +132,14 @@ let test_portal_tools_require_worker () =
       (Tool_access_policy.allows_name worker_policy tool_name))
     [ "masc_portal_open"; "masc_portal_close"; "masc_portal_send" ]
 
+let test_sidecar_allowed_for_dashboard_worker () =
+  let worker_policy = Tool_access_role.policy_for_role Worker in
+  check bool "Worker (dashboard) allows sidecar tool" true
+    (Tool_access_policy.allows_name worker_policy "sidecar");
+  let admin_policy = Tool_access_role.policy_for_role Admin in
+  check bool "Admin allows sidecar tool" true
+    (Tool_access_policy.allows_name admin_policy "sidecar")
+
 let test_permissions_promoted_to_metadata_ssot () =
   ignore
     (Masc_mcp.Mcp_server_eio.create_state ~test_mode:true
@@ -249,6 +257,8 @@ let () =
             test_channel_gate_requires_worker;
           test_case "portal tools require worker" `Quick
             test_portal_tools_require_worker;
+          test_case "sidecar tool allowed for dashboard worker" `Quick
+            test_sidecar_allowed_for_dashboard_worker;
           test_case "permissions promoted to metadata ssot" `Quick
             test_permissions_promoted_to_metadata_ssot;
         ] );

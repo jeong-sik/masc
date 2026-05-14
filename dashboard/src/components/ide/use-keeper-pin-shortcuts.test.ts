@@ -24,7 +24,7 @@ async function mountHost(
   // Preact schedules useEffect on a microtask but vitest+jsdom shows a
   // race on the first render of the file (registry empty after a single
   // setTimeout(0) tick). vi.waitFor polls until the side effect lands —
-  // robust across cold/warm module state.
+  // stable across cold/warm module state.
   await vi.waitFor(() => {
     if (manager.getAll().length < 5) throw new Error('shortcuts not registered yet')
   })

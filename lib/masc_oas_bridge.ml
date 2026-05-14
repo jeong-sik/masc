@@ -15,8 +15,10 @@
     pass [~caller] explicitly or use {!run_with_caller}, which
     accepts a typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
-let run_safe ?(caller = "unknown") ~timeout_s fn =
-  if not (Float.is_finite timeout_s) || Float.compare timeout_s 0.0 <= 0 then
+let default_caller = "unknown"
+let min_timeout_s = 0.0
+let run_safe ?(caller = default_caller) ~timeout_s fn =
+  if not (Float.is_finite timeout_s) || Float.compare timeout_s min_timeout_s <= 0 then
     invalid_arg
       (Printf.sprintf
          "Masc_oas_bridge.run_safe: timeout_s must be positive and finite \

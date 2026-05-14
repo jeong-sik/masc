@@ -9,7 +9,7 @@
   bottom: 12px;
   z-index: 1100;
   display: flex;
-  gap: 4px;
+  gap: var(--sp-1);
   padding: 4px;
   background: var(--color-bg-surface, #1a1814);
   border: 1px solid var(--color-border-default, #3a352c);
@@ -22,7 +22,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: var(--sp-1) var(--sp-2);
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-fg-muted, #8a857c);
@@ -77,7 +77,7 @@
   align-items: center;
   justify-content: center;
   width: 18px; height: 18px;
-  margin-left: 2px;
+  margin-left: var(--sp-0h);
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-fg-disabled, #6b6258);
@@ -127,7 +127,7 @@
   font: var(--fs-11)/1.4 var(--font-mono);
 }
 .st-list-h {
-  padding: 8px 12px 6px;
+  padding: var(--sp-2) var(--sp-3) 6px;
   font-size: var(--fs-9);
   letter-spacing: .12em;
   text-transform: uppercase;
@@ -137,7 +137,7 @@
 .st-list-row {
   display: grid;
   grid-template-columns: 12px 100px 70px 1fr;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   padding: 5px 12px;
   border-bottom: 1px solid var(--color-border-divider, #2a261f);

@@ -43,18 +43,32 @@ let get_phase name =
   | None -> Alcotest.fail ("keeper not found: " ^ name)
   | Some e -> e.phase
 
+let paired_lifecycle_origin = function
+  | KSM.Compaction_started
+  | KSM.Compaction_completed _
+  | KSM.Compaction_failed _
+  | KSM.Handoff_started
+  | KSM.Handoff_completed _
+  | KSM.Handoff_failed _ -> R.Post_turn_lifecycle
+  | _ -> R.Generic_dispatch
+
 let dispatch name event =
-  match R.dispatch_event ~base_path:bp name event with
+  match R.dispatch_event ~base_path:bp ~origin:(paired_lifecycle_origin event) name event with
   | Ok tr -> tr
   | Error e -> Alcotest.fail (KSM.transition_error_to_string e)
 
 let dispatch_expect_rejected name event =
-  match R.dispatch_event ~base_path:bp name event with
+  match R.dispatch_event ~base_path:bp ~origin:(paired_lifecycle_origin event) name event with
   | Ok _ -> Alcotest.fail "expected rejected transition"
-  (* R.dispatch_event returns a closed transition_error type:
-     rejected terminal keepers yield either Terminal_state or Invalid_transition. *)
+  (* R.dispatch_event returns a closed transition_error type.  Terminal
+     keepers always yield Terminal_state (apply_event guards on
+     terminal phase before invoking check_event_precondition).  This
+     helper is also reused for non-terminal rejection-path tests
+     elsewhere — accept Invalid_transition / Precondition_violation
+     so a single helper covers both regimes. *)
   | Error (KSM.Terminal_state _) -> ()
   | Error (KSM.Invalid_transition _) -> ()
+  | Error (KSM.Precondition_violation _) -> ()
 
 let setup name =
   R.clear ();

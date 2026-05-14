@@ -30,7 +30,7 @@ let loop_summary_json (base_path : string)
       ("loop_id", `String state.loop_id);
       ("goal", `String state.goal);
       ("metric_fn", `String state.metric_fn);
-      ("model_model", `String state.model_model);
+      ("model_model", `String "runtime");
       ("target_file", `String state.target_file);
       ("status", `String (Autoresearch_serde.status_to_string state.status));
       ("current_cycle", `Int state.current_cycle);
@@ -77,7 +77,7 @@ let persisted_to_loop_summary_json (base_path : string)
       ("loop_id", `String p.loop_id);
       ("goal", `String p.goal);
       ("metric_fn", `String p.metric_fn);
-      ("model_model", `String p.model_model);
+      ("model_model", `String "runtime");
       ("target_file", `String p.target_file);
       ("status", `String (Autoresearch_serde.status_to_string p.status));
       ("current_cycle", `Int p.current_cycle);

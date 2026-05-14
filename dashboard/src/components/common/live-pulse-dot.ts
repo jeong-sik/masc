@@ -29,8 +29,8 @@ interface LivePulseView {
     - `stale`: last tick older than 2× interval — sampler is frozen or
       tab was backgrounded. Amber dot, no pulse.
     2× threshold mirrors Datadog's "missed one expected heartbeat →
-    still healthy; missed two → something's wrong" convention, robust
-    to one-off scheduling jitter. */
+    still healthy; missed two → something's wrong" convention, tolerant
+    of one-off scheduling jitter. */
 export function classifyLivePulse(
   lastTickMs: number | null,
   nowMs: number,

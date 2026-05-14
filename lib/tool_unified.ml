@@ -119,5 +119,5 @@ let summary_report () : Yojson.Safe.t =
     ("tool_distribution", tool_dist);
     ("dispatch_v2_enabled", `Bool Tool_dispatch.v2_enabled);
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
-    ("cascade_metrics", Oas_worker.cascade_metrics_json ());
+    ("cascade_metrics", Cascade_legacy_runner.cascade_metrics_json ());
   ]

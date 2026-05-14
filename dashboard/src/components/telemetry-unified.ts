@@ -17,10 +17,10 @@ import {
   sharedTelemetrySummary,
   sharedTelemetrySummaryError,
 } from './fleet-data-core'
-import { route } from '../router'
+import { replaceRoute, route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
-import { formatTimeAgo } from '../lib/format-time'
+import { formatElapsedCompact } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
 import { Btn } from './btn'
@@ -28,6 +28,8 @@ import { OasHealthChip } from './oas-health-chip'
 import { CopyIdButton } from './common/copy-id-button'
 import { ringFocusClasses } from './common/ring'
 import { StatTile } from './common/stat-tile'
+import { coverageGapDisplay } from './common/source-health'
+import { TimeAgo } from './common/time-ago'
 
 interface StoreSnapshot {
   keepers: number
@@ -62,6 +64,13 @@ interface TelemetryState {
 const sourceMeta = telemetrySourceMeta
 
 type TelemetryCondensedCategory = 'heartbeat' | 'polling'
+
+interface TelemetryRouteFocus {
+  readonly sessionId: string | null
+  readonly operationId: string | null
+  readonly workerRunId: string | null
+  readonly query: string | null
+}
 
 export type TelemetryDisplayItem =
   | {
@@ -128,10 +137,6 @@ function formatTs(ts: number): string {
   })
 }
 
-function timeAgoSafe(ts: number): string {
-  return ts === 0 ? '' : formatTimeAgo(ts)
-}
-
 function normalizeText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
@@ -168,6 +173,42 @@ function telemetryScopeBadges(entry: TelemetryEntry): string[] {
     compactId(normalizeText(entry.operation_id), 'OP'),
     compactId(normalizeText(entry.worker_run_id), 'WR'),
   ].filter((value): value is string => Boolean(value))
+}
+
+function telemetryRouteFocusFromParams(
+  params: Record<string, string | undefined>,
+): TelemetryRouteFocus | null {
+  const focus = {
+    sessionId: normalizeText(params.session_id),
+    operationId: normalizeText(params.operation_id),
+    workerRunId: normalizeText(params.worker_run_id),
+    query: normalizeText(params.q),
+  }
+  return focus.sessionId || focus.operationId || focus.workerRunId || focus.query
+    ? focus
+    : null
+}
+
+function clearTelemetryRouteFocus(): void {
+  const params: Record<string, string> = {
+    ...route.value.params,
+    section: 'fleet-health',
+    view: 'event-log',
+  }
+  delete params.session_id
+  delete params.operation_id
+  delete params.worker_run_id
+  delete params.q
+  replaceRoute('monitoring', params)
+}
+
+function telemetryRouteFocusBadges(focus: TelemetryRouteFocus): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  return [
+    focus.sessionId ? { label: 'SESSION', value: focus.sessionId } : null,
+    focus.operationId ? { label: 'OPERATION', value: focus.operationId } : null,
+    focus.workerRunId ? { label: 'WORKER', value: focus.workerRunId } : null,
+    focus.query ? { label: 'QUERY', value: focus.query } : null,
+  ].filter((value): value is { readonly label: string; readonly value: string } => value !== null)
 }
 
 function telemetryToolName(entry: TelemetryEntry): string | null {
@@ -263,12 +304,9 @@ function entryPreview(e: TelemetryEntry): string {
     case 'keeper_metric': {
       const name = normalizeText(e.name) ?? '-'
       const channel = normalizeText(e.channel) ?? '-'
-      const rawModel = normalizeText(e.model_used)
-      const isStatusTag = rawModel != null && /^(turn-exhausted|unknown|none|-)$/i.test(rawModel)
-      const model = rawModel == null ? '-' : isStatusTag ? `(${rawModel})` : rawModel
       const tools = normalizeStringArray(e.tools_used)
       const toolCount = typeof e.tool_call_count === 'number' ? e.tool_call_count : tools.length
-      return `${name} [${channel}] model=${model} tools=${toolCount}`
+      return `${name} [${channel}] tools=${toolCount}`
     }
     case 'agent_event': {
       const event = e.event
@@ -292,12 +330,12 @@ function entryPreview(e: TelemetryEntry): string {
       return `${keeper} -> ${tool}`
     }
     case 'trajectory_tool_call': {
-      const tool = telemetryToolName(e) ?? 'tool'
+      const tool = telemetryToolName(e) ?? '(unknown tool)'
       const keeper =
         normalizeText(e.keeper_name)
         ?? normalizeText(recordField(e.runtime_contract, 'keeper_name'))
         ?? normalizeText(e.keeper)
-        ?? 'unknown'
+        ?? '(unknown keeper)'
       return `${keeper} -> ${tool}`
     }
     case 'tool_usage': {
@@ -306,7 +344,7 @@ function entryPreview(e: TelemetryEntry): string {
       return `${caller || 'unknown'} -> ${tool}`
     }
     case 'oas_event': {
-      const eventType = normalizeText(e.event_type) ?? normalizeText(e.type) ?? 'oas'
+      const eventType = normalizeText(e.event_type) ?? normalizeText(e.type) ?? '(unknown event_type)'
       const agentName = normalizeText(e.agent_name)
       const toolName = normalizeText(e.tool_name)
       const turn = typeof e.turn === 'number' ? e.turn : null
@@ -320,14 +358,14 @@ function entryPreview(e: TelemetryEntry): string {
       return parts.length > 0 ? `${eventType}: ${parts.join(' · ')}` : eventType
     }
     case 'execution_receipt': {
-      const keeper = normalizeText(e.keeper_name) ?? normalizeText(e.agent_name) ?? 'unknown'
-      const outcome = normalizeText(e.outcome) ?? normalizeText(e.operator_disposition) ?? 'recorded'
+      const keeper = normalizeText(e.keeper_name) ?? normalizeText(e.agent_name) ?? '(unknown keeper)'
+      const outcome = normalizeText(e.outcome) ?? normalizeText(e.operator_disposition) ?? '(no outcome)'
       const reason = normalizeText(e.terminal_reason_code)
       return reason ? `${keeper} receipt ${outcome} (${reason})` : `${keeper} receipt ${outcome}`
     }
     case 'goal_event': {
-      const goal = normalizeText(e.goal_id) ?? 'unknown-goal'
-      const eventType = normalizeText(e.event_type) ?? 'goal_event'
+      const goal = normalizeText(e.goal_id) ?? '(unknown goal)'
+      const eventType = normalizeText(e.event_type) ?? '(unknown event_type)'
       return `${goal} ${eventType}`
     }
     case 'tool_metric': {
@@ -361,19 +399,35 @@ export function filterTelemetryDisplayItems(
   if (trimmed === '') return items
   const needle = trimmed.toLowerCase()
 
-  const haystackForItem = (item: TelemetryDisplayItem): string => {
-    if (item.kind === 'entry') {
-      const source = typeof item.entry.source === 'string' ? item.entry.source : ''
-      const preview = entryPreview(item.entry)
-      const badges = telemetryScopeBadges(item.entry).join(' ')
-      return `${source} ${preview} ${badges}`
-    }
-    const sources = item.sourceKeys.join(' ')
-    const badges = item.scopeBadges.join(' ')
-    return `${sources} ${item.label} ${badges}`
-  }
+  return items.filter(item => telemetryDisplayItemHaystack(item).toLowerCase().includes(needle))
+}
 
-  return items.filter(item => haystackForItem(item).toLowerCase().includes(needle))
+function telemetryEntryHaystack(entry: TelemetryEntry): string {
+  const source = typeof entry.source === 'string' ? entry.source : ''
+  const preview = entryPreview(entry)
+  const badges = telemetryScopeBadges(entry).join(' ')
+  return `${source} ${preview} ${badges}`
+}
+
+function telemetryDisplayItemHaystack(item: TelemetryDisplayItem): string {
+  if (item.kind === 'entry') return telemetryEntryHaystack(item.entry)
+  const sources = item.sourceKeys.join(' ')
+  const badges = item.scopeBadges.join(' ')
+  const previews = item.entries.map(entry => entryPreview(entry)).join(' ')
+  return `${sources} ${item.label} ${badges} ${previews}`
+}
+
+function telemetryEntryMatchesRouteFocus(entry: TelemetryEntry, focus: TelemetryRouteFocus): boolean {
+  if (focus.sessionId && normalizeText(entry.session_id) !== focus.sessionId) return false
+  if (focus.operationId && normalizeText(entry.operation_id) !== focus.operationId) return false
+  if (focus.workerRunId && normalizeText(entry.worker_run_id) !== focus.workerRunId) return false
+  if (focus.query && !telemetryEntryHaystack(entry).toLowerCase().includes(focus.query.toLowerCase())) return false
+  return true
+}
+
+function telemetryDisplayItemMatchesRouteFocus(item: TelemetryDisplayItem, focus: TelemetryRouteFocus): boolean {
+  if (item.kind === 'entry') return telemetryEntryMatchesRouteFocus(item.entry, focus)
+  return item.entries.some(entry => telemetryEntryMatchesRouteFocus(entry, focus))
 }
 
 export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): TelemetryDisplayItem[] {
@@ -522,21 +576,61 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
 function condensedStats(items: readonly TelemetryDisplayItem[]) {
   let groups = 0
   let groupedEntries = 0
-  let collapsedEntries = 0
   const byCategory = new Map<TelemetryCondensedCategory, number>()
   for (const item of items) {
     if (item.kind !== 'group') continue
     groups += 1
     groupedEntries += item.count
-    collapsedEntries += Math.max(0, item.count - 1)
     byCategory.set(item.category, (byCategory.get(item.category) ?? 0) + item.count)
   }
-  return { groups, groupedEntries, collapsedEntries, byCategory }
+  return { groups, groupedEntries, byCategory }
+}
+
+function telemetrySourceStatusParts(src: TelemetrySourceSummary): string[] {
+  const parts: string[] = []
+  const coverageGap = coverageGapDisplay(src)
+  if (src.health) {
+    parts.push(src.stale_reason ? `${src.health}: ${src.stale_reason}` : src.health)
+  } else if (src.stale_reason) {
+    parts.push(src.stale_reason)
+  }
+  if (coverageGap) {
+    parts.push(coverageGap.summary)
+  }
+  if (typeof src.latest_age_s === 'number' && Number.isFinite(src.latest_age_s)) {
+    parts.push(`age ${formatElapsedCompact(src.latest_age_s)}`)
+  }
+  if (typeof src.freshness_slo_s === 'number' && Number.isFinite(src.freshness_slo_s)) {
+    parts.push(`SLO ${formatElapsedCompact(src.freshness_slo_s)}`)
+  }
+  return parts
+}
+
+function telemetrySourceProvenanceRows(src: TelemetrySourceSummary): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = []
+  if (src.producer) rows.push({ label: 'producer', value: src.producer })
+  if (src.durable_store) rows.push({ label: 'store', value: src.durable_store })
+  if (src.dashboard_surface) rows.push({ label: 'surface', value: src.dashboard_surface })
+  const coverageGap = coverageGapDisplay(src)
+  for (const detail of coverageGap?.details ?? []) {
+    const separator = detail.indexOf(' ')
+    if (separator <= 0) {
+      rows.push({ label: 'gap', value: detail })
+    } else {
+      rows.push({
+        label: `gap ${detail.slice(0, separator)}`,
+        value: detail.slice(separator + 1),
+      })
+    }
+  }
+  return rows
 }
 
 function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const meta = sourceMeta(src.source)
   const hasData = src.entry_count > 0
+  const statusParts = telemetrySourceStatusParts(src)
+  const provenanceRows = telemetrySourceProvenanceRows(src)
 
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
@@ -554,21 +648,38 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
       ${src.exists === false ? html`
         <div class="text-xs text-[var(--color-fg-muted)] italic">store not found</div>
       ` : null}
+      ${statusParts.length > 0 ? html`
+        <div class="mt-2 text-3xs font-mono text-[var(--color-fg-muted)]">${statusParts.join(' · ')}</div>
+      ` : null}
+      ${provenanceRows.length > 0 ? html`
+        <div class="mt-2 grid gap-1 text-3xs text-[var(--color-fg-disabled)]">
+          ${provenanceRows.map(row => html`
+            <div class="flex min-w-0 gap-1">
+              <span class="shrink-0">${row.label}:</span>
+              <span class="min-w-0 break-all font-mono">${row.value}</span>
+            </div>
+          `)}
+        </div>
+      ` : null}
     </div>
   `
 }
 
-function EntryRow({ entry }: { entry: TelemetryEntry }) {
+function EntryRow({ entry, routeFocused = false }: { entry: TelemetryEntry; routeFocused?: boolean }) {
   const expanded = useSignal(false)
   const meta = sourceMeta(entry.source)
   const ts = entryTimestamp(entry)
   const success = entry.success as boolean | undefined
   const scopeBadges = telemetryScopeBadges(entry)
   const rawJson = JSON.stringify(entry, null, 2)
+  const focusedClasses = routeFocused
+    ? 'border-l-2 border-l-[var(--color-brass-1)] bg-[var(--color-brass-soft)]'
+    : ''
 
   return html`
     <div
-      class="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors"
+      class=${`border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors ${focusedClasses}`}
+      data-route-focused-telemetry=${routeFocused ? 'true' : undefined}
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <div class="flex items-center gap-1">
@@ -579,8 +690,10 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
           aria-expanded=${expanded.value}
         >
           <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
-          <span class="font-mono text-[var(--color-fg-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
-            ${timeAgoSafe(ts)}
+          <span class="w-56 flex-shrink-0">
+            ${ts === 0
+              ? html`<span class="font-mono text-[var(--color-fg-muted)]">-</span>`
+              : html`<${TimeAgo} timestamp=${ts} mode="both" class="font-mono text-[var(--color-fg-muted)]"/>`}
           </span>
           ${success != null ? html`
             <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--color-status-ok)]' : 'text-[var(--bad-light)]'}">
@@ -632,17 +745,21 @@ ${rawJson}</pre>
   `
 }
 
-function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group' }> }) {
+function GroupRow({ item, routeFocused = false }: { item: Extract<TelemetryDisplayItem, { kind: 'group' }>; routeFocused?: boolean }) {
   const expanded = useSignal(false)
   const meta = CONDENSED_CATEGORY_META[item.category]
   const latestPreview = entryPreview(item.entries[0] as TelemetryEntry)
   const sourceIcons = uniqueStrings(item.sourceKeys.map(source => sourceMeta(source).icon))
   const contentId = `telemetry-group-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   const rawJson = JSON.stringify(item.entries, null, 2)
+  const focusedClasses = routeFocused
+    ? 'border-l-2 border-l-[var(--color-brass-1)] bg-[var(--color-brass-soft)]'
+    : 'bg-[var(--color-bg-panel-alt)]'
 
   return html`
     <div
-      class="border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] hover:bg-[var(--color-bg-hover)] transition-colors"
+      class=${`border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors ${focusedClasses}`}
+      data-route-focused-telemetry=${routeFocused ? 'true' : undefined}
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <div class="flex items-center gap-1">
@@ -654,8 +771,10 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           onClick=${() => { expanded.value = !expanded.value }}
         >
           <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
-          <span class="font-mono text-[var(--color-fg-muted)] w-28 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
-            ${timeAgoSafe(item.latestTs)}
+          <span class="w-56 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
+            ${item.latestTs === 0
+              ? html`<span class="font-mono text-[var(--color-fg-muted)]">-</span>`
+              : html`<${TimeAgo} timestamp=${item.latestTs} mode="both" class="font-mono text-[var(--color-fg-muted)]"/>`}
           </span>
           <span class="flex-shrink-0 w-4 text-[var(--color-fg-disabled)]">~</span>
           <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${`${meta.label} · ${item.label} · ${item.count} events`}>
@@ -693,7 +812,11 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
             return html`
               <div class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--black-20)] px-2 py-1.5 text-3xs" key=${`${item.key}:${index}`}>
                 <span class="font-mono font-bold ${entryMeta.color} w-4 text-center flex-shrink-0">${entryMeta.icon}</span>
-                <span class="font-mono text-[var(--color-fg-disabled)] w-24 flex-shrink-0" title=${formatTs(ts)}>${timeAgoSafe(ts)}</span>
+                <span class="w-48 flex-shrink-0">
+                  ${ts === 0
+                    ? html`<span class="font-mono text-[var(--color-fg-disabled)]">-</span>`
+                    : html`<${TimeAgo} timestamp=${ts} mode="both" class="font-mono text-[var(--color-fg-disabled)]"/>`}
+                </span>
                 <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
               </div>
             `
@@ -719,6 +842,49 @@ ${rawJson}</pre>
   `
 }
 
+function TelemetryRouteFocusPanel({
+  focus,
+  matchCount,
+}: {
+  focus: TelemetryRouteFocus | null
+  matchCount: number
+}) {
+  if (!focus) return null
+  const badges = telemetryRouteFocusBadges(focus)
+  return html`
+    <section
+      class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      data-testid="telemetry-route-focus"
+      aria-label="Telemetry route focus"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+            ROUTE FOCUS
+          </div>
+          <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
+            ${badges.map(badge => html`
+              <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                ${badge.label} ${badge.value}
+              </span>
+            `)}
+            <span class="font-mono text-3xs text-[var(--color-fg-muted)]">
+              ${matchCount.toLocaleString()} focused item${matchCount === 1 ? '' : 's'}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          onClick=${clearTelemetryRouteFocus}
+        >
+          CLEAR
+        </button>
+      </div>
+    </section>
+  `
+}
+
 export function TelemetryUnified() {
   const params = route.value.params
   const latestRequestId = useRef(0)
@@ -739,16 +905,18 @@ export function TelemetryUnified() {
   const operationFilter = useSignal(params.operation_id ?? '')
   const workerRunFilter = useSignal(params.worker_run_id ?? '')
   const limit = useSignal(100)
-  const entrySearch = useSignal('')
+  const entrySearch = useSignal(params.q ?? '')
 
   useEffect(() => {
     sessionFilter.value = route.value.params.session_id ?? ''
     operationFilter.value = route.value.params.operation_id ?? ''
     workerRunFilter.value = route.value.params.worker_run_id ?? ''
+    entrySearch.value = route.value.params.q ?? ''
   }, [
     route.value.params.session_id,
     route.value.params.operation_id,
     route.value.params.worker_run_id,
+    route.value.params.q,
   ])
 
   async function load() {
@@ -874,6 +1042,21 @@ export function TelemetryUnified() {
     () => filterTelemetryDisplayItems(allDisplayItems, entrySearchQuery),
     [allDisplayItems, entrySearchQuery],
   )
+  const routeFocus = useMemo(
+    () => telemetryRouteFocusFromParams(route.value.params as Record<string, string | undefined>),
+    [
+      route.value.params.session_id,
+      route.value.params.operation_id,
+      route.value.params.worker_run_id,
+      route.value.params.q,
+    ],
+  )
+  const routeFocusedItemKeys = useMemo(() => {
+    if (!routeFocus) return new Set<string>()
+    return new Set(displayItems
+      .filter(item => telemetryDisplayItemMatchesRouteFocus(item, routeFocus))
+      .map(item => item.key))
+  }, [displayItems, routeFocus])
   const isFilteringEntries = entrySearchQuery.trim() !== ''
   const condensed = useMemo(() => condensedStats(displayItems), [displayItems])
 
@@ -881,18 +1064,18 @@ export function TelemetryUnified() {
     <div class="flex flex-col gap-4">
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
         <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">런타임 진단</div>
-        <div class="mt-1 text-base leading-relaxed text-[var(--color-fg-secondary)]">
-          MASC telemetry store (keeper/tool/agent) 진단 뷰.
-        </div>
-        <div class="mt-3 flex flex-wrap gap-2">
+        <div class="mt-2 flex flex-wrap gap-2">
           <span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-disabled)]">MASC: keeper/tool/agent store</span>
           ${sessionFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">session ${sessionFilter.value}</span>` : null}
           ${operationFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">operation ${operationFilter.value}</span>` : null}
           ${workerRunFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">worker_run ${workerRunFilter.value}</span>` : null}
+          ${route.value.params.q ? html`<span class="rounded-[var(--r-1)] border border-[var(--color-accent-muted)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-accent-fg)]">focus ${route.value.params.q}</span>` : null}
         </div>
       </div>
 
       <${OasHealthChip} />
+
+      <${TelemetryRouteFocusPanel} focus=${routeFocus} matchCount=${routeFocusedItemKeys.size} />
 
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
@@ -1030,8 +1213,8 @@ export function TelemetryUnified() {
         <div class="max-h-150 overflow-y-auto">
           ${displayItems.length > 0
             ? displayItems.map(item => item.kind === 'group'
-              ? html`<${GroupRow} key=${item.key} item=${item} />`
-              : html`<${EntryRow} key=${item.key} entry=${item.entry} />`)
+              ? html`<${GroupRow} key=${item.key} item=${item} routeFocused=${routeFocusedItemKeys.has(item.key)} />`
+              : html`<${EntryRow} key=${item.key} entry=${item.entry} routeFocused=${routeFocusedItemKeys.has(item.key)} />`)
             : isFilteringEntries && allDisplayItems.length > 0
               ? html`<div class="px-4 py-6 text-sm text-[var(--color-fg-muted)]">필터 결과 없음 (${allDisplayItems.length} items)</div>`
               : html`<div class="px-4 py-6 text-sm text-[var(--color-fg-muted)]">선택한 scope에 해당하는 MASC telemetry entry가 없습니다.</div>`}

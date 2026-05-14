@@ -28,6 +28,7 @@ let default_max_checkpoint_messages = 120
     accumulates hundreds of text blocks or multi-MB synthetic context. *)
 let default_max_checkpoint_text_blocks_per_message = 32
 let default_max_checkpoint_text_chars_per_message = 16 * 1024
+let default_max_checkpoint_content_chars_total = 512 * 1024
 let checkpoint_text_cap_marker = "\n[capped]"
 
 (** ToolResult block caps — analogous to text block caps above.
@@ -295,9 +296,19 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
              List.find_map
                (function
                  | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-                 | _ -> None)
+                 (* Other content_block variants do not carry a tool_use_id. *)
+                 | Agent_sdk.Types.Text _
+                 | Agent_sdk.Types.Thinking _
+                 | Agent_sdk.Types.RedactedThinking _
+                 | Agent_sdk.Types.ToolUse _
+                 | Agent_sdk.Types.Image _
+                 | Agent_sdk.Types.Document _
+                 | Agent_sdk.Types.Audio _ -> None)
                m.content
-         | _ -> None)
+         (* Non-Tool roles never own a tool_call_id. *)
+         | Agent_sdk.Types.System
+         | Agent_sdk.Types.User
+         | Agent_sdk.Types.Assistant -> None)
   in
   (* SSOT: structured [content_blocks] only. The previous flat [content]
      field was a duplicate of [text_of_message m] used by legacy
@@ -371,21 +382,42 @@ let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   List.filter_map
     (function
       | Agent_sdk.Types.ToolUse { id; _ } -> Some id
-      | _ -> None)
+      (* Only [ToolUse] carries a tool-use id; other blocks contribute none. *)
+      | Agent_sdk.Types.Text _
+      | Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.RedactedThinking _
+      | Agent_sdk.Types.ToolResult _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ -> None)
     msg.content
 
 let tool_result_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   List.filter_map
     (function
       | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-      | _ -> None)
+      (* Only [ToolResult] carries a tool_use_id reference; others contribute none. *)
+      | Agent_sdk.Types.Text _
+      | Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.RedactedThinking _
+      | Agent_sdk.Types.ToolUse _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ -> None)
     msg.content
 
 let has_tool_result_block (msg : Agent_sdk.Types.message) : bool =
   List.exists
     (function
       | Agent_sdk.Types.ToolResult _ -> true
-      | _ -> false)
+      (* Only [ToolResult] qualifies; other blocks are not tool-result evidence. *)
+      | Agent_sdk.Types.Text _
+      | Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.RedactedThinking _
+      | Agent_sdk.Types.ToolUse _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ -> false)
     msg.content
 
 (** Trim messages to at most [max_count] while preserving ToolUse/ToolResult
@@ -464,7 +496,14 @@ let repair_dangling_tool_use_messages
         (function
           | Agent_sdk.Types.ToolUse { id; _ } ->
               not (List.mem id next_tool_result_ids)
-          | _ -> false)
+          (* Only [ToolUse] blocks can be dangling without a paired ToolResult. *)
+          | Agent_sdk.Types.Text _
+          | Agent_sdk.Types.Thinking _
+          | Agent_sdk.Types.RedactedThinking _
+          | Agent_sdk.Types.ToolResult _
+          | Agent_sdk.Types.Image _
+          | Agent_sdk.Types.Document _
+          | Agent_sdk.Types.Audio _ -> false)
         current.content
     in
     if not has_dangling then current
@@ -516,7 +555,14 @@ let repair_orphan_tool_result_messages
                 (function
                   | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
                       not (List.mem tool_use_id prev_tool_use_ids)
-                  | _ -> false)
+                  (* Only [ToolResult] can be orphaned w.r.t. prior ToolUse ids. *)
+                  | Agent_sdk.Types.Text _
+                  | Agent_sdk.Types.Thinking _
+                  | Agent_sdk.Types.RedactedThinking _
+                  | Agent_sdk.Types.ToolUse _
+                  | Agent_sdk.Types.Image _
+                  | Agent_sdk.Types.Document _
+                  | Agent_sdk.Types.Audio _ -> false)
                 msg.content
             in
             if not has_orphan then msg
@@ -735,8 +781,8 @@ let migrate_session_history_logs
        | Ok () -> ()
        | Error detail ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_checkpoint_failures
-             ~labels:[("operation", "migrate_main_history")]
+             Keeper_metrics.metric_keeper_checkpoint_failures
+             ~labels:[("operation", Checkpoint_failure_operation.(to_label Migrate_main_history))]
              ();
            Log.Keeper.error "migrate_session_history_logs: save main history failed for %s: %s"
              main_path detail);
@@ -747,8 +793,8 @@ let migrate_session_history_logs
        | Ok () -> ()
        | Error detail ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_checkpoint_failures
-             ~labels:[("operation", "migrate_internal_history")]
+             Keeper_metrics.metric_keeper_checkpoint_failures
+             ~labels:[("operation", Checkpoint_failure_operation.(to_label Migrate_internal_history))]
              ();
            Log.Keeper.error "migrate_session_history_logs: save internal history failed for %s: %s"
              internal_path detail);
@@ -777,7 +823,14 @@ let persist_message ?source session msg =
     msg.content
     |> List.filter_map (function
          | Agent_sdk.Types.Text text -> Some text
-         | _ -> None)
+         (* Non-Text blocks contribute no inline text to the legacy field. *)
+         | Agent_sdk.Types.Thinking _
+         | Agent_sdk.Types.RedactedThinking _
+         | Agent_sdk.Types.ToolUse _
+         | Agent_sdk.Types.ToolResult _
+         | Agent_sdk.Types.Image _
+         | Agent_sdk.Types.Document _
+         | Agent_sdk.Types.Audio _ -> None)
     |> String.concat "\n"
   in
   if classify_history_entry ~source:source_text ~content:content_text = Drop_line then
@@ -1125,23 +1178,145 @@ let sanitize_checkpoint_message
         { empty_checkpoint_sanitize_stats with dropped_messages = 1 } )
   else (Some { msg with content = kept }, stats)
 
+let checkpoint_content_chars_of_block = function
+  | Agent_sdk.Types.Text text -> String.length text
+  | Agent_sdk.Types.Thinking { content; _ } -> String.length content
+  | Agent_sdk.Types.RedactedThinking text -> String.length text
+  | Agent_sdk.Types.ToolResult { content; _ } -> String.length content
+  | _ -> 0
+
+let checkpoint_content_chars_of_message (msg : Agent_sdk.Types.message) : int =
+  List.fold_left
+    (fun total block -> total + checkpoint_content_chars_of_block block)
+    0
+    msg.content
+
+let cap_checkpoint_message_to_remaining_content
+    ~(remaining : int)
+    (msg : Agent_sdk.Types.message)
+  : Agent_sdk.Types.message option * int * checkpoint_sanitize_stats =
+  let message_chars = checkpoint_content_chars_of_message msg in
+  if message_chars = 0 then (Some msg, 0, empty_checkpoint_sanitize_stats)
+  else if remaining <= 0 then
+    ( None,
+      0,
+      {
+        empty_checkpoint_sanitize_stats with
+        dropped_messages = 1;
+        dropped_chars = message_chars;
+      } )
+  else if message_chars <= remaining then
+    (Some msg, message_chars, empty_checkpoint_sanitize_stats)
+  else
+    let remaining_ref = ref remaining in
+    let used_ref = ref 0 in
+    let kept_rev, stats =
+      List.fold_left
+        (fun (kept_rev, stats) block ->
+           let cap_content rebuild content =
+             let len = String.length content in
+             if len = 0 then
+               (rebuild content :: kept_rev, stats)
+             else if !remaining_ref <= 0 then
+               ( kept_rev,
+                 add_checkpoint_sanitize_stats stats
+                   {
+                     empty_checkpoint_sanitize_stats with
+                     dropped_blocks = 1;
+                     dropped_chars = len;
+                   } )
+             else if len <= !remaining_ref then (
+               remaining_ref := !remaining_ref - len;
+               used_ref := !used_ref + len;
+               (rebuild content :: kept_rev, stats))
+             else
+               let capped, truncated_chars =
+                 truncate_checkpoint_text ~max_chars:!remaining_ref content
+               in
+               let capped_len = String.length capped in
+               remaining_ref := 0;
+               used_ref := !used_ref + capped_len;
+               ( rebuild capped :: kept_rev,
+                 add_checkpoint_sanitize_stats stats
+                   {
+                     empty_checkpoint_sanitize_stats with
+                     truncated_blocks = 1;
+                     truncated_chars;
+                   } )
+           in
+           match block with
+           | Agent_sdk.Types.Text text ->
+               cap_content (fun text -> Agent_sdk.Types.Text text) text
+           | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
+               cap_content
+                 (fun content ->
+                   Agent_sdk.Types.ToolResult
+                     { tool_use_id; content; is_error; json = None })
+                 content
+           | Agent_sdk.Types.Thinking { content; _ } ->
+               cap_content (fun text -> Agent_sdk.Types.Text text) content
+           | Agent_sdk.Types.RedactedThinking text ->
+               cap_content (fun text -> Agent_sdk.Types.Text text) text
+           | _ -> (block :: kept_rev, stats))
+        ([], empty_checkpoint_sanitize_stats)
+        msg.content
+    in
+    let kept = List.rev kept_rev in
+    if kept = [] then
+      ( None,
+        !used_ref,
+        add_checkpoint_sanitize_stats stats
+          { empty_checkpoint_sanitize_stats with dropped_messages = 1 } )
+    else (Some { msg with content = kept }, !used_ref, stats)
+
+let cap_checkpoint_messages_total_content
+    (messages : Agent_sdk.Types.message list)
+  : Agent_sdk.Types.message list * checkpoint_sanitize_stats =
+  let rec loop kept remaining stats = function
+    | [] -> (kept, stats)
+    | msg :: older ->
+        let sanitized, used, msg_stats =
+          cap_checkpoint_message_to_remaining_content ~remaining msg
+        in
+        let kept =
+          match sanitized with
+          | Some msg -> msg :: kept
+          | None -> kept
+        in
+        let remaining = max 0 (remaining - used) in
+        loop
+          kept
+          remaining
+          (add_checkpoint_sanitize_stats stats msg_stats)
+          older
+  in
+  loop
+    []
+    default_max_checkpoint_content_chars_total
+    empty_checkpoint_sanitize_stats
+    (List.rev messages)
+
 let sanitize_checkpoint_messages
     (messages : Agent_sdk.Types.message list)
   : Agent_sdk.Types.message list * checkpoint_sanitize_stats =
-  List.fold_right
-    (fun msg (acc, stats) ->
-       let sanitized_opt, msg_stats = sanitize_checkpoint_message msg in
-       let acc =
-         match sanitized_opt with
-         | Some sanitized -> sanitized :: acc
-         | None -> acc
-       in
-       let stats =
-         add_checkpoint_sanitize_stats stats msg_stats
-       in
-       (acc, stats))
-    messages
-    ([], empty_checkpoint_sanitize_stats)
+  let messages, stats =
+    List.fold_right
+      (fun msg (acc, stats) ->
+         let sanitized_opt, msg_stats = sanitize_checkpoint_message msg in
+         let acc =
+           match sanitized_opt with
+           | Some sanitized -> sanitized :: acc
+           | None -> acc
+         in
+         let stats =
+           add_checkpoint_sanitize_stats stats msg_stats
+         in
+         (acc, stats))
+      messages
+      ([], empty_checkpoint_sanitize_stats)
+  in
+  let messages, total_stats = cap_checkpoint_messages_total_content messages in
+  (messages, add_checkpoint_sanitize_stats stats total_stats)
 
 let sanitize_oas_checkpoint
     ?(repair_orphans = true)
@@ -1154,6 +1329,47 @@ let sanitize_oas_checkpoint
   in
   ({ cp with messages }, stats)
 
+let capped_checkpoint_messages_of_context
+      ~(max_checkpoint_messages : int)
+      (ctx : working_context)
+  : Agent_sdk.Types.message list
+  =
+  (* Shared by checkpoint persistence and pre-dispatch resume: both paths
+     must honor the load-time message cap plus content-size guards. *)
+  let original_messages = messages_of_context ctx in
+  let capped_messages =
+    trim_messages_preserving_pairs original_messages
+      ~max_count:max_checkpoint_messages
+  in
+  let capped_messages_were_truncated =
+    List.length capped_messages < List.length original_messages
+  in
+  let capped_messages =
+    Agent_sdk.Context_reducer.reduce
+      (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
+      capped_messages
+  in
+  let capped_messages, sanitize_stats =
+    sanitize_checkpoint_messages capped_messages
+  in
+  if capped_messages_were_truncated || checkpoint_sanitize_changed sanitize_stats
+  then repair_broken_tool_call_pairs capped_messages
+  else capped_messages
+
+let resume_checkpoint_of_context
+      ~(max_checkpoint_messages : int)
+      (ctx : working_context) : Agent_sdk.Checkpoint.t
+  =
+  let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
+  {
+    ctx.checkpoint with
+    version = Agent_sdk.Checkpoint.checkpoint_version;
+    system_prompt = Some (system_prompt_of_context ctx);
+    messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
+    max_total_tokens = Some (max_tokens_of_context ctx);
+    context = checkpoint_context;
+  }
+
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
   match cp.max_total_tokens with
@@ -1162,7 +1378,7 @@ let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
       match cp.working_context with
       | Some (`Assoc _ as sidecar) ->
           sidecar |> member "max_tokens" |> to_int_option
-          |> Option.value ~default:fallback
+      |> Option.value ~default:fallback
       | _ -> fallback)
 
 let context_of_oas_checkpoint
@@ -1200,8 +1416,9 @@ let checkpoint_model_of_meta (meta : keeper_meta) =
     meta.runtime.usage.last_model_used
     :: Keeper_model_labels.configured_model_labels_of_meta meta
   in
-  List.find_opt (fun value -> String.trim value <> "") candidates
-  |> Option.value ~default:(Provider_adapter.default_local_fallback_label ())
+  match List.find_opt (fun value -> String.trim value <> "") candidates with
+  | Some value -> value
+  | None -> Cascade_runtime_candidate.default_local_runtime_label ()
 
 let save_oas_checkpoint
     ~(max_checkpoint_messages : int)
@@ -1214,32 +1431,6 @@ let save_oas_checkpoint
   let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
-  (* Truncate messages at save time to match the load-time cap.
-     Without this, checkpoints grow unbounded between compaction cycles,
-     causing multi-GB transient allocations when loaded by concurrent keepers. *)
-  let original_messages = messages_of_context ctx in
-  let capped_messages =
-    trim_messages_preserving_pairs original_messages
-      ~max_count:max_checkpoint_messages
-  in
-  let capped_messages_were_truncated =
-    List.length capped_messages < List.length original_messages
-  in
-  (* Stub old tool results at save time: keep only the most recent turn's
-     results in full. During Agent.run the reducer uses keep_recent:3, but
-     at checkpoint persistence we are more aggressive — older tool results
-     are unlikely to be useful on resume and bloat disk/memory. *)
-  let capped_messages =
-    Agent_sdk.Context_reducer.reduce
-      (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
-      capped_messages
-  in
-  let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
-  let capped_messages =
-    if capped_messages_were_truncated
-    then repair_broken_tool_call_pairs capped_messages
-    else capped_messages
-  in
   let checkpoint =
     {
       ctx.checkpoint with
@@ -1248,7 +1439,7 @@ let save_oas_checkpoint
       agent_name;
       model;
       system_prompt = Some (system_prompt_of_context ctx);
-      messages = capped_messages;
+      messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
       created_at = Time_compat.now ();
       max_total_tokens = Some (max_tokens_of_context ctx);
       context = checkpoint_context;
@@ -1273,6 +1464,84 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
           |> Option.value ~default:fallback
       | _ -> fallback)
 
+let latest_state_snapshot_sidecar_path session =
+  Filename.concat session.session_dir "state-snapshot.latest.json"
+
+let state_snapshot_of_sidecar_payload (json : Yojson.Safe.t) =
+  try
+    let open Yojson.Safe.Util in
+    match json |> member "schema_version" |> to_int_option with
+    | Some 1 ->
+        Keeper_memory_policy.keeper_state_snapshot_of_json
+          (json |> member "state_snapshot")
+    | _ -> Keeper_memory_policy.snapshot_of_structured_working_context json
+  with
+  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+
+let load_latest_state_snapshot_sidecar session =
+  let path = latest_state_snapshot_sidecar_path session in
+  if not (Fs_compat.file_exists path) then None
+  else
+    try
+      match Yojson.Safe.from_string (Fs_compat.load_file path)
+            |> state_snapshot_of_sidecar_payload with
+      | Some snapshot -> Some (path, snapshot)
+      | None ->
+          Log.Keeper.warn
+            "keeper:%s state snapshot sidecar malformed: %s"
+            session.session_id path;
+          None
+    with exn ->
+      Log.Keeper.warn
+        "keeper:%s state snapshot sidecar load failed: %s (%s)"
+        session.session_id path (Printexc.to_string exn);
+      None
+
+let latest_message_metadata_snapshot messages =
+  let rec loop = function
+    | [] -> None
+    | msg :: rest -> (
+        match Keeper_memory_policy.snapshot_of_message_metadata msg with
+        | Some _ as snapshot -> snapshot
+        | None -> loop rest)
+  in
+  loop (List.rev messages)
+
+let checkpoint_has_structured_state_snapshot (cp : Agent_sdk.Checkpoint.t) =
+  match cp.working_context with
+  | Some json
+    when Option.is_some
+           (Keeper_memory_policy.snapshot_of_structured_working_context json) ->
+      true
+  | _ -> Option.is_some (latest_message_metadata_snapshot cp.messages)
+
+let hydrate_checkpoint_with_state_snapshot_sidecar session
+    (cp : Agent_sdk.Checkpoint.t) =
+  if checkpoint_has_structured_state_snapshot cp then cp
+  else
+    match load_latest_state_snapshot_sidecar session with
+    | None -> cp
+    | Some (path, snapshot) ->
+        let last_assistant_idx = ref (-1) in
+        List.iteri
+          (fun idx (msg : Agent_sdk.Types.message) ->
+            if msg.role = Agent_sdk.Types.Assistant then last_assistant_idx := idx)
+          cp.messages;
+        if !last_assistant_idx < 0 then cp
+        else (
+          Log.Keeper.debug
+            "keeper:%s hydrating checkpoint continuity from state sidecar: %s"
+            session.session_id path;
+          let messages =
+            List.mapi
+              (fun idx msg ->
+                if idx = !last_assistant_idx then
+                  Keeper_memory_policy.with_snapshot_metadata msg snapshot
+                else msg)
+              cp.messages
+          in
+          { cp with messages })
+
 (* ================================================================ *)
 (* Checkpoint Loading                                                *)
 (* ================================================================ *)
@@ -1293,26 +1562,26 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
   (match oas_result with
    | Error (Parse_error detail) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
-         ~labels:[("operation", "oas_parse")]
+         Keeper_metrics.metric_keeper_checkpoint_failures
+         ~labels:[("operation", Checkpoint_failure_operation.(to_label Oas_parse))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
    | Error (Store_error detail) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
-         ~labels:[("operation", "oas_store")]
+         Keeper_metrics.metric_keeper_checkpoint_failures
+         ~labels:[("operation", Checkpoint_failure_operation.(to_label Oas_store))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
-         ~labels:[("operation", "oas_io")]
+         Keeper_metrics.metric_keeper_checkpoint_failures
+         ~labels:[("operation", Checkpoint_failure_operation.(to_label Oas_io))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
    | Error (Sdk_other_error detail) ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
-         ~labels:[("operation", "oas_sdk")]
+         Keeper_metrics.metric_keeper_checkpoint_failures
+         ~labels:[("operation", Checkpoint_failure_operation.(to_label Oas_sdk))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
    | Error Not_found ->
@@ -1329,8 +1598,8 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     try load_latest_checkpoint session
     with ex ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_checkpoint_failures
-        ~labels:[("operation", "load_legacy")]
+        Keeper_metrics.metric_keeper_checkpoint_failures
+        ~labels:[("operation", Checkpoint_failure_operation.(to_label Load_legacy))]
         ();
       Log.Keeper.error "keeper:%s checkpoint load failed: %s" trace_id
         (Printexc.to_string ex);
@@ -1355,15 +1624,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     |> Option.map (fun checkpoint ->
       let sanitized, stats = sanitize_oas_checkpoint checkpoint in
       if checkpoint_sanitize_changed stats then begin
-        let has_data_loss =
-          stats.dropped_blocks > 0
-          || stats.dropped_messages > 0
-          || stats.dropped_chars > 0
-        in
-        (if has_data_loss then
-           Log.Keeper.warn
-         else
-           Log.Keeper.debug)
+        Log.Keeper.info
           "keeper:%s checkpoint migration sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
           trace_id
           stats.dropped_blocks
@@ -1375,14 +1636,15 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          | Ok () -> ()
          | Error detail ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_checkpoint_failures
-               ~labels:[("operation", "migration_save")]
+               Keeper_metrics.metric_keeper_checkpoint_failures
+               ~labels:[("operation", Checkpoint_failure_operation.(to_label Migration_save))]
                ();
              Log.Keeper.error
                "keeper:%s checkpoint migration save failed: %s"
                trace_id detail)
       end;
       sanitized)
+    |> Option.map (hydrate_checkpoint_with_state_snapshot_sidecar session)
   in
   match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
   | (false, Some checkpoint, _) ->
@@ -1402,8 +1664,8 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          (session, Some ctx)
        with ex ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_checkpoint_failures
-           ~labels:[("operation", "restore_legacy")]
+           Keeper_metrics.metric_keeper_checkpoint_failures
+           ~labels:[("operation", Checkpoint_failure_operation.(to_label Restore_legacy))]
            ();
          Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
            trace_id (Printexc.to_string ex);

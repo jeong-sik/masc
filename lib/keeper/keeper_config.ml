@@ -2,11 +2,22 @@
 
 open Tool_args
 
-(** Default cascade name for keeper turns. Resolved through [routes.keeper_turn]
-    so the concrete profile remains configuration-owned. *)
-let default_cascade_name =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Keeper_turn
+(** Default cascade name for keeper turns. Resolved through the live
+    [Cascade_catalog_runtime] snapshot so the answer reflects the
+    currently-installed catalog rather than module-init state. Falls
+    back to [Cascade_routes.cascade_name_for_use Keeper_turn] (legacy
+    spec-driven path) when the snapshot is not yet available, which
+    matches pre-RFC-0066 behavior during early boot.
+
+    RFC-0066 Phase 1: was a string value evaluated at module init,
+    freezing to the static fallback when the catalog was empty at
+    init time. See issue #14624. *)
+let default_cascade_name () =
+  match Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" () with
+  | Ok name -> name
+  | Error _ ->
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Keeper_turn
 
 
 (** Cascade name for recovery turns when keeper is in Failing phase.
@@ -91,23 +102,21 @@ let bool_default_true_of_env name =
       let v = String.trim v |> String.lowercase_ascii in
       not (v = "0" || v = "false" || v = "no" || v = "n")
 
+let bool_of_string raw =
+  let v = String.trim raw |> String.lowercase_ascii in
+  if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true
+  else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
+  else None
+
 let bool_of_env_default name ~(default : bool) =
   match Env_config_core.raw_value_opt name with
   | None -> default
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then true
-      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then false
-      else default
+  | Some raw -> Option.value (bool_of_string raw) ~default
 
 let bool_of_env_opt name =
   match Env_config_core.raw_value_opt name with
   | None -> None
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true
-      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
-      else None
+  | Some raw -> bool_of_string raw
 
 let valid_name_re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile
 
@@ -122,6 +131,7 @@ let default_room_signal_prompt_enabled = false
 let default_goal_horizon_max_chars = 480
 let default_drift_max_clauses = 6
 let prompt_render_max_bytes = 320
+let legacy_provider_filter_name = "allowed_providers"
 
 let keeper_room_signal_prompt_enabled_override () =
   bool_of_env_opt "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED"
@@ -132,6 +142,7 @@ let removed_keeper_input_key_names =
     "models";
     "allowed_models";
     "active_model";
+    legacy_provider_filter_name;
     "presence_keepalive";
     "presence_keepalive_sec";
     "trigger_mode";
@@ -657,6 +668,15 @@ let keeper_batch_limit_rp =
 let keeper_batch_limit () : int =
   Runtime_params.get keeper_batch_limit_rp
 
+let keeper_board_debounce_window_sec_rp =
+  _rp_float ~key:"keeper.board.debounce_window_sec"
+    ~default:(fun () -> float_of_env_default "MASC_KEEPER_BOARD_DEBOUNCE_SEC"
+                          ~default:2.0 ~min_v:0.0 ~max_v:30.0)
+    ~min_v:0.0 ~max_v:30.0
+    ~description:"Time window to coalesce board signals into one turn (seconds)" ()
+let keeper_board_debounce_window_sec () : float =
+  Runtime_params.get keeper_board_debounce_window_sec_rp
+
 let keeper_tool_cost_max_usd_rp =
   _rp_float ~key:"keeper.turn.tool_cost_max_usd"
     ~default:(fun () -> float_of_env_default "MASC_KEEPER_TOOL_COST_MAX_USD"
@@ -798,7 +818,7 @@ let keeper_unified_max_tokens_rp =
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_UNIFIED_MAX_TOKENS"
                           ~default:65536 ~min_v:256 ~max_v:262144)
     ~min_v:256 ~max_v:262144
-    ~description:"Keeper turn max output tokens fallback (cascade.json overrides to 16384 in production)" ()
+    ~description:"Keeper turn max output tokens fallback (cascade.toml may override in production)" ()
 let keeper_unified_max_tokens () : int =
   Runtime_params.get keeper_unified_max_tokens_rp
 

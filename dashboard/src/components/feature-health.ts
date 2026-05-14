@@ -209,10 +209,11 @@ export function FeatureHealth() {
                       <div class="mt-2 text-2xl font-semibold text-[var(--color-fg-primary)]">
                         ${overview.enabled_count} / ${overview.total_features} 기능 활성화
                       </div>
-                      <div class="mt-2 text-sm leading-airy text-[var(--color-fg-secondary)]">
-                        시스템 기능 플래그 상태를 실시간으로 모니터링합니다.
-                        ${overview.overridden_count ? `${overview.overridden_count}개 플래그가 환경변수로 오버라이드되었습니다.` : ''}
-                      </div>
+                      ${overview.overridden_count ? html`
+                        <div class="mt-2 text-sm leading-airy text-[var(--color-fg-secondary)]">
+                          ${overview.overridden_count}개 플래그가 환경변수로 오버라이드되었습니다.
+                        </div>
+                      ` : null}
                     </div>
                     <button
                       type="button"

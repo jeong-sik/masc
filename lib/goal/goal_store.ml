@@ -279,9 +279,18 @@ and normalize_goal (goal : goal) =
     goal with
     status = goal_status_of_phase goal.phase;
     active_verification_request_id =
+      (* Enumerate every [Goal_phase.t] variant so the compiler flags any
+         new phase added here. Only [Awaiting_verification] keeps an
+         active verification request_id; all other phases clear it as part
+         of [normalize_goal]. A future phase added to [Goal_phase.t] (e.g.
+         a hypothetical [Awaiting_review]) that should also retain the
+         request_id would silently inherit "clear" under the previous
+         [_, _ -> None] catch-all. *)
       (match goal.phase, goal.active_verification_request_id with
       | Goal_phase.Awaiting_verification, request_id -> request_id
-      | _, _ -> None);
+      | ( Goal_phase.Executing | Goal_phase.Awaiting_approval
+        | Goal_phase.Blocked | Goal_phase.Paused
+        | Goal_phase.Completed | Goal_phase.Dropped ), _ -> None);
   }
 
 and goal_status_of_phase = function
@@ -746,9 +755,15 @@ let review_goal config ~goal_id ~(outcome : review_outcome) ?new_horizon ?note (
         last_review_note = note;
         last_review_at = Some now;
         active_verification_request_id =
+          (* Enumerate every [Goal_phase.t] variant. Mirrors the fix
+             applied to [normalize_goal] in PR #14790; this call site
+             was missed in that sweep. Only [Awaiting_verification]
+             retains the active request_id; all other phases clear it. *)
           (match phase with
           | Goal_phase.Awaiting_verification -> goal.active_verification_request_id
-          | _ -> None);
+          | Goal_phase.Executing | Goal_phase.Awaiting_approval
+          | Goal_phase.Blocked | Goal_phase.Paused
+          | Goal_phase.Completed | Goal_phase.Dropped -> None);
         updated_at = now;
       })
 

@@ -9,6 +9,7 @@ module Watchdog = Masc_mcp.Keeper_stale_watchdog
 module KT = Masc_mcp.Keeper_types
 module AQ = Masc_mcp.Keeper_approval_queue
 module KSM = Masc_mcp.Keeper_state_machine
+module KLH = Masc_mcp.Keeper_lifecycle_hooks
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -30,6 +31,37 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+
+let with_config_dir f =
+  let dir = temp_dir () in
+  let config_dir = Filename.concat dir "config" in
+  mkdir_p (Filename.concat config_dir "keepers");
+  mkdir_p (Filename.concat config_dir "personas");
+  let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original;
+      Masc_mcp.Config_dir_resolver.reset ();
+      cleanup_dir dir)
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Masc_mcp.Config_dir_resolver.reset ();
+      f config_dir)
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
@@ -207,6 +239,75 @@ let make_meta name =
   match KT.meta_of_json json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
+
+let test_persona_drift_check_uses_toml_persona_name () =
+  with_config_dir @@ fun config_dir ->
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  let executor_persona_dir =
+    Filename.concat (Filename.concat config_dir "personas") "executor"
+  in
+  mkdir_p executor_persona_dir;
+  write_file
+    (Filename.concat executor_persona_dir "profile.json")
+    {|{"name":"Executor","role":"execution"}|};
+  write_file
+    (Filename.concat keepers_dir "glm-coding-plan.toml")
+    {|
+[keeper]
+name = "glm-coding-plan"
+persona_name = "executor"
+goal = "plan coding work"
+|};
+  check string "drift check honors TOML persona_name" "executor"
+    (Sup.persona_name_for_drift_check (make_meta "glm-coding-plan"))
+
+let test_persona_drift_path_points_to_profile_json () =
+  with_config_dir @@ fun config_dir ->
+  let expected =
+    Filename.concat
+      (Filename.concat (Filename.concat config_dir "personas") "executor")
+      "profile.json"
+  in
+  check
+    string
+    "profile path"
+    expected
+    (Sup.persona_profile_path_for_drift_check
+       ~base_path:(Filename.dirname (Filename.dirname config_dir))
+       "executor")
+
+let test_missing_persona_with_inline_toml_is_warn () =
+  with_config_dir @@ fun config_dir ->
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  write_file
+    (Filename.concat keepers_dir "inline-only.toml")
+    {|
+[keeper]
+name = "inline-only"
+persona_name = "missing-profile"
+goal = "inline keeper metadata is enough to run"
+|};
+  check
+    bool
+    "inline TOML missing profile is warn"
+    true
+    (match Sup.persona_drift_log_level_for_missing_profile
+             (make_meta "inline-only")
+     with
+     | Sup.Persona_drift_warn -> true
+     | Sup.Persona_drift_error -> false)
+
+let test_missing_persona_without_profile_or_toml_is_error () =
+  with_config_dir @@ fun _config_dir ->
+  check
+    bool
+    "missing profile without TOML is error"
+    true
+    (match Sup.persona_drift_log_level_for_missing_profile
+             (make_meta "missing-everywhere")
+     with
+     | Sup.Persona_drift_error -> true
+     | Sup.Persona_drift_warn -> false)
 
 let registered_entries names =
   Reg.clear ();
@@ -479,7 +580,10 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
             {
               base.runtime with
               last_blocker =
-                "turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated";
+                Some
+                  (KT.blocker_info_of_class
+                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
+                     KT.Ambiguous_post_commit_timeout);
             };
         }
       in
@@ -528,7 +632,8 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         | Error err -> fail err
       in
       check bool "paused cleared after approval" false resumed_meta.paused;
-      check string "blocker cleared after approval" "" resumed_meta.runtime.last_blocker;
+      check bool "blocker cleared after approval" true
+        (Option.is_none resumed_meta.runtime.last_blocker);
       check bool "keeper registered after approval" true
         (Reg.is_registered ~base_path:config.base_path meta.name))
 
@@ -560,12 +665,12 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let outcome_labels = [ ("keeper", name); ("outcome", "started") ] in
       let attempts_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_restart_attempts
+          Masc_mcp.Keeper_metrics.metric_keeper_restart_attempts
           ~labels:attempt_labels ()
       in
       let outcomes_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+          Masc_mcp.Keeper_metrics.metric_keeper_restart_outcomes
           ~labels:outcome_labels ()
       in
       let ctx : _ KT.context =
@@ -582,12 +687,12 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
         (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Prometheus.metric_keeper_restart_attempts
+           Masc_mcp.Keeper_metrics.metric_keeper_restart_attempts
            ~labels:attempt_labels ());
       check (float 0.001) "restart started outcome metric incremented"
         (outcomes_before +. 1.0)
         (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+           Masc_mcp.Keeper_metrics.metric_keeper_restart_outcomes
            ~labels:outcome_labels ());
       match Reg.get ~base_path:config.base_path name with
       | None -> fail "expected restarted keeper in registry"
@@ -619,12 +724,12 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       in
       let attempts_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_restart_attempts
+          Masc_mcp.Keeper_metrics.metric_keeper_restart_attempts
           ~labels:attempt_labels ()
       in
       let outcomes_before =
         Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+          Masc_mcp.Keeper_metrics.metric_keeper_restart_outcomes
           ~labels:outcome_labels ()
       in
       let ctx : _ KT.context =
@@ -641,12 +746,12 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
         (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Prometheus.metric_keeper_restart_attempts
+           Masc_mcp.Keeper_metrics.metric_keeper_restart_attempts
            ~labels:attempt_labels ());
       check (float 0.001) "missing-meta outcome metric incremented"
         (outcomes_before +. 1.0)
         (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+           Masc_mcp.Keeper_metrics.metric_keeper_restart_outcomes
            ~labels:outcome_labels ());
       check bool "keeper unregistered after missing meta" false
         (Reg.is_registered ~base_path:config.base_path name))
@@ -690,7 +795,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
         ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
       let baseline =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       let ctx : _ KT.context =
         {
@@ -705,7 +810,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       Sup.sweep_and_recover ctx;
       let after =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       check (float 0.001) "metric_keeper_dead_total incremented by 1"
         (baseline +. 1.0) after;
@@ -716,6 +821,75 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       in
       check bool "keeper phase advanced to Dead"
         true (phase = Masc_mcp.Keeper_state_machine.Dead))
+
+let with_reap_ready_dead_keeper name f =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KLH.reset_for_testing ();
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let meta = make_meta name in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      ignore (Reg.register ~base_path:config.base_path name meta);
+      Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      f ~config ctx)
+
+let event_label = function
+  | KLH.Tombstone_reaped -> "tombstone_reaped"
+  | KLH.Phase_transition _ -> "phase_transition"
+
+let test_sweep_and_recover_fires_tombstone_reaped_hook () =
+  KLH.reset_for_testing ();
+  let name = "tombstone-hook-keeper" in
+  let fired = ref [] in
+  KLH.register (fun ~keeper_id event ->
+    fired := (keeper_id, event_label event) :: !fired);
+  with_reap_ready_dead_keeper name @@ fun ~config ctx ->
+  Sup.sweep_and_recover ctx;
+  check (list (pair string string))
+    "single Tombstone_reaped event"
+    [ (name, "tombstone_reaped") ] (List.rev !fired);
+  check bool "dead keeper unregistered after tombstone cleanup"
+    false (Reg.is_registered ~base_path:config.base_path name)
+
+let test_sweep_and_recover_swallows_failing_tombstone_hook () =
+  KLH.reset_for_testing ();
+  let name = "tombstone-failing-hook-keeper" in
+  let failing_hook_calls = ref 0 in
+  let later_hook_events = ref [] in
+  KLH.register (fun ~keeper_id:_ _ ->
+    incr failing_hook_calls;
+    raise (Failure "intentional tombstone hook failure"));
+  KLH.register (fun ~keeper_id event ->
+    later_hook_events := (keeper_id, event_label event) :: !later_hook_events);
+  with_reap_ready_dead_keeper name @@ fun ~config ctx ->
+  Sup.sweep_and_recover ctx;
+  check int "failing hook invoked exactly once" 1 !failing_hook_calls;
+  check (list (pair string string))
+    "later hook still observes Tombstone_reaped"
+    [ (name, "tombstone_reaped") ] (List.rev !later_hook_events);
+  check bool "dead keeper still unregistered after failing hook"
+    false (Reg.is_registered ~base_path:config.base_path name)
 
 (* ── Phase 2 (#10765): stale-termination storm auto-pause ──────── *)
 
@@ -764,7 +938,7 @@ let test_stale_storm_pause_skips_restart () =
       in
       let baseline_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       let ctx : _ KT.context =
         {
@@ -782,7 +956,7 @@ let test_stale_storm_pause_skips_restart () =
       in
       let after_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       check (float 0.001) "stale_storm_paused counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -833,7 +1007,7 @@ let test_stale_fleet_batch_pause_skips_restart () =
       in
       let baseline_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       let ctx : _ KT.context =
         {
@@ -852,7 +1026,7 @@ let test_stale_fleet_batch_pause_skips_restart () =
       in
       let after_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       check (float 0.001) "stale_fleet_batch_paused counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -862,8 +1036,13 @@ let test_stale_fleet_batch_pause_skips_restart () =
        | Ok (Some m) ->
            check bool "meta.paused = true after fleet batch pause"
              true m.paused;
+           let blocker_detail =
+             match m.runtime.last_blocker with
+             | Some b -> b.detail
+             | None -> ""
+           in
            check string "last_blocker records fleet batch"
-             "stale_fleet_batch" m.runtime.last_blocker
+             "stale_fleet_batch" blocker_detail
        | Ok None -> fail "meta missing after fleet batch pause"
        | Error err -> fail ("read_meta failed: " ^ err));
       check bool "registry entry unregistered after fleet batch pause"
@@ -915,9 +1094,13 @@ let test_stale_fleet_batch_latch_marks_batch_members () =
       (match KT.read_meta config "batch-provider" with
        | Ok (Some m) ->
            check bool "provider root cause remains in blocker text" true
-             (contains_substring m.runtime.last_blocker "provider_runtime_error");
+             (match m.runtime.last_blocker with
+              | Some b -> contains_substring b.detail "provider_runtime_error"
+              | None -> false);
            check bool "provider blocker class is fleet batch" true
-             (m.runtime.last_blocker_class = Some KT.Stale_fleet_batch)
+             (match m.runtime.last_blocker with
+              | Some b -> b.klass = KT.Stale_fleet_batch
+              | None -> false)
        | Ok None -> fail "batch-provider meta missing"
        | Error err -> fail ("read_meta failed: " ^ err)))
 
@@ -951,7 +1134,7 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
       in
       let baseline_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       let ctx : _ KT.context =
         {
@@ -970,7 +1153,7 @@ let test_oas_timeout_budget_loop_pause_skips_restart () =
       in
       let after_dead =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_dead_total
+          Masc_mcp.Keeper_metrics.metric_keeper_dead_total
       in
       check (float 0.001) "oas_timeout_budget_loop counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -1025,7 +1208,10 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
            check bool "meta.paused = true after unresolved watchdog stop"
              true m.paused;
            check bool "budget loop blocker class preserved"
-             true (m.runtime.last_blocker_class = Some KT.Oas_timeout_budget)
+             true
+             (match m.runtime.last_blocker with
+              | Some b -> b.klass = KT.Oas_timeout_budget
+              | None -> false)
        | Ok None -> fail "meta missing after unresolved watchdog stop"
        | Error err -> fail ("read_meta failed: " ^ err));
       check bool "unresolved watchdog-stopped entry reaped"
@@ -1242,7 +1428,7 @@ let test_sweep_auto_resumes_after_backoff () =
        | Error err -> fail err);
       let baseline_auto_resume =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
       in
       let ctx : _ KT.context =
         {
@@ -1267,7 +1453,7 @@ let test_sweep_auto_resumes_after_backoff () =
        | Error err -> fail ("read_meta failed: " ^ err));
       let after_auto_resume =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
       in
       check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
         (baseline_auto_resume +. 1.0) after_auto_resume)
@@ -1307,7 +1493,7 @@ let test_operator_pause_not_auto_resumed () =
        | Error err -> fail err);
       let baseline_auto_resume =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
       in
       let ctx : _ KT.context =
         {
@@ -1329,7 +1515,7 @@ let test_operator_pause_not_auto_resumed () =
        | Error err -> fail ("read_meta failed: " ^ err));
       let after_auto_resume =
         Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Prometheus.metric_keeper_auto_resumed_total
+          Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
@@ -1405,7 +1591,16 @@ let test_persisted_blocker_survives_unregister () =
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "auto-pause-blocker-keeper" in
       let meta = make_meta name in
-      let meta = { meta with runtime = { meta.runtime with last_blocker = "test-blocker"; last_blocker_class = Some KT.Turn_timeout } } in
+      let meta =
+        {
+          meta with
+          runtime =
+            {
+              meta.runtime with
+              last_blocker = Some (KT.blocker_info_of_class ~detail:"test-blocker" KT.Turn_timeout);
+            };
+        }
+      in
       (match KT.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
@@ -1423,8 +1618,11 @@ let test_persisted_blocker_survives_unregister () =
       (* Check if blocker is persisted *)
       (match KT.read_meta config name with
        | Ok (Some m) ->
-           check string "meta.runtime.last_blocker" "test-blocker" m.runtime.last_blocker;
-           check bool "meta.runtime.last_blocker_class" true (m.runtime.last_blocker_class = Some KT.Turn_timeout)
+           (match m.runtime.last_blocker with
+            | Some b ->
+                check string "meta.runtime.last_blocker" "test-blocker" b.detail;
+                check bool "meta.runtime.last_blocker_class" true (b.klass = KT.Turn_timeout)
+            | None -> fail "expected blocker after storm pause");
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
       
@@ -1434,8 +1632,11 @@ let test_persisted_blocker_survives_unregister () =
       (* Read again and verify *)
       (match KT.read_meta config name with
        | Ok (Some m) ->
-           check string "meta.runtime.last_blocker after unregister" "test-blocker" m.runtime.last_blocker;
-           check bool "meta.runtime.last_blocker_class after unregister" true (m.runtime.last_blocker_class = Some KT.Turn_timeout)
+           (match m.runtime.last_blocker with
+            | Some b ->
+                check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
+                check bool "meta.runtime.last_blocker_class after unregister" true (b.klass = KT.Turn_timeout)
+            | None -> fail "expected blocker after unregister")
        | Ok None -> fail "meta missing after unregister"
        | Error err -> fail ("read_meta failed: " ^ err)))
 
@@ -1454,6 +1655,16 @@ let () =
       test_case "under limit" `Quick test_keep_last_n_under_limit;
       test_case "at limit" `Quick test_keep_last_n_at_limit;
       test_case "over limit drops oldest" `Quick test_keep_last_n_over_limit;
+    ];
+    "persona_drift", [
+      test_case "drift check honors TOML persona_name" `Quick
+        test_persona_drift_check_uses_toml_persona_name;
+      test_case "drift path points to profile.json" `Quick
+        test_persona_drift_path_points_to_profile_json;
+      test_case "missing persona with inline TOML is WARN" `Quick
+        test_missing_persona_with_inline_toml_is_warn;
+      test_case "missing persona without TOML is ERROR" `Quick
+        test_missing_persona_without_profile_or_toml_is_error;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;
@@ -1512,6 +1723,10 @@ let () =
     "dead_state_alert", [
       test_case "max_restarts exhaustion emits Dead alert" `Quick
         test_max_restarts_exhaustion_emits_dead_alert;
+      test_case "sweep cleanup fires Tombstone_reaped hook" `Quick
+        test_sweep_and_recover_fires_tombstone_reaped_hook;
+      test_case "failing Tombstone_reaped hook is swallowed" `Quick
+        test_sweep_and_recover_swallows_failing_tombstone_hook;
     ];
     "stale_storm_phase2", [
       test_case "Stale_termination_storm skips restart, persists paused, increments counter" `Quick
@@ -1825,13 +2040,13 @@ let () =
                 let labels = [("keeper_name", name)] in
                 let stuck_seconds =
                   Masc_mcp.Prometheus.metric_value_or_zero
-                    Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_seconds
+                    Masc_mcp.Keeper_metrics.metric_keeper_alive_but_stuck_seconds
                     ~labels
                     ()
                 in
                 let threshold_seconds =
                   Masc_mcp.Prometheus.metric_value_or_zero
-                    Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_threshold_seconds
+                    Masc_mcp.Keeper_metrics.metric_keeper_alive_but_stuck_threshold_seconds
                     ~labels
                     ()
                 in
@@ -1986,7 +2201,7 @@ let () =
             let entry = Reg.register ~base_path:bp name (make_meta name) in
             let before =
               Masc_mcp.Prometheus.metric_value_or_zero
-                Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+                Masc_mcp.Keeper_metrics.metric_keeper_alive_but_stuck_recovery_requests
                 ~labels:[("keeper", name)]
                 ()
             in
@@ -2002,7 +2217,7 @@ let () =
                  (Reg.failure_reason_cohort_key updated.Reg.last_failure_reason));
             let after =
               Masc_mcp.Prometheus.metric_value_or_zero
-                Masc_mcp.Prometheus.metric_keeper_alive_but_stuck_recovery_requests
+                Masc_mcp.Keeper_metrics.metric_keeper_alive_but_stuck_recovery_requests
                 ~labels:[("keeper", name)]
                 ()
             in

@@ -1,11 +1,13 @@
 open Alcotest
 
 module KEC = Masc_mcp.Keeper_exec_context
+module KCP = Masc_mcp.Keeper_compact_policy
 module KCC = Masc_mcp.Keeper_context_core
 module KAR = Masc_mcp.Keeper_agent_run
 module KMP = Masc_mcp.Keeper_memory_policy
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
+module KHB = Masc_mcp.Keeper_heartbeat_snapshot
 module KHS = Masc_mcp.Keeper_keepalive_signal
 module KST = Masc_mcp.Keeper_state_machine
 module KCB = Masc_mcp.Keeper_turn_cascade_budget
@@ -31,6 +33,29 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let write_lines path lines =
+  KT.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      List.iter
+        (fun line ->
+          output_string oc line;
+          output_char oc '\n')
+        lines)
+
+let persistence_read_drop_total ~surface ~reason =
+  P.metric_value_or_zero P.metric_persistence_read_drops
+    ~labels:[("surface", surface); ("reason", reason)]
+    ()
+
+let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
+  check (float 0.0001)
+    (Printf.sprintf "%s/%s persistence read drops" surface reason)
+    (before +. float_of_int delta)
+    (persistence_read_drop_total ~surface ~reason)
 
 let with_env key value f =
   let prev = Sys.getenv_opt key in
@@ -137,7 +162,7 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
+          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
           ("last_model_used", `String "llama:auto");
           ("sandbox_profile", `String "local");
           ("network_mode", `String "inherit");
@@ -203,7 +228,7 @@ let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:512
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:None
       in
       check bool "compaction not attempted" false lifecycle.compaction.attempted;
@@ -289,7 +314,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
           ~on_compaction_started:(fun () -> incr compaction_started)
           ~model:"llama:auto"
           ~primary_model_max_tokens:320
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check int "compaction start hook called once" 1 !compaction_started;
@@ -364,7 +389,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_compaction_started") ] in
       let before =
         P.metric_value_or_zero
-          P.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels
           ()
       in
@@ -376,7 +401,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
             failwith "synthetic callback failure")
           ~model:"llama:auto"
           ~primary_model_max_tokens:320
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "compaction still applied" true
@@ -386,7 +411,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       check (float 0.0001) "callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           P.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
@@ -450,7 +475,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "compaction not attempted" false lifecycle.compaction.attempted;
@@ -511,7 +536,7 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
           ~on_handoff_started:(fun () -> incr handoff_started)
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check int "compaction start hook called once" 1 !compaction_started;
@@ -585,7 +610,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_handoff_started") ] in
       let before =
         P.metric_value_or_zero
-          P.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels
           ()
       in
@@ -597,7 +622,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "handoff attempted" true lifecycle.handoff_attempted;
@@ -608,7 +633,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
       check (float 0.0001) "handoff callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           P.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
@@ -670,8 +695,12 @@ let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:
-            (Some "Invalid request: Prompt exceeds max length")
+          ~current_turn_blocker_info:
+            (Some
+               KT.{
+                 klass = Sdk_token_budget_exceeded;
+                 detail = "Invalid request: Prompt exceeds max length";
+               })
           ~checkpoint:(Some checkpoint)
       in
       check bool "ratio stays below threshold" true
@@ -746,7 +775,7 @@ let test_apply_post_turn_lifecycle_passes_resilience_handles () =
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       Unix.chmod base_dir 0o755;
@@ -812,7 +841,7 @@ let test_apply_post_turn_lifecycle_legacy_path_skips_executor () =
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:None
       in
       check bool "no handoff attempted" false lifecycle.handoff_attempted;
@@ -852,7 +881,7 @@ let test_apply_post_turn_lifecycle_rejects_executor_without_audit () =
                ~on_handoff_started:(fun () -> ())
                ~model:"llama:auto"
                ~primary_model_max_tokens:4096
-               ~current_turn_overflow_blocker:None
+               ~current_turn_blocker_info:None
                ~checkpoint:None);
           false
         with Invalid_argument _ -> true
@@ -919,7 +948,7 @@ let test_post_turn_resilience_runtime_executor_pauses_handoff () =
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
         |> handles.sync_lifecycle_meta
       in
@@ -1005,7 +1034,7 @@ let test_rollover_aborts_on_save_failure () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       (* Restore permissions before assertions *)
@@ -1261,7 +1290,7 @@ let test_rollover_repairs_orphan_tool_result () =
           ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
-          ~current_turn_overflow_blocker:None
+          ~current_turn_blocker_info:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "rollover attempted" true rollover.attempted;
@@ -1349,6 +1378,24 @@ let oversized_user_message ?(prompt = "긴 텍스트도 저장되면 안 돼") (
     tool_call_id = None;
       metadata = [];
   }
+
+let checkpoint_counted_content_chars messages =
+  List.fold_left
+    (fun total (msg : Agent_sdk.Types.message) ->
+      List.fold_left
+        (fun total block ->
+          match block with
+          | Agent_sdk.Types.Text text -> total + String.length text
+          | Agent_sdk.Types.ToolResult { content; _ } ->
+              total + String.length content
+          | Agent_sdk.Types.Thinking { content; _ } ->
+              total + String.length content
+          | Agent_sdk.Types.RedactedThinking text -> total + String.length text
+          | _ -> total)
+        total
+        msg.content)
+    0
+    messages
 
 let summarized_contaminated_text =
   "[Summary of 2 earlier messages]\n\
@@ -1530,6 +1577,54 @@ let test_save_oas_checkpoint_caps_oversized_text () =
             (contains_substring text "[capped]");
           check bool "text was compacted" true
             (String.length text < String.length oversized_checkpoint_text))
+
+let test_save_oas_checkpoint_caps_total_content () =
+  let base_dir = temp_dir "keeper_lifecycle_save_total_cap" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-save-total-cap" ~base_dir
+      in
+      let large_text =
+        String.make (KCC.default_max_checkpoint_content_chars_total / 8) 'q'
+      in
+      let messages =
+        List.init 40 (fun i ->
+            Agent_sdk.Types.user_msg
+              (Printf.sprintf "bulk-checkpoint-%02d %s" i large_text))
+      in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:64_000
+        |> fun ctx -> KEC.append_many ctx messages
+        |> KEC.sync_oas_context
+      in
+      match
+        KEC.save_oas_checkpoint
+          ~max_checkpoint_messages:120
+          ~session
+          ~agent_name:"keeper-lifecycle"
+          ~model:"glm:glm-5.1"
+          ~ctx
+          ~generation:1
+      with
+      | Error e ->
+          Alcotest.fail
+            (Printf.sprintf "save_oas_checkpoint failed: %s" e)
+      | Ok checkpoint ->
+          check bool "global content cap enforced" true
+            (checkpoint_counted_content_chars checkpoint.messages
+             <= KCC.default_max_checkpoint_content_chars_total);
+          check bool "older messages dropped at total cap" true
+            (List.length checkpoint.messages < List.length messages);
+          let newest =
+            checkpoint.messages
+            |> List.rev
+            |> List.hd
+            |> Agent_sdk.Types.text_of_message
+          in
+          check bool "newest message retained" true
+            (contains_substring newest "bulk-checkpoint-39"))
 
 let test_sanitize_checkpoint_message_caps_oversized_tool_result () =
   let oversized =
@@ -2185,7 +2280,7 @@ let test_compact_if_needed_ts_zero_bypasses_cooldown () =
   let meta = make_gate_only_meta ~last_continuity_update_ts:0.0 ~cooldown_sec:3600 () in
   let ctx = KEC.create ~system_prompt:"sp" ~max_tokens:4096 in
   let now_ts = 1000.0 in (* well within the 3600s cooldown window *)
-  let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
+  let (_ctx, trigger, decision) = KCP.compact_if_needed ~meta ~now_ts ctx in
   check (option string) "no compaction triggered (ratio_gate=1.0)" None trigger;
   check string "ts=0.0 bypasses cooldown, not skipped" "blocked:below_thresholds" decision
 
@@ -2209,7 +2304,7 @@ let test_compact_if_needed_emergency_bypass_ignores_cooldown () =
   in
   let ratio = KCC.context_ratio ctx in
   check bool "context ratio is above emergency threshold" true (ratio >= 0.8);
-  let (_ctx, trigger, decision) = KEC.compact_if_needed ~meta ~now_ts ctx in
+  let (_ctx, trigger, decision) = KCP.compact_if_needed ~meta ~now_ts ctx in
   (* Emergency ratio bypasses cooldown → compaction fires (ratio >= ratio_gate=1.0) *)
   check bool "compaction was triggered (emergency bypass)" true (Option.is_some trigger);
   check bool "decision starts with applied:" true (String.starts_with ~prefix:"applied:" decision)
@@ -2234,17 +2329,17 @@ let test_compact_if_needed_records_saved_tokens_metric () =
   let labels = [ ("keeper", meta.name) ] in
   let before_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
       ~labels
       ()
     |> Option.value ~default:0.0
   in
   let (compacted_ctx, trigger, decision) =
-    KEC.compact_if_needed ~meta ~now_ts ctx
+    KCP.compact_if_needed ~meta ~now_ts ctx
   in
   let after_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
       ~labels
       ()
     |> Option.value ~default:0.0
@@ -2306,6 +2401,79 @@ let test_pre_dispatch_resume_checkpoint_uses_loaded_working_context () =
   in
   check bool "fresh context does not force Agent.resume" false
     (Option.is_some fresh_result.resume_checkpoint)
+
+let test_pre_dispatch_resume_checkpoint_caps_loaded_context_without_save () =
+  let base_meta = make_keeper_meta () in
+  let meta =
+    {
+      base_meta with
+      compaction =
+        {
+          base_meta.compaction with
+          ratio_gate = 1.0;
+          message_gate = 0;
+          token_gate = 0;
+          max_checkpoint_messages = 120;
+        };
+    }
+  in
+  let large_text =
+    String.make (KCC.default_max_checkpoint_content_chars_total / 8) 'q'
+  in
+  let messages =
+    List.init 40 (fun i ->
+      Agent_sdk.Types.user_msg
+        (Printf.sprintf "resume-bulk-checkpoint-%02d %s" i large_text))
+  in
+  let ctx =
+    KEC.create ~system_prompt:"sp" ~max_tokens:10_000_000
+    |> fun c -> KEC.append_many c messages
+    |> KEC.sync_oas_context
+  in
+  let checkpoint =
+    {
+      (KEC.checkpoint_of_context ctx) with
+      turn_count = 13;
+      messages = KEC.messages_of_context ctx;
+    }
+  in
+  let ctx = { ctx with checkpoint } in
+  let save_called = ref false in
+  let result =
+    KAR.prepare_resume_checkpoint_for_dispatch
+      ~meta
+      ~now_ts:1000.0
+      ~loaded_checkpoint_present:true
+      ~save_checkpoint:(fun _ ->
+        save_called := true;
+        Error "unexpected save without compaction")
+      ctx
+  in
+  check bool "no compaction save for below-threshold bulk context" false
+    !save_called;
+  check bool "bulk context stays below compaction gates" false result.applied;
+  let resume_checkpoint =
+    match result.resume_checkpoint with
+    | Some checkpoint -> checkpoint
+    | None -> Alcotest.fail "expected capped resume checkpoint"
+  in
+  check int "resume turn count is preserved" 13 resume_checkpoint.turn_count;
+  check bool "resume checkpoint enforces total content cap" true
+    (checkpoint_counted_content_chars resume_checkpoint.messages
+     <= KCC.default_max_checkpoint_content_chars_total);
+  check bool "older messages dropped at resume total cap" true
+    (List.length resume_checkpoint.messages < List.length messages);
+  let newest =
+    resume_checkpoint.messages
+    |> List.rev
+    |> List.hd
+    |> Agent_sdk.Types.text_of_message
+  in
+  check bool "newest message retained in resume checkpoint" true
+    (contains_substring newest "resume-bulk-checkpoint-39");
+  check int "context carries capped resume checkpoint"
+    (List.length resume_checkpoint.messages)
+    (List.length result.context.checkpoint.messages)
 
 let test_pre_dispatch_resume_checkpoint_saves_compacted_context () =
   Eio_main.run @@ fun env ->
@@ -2438,6 +2606,7 @@ let test_dispatch_keeper_phase_event_uses_room_base_path () =
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
         KST.Compaction_started;
       match KR.get ~base_path:config.base_path meta.name with
@@ -2459,6 +2628,7 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
         KST.Compaction_started;
       let lifecycle =
@@ -2469,8 +2639,8 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
               attempted = true;
               applied = true;
               failure_reason = None;
-              trigger = Some "test";
-              decision = KEC.Applied "test";
+              trigger = Some Masc_mcp.Compaction_trigger.Manual;
+              decision = KEC.Applied Masc_mcp.Compaction_trigger.Manual;
               before_tokens = 42;
               after_tokens = 21;
               saved_tokens = 21;
@@ -2487,6 +2657,45 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after lifecycle dispatch")
 
+let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_origin_guard" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let meta = make_keeper_meta ~name:"keeper-origin-guard" () in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let labels =
+        [ ("keeper", meta.name); ("event", "compaction_started") ]
+      in
+      let before =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      KEC.dispatch_keeper_phase_event
+        ~config
+        ~keeper_name:meta.name
+        KST.Compaction_started;
+      let after =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      check bool "origin guard rejection metric increments" true (after > before);
+      match KR.get ~base_path:config.base_path meta.name with
+      | Some entry ->
+          check string "unscoped compaction start is rejected" "running"
+            (KST.phase_to_string entry.phase)
+      | None -> fail "expected registered keeper after rejected lifecycle dispatch")
+
 let test_dispatch_keeper_phase_event_rejection_increments_metric () =
   let base_dir = temp_dir "keeper_lifecycle_registry_rejection" in
   Fun.protect
@@ -2500,7 +2709,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2510,7 +2719,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2543,7 +2752,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -2553,12 +2762,73 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Prometheus.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
           ~labels ()
         |> Option.value ~default:0.0
       in
       check bool "keepalive registry rejection metric increments" true
         (after > before))
+
+let test_heartbeat_history_fallback_counts_malformed_rows () =
+  let base_dir = temp_dir "keeper_lifecycle_heartbeat_history_drops" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:None);
+      let meta =
+        make_keeper_meta
+          ~name:"keeper-heartbeat-history-drop"
+          ~trace_id:"trace-heartbeat-history-drop"
+          ()
+      in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let trace_id =
+        Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      in
+      let history_path = KT.keeper_history_path config trace_id in
+      write_lines history_path
+        [
+          {|{"role":"user","content":"keep continuity","source":"user"}|};
+          "[]";
+          "{not-json";
+        ];
+      let surface = "keeper_heartbeat_history" in
+      let entry_reason = "entry_load_error" in
+      let invalid_reason = "invalid_payload" in
+      let before_entry =
+        persistence_read_drop_total ~surface ~reason:entry_reason
+      in
+      let before_invalid =
+        persistence_read_drop_total ~surface ~reason:invalid_reason
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "test-operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      KHB.write_heartbeat_snapshot
+        ~ctx
+        ~meta_current:meta
+        ~now_ts:(Time_compat.now ())
+        ~consecutive_hb_failures:0
+        ~timing_ring:[||]
+        ~timing_filled:0;
+      check_persistence_read_drop_delta ~surface ~reason:entry_reason
+        ~before:before_entry ~delta:1;
+      check_persistence_read_drop_delta ~surface ~reason:invalid_reason
+        ~before:before_invalid ~delta:1)
 
 let () =
   run "keeper_lifecycle"
@@ -2616,6 +2886,8 @@ let () =
             test_save_oas_checkpoint_strips_ephemeral_world_state;
           test_case "save caps oversized text" `Quick
             test_save_oas_checkpoint_caps_oversized_text;
+          test_case "save caps total checkpoint content" `Quick
+            test_save_oas_checkpoint_caps_total_content;
           test_case "save caps oversized tool result" `Quick
             test_sanitize_checkpoint_message_caps_oversized_tool_result;
           test_case "save caps aggregate tool result budget" `Quick
@@ -2663,6 +2935,8 @@ let () =
             test_compact_if_needed_records_saved_tokens_metric;
           test_case "pre-dispatch resume uses loaded working context" `Quick
             test_pre_dispatch_resume_checkpoint_uses_loaded_working_context;
+          test_case "pre-dispatch resume caps loaded context without save" `Quick
+            test_pre_dispatch_resume_checkpoint_caps_loaded_context_without_save;
           test_case "pre-dispatch resume saves compacted context" `Quick
             test_pre_dispatch_resume_checkpoint_saves_compacted_context;
           test_case "pre-dispatch resume blocks unsaved compaction" `Quick
@@ -2674,9 +2948,13 @@ let () =
             test_dispatch_keeper_phase_event_uses_room_base_path;
           test_case "post-turn lifecycle events use room base_path" `Quick
             test_dispatch_post_turn_lifecycle_events_uses_room_base_path;
+          test_case "unscoped lifecycle event is rejected" `Quick
+            test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event;
           test_case "phase event rejection increments metric" `Quick
             test_dispatch_keeper_phase_event_rejection_increments_metric;
           test_case "keepalive event rejection increments metric" `Quick
             test_keepalive_dispatch_event_rejection_increments_metric;
+          test_case "heartbeat history fallback counts malformed rows" `Quick
+            test_heartbeat_history_fallback_counts_malformed_rows;
         ] );
     ]

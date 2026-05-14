@@ -172,10 +172,11 @@ let effective_declarative_cascade_name
     (meta : keeper_meta) =
   match defaults.cascade_name, defaults.manifest_path with
   | Some cascade_name, _ ->
-      Keeper_cascade_profile.normalize_declared_name cascade_name
-  | None, Some _ -> Keeper_config.default_cascade_name
+      Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
+  | None, Some _ -> (Keeper_config.default_cascade_name ())
   | None, None ->
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+        (cascade_name_of_meta meta)
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -235,7 +236,6 @@ let ensure_keeper_meta config name =
             defaults.room_signal_prompt_enabled
     in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
-    let target_models = apply_default defaults.models meta.models in
     let target_social_model =
       apply_default defaults.social_model meta.social_model
       |> Keeper_social_model.normalize_social_model in
@@ -257,8 +257,8 @@ let ensure_keeper_meta config name =
         let raw_value =
           match defaults.cascade_name, defaults.manifest_path with
           | Some cascade_name, _ -> cascade_name
-          | None, Some _ -> Keeper_config.default_cascade_name
-          | None, None -> meta.cascade_name
+          | None, Some _ -> (Keeper_config.default_cascade_name ())
+          | None, None -> cascade_name_of_meta meta
         in
         let msg =
           Printf.sprintf
@@ -386,14 +386,13 @@ let ensure_keeper_meta config name =
     let signal_changed =
       meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
     let denylist_changed = meta.tool_denylist <> target_denylist in
-    let models_changed = meta.models <> target_models in
     let social_model_changed = meta.social_model <> target_social_model in
     (* [meta.cascade_name] may be a raw TOML/JSON value while
        [resolved_target_cascade_name] is the validated runtime catalog
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)
     let cascade_changed =
-      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
       <> resolved_target_cascade_name
     in
     (* #10061: persisted state vs TOML source can differ by a single
@@ -447,7 +446,7 @@ let ensure_keeper_meta config name =
       meta.per_provider_timeout_s <> target_per_provider_timeout in
     let oas_env_changed = meta.oas_env <> target_oas_env in
     let any_changed =
-      proactive_changed || signal_changed || denylist_changed || models_changed
+      proactive_changed || signal_changed || denylist_changed
       || social_model_changed
       || cascade_changed
       || personality_changed || policy_changed || discovery_changed
@@ -458,7 +457,6 @@ let ensure_keeper_meta config name =
         (if proactive_changed then Some "proactive" else None);
         (if signal_changed then Some "signal" else None);
         (if denylist_changed then Some "denylist" else None);
-        (if models_changed then Some "models" else None);
         (if social_model_changed then Some "social_model" else None);
         (if cascade_changed then Some "cascade" else None);
         (if personality_changed then
@@ -517,16 +515,18 @@ let ensure_keeper_meta config name =
         };
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
-        models = target_models;
         social_model = target_social_model;
-        (* Preserve raw [meta.cascade_name] when the cascade itself did
-           not change, even if another field (personality, policy, ...)
-           triggered a re-sync.  Otherwise a reconcile caused by an
-           unrelated field would silently canonicalize cascade_name and
-           hide drift from the dashboard [canonical] column. *)
-        cascade_name =
-          if cascade_changed then resolved_target_cascade_name
-          else meta.cascade_name;
+        (* RFC-0041: cascade_ref is the SSOT after step 4 (B7). When
+           cascade_changed flips, materialize a fresh cascade_ref;
+           otherwise preserve [meta.cascade_ref] verbatim so an unrelated
+           reconcile never canonicalizes routing silently. *)
+        cascade_ref =
+          if cascade_changed then
+            Some Cascade_ref.{
+              group = resolved_target_cascade_name;
+              item = None;
+            }
+          else meta.cascade_ref;
         goal = target_goal;
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;
@@ -560,7 +560,7 @@ let ensure_keeper_meta config name =
       | Ok () -> Ok updated
       | Error e ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_write_meta_failures
+          Keeper_metrics.metric_keeper_write_meta_failures
           ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
           ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
@@ -608,7 +608,6 @@ let load_or_materialize_boot_meta (ctx : _ context) name
                      name toml_path msg))
 
 type keeper_bootstrap_stats = {
-  enabled: bool;
   scanned: int;
   started: int;
   stale: int;
@@ -617,7 +616,7 @@ type keeper_bootstrap_stats = {
 
 let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
   if not Env_config.KeeperBootstrap.enabled then
-    { enabled = false; scanned = 0; started = 0; stale = 0; recovering = 0 }
+    { scanned = 0; started = 0; stale = 0; recovering = 0 }
   else
     let now_ts = Time_compat.now () in
     let proactive_warmup_sec = keeper_bootstrap_proactive_warmup_sec () in
@@ -636,15 +635,15 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
            max_int)
     in
     let entries = bootable_keeper_names ctx.config |> take max_scan in
-    let (enabled, scanned, started, stale, recovering) =
+    let (scanned, started, stale, recovering) =
       List.fold_left
-        (fun (enabled_acc, scanned_acc, started_acc, stale_acc, recovering_acc) name ->
+        (fun (scanned_acc, started_acc, stale_acc, recovering_acc) name ->
           match load_or_materialize_boot_meta ctx name with
           | Error _ ->
-              (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
+              (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
           | Ok { meta = m; materialized } ->
               if m.paused then
-                (enabled_acc, scanned_acc + 1, started_acc, stale_acc, recovering_acc)
+                (scanned_acc + 1, started_acc, stale_acc, recovering_acc)
               else
               let stale_now =
                 (not materialized)
@@ -678,15 +677,14 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                   started_now
                 )
               in
-              ( true,
-                scanned_acc + 1,
+              ( scanned_acc + 1,
                 started_acc + (if started_here then 1 else 0),
                 stale_acc + (if stale_now then 1 else 0),
                 recovering_acc + (if stale_now && started_here then 1 else 0) ))
-        (false, 0, 0, 0, 0)
+        (0, 0, 0, 0)
         entries
     in
-    { enabled; scanned; started; stale; recovering }
+    { scanned; started; stale; recovering }
 
 (** Start the supervisor sweep Pulse loop.
     Runs alongside existing keepalive bootstrap, scanning for
@@ -737,7 +735,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "keeper_runtime")]
                ();
              Log.Keeper.error "supervisor sweep failed: %s"
@@ -748,7 +746,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.liveness_recovery_scan ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "liveness_recovery")]
                ();
              Log.Keeper.error "liveness recovery scan failed: %s"
@@ -761,7 +759,7 @@ let start_supervisor_sweep ctx =
           (try Keeper_supervisor.alive_but_stuck_scan ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_supervisor_sweep_failures
+               Keeper_metrics.metric_keeper_supervisor_sweep_failures
                ~labels:[("origin", "alive_but_stuck")]
                ();
              Log.Keeper.error "alive-but-stuck scan failed: %s"
@@ -772,6 +770,18 @@ let start_supervisor_sweep ctx =
           (try
             Keeper_registry.all ~base_path ()
             |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+              (* Enumerate every phase so the compiler flags any new
+                 variant added to [Keeper_state_machine.phase]. TOML
+                 hot-reload only reconciles Running keepers; the other
+                 12 phases must skip (a Stopped/Crashed/Dead/Zombie
+                 keeper has no in-memory meta to update; a Compacting
+                 or HandingOff keeper is mid-transition and reconcile
+                 would race; Offline / Paused / Failing / Overflowed /
+                 Draining / Restarting are all transient or paused
+                 states). A future phase (e.g. Migrating, Healing)
+                 would silently skip reconcile under [_ -> ()] without
+                 a review point. Same FSM Sparse Match anti-pattern as
+                 PR #14857. *)
               match entry.phase with
               | Keeper_state_machine.Running ->
                   (match ensure_keeper_meta ctx.config entry.name with
@@ -785,10 +795,21 @@ let start_supervisor_sweep ctx =
                    | Error e ->
                        Log.Keeper.warn "TOML reconcile failed for %s: %s"
                          entry.name e)
-              | _ -> ())
+              | Keeper_state_machine.Offline
+              | Keeper_state_machine.Failing
+              | Keeper_state_machine.Overflowed
+              | Keeper_state_machine.Compacting
+              | Keeper_state_machine.HandingOff
+              | Keeper_state_machine.Draining
+              | Keeper_state_machine.Paused
+              | Keeper_state_machine.Stopped
+              | Keeper_state_machine.Crashed
+              | Keeper_state_machine.Restarting
+              | Keeper_state_machine.Dead
+              | Keeper_state_machine.Zombie -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_toml_reconcile_sweep_failures
+               Keeper_metrics.metric_keeper_toml_reconcile_sweep_failures
                ~labels:[("origin", "keeper_runtime")]
                ();
              Log.Keeper.error "TOML reconcile sweep failed: %s"
@@ -797,7 +818,7 @@ let start_supervisor_sweep ctx =
              completed beat.  Stale gauge (now - last > 2 × interval)
              tells operators the sweep stopped. *)
           Prometheus.set_gauge
-            Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+            Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
             ~labels:[ ("base_path", base_path) ]
             (Unix.gettimeofday ());
           Ok ()
@@ -820,14 +841,14 @@ let start_supervisor_sweep ctx =
        After a server restart, if this stays at 0 the supervisor
        never came up — operators alert on absence of advancement. *)
     Prometheus.inc_counter
-      Prometheus.metric_keeper_supervisor_sweep_starts
+      Keeper_metrics.metric_keeper_supervisor_sweep_starts
       ~labels:[ ("base_path", base_path) ]
       ();
     (* Initialize the liveness gauge to "now" so dashboards do not
        start at unixtime=0 (which would look infinitely stale).  The
        on_beat will overwrite this on every subsequent sweep. *)
     Prometheus.set_gauge
-      Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+      Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
       ~labels:[ ("base_path", base_path) ]
       (Unix.gettimeofday ());
     Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
@@ -841,7 +862,7 @@ let start_supervisor_sweep ctx =
 let supervisor_sweep_age_seconds ~(base_path : string) : float option =
   match
     Prometheus.get_metric_value
-      Prometheus.metric_keeper_supervisor_last_sweep_unixtime
+      Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
       ~labels:[ ("base_path", base_path) ]
       ()
   with
@@ -862,30 +883,20 @@ let has_boot_entries config =
 let should_start_supervisor_sweep
     ~(config : Coord.config)
     ~(stats : keeper_bootstrap_stats) : bool =
-  let _ = stats.enabled in
   stats.started > 0
   || Keeper_registry.count_running ~base_path:config.base_path () > 0
   || has_boot_entries config
 
 let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
-  (* #10125: drop the [stats.enabled] precondition.  The previous
-     gate required bootstrap to have processed at least one keeper
-     successfully ([enabled = true] only when [bootable_keeper_names]
-     was non-empty AND at least one entry got past
-     [load_or_materialize_boot_meta]).  In the 2026-04-24 production
-     incident every bootstrap entry hit a transient
-     [load_or_materialize_boot_meta] error after a server restart,
-     so [stats.enabled] stayed [false] even though 14 keeper meta
-     files were on disk — supervisor never started, fleet stayed
-     dead for 4h+.
-
-     Decouple supervisor startup from bootstrap success: if there
-     are bootable keepers on disk OR any are already running OR
-     any started this boot, run the sweep.  The supervisor can
-     recover keepers that bootstrap failed to load, which is
-     exactly what the sweep is for.  Without this change, a
-     transient load failure during bootstrap silently disables
-     auto-recovery for the rest of the server lifetime. *)
+  (* #10125: supervisor startup is decoupled from bootstrap success.
+     If there are bootable keepers on disk OR any are already running
+     OR any started this boot, run the sweep.  The supervisor can
+     recover keepers that bootstrap failed to load — exactly what
+     the sweep is for — so a transient bootstrap failure must not
+     silently disable auto-recovery for the rest of the server
+     lifetime (2026-04-24 incident: 14 keeper meta files on disk,
+     every bootstrap entry hit a transient
+     [load_or_materialize_boot_meta] error, fleet stayed dead 4h+). *)
   if should_start_supervisor_sweep ~config:ctx.config ~stats
   then start_supervisor_sweep ctx
 
@@ -904,8 +915,8 @@ let start_existing_keepalives ctx =
     try
       let stats = bootstrap_existing_keepers ctx in
       if keeper_debug then
-        Log.Keeper.debug "bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d recovering=%d"
-          stats.enabled stats.scanned stats.started stats.stale
+        Log.Keeper.debug "bootstrap_existing_keepers scanned=%d started=%d stale=%d recovering=%d"
+          stats.scanned stats.started stats.stale
           stats.recovering;
       maybe_start_supervisor_sweep ctx stats
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

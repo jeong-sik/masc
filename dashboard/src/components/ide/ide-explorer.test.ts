@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { explorerScopeLabel, IdeExplorer } from './ide-explorer'
 import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
 import type { Repository } from '../../api/repositories'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 const SAMPLE: ReadonlyArray<FileTreeNode> = [
   { path: 'runtime', label: 'runtime', depth: 0, parent: null, hasChildren: true, diff: null, keeperId: null, hueIndex: null },
@@ -57,6 +59,9 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
 
   afterEach(() => {
     render(null, container)
+    window.location.hash = ''
+    activeIdeFile.value = 'package.json'
+    ideContextFocus.value = null
   })
 
   it('makes every treeitem keyboard-focusable, not just directories', () => {
@@ -91,6 +96,31 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(keeperOwnedRow?.textContent).toContain('NK')
     expect(keeperOwnedRow?.textContent).toContain('router.ts')
   })
+
+  it('summarizes workspace git changes from file tree diff badges', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE)
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    const summary = container.querySelector<HTMLElement>('[aria-label="Workspace git changes: 1 changed, +14"]')
+    expect(summary).not.toBeNull()
+    expect(summary?.textContent).toContain('Git changes')
+    expect(summary?.textContent).toContain('1 changed')
+    expect(summary?.textContent).toContain('+14')
+
+    const diffBadge = Array.from(container.querySelectorAll<HTMLElement>('[aria-label="Git diff +14"]'))
+      .find(el => el.textContent === '+14')
+    expect(diffBadge).toBeDefined()
+  })
+
+  it('hides the git changes summary when the workspace tree has no diffs', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE.map(node => ({ ...node, diff: null })))
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    expect(container.textContent).not.toContain('Git changes')
+  })
+
   it('renders repository source in the explorer header', () => {
     const store = createFileTreeStore()
     store.seed(SAMPLE)
@@ -119,5 +149,56 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(scroller?.contains(tree)).toBe(true)
     expect(scroller?.contains(container.querySelector('header'))).toBe(false)
     expect(scroller?.contains(container.querySelector('input[type="search"]'))).toBe(false)
+  })
+
+  it('marks the file row carrying the current IDE context focus with route buttons', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE)
+    ideContextFocus.value = {
+      file_path: 'runtime/router.ts',
+      line: 42,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      activated_at_ms: Date.now(),
+      route_links: [
+        {
+          id: 'task:task-runtime',
+          label: 'Task',
+          tab: 'workspace',
+          params: { section: 'planning', view: 'default', task: 'task-runtime' },
+          evidence: 'Task task-runtime',
+        },
+        {
+          id: 'telemetry:turn-9',
+          label: 'Telemetry',
+          tab: 'monitoring',
+          params: { section: 'fleet-health', view: 'event-log', q: 'turn-9' },
+          evidence: 'Fleet telemetry event log · query turn-9',
+        },
+      ],
+    }
+
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    const focusedRow = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="treeitem"]'),
+    ).find(el => el.textContent?.includes('router.ts'))
+    const chip = focusedRow?.querySelector('.ide-explorer-context-chip')
+
+    expect(chip?.textContent).toContain('Task')
+    expect(chip?.textContent).toContain('L42')
+    const routeButtons = [...focusedRow!.querySelectorAll<HTMLButtonElement>('.ide-explorer-context-chip button')]
+    expect(routeButtons.map(button => button.textContent)).toEqual(['Task', 'Telemetry'])
+    expect(routeButtons.map(button => button.getAttribute('aria-label'))).toEqual([
+      'Open Task task-runtime',
+      'Open Fleet telemetry event log · query turn-9',
+    ])
+    expect(chip?.getAttribute('aria-label'))
+      .toBe('Focused Task line 42: task task-runtime, 2 route links')
+
+    fireEvent.click(routeButtons[1]!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
+    expect(activeIdeFile.value).toBe('package.json')
   })
 })

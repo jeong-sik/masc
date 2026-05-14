@@ -56,6 +56,179 @@ let test_emit_and_list_events () =
       in
       check int "task filter" 1 (List.length task_only))
 
+let test_events_json_derives_ide_context () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-9")
+           ~tags:[
+             "file:lib/keeper/keeper_exec_ide.ml:27";
+             "task:task-42";
+             "board:post-1";
+             "comment:comment-7";
+             "git:main";
+             "log:turn-9";
+           ]
+           ~payload:
+             (`Assoc
+                [
+                  ("goal_id", `String "goal-ide");
+                  ("comment_id", `String "comment-7");
+                  ("pr_number", `Int 15035);
+                ])
+           ());
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let open Yojson.Safe.Util in
+      let event =
+        match json |> member "events" |> to_list with
+        | [ event ] -> event
+        | events ->
+          fail (Printf.sprintf "expected one event, got %d" (List.length events))
+      in
+      let context = event |> member "context" in
+      check string "context file path" "lib/keeper/keeper_exec_ide.ml"
+        (context |> member "file_path" |> to_string);
+      check int "context line" 27 (context |> member "line" |> to_int);
+      check string "context goal" "goal-ide"
+        (context |> member "goal_id" |> to_string);
+      check string "context task" "task-42"
+        (context |> member "task_id" |> to_string);
+      check string "context board" "post-1"
+        (context |> member "board_post_id" |> to_string);
+      check string "context comment" "comment-7"
+        (context |> member "comment_id" |> to_string);
+      check string "context pr" "15035"
+        (context |> member "pr_id" |> to_string);
+      check string "context git" "main"
+        (context |> member "git_ref" |> to_string);
+      check string "context log" "turn-9"
+        (context |> member "log_id" |> to_string))
+
+let test_events_json_normalizes_ide_context_file_paths () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-payload")
+           ~tags:[]
+           ~payload:
+             (`Assoc
+                [
+                  ("file_path", `String " lib\\payload.ml ");
+                  ("line", `Int 12);
+                ])
+           ());
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-tag")
+           ~tags:[ "file: lib\\tag.ml:27" ]
+           ~payload:(`Assoc [])
+           ());
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let open Yojson.Safe.Util in
+      match json |> member "events" |> to_list with
+      | [ payload_event; tag_event ] ->
+        let payload_context = payload_event |> member "context" in
+        let tag_context = tag_event |> member "context" in
+        check string "payload file path normalized" "lib/payload.ml"
+          (payload_context |> member "file_path" |> to_string);
+        check string "tag file path normalized" "lib/tag.ml"
+          (tag_context |> member "file_path" |> to_string);
+        check int "tag line kept" 27 (tag_context |> member "line" |> to_int)
+      | events ->
+        fail (Printf.sprintf "expected two events, got %d" (List.length events)))
+
+let test_events_json_omits_unsafe_ide_context_file_paths () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-absolute")
+           ~tags:[]
+           ~payload:
+             (`Assoc
+                [
+                  ("file_path", `String "/workspace/lib/payload.ml");
+                  ("line", `Int 12);
+                ])
+           ());
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-drive")
+           ~tags:[ "file:C:\\workspace\\lib\\tag.ml:27" ]
+           ~payload:(`Assoc [])
+           ());
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-traversal")
+           ~tags:[ "file:lib/../tag.ml:31" ]
+           ~payload:(`Assoc [])
+           ());
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-mismatch")
+           ~tags:[ "file:/workspace/lib/tag.ml:99" ]
+           ~payload:
+             (`Assoc
+                [
+                  ("file_path", `String "lib/payload.ml");
+                  ("line", `Int 12);
+                ])
+           ());
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let open Yojson.Safe.Util in
+      match json |> member "events" |> to_list with
+      | [ payload_event; drive_event; traversal_event; mismatch_event ] ->
+        let file_path_omitted event =
+          match event |> member "context" with
+          | `Null -> true
+          | context -> context |> member "file_path" = `Null
+        in
+        List.iter
+          (fun event ->
+            check bool "unsafe file path omitted" true (file_path_omitted event))
+          [ payload_event; drive_event; traversal_event ];
+        check int "line survives without unsafe payload file path" 12
+          (payload_event |> member "context" |> member "line" |> to_int);
+        check bool "unsafe tag file line omitted" true
+          (drive_event |> member "context" = `Null);
+        let mismatch_context = mismatch_event |> member "context" in
+        check string "unsafe tag keeps payload file path" "lib/payload.ml"
+          (mismatch_context |> member "file_path" |> to_string);
+        check int "unsafe tag keeps payload line" 12
+          (mismatch_context |> member "line" |> to_int)
+      | events ->
+        fail
+          (Printf.sprintf "expected four events, got %d" (List.length events)))
+
+let test_events_json_ignores_invalid_derived_pr_number () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~subject:(Activity_graph.entity ~kind:"log" "turn-10")
+           ~tags:[]
+           ~payload:(`Assoc [ ("pr_number", `Int 0) ])
+           ());
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let open Yojson.Safe.Util in
+      let event =
+        match json |> member "events" |> to_list with
+        | [ event ] -> event
+        | events ->
+          fail (Printf.sprintf "expected one event, got %d" (List.length events))
+      in
+      let context = event |> member "context" in
+      check bool "invalid pr number omitted" true
+        (match context with
+         | `Null -> true
+         | _ -> context |> member "pr_id" |> fun value -> value = `Null))
+
 let test_emit_sanitizes_invalid_utf8_before_persisting () =
   with_config (fun config ->
       Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
@@ -94,6 +267,44 @@ let test_emit_sanitizes_invalid_utf8_before_persisting () =
       let stats = Safe_ops.persistence_utf8_repair_stats () in
       check int "read path did not repair activity graph row" 0
         stats.repaired_reads)
+
+let test_read_self_heals_historic_invalid_utf8_event_file () =
+  with_config (fun config ->
+      Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+      let root = Filename.concat (Coord_utils.masc_dir config) "activity-events" in
+      let month_dir = Filename.concat root "2000-01" in
+      Unix.mkdir root 0o755;
+      Unix.mkdir month_dir 0o755;
+      let event_path = Filename.concat month_dir "01.jsonl" in
+      let raw_line =
+        "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
+         \"room_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"payload\":{\"content\":\"bad\xffpayload\"},\"tags\":[]}\n"
+      in
+      Fs_compat.save_file event_path raw_line;
+      check bool "fixture starts invalid" false
+        (String.is_valid_utf_8 (Fs_compat.load_file event_path));
+      let events = Activity_graph.list_events config ~after_seq:0 ~limit:10 () in
+      let event =
+        match events with
+        | [ event ] -> event
+        | events ->
+            fail
+              (Printf.sprintf "expected one event, got %d"
+                 (List.length events))
+      in
+      let open Yojson.Safe.Util in
+      let replacement = "\xEF\xBF\xBD" in
+      check string "payload repaired on read" ("bad" ^ replacement ^ "payload")
+        (event.payload |> member "content" |> to_string);
+      let stats_after_first = Safe_ops.persistence_utf8_repair_stats () in
+      check int "file repair counted once" 1 stats_after_first.repaired_reads;
+      check bool "backing file rewritten valid" true
+        (String.is_valid_utf_8 (Fs_compat.load_file event_path));
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:10 ());
+      let stats_after_second = Safe_ops.persistence_utf8_repair_stats () in
+      check int "second read does not repair again" 1
+        stats_after_second.repaired_reads)
 
 let test_filtered_client_receives_matching_events () =
   Eio_main.run @@ fun env ->
@@ -341,8 +552,18 @@ let () =
       ( "core",
         [
           test_case "emit and list events" `Quick test_emit_and_list_events;
+          test_case "events json derives IDE context" `Quick
+            test_events_json_derives_ide_context;
+          test_case "events json normalizes IDE context file paths" `Quick
+            test_events_json_normalizes_ide_context_file_paths;
+          test_case "events json omits unsafe IDE context file paths" `Quick
+            test_events_json_omits_unsafe_ide_context_file_paths;
+          test_case "events json ignores invalid derived PR number" `Quick
+            test_events_json_ignores_invalid_derived_pr_number;
           test_case "emit sanitizes invalid utf8 before persisting" `Quick
             test_emit_sanitizes_invalid_utf8_before_persisting;
+          test_case "read self-heals historic invalid utf8 event file" `Quick
+            test_read_self_heals_historic_invalid_utf8_event_file;
           test_case "filtered client receives matching events" `Quick
             test_filtered_client_receives_matching_events;
           test_case "graph summary builds nodes and edges" `Quick

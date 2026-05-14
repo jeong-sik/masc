@@ -32,6 +32,10 @@ vi.mock('./components/server-config', () => ({
   refreshServerConfig: vi.fn(),
 }))
 
+vi.mock('./components/surface-readiness-panel', () => ({
+  refreshSurfaceReadiness: vi.fn(),
+}))
+
 vi.mock('./components/observatory/observatory', () => ({
   refreshObservatorySurface: vi.fn(),
 }))
@@ -49,6 +53,7 @@ import { refreshActivityGraph } from './components/activity-graph-store'
 import { refreshGitGraph } from './components/git-graph-store'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshServerConfig } from './components/server-config'
+import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
 import { refreshExecution, refreshShell } from './store'
 
@@ -73,7 +78,7 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'journey' },
-    })).toEqual(['execution', 'missionSnapshot'])
+    })).toEqual(['execution'])
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',
@@ -91,6 +96,11 @@ describe('refreshPlanForRoute', () => {
       tab: 'command',
       params: { section: 'operations' },
     })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest'])
+
+    expect(refreshPlanForRoute({
+      tab: 'command',
+      params: { section: 'operations', view: 'surfaces' },
+    })).toEqual(['surfaceReadiness'])
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {
@@ -146,6 +156,17 @@ describe('refreshPlanForRoute', () => {
     await waitFor(() => {
       expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
       expect(refreshServerConfig).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('refreshes the surface readiness view on route entry', async () => {
+    refreshForRoute({
+      tab: 'command',
+      params: { section: 'operations', view: 'surfaces' },
+    })
+
+    await waitFor(() => {
+      expect(refreshSurfaceReadiness).toHaveBeenCalledTimes(1)
     })
   })
 

@@ -1,6 +1,6 @@
 (* See cascade_attempt_liveness_config.mli for documentation.
 
-   RFC-0022 PR-2/4 §2 — tri-state env flag + per-label budget map. *)
+   RFC-0022 PR-2/4 §2 — tri-state env flag + living budget map. *)
 
 type mode =
   | Off
@@ -21,7 +21,8 @@ let parse_mode raw =
   | "" | "observe" | "default" | "1" | "true" | "shadow" -> Observe
   | _ -> Observe (* unknown values default to Observe — never silently Off *)
 
-(* Cached after first read. Mirrors Keeper_admission_glue.use_new_admission. *)
+(* Cached after first read so mid-attempt env edits do not split-brain the
+   observer. *)
 let mode_cache : mode option ref = ref None
 
 let current_mode () =
@@ -30,7 +31,7 @@ let current_mode () =
   | None ->
       let m =
         match Sys.getenv_opt env_var_name with
-        | None -> Observe
+        | None -> Enforce
         | Some raw -> parse_mode raw
       in
       mode_cache := Some m;
@@ -38,38 +39,200 @@ let current_mode () =
 
 let reset_cache_for_test () = mode_cache := None
 
-(* Per-label budget catalog — RFC-0022 PR-2 §2.
+type success_sample =
+  { ttft_ms : float
+  ; max_inter_chunk_ms : float
+  ; wall_ms : float
+  }
 
-   Cloud streaming providers (codex_cli, claude_code, gemini_cli) use
-   [cloud_fast] as a TTFT-strict budget that matches their typical short
-   answer latency. Adaptive-reasoning models (glm-coding which streams
-   thinking deltas, kimi-for-coding) get [cloud_thinking].
+type budget_source =
+  | Bootstrap
+  | Observed_success of { samples : int }
 
-   Local providers stay on the larger [local_27b] / [local_70b_plus]
-   budgets to avoid killing slow local models. *)
+type resolved_budget =
+  { budget : Cascade_attempt_liveness.budget
+  ; source : budget_source
+  }
 
-let budget_for_label (label : string) : Cascade_attempt_liveness.budget =
-  let canon = String.lowercase_ascii (String.trim label) in
-  match canon with
-  | "codex_cli" | "claude_code" | "claude" | "gemini_cli" | "gemini" ->
-      Cascade_attempt_liveness.cloud_fast
-  | "glm-coding" | "glm_coding" | "glm" | "kimi_cli" | "kimi-for-coding"
-  | "kimi" ->
-      Cascade_attempt_liveness.cloud_thinking
-  | "ollama_only" | "llama-server" | "llama_server" ->
-      Cascade_attempt_liveness.local_27b
-  | "local_70b" | "local_70b_plus" | "ollama_70b" ->
-      Cascade_attempt_liveness.local_70b_plus
-  | _ -> Cascade_attempt_liveness.cloud_fast
+let budget_source_label = function
+  | Bootstrap -> "bootstrap"
+  | Observed_success _ -> "observed_success"
+
+let success_history : (string, success_sample list) Hashtbl.t = Hashtbl.create 64
+let success_history_order : string list ref = ref []
+let success_history_mu = Stdlib.Mutex.create ()
+
+let with_success_history_lock f =
+  Stdlib.Mutex.lock success_history_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock success_history_mu) f
+
+let success_history_limit =
+  match Sys.getenv_opt "MASC_CASCADE_LIVENESS_SUCCESS_HISTORY_SIZE" with
+  | None | Some "" -> 32
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some n -> max 1 (min 256 n)
+     | None -> 32)
+
+let success_history_candidate_limit =
+  match Sys.getenv_opt "MASC_CASCADE_LIVENESS_SUCCESS_CANDIDATES" with
+  | None | Some "" -> 128
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some n -> max 1 (min 2048 n)
+     | None -> 128)
+
+let finite_non_negative v = Float.is_finite v && Float.compare v 0.0 >= 0
+
+let valid_sample (s : success_sample) =
+  finite_non_negative s.ttft_ms
+  && finite_non_negative s.max_inter_chunk_ms
+  && finite_non_negative s.wall_ms
+
+let runtime_candidate_key = "runtime"
+
+let normalize_candidate_key raw =
+  let key = String.trim raw in
+  if key = "" then None else Some runtime_candidate_key
+
+let take limit values =
+  let rec loop n acc = function
+    | [] -> List.rev acc
+    | _ when n <= 0 -> List.rev acc
+    | x :: rest -> loop (n - 1) (x :: acc) rest
+  in
+  loop limit [] values
+
+let take_drop limit values =
+  let rec loop n kept = function
+    | [] -> List.rev kept, []
+    | rest when n <= 0 -> List.rev kept, rest
+    | x :: rest -> loop (n - 1) (x :: kept) rest
+  in
+  loop limit [] values
+
+let remember_candidate_key key =
+  success_history_order
+  := key
+     :: List.filter
+          (fun existing -> not (String.equal existing key))
+          !success_history_order;
+  let kept, evicted =
+    take_drop success_history_candidate_limit !success_history_order
+  in
+  success_history_order := kept;
+  List.iter (Hashtbl.remove success_history) evicted
+
+let record_success_sample ~candidate_key (sample : success_sample) =
+  match normalize_candidate_key candidate_key with
+  | None -> ()
+  | Some key when not (valid_sample sample) -> ()
+  | Some key ->
+    with_success_history_lock (fun () ->
+        remember_candidate_key key;
+        let current =
+          match Hashtbl.find_opt success_history key with
+          | Some samples -> samples
+          | None -> []
+        in
+        Hashtbl.replace success_history key (take success_history_limit (sample :: current)))
+
+let reset_success_history_for_test () =
+  with_success_history_lock (fun () ->
+      Hashtbl.clear success_history;
+      success_history_order := [])
+
+let success_sample_count_for_test ~candidate_key =
+  match normalize_candidate_key candidate_key with
+  | None -> 0
+  | Some key ->
+    with_success_history_lock (fun () ->
+        match Hashtbl.find_opt success_history key with
+        | Some samples -> List.length samples
+        | None -> 0)
+
+let percentile p values =
+  match List.sort Float.compare values with
+  | [] -> None
+  | sorted ->
+    let len = List.length sorted in
+    let raw_idx = int_of_float (ceil (p *. float_of_int len)) - 1 in
+    let idx = max 0 (min (len - 1) raw_idx) in
+    List.nth_opt sorted idx
+
+let seconds_of_ms ms = ms /. 1000.0
+
+let clamp_float ~floor ~ceiling v =
+  Float.max floor (Float.min ceiling v)
+
+let tuned_seconds ~floor ~ceiling ~multiplier ~add seconds =
+  clamp_float ~floor ~ceiling ((seconds *. multiplier) +. add)
+
+let budget_of_samples samples =
+  let p95 field = percentile 0.95 (List.map field samples) in
+  match p95 (fun s -> s.ttft_ms), p95 (fun s -> s.max_inter_chunk_ms),
+        p95 (fun s -> s.wall_ms) with
+  | Some ttft_ms, Some inter_ms, Some wall_ms ->
+    let ttft_max =
+      tuned_seconds
+        ~floor:30.0
+        ~ceiling:900.0
+        ~multiplier:1.5
+        ~add:5.0
+        (seconds_of_ms ttft_ms)
+    in
+    let inter_chunk_max =
+      tuned_seconds
+        ~floor:20.0
+        ~ceiling:240.0
+        ~multiplier:2.0
+        ~add:5.0
+        (seconds_of_ms inter_ms)
+    in
+    let observed_wall =
+      tuned_seconds
+        ~floor:180.0
+        ~ceiling:3600.0
+        ~multiplier:1.4
+        ~add:30.0
+        (seconds_of_ms wall_ms)
+    in
+    let attempt_wall_max =
+      Float.max observed_wall (ttft_max +. inter_chunk_max)
+    in
+    { Cascade_attempt_liveness.ttft_max = ttft_max
+    ; inter_chunk_max
+    ; attempt_wall_max
+    }
+  | _ -> Cascade_attempt_liveness.bootstrap
+
+let budget_for_candidate ~candidate_key =
+  let key = normalize_candidate_key candidate_key in
+  let samples =
+    match key with
+    | None -> []
+    | Some key ->
+      with_success_history_lock (fun () ->
+          match Hashtbl.find_opt success_history key with
+          | Some samples -> samples
+          | None -> [])
+  in
+  match samples with
+  | [] -> { budget = Cascade_attempt_liveness.bootstrap; source = Bootstrap }
+  | samples ->
+    { budget = budget_of_samples samples
+    ; source = Observed_success { samples = List.length samples }
+    }
 
 (* RFC-0022 §1 — see .mli for contract. *)
 let outer_wall_for_attempt
-    ~mode ~observer_attached ~per_provider_timeout_s ~provider_label =
+    ~mode ~observer_attached ~per_provider_timeout_s ~candidate_key =
   match mode, observer_attached with
   | Enforce, true -> None
   | _, true ->
+      let resolved = budget_for_candidate ~candidate_key in
       let budget_wall =
-        (budget_for_label provider_label).Cascade_attempt_liveness.attempt_wall_max
+        resolved.budget.Cascade_attempt_liveness.attempt_wall_max
       in
       Option.map
         (fun t -> Float.max t budget_wall)

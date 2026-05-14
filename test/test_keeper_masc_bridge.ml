@@ -245,12 +245,7 @@ let test_custom_keeps_registered_inline_board_tool () =
     (List.mem "masc_who" names)
 
 let with_masc_schema_ref schemas f =
-  let previous = !(KET.masc_schemas_ref) in
-  Fun.protect
-    ~finally:(fun () -> KET.masc_schemas_ref := previous)
-    (fun () ->
-      KET.masc_schemas_ref := schemas;
-      f ())
+  KET.with_masc_schemas_for_test schemas f
 
 let test_dashboard_tool_count_uses_schema_ssot () =
   let bridge_name = "mcp__masc__masc_status" in
@@ -602,7 +597,7 @@ let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
       let raw =
         Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
           ~config
-          ~meta
+          ~keeper_name:meta.name
           ~name:"masc_approval_pending"
           ~args:(`Assoc [])
       in
@@ -638,7 +633,7 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
         let raw =
           Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
             ~config
-            ~meta
+            ~keeper_name:meta.name
             ~name:"masc_code_read"
             ~args:
               (`Assoc

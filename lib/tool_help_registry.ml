@@ -98,8 +98,10 @@ let default_when_to_use name =
   else
     "Use when you need this tool's canonical action."
 
-let constraints_from_metadata name =
-  let meta = Tool_catalog.metadata name in
+(* Internal: same body as [constraints_from_metadata] but operates on a
+   pre-fetched [Tool_catalog.metadata] value to avoid re-doing the
+   catalog lookup when [entry_of_schema] already has it in scope. *)
+let constraints_from_meta (meta : Tool_catalog.metadata) =
   let visibility_note =
     match meta.visibility with
     | Tool_catalog.Hidden -> [ "Hidden from the default tool list." ]
@@ -120,6 +122,9 @@ let constraints_from_metadata name =
     | Tool_catalog.Real -> []
   in
   visibility_note @ lifecycle_note @ implementation_note
+
+let constraints_from_metadata name =
+  constraints_from_meta (Tool_catalog.metadata name)
 
 let manual_help_entry name =
   match name with
@@ -225,8 +230,7 @@ let manual_help_entry name =
         }
   | _ -> None
 
-let derived_short_description name original =
-  let meta = Tool_catalog.metadata name in
+let derived_short_description_with_meta (meta : Tool_catalog.metadata) name original =
   match meta.lifecycle, meta.replacement with
   | Tool_catalog.Deprecated, Some replacement ->
       "Deprecated alias for " ^ replacement ^ "."
@@ -247,10 +251,13 @@ let derived_short_description name original =
       else
         cleaned ^ "."
 
-let derived_details name original =
+let derived_short_description name original =
+  derived_short_description_with_meta (Tool_catalog.metadata name) name original
+
+let derived_details_with_meta (meta : Tool_catalog.metadata) original =
   let base = normalize_spaces original in
-  let extra_constraints = constraints_from_metadata name in
-  if Stdlib.List.length extra_constraints = 0 then
+  let extra_constraints = constraints_from_meta meta in
+  if extra_constraints = [] then
     base
   else
     String.concat "\n\n"
@@ -260,16 +267,30 @@ let derived_details name original =
         ^ String.concat "\n" (List.map (fun item -> "- " ^ item) extra_constraints);
       ]
 
+let derived_details name original =
+  derived_details_with_meta (Tool_catalog.metadata name) original
+
 let entry_of_schema (schema : Masc_domain.tool_schema) : help_entry =
   match manual_help_entry schema.name with
   | Some entry -> entry
   | None ->
+      (* Fetch catalog metadata once and thread it through every helper
+         that would otherwise re-query Tool_catalog.metadata.  Without
+         this, each non-manual entry triggered 3 lookups via
+         derived_short_description, constraints_from_metadata, and
+         derived_details — the pre-hoist call graph this comment
+         documented.  Today derived_details_with_meta calls
+         constraints_from_meta directly on the cached meta, so the
+         second lookup inside derived_details is gone; the threading
+         pattern below avoids the remaining two by passing [meta]
+         explicitly. *)
+      let meta = Tool_catalog.metadata schema.name in
       {
         name = schema.name;
-        short_description = derived_short_description schema.name schema.description;
+        short_description = derived_short_description_with_meta meta schema.name schema.description;
         when_to_use = default_when_to_use schema.name;
-        key_constraints = constraints_from_metadata schema.name;
-        details_markdown = derived_details schema.name schema.description;
+        key_constraints = constraints_from_meta meta;
+        details_markdown = derived_details_with_meta meta schema.description;
         doc_refs = help_doc_refs schema.name;
         prompt_hints = help_prompt_hints schema.name;
       }

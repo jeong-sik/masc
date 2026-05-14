@@ -8,12 +8,24 @@ import type {
   KeeperTrustTerminalReason,
   PipelineStage,
   PromptTelemetry,
+  ProviderHealth,
 } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
+import { asKeeperRuntimeBlockerClass } from './lib/runtime-blocker-class'
 import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
+import type { CascadeRef } from './types'
+
+/** Normalize a raw cascade_ref JSON object into a typed CascadeRef. */
+function normalizeCascadeRef(raw: unknown): CascadeRef | null {
+  if (!isRecord(raw)) return null
+  const group = asString(raw.group)
+  if (!group) return null
+  const item = asString(raw.item) ?? null
+  return { group, item }
+}
 
 /** Maps lowercase backend phase strings to PascalCase KeeperPhase values.
  *  Backend (keeper_state_machine.ml) emits lowercase: "offline", "running", "handing_off", etc.
@@ -227,8 +239,7 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
             asNumber(executionRaw.provider_attempt_count) ?? null,
           provider_fallback_applied:
             asBoolean(executionRaw.provider_fallback_applied) ?? null,
-          provider_selected_model:
-            asString(executionRaw.provider_selected_model) ?? null,
+          provider_selected_model: asString(executionRaw.provider_selected_model) ?? null,
           cascade_outcome: asString(executionRaw.cascade_outcome) ?? null,
           sandbox_summary: asString(executionRaw.sandbox_summary) ?? null,
           sandbox_root: asString(executionRaw.sandbox_root) ?? null,
@@ -279,10 +290,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoffObj
           ? (asNumber(handoffObj.new_generation) ?? asNumber(handoffObj.to_generation) ?? null)
           : (asNumber(item.handoff_new_generation) ?? null)
-      const handoffToModel =
-        handoffObj
-          ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null)
-          : (typeof item.handoff_to_model === 'string' ? item.handoff_to_model : null)
+      const handoffToModel = null
       const rawPrompt = isRecord(item.prompt) ? item.prompt : null
       const rawUsage = isRecord(item.usage) ? item.usage : null
       const promptSegments: NonNullable<PromptTelemetry['segments']> =
@@ -350,6 +358,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         reasoning_tokens: asNumber(rawTel.reasoning_tokens) ?? null,
         peak_memory_gb: asNumber(rawTel.peak_memory_gb) ?? null,
         request_latency_ms: asNumber(rawTel.request_latency_ms) ?? null,
+        ttfrc_ms: asNumber(rawTel.ttfrc_ms) ?? null,
+        prefill_ms: asNumber(rawTel.prefill_ms) ?? null,
       } : null
       const cascadeObj = isRecord(item.cascade) ? item.cascade : null
       const fallbackEvents = cascadeObj && Array.isArray(cascadeObj.fallback_events) ? cascadeObj.fallback_events : []
@@ -366,7 +376,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         is_compaction: item.compacted === true,
         compaction_saved_tokens: asNumber(item.compaction_saved_tokens) ?? 0,
         compaction_trigger: typeof item.compaction_trigger === 'string' ? item.compaction_trigger : null,
-        model_used: typeof item.model_used === 'string' ? item.model_used : '',
+        model_used: '',
         cost_usd: asNumber(item.cost_usd) ?? Number.NaN,
         handoff_to_model: handoffToModel,
         handoff_new_generation: handoffNewGeneration,
@@ -381,16 +391,13 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         inference_telemetry,
         cascade_name: cascadeObj ? (asString(cascadeObj.cascade_name) ?? asString(cascadeObj.name) ?? null) : null,
         cascade_outcome: cascadeObj ? (asString(cascadeObj.outcome) ?? null) : null,
-        cascade_selected_model:
-          cascadeObj
-            ? (asString(cascadeObj.selected_model) ?? asString(cascadeObj.selected_model_id) ?? null)
-            : null,
+        cascade_selected_model: null,
         cascade_attempt_count: cascadeObj ? (asNumber(cascadeObj.attempt_count) ?? null) : null,
         cascade_strategy: cascadeObj && typeof cascadeObj.strategy === 'string' ? cascadeObj.strategy : null,
         fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
         fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,
-        fallback_from: firstFallback && typeof firstFallback.from_model_id === 'string' ? firstFallback.from_model_id : null,
-        fallback_to: firstFallback && typeof firstFallback.to_model_id === 'string' ? firstFallback.to_model_id : null,
+        fallback_from: null,
+        fallback_to: null,
         fallback_reason: firstFallback && typeof firstFallback.reason === 'string' ? firstFallback.reason : null,
       }
     })
@@ -463,7 +470,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
 
       const contextRatio = asNumber(row.context_ratio) ?? asNumber(contextRaw?.context_ratio)
       const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
-      const model = asString(row.model) ?? asString(row.active_model) ?? asString(row.primary_model)
+      const model = undefined
       const skillSecondary = asStringArray(row.skill_secondary)
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
 
@@ -496,10 +503,12 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
             }
           : undefined
 
+      const providerHealth: ProviderHealth | null = null
+
       return {
         name,
         runtime_class: 'keeper' as const,
-        pipeline_stage: (asString(row.pipeline_stage) ?? 'idle') as PipelineStage,
+        pipeline_stage: (asString(row.pipeline_stage) ?? 'unknown') as PipelineStage,
         phase: toKeeperPhase(asString(row.phase)),
         paused: asBoolean(row.paused),
         registered:
@@ -511,13 +520,14 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         agent_name: asString(row.agent_name),
         trace_id: asString(row.trace_id),
         model,
-        primary_model: asString(row.primary_model),
-        active_model: asString(row.active_model),
-        active_model_label: asString(row.active_model_label) ?? null,
-        last_model_used: asString(row.last_model_used),
-        last_model_used_label: asString(row.last_model_used_label) ?? null,
-        next_model_hint: asString(row.next_model_hint) ?? null,
+        primary_model: undefined,
+        active_model: undefined,
+        active_model_label: null,
+        last_model_used: undefined,
+        last_model_used_label: null,
+        next_model_hint: null,
         cascade_name: asString(row.cascade_name) ?? null,
+        cascade_ref: normalizeCascadeRef(row.cascade_ref),
         cascade_canonical: asString(row.cascade_canonical) ?? asString(row.selected_cascade_canonical) ?? null,
         selected_cascade_canonical: asString(row.selected_cascade_canonical) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),
@@ -530,8 +540,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
-        runtime_blocker_class:
-          (asString(row.runtime_blocker_class) as Keeper['runtime_blocker_class']) ?? null,
+        runtime_blocker_class: asKeeperRuntimeBlockerClass(row.runtime_blocker_class),
         runtime_blocker_summary: asString(row.runtime_blocker_summary) ?? null,
         runtime_blocker_continue_gate:
           typeof row.runtime_blocker_continue_gate === 'boolean'
@@ -600,10 +609,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_proactive_reason: asString(row.last_proactive_reason) ?? null,
         last_activity_ago_s: asNumber(row.last_activity_ago_s),
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
-        social_model: asString(row.social_model) ?? null,
-        configured_social_model: asString(row.configured_social_model) ?? null,
+        social_model: null,
+        configured_social_model: null,
         social_model_recognized: asBoolean(row.social_model_recognized) ?? null,
-        social_model_fallback: asString(row.social_model_fallback) ?? null,
+        social_model_fallback: null,
         last_speech_act: asString(row.last_speech_act) ?? null,
         last_blocker: asString(row.last_blocker) ?? null,
         last_need: asString(row.last_need) ?? null,
@@ -638,6 +647,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
         agent: normalizedAgent,
+        provider_health: providerHealth,
       }
     })
     .filter((row): row is Keeper => row !== null)

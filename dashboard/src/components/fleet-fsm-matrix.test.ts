@@ -68,8 +68,10 @@ function snapshot(
       no_cascade_before_measurement: allHold,
       compaction_atomicity: allHold,
       event_priority_monotone: allHold,
+      phase_derivation_agreement: allHold,
       ...overrides.violate,
     },
+    fsm_guard_violations: 0,
     is_live: false,
     last_outcome: null,
     recommended_actions: [],
@@ -167,6 +169,7 @@ describe('tallyInvariantViolations', () => {
       no_cascade_before_measurement: 0,
       compaction_atomicity: 0,
       event_priority_monotone: 0,
+      phase_derivation_agreement: 0,
     })
   })
 
@@ -189,6 +192,7 @@ describe('tallyInvariantViolations', () => {
       no_cascade_before_measurement: 0,
       compaction_atomicity: 0,
       event_priority_monotone: 0,
+      phase_derivation_agreement: 0,
     })
   })
 })
@@ -390,7 +394,11 @@ describe('runtimeAttentionForSnapshot', () => {
         tool_contract_result: 'missing_required_tool_use',
         tool_surface: {
           tool_requirement: 'required',
+          turn_lane: 'tool_required',
+          tool_surface_class: 'mixed',
+          visible_tool_count: 0,
           tool_gate_enabled: true,
+          tool_surface_fallback_used: true,
           missing_required_tools: ['keeper_bash'],
           required_tools: ['keeper_bash'],
         },
@@ -400,6 +408,9 @@ describe('runtimeAttentionForSnapshot', () => {
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
     expect(attention.cause).toContain('missing_required_tool_use (keeper_bash)')
+    expect(attention.reason).toContain('turn_lane=tool_required')
+    expect(attention.reason).toContain('visible_tools=0')
+    expect(attention.reason).toContain('tool_surface_fallback=true')
     expect(attention.nextStep).toContain('keeper_bash')
   })
 
@@ -438,6 +449,16 @@ describe('fleetCellPresentation', () => {
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_required_unsatisfied',
+        tool_surface: {
+          tool_requirement: 'required',
+          turn_lane: 'tool_required',
+          tool_surface_class: 'mixed',
+          visible_tool_count: 0,
+          tool_gate_enabled: true,
+          tool_surface_fallback_used: true,
+          missing_required_tools: ['keeper_bash'],
+          required_tools: ['keeper_bash'],
+        },
       }),
     })
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
@@ -479,6 +500,16 @@ describe('buildRuntimeAssistPrompt', () => {
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_required_unsatisfied',
+        tool_surface: {
+          tool_requirement: 'required',
+          turn_lane: 'tool_required',
+          tool_surface_class: 'mixed',
+          visible_tool_count: 0,
+          tool_gate_enabled: true,
+          tool_surface_fallback_used: true,
+          missing_required_tools: ['keeper_bash'],
+          required_tools: ['keeper_bash'],
+        },
       }),
     })
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
@@ -488,6 +519,9 @@ describe('buildRuntimeAssistPrompt', () => {
     expect(prompt).toContain('cause=')
     expect(prompt).toContain('operator pause: tool_required_unsatisfied')
     expect(prompt).toContain('evidence=')
+    expect(prompt).toContain('"turn_lane":"tool_required"')
+    expect(prompt).toContain('"visible_tool_count":0')
+    expect(prompt).toContain('"tool_surface_fallback_used":true')
     expect(prompt).toContain('KSM=Running')
     expect(prompt).toContain('resolve 후보')
     expect(prompt).toContain('keeper_probe')

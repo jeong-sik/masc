@@ -672,7 +672,7 @@ let test_load_keeper_toml_inherits_base_defaults () =
     (fun () ->
       write_file base_path {|
 [keeper]
-cascade_name = "big_three"
+cascade_name = "primary"
 sandbox_profile = "docker"
 network_mode = "inherit"
 work_discovery_enabled = true
@@ -693,7 +693,7 @@ preset = "coding"
       | Error e -> fail e
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
-          check (option string) "base cascade" (Some "big_three")
+          check (option string) "base cascade" (Some "primary")
             defaults.cascade_name;
           check (option string) "base sandbox" (Some "docker")
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
@@ -841,24 +841,21 @@ let with_config_dir f =
       Masc_mcp.Config_dir_resolver.reset ();
       f config_dir)
 
-(* Legacy allowed_providers is accepted for compatibility but ignored.
-   Provider ownership now lives with OAS cascade resolution. *)
-
-let test_profile_ignores_legacy_allowed_providers () =
+let test_profile_rejects_legacy_allowed_providers () =
   let input = {|
 [keeper]
 goal = "test"
 allowed_providers = ["Ollama", "GLM"]
-cascade_name = "big_three"
+cascade_name = "primary"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
   | Ok doc ->
     (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok d ->
-       check (option string) "cascade preserved"
-         (Some "big_three") d.cascade_name)
+     | Ok _ -> fail "expected removed TOML key error"
+     | Error msg ->
+       check bool "mentions removed allowed_providers key" true
+         (contains_substring msg "keeper.allowed_providers"))
 
 let test_profile_max_turns_overrides () =
   let input = {|
@@ -953,7 +950,7 @@ cascade_name = "oas-coding_first"
      | Error e -> fail e
      | Ok d ->
        check (option string) "legacy keeper cascade normalized"
-         (Some Masc_mcp.Keeper_config.default_cascade_name)
+         (Some Masc_mcp.(Keeper_config.default_cascade_name ()))
          d.cascade_name)
 
 let test_persona_resolver_defaults_to_research_tool_access () =
@@ -1482,7 +1479,7 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
-cascade_name = "big_three"
+cascade_name = "primary"
 github_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
@@ -1764,6 +1761,15 @@ legacy_scope = "removed"
   let request = Httpun.Request.create `GET "/health" in
   let json = Runtime.make_health_json request in
   let open Yojson.Safe.Util in
+  let listener = json |> member "http_listener" in
+  check bool "health exposes http listener diagnostics" true
+    (match listener with `Assoc _ -> true | _ -> false);
+  check bool "health listener status is surfaced" true
+    (match listener |> member "status" with `String _ -> true | _ -> false);
+  check bool "health listener active connections surfaced" true
+    (match listener |> member "active_connections" with
+    | `Int _ -> true
+    | _ -> false);
   check int "unknown key count" 1
     (json |> member "keeper_config_unknown_key_count" |> to_int);
   check string "schema status" "blocked"
@@ -1795,6 +1801,19 @@ legacy_scope = "removed"
           (List.length rows)));
   check (float 0.0001) "health scan does not increment warning metric"
     before_unknown_metric (unknown_metric ())
+
+let test_health_json_build_exposes_runtime_binary_identity () =
+  with_config_dir @@ fun _config_dir ->
+  let request = Httpun.Request.create `GET "/health" in
+  let json = Runtime.make_health_json request in
+  let open Yojson.Safe.Util in
+  let build = json |> member "build" in
+  check bool "build executable path populated" true
+    (String.length (build |> member "executable_path" |> to_string) > 0);
+  check bool "build executable dir populated" true
+    (String.length (build |> member "executable_dir" |> to_string) > 0);
+  check bool "build repo_root field present" true
+    (match build |> member "repo_root" with `Null | `String _ -> true | _ -> false)
 
 let test_unknown_toml_warning_key_normalizes_unknown_order () =
   let path =
@@ -1921,8 +1940,8 @@ let () =
             test_profile_rejects_removed_also_allow_alias;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
-          test_case "legacy allowed_providers ignored" `Quick
-            test_profile_ignores_legacy_allowed_providers;
+          test_case "legacy allowed_providers rejected" `Quick
+            test_profile_rejects_legacy_allowed_providers;
           test_case "legacy keeper cascade alias normalized" `Quick
             test_profile_normalizes_legacy_keeper_cascade_alias;
           test_case "max_turns overrides parsed and applied" `Quick
@@ -1954,6 +1973,8 @@ let () =
             test_keeper_toml_unknown_keys_in_dir_reports_files;
           test_case "health JSON surfaces unknown keys" `Quick
             test_health_json_surfaces_keeper_toml_unknown_keys;
+          test_case "health JSON build exposes runtime binary identity" `Quick
+            test_health_json_build_exposes_runtime_binary_identity;
           test_case "unknown TOML warning key normalizes order" `Quick
             test_unknown_toml_warning_key_normalizes_unknown_order;
           test_case "unknown TOML warning key uses full path not basename" `Quick

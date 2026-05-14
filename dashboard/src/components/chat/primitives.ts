@@ -63,7 +63,6 @@ function tokenSummary(details: KeeperConversationDetails | null | undefined): st
 function detailSummary(details: KeeperConversationDetails | null | undefined): string[] {
   if (!details) return []
   return [
-    details.modelUsed ?? null,
     typeof details.latencyMs === 'number' ? `${details.latencyMs} ms` : null,
     tokenSummary(details),
   ].filter((value): value is string => Boolean(value))
@@ -95,7 +94,6 @@ function stateRows(stateBlock?: string | null): Array<{ label: string; value: st
 
 function overviewRows(details: KeeperConversationDetails): Array<{ label: string; value: string }> {
   return [
-    details.modelUsed ? { label: '모델', value: details.modelUsed } : null,
     typeof details.latencyMs === 'number' ? { label: '지연', value: `${details.latencyMs} ms` } : null,
     typeof details.usage?.totalTokens === 'number' ? { label: '토큰', value: `${details.usage.totalTokens}` } : null,
     formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,

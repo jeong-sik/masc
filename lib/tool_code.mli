@@ -34,7 +34,6 @@ type context = {
 (** Per-call context.  Concrete record because callers
     construct it field-by-field at the dispatch site. *)
 
-type tool_result = bool * string
 
 (** {1 Security primitives} *)
 
@@ -118,7 +117,7 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 (** [dispatch ctx ~name ~args] routes by tool name to the
     private handlers ([handle_code_search],
     [handle_code_symbols], [handle_code_read]).  Returns [None]

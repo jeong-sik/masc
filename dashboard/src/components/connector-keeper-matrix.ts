@@ -28,6 +28,7 @@ import {
 import { openConnectorConfig } from './connector-config-form'
 import { KeeperBadge } from './keeper-badge'
 import { Tk } from './tk'
+import { SurfaceCard } from './common/card'
 
 type MatrixCellState = 'bound' | 'unbound' | 'na' | 'unknown'
 
@@ -229,7 +230,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
   const gridCols = `grid-template-columns: minmax(160px, 1fr) repeat(${matrix.columns.length}, minmax(80px, 1fr)) minmax(90px, auto);`
 
   return html`
-    <section class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" data-panel="connector-keeper-matrix" aria-label="Keeper × Connector 매트릭스">
+    <${SurfaceCard} class="mb-4 !border-[var(--color-border-default)] !bg-[var(--color-bg-surface)] !p-3" data-panel="connector-keeper-matrix" aria-label="Keeper × Connector 매트릭스">
       <header class="mb-2 flex items-baseline justify-between gap-3">
         <div>
           <h4 class="text-xs font-semibold uppercase tracking-4 text-[var(--color-fg-primary)]">
@@ -254,9 +255,9 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
 
       ${!hasKeepers
         ? html`
-            <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
+            <${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
               No keepers yet — add one under <${Tk}>config/keepers/<//> and restart.
-            </div>
+            </${SurfaceCard}>
           `
         : html`
             <div class="overflow-x-auto">
@@ -288,7 +289,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
               </div>
             </div>
           `}
-    </section>
+    </${SurfaceCard}>
   `
 }
 

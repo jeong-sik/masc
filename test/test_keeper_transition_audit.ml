@@ -45,7 +45,7 @@ let keeper_meta name =
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
           ("goal", `String "transition-audit-test");
-          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
+          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
         ])
   with
   | Ok meta -> meta
@@ -64,7 +64,7 @@ let transition ?(prev_phase = KSM.Running) ?(new_phase = KSM.Paused)
   }
 
 let transition_audit_failure_count site =
-  P.metric_value_or_zero P.metric_keeper_transition_audit_failures
+  P.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_transition_audit_failures
     ~labels:[("site", site)]
     ()
 

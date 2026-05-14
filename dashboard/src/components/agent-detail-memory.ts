@@ -3,7 +3,7 @@ import { useSignal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import { ProgressBar } from './common/progress-bar'
-import { Card } from './common/card'
+import { CollapsibleSection } from './common/collapsible'
 import {
   fetchMemorySubsystems,
   type MemorySubsystemsResponse,
@@ -120,7 +120,7 @@ export function AgentDetailMemory({ agentName }: Props) {
   const isFilteringEpisodes = episodeQuery.value.trim() !== ''
 
   return html`
-    <${Card} title="협업 & 기억">
+    <${CollapsibleSection} title="협업 & 기억" mountWhenOpen=${true}>
       <div class="space-y-4">
         <!-- Hebbian collaboration -->
         <div>

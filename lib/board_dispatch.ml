@@ -688,3 +688,8 @@ let list_sub_boards () =
 let delete_sub_board ~sub_board_id =
   match backend () with
   | Jsonl store -> Board.delete_sub_board store ~sub_board_id
+
+let update_sub_board ~sub_board_id ?name ?description ?members ?access () =
+  match backend () with
+  | Jsonl store -> Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()
+

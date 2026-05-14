@@ -120,6 +120,19 @@ type BoardPostMeta = Record<string, unknown> & {
 export type BoardVoteDirection = 'up' | 'down'
 export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
+export interface BoardContributorQuality {
+  score: number
+  band?: 'low' | 'watch' | 'strong' | 'excellent' | string
+  source?: string
+  completion_rate?: number
+  response_rate?: number
+  board_posts?: number
+  board_comments?: number
+  accountability_score?: number
+  autonomy_level?: string
+  thompson_confidence?: number
+}
+
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
   id: string
@@ -141,8 +154,10 @@ export interface BoardPost {
   content: string
   meta?: BoardPostMeta | null
   tags: string[]
-  votes: number
-  vote_balance?: number
+  votes: number | null
+  vote_balance?: number | null
+  vote_blind?: boolean
+  vote_blind_reason?: string
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
   comment_count: number
@@ -155,6 +170,7 @@ export interface BoardPost {
   hearth_count?: number
   report_count?: number
   moderation_status?: BoardModerationStatus
+  contributor_quality?: BoardContributorQuality | null
   reactions?: BoardReactionSummary[]
 }
 
@@ -166,10 +182,12 @@ export interface BoardComment {
   author_identity?: BoardActorIdentity | null
   content: string
   created_at: string
-  votes?: number
-  vote_balance?: number
-  votes_up?: number
-  votes_down?: number
+  votes?: number | null
+  vote_balance?: number | null
+  votes_up?: number | null
+  votes_down?: number | null
+  vote_blind?: boolean
+  vote_blind_reason?: string
   current_vote?: BoardVoteDirection | null
   has_voted?: boolean
   report_count?: number
@@ -285,6 +303,8 @@ export interface InferenceTelemetry {
   reasoning_tokens: number | null
   peak_memory_gb: number | null
   request_latency_ms: number | null
+  ttfrc_ms: number | null
+  prefill_ms: number | null
 }
 
 export interface PromptSegmentTelemetry {
@@ -354,26 +374,53 @@ export interface KeeperMetricPoint {
   fallback_reason: string | null
 }
 
-export type KeeperRuntimeBlockerClass =
-  | 'ambiguous_post_commit_timeout'
-  | 'ambiguous_post_commit_failure'
-  | 'autonomous_slot_wait_timeout'
-  | 'admission_queue_wait_timeout'
-  | 'turn_timeout_after_queue_wait'
-  | 'oas_timeout_budget'
-  | 'turn_timeout'
-  | 'completion_contract_violation'
-  | 'cascade_exhausted'
-  | 'no_tool_capable_provider'
-  | 'provider_runtime_error'
-  | 'tool_required_unsatisfied'
-  | 'fiber_unresolved'
-  | 'stale_turn_timeout'
-  | 'stale_termination_storm'
-  | 'heartbeat_failures'
-  | 'turn_failures'
-  | 'exception'
-  | 'stale_fleet_batch'
+export interface ProviderHealth {
+  provider: string
+  model: string
+  status: 'healthy' | 'degraded' | 'unhealthy'
+  ttfrc_ms_ewma: number
+  timeout_count_5m: number
+  prefill_ms_ewma: number
+  last_updated: number
+}
+
+export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
+  'ambiguous_post_commit_timeout',
+  'ambiguous_post_commit_failure',
+  'autonomous_slot_wait_timeout',
+  'admission_queue_wait_timeout',
+  'turn_timeout_after_queue_wait',
+  'oas_timeout_budget',
+  'turn_timeout',
+  'completion_contract_violation',
+  'cascade_exhausted',
+  'no_tool_capable_provider',
+  'provider_runtime_error',
+  'tool_required_unsatisfied',
+  'fiber_unresolved',
+  'stale_turn_timeout',
+  'stale_termination_storm',
+  'heartbeat_failures',
+  'turn_failures',
+  'exception',
+  'stale_fleet_batch',
+  'awaiting_operator',
+  'awaiting_sandbox_egress',
+  'supervisor_paused',
+  'synthetic_stall',
+  'self_imposed_idle',
+  'sdk_max_turns_exceeded',
+  'sdk_token_budget_exceeded',
+  'sdk_cost_budget_exceeded',
+  'sdk_unrecognized_stop_reason',
+  'sdk_idle_detected',
+  'sdk_tool_retry_exhausted',
+  'sdk_guardrail_violation',
+  'sdk_tripwire_violation',
+  'sdk_exit_condition_met',
+] as const
+
+export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
 
 export interface KeeperTrustLatestEvent {
   kind: string
@@ -620,6 +667,7 @@ export type PipelineStage =
   | 'paused'
   | 'crashed'
   | 'restarting'
+  | 'unknown'
 
 // Aggregated metrics computed by the backend over a sliding window.
 // Fields mirror dashboard_http_keeper_detail.ml summary output.
@@ -814,6 +862,7 @@ export interface Keeper {
   last_model_used_label?: string | null
   next_model_hint?: string | null
   cascade_name?: string | null
+  cascade_ref?: CascadeRef | null
   cascade_canonical?: string | null
   selected_cascade_canonical?: string | null
   status: string
@@ -970,6 +1019,7 @@ export interface Keeper {
   inventory?: string[]
   relationships?: Record<string, string>
   supervisor_diagnostics?: KeeperSupervisorDiagnostics
+  provider_health?: ProviderHealth | null
   outcomes?: KeeperOutcomes
   conditions?: KeeperConditions
 }
@@ -1094,6 +1144,7 @@ interface KeeperConfigExecution {
   verify: boolean
   selected_cascade_name: string
   selected_cascade_canonical: string
+  cascade_ref?: CascadeRef | null
 }
 
 interface KeeperConfigCompaction {
@@ -1108,6 +1159,11 @@ interface KeeperConfigProactive {
   enabled: boolean
   idle_sec: number
   cooldown_sec: number
+}
+
+export interface CascadeRef {
+  group: string
+  item: string | null
 }
 
 export type KeeperFeatureStatus = 'wired' | 'source_only' | 'unwired'
@@ -1185,8 +1241,6 @@ interface KeeperConfigSources {
   override_fields: string[]
   cascade_catalog_source_kind: 'json' | 'toml' | null
   cascade_catalog_source_path: string | null
-  cascade_runtime_json_path: string | null
-  cascade_runtime_json_editable: boolean
 }
 
 interface KeeperConfigMetrics {
@@ -1200,7 +1254,7 @@ interface KeeperConfigMetrics {
   last_input_tokens: number
   last_output_tokens: number
   last_total_tokens: number
-  last_latency_ms: number
+  last_latency_ms: number | null
   last_total_tokens_per_sec: number | null
   last_output_tokens_per_sec: number | null
   compaction_count: number

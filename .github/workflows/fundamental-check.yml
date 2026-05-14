@@ -28,6 +28,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-roadmap-stale-hardcoding.sh
 
+  provider-adapter-removal-ratchet:
+    name: Provider adapter removal ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/provider-adapter-removal-ratchet.sh
+
   no-fabricated-telemetry:
     name: Math.random in components
     runs-on: ubuntu-latest
@@ -35,6 +45,30 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run lint
         run: bash scripts/lint/no-fabricated-telemetry.sh
+
+  no-oas-prefix-in-lib:
+    name: No oas_* prefix in masc-mcp lib/ (RFC-0047)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/no-oas-prefix-in-lib.sh
+
+  no-inline-ok-envelope:
+    name: No inline ok-envelope literals (T27/T28/T29)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/no-inline-ok-envelope.sh
+
+  no-inline-error-envelope:
+    name: No inline error-envelope literals (T30)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/no-inline-error-envelope.sh
 
   godfile-size-regression:
     name: Godfile size
@@ -53,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
       - name: Install PyYAML
@@ -74,3 +108,16 @@ jobs:
           python3 scripts/ci/check-env-knob-classification.py \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head HEAD
+
+  exhaustive-guard-advisory:
+    # RFC-0071 Phase 1 advisory: surfaces new fragile-match sites in PR
+    # checks but never blocks merge. Phase 5 (RFC-0071 §4) flips this
+    # to required-and-blocking once codemod (WS-3) closes the bulk of
+    # the inventory and the allowlist is narrowed to (a)-class sites.
+    name: Fragile-match (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/exhaustive-guard.sh

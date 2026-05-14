@@ -302,7 +302,7 @@ let dashboard_actor_for_request ~base_path request =
             token_hash_prefix;
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
-            ~labels:[ ("outcome", "none") ]
+            ~labels:[ ("outcome", Silent_dashboard_actor_outcome.(to_label None_resolved)) ]
             ();
           request_actor_hint request
       | Error err ->
@@ -319,8 +319,7 @@ let dashboard_actor_for_request ~base_path request =
             | None -> "<none>"
           in
           (* err_kind is a closed enum in [Auth_error_kind] — issue #11266
-             Track 2a. The inline label match here previously diverged
-             silently from the MCP-side dispatch in
+             Track 2a. The stable label is shared with the MCP-side dispatch in
              [mcp_server_eio_execute.ml:silent_auth_token_error_kind]. *)
           let err_kind = Auth_error_kind.to_string (Auth_error_kind.classify err) in
           (* P3-5: token_mismatch means the dashboard's bearer token does not
@@ -345,7 +344,7 @@ let dashboard_actor_for_request ~base_path request =
             token_hash_prefix err_kind hint err_str extra_hint;
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
-            ~labels:[ ("outcome", "error"); ("err_kind", err_kind) ]
+            ~labels:[ ("outcome", Silent_dashboard_actor_outcome.(to_label Error_classified)); ("err_kind", err_kind) ]
             ();
           request_actor_hint request)
   | None -> request_actor_hint request

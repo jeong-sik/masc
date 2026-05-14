@@ -70,8 +70,8 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       per_provider_timeout_sec: null,
       per_provider_timeout_mode: 'turn_budget_heuristic',
       verify: true,
-      selected_cascade_name: 'keeper_unified',
-      selected_cascade_canonical: 'keeper_unified',
+      selected_cascade_name: 'tier-group.keeper_unified',
+      selected_cascade_canonical: 'tier-group.keeper_unified',
     },
     compaction: {
       profile: 'balanced',
@@ -134,8 +134,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       override_fields: ['goal', 'instructions'],
       cascade_catalog_source_kind: 'toml',
       cascade_catalog_source_path: '/tmp/config/cascade.toml',
-      cascade_runtime_json_path: '/tmp/config/cascade.json',
-      cascade_runtime_json_editable: false,
     },
     tools: {
       tool_access: { kind: 'preset', preset: 'coding' },
@@ -464,10 +462,10 @@ const mocks = vi.hoisted(() => ({
     },
   })),
   fetchCascadeProfiles: vi.fn(async () => ({
-    profiles: ['keeper_unified', 'resilient_breaker'],
+    profiles: ['tier-group.keeper_unified', 'tier.resilient_breaker'],
     invalid_profiles: [
       {
-        name: 'broken_profile',
+        name: 'tier.broken_profile',
         errors: ['missing models'],
       },
     ],
@@ -521,16 +519,15 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('편집 가능 범위')
     expect(container.textContent).toContain('keeper TOML의 cascade_name')
     expect(container.textContent).toContain('Cascade 선택')
-    expect(container.textContent).toContain('keeper_unified')
+    expect(container.textContent).toContain('tier-group.keeper_unified')
     expect(container.textContent).toContain('broken_profile')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
     expect(container.textContent).toContain('/tmp/config/cascade.toml')
-    expect(container.textContent).toContain('/tmp/config/cascade.json')
     expect(container.textContent).toContain('런타임 설정')
     expect(container.textContent).toContain('active_goal_ids')
     expect(container.textContent).toContain('Ship runtime clarity')
     expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
-    expect(container.textContent).toContain('활성 모델')
+    expect(container.textContent).toContain('활성 런타임')
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
     expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
@@ -556,7 +553,7 @@ describe('KeeperConfigPanel', () => {
       (select) => !select.getAttribute('aria-label'),
     ) as HTMLSelectElement | undefined
     expect(cascadeSelect).toBeDefined()
-    expect(cascadeSelect?.value).toBe('keeper_unified')
+    expect(cascadeSelect?.value).toBe('tier-group.keeper_unified')
 
     mocks.fetchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
@@ -566,20 +563,20 @@ describe('KeeperConfigPanel', () => {
           per_provider_timeout_sec: null,
           per_provider_timeout_mode: 'turn_budget_heuristic',
           verify: true,
-          selected_cascade_name: 'resilient_breaker',
-          selected_cascade_canonical: 'resilient_breaker',
+          selected_cascade_name: 'tier.resilient_breaker',
+          selected_cascade_canonical: 'tier.resilient_breaker',
         },
       }),
     )
 
-    cascadeSelect!.value = 'resilient_breaker'
+    cascadeSelect!.value = 'tier.resilient_breaker'
     cascadeSelect!.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
     await flush()
 
     expect(mocks.updateKeeperCascade).toHaveBeenCalledWith(
       'keeper-sangsu',
-      'resilient_breaker',
+      'tier.resilient_breaker',
     )
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
   })

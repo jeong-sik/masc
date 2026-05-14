@@ -68,6 +68,13 @@ let optional_string_field json field =
         (Printf.sprintf "%s: expected string or null, got %s" field
            (yojson_type_name value))
 
+let redacted_runtime_label = "runtime"
+
+let redacted_runtime_model_field json field =
+  match optional_string_field json field with
+  | Ok _ -> Ok redacted_runtime_label
+  | Stdlib.Error _ as error -> error
+
 let required_int_field kind json field =
   match Yojson.Safe.Util.member field json with
   | `Int value -> Ok value
@@ -137,7 +144,7 @@ let cycle_to_yojson (r : cycle_record) : Yojson.Safe.t =
     ("decision", `String (decision_to_string r.decision));
     ("commit_hash", Json_util.string_opt_to_json r.commit_hash);
     ("elapsed_ms", `Int r.elapsed_ms);
-    ("model_used", `String r.model_used);
+    ("model_used", `Null);
     ("timestamp", `Float r.timestamp);
   ]
 
@@ -158,7 +165,7 @@ let cycle_of_yojson_result (json : Yojson.Safe.t) : (cycle_record, string) resul
   in
   let* commit_hash = optional_string_field json "commit_hash" in
   let* elapsed_ms = required_int_field kind json "elapsed_ms" in
-  let* model_used = required_string_field kind json "model_used" in
+  let* model_used = redacted_runtime_model_field json "model_used" in
   let* timestamp = required_float_field kind json "timestamp" in
   Ok
     {
@@ -353,4 +360,3 @@ let execution_link_of_yojson_result (json : Yojson.Safe.t) : (execution_link, st
       created_by;
       linked_at;
     }
-

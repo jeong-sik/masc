@@ -31,12 +31,21 @@ let threshold () =
 let required_tool_no_call_progress_class = "required_tool_no_call"
 let required_tool_unsatisfied_progress_class = "required_tool_unsatisfied"
 
-let progress_class_of_terminal_reason_code = function
-  | "required_tool_use_no_tool_call" ->
+(* RFC-0047 follow-up: take a typed [Keeper_turn_disposition.t] instead
+   of pattern-matching on the wire string. The two relevant arms
+   ([Required_tool_use_no_tool_call] and [Required_tool_use_unsatisfied])
+   are dispositions known at construction time; everything else returns
+   [None] without ever needing to introspect the [code] string. *)
+let progress_class_of_disposition (d : Keeper_turn_disposition.t) =
+  match d with
+  | Required_tool_use_no_tool_call ->
       Some required_tool_no_call_progress_class
-  | "required_tool_use_unsatisfied" ->
+  | Required_tool_use_unsatisfied ->
       Some required_tool_unsatisfied_progress_class
-  | _ -> None
+  | Success | External_cancel | Turn_wall_clock_timeout | Oas_timeout_budget
+  | Gh_repo_context_missing_worktree | Post_commit_ambiguous
+  | Provider_error _ | Unknown _ ->
+      None
 
 type keeper_state = {
   mutable streak : int;
@@ -69,7 +78,7 @@ let get_or_create keeper_name =
    episode at threshold). *)
 let update_streak_gauge keeper_name value =
   Prometheus.set_gauge
-    Prometheus.metric_keeper_consecutive_idle
+    Keeper_metrics.metric_keeper_consecutive_idle
     ~labels:[("keeper", keeper_name)]
     (float_of_int value)
 
@@ -78,7 +87,7 @@ let update_streak_gauge keeper_name value =
    alert per keeper. *)
 let update_last_productive_gauge keeper_name ts =
   Prometheus.set_gauge
-    Prometheus.metric_keeper_last_productive_ts
+    Keeper_metrics.metric_keeper_last_productive_ts
     ~labels:[("keeper", keeper_name)]
     ts
 
@@ -103,13 +112,23 @@ let threshold_for_progress_class progress_class =
 
 let detect_counter_for_progress_class progress_class =
   if is_required_tool_progress_class progress_class
-  then Prometheus.metric_keeper_required_tool_loop_detected_total
-  else Prometheus.metric_keeper_passive_loop_detected_total
+  then Keeper_metrics.metric_keeper_required_tool_loop_detected_total
+  else Keeper_metrics.metric_keeper_passive_loop_detected_total
 
 let detect_labels_for_progress_class keeper_name progress_class =
   if is_required_tool_progress_class progress_class
   then [("keeper", keeper_name); ("kind", progress_class)]
   else [("keeper", keeper_name)]
+
+let emit_detected_loop_metrics keeper_name progress_class =
+  Prometheus.inc_counter
+    (detect_counter_for_progress_class progress_class)
+    ~labels:(detect_labels_for_progress_class keeper_name progress_class)
+    ();
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_zombie_loop_detected_total
+    ~labels:[("keeper_name", keeper_name)]
+    ()
 
 let log_detected_loop keeper_name progress_class streak threshold =
   if is_required_tool_progress_class progress_class then
@@ -148,10 +167,7 @@ let record_turn ~keeper_name ~progress_class =
         let t = threshold_for_progress_class progress_class in
         if s.streak >= t && not s.detected_latched then begin
           s.detected_latched <- true;
-          Prometheus.inc_counter
-            (detect_counter_for_progress_class progress_class)
-            ~labels:(detect_labels_for_progress_class keeper_name progress_class)
-            ();
+          emit_detected_loop_metrics keeper_name progress_class;
           log_detected_loop keeper_name progress_class s.streak t
         end
       end

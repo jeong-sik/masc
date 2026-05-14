@@ -1,6 +1,8 @@
 (** See [Dashboard_oas_bridge.mli]. *)
 
 let per_provider_cap = 200
+let default_duration_ms = 0.0
+let default_ttfb_ms = 0.0
 
 type status =
   | Success
@@ -68,12 +70,25 @@ let status_to_yojson = function
 let int_opt_to_yojson = function Some value -> `Int value | None -> `Null
 let float_opt_to_yojson = function Some value -> `Float value | None -> `Null
 let bool_opt_to_yojson = function Some value -> `Bool value | None -> `Null
+let public_runtime_provider_label = "runtime"
+let public_runtime_model_label = "runtime"
+
+let normalize_sample (s : sample) =
+  {
+    s with
+    provider_id = public_runtime_provider_label;
+    model_id = public_runtime_model_label;
+  }
+
+let normalize_provider_filter = function
+  | Some _ -> Some public_runtime_provider_label
+  | None -> None
 
 let sample_to_yojson (s : sample) =
   `Assoc
     [
-      ("provider_id", `String s.provider_id);
-      ("model_id", `String s.model_id);
+      ("provider_id", `String public_runtime_provider_label);
+      ("model_id", `String public_runtime_model_label);
       ("ttfb_ms", `Float s.ttfb_ms);
       ("total_duration_ms", `Float s.total_duration_ms);
       ("serialization_ms", `Float s.serialization_ms);
@@ -98,7 +113,7 @@ let sample_entry_to_yojson (s, recorded_at) =
 let provider_error_count_to_yojson (c : provider_error_count) =
   `Assoc
     [
-      ("provider_id", `String c.provider_id);
+      ("provider_id", `String public_runtime_provider_label);
       ("cascade_name", `String c.cascade_name);
       ("kind", `String c.kind);
       ("capacity_scope", `String c.capacity_scope);
@@ -106,7 +121,7 @@ let provider_error_count_to_yojson (c : provider_error_count) =
     ]
 
 let provider_json = function
-  | Some provider -> `String provider
+  | Some _ -> `String public_runtime_provider_label
   | None -> `Null
 
 let broadcast_sample_entry entry =
@@ -116,8 +131,8 @@ let broadcast_sample_entry entry =
       [
         ("type", `String "oas_telemetry_sample");
         ("payload", sample_entry_to_yojson entry);
-        ("provider_id", `String sample.provider_id);
-        ("model_id", `String sample.model_id);
+        ("provider_id", `String public_runtime_provider_label);
+        ("model_id", `String public_runtime_model_label);
         ("ts_unix", `Float recorded_at);
       ]
   in
@@ -129,6 +144,7 @@ let broadcast_sample_entry entry =
         (Printexc.to_string exn)
 
 let record_with_time ~now (s : sample) =
+  let s = normalize_sample s in
   let entry = (s, now) in
   with_lock (fun () ->
       let q =
@@ -147,19 +163,47 @@ let record_with_time ~now (s : sample) =
 
 let record (s : sample) = record_with_time ~now:(Unix.gettimeofday ()) s
 
+let positive_ms = function
+  | Some ms when ms > 0.0 && Float.is_finite ms -> Some ms
+  | _ -> None
+
+let ttfb_from_telemetry (telemetry : Agent_sdk.Types.inference_telemetry) =
+  match positive_ms telemetry.ttfrc_ms with
+  | Some _ as value -> value
+  | None -> (
+      match positive_ms telemetry.prefill_ms with
+      | Some _ as value -> value
+      | None -> (
+          match telemetry.timings with
+          | Some { prompt_ms; _ } -> positive_ms prompt_ms
+          | None -> None))
+
 let duration_from_response ?total_duration_ms
     (response : Agent_sdk.Types.api_response) =
+  let duration_from_telemetry (telemetry : Agent_sdk.Types.inference_telemetry) =
+    let decode_ms =
+      match telemetry.timings with
+      | Some { predicted_ms; _ } -> positive_ms predicted_ms
+      | None -> None
+    in
+    match ttfb_from_telemetry telemetry, decode_ms with
+    | Some ttfb_ms, Some decode_ms -> ttfb_ms +. decode_ms
+    | Some ttfb_ms, None -> ttfb_ms
+    | None, Some decode_ms -> decode_ms
+    | None, None -> default_duration_ms
+  in
   match total_duration_ms, response.telemetry with
   | Some ms, _ when ms > 0.0 -> ms
-  | _, Some telemetry when telemetry.request_latency_ms > 0 ->
-      Float.of_int telemetry.request_latency_ms
-  | _ -> 0.0
+  | _, Some telemetry -> (
+      match telemetry.request_latency_ms with
+      | Some ms when ms > 0 -> Float.of_int ms
+      | _ -> duration_from_telemetry telemetry)
+  | _ -> default_ttfb_ms
 
 let ttfb_from_response (response : Agent_sdk.Types.api_response) =
   match response.telemetry with
-  | Some { timings = Some { prompt_ms = Some ms; _ }; _ } when ms > 0.0 ->
-      ms
-  | _ -> 0.0
+  | Some telemetry -> Option.value ~default:default_ttfb_ms (ttfb_from_telemetry telemetry)
+  | _ -> default_ttfb_ms
 
 let cache_hit_from_response ~(usage : Agent_sdk.Types.api_usage option)
     (response : Agent_sdk.Types.api_response) =
@@ -194,17 +238,17 @@ let throughput_from_response ~(usage : Agent_sdk.Types.api_usage option)
             Float.of_int usage.output_tokens /. (decode_ms /. 1000.0))
         usage
 
-let sample_of_response ~provider_id ~model_id ?total_duration_ms
+let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
     (response : Agent_sdk.Types.api_response) =
-  let usage = Oas_response.usage response in
+  let usage = Agent_sdk_response.usage response in
   let total_duration_ms =
     duration_from_response ?total_duration_ms response
   in
   let ttfb_ms = ttfb_from_response response in
   {
-    provider_id;
-    model_id;
+    provider_id = public_runtime_provider_label;
+    model_id = public_runtime_model_label;
     ttfb_ms;
     total_duration_ms;
     serialization_ms;
@@ -234,17 +278,23 @@ let record_response ~provider_id ~model_id ?total_duration_ms ?serialization_ms
        ?serialization_ms ?retry_count ~status response)
 
 let provider_error_capacity_scope_label = function
-  | Provider_error.CapacityExhausted { scope; _ } ->
+  | Provider_error.CapacityExhausted { scope } ->
       Provider_error.scope_to_string scope
   | Provider_error.RateLimit _
-  | Provider_error.AuthError _
+  | Provider_error.AuthError
   | Provider_error.ServerError _
-  | Provider_error.InvalidRequest _ ->
+  | Provider_error.InvalidRequest _
+  | Provider_error.CliWrappedHardQuota _
+  | Provider_error.CliWrappedMaxTurns _
+  | Provider_error.CliWrappedResumableSession _
+  | Provider_error.PermissionDenied _
+  | Provider_error.ModelNotFound ->
       "none"
 
-let record_provider_error ~cascade_name ~provider_id error =
+let record_provider_error ~cascade_name ~provider_id:_ error =
   let kind = Provider_error.to_error_kind error in
   let capacity_scope = provider_error_capacity_scope_label error in
+  let provider_id = public_runtime_provider_label in
   let key = (provider_id, cascade_name, kind, capacity_scope) in
   with_lock (fun () ->
       let count =
@@ -269,6 +319,7 @@ let compare_provider_error_count a b =
   | c -> c
 
 let provider_error_counts ?provider () =
+  let provider = normalize_provider_filter provider in
   let counts =
     with_lock (fun () ->
         Hashtbl.fold
@@ -288,7 +339,8 @@ let provider_error_counts ?provider () =
   in
   List.sort compare_provider_error_count counts
 
-let snapshot_provider provider =
+let snapshot_provider _provider =
+  let provider = public_runtime_provider_label in
   with_lock (fun () ->
       match Hashtbl.find_opt table provider with
       | None -> []
@@ -398,7 +450,9 @@ let summary ?provider ?limit () =
       let cancels =
         List.fold_left
           (fun acc (s, _) ->
-            match s.status with Cancelled _ -> acc + 1 | _ -> acc)
+            match s.status with
+            | Cancelled _ -> acc + 1
+            | Success | Error _ | Timeout -> acc)
           0 xs
       in
       {
@@ -464,7 +518,7 @@ let summary_json ?provider ?limit () =
 
 let clear ?provider () =
   with_lock (fun () ->
-      match provider with
+      match normalize_provider_filter provider with
       | Some p ->
           Hashtbl.remove table p;
           let keys =

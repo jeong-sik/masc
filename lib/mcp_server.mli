@@ -207,7 +207,7 @@ val create_state_eio :
   server_state
 (** Production bootstrap.  Wires every Eio handle into
     [Some], starts the [Session] actor consumer, starts
-    the {!Oas_worker_cascade} actor, and installs the
+    the {!Cascade_legacy_runner} actor, and installs the
     Subscriptions notification harness. *)
 
 (** {1 SSE broadcast} *)

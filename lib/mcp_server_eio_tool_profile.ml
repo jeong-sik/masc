@@ -36,6 +36,19 @@ let managed_agent_passthrough_tool_names =
                 "masc_a2a_delegate";
               ]))
 
+(* O(1) membership view of [managed_agent_passthrough_tool_names].
+   Used by [tool_schemas_for_profile Managed_agent] to filter
+   ~150 visible schemas per request — replaces a per-schema
+   [List.mem] scan over ~20 passthrough names. *)
+let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
+  let tbl =
+    Hashtbl.create (List.length managed_agent_passthrough_tool_names)
+  in
+  List.iter
+    (fun name -> Hashtbl.replace tbl name ())
+    managed_agent_passthrough_tool_names;
+  tbl
+
 module StringSet = Set.Make (String)
 module StringMap = Map.Make (String)
 
@@ -70,7 +83,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         let keeper_internal_schemas =
           if not include_keeper_internal then []
           else
-            Tool_shard.keeper_model_tools
+            Tool_shard.all_keeper_tool_schemas
             |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                    Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
                      schema.name
@@ -100,7 +113,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
           |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-                 List.mem schema.name managed_agent_passthrough_tool_names
+                 Hashtbl.mem managed_agent_passthrough_tool_set schema.name
                  && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
         dedupe_tool_schemas_by_name
@@ -116,11 +129,17 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
       if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
         internal_keeper_runtime
       else
-        let allowed_schema_names =
-          Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
-          |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-        in
-        List.mem tool_name allowed_schema_names
+        (* Equivalent to [List.mem tool_name (names from
+           visible_tool_schemas ~include_hidden:true
+           ~include_deprecated:true)]: that helper composes raw schemas
+           → dedupe → canonicalize → filter is_visible.  Dedupe and
+           canonicalize do not change the name set, so the name set is
+           exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
+           Two O(1) checks replace ~150 schema canonicalizations + a
+           List.mem per dispatch. *)
+        Config.is_raw_tool_name tool_name
+        && Tool_catalog.is_visible ~include_hidden:true ~include_deprecated:true
+             tool_name
   | Managed_agent ->
       Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent

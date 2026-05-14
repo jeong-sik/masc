@@ -50,8 +50,6 @@ type context = {
     via [{ Tool_code_write.config; agent_name }] at the
     dispatch site. *)
 
-type tool_result = bool * string
-
 (** {1 Git action SSOT (issue #8522)} *)
 
 (** Variant SSOT for git actions.  Adding a constructor forces
@@ -222,7 +220,7 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 (** [dispatch ctx ~name ~args] routes [name] to the appropriate
     private handler ([handle_code_write], [handle_code_edit],
     [handle_code_delete], [handle_code_shell],

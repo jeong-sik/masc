@@ -26,8 +26,6 @@
 //   neutral tone variant which itself has drift vs line 230
 //   (mono version: reversed bg/border alpha pair). Both belong
 //   in P6 color normalisation.
-// • agent-detail:230 (agent.model) — mono neutral pill with
-//   reversed opacities to 228. P6.
 // • agent-detail-worker:45 (signal_truth) — `rounded-[var(--r-0)]` with
 //   raw `var(--accent-36)` border. That is StatusChip
 //   shape with an untypeable border, not IdPill shape. P6 when

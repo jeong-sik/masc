@@ -1,8 +1,51 @@
-# Dashboard Section Route Inventory (Phase -1a)
+# Dashboard Section Route Inventory (Phase -1a, Historical)
 
 **목적**: Dashboard consolidation을 위한 section ID 참조 전수 조사.
 **수집일**: 2026-04-14.
 **수집 방법**: `rg` 기반 정적 분석. section 문자열 리터럴이 있는 모든 파일.
+
+> **Status (2026-05-14)**: 아래 표는 consolidation 전 정적 스냅샷이다.
+> Current Dashboard v1 navigation의 SSOT로 쓰지 않는다. 현재 SSOT는
+> `dashboard/src/config/navigation.ts`, `lib/dashboard/dashboard_surface_readiness.ml`,
+> `lib/dashboard/dashboard_nav_event.ml`이며, drift 검증은
+> `scripts/check-dashboard-surface-parity.sh`와
+> `scripts/check-dashboard-nav-event-parity.sh`가 담당한다.
+>
+> [근거] `bash scripts/check-dashboard-surface-parity.sh`
+> (2026-05-14 KST, High) ->
+> `Dashboard surface parity OK: 21 canonical surfaces aligned between
+> navigation.ts and dashboard_surface_readiness.ml`.
+>
+> [근거] `bash scripts/check-dashboard-nav-event-parity.sh`
+> (2026-05-14 KST, High) ->
+> `dashboard nav-event allowlist parity: OK`.
+
+## Current Canonical Inventory (2026-05-14)
+
+| Surface | Sections |
+|---------|----------|
+| `cockpit` | none; hidden surface |
+| `overview` | none |
+| `monitoring` | `runtime`, `agents`, `goal-loop`, `fleet-health`; hidden diagnostics: `journey`, `observatory`, `cognition` |
+| `command` | `operations` |
+| `connectors` | `connector-status` |
+| `workspace` | `board`, `sub-boards`, `planning`, `repositories`, `verification` |
+| `lab` | `tools`, `autoresearch`, `harness` |
+| `code` | `ide-shell` |
+| `logs` | none |
+
+Retired sections are not canonical dashboard surfaces:
+
+- `monitoring:memory-subsystems` remains only as a legacy redirect to
+  `monitoring:cognition&view=memory`.
+- `workspace:collab-mvp` is retired and has no current canonical route or
+  readiness entry.
+- `monitoring:sessions`, `monitoring:telemetry`, `monitoring:fleet`,
+  `monitoring:tool-quality`, `monitoring:governance`, `monitoring:metrics`,
+  and `monitoring:fsm-hub` remain legacy redirect inputs only.
+
+The historical tables below are kept to explain the consolidation work that
+led to the current route table.
 
 ---
 

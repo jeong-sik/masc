@@ -70,7 +70,7 @@ val record_pre_dispatch_terminal_observation :
   meta:keeper_meta ->
   generation:int ->
   cascade_name:Keeper_execution_receipt.cascade_name ->
-  outcome:string ->
+  outcome:Keeper_execution_receipt.outcome_kind ->
   terminal_reason_code:string ->
   activity_kind:string ->
   trajectory_outcome:Trajectory.trajectory_outcome ->
@@ -87,3 +87,10 @@ val ensure_local_discovery_ready :
   (unit, string) result
 (** Ensure local-provider discovery is refreshed before a turn when the
     selected labels depend on runtime discovery. *)
+
+module For_testing : sig
+  val with_local_discovery_refresh :
+    (string list -> bool) -> (unit -> 'a) -> 'a
+  (** Install a scoped refresh override and force the discovery branch for
+      deterministic preflight tests. *)
+end

@@ -271,7 +271,7 @@ export function GraphView({ data }: GraphViewProps) {
           <span class="py-0.5 px-2 rounded-[var(--r-1)] text-2xs ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--color-status-ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--color-fg-muted)] bg-[var(--color-bg-panel-alt)]' : 'text-[var(--color-fg-secondary)] bg-[var(--color-bg-panel-alt)]'}">${statusLabel(selectedNode.status)}</span>
           <${ActionButton} variant="subtle" size="sm" class="ml-auto" onClick=${() => { selectedNodeId.value = null }} ariaLabel="패널 닫기">닫기<//>
         </div>
-        <div class="grid grid-cols-3 gap-3 mb-3">
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-3 mb-3">
           <div class="text-center">
             <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-1">중요도</div>
             <div class="text-xl font-bold text-[var(--color-fg-primary)] tabular-nums">${(selectedNode.semantic_weight ?? selectedNode.weight).toFixed(1)}</div>

@@ -17,7 +17,7 @@ open Keeper_execution
    produces one of {keeper_paused, approval_pending,
    scheduled_autonomous_disabled, provider_cooldown_pending,
    idle_gate_pending, cooldown_pending, no_signal}. *)
-let proactive_skip_reason_metric = Prometheus.metric_keeper_proactive_skip
+let proactive_skip_reason_metric = Keeper_metrics.metric_keeper_proactive_skip
 
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
@@ -26,6 +26,19 @@ let keepalive_interval_sec () =
 (* ── Heartbeat history fallback read limits ── *)
 let max_history_read_bytes = 256 * 1024
 let max_history_read_lines = 200
+let heartbeat_history_persistence_surface = "keeper_heartbeat_history"
+
+let report_heartbeat_history_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+        ~labels:[("surface", heartbeat_history_persistence_surface); ("reason", reason)]
+        ())
+    ~surface:heartbeat_history_persistence_surface
+    ~reason
+    ~path
+    ~detail
+;;
 
 let status_tick_usage_json () =
   `Assoc
@@ -57,7 +70,7 @@ let write_heartbeat_snapshot
   let metrics_store = keeper_metrics_store ctx.config meta_current.name in
   let cascade_models =
     Cascade_runtime.models_of_cascade_name
-      (Keeper_cascade_profile.Runtime_name meta_current.cascade_name)
+      (Keeper_cascade_profile.Runtime_name (Keeper_types.cascade_name_of_meta meta_current))
   in
   let max_cascade_context =
     let resolution =
@@ -99,10 +112,19 @@ let write_heartbeat_snapshot
            |> List.concat_map (fun path ->
                 read_file_tail_lines path
                   ~max_bytes:max_history_read_bytes
-                  ~max_lines:max_history_read_lines)
-           |> List.filter_map (fun line ->
+                  ~max_lines:max_history_read_lines
+                |> List.filter_map (fun line ->
              try
-               let json = Yojson.Safe.from_string line in
+               let json =
+                 match Yojson.Safe.from_string line with
+                 | `Assoc _ as json -> json
+                 | _ ->
+                   report_heartbeat_history_drop
+                     ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                     ~path
+                     ~detail:"history row is not a JSON object";
+                   raise Exit
+               in
                let source =
                  Safe_ops.json_string ~default:"" "source" json |> String.trim
                in
@@ -114,14 +136,35 @@ let write_heartbeat_snapshot
                else Some (Keeper_context_core.message_of_json json)
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
-             | _exn ->
+             | Exit ->
                incr parse_errors;
-               None)
+               None
+             | Yojson.Json_error detail ->
+               incr parse_errors;
+               report_heartbeat_history_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+                 ~path
+                 ~detail;
+               None
+             | Yojson.Safe.Util.Type_error (detail, _) ->
+               incr parse_errors;
+               report_heartbeat_history_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path
+                 ~detail;
+               None
+             | exn ->
+               incr parse_errors;
+               report_heartbeat_history_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path
+                 ~detail:(Printexc.to_string exn);
+               None))
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            Prometheus.inc_counter
-             Prometheus.metric_keeper_heartbeat_failures
+             Keeper_metrics.metric_keeper_heartbeat_failures
              ~labels:[("keeper", meta_current.name); ("site", "history_load")]
              ();
            Log.Keeper.warn "write_heartbeat_snapshot: history.jsonl load error (%s): %s"
@@ -130,7 +173,7 @@ let write_heartbeat_snapshot
        in
        if !parse_errors > 0 then begin
          Prometheus.inc_counter
-           Prometheus.metric_keeper_heartbeat_failures
+           Keeper_metrics.metric_keeper_heartbeat_failures
            ~labels:[("keeper", meta_current.name); ("site", "history_parse")]
            ();
          Log.Keeper.warn
@@ -313,7 +356,7 @@ let write_heartbeat_snapshot
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_heartbeat_failures
+           Keeper_metrics.metric_keeper_heartbeat_failures
            ~labels:[("keeper", meta_current.name); ("site", "thompson_penalty")]
            ();
          Log.Keeper.warn "guard→thompson penalty failed for %s: %s"
@@ -420,13 +463,13 @@ let write_heartbeat_snapshot
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_sse_broadcast_failures
+         Keeper_metrics.metric_keeper_sse_broadcast_failures
          ~labels:[("keeper", meta_current.name)]
          ();
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
     (match Keeper_event_bus.get () with
      | Some bus ->
-       Oas_events.publish_keeper_snapshot
+       Cascade_events.publish_keeper_snapshot
          bus
          ~keeper_name:meta_current.name
          ~generation:meta_current.runtime.generation
@@ -439,7 +482,7 @@ let write_heartbeat_snapshot
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_heartbeat_failures
+         Keeper_metrics.metric_keeper_heartbeat_failures
          ~labels:[("keeper", meta_current.name); ("site", "flush_tool_usage")]
          ();
        Log.Keeper.warn "keeper:%s flush_tool_usage failed: %s"

@@ -4,8 +4,16 @@ import {
   streamKeeperShell,
   type KeeperShellStreamEvent,
 } from '../../api/keeper-shell'
+import { tasks } from '../../store'
+import type { Task } from '../../types'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
 import { Terminal, type TerminalLine } from '../common/terminal'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
+import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 
 const MAX_TERMINAL_LINES = 5000
 
@@ -27,6 +35,13 @@ export interface KeeperShellSummary {
   readonly meta: number
   readonly droppedBytes: number
   readonly lastStream: ShellLine['stream'] | null
+}
+
+export interface KeeperShellRouteLinkInput {
+  readonly keeperName: string
+  readonly taskId: string | null
+  readonly taskList: ReadonlyArray<Task>
+  readonly cursor: KeeperCursor | null
 }
 
 function splitChunkLines(chunk: string): string[] {
@@ -119,6 +134,55 @@ function shellSummaryLabel(summary: KeeperShellSummary, status: KeeperShellStatu
   return `Keeper shell ${status}: ${lineCountLabel(summary.total)}, ${summary.stdout} stdout, ${summary.stderr} stderr, ${summary.meta} meta, last ${last}${dropped}`
 }
 
+export function keeperShellRouteLinks({
+  keeperName,
+  taskId,
+  taskList,
+  cursor,
+}: KeeperShellRouteLinkInput): ReadonlyArray<IdeContextRouteLink> {
+  const keeperId = nonEmpty(keeperName)
+  if (!keeperId) return []
+  const task = taskId
+    ? taskList.find(candidate => candidate.id === taskId) ?? null
+    : null
+  const sourceParts = ['keeper-shell', keeperId, taskId].filter((part): part is string =>
+    typeof part === 'string' && part.trim() !== '')
+  return routeLinksForContext({
+    filePath: cursor?.file_path,
+    line: cursor?.line,
+    surface: 'Terminal',
+    label: taskId ? `keeper shell ${taskId}` : 'keeper shell',
+    sourceId: sourceParts.join(':'),
+    goalId: task?.goal_id ?? undefined,
+    taskId: taskId ?? undefined,
+    gitRef: task?.worktree?.branch,
+    keeperId,
+    telemetry: true,
+    telemetryQuery: taskId ?? keeperId,
+  })
+}
+
+function KeeperShellContextLinks({
+  links,
+}: {
+  readonly links: ReadonlyArray<IdeContextRouteLink>
+}) {
+  if (links.length === 0) return null
+  return html`
+    <div class="keeper-shell-context-links" aria-label="Keeper shell operational links">
+      ${links.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >${link.label}</button>
+      `)}
+    </div>
+  `
+}
+
 function KeeperShellSummaryStrip({
   summary,
   status,
@@ -148,9 +212,17 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
   const [lines, setLines] = useState<ShellLine[]>([])
   const [status, setStatus] = useState<KeeperShellStatus>('idle')
   const [taskId, setTaskId] = useState<string | null>(null)
+  const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const terminalLines = useMemo(() => lines.map(toTerminalLine), [lines])
   const summary = useMemo(() => summarizeShellLines(lines), [lines])
+  const cursor = resolveKeeperCursor(keeper, overlay.cursors)
+  const routeLinks = keeperShellRouteLinks({
+    keeperName: keeper,
+    taskId,
+    taskList: tasks.value,
+    cursor,
+  })
 
   const prefersReducedMotion = useMemo(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -200,6 +272,11 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
     el.scrollTop = el.scrollHeight
   }, [lines, prefersReducedMotion])
 
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(v => setOverlay(v))
+    return () => unsub()
+  }, [])
+
   return html`
     <aside
       class="border-t border-solid border-[var(--color-border-divider)] bg-[var(--color-bg-page)]"
@@ -216,13 +293,14 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
           ? html`<span class="truncate text-[var(--color-fg-disabled)]">${taskId}</span>`
           : null}
         <${StatusChip} tone=${statusTone(status)} uppercase=${false} class="font-mono">${status}</${StatusChip}>
+        <${KeeperShellContextLinks} links=${routeLinks} />
         <div class="ml-auto min-w-0">
           <${KeeperShellSummaryStrip} summary=${summary} status=${status} />
         </div>
       </div>
       <${Terminal}
         lines=${terminalLines}
-        prompt=${status === 'streaming' ? `${keeper || 'keeper'}:$ ` : ''}
+        prompt=${status === 'streaming' ? `${keeper || '(no keeper)'}:$ ` : ''}
         testId="keeper-shell-terminal"
         ariaLabel="Keeper shell terminal"
         emptyText="waiting for keeper shell output"
@@ -231,4 +309,22 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
       />
     </aside>
   `
+}
+
+function resolveKeeperCursor(
+  keeperName: string,
+  cursors: ReadonlyMap<string, KeeperCursor>,
+): KeeperCursor | null {
+  const target = keeperName.toLowerCase().trim()
+  if (!target) return null
+  for (const [id, cursor] of cursors) {
+    if (id.toLowerCase() === target) return cursor
+    if (cursor.keeper_id.toLowerCase() === target) return cursor
+  }
+  return null
+}
+
+function nonEmpty(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
 }

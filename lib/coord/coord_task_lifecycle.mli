@@ -22,6 +22,7 @@ val decide
   :  verification_enabled:bool
   -> verification_timeout_seconds:float
   -> new_verification_id:(unit -> string)
+  -> same_agent:(string -> bool)
   -> agent_name:string
   -> task_id:string
   -> task_status:Masc_domain.task_status

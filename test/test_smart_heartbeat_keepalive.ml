@@ -283,13 +283,13 @@ let test_skip_idle_wake_resumed_metric_registered () =
   let labels = [ ("keeper", "test_keeper_a") ] in
   let before =
     Prom.metric_value_or_zero
-      Prom.metric_keeper_skip_idle_wake_resumed ~labels ()
+      Masc_mcp.Keeper_metrics.metric_keeper_skip_idle_wake_resumed ~labels ()
   in
   Prom.inc_counter
-    Prom.metric_keeper_skip_idle_wake_resumed ~labels ();
+    Masc_mcp.Keeper_metrics.metric_keeper_skip_idle_wake_resumed ~labels ();
   let after =
     Prom.metric_value_or_zero
-      Prom.metric_keeper_skip_idle_wake_resumed ~labels ()
+      Masc_mcp.Keeper_metrics.metric_keeper_skip_idle_wake_resumed ~labels ()
   in
   check (float 0.001) "counter increments by 1" 1.0 (after -. before)
 
@@ -301,15 +301,15 @@ let test_skip_idle_wake_resumed_label_isolation () =
   let lb = [ ("keeper", "test_keeper_iso_b") ] in
   let b_before =
     Prom.metric_value_or_zero
-      Prom.metric_keeper_skip_idle_wake_resumed ~labels:lb ()
+      Masc_mcp.Keeper_metrics.metric_keeper_skip_idle_wake_resumed ~labels:lb ()
   in
   Prom.inc_counter
-    Prom.metric_keeper_skip_idle_wake_resumed ~labels:la ();
+    Masc_mcp.Keeper_metrics.metric_keeper_skip_idle_wake_resumed ~labels:la ();
   Prom.inc_counter
-    Prom.metric_keeper_skip_idle_wake_resumed ~labels:la ();
+    Masc_mcp.Keeper_metrics.metric_keeper_skip_idle_wake_resumed ~labels:la ();
   let b_after =
     Prom.metric_value_or_zero
-      Prom.metric_keeper_skip_idle_wake_resumed ~labels:lb ()
+      Masc_mcp.Keeper_metrics.metric_keeper_skip_idle_wake_resumed ~labels:lb ()
   in
   check (float 0.001) "keeper_b counter unchanged" 0.0
     (b_after -. b_before)

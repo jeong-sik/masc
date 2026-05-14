@@ -509,7 +509,7 @@ let test_keeper_config_defaults () =
   (* Default cascade name *)
   let cascade = Keeper_config.keeper_llm_rerank_cascade () in
   Alcotest.(check string) "default cascade name"
-    "tool_rerank" cascade
+    "scoring" cascade
 
 (* ── Suite ───────────────────────────────────────────────── *)
 

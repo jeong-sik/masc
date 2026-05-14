@@ -59,6 +59,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some ids -> ids
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
   in
+  let selected_cascade_name =
+    match p.cascade_name_opt, p.profile_defaults.cascade_name with
+    | Some name, _ -> name
+    | None, Some name -> name
+    | None, None -> Keeper_config.default_cascade_name ()
+  in
   let active_goal_ids_error =
     match p.active_goal_ids_opt with
     | None -> None
@@ -120,7 +126,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     with
     | Error err ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
           ~labels:[("keeper", p.name); ("event", "create_sandbox_validation")]
           ();
         Log.Keeper.warn "create_keeper failed sandbox validation for %s: %s"
@@ -133,7 +139,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         with
         | Error err ->
             Prometheus.inc_counter
-              Prometheus.metric_keeper_lifecycle_dispatch_rejections
+              Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
               ~labels:[("keeper", p.name); ("event", "create_sandbox_preflight")]
               ();
             Log.Keeper.warn "create_keeper failed sandbox preflight for %s: %s"
@@ -146,7 +152,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             let active_keepers = Keeper_registry.count_running () in
             if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
               Prometheus.inc_counter
-                Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                 ~labels:[("keeper", p.name); ("event", "create_max_active_reached")]
                 ();
               Log.Keeper.warn
@@ -306,8 +312,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               in
               let cascade_models =
                 Cascade_runtime.models_of_cascade_name
-                  (Keeper_cascade_profile.Runtime_name
-                     Keeper_config.default_cascade_name)
+                  (Keeper_cascade_profile.Runtime_name selected_cascade_name)
               in
               (match
                  Keeper_turn_helpers.ensure_local_discovery_ready
@@ -321,7 +326,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                      p.name
                      msg;
                    Prometheus.inc_counter
-                     Prometheus.metric_keeper_local_discovery_failures
+                     Keeper_metrics.metric_keeper_local_discovery_failures
                      ~labels:
                        [
                          ("keeper", p.name);
@@ -343,7 +348,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               match Keeper_id.Trace_id.of_string trace_id with
               | Error err ->
                   Prometheus.inc_counter
-                    Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                    Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                     ~labels:[("keeper", p.name); ("event", "create_invalid_trace_id")]
                     ();
                   Log.Keeper.error
@@ -371,7 +376,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                         "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
                         p.name (Printexc.to_string exn);
                       Prometheus.inc_counter
-                        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                         ~labels:[("keeper", p.name);
                                  ("event", "sandbox_bundle_init_raised")]
                         ();
@@ -383,7 +388,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                         "create_keeper sandbox bundle path missing post-init: keeper=%s path=%s"
                         p.name bp;
                       Prometheus.inc_counter
-                        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+                        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                         ~labels:[("keeper", p.name);
                                  ("event", "sandbox_bundle_missing_post_init")]
                         ()
@@ -452,12 +457,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         long_goal;
 
         social_model;
-        cascade_name = (match p.profile_defaults.cascade_name with
-          | Some name -> name
-          | None -> Keeper_config.default_cascade_name);
-        (* Empty = "use cascade_name". Injecting any default here would silently
-           override the keeper's declared cascade_name in oas_worker_named. *)
-        models = Option.value ~default:[] p.profile_defaults.models;
+        cascade_ref =
+          Some Cascade_ref.{
+            group = selected_cascade_name;
+            item = None;
+          };
+        (* RFC-0041 (post-step-4): cascade_ref is the SSOT; the legacy
+           cascade_name field was removed from keeper_meta. *)
+        models = [];
         will;
         needs;
         desires;
@@ -569,8 +576,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           last_social_transition_reason = "";
           last_active_desire = "";
           last_current_intention = "";
-          last_blocker = "";
-          last_blocker_class = None;
+          last_blocker = None;
           last_need = "";
         };
       keeper_id = None;
@@ -596,8 +602,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       match init_save_result with
       | Error e ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_checkpoint_failures
-          ~labels:[("keeper", p.name); ("site", "create_initial_save")]
+          Keeper_metrics.metric_keeper_checkpoint_failures
+          ~labels:[("keeper", p.name); ("site", Checkpoint_failure_operation.(to_label Create_initial_save))]
           ();
         Log.Keeper.error
           "create_keeper failed: initial checkpoint save error for name=%s: %s"
@@ -608,7 +614,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_initial_meta ctx.config meta with
       | Error e ->
-        Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_write_meta_failures
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
         Progress.stop_tracking task_id;
@@ -623,7 +629,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              Log.Keeper.debug "create_keeper: credential ensured for %s" agent_name
          | Error err ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_dispatch_rejections
+               Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
                ~labels:[("keeper", agent_name); ("event", "create_credential_ensure")]
                ();
              Log.Keeper.warn "create_keeper: credential ensure failed for %s: %s"
@@ -653,7 +659,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("needs", `String meta.needs);
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
-          ("cascade_name", `String meta.cascade_name);
+          ("cascade_name", `String (cascade_name_of_meta meta));
           ("voice_enabled", `Bool meta.voice_enabled);
           ("voice_channel", `String meta.voice_channel);
           ("voice_agent_id", `String meta.voice_agent_id);

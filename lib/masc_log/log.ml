@@ -69,22 +69,10 @@ let event_class_to_string = function
 
 let has_prefix ~prefix value = String.starts_with ~prefix value
 
-let infer_legacy_level message =
-  let trimmed = String.trim message in
-  let upper = String.uppercase_ascii trimmed in
-  if has_prefix ~prefix:"[FATAL]" upper || has_prefix ~prefix:"FATAL:" upper then
-    (Error, "FATAL")
-  else if has_prefix ~prefix:"[ERROR]" upper || has_prefix ~prefix:"ERROR:" upper then
-    (Error, "ERROR")
-  else if has_prefix ~prefix:"[WARN]" upper || has_prefix ~prefix:"[WARNING]" upper
-          || has_prefix ~prefix:"WARN:" upper || has_prefix ~prefix:"WARNING:" upper then
-    (Warn, "WARN")
-  else if has_prefix ~prefix:"[INFO]" upper || has_prefix ~prefix:"INFO:" upper then
-    (Info, "INFO")
-  else if has_prefix ~prefix:"[DEBUG]" upper || has_prefix ~prefix:"DEBUG:" upper then
-    (Debug, "DEBUG")
-  else
-    (Info, "INFO")
+(* RFC-0079: [infer_legacy_level] (a string-prefix classifier on the
+   message body) was deleted along with the [?level] option on
+   [legacy_stderr] / [legacy_traceln]. All callers now pass typed [~level]
+   explicitly; see [Log.legacy_stderr] / [Log.legacy_traceln] below. *)
 
 (** Check if level should be logged *)
 let should_log level =
@@ -179,14 +167,17 @@ let format_utc_date_of (t : float) =
     Lock-free: single-writer (log functions), multi-reader (API).
     Optional file sink persists entries across restarts. *)
 module Ring = struct
+  (* RFC-0079: [entry] is the typed record produced by the write-side encoder.
+     [level] and [source] are typed closed sums — see [type level] / [type
+     source] at the top of this module. Wire format (the JSON emitted by
+     [entry_to_json]) renders them as their canonical strings; the dashboard
+     reads those strings back. Decode failures raise — silent skipping of
+     malformed rows is gone, which is the F1 / RFC-0079 root-fix. *)
   type entry = {
     seq : int;
     ts : string;
-    level : string;
-    raw_level : string;
-    normalized_level : string;
-    source : string;
-    legacy_classified : bool;
+    level : level;
+    source : source;
     module_name : string;
     keeper_name : string option;
     turn_id : int option;
@@ -202,11 +193,8 @@ module Ring = struct
     {
       seq = 0;
       ts = "";
-      level = "";
-      raw_level = "";
-      normalized_level = "";
-      source = "";
-      legacy_classified = false;
+      level = Info;
+      source = Structured;
       module_name = "";
       keeper_name = None;
       turn_id = None;
@@ -245,6 +233,10 @@ module Ring = struct
     file_current_date := date;
     file_base_dir := dir
 
+  (* RFC-0079: typed encoder. Exhaustive match on [level] / [source] means
+     adding a new variant fails to compile here until the wire format is
+     extended deliberately. The wire shape (field set + key order) is the
+     [LogEntryRawSchema] contract in [dashboard/src/api/schemas/logs.ts]. *)
   let entry_to_json e =
     let keeper_name_json = match e.keeper_name with
       | Some s -> `String s
@@ -257,11 +249,8 @@ module Ring = struct
     `Assoc [
       ("seq", `Int e.seq);
       ("ts", `String e.ts);
-      ("level", `String e.level);
-      ("raw_level", `String e.raw_level);
-      ("normalized_level", `String e.normalized_level);
-      ("source", `String e.source);
-      ("legacy_classified", `Bool e.legacy_classified);
+      ("level", `String (level_to_string e.level));
+      ("source", `String (source_to_string e.source));
       ("module", `String e.module_name);
       ("keeper_name", keeper_name_json);
       ("turn_id", turn_id_json);
@@ -304,36 +293,92 @@ module Ring = struct
         protect ~default:() (fun () -> flush oc)
     | None -> ()
 
+  exception Entry_decode_error of string
+
+  (* RFC-0079: explicit source decoder. New source variants must be added
+     here AND in [source_to_string] — adjacent functions are colocated so a
+     drift between encoder and decoder is visible to the reviewer. *)
+  let source_of_string = function
+    | "structured" -> Structured
+    | "legacy_stderr" -> Legacy_stderr
+    | "legacy_traceln" -> Legacy_traceln
+    | "client_tool_host" -> Client_tool_host
+    | s -> raise (Entry_decode_error (Printf.sprintf "unknown source: %S" s))
+
+  (* RFC-0079: total decoder. Missing required fields or unknown variants
+     raise [Entry_decode_error] instead of returning [None]. Callers that
+     reload historical JSONL ([load_from_file]) decide whether to skip a
+     bad line at the file-fold boundary; the decoder itself never silently
+     drops. *)
   let entry_of_json json =
+    let open Yojson.Safe.Util in
+    let require_string field =
+      match member field json with
+      | `String s -> s
+      | `Null ->
+          raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
+      | other ->
+          raise
+            (Entry_decode_error
+               (Printf.sprintf "field %s: expected string, got %s" field
+                  (Yojson.Safe.to_string other)))
+    in
+    let require_int field =
+      match member field json with
+      | `Int i -> i
+      | `Null ->
+          raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
+      | other ->
+          raise
+            (Entry_decode_error
+               (Printf.sprintf "field %s: expected int, got %s" field
+                  (Yojson.Safe.to_string other)))
+    in
     match json with
     | `Assoc _ ->
-        let open Yojson.Safe.Util in
-        (match
-           member "seq" json, member "ts" json, member "level" json,
-           member "raw_level" json, member "normalized_level" json,
-           member "source" json, member "legacy_classified" json,
-           member "module" json, member "message" json
-         with
-         | `Int seq, `String ts, `String level,
-           `String raw_level, `String normalized_level,
-           `String source, `Bool legacy_classified,
-           `String module_name, `String message ->
-             let keeper_name = match member "keeper_name" json with
-               | `String s -> Some s
-               | _ -> None
-             in
-             let turn_id = match member "turn_id" json with
-               | `Int i -> Some i
-               | _ -> None
-             in
-             Some {
-               seq; ts; level; raw_level; normalized_level;
-               source; legacy_classified; module_name;
-               keeper_name; turn_id; message;
-               details = member "details" json;
-             }
-         | _ -> None)
-    | _ -> None
+        let seq = require_int "seq" in
+        let ts = require_string "ts" in
+        let level =
+          match level_of_string_opt (require_string "level") with
+          | Some l -> l
+          | None ->
+              raise
+                (Entry_decode_error
+                   (Printf.sprintf "unknown level: %S" (require_string "level")))
+        in
+        let source = source_of_string (require_string "source") in
+        let module_name = require_string "module" in
+        let message = require_string "message" in
+        let keeper_name =
+          match member "keeper_name" json with
+          | `String s -> Some s
+          | `Null -> None
+          | other ->
+              raise
+                (Entry_decode_error
+                   (Printf.sprintf "field keeper_name: expected string or null, got %s"
+                      (Yojson.Safe.to_string other)))
+        in
+        let turn_id =
+          match member "turn_id" json with
+          | `Int i -> Some i
+          | `Null -> None
+          | other ->
+              raise
+                (Entry_decode_error
+                   (Printf.sprintf "field turn_id: expected int or null, got %s"
+                      (Yojson.Safe.to_string other)))
+        in
+        {
+          seq; ts; level; source; module_name;
+          keeper_name; turn_id; message;
+          details = member "details" json;
+        }
+    | _ ->
+        raise
+          (Entry_decode_error
+             (Printf.sprintf "expected JSON object, got %s"
+                (Yojson.Safe.to_string json)))
 
   let load_from_file dir =
     ensure_dir dir;
@@ -344,38 +389,52 @@ module Ring = struct
        written.  Pre-fix this used [Unix.localtime] which on KST hosts
        loaded a file 9 hours skewed from the today computation. *)
     let yesterday = format_utc_date_of (Time_compat.now () -. 86400.0) in
-    let load_file path =
-      if Sys.file_exists path then begin
-        let ic = open_in path in
-        let entries = ref [] in
-        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-          (try while true do
-             let line = input_line ic in
-             if String.length line > 0 then
-               (match entry_of_json (Yojson.Safe.from_string line) with
-                | Some e -> entries := e :: !entries
-                | None -> ()
-                | exception Yojson.Json_error _ -> ())
-           done with End_of_file -> ());
-          List.rev !entries
-        )
-      end else []
+    (* Drive the fold into a bounded [Queue.t] sized to [capacity].
+       Each new entry pushes onto the tail; if the queue overflows
+       past [capacity] we drop the head (oldest seen).  Combined with
+       the yesterday-then-today fold order this keeps the last
+       [capacity] entries across both files in O(capacity) live
+       memory — the previous accumulator built an unbounded
+       per-file list and only trimmed *after* concatenation, so a
+       full daily log allocated O(line_count) entry records on
+       boot even when [capacity] was much smaller.
+
+       [Fs_compat.fold_jsonl_lines] also gives us non-blocking IO
+       under Eio, max-line-size enforcement via the [~max_size:16 MiB]
+       cap on [Eio.Buf_read.of_flow] (which [Buf_read.lines] then
+       streams under), and consistent malformed-line handling (stderr
+       warning + skip) in place of the prior silent drop on
+       [Yojson.Json_error]. *)
+    let buf_ring : entry Queue.t = Queue.create () in
+    let push_file path =
+      Fs_compat.fold_jsonl_lines
+        ~init:()
+        ~f:(fun () ~line_no json ->
+          (* RFC-0079: file-fold is the one boundary that tolerates legacy
+             rows written before the typed encoder. Older JSONL files (with
+             [raw_level] / [normalized_level] / [legacy_classified]) fail
+             [entry_of_json] because their schema is gone; the cleanup_old
+             rotation deletes them within [keep_days], so the WARN here is
+             load-bearing only during that window. Anywhere else, a decode
+             error propagates as [Entry_decode_error]. *)
+          match entry_of_json json with
+          | exception Entry_decode_error msg ->
+              Printf.eprintf
+                "[%s] [WARN] [Log] skip legacy/malformed JSONL row %s:%d: %s\n%!"
+                (timestamp ()) path line_no msg
+          | e ->
+            Queue.add e buf_ring;
+            if Queue.length buf_ring > capacity then ignore (Queue.pop buf_ring))
+        path
     in
-    let yesterday_entries = load_file (log_file_path dir yesterday) in
-    let today_entries = load_file (log_file_path dir today) in
-    let all = yesterday_entries @ today_entries in
-    (* Take only last [capacity] entries *)
-    let len = List.length all in
-    let to_load = if len > capacity then
-      let skip = len - capacity in
-      let rec drop n = function [] -> [] | _ :: tl when n > 0 -> drop (n-1) tl | l -> l in
-      drop skip all
-    else all in
-    List.iter (fun e ->
-      let seq = Atomic.fetch_and_add total 1 in
-      let idx = seq mod capacity in
-      buf.(idx) <- { e with seq }
-    ) to_load
+    push_file (log_file_path dir yesterday);
+    push_file (log_file_path dir today);
+    Queue.iter
+      (fun e ->
+        let seq = Atomic.fetch_and_add total 1 in
+        let idx = seq mod capacity in
+        buf.(idx) <- { e with seq })
+      buf_ring
 
   let init_file_sink dir =
     close_sink ();
@@ -407,29 +466,26 @@ module Ring = struct
       ) files
     end
 
+  (* RFC-0079: typed [push]. [~level] and [?source] are typed values, not
+     strings. Legacy options [?raw_level] / [~normalized_level] /
+     [?legacy_classified] are gone — they only existed to carry the
+     pre-typed mirror state through the wire. *)
   let push
-      ?raw_level
       ?(source = Structured)
-      ?(legacy_classified = false)
       ?(details = `Null)
       ?keeper_name
       ?turn_id
-      ~normalized_level
+      ~level
       ~module_name
       ~message
       () =
     let seq = Atomic.fetch_and_add total 1 in
     let idx = seq mod capacity in
-    let raw_level = Option.value ~default:normalized_level raw_level in
-    let source = source_to_string source in
     let entry = {
         seq;
         ts = timestamp_iso ();
-        level = normalized_level;
-        raw_level;
-        normalized_level;
+        level;
         source;
-        legacy_classified;
         module_name;
         keeper_name;
         turn_id;
@@ -457,9 +513,7 @@ module Ring = struct
       let i = ref (t - 1) in
       while !i >= start && !count < limit do
         let e = buf.(!i mod capacity) in
-        let level_ok =
-          (level_to_int (level_of_string e.normalized_level)) >= min_level
-        in
+        let level_ok = level_to_int e.level >= min_level in
         let module_ok = module_filter = "" ||
           String.lowercase_ascii e.module_name =
           String.lowercase_ascii module_filter in
@@ -480,6 +534,69 @@ module Ring = struct
       ("total", `Int (Atomic.get total));
       ("entries", `List (List.map entry_to_json entries));
     ]
+
+  let latest_metadata_json = function
+    | None -> `Null
+    | Some e ->
+        `Assoc
+          [
+            ("seq", `Int e.seq);
+            ("ts", `String e.ts);
+            ("level", `String (level_to_string e.level));
+            ("source", `String (source_to_string e.source));
+            ("module", `String e.module_name);
+            ( "keeper_name",
+              (match e.keeper_name with
+              | Some name -> `String name
+              | None -> `Null) );
+            ( "turn_id",
+              (match e.turn_id with
+              | Some turn_id -> `Int turn_id
+              | None -> `Null) );
+          ]
+
+  let summary_json () =
+    let total_entries = Atomic.get total in
+    let retained_entries = min total_entries capacity in
+    let recent_window = recent ~limit:200 () in
+    let recent_errors =
+      List.fold_left
+        (fun count e -> if e.level = Error then count + 1 else count)
+        0 recent_window
+    in
+    let recent_warnings =
+      List.fold_left
+        (fun count e -> if e.level = Warn then count + 1 else count)
+        0 recent_window
+    in
+    let file_sink_dir =
+      if String.equal !file_base_dir "" then `Null else `String !file_base_dir
+    in
+    let latest =
+      match recent_window with
+      | latest :: _ -> Some latest
+      | [] -> None
+    in
+    `Assoc
+      [
+        ("status", `String (if total_entries = 0 then "empty" else "active"));
+        ("capacity", `Int capacity);
+        ("total_entries", `Int total_entries);
+        ("retained_entries", `Int retained_entries);
+        ("recent_window", `Int (List.length recent_window));
+        ("recent_errors", `Int recent_errors);
+        ("recent_warnings", `Int recent_warnings);
+        ("latest", latest_metadata_json latest);
+        ( "file_sink",
+          `Assoc
+            [
+              ("enabled", `Bool (!file_channel <> None));
+              ("dir", file_sink_dir);
+              ( "current_date",
+                if String.equal !file_current_date "" then `Null
+                else `String !file_current_date );
+            ] );
+      ]
 end
 
 (** Log a message at given level with optional context *)
@@ -493,8 +610,7 @@ let log level ?(ctx : string option) fmt =
         | None -> Printf.sprintf "[%s] [%s]" (timestamp ()) level_str
       in
       Printf.eprintf "%s %s\n%!" prefix msg;
-      Ring.push ~raw_level:level_str ~normalized_level:level_str ~module_name
-        ~message:msg ()
+      Ring.push ~level ~module_name ~message:msg ()
     end
   ) fmt
 
@@ -508,8 +624,7 @@ let emit level ?(module_name = "") ?(details = `Null) message =
         Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) level_str module_name
     in
     Printf.eprintf "%s %s\n%!" prefix message;
-    Ring.push ~raw_level:level_str ~normalized_level:level_str ~module_name
-      ~message ~details ()
+    Ring.push ~level ~module_name ~message ~details ()
   end
 
 let details_with_event_class event_class details =
@@ -540,29 +655,24 @@ let info ?ctx fmt = log Info ?ctx fmt
 let warn ?ctx fmt = log Warn ?ctx fmt
 let error ?ctx fmt = log Error ?ctx fmt
 
-let emit_legacy_raw ?level ?(module_name = "") ~source message =
-  let normalized_level, raw_level, legacy_classified =
-    match level with
-    | Some level ->
-        let level_str = level_to_string level in
-        (level_str, level_str, false)
-    | None ->
-        let inferred, raw_level = infer_legacy_level message in
-        (level_to_string inferred, raw_level, true)
-  in
+(* RFC-0079: [~level] is now required for the mirror functions. The old
+   [?level] option backed [infer_legacy_level], a string-prefix classifier
+   over the message body — every existing caller already passed
+   [~level:Log.Error/Warn/Debug] explicitly, so the option was dead code
+   masquerading as flexibility. *)
+let emit_legacy_raw ~level ?(module_name = "") ~source message =
   Printf.eprintf "%s\n%!" message;
-  Ring.push ~raw_level ~normalized_level ~source ~legacy_classified ~module_name
-    ~message ()
+  Ring.push ~level ~source ~module_name ~message ()
 
-let legacy_stderr ?level ?module_name message =
-  emit_legacy_raw ?level ?module_name ~source:Legacy_stderr message
+let legacy_stderr ~level ?module_name message =
+  emit_legacy_raw ~level ?module_name ~source:Legacy_stderr message
 
-let legacy_traceln ?level ?module_name message =
-  emit_legacy_raw ?level ?module_name ~source:Legacy_traceln message
+let legacy_traceln ~level ?module_name message =
+  emit_legacy_raw ~level ?module_name ~source:Legacy_traceln message
 
 let client_tool_host_error ?(module_name = "ToolHost") ?(details = `Null) message =
   Printf.eprintf "%s\n%!" message;
-  Ring.push ~raw_level:"ERROR" ~normalized_level:"ERROR" ~source:Client_tool_host
+  Ring.push ~level:Error ~source:Client_tool_host
     ~module_name ~message ~details ()
 
 module type LOGGER = sig
@@ -629,8 +739,7 @@ module Make (M : sig val name : string end) = struct
         (timestamp ()) level_str M.name in
       Printf.eprintf "%s %s\n%!" prefix message;
       Ring.push ?keeper_name ?turn_id
-        ~raw_level:level_str ~normalized_level:level_str
-        ~module_name:M.name ~message ~details ()
+        ~level ~module_name:M.name ~message ~details ()
     end
 
   let log_module level ?keeper_name ?turn_id fmt =

@@ -112,9 +112,6 @@ let filter_healthy_internal ~sw ~net (providers : Llm_provider.Provider_config.t
         (cloud_providers, [])
       end
 
-let filter_healthy ~sw ~net providers =
-  fst (filter_healthy_internal ~sw ~net providers)
-
 let filter_healthy_strict ~sw ~net (providers : Llm_provider.Provider_config.t list)
     : (Llm_provider.Provider_config.t list, health_filter_rejection) result =
   let initial_count = List.length providers in

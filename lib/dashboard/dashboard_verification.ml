@@ -251,7 +251,8 @@ let rejection_row_json (req : V.verification_request) : Yojson.Safe.t =
 let is_rejected (req : V.verification_request) : bool =
   match req.status with
   | V.Completed (V.Fail _) | V.Completed (V.Partial _) -> true
-  | _ -> false
+  | V.Completed V.Pass -> false
+  | V.Pending | V.Assigned _ -> false
 
 let bucket_of_status (req : V.verification_request) : string =
   req |> status_bucket_of_request |> status_bucket_to_string

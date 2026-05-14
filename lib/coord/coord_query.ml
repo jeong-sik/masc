@@ -239,7 +239,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
             | json ->
                 (match message_of_yojson json with
                  | Ok msg when msg.seq > since_seq -> loop (remaining - 1) (msg :: acc) rest
-                 | _ -> loop remaining acc rest)
+                 | Ok _ | Error _ -> loop remaining acc rest)
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
                 Log.legacy_traceln ~level:Log.Warn ~module_name:"Coord"
@@ -278,7 +278,7 @@ let get_all_messages_raw config ~since_seq =
             | json ->
                 (match message_of_yojson json with
                  | Ok msg when msg.seq > since_seq -> loop (msg :: acc) rest
-                 | _ -> loop acc rest)
+                 | Ok _ | Error _ -> loop acc rest)
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
                 Log.legacy_traceln ~level:Log.Warn ~module_name:"Coord"

@@ -355,7 +355,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       let raw_output, stderr_output, status =
         let status, stdout, stderr =
           Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
-            ~actor:"system/spawn"
+            ~actor:(Masc_exec.Agent_id.of_string "system/spawn")
             ~raw_source
             ~summary:"spawn agent cli"
             ~timeout_sec:(float_of_int timeout)

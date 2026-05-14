@@ -5,6 +5,7 @@
 // Backend dashboard timeout is 30s; frontend must wait slightly longer.
 export const DEFAULT_GET_TIMEOUT_MS = 35_000
 export const DEFAULT_POST_TIMEOUT_MS = 30_000
+export const KEEPER_LIFECYCLE_TIMEOUT_MS = 12_000
 export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const NAMESPACE_TRUTH_GET_TIMEOUT_MS = 30_000
 export const KEEPER_MESSAGE_TIMEOUT_MS = 90_000
@@ -17,6 +18,7 @@ export const MCP_INIT_COOLDOWN_MS = 2_000
 // so a slow first response under Executor_pool contention is not turned into
 // a reconnect by the client side.
 export const DASHBOARD_WS_RPC_TIMEOUT_MS = 30_000
+export const DASHBOARD_WS_HEARTBEAT_INTERVAL_MS = 30_000
 
 // --- Reconnect backoff (shared by SSE and dashboard WS) ---
 // Cap at 60s with plus/minus 1s jitter to break reconnect storms when the server is

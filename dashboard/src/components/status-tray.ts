@@ -8,7 +8,11 @@ import {
   dashboardWsEventCount60s,
   dashboardWsLastError,
   dashboardWsLastEventAt,
+  dashboardWsLastPongAt,
+  dashboardWsLastPongLatencyMs,
   dashboardWsReady,
+  dashboardWsSseFallbackActive,
+  dashboardWsSseFallbackReason,
 } from '../dashboard-ws-state'
 import { route } from '../router'
 import {
@@ -22,6 +26,10 @@ import {
   lastDisconnectedAt,
   reconnectCount,
 } from '../sse'
+import {
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+} from '../config/constants'
 import { journalSeverity } from '../journal-entry'
 import { TimeAgo } from './common/time-ago'
 import { RouteLink } from './common/route-link'
@@ -29,6 +37,8 @@ import { ringFocusClasses } from './common/ring'
 import { unacknowledgedCount } from './common/error-notification-state'
 
 export const STATUS_TRAY_SILENT_MS = 30_000
+export const STATUS_TRAY_HEARTBEAT_FRESH_MS =
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS + DASHBOARD_WS_RPC_TIMEOUT_MS + 1_000
 
 export type StatusTrayKey = 'transport' | 'fleet' | 'activity' | 'attention'
 export type StatusTrayTone = 'ok' | 'warn' | 'err' | 'muted'
@@ -62,6 +72,10 @@ export interface StatusTrayInput {
   wsReady: boolean
   wsLastEventAt: number
   wsEventCount60s: number
+  wsLastPongAt: number
+  wsLastPongLatencyMs: number | null
+  wsSseFallbackActive?: boolean
+  wsSseFallbackReason?: string | null
   wsLastError: string | null
   reconnectCount: number
   lastDisconnectedAt: number
@@ -122,9 +136,39 @@ function countPendingVerification(tasksInput: readonly Task[]): number {
   return tasksInput.filter(task => task.status === 'awaiting_verification').length
 }
 
+function isExecutionAttentionCode(value: string | null | undefined): boolean {
+  const normalized = value?.trim().toLowerCase()
+  if (!normalized || normalized === 'unknown') return false
+  if (
+    normalized === 'ok'
+    || normalized === 'pass'
+    || normalized === 'allowed_in_sandbox'
+    || normalized.startsWith('satisfied')
+  ) return false
+  return normalized.includes('violat')
+    || normalized.includes('missing')
+    || normalized.includes('need')
+    || normalized.includes('fail')
+    || normalized.includes('error')
+    || normalized.includes('passive')
+}
+
+function hasExecutionAttentionEvidence(keeper: Keeper): boolean {
+  const trust = keeper.trust
+  if (trust?.needs_attention === true) return true
+  const terminalSeverity = trust?.latest_terminal_reason?.severity?.trim().toLowerCase()
+  if (terminalSeverity === 'bad' || terminalSeverity === 'warn') return true
+  const execution = trust?.execution_summary
+  if (!execution) return false
+  if ((execution.missing_required_tools ?? []).length > 0) return true
+  return isExecutionAttentionCode(execution.runtime_proof_status)
+    || isExecutionAttentionCode(execution.tool_contract_result)
+}
+
 function countKeeperAttention(keeperInput: readonly Keeper[]): number {
   return keeperInput.filter(keeper => {
     if (keeper.needs_attention) return true
+    if (hasExecutionAttentionEvidence(keeper)) return true
     const status = (keeper.status ?? '').toLowerCase()
     return status.includes('crash') || status === 'dead' || status === 'zombie'
   }).length
@@ -146,25 +190,50 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
   let transport: StatusTrayItem
   if (input.wsOnly) {
     if (!input.wsConnected || !input.wsReady) {
-      transport = {
-        key: 'transport',
-        tone: 'err',
-        label: 'WS',
-        value: 'closed',
-        detail: input.wsLastError ? clip(input.wsLastError) : 'WS-only channel is not ready',
+      if (input.wsSseFallbackActive && input.sseConnected) {
+        transport = {
+          key: 'transport',
+          tone: 'warn',
+          label: 'Client',
+          value: 'SSE fallback',
+          detail: input.wsSseFallbackReason
+            ? `client WS degraded; ${clip(input.wsSseFallbackReason)}`
+            : 'client WS degraded; SSE fallback is live',
+        }
+      } else {
+        transport = {
+          key: 'transport',
+          tone: 'err',
+          label: 'Client',
+          value: 'closed',
+          detail: input.wsLastError
+            ? clip(input.wsLastError)
+            : 'client WS channel is not ready; server transport truth is in Transport Health',
+        }
       }
     } else {
       const silentMs = input.wsLastEventAt === 0
         ? Number.POSITIVE_INFINITY
         : input.now - input.wsLastEventAt
       const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
+      const pongAgeMs = input.wsLastPongAt === 0
+        ? Number.POSITIVE_INFINITY
+        : input.now - input.wsLastPongAt
+      const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
+      const pongLatency = input.wsLastPongLatencyMs == null
+        ? 'pong'
+        : `${input.wsLastPongLatencyMs}ms`
       transport = {
         key: 'transport',
-        tone: silent ? 'warn' : 'ok',
-        label: 'WS',
-        value: silent ? 'silent' : `${input.wsEventCount60s}/60s`,
+        tone: silent && !heartbeatFresh ? 'warn' : 'ok',
+        label: 'Client',
+        value: silent
+          ? heartbeatFresh ? pongLatency : 'silent'
+          : `${input.wsEventCount60s}/60s`,
         detail: silent
-          ? 'WS-only channel is open but no recent event has arrived'
+          ? heartbeatFresh
+            ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
+            : 'client WS channel is open but no recent event or heartbeat pong has arrived'
           : `last event ${Math.floor(silentMs / 1000)}s ago`,
       }
     }
@@ -172,10 +241,12 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
     transport = {
       key: 'transport',
       tone: input.sseConnected ? 'ok' : 'err',
-      label: 'SSE',
+      label: 'Client',
       value: input.sseConnected ? 'live' : 'offline',
       detail: input.sseConnected
-        ? input.wsConnected ? 'SSE is live with WS shadow channel connected' : 'SSE is live'
+        ? input.wsConnected
+          ? 'client SSE is live with WS mirror connected'
+          : 'client SSE is live'
         : formatDisconnectedDetail(input),
     }
   }
@@ -399,6 +470,10 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     wsReady: dashboardWsReady.value,
     wsLastEventAt: dashboardWsLastEventAt.value,
     wsEventCount60s: dashboardWsEventCount60s.value,
+    wsLastPongAt: dashboardWsLastPongAt.value,
+    wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
+    wsSseFallbackActive: dashboardWsSseFallbackActive.value,
+    wsSseFallbackReason: dashboardWsSseFallbackReason.value,
     wsLastError: dashboardWsLastError.value,
     reconnectCount: reconnectCount.value,
     lastDisconnectedAt: lastDisconnectedAt.value,

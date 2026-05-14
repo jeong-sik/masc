@@ -1,142 +1,125 @@
 (** Tests for Keeper_tool_alias.
 
-    Phase A.1 of RFC-0006. The module is data-only at this point;
-    these tests pin the alias table so subsequent runtime wiring
-    (Phase A.2/A.3) can rely on stable contracts. *)
+    RFC-0064: two-surface routing table. Public names (Bash, Read, …)
+    map to internal handler names (keeper_bash, keeper_fs_read, …)
+    via a single [route] type. No reverse lookup or tier classification. *)
 
 module Alias = Masc_mcp.Keeper_tool_alias
 module Disclosure = Masc_mcp.Keeper_tool_disclosure
 
+let route_internal name =
+  match Alias.route name with
+  | Some r -> Some r.internal_name
+  | None -> None
+;;
+
 let test_known_aliases_resolve () =
-  Alcotest.(check (option string)) "Bash -> keeper_bash"
-    (Some "keeper_bash") (Alias.to_internal "Bash");
-  Alcotest.(check (option string)) "Read -> keeper_fs_read"
-    (Some "keeper_fs_read") (Alias.to_internal "Read");
-  Alcotest.(check (option string)) "Edit -> keeper_fs_edit"
-    (Some "keeper_fs_edit") (Alias.to_internal "Edit");
-  Alcotest.(check (option string)) "Write -> keeper_fs_edit"
-    (Some "keeper_fs_edit") (Alias.to_internal "Write");
-  Alcotest.(check (option string)) "Grep -> keeper_shell"
-    (Some "keeper_shell") (Alias.to_internal "Grep");
-  Alcotest.(check (option string)) "WebSearch -> masc_web_search"
-    (Some "masc_web_search") (Alias.to_internal "WebSearch")
+  Alcotest.(check (option string))
+    "Bash -> keeper_bash"
+    (Some "keeper_bash")
+    (route_internal "Bash");
+  Alcotest.(check (option string))
+    "Read -> keeper_fs_read"
+    (Some "keeper_fs_read")
+    (route_internal "Read");
+  Alcotest.(check (option string))
+    "Edit -> keeper_fs_edit"
+    (Some "keeper_fs_edit")
+    (route_internal "Edit");
+  Alcotest.(check (option string))
+    "Write -> keeper_fs_edit"
+    (Some "keeper_fs_edit")
+    (route_internal "Write");
+  Alcotest.(check (option string))
+    "Grep -> keeper_shell"
+    (Some "keeper_shell")
+    (route_internal "Grep");
+  Alcotest.(check (option string))
+    "WebSearch -> masc_web_search"
+    (Some "masc_web_search")
+    (route_internal "WebSearch")
+;;
+
+let test_internal_names_resolve_to_preferred_public_alias () =
+  Alcotest.(check (option string))
+    "keeper_bash -> Bash"
+    (Some "Bash")
+    (Alias.public_name_for_internal "keeper_bash");
+  Alcotest.(check (option string))
+    "keeper_shell -> Grep"
+    (Some "Grep")
+    (Alias.public_name_for_internal "keeper_shell");
+  Alcotest.(check (option string))
+    "keeper_fs_edit primary public alias is Edit"
+    (Some "Edit")
+    (Alias.public_name_for_internal "keeper_fs_edit");
+  Alcotest.(check (option string))
+    "unaliased internal has no public alias"
+    None
+    (Alias.public_name_for_internal "keeper_board_post")
+;;
 
 let test_unknown_returns_none () =
-  Alcotest.(check (option string)) "Skill has no cognate"
-    None (Alias.to_internal "Skill");
-  Alcotest.(check (option string)) "keeper_bash is internal, not public"
-    None (Alias.to_internal "keeper_bash");
-  Alcotest.(check (option string)) "empty string"
-    None (Alias.to_internal "");
-  Alcotest.(check (option string)) "case sensitive"
-    None (Alias.to_internal "bash")
+  Alcotest.(check (option string)) "Skill has no cognate" None (route_internal "Skill");
+  Alcotest.(check (option string))
+    "keeper_bash is internal, not public"
+    None
+    (route_internal "keeper_bash");
+  Alcotest.(check (option string)) "empty string" None (route_internal "");
+  Alcotest.(check (option string)) "case sensitive" None (route_internal "bash")
+;;
 
-let test_to_public_round_trip () =
-  Alcotest.(check string) "keeper_bash -> Bash"
-    "Bash" (Alias.to_public "keeper_bash");
-  Alcotest.(check string) "keeper_fs_read -> Read"
-    "Read" (Alias.to_public "keeper_fs_read");
-  Alcotest.(check string) "keeper_shell stays internal"
-    "keeper_shell" (Alias.to_public "keeper_shell");
-  Alcotest.(check string) "masc_web_search -> WebSearch"
-    "WebSearch" (Alias.to_public "masc_web_search");
-  (* Edit/Write collapse: first occurrence wins for stability *)
-  Alcotest.(check string) "keeper_fs_edit -> Edit (first wins)"
-    "Edit" (Alias.to_public "keeper_fs_edit")
-
-let test_to_public_pass_through () =
-  (* Tools without an Anthropic Code cognate should fall through verbatim. *)
-  Alcotest.(check string) "keeper_board_post passes through"
-    "keeper_board_post" (Alias.to_public "keeper_board_post");
-  Alcotest.(check string) "unknown name passes through"
-    "anything" (Alias.to_public "anything")
-
-let test_canonicalize_observed () =
-  let input =
-    [
-      "Bash";
-      "keeper_board_post";
-      "masc_board_post";
-      "Read";
-      "Skill";
-      "WebSearch";
-      "Write";
-    ]
-  in
-  let expected =
-    [
-      "keeper_bash";
-      "keeper_board_post";
-      "keeper_board_post";
-      "keeper_fs_read";
-      "Skill";
-      "masc_web_search";
-      "keeper_fs_edit";
-    ]
-  in
-  Alcotest.(check (list string)) "mixed list canonicalizes only known aliases"
-    expected (Alias.canonicalize_observed input)
-
-let test_canonicalize_observed_with_telemetry_records_public_masc () =
-  let labels =
-    [
-      ("alias_kind", "public_masc");
-      ("public_tool", "masc_board_post");
-      ("canonical_tool", "keeper_board_post");
-    ]
-  in
-  let before =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_alias_canonicalizations
-      ~labels ()
-  in
-  let canonical =
-    Alias.canonicalize_observed_with_telemetry [ "masc_board_post" ]
-  in
-  let after =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_tool_alias_canonicalizations
-      ~labels ()
-  in
-  Alcotest.(check (list string)) "public MASC tool canonicalized"
-    [ "keeper_board_post" ] canonical;
-  Alcotest.(check (float 0.001)) "telemetry counter incremented"
-    (before +. 1.0) after
-
-let test_hallucinated_builtins () =
-  Alcotest.(check bool) "Skill is hallucinated"
-    true (Alias.is_hallucinated_builtin "Skill");
-  Alcotest.(check bool) "Agent is hallucinated"
-    true (Alias.is_hallucinated_builtin "Agent");
-  Alcotest.(check bool) "WebSearch is NOT hallucinated (has cognate)"
-    false (Alias.is_hallucinated_builtin "WebSearch");
-  Alcotest.(check bool) "WebFetch is hallucinated"
-    true (Alias.is_hallucinated_builtin "WebFetch");
-  Alcotest.(check bool) "Bash is NOT hallucinated (has cognate)"
-    false (Alias.is_hallucinated_builtin "Bash");
-  Alcotest.(check bool) "keeper_bash is NOT hallucinated"
-    false (Alias.is_hallucinated_builtin "keeper_bash")
-
-let test_no_overlap_alias_and_hallucinated () =
-  let aliased = List.map fst (Alias.all_aliases ()) in
+let test_route_round_trip () =
+  (* Every public name must resolve to a non-empty internal handler. *)
   List.iter
-    (fun b ->
-       Alcotest.(check bool)
-         (Printf.sprintf "%s must not appear in alias table" b)
-         false (List.mem b aliased))
-    Alias.hallucinated_builtins
+    (fun public ->
+       match Alias.route public with
+       | Some r ->
+         Alcotest.(check bool)
+           (Printf.sprintf "%s resolves to non-empty internal_name" public)
+           true
+           (r.internal_name <> "")
+       | None ->
+         Alcotest.fail (Printf.sprintf "%s should have a route but got None" public))
+    (Alias.public_names ());
+  (* Edit and Write both route to keeper_fs_edit. *)
+  Alcotest.(check (option string))
+    "Edit -> keeper_fs_edit"
+    (Some "keeper_fs_edit")
+    (route_internal "Edit");
+  Alcotest.(check (option string))
+    "Write -> keeper_fs_edit"
+    (Some "keeper_fs_edit")
+    (route_internal "Write")
+;;
+
+let test_route_unknown_returns_none () =
+  Alcotest.(check (option string))
+    "internal name has no route"
+    None
+    (route_internal "keeper_bash");
+  Alcotest.(check (option string))
+    "arbitrary name has no route"
+    None
+    (route_internal "anything");
+  Alcotest.(check (option string)) "empty string has no route" None (route_internal "")
+;;
 
 let test_alias_table_is_stable () =
-  let pairs = Alias.all_aliases () in
-  Alcotest.(check int) "seven canonical aliases" 7 (List.length pairs);
-  (* Round-trip: every alias should round-trip via to_internal then to_public,
-     except where collapse happens (Write -> keeper_fs_edit -> Edit). *)
+  (* [public_names ()] is the canonical listing of LLM-native public names.
+     Every entry must have a real [route] mapping; pinning length and
+     route resolution catches accidental additions/deletions to the
+     routing table. *)
+  let names = Alias.public_names () in
+  Alcotest.(check int) "seven public names" 7 (List.length names);
   List.iter
-    (fun (public, internal) ->
-       Alcotest.(check (option string))
-         (Printf.sprintf "%s resolves to %s" public internal)
-         (Some internal) (Alias.to_internal public))
-    pairs
+    (fun public ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s has a route" public)
+         true
+         (Option.is_some (Alias.route public)))
+    names
+;;
 
 (* ── Phase A.3 integration: canonicalize before the disclosure check ─── *)
 
@@ -145,12 +128,20 @@ let test_alias_table_is_stable () =
     tool calls are Anthropic Code aliases (Bash/Read/Edit/Grep/WebSearch/Write)
     must NOT produce any unexpected names. *)
 let allowed_keeper_surface =
-  [ "keeper_bash"; "keeper_fs_read"; "keeper_fs_edit"; "keeper_shell";
-    "keeper_board_post"; "masc_web_search"; "extend_turns" ]
+  [ "keeper_bash"
+  ; "keeper_fs_read"
+  ; "keeper_fs_edit"
+  ; "keeper_shell"
+  ; "keeper_board_post"
+  ; "masc_web_search"
+  ; "masc_web_fetch"
+  ; "extend_turns"
+  ]
+;;
 
 let test_pure_alias_turn_no_longer_unexpected () =
   let observed = [ "Bash" ] in
-  let canonical = Alias.canonicalize_observed observed in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -158,22 +149,24 @@ let test_pure_alias_turn_no_longer_unexpected () =
   in
   Alcotest.(check (list string))
     "[Bash] only -> no unexpected (was the 18% nuke source)"
-    [] unexpected
+    []
+    unexpected
+;;
 
 let test_mixed_alias_and_internal_no_unexpected () =
   let observed = [ "Read"; "keeper_board_post"; "Edit"; "WebSearch" ] in
-  let canonical = Alias.canonicalize_observed observed in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
       ~tool_names:canonical
   in
-  Alcotest.(check (list string)) "mixed alias + internal -> no unexpected"
-    [] unexpected
+  Alcotest.(check (list string)) "mixed alias + internal -> no unexpected" [] unexpected
+;;
 
 let test_hallucinated_builtin_still_unexpected () =
   let observed = [ "Skill"; "Bash" ] in
-  let canonical = Alias.canonicalize_observed observed in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -181,381 +174,664 @@ let test_hallucinated_builtin_still_unexpected () =
   in
   Alcotest.(check (list string))
     "Skill remains unexpected (no cognate); Bash resolved"
-    [ "Skill" ] unexpected
+    [ "Skill" ]
+    unexpected
+;;
+
+let test_mcp_prefixed_anthropic_alias_routes () =
+  (* Regression guard for PR #14574 review #5: [canonical_name] must
+     route ["mcp__masc__Bash"] the same way as ["Bash"]. Earlier the
+     route lookup used the raw [name] instead of the stripped form,
+     so MCP-prefixed Anthropic Code calls regressed into routing
+     misses. *)
+  let canonical = Disclosure.canonical_tool_name "mcp__masc__Bash" in
+  Alcotest.(check string)
+    "mcp__masc__Bash routes through stripped form to keeper_bash"
+    "keeper_bash"
+    canonical
+;;
+
+let test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped () =
+  (* Self-review of PR #14585: in canonical_name_observed, the Route_hit
+     branch (LLM-native public name reached via a stripped MCP prefix)
+     must record [tool=stripped] so the label stays within
+     [is_known_public]. Otherwise [safe_tool_label] collapses
+     ["mcp__masc__Bash"] to ["unknown"] on a successful route. *)
+  let labels = [ "tool", "Bash"; "routed_to", "keeper_bash"; "result", "ok" ] in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  let _ = Disclosure.canonical_tool_name_observed "mcp__masc__Bash" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  Alcotest.(check (float 0.001))
+    "MCP-prefixed Anthropic alias records tool=Bash (stripped), not raw prefixed name"
+    (before +. 1.0)
+    after
+;;
+
+let test_mcp_prefixed_keeper_internal_routes () =
+  (* PR #14585 review: MCP transports can emit prefixed internal names
+     like [mcp__masc__keeper_pr_create]. canonicalise_outcome must check
+     [is_known_internal stripped], not raw [name], so these are
+     canonicalised to the stripped form instead of falling into [Miss]
+     and being reported as unexpected. *)
+  let canonical = Disclosure.canonical_tool_name "mcp__masc__keeper_bash" in
+  Alcotest.(check string)
+    "mcp__masc__keeper_bash canonicalises to keeper_bash (stripped)"
+    "keeper_bash"
+    canonical
+;;
+
+let test_mcp_prefixed_public_masc_goal_tool_routes () =
+  let canonical = Disclosure.canonical_tool_name "mcp__masc__masc_goal_list" in
+  Alcotest.(check string)
+    "mcp__masc__masc_goal_list canonicalises to masc_goal_list"
+    "masc_goal_list"
+    canonical;
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:[ "masc_goal_list"; "masc_goal_verify" ]
+      ~tool_names:[ canonical ]
+  in
+  Alcotest.(check (list string))
+    "public MASC goal allowlist accepts MCP-prefixed observation"
+    []
+    unexpected
+;;
+
+let test_mcp_prefixed_masc_public_telemetry_preserves_label () =
+  (* PR #14585 review: a successful MCP-mapped route for a name like
+     [mcp__masc__masc_board_post] must record [tool=masc_board_post],
+     not collapse to ["unknown"]. Verifies that
+     [known_internal_names_tbl] is seeded with public MCP counterparts
+     via [Tool_catalog_surfaces.keeper_internal_replacement]. *)
+  let labels =
+    [ "tool", "masc_board_post"; "routed_to", "keeper_board_post"; "result", "ok" ]
+  in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  let _ = Disclosure.canonical_tool_name_observed "mcp__masc__masc_board_post" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels
+      ()
+  in
+  Alcotest.(check (float 0.001))
+    "MCP-prefixed masc_* public name records tool=masc_board_post (not unknown)"
+    (before +. 1.0)
+    after
+;;
+
+let test_canonical_tool_name_pure_does_not_increment_counter () =
+  (* Self-review of PR #14585 review #3: the pure variant must NOT emit
+     telemetry. Otherwise set-logic call sites (required-tool
+     canonicalisation, surface composition) would over-count. *)
+  let labels_ok = [ "tool", "Bash"; "routed_to", "keeper_bash"; "result", "ok" ] in
+  let before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels:labels_ok
+      ()
+  in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let _ = Disclosure.canonical_tool_name "Bash" in
+  let after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      ~labels:labels_ok
+      ()
+  in
+  Alcotest.(check (float 0.001))
+    "pure canonical_tool_name does not increment masc_keeper_tool_call_total"
+    before
+    after
+;;
 
 let test_partial_tolerance_still_works () =
   let observed = [ "Skill"; "Bash" ] in
-  let canonical = Alias.canonicalize_observed observed in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
       ~tool_names:canonical
   in
   let has_valid =
-    Disclosure.has_valid_tool_call
-      ~unexpected_tool_names:unexpected
+    Disclosure.has_valid_tool_call ~unexpected_tool_names:unexpected ~tool_names:canonical
+  in
+  Alcotest.(check bool)
+    "Bash counts as valid -> partial tolerance kicks in"
+    true
+    has_valid
+;;
+
+let test_public_allowed_surface_accepts_canonical_alias () =
+  let observed = [ "Bash" ] in
+  let canonical = List.map Disclosure.canonical_tool_name observed in
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:[ "Bash" ]
       ~tool_names:canonical
   in
-  Alcotest.(check bool) "Bash counts as valid -> partial tolerance kicks in"
-    true has_valid
+  Alcotest.(check (list string))
+    "public Bash allowlist accepts canonical keeper_bash observation"
+    []
+    unexpected;
+  Alcotest.(check (list string))
+    "final names keep canonical internal name"
+    [ "keeper_bash" ]
+    (Disclosure.final_keeper_tool_names
+       ~reported_tool_names:observed
+       ~observed_tool_names:[]
+       ~allowed_tool_names:[ "Bash" ])
+;;
 
-(* ── Phase A.2 OAS dual registration ─────────────────────────────── *)
+(* ── Routing table and schemas ─────────────────────────────── *)
 
 let yojson_field name j =
   match j with
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
+;;
 
-let test_oas_dual_register_subset () =
-  let pairs = Alias.oas_dual_register_aliases () in
-  let names = List.map fst pairs in
-  Alcotest.(check (list string)) "dual-reg covers shell/fs/search aliases"
-    [ "Bash"; "Edit"; "Grep"; "Read"; "WebSearch"; "Write" ] names;
-  (* Every entry must also appear in the full alias table. *)
-  let full = List.map fst (Alias.all_aliases ()) in
-  List.iter
-    (fun (public, _) ->
-      Alcotest.(check bool)
-        (Printf.sprintf "%s is in all_aliases" public)
-        true (List.mem public full))
-    pairs
+let test_public_names_stable_order () =
+  (* public_names returns all LLM-native surface names in stable order. *)
+  let names = Alias.public_names () in
+  Alcotest.(check (list string))
+    "stable public name order"
+    [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ]
+    names
+;;
 
 let test_public_input_schema_present () =
   List.iter
     (fun name ->
-      Alcotest.(check bool)
-        (Printf.sprintf "%s has tailored schema" name)
-        true (Option.is_some (Alias.public_input_schema name)))
-    [ "Bash"; "Edit"; "Grep"; "Read"; "WebSearch"; "Write" ];
-  Alcotest.(check bool) "unknown public name has no schema"
-    true (Option.is_none (Alias.public_input_schema "Nope"))
+       Alcotest.(check bool)
+         (Printf.sprintf "%s has tailored schema" name)
+         true
+         (Option.is_some (Alias.public_input_schema name)))
+    [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ];
+  Alcotest.(check bool)
+    "unknown public name has no schema"
+    true
+    (Option.is_none (Alias.public_input_schema "Nope"))
+;;
 
 let test_bash_schema_uses_command_field () =
   let schema = Option.get (Alias.public_input_schema "Bash") in
   let props = Option.get (yojson_field "properties" schema) in
-  Alcotest.(check bool) "Bash schema exposes 'command' (not 'cmd')"
-    true (Option.is_some (yojson_field "command" props));
-  Alcotest.(check bool) "Bash schema does not expose 'cmd' directly"
-    true (Option.is_none (yojson_field "cmd" props));
+  Alcotest.(check bool)
+    "Bash schema exposes 'command' (not 'cmd')"
+    true
+    (Option.is_some (yojson_field "command" props));
+  Alcotest.(check bool)
+    "Bash schema does not expose 'cmd' directly"
+    true
+    (Option.is_none (yojson_field "cmd" props));
   let required =
     match yojson_field "required" schema with
     | Some (`List items) ->
-        List.filter_map
-          (function `String s -> Some s | _ -> None) items
+      List.filter_map
+        (function
+          | `String s -> Some s
+          | _ -> None)
+        items
     | _ -> []
   in
-  Alcotest.(check (list string)) "Bash requires 'command'"
-    [ "command" ] required
+  Alcotest.(check (list string)) "Bash requires 'command'" [ "command" ] required
+;;
 
 let test_read_schema_uses_file_path () =
   let schema = Option.get (Alias.public_input_schema "Read") in
   let props = Option.get (yojson_field "properties" schema) in
-  Alcotest.(check bool) "Read schema exposes 'file_path' (not 'path')"
-    true (Option.is_some (yojson_field "file_path" props));
-  Alcotest.(check bool) "Read schema does not expose 'path' directly"
-    true (Option.is_none (yojson_field "path" props))
+  Alcotest.(check bool)
+    "Read schema exposes 'file_path' (not 'path')"
+    true
+    (Option.is_some (yojson_field "file_path" props));
+  Alcotest.(check bool)
+    "Read schema does not expose 'path' directly"
+    true
+    (Option.is_none (yojson_field "path" props))
+;;
 
 let test_translate_bash_input () =
-  let input = `Assoc
-    [ ("command", `String "ls -la");
-      ("timeout", `Int 60);
-      ("description", `String "list files");
-      ("run_in_background", `Bool false) ]
+  let input =
+    `Assoc
+      [ "command", `String "ls -la"
+      ; "timeout", `Int 60
+      ; "description", `String "list files"
+      ; "run_in_background", `Bool false
+      ]
   in
   let translated = Alias.translate_input ~public:"Bash" input in
   let cmd = yojson_field "cmd" translated in
   let timeout_sec = yojson_field "timeout_sec" translated in
   let bg = yojson_field "run_in_background" translated in
   let desc = yojson_field "description" translated in
-  Alcotest.(check (option string)) "command -> cmd"
+  Alcotest.(check (option string))
+    "command -> cmd"
     (Some "ls -la")
-    (Option.bind cmd (function `String s -> Some s | _ -> None));
-  Alcotest.(check (option int)) "timeout -> timeout_sec"
+    (Option.bind cmd (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check (option int))
+    "timeout -> timeout_sec"
     (Some 60)
-    (Option.bind timeout_sec (function `Int i -> Some i | _ -> None));
-  Alcotest.(check bool) "run_in_background passes through"
-    true (Option.is_some bg);
-  Alcotest.(check bool) "description is dropped"
-    true (Option.is_none desc)
+    (Option.bind timeout_sec (function
+       | `Int i -> Some i
+       | _ -> None));
+  Alcotest.(check bool) "run_in_background passes through" true (Option.is_some bg);
+  Alcotest.(check bool) "description is dropped" true (Option.is_none desc)
+;;
 
 let test_translate_read_input () =
-  let input = `Assoc
-    [ ("file_path", `String "/tmp/foo");
-      ("limit", `Int 4096);
-      ("offset", `Int 100) ]
+  let input =
+    `Assoc [ "file_path", `String "/tmp/foo"; "limit", `Int 4096; "offset", `Int 100 ]
   in
   let translated = Alias.translate_input ~public:"Read" input in
   let path = yojson_field "path" translated in
   let max_bytes = yojson_field "max_bytes" translated in
   let offset = yojson_field "offset" translated in
-  Alcotest.(check (option string)) "file_path -> path"
+  Alcotest.(check (option string))
+    "file_path -> path"
     (Some "/tmp/foo")
-    (Option.bind path (function `String s -> Some s | _ -> None));
-  Alcotest.(check (option int)) "limit -> max_bytes"
+    (Option.bind path (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check (option int))
+    "limit -> max_bytes"
     (Some 4096)
-    (Option.bind max_bytes (function `Int i -> Some i | _ -> None));
-  Alcotest.(check bool) "offset is dropped (keeper_fs_read does not support it)"
-    true (Option.is_none offset)
+    (Option.bind max_bytes (function
+       | `Int i -> Some i
+       | _ -> None));
+  Alcotest.(check bool)
+    "offset is dropped (keeper_fs_read does not support it)"
+    true
+    (Option.is_none offset)
+;;
 
 let test_edit_schema_uses_anthropic_fields () =
   let schema = Option.get (Alias.public_input_schema "Edit") in
   let props = Option.get (yojson_field "properties" schema) in
   List.iter
     (fun field ->
-      Alcotest.(check bool)
-        (Printf.sprintf "Edit schema exposes %S" field)
-        true (Option.is_some (yojson_field field props)))
+       Alcotest.(check bool)
+         (Printf.sprintf "Edit schema exposes %S" field)
+         true
+         (Option.is_some (yojson_field field props)))
     [ "file_path"; "old_string"; "new_string"; "replace_all" ];
-  Alcotest.(check bool) "Edit schema does not expose internal 'mode' to LLM"
-    true (Option.is_none (yojson_field "mode" props))
+  Alcotest.(check bool)
+    "Edit schema does not expose internal 'mode' to LLM"
+    true
+    (Option.is_none (yojson_field "mode" props))
+;;
 
 let test_write_schema_uses_anthropic_fields () =
   let schema = Option.get (Alias.public_input_schema "Write") in
   let props = Option.get (yojson_field "properties" schema) in
   List.iter
     (fun field ->
-      Alcotest.(check bool)
-        (Printf.sprintf "Write schema exposes %S" field)
-        true (Option.is_some (yojson_field field props)))
+       Alcotest.(check bool)
+         (Printf.sprintf "Write schema exposes %S" field)
+         true
+         (Option.is_some (yojson_field field props)))
     [ "file_path"; "content" ];
-  Alcotest.(check bool) "Write schema does not expose internal 'mode' to LLM"
-    true (Option.is_none (yojson_field "mode" props))
+  Alcotest.(check bool)
+    "Write schema does not expose internal 'mode' to LLM"
+    true
+    (Option.is_none (yojson_field "mode" props))
+;;
 
 let test_grep_schema_uses_anthropic_fields () =
   let schema = Option.get (Alias.public_input_schema "Grep") in
   let props = Option.get (yojson_field "properties" schema) in
-  Alcotest.(check bool) "Grep schema exposes 'pattern'"
-    true (Option.is_some (yojson_field "pattern" props));
-  Alcotest.(check bool) "Grep schema does not expose internal 'op' to LLM"
-    true (Option.is_none (yojson_field "op" props))
+  Alcotest.(check bool)
+    "Grep schema exposes 'pattern'"
+    true
+    (Option.is_some (yojson_field "pattern" props));
+  Alcotest.(check bool)
+    "Grep schema does not expose internal 'op' to LLM"
+    true
+    (Option.is_none (yojson_field "op" props))
+;;
 
 let test_web_search_schema_uses_public_fields () =
   let schema = Option.get (Alias.public_input_schema "WebSearch") in
   let props = Option.get (yojson_field "properties" schema) in
-  Alcotest.(check bool) "WebSearch schema exposes 'query'"
-    true (Option.is_some (yojson_field "query" props));
-  Alcotest.(check bool) "WebSearch schema exposes 'limit'"
-    true (Option.is_some (yojson_field "limit" props));
+  Alcotest.(check bool)
+    "WebSearch schema exposes 'query'"
+    true
+    (Option.is_some (yojson_field "query" props));
+  Alcotest.(check bool)
+    "WebSearch schema exposes 'limit'"
+    true
+    (Option.is_some (yojson_field "limit" props));
   let required =
     match yojson_field "required" schema with
     | Some (`List items) ->
-        List.filter_map
-          (function `String s -> Some s | _ -> None) items
+      List.filter_map
+        (function
+          | `String s -> Some s
+          | _ -> None)
+        items
     | _ -> []
   in
-  Alcotest.(check (list string)) "WebSearch requires 'query'"
-    [ "query" ] required
+  Alcotest.(check (list string)) "WebSearch requires 'query'" [ "query" ] required
+;;
 
 let test_translate_edit_input () =
   let input =
     `Assoc
-      [
-        ("file_path", `String "/tmp/foo.ml");
-        ("old_string", `String "let x = 1");
-        ("new_string", `String "let x = 2");
-        ("replace_all", `Bool true);
+      [ "file_path", `String "/tmp/foo.ml"
+      ; "old_string", `String "let x = 1"
+      ; "new_string", `String "let x = 2"
+      ; "replace_all", `Bool true
       ]
   in
   let translated = Alias.translate_input ~public:"Edit" input in
-  Alcotest.(check (option string)) "file_path -> path"
+  Alcotest.(check (option string))
+    "file_path -> path"
     (Some "/tmp/foo.ml")
-    (Option.bind (yojson_field "path" translated)
-       (function `String s -> Some s | _ -> None));
-  Alcotest.(check (option string)) "mode injected as 'patch'"
+    (Option.bind (yojson_field "path" translated) (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check (option string))
+    "mode injected as 'patch'"
     (Some "patch")
-    (Option.bind (yojson_field "mode" translated)
-       (function `String s -> Some s | _ -> None));
-  Alcotest.(check bool) "old_string preserved" true
+    (Option.bind (yojson_field "mode" translated) (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check bool)
+    "old_string preserved"
+    true
     (Option.is_some (yojson_field "old_string" translated));
-  Alcotest.(check bool) "new_string preserved" true
+  Alcotest.(check bool)
+    "new_string preserved"
+    true
     (Option.is_some (yojson_field "new_string" translated));
-  Alcotest.(check (option bool)) "replace_all preserved"
+  Alcotest.(check (option bool))
+    "replace_all preserved"
     (Some true)
-    (Option.bind (yojson_field "replace_all" translated)
-       (function `Bool b -> Some b | _ -> None))
+    (Option.bind (yojson_field "replace_all" translated) (function
+       | `Bool b -> Some b
+       | _ -> None))
+;;
 
 let test_translate_edit_drops_caller_supplied_mode () =
   (* Defense-in-depth: if the LLM tries to write via Edit by providing 'content',
      fallback to mode=overwrite instead of silently dropping it. *)
   let input =
     `Assoc
-      [
-        ("file_path", `String "/tmp/x");
-        ("mode", `String "patch");
-        ("content", `String "fallback");
+      [ "file_path", `String "/tmp/x"
+      ; "mode", `String "patch"
+      ; "content", `String "fallback"
       ]
   in
   let translated = Alias.translate_input ~public:"Edit" input in
-  Alcotest.(check (option string)) "mode is fallback to overwrite"
+  Alcotest.(check (option string))
+    "mode is fallback to overwrite"
     (Some "overwrite")
-    (Option.bind (yojson_field "mode" translated)
-       (function `String s -> Some s | _ -> None));
-  Alcotest.(check (option string)) "caller-supplied content preserved"
+    (Option.bind (yojson_field "mode" translated) (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check (option string))
+    "caller-supplied content preserved"
     (Some "fallback")
-    (Option.bind (yojson_field "content" translated)
-       (function `String s -> Some s | _ -> None))
+    (Option.bind (yojson_field "content" translated) (function
+       | `String s -> Some s
+       | _ -> None))
+;;
 
 let test_translate_write_input () =
   let input =
-    `Assoc
-      [
-        ("file_path", `String "/tmp/new.txt");
-        ("content", `String "hello world");
-      ]
+    `Assoc [ "file_path", `String "/tmp/new.txt"; "content", `String "hello world" ]
   in
   let translated = Alias.translate_input ~public:"Write" input in
-  Alcotest.(check (option string)) "file_path -> path"
+  Alcotest.(check (option string))
+    "file_path -> path"
     (Some "/tmp/new.txt")
-    (Option.bind (yojson_field "path" translated)
-       (function `String s -> Some s | _ -> None));
-  Alcotest.(check (option string)) "mode injected as 'overwrite'"
+    (Option.bind (yojson_field "path" translated) (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check (option string))
+    "mode injected as 'overwrite'"
     (Some "overwrite")
-    (Option.bind (yojson_field "mode" translated)
-       (function `String s -> Some s | _ -> None));
-  Alcotest.(check (option string)) "content preserved verbatim"
+    (Option.bind (yojson_field "mode" translated) (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check (option string))
+    "content preserved verbatim"
     (Some "hello world")
-    (Option.bind (yojson_field "content" translated)
-       (function `String s -> Some s | _ -> None))
+    (Option.bind (yojson_field "content" translated) (function
+       | `String s -> Some s
+       | _ -> None))
+;;
 
 let test_translate_grep_input () =
   let input =
     `Assoc
-      [
-        ("pattern", `String "TODO");
-        ("path", `String "lib/");
-        ("glob", `String "*.ml");
-        ("type", `String "ml");
-        ("-i", `Bool true);
-        ("-n", `Bool true);
+      [ "pattern", `String "TODO"
+      ; "path", `String "lib/"
+      ; "glob", `String "*.ml"
+      ; "type", `String "ml"
+      ; "-i", `Bool true
+      ; "-n", `Bool true
       ]
   in
   let translated = Alias.translate_input ~public:"Grep" input in
-  Alcotest.(check (option string)) "op injected as 'rg'"
+  Alcotest.(check (option string))
+    "op injected as 'rg'"
     (Some "rg")
-    (Option.bind (yojson_field "op" translated)
-       (function `String s -> Some s | _ -> None));
-  Alcotest.(check (option string)) "pattern preserved and prefix added"
+    (Option.bind (yojson_field "op" translated) (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check (option string))
+    "pattern preserved and prefix added"
     (Some "(?i)TODO")
-    (Option.bind (yojson_field "pattern" translated)
-       (function `String s -> Some s | _ -> None));
-  Alcotest.(check bool) "path preserved" true
+    (Option.bind (yojson_field "pattern" translated) (function
+       | `String s -> Some s
+       | _ -> None));
+  Alcotest.(check bool)
+    "path preserved"
+    true
     (Option.is_some (yojson_field "path" translated));
-  Alcotest.(check bool) "glob preserved" true
+  Alcotest.(check bool)
+    "glob preserved"
+    true
     (Option.is_some (yojson_field "glob" translated));
-  Alcotest.(check bool) "type preserved" true
+  Alcotest.(check bool)
+    "type preserved"
+    true
     (Option.is_some (yojson_field "type" translated));
-  Alcotest.(check bool) "-i shim dropped" true
+  Alcotest.(check bool)
+    "-i shim dropped"
+    true
     (Option.is_none (yojson_field "-i" translated));
-  Alcotest.(check bool) "-n shim dropped" true
+  Alcotest.(check bool)
+    "-n shim dropped"
+    true
     (Option.is_none (yojson_field "-n" translated))
+;;
 
 let test_translate_web_search_input_is_identity () =
-  let input =
-    `Assoc
-      [ ("query", `String "OpenAI API release notes"); ("limit", `Int 5) ]
-  in
+  let input = `Assoc [ "query", `String "OpenAI API release notes"; "limit", `Int 5 ] in
   let translated = Alias.translate_input ~public:"WebSearch" input in
-  Alcotest.(check string) "WebSearch payload already matches masc_web_search"
-    (Yojson.Safe.to_string input) (Yojson.Safe.to_string translated)
+  Alcotest.(check string)
+    "WebSearch payload already matches masc_web_search"
+    (Yojson.Safe.to_string input)
+    (Yojson.Safe.to_string translated)
+;;
 
 let test_translate_unknown_is_identity () =
-  let input = `Assoc [ ("foo", `String "bar") ] in
+  let input = `Assoc [ "foo", `String "bar" ] in
   let translated = Alias.translate_input ~public:"NoSuchTool" input in
-  Alcotest.(check string) "identity for unknown public name"
-    (Yojson.Safe.to_string input) (Yojson.Safe.to_string translated)
+  Alcotest.(check string)
+    "identity for unknown public name"
+    (Yojson.Safe.to_string input)
+    (Yojson.Safe.to_string translated)
+;;
 
 let test_translate_malformed_input_is_identity () =
   let input = `String "not an object" in
   let translated = Alias.translate_input ~public:"Bash" input in
-  Alcotest.(check string) "non-object payload passes through"
-    (Yojson.Safe.to_string input) (Yojson.Safe.to_string translated)
+  Alcotest.(check string)
+    "non-object payload passes through"
+    (Yojson.Safe.to_string input)
+    (Yojson.Safe.to_string translated)
+;;
 
-let test_expand_universe_adds_aliases () =
-  let internal =
-    [ "keeper_bash"; "keeper_fs_read"; "masc_web_search"; "keeper_board_post" ]
-  in
-  let expanded = Alias.expand_universe internal in
-  Alcotest.(check bool) "Bash appears after expansion"
-    true (List.mem "Bash" expanded);
-  Alcotest.(check bool) "Read appears after expansion"
-    true (List.mem "Read" expanded);
-  Alcotest.(check bool) "WebSearch appears after expansion"
-    true (List.mem "WebSearch" expanded);
-  Alcotest.(check bool) "internal names preserved"
-    true (List.for_all (fun n -> List.mem n expanded) internal);
-  Alcotest.(check bool) "no duplicate Bash entries"
-    true
-    (List.length (List.filter (String.equal "Bash") expanded) = 1)
-
-let test_expand_universe_skips_when_internal_absent () =
-  let internal = [ "keeper_board_post"; "keeper_tasks_list" ] in
-  let expanded = Alias.expand_universe internal in
-  Alcotest.(check bool) "Bash NOT added when keeper_bash absent"
-    true (not (List.mem "Bash" expanded));
-  Alcotest.(check bool) "Read NOT added when keeper_fs_read absent"
-    true (not (List.mem "Read" expanded));
-  Alcotest.(check bool) "WebSearch NOT added when masc_web_search absent"
-    true (not (List.mem "WebSearch" expanded));
-  Alcotest.(check int) "expanded length unchanged"
-    (List.length internal) (List.length expanded)
-
-let test_expand_universe_dedup_existing_public () =
-  (* If a caller already has the public name in the input list, expand
-     must not duplicate it. *)
-  let internal = [ "keeper_bash"; "Bash"; "keeper_fs_read" ] in
-  let expanded = Alias.expand_universe internal in
-  Alcotest.(check int) "Bash appears exactly once"
-    1
-    (List.length (List.filter (String.equal "Bash") expanded))
+let test_public_names_adds_to_allowlist () =
+  (* public_names returns LLM-native surface names that callers should
+     add to their allowlists. These are the names the LLM will call,
+     not the internal keeper_* names. *)
+  let names = Alias.public_names () in
+  Alcotest.(check bool) "Bash is in public_names" true (List.mem "Bash" names);
+  Alcotest.(check bool) "Read is in public_names" true (List.mem "Read" names);
+  Alcotest.(check bool) "WebSearch is in public_names" true (List.mem "WebSearch" names);
+  (* Internal names are NOT in public_names. *)
+  Alcotest.(check bool)
+    "keeper_bash is NOT in public_names"
+    false
+    (List.mem "keeper_bash" names)
+;;
 
 let () =
-  Alcotest.run "Keeper_tool_alias"
-    [
-      ( "alias-table",
-        [
-          Alcotest.test_case "known aliases resolve" `Quick test_known_aliases_resolve;
-          Alcotest.test_case "unknown returns None" `Quick test_unknown_returns_none;
-          Alcotest.test_case "to_public round-trip" `Quick test_to_public_round_trip;
-          Alcotest.test_case "to_public pass-through" `Quick test_to_public_pass_through;
-          Alcotest.test_case "canonicalize_observed" `Quick test_canonicalize_observed;
-          Alcotest.test_case "canonicalize_observed telemetry" `Quick
-            test_canonicalize_observed_with_telemetry_records_public_masc;
-          Alcotest.test_case "hallucinated builtins" `Quick test_hallucinated_builtins;
-          Alcotest.test_case "no overlap" `Quick test_no_overlap_alias_and_hallucinated;
-          Alcotest.test_case "table is stable" `Quick test_alias_table_is_stable;
-        ] );
-      ( "disclosure-integration",
-        [
-          Alcotest.test_case "pure alias turn no longer unexpected" `Quick
-            test_pure_alias_turn_no_longer_unexpected;
-          Alcotest.test_case "mixed alias + internal no unexpected" `Quick
-            test_mixed_alias_and_internal_no_unexpected;
-          Alcotest.test_case "hallucinated builtin still unexpected" `Quick
-            test_hallucinated_builtin_still_unexpected;
-          Alcotest.test_case "partial tolerance still works" `Quick
-            test_partial_tolerance_still_works;
-        ] );
-      ( "oas-dual-register",
-        [
-          Alcotest.test_case "dual registration subset is stable" `Quick test_oas_dual_register_subset;
-          Alcotest.test_case "tailored input schema present" `Quick test_public_input_schema_present;
-          Alcotest.test_case "Bash schema uses 'command' field" `Quick test_bash_schema_uses_command_field;
-          Alcotest.test_case "Read schema uses 'file_path' field" `Quick test_read_schema_uses_file_path;
-          Alcotest.test_case "Edit schema uses Anthropic field names" `Quick test_edit_schema_uses_anthropic_fields;
-          Alcotest.test_case "Write schema uses Anthropic field names" `Quick test_write_schema_uses_anthropic_fields;
-          Alcotest.test_case "Grep schema uses Anthropic field names" `Quick test_grep_schema_uses_anthropic_fields;
-          Alcotest.test_case "WebSearch schema uses public field names" `Quick test_web_search_schema_uses_public_fields;
-          Alcotest.test_case "translate Bash input shape" `Quick test_translate_bash_input;
-          Alcotest.test_case "translate Read input shape" `Quick test_translate_read_input;
-          Alcotest.test_case "translate Edit input shape" `Quick test_translate_edit_input;
-          Alcotest.test_case "translate Edit drops caller mode" `Quick test_translate_edit_drops_caller_supplied_mode;
-          Alcotest.test_case "translate Write input shape" `Quick test_translate_write_input;
-          Alcotest.test_case "translate Grep input shape" `Quick test_translate_grep_input;
-          Alcotest.test_case "translate WebSearch input shape" `Quick test_translate_web_search_input_is_identity;
-          Alcotest.test_case "translate unknown is identity" `Quick test_translate_unknown_is_identity;
-          Alcotest.test_case "translate malformed is identity" `Quick test_translate_malformed_input_is_identity;
-          Alcotest.test_case "expand_universe adds aliases" `Quick test_expand_universe_adds_aliases;
-          Alcotest.test_case "expand_universe skips when internal absent" `Quick test_expand_universe_skips_when_internal_absent;
-          Alcotest.test_case "expand_universe dedup existing public" `Quick test_expand_universe_dedup_existing_public;
-        ] );
+  Alcotest.run
+    "Keeper_tool_alias"
+    [ ( "routing-table"
+      , [ Alcotest.test_case "known aliases resolve" `Quick test_known_aliases_resolve
+        ; Alcotest.test_case
+            "internal names resolve to preferred public alias"
+            `Quick
+            test_internal_names_resolve_to_preferred_public_alias
+        ; Alcotest.test_case "unknown returns None" `Quick test_unknown_returns_none
+        ; Alcotest.test_case "route round-trip" `Quick test_route_round_trip
+        ; Alcotest.test_case
+            "route unknown returns None"
+            `Quick
+            test_route_unknown_returns_none
+        ; Alcotest.test_case "table is stable" `Quick test_alias_table_is_stable
+        ] )
+    ; ( "disclosure-integration"
+      , [ Alcotest.test_case
+            "pure alias turn no longer unexpected"
+            `Quick
+            test_pure_alias_turn_no_longer_unexpected
+        ; Alcotest.test_case
+            "mixed alias + internal no unexpected"
+            `Quick
+            test_mixed_alias_and_internal_no_unexpected
+        ; Alcotest.test_case
+            "hallucinated builtin still unexpected"
+            `Quick
+            test_hallucinated_builtin_still_unexpected
+        ; Alcotest.test_case
+            "mcp-prefixed anthropic alias routes"
+            `Quick
+            test_mcp_prefixed_anthropic_alias_routes
+        ; Alcotest.test_case
+            "mcp-prefixed anthropic alias telemetry uses stripped tool label"
+            `Quick
+            test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped
+        ; Alcotest.test_case
+            "mcp-prefixed keeper internal canonicalises to stripped"
+            `Quick
+            test_mcp_prefixed_keeper_internal_routes
+        ; Alcotest.test_case
+            "mcp-prefixed public MASC goal tool canonicalises to stripped"
+            `Quick
+            test_mcp_prefixed_public_masc_goal_tool_routes
+        ; Alcotest.test_case
+            "mcp-prefixed masc public name telemetry preserves label"
+            `Quick
+            test_mcp_prefixed_masc_public_telemetry_preserves_label
+        ; Alcotest.test_case
+            "pure canonical_tool_name does not increment counter"
+            `Quick
+            test_canonical_tool_name_pure_does_not_increment_counter
+        ; Alcotest.test_case
+            "partial tolerance still works"
+            `Quick
+            test_partial_tolerance_still_works
+        ; Alcotest.test_case
+            "public allowed surface accepts canonical alias"
+            `Quick
+            test_public_allowed_surface_accepts_canonical_alias
+        ] )
+    ; ( "routing-and-schemas"
+      , [ Alcotest.test_case
+            "public names stable order"
+            `Quick
+            test_public_names_stable_order
+        ; Alcotest.test_case
+            "tailored input schema present"
+            `Quick
+            test_public_input_schema_present
+        ; Alcotest.test_case
+            "Bash schema uses 'command' field"
+            `Quick
+            test_bash_schema_uses_command_field
+        ; Alcotest.test_case
+            "Read schema uses 'file_path' field"
+            `Quick
+            test_read_schema_uses_file_path
+        ; Alcotest.test_case
+            "Edit schema uses Anthropic field names"
+            `Quick
+            test_edit_schema_uses_anthropic_fields
+        ; Alcotest.test_case
+            "Write schema uses Anthropic field names"
+            `Quick
+            test_write_schema_uses_anthropic_fields
+        ; Alcotest.test_case
+            "Grep schema uses Anthropic field names"
+            `Quick
+            test_grep_schema_uses_anthropic_fields
+        ; Alcotest.test_case
+            "WebSearch schema uses public field names"
+            `Quick
+            test_web_search_schema_uses_public_fields
+        ; Alcotest.test_case "translate Bash input shape" `Quick test_translate_bash_input
+        ; Alcotest.test_case "translate Read input shape" `Quick test_translate_read_input
+        ; Alcotest.test_case "translate Edit input shape" `Quick test_translate_edit_input
+        ; Alcotest.test_case
+            "translate Edit drops caller mode"
+            `Quick
+            test_translate_edit_drops_caller_supplied_mode
+        ; Alcotest.test_case
+            "translate Write input shape"
+            `Quick
+            test_translate_write_input
+        ; Alcotest.test_case "translate Grep input shape" `Quick test_translate_grep_input
+        ; Alcotest.test_case
+            "translate WebSearch input shape"
+            `Quick
+            test_translate_web_search_input_is_identity
+        ; Alcotest.test_case
+            "translate unknown is identity"
+            `Quick
+            test_translate_unknown_is_identity
+        ; Alcotest.test_case
+            "translate malformed is identity"
+            `Quick
+            test_translate_malformed_input_is_identity
+        ; Alcotest.test_case
+            "public_names adds to allowlist"
+            `Quick
+            test_public_names_adds_to_allowlist
+        ] )
     ]
+;;

@@ -32,7 +32,7 @@ val friction_activity_payload :
 
 (** Log a CDAL proof at debug (Completed) or warn level. *)
 val log_keeper_proof :
-  keeper_name:string -> Agent_sdk.Cdal_proof.t -> unit
+  keeper_name:string -> Masc_mcp_cdal_runtime.Cdal_proof.t -> unit
 
 (** Log a contract verdict at debug (Satisfied) or warn (Violated,
     Inconclusive) level. *)

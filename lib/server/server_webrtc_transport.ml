@@ -456,3 +456,18 @@ let cleanup_expired_offers ?(max_age_s = 60.0) () =
     with_registry (fun () -> Hashtbl.remove pending_offers id)
   ) expired;
   List.length expired
+
+(** Clean up active peers that stopped producing lifecycle or datachannel
+    activity.  Collect ids under the registry lock, then remove peers outside
+    that critical section because [remove_peer] takes the same lock and closes
+    the WebRTC stack. *)
+let cleanup_stale_peers ?(max_idle_s = 300.0) () =
+  let now = Unix.gettimeofday () in
+  let stale =
+    with_registry (fun () ->
+      Hashtbl.fold (fun peer_id conn acc ->
+        if now -. conn.last_activity > max_idle_s then peer_id :: acc else acc
+      ) active_peers [])
+  in
+  List.iter remove_peer stale;
+  List.length stale

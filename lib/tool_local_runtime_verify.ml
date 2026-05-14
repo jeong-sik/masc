@@ -160,7 +160,7 @@ let probe_chat_completion_compatible
           ~kind:Llm_provider.Provider_config.OpenAI_compat
           ~model_id ~base_url:endpoint.url
           ~request_path:Masc_network_defaults.openai_chat_completions_path
-          ~max_tokens:1 ~temperature:Oas_worker_cascade.deterministic_temperature ()
+          ~max_tokens:1 ~temperature:Cascade_legacy_runner.deterministic_temperature ()
       in
       let messages : Oas_types.message list =
         [

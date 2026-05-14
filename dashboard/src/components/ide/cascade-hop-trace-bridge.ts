@@ -33,7 +33,7 @@ import { pushTrace } from './keeper-trace-store'
  *                discriminator and this surfaces it on the chip.)
  *
  * Why a pure function (not a stateful subscription):
- *   - The owning component (`IdeConversationRailMock`) already has the
+ *   - The owning component (`IdeConversationRail`) already has the
  *     fetched `cascadeEvents` array as a useState value. A pure mapper
  *     called from a `useEffect([cascadeEvents])` is sufficient and
  *     trivially testable.

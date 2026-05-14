@@ -3,7 +3,6 @@ module StringSet = Set.Make (String)
 (** SSOT for config filenames documented in [docs/TOML-RELOAD-MATRIX.md].
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
-let cascade_json_filename = "cascade.json"
 let cascade_toml_filename = "cascade.toml"
 let tool_policy_toml_filename = "tool_policy.toml"
 let keeper_runtime_toml_filename = "keeper_runtime.toml"
@@ -185,13 +184,12 @@ let to_json (resolution : resolution) =
     ]
 
 let config_signature_exists config_dir =
-  let cascade = Filename.concat config_dir cascade_json_filename in
   let cascade_toml = Filename.concat config_dir cascade_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
   let keepers = Filename.concat config_dir "keepers" in
   let personas = Filename.concat config_dir "personas" in
   existing_dir config_dir
-  && ((existing_file cascade || existing_file cascade_toml)
+  && (existing_file cascade_toml
      || existing_dir prompts || existing_dir keepers
      || existing_dir personas)
 
@@ -333,15 +331,7 @@ let config_root_resolution (inputs : inputs) =
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
-  let exists =
-    root.exists
-    &&
-    if String.equal name cascade_json_filename then
-      existing_file path
-      || existing_file (Filename.concat root.path cascade_toml_filename)
-    else
-      existing_dir path
-  in
+  let exists = root.exists && existing_dir path in
   { path; exists; source = root.source }
 
 let file_item (root : path_item) name =
@@ -375,19 +365,26 @@ let inputs_from_env () =
 let resolve_with inputs =
   let config_root, root_warnings = config_root_resolution inputs in
   let cascade_authoring = file_item config_root cascade_toml_filename in
-  let cascade = child_item config_root cascade_json_filename in
+  let cascade = cascade_authoring in
   let prompts = child_item config_root "prompts" in
   let keepers = child_item config_root "keepers" in
   let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
-    [ ("cascade.json/cascade.toml", cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
+    (* RFC-0058 §9: [cascade.toml] is the only cascade source. *)
+    [ ("cascade.toml", cascade_authoring.exists)
+    ; ("prompts", prompts.exists)
+    ; ("keepers", keepers.exists)
+    ; ("personas", personas.exists)
+    ]
     |> List.filter_map (fun (label, exists) ->
            if exists then None
            else
              Some
                (Printf.sprintf "Resolved config child is missing: %s" label))
   in
-  let warnings = root_warnings @ persona_warnings @ missing_child_warnings in
+  let warnings =
+    root_warnings @ persona_warnings @ missing_child_warnings
+  in
   let status =
     match config_root.source with
     | Invalid_env -> Invalid_env_status
@@ -419,23 +416,8 @@ let resolve () =
 let reset () =
   _cached_resolution := None
 
+(* RFC-0058 §9: the on-disk cascade source is [cascade.toml]. *)
 let cascade_path_opt () =
-  let resolution = resolve () in
-  match resolution.config_root.source with
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
-    when resolution.cascade.exists ->
-      Some resolution.cascade.path
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
-  | Invalid_env | Missing ->
-      None
-
-let cascade_path_candidate () =
-  (resolve ()).cascade.path
-
-let cascade_toml_path_candidate () =
-  Filename.concat (resolve ()).config_root.path cascade_toml_filename
-
-let cascade_toml_path_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with
   | Env | Local_masc | Home_masc | Exe_relative | Cwd
@@ -444,6 +426,12 @@ let cascade_toml_path_opt () =
   | Env | Local_masc | Home_masc | Exe_relative | Cwd
   | Invalid_env | Missing ->
       None
+
+let cascade_path_candidate () =
+  (resolve ()).cascade_authoring.path
+
+let cascade_toml_path_candidate () =
+  Filename.concat (resolve ()).config_root.path cascade_toml_filename
 
 let prompts_dir () =
   (resolve ()).prompts.path
@@ -476,21 +464,32 @@ let personas_dirs_with inputs resolution =
      happens to be true (e.g. [default_missing_root] pointing at a repo-local
      config/ tree). Without this gate, callers can silently load personas from
      a fallback root the resolver explicitly disowned. *)
-  let primary =
-    match resolution.config_root.source with
-    | Invalid_env | Missing -> []
-    | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
-      if resolution.personas.exists then [ resolution.personas.path ] else []
-  in
   let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
   (* Persona resolution is intentionally single-source:
-     - MASC_PERSONAS_DIR when explicitly set
+     - MASC_PERSONAS_DIR when explicitly set (bypasses config-root gating;
+       operator-declared persona roots stand on their own — a user may
+       legitimately want personas without a full MASC config directory)
      - otherwise the resolved config root's personas/
      Hidden secondary searches (~/.masc/personas, $MASC_BASE_PATH/.masc/personas)
      make the dashboard/config panel lie about the actual source of truth. *)
   match explicit_personas_dir_override with
-  | Some _ -> dedupe_paths primary
-  | None -> dedupe_paths primary
+  | Some _ ->
+    (* The env override path is captured in [resolution.personas] by
+       [personas_item] when MASC_PERSONAS_DIR is set; honor its exists
+       flag regardless of [config_root.source].  If the env path is
+       invalid the source comes back as [Invalid_env] and we still
+       suppress to keep the no-silent-fallback contract. *)
+    (match resolution.personas.source with
+     | Env when resolution.personas.exists -> [ resolution.personas.path ]
+     | _ -> [])
+  | None ->
+    let primary =
+      match resolution.config_root.source with
+      | Invalid_env | Missing -> []
+      | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
+        if resolution.personas.exists then [ resolution.personas.path ] else []
+    in
+    dedupe_paths primary
 
 let personas_dirs () =
   let resolution = resolve () in

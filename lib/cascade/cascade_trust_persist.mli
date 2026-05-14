@@ -28,11 +28,16 @@ val snapshot_now : base_path:string -> unit
     {!Cascade_health_tracker.global} via {!Cascade_health_tracker.all_providers}.
     Used by the tick fiber and shutdown hook. *)
 
+val hydrate_latest : base_path:string -> int
+(** Restore provider cooldown/failure state from the latest JSONL snapshot.
+    Returns the number of provider rows applied. Best-effort: malformed or
+    missing snapshots return [0]. *)
+
 val start_snapshot_fiber :
   sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** Spawn a background fiber that calls {!snapshot_now} every
-    [snapshot_interval_s].  Registers a shutdown hook for one final
-    snapshot. *)
+    [snapshot_interval_s].  Hydrates from the latest snapshot before the
+    fiber starts and registers a shutdown hook for one final snapshot. *)
 
 val reset_for_testing : unit -> unit
 (** Clear cached store state.  Does not cancel any fiber started via

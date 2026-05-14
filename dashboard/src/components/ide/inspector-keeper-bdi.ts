@@ -5,6 +5,18 @@ import { activeKeeperName } from '../../keeper-state'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
+// Imported from `./ide-state` rather than `./ide-shell` to avoid the
+// circular dependency `ide-shell -> inspector-keeper-bdi -> ide-shell`
+// (which also drags `router` and other window-touching side effects
+// into this module's tests).
+import { focusIdeContextAnchor } from './ide-state'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 
 export interface KeeperBdiTokenSpend {
@@ -152,6 +164,12 @@ function formatTokens(value: number | null): string {
   return value === null ? '—' : value.toLocaleString()
 }
 
+function formatDurationMs(value: number | null): string {
+  if (value === null || !Number.isFinite(value) || value < 0) return '—'
+  if (value < 1000) return `${Math.round(value).toLocaleString()}ms`
+  return `${(value / 1000).toFixed(1)}s`
+}
+
 function formatAge(value: string | null): string {
   if (!value) return '—'
   return value.slice(11, 19)
@@ -164,6 +182,66 @@ function BdiRow({ label, value }: { readonly label: string, readonly value: stri
       <span style=${{ color: value ? 'var(--color-fg-secondary)' : 'var(--color-fg-disabled)', lineHeight: 1.35 }}>
         ${value ?? '—'}
       </span>
+    </div>
+  `
+}
+
+export function bdiRouteLinks({
+  keeperName,
+  snapshot,
+  filePath,
+  line,
+}: {
+  readonly keeperName: string
+  readonly snapshot: KeeperBdiSnapshot | null
+  readonly filePath?: string
+  readonly line?: number
+}): ReadonlyArray<IdeContextRouteLink> {
+  const keeper = keeperName.trim()
+  if (!keeper) return []
+  return routeLinksForContext({
+    filePath,
+    line,
+    surface: 'BDI',
+    label: snapshot?.intention ?? `keeper BDI ${keeper}`,
+    sourceId: `bdi-${keeper}-${snapshot?.generated_at ?? 'live'}`,
+    keeperId: keeper,
+    telemetry: true,
+    telemetryQuery: bdiTelemetryQuery(keeper, snapshot),
+  })
+}
+
+function bdiTelemetryQuery(keeperName: string, snapshot: KeeperBdiSnapshot | null): string {
+  return [
+    'bdi',
+    `keeper:${keeperName}`,
+    snapshot?.generated_at ? `generated:${snapshot.generated_at}` : null,
+    snapshot?.last_tool_call?.tool ? `tool:${snapshot.last_tool_call.tool}` : null,
+  ].filter((value): value is string => value !== null).join(' ')
+}
+
+export function BdiRouteLinks({
+  links,
+  ariaLabel,
+}: {
+  readonly links: ReadonlyArray<IdeContextRouteLink>
+  readonly ariaLabel: string
+}) {
+  if (links.length === 0) return null
+  return html`
+    <div class="ide-bdi-route-links" aria-label=${ariaLabel}>
+      ${links.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          class="ide-bdi-route-link"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >
+          ${link.label}
+        </button>
+      `)}
     </div>
   `
 }
@@ -186,6 +264,16 @@ export function InspectorKeeperBDI({
   const keeperName = (pin?.keeperName ?? activeKeeper).trim()
   const [snapshot, setSnapshot] = useState<KeeperBdiSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [, forceRender] = useState(0)
+
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
 
   useEffect(() => {
     if (!keeperName) {
@@ -226,8 +314,41 @@ export function InspectorKeeperBDI({
     knownBdiKeys.current = bridgeBdiSnapshotsToTrace([snapshot], knownBdiKeys.current)
   }, [snapshot])
 
+  const cursor = cursorOverlaySignal.value.cursors.get(keeperName)
+  // The SSE adapter defaults a missing `line` to 0 (see
+  // `keeper-cursor-overlay.ts::connectKeeperCursorStream` —
+  // `line: entry.line || 0`), so requiring a 1-based line here avoids
+  // labels like `foo.ts:0` and prevents click-to-navigate firing for
+  // placeholder cursors.
+  const hasValidFocus = !!cursor?.file_path && typeof cursor.line === 'number' && cursor.line >= 1
+  const focusLabel = hasValidFocus
+    ? `${cursor!.file_path.split('/').pop()}:${cursor!.line}`
+    : null
   const tokenRows = snapshot?.recent_token_spend ?? []
   const lastTool = snapshot?.last_tool_call ?? null
+  const presence = globalPresenceSnapshot.value
+  const entries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
+  const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
+  const statusDot = entry ? PRESENCE_DOT[entry.status] : null
+  const routeLinks = bdiRouteLinks({
+    keeperName,
+    snapshot,
+    filePath: hasValidFocus ? cursor?.file_path : undefined,
+    line: hasValidFocus ? cursor?.line : undefined,
+  })
+
+  const navigateToFocus = (): void => {
+    if (!hasValidFocus || !cursor) return
+    focusIdeContextAnchor({
+      file_path: cursor.file_path,
+      line: cursor.line,
+      surface: 'BDI',
+      label: snapshot?.intention ?? `keeper BDI ${keeperName}`,
+      source_id: `bdi-${keeperName}-${snapshot?.generated_at ?? 'live'}`,
+      keeper_id: keeperName,
+      route_links: routeLinks,
+    })
+  }
 
   return html`
     <section
@@ -242,13 +363,63 @@ export function InspectorKeeperBDI({
         minHeight: '180px',
       }}
     >
-      <header style=${{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-2)' }}>
+      <header style=${{ display: 'flex', alignItems: 'baseline', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
         <h3 style=${{ margin: 0, font: 'var(--type-eyebrow)', color: 'var(--color-fg-primary)' }}>
           Keeper BDI
         </h3>
         <span style=${{ color: 'var(--color-accent-fg)', fontSize: 'var(--fs-12)' }}>
           ${keeperName || '—'}
         </span>
+        ${statusDot ? html`
+          <span
+            role="status"
+            aria-label=${`Keeper status: ${statusDot.label}`}
+            style=${{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px',
+              fontSize: 'var(--fs-10)',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              color: statusDot.color,
+            }}
+          >
+            <span style=${{
+              width: '4px',
+              height: '4px',
+              borderRadius: '50%',
+              background: statusDot.color,
+              display: 'inline-block',
+            }} />
+            ${statusDot.label}
+          </span>
+        ` : null}
+        ${focusLabel ? html`
+          <button
+            type="button"
+            data-testid="bdi-focus-label"
+            onClick=${navigateToFocus}
+            title=${cursor?.file_path ?? ''}
+            style=${{
+              color: 'var(--color-accent-fg)',
+              fontSize: 'var(--fs-11)',
+              maxWidth: '160px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+              borderRadius: 'var(--r-0)',
+              padding: '0 var(--sp-1)',
+              transition: 'background 0.15s',
+              background: 'transparent',
+              border: 'none',
+              font: 'inherit',
+              lineHeight: 'inherit',
+              textAlign: 'left',
+            }}
+          >${focusLabel}</button>
+        ` : null}
+        <${BdiRouteLinks} links=${routeLinks} ariaLabel="BDI operational links" />
         ${pin?.line
           ? html`<span style=${{ marginLeft: 'auto', color: 'var(--color-fg-muted)', fontSize: 'var(--fs-11)' }}>L${pin.line}</span>`
           : null}
@@ -290,6 +461,9 @@ export function InspectorKeeperBDI({
         </span>
         ${lastTool?.semantic_outcome
           ? html`<span style=${{ color: lastTool.success === false ? 'var(--color-status-warn)' : 'var(--color-status-ok)' }}>${lastTool.semantic_outcome}</span>`
+          : null}
+        ${lastTool?.duration_ms !== null && lastTool?.duration_ms !== undefined
+          ? html`<span style=${{ color: 'var(--color-fg-secondary)', fontFamily: 'var(--font-mono)' }}>${formatDurationMs(lastTool.duration_ms)}</span>`
           : null}
       </div>
 

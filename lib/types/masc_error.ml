@@ -63,9 +63,6 @@ let rate_limit_config_of_yojson json =
          admin_multiplier; broadcast_per_minute; task_ops_per_minute }
   with e -> Error (Printexc.to_string e)
 
-let show_rate_limit_category = show_rate_limit_category
-let show_rate_limit_error = show_rate_limit_error
-
 let limit_for_category config = function
   | GeneralLimit -> config.per_minute
   | BroadcastLimit -> config.broadcast_per_minute
@@ -212,7 +209,7 @@ let to_string = function
   | System e -> System_error.to_string e
   | RateLimitExceeded e ->
       Printf.sprintf "[RateLimit] Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
-        (show_rate_limit_category e.category) e.current e.limit e.wait_seconds
+        (Rate_limit_types.rate_limit_category_to_string e.category) e.current e.limit e.wait_seconds
   | CacheError e -> (match e with
       | CacheReadFailed path -> Printf.sprintf "[CacheError] Read failed [path=%s]" path
       | CacheWriteFailed path -> Printf.sprintf "[CacheError] Write failed [path=%s]" path
@@ -226,12 +223,31 @@ let to_yojson err =
 
 let code = function
   | Auth (Auth_error.Forbidden _) -> 403
-  | Auth _ -> 401
+  | Auth (Auth_error.Unauthorized _
+         | Auth_error.TokenExpired _
+         | Auth_error.InvalidToken _) -> 401
   | Task (Task_error.NotFound _) -> 404
   | Agent (Agent_error.NotFound _) -> 404
-  | Task _ | Agent _ | Portal _ | System _ -> 400
+  | Task (Task_error.AlreadyClaimed _
+         | Task_error.NotClaimed _
+         | Task_error.InvalidState _
+         | Task_error.InvalidId _) -> 400
+  | Agent (Agent_error.NotJoined _
+          | Agent_error.AlreadyJoined _
+          | Agent_error.InvalidName _) -> 400
+  | Portal (Portal_error.NotOpen _
+           | Portal_error.AlreadyOpen _
+           | Portal_error.Closed _) -> 400
+  | System (System_error.NotInitialized
+           | System_error.AlreadyInitialized
+           | System_error.InvalidJson _
+           | System_error.IoError _
+           | System_error.InvalidFilePath _
+           | System_error.StorageError _
+           | System_error.ValidationError _
+           | System_error.WorktreeNotFound _) -> 400
   | RateLimitExceeded _ -> 429
-  | _ -> 500
+  | CacheError _ -> 500
 
 (* [is_retryable] mirrors [Error.is_retryable] in OAS so MASC-side
    callers don't have to fall back on an OAS-only predicate when

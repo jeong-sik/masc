@@ -116,7 +116,7 @@ let test_docker_write_blocks_project_root_even_if_allowlisted () =
     Keeper_exec_fs.handle_keeper_fs_edit
       ~turn_sandbox_factory:None
       ~config
-      ~meta
+      ~keeper_name:meta.name
       ~args:
         (`Assoc
             [ "path", `String path
@@ -144,7 +144,7 @@ let test_docker_write_allows_playground () =
     Keeper_exec_fs.handle_keeper_fs_edit
       ~turn_sandbox_factory:None
       ~config
-      ~meta
+      ~keeper_name:meta.name
       ~args:
         (`Assoc
             [ "path", `String path

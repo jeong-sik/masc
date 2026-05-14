@@ -584,6 +584,8 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
             ~reason ~retry_after_s reqd
       | Ok () ->
           stop_sse_session session_id;
+          if Option.is_some last_event_id then
+            Transport_metrics.inc_sse_reconnect ();
           let headers =
             Httpun.Headers.of_list
               (legacy_headers
@@ -596,6 +598,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           let client_id, event_stream, evicted =
             Sse.register ~kind:sse_kind session_id
               ~last_event_id:(Option.value ~default:0 last_event_id)
+              ~on_disconnect:(fun () -> stop_sse_session session_id)
           in
           (match evicted with
           | Some evicted_sid -> stop_sse_session evicted_sid

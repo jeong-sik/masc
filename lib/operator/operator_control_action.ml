@@ -74,11 +74,8 @@ let judgment_write_json (ctx : 'a context) args =
         ~keeper_name ()
     in
     Ok
-      (`Assoc
-        [
-          ("status", `String "ok");
-          ("judgment", Operator_judgment.to_yojson judgment);
-        ])
+      (Tool_args.ok_assoc
+         [ ("judgment", Operator_judgment.to_yojson judgment) ])
 
 let judgment_latest_json (_ctx : 'a context) args =
   let* surface = normalize_judgment_surface (get_string args "surface" "") in
@@ -97,14 +94,13 @@ let judgment_latest_json (_ctx : 'a context) args =
     | _ -> None
   in
   Ok
-    (`Assoc
-      [
-        ("status", `String "ok");
-        ( "judgment",
-          match judgment with
-          | Some value -> Operator_judgment.to_yojson value
-          | None -> `Null );
-      ])
+    (Tool_args.ok_assoc
+       [
+         ( "judgment",
+           match judgment with
+           | Some value -> Operator_judgment.to_yojson value
+           | None -> `Null );
+       ])
 
 type action_request = {
   actor : string;

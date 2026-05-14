@@ -1,0 +1,402 @@
+{
+  "__meta": {
+    "purpose": "MASC cascade telemetry — TTFT, inter-chunk latency, cost, health score, context overflow. Imports into Grafana 10+ via File > Import.",
+    "metrics": [
+      "masc_cascade_ttfb_seconds{cascade, provider}",
+      "masc_cascade_inter_chunk_seconds{cascade, provider}",
+      "masc_oas_inference_cost_usd{model_bucket}",
+      "masc_cascade_provider_health_score{provider_key}",
+      "masc_oas_context_overflow_ratio{agent_name}",
+      "masc_oas_context_compaction_total{agent_name, trigger}",
+      "masc_cascade_attempt_liveness_kill{mode, kind, cascade, provider}",
+      "masc_cascade_attempt_liveness_observed{cascade, provider, outcome}"
+    ],
+    "companion_doc": "docs/observability/telemetry-phase0-5.md",
+    "design_doc": "telemetry_design.md (Phase 6)"
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "grafana" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Liveness — kill / observed outcomes",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Liveness kills — last 1h",
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Total cascade attempts killed by liveness FSM (No_first_token, Inter_chunk_idle, Wall_exceeded, Provider_error).",
+      "targets": [
+        {
+          "expr": "sum(increase(masc_cascade_attempt_liveness_kill[1h]))",
+          "legendFormat": "kills",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "piechart",
+      "title": "Kill breakdown by kind",
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Failure class distribution: no_first_token vs inter_chunk_idle vs wall_exceeded vs provider_error.",
+      "targets": [
+        {
+          "expr": "sum by (kind) (increase(masc_cascade_attempt_liveness_kill[1h]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Observed outcomes — rate / 5m",
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Final outcome per cascade attempt: success vs kill vs wire_error.",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_cascade_attempt_liveness_observed[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Latency — TTFT + inter-chunk",
+      "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "TTFT (time to first token) — p50 / p95 / p99",
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Histogram quantiles of time-to-first-byte per (cascade, provider). High TTFT = slow prefill or queuing.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, cascade, provider) (rate(masc_cascade_ttfb_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{cascade}}/{{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, cascade, provider) (rate(masc_cascade_ttfb_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{cascade}}/{{provider}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, cascade, provider) (rate(masc_cascade_ttfb_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{cascade}}/{{provider}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Inter-chunk gap — p50 / p95",
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Time between consecutive SSE content deltas. High inter-chunk = decode stall or provider overload.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, cascade, provider) (rate(masc_cascade_inter_chunk_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{cascade}}/{{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, cascade, provider) (rate(masc_cascade_inter_chunk_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{cascade}}/{{provider}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Cost — inference spend",
+      "gridPos": { "x": 0, "y": 19, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Cumulative inference cost — USD",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Running total of inference cost by model bucket. Uses masc_oas_inference_cost_usd histogram.",
+      "targets": [
+        {
+          "expr": "sum by (model_bucket) (increase(masc_oas_inference_cost_usd_sum[1h]))",
+          "legendFormat": "{{model_bucket}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "bargauge",
+      "title": "Avg cost per request — by model bucket",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Average cost per inference request, grouped by model bucket (claude-sonnet, gpt-4o, local, etc).",
+      "targets": [
+        {
+          "expr": "sum by (model_bucket) (rate(masc_oas_inference_cost_usd_sum[5m])) / sum by (model_bucket) (rate(masc_oas_inference_cost_usd_count[5m]))",
+          "legendFormat": "{{model_bucket}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Health — provider composite score",
+      "gridPos": { "x": 0, "y": 29, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "type": "gauge",
+      "title": "Provider health score",
+      "gridPos": { "x": 0, "y": 30, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Composite score: success_rate * speed_score * cost_score in [0.0, 1.0]. Below 0.3 = degraded.",
+      "targets": [
+        {
+          "expr": "masc_cascade_provider_health_score",
+          "legendFormat": "{{provider_key}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "green", "value": 0.7 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Health score — trend by provider",
+      "gridPos": { "x": 8, "y": 30, "w": 16, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Health score over time per provider. Sudden drops signal provider degradation.",
+      "targets": [
+        {
+          "expr": "masc_cascade_provider_health_score",
+          "legendFormat": "{{provider_key}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "Context — overflow + compaction",
+      "gridPos": { "x": 0, "y": 39, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+    {
+      "id": 41,
+      "type": "gauge",
+      "title": "Context overflow ratio — current",
+      "gridPos": { "x": 0, "y": 40, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Latest estimated_tokens / limit_tokens ratio per agent. Values > 0.8 signal imminent compaction.",
+      "targets": [
+        {
+          "expr": "masc_oas_context_overflow_ratio",
+          "legendFormat": "{{agent_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ratio",
+          "min": 0,
+          "max": 1.2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.7 },
+              { "color": "red", "value": 0.9 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 42,
+      "type": "barchart",
+      "title": "Compaction count by trigger — last 1h",
+      "gridPos": { "x": 8, "y": 40, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Number of context compactions grouped by trigger reason (overflow, proactive, manual).",
+      "targets": [
+        {
+          "expr": "sum by (trigger) (increase(masc_oas_context_compaction_total[1h]))",
+          "legendFormat": "{{trigger}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Compaction rate — by agent / 5m",
+      "gridPos": { "x": 16, "y": 40, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Compaction events per agent over time. High-frequency compaction = context management pressure.",
+      "targets": [
+        {
+          "expr": "sum by (agent_name) (rate(masc_oas_context_compaction_total[5m]))",
+          "legendFormat": "{{agent_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "masc",
+    "cascade",
+    "telemetry",
+    "liveness",
+    "cost",
+    "health"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "refresh": 1,
+        "regex": ""
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "MASC Cascade Telemetry",
+  "uid": "masc-cascade-telemetry",
+  "version": 1
+}

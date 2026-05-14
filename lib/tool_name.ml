@@ -23,7 +23,9 @@ module Float = Stdlib.Float
 
 module Keeper = struct
   type t =
-    | Bash | Bash_kill | Bash_output
+    | Bash
+    | Bash_kill
+    | Bash_output
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -35,6 +37,11 @@ module Keeper = struct
     | Board_post
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote
     | Broadcast
     | Code_read
@@ -46,6 +53,7 @@ module Keeper = struct
     | Library_read
     | Library_search
     | Memory_search
+    | Memory_write
     | Pr_create
     | Pr_list
     | Pr_review_comment
@@ -73,6 +81,7 @@ module Keeper = struct
     | Voice_sessions
     | Voice_speak
     | Write
+
   let to_string = function
     | Bash -> "keeper_bash"
     | Bash_kill -> "keeper_bash_kill"
@@ -88,6 +97,11 @@ module Keeper = struct
     | Board_post -> "keeper_board_post"
     | Board_search -> "keeper_board_search"
     | Board_stats -> "keeper_board_stats"
+    | Board_sub_board_create -> "keeper_board_sub_board_create"
+    | Board_sub_board_delete -> "keeper_board_sub_board_delete"
+    | Board_sub_board_get -> "keeper_board_sub_board_get"
+    | Board_sub_board_list -> "keeper_board_sub_board_list"
+    | Board_sub_board_update -> "keeper_board_sub_board_update"
     | Board_vote -> "keeper_board_vote"
     | Broadcast -> "keeper_broadcast"
     | Code_read -> "keeper_code_read"
@@ -99,6 +113,7 @@ module Keeper = struct
     | Library_read -> "keeper_library_read"
     | Library_search -> "keeper_library_search"
     | Memory_search -> "keeper_memory_search"
+    | Memory_write -> "keeper_memory_write"
     | Pr_create -> "keeper_pr_create"
     | Pr_list -> "keeper_pr_list"
     | Pr_review_comment -> "keeper_pr_review_comment"
@@ -126,6 +141,8 @@ module Keeper = struct
     | Voice_sessions -> "keeper_voice_sessions"
     | Voice_speak -> "keeper_voice_speak"
     | Write -> "keeper_write"
+  ;;
+
   let of_string = function
     | "keeper_bash" -> Some Bash
     | "keeper_bash_kill" -> Some Bash_kill
@@ -142,6 +159,11 @@ module Keeper = struct
     | "keeper_board_search" -> Some Board_search
     | "keeper_board_stats" -> Some Board_stats
     | "keeper_board_vote" -> Some Board_vote
+    | "keeper_board_sub_board_create" -> Some Board_sub_board_create
+    | "keeper_board_sub_board_delete" -> Some Board_sub_board_delete
+    | "keeper_board_sub_board_get" -> Some Board_sub_board_get
+    | "keeper_board_sub_board_list" -> Some Board_sub_board_list
+    | "keeper_board_sub_board_update" -> Some Board_sub_board_update
     | "keeper_broadcast" -> Some Broadcast
     | "keeper_code_read" -> Some Code_read
     | "keeper_context_status" -> Some Context_status
@@ -152,6 +174,7 @@ module Keeper = struct
     | "keeper_library_read" -> Some Library_read
     | "keeper_library_search" -> Some Library_search
     | "keeper_memory_search" -> Some Memory_search
+    | "keeper_memory_write" -> Some Memory_write
     | "keeper_pr_create" -> Some Pr_create
     | "keeper_pr_list" -> Some Pr_list
     | "keeper_pr_review_comment" -> Some Pr_review_comment
@@ -180,9 +203,9 @@ module Keeper = struct
     | "keeper_voice_speak" -> Some Voice_speak
     | "keeper_write" -> Some Write
     | _ -> None
+  ;;
 
   let board_write_tools = [ Board_post; Board_comment; Board_vote; Board_curation_submit ]
-
   let board_write_tool_names = List.map to_string board_write_tools
 
   let is_board = function
@@ -197,12 +220,19 @@ module Keeper = struct
     | Board_post
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote -> true
     | _ -> false
+  ;;
 
   let is_board_write = function
     | Board_post | Board_comment | Board_vote | Board_curation_submit -> true
     | _ -> false
+  ;;
 
   let board_write_action_kind = function
     | Board_post -> Some "post"
@@ -210,6 +240,7 @@ module Keeper = struct
     | Board_vote -> Some "vote"
     | Board_curation_submit -> Some "curation"
     | _ -> None
+  ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
@@ -243,6 +274,11 @@ module Masc = struct
     | Board_reaction
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote
     | Broadcast
     | Cancel_task
@@ -302,6 +338,7 @@ module Masc = struct
     | Tool_revoke
     | Transition
     | Update_priority
+    | Web_fetch
     | Web_search
     | Who
     | Workflow_guide
@@ -345,6 +382,11 @@ module Masc = struct
     | Board_reaction -> "masc_board_reaction"
     | Board_search -> "masc_board_search"
     | Board_stats -> "masc_board_stats"
+    | Board_sub_board_create -> "masc_board_sub_board_create"
+    | Board_sub_board_delete -> "masc_board_sub_board_delete"
+    | Board_sub_board_get -> "masc_board_sub_board_get"
+    | Board_sub_board_list -> "masc_board_sub_board_list"
+    | Board_sub_board_update -> "masc_board_sub_board_update"
     | Board_vote -> "masc_board_vote"
     | Broadcast -> "masc_broadcast"
     | Cancel_task -> "masc_cancel_task"
@@ -411,6 +453,7 @@ module Masc = struct
     | Tool_revoke -> "masc_tool_revoke"
     | Transition -> "masc_transition"
     | Update_priority -> "masc_update_priority"
+    | Web_fetch -> "masc_web_fetch"
     | Web_search -> "masc_web_search"
     | Who -> "masc_who"
     | Workflow_guide -> "masc_workflow_guide"
@@ -432,6 +475,7 @@ module Masc = struct
     | Tool_stats -> "masc_tool_stats"
     | Webrtc_answer -> "masc_webrtc_answer"
     | Webrtc_offer -> "masc_webrtc_offer"
+  ;;
 
   let of_string = function
     | "masc_add_task" -> Some Add_task
@@ -455,6 +499,11 @@ module Masc = struct
     | "masc_board_search" -> Some Board_search
     | "masc_board_stats" -> Some Board_stats
     | "masc_board_vote" -> Some Board_vote
+    | "masc_board_sub_board_create" -> Some Board_sub_board_create
+    | "masc_board_sub_board_delete" -> Some Board_sub_board_delete
+    | "masc_board_sub_board_get" -> Some Board_sub_board_get
+    | "masc_board_sub_board_list" -> Some Board_sub_board_list
+    | "masc_board_sub_board_update" -> Some Board_sub_board_update
     | "masc_broadcast" -> Some Broadcast
     | "masc_cancel_task" -> Some Cancel_task
     | "masc_check" -> Some Check
@@ -520,6 +569,7 @@ module Masc = struct
     | "masc_tool_revoke" -> Some Tool_revoke
     | "masc_transition" -> Some Transition
     | "masc_update_priority" -> Some Update_priority
+    | "masc_web_fetch" -> Some Web_fetch
     | "masc_web_search" -> Some Web_search
     | "masc_who" -> Some Who
     | "masc_workflow_guide" -> Some Workflow_guide
@@ -542,6 +592,7 @@ module Masc = struct
     | "masc_webrtc_answer" -> Some Webrtc_answer
     | "masc_webrtc_offer" -> Some Webrtc_offer
     | _ -> None
+  ;;
 
   let is_board = function
     | Board_cleanup
@@ -558,8 +609,14 @@ module Masc = struct
     | Board_reaction
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote -> true
     | _ -> false
+  ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
@@ -590,6 +647,7 @@ module Masc_keeper = struct
     | Reset -> "masc_keeper_reset"
     | Status -> "masc_keeper_status"
     | Up -> "masc_keeper_up"
+  ;;
 
   let of_string = function
     | "masc_keeper_clear" -> Some Clear
@@ -604,6 +662,7 @@ module Masc_keeper = struct
     | "masc_keeper_status" -> Some Status
     | "masc_keeper_up" -> Some Up
     | _ -> None
+  ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
@@ -617,25 +676,49 @@ let to_string = function
   | Keeper k -> Keeper.to_string k
   | Masc m -> Masc.to_string m
   | Masc_keeper mk -> Masc_keeper.to_string mk
+;;
 
 let of_string s =
   match Keeper.of_string s with
   | Some k -> Some (Keeper k)
   | None ->
-    match Masc_keeper.of_string s with
-    | Some mk -> Some (Masc_keeper mk)
-    | None ->
-      match Masc.of_string s with
-      | Some m -> Some (Masc m)
-      | None -> None
+    (match Masc_keeper.of_string s with
+     | Some mk -> Some (Masc_keeper mk)
+     | None ->
+       (match Masc.of_string s with
+        | Some m -> Some (Masc m)
+        | None -> None))
+;;
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 
-let is_keeper = function Keeper _ -> true | _ -> false
-let is_masc = function Masc _ -> true | _ -> false
-let is_masc_keeper = function Masc_keeper _ -> true | _ -> false
+(* Enumerate every [t] constructor in each sibling predicate so the
+   compiler flags any new variant added to [t]. If a future variant
+   (say [External of ...]) joins the sum, the previous [_ -> false]
+   catch-alls would silently classify it as not-keeper / not-masc /
+   not-masc_keeper without any review point; with explicit
+   enumeration the new variant must be deliberately mapped on each
+   predicate. Mirrors the [is_board] convention below and the fix
+   shape in PR #14842 (Resilience_outcome predicates). Same FSM
+   Sparse Match anti-pattern as PRs #14716, #14790, #14806, #14810,
+   #14816, #14823, #14829. *)
+let is_keeper = function
+  | Keeper _ -> true
+  | Masc _ | Masc_keeper _ -> false
+;;
+
+let is_masc = function
+  | Masc _ -> true
+  | Keeper _ | Masc_keeper _ -> false
+;;
+
+let is_masc_keeper = function
+  | Masc_keeper _ -> true
+  | Keeper _ | Masc _ -> false
+;;
 
 let is_board = function
   | Keeper k -> Keeper.is_board k
   | Masc m -> Masc.is_board m
   | Masc_keeper _ -> false
+;;

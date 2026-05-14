@@ -64,14 +64,14 @@ let weight_score = function
 
 let degradation_penalty = function
   | Degradation { penalty; _ } -> Some (clamp_unit penalty)
-  | _ -> None
+  | Artifact _ | Verification _ | Consensus _ -> None
 
 let max_degradation_level factors =
   List.fold_left
     (fun acc f ->
       match f with
       | Degradation { level; _ } -> max acc level
-      | _ -> acc)
+      | Artifact _ | Verification _ | Consensus _ -> acc)
     0 factors
 
 (* ── Composition: geometric mean × penalties ──────────────────── *)
@@ -110,7 +110,11 @@ let select_recommendation
   else
     let very_low = final_float <= threshold *. 0.5 in
     let has_degradation =
-      List.exists (function Degradation _ -> true | _ -> false) factors
+      List.exists
+        (function
+          | Degradation _ -> true
+          | Artifact _ | Verification _ | Consensus _ -> false)
+        factors
     in
     if very_low then
       Some
@@ -137,7 +141,7 @@ let select_recommendation
         List.find_map
           (function
             | Verification { verifier; _ } -> Some verifier
-            | _ -> None)
+            | Artifact _ | Degradation _ | Consensus _ -> None)
           factors
       in
       Some

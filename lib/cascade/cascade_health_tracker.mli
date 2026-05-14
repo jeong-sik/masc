@@ -84,6 +84,12 @@ val confidence_ring_size : int
     [MASC_CASCADE_CONFIDENCE_RING_SIZE].  Values [<= 0] disable
     confidence tracking. *)
 
+val cost_ring_size : int
+(** Number of recent per-request cost samples retained per provider.
+    Mirrors {!latency_ring_size} semantics: ring buffer, drop-oldest,
+    lazy allocation.  Default 100, env [MASC_CASCADE_COST_RING_SIZE].
+    Values [<= 0] disable cost tracking.  @since 0.191.0 *)
+
 
 (** Opaque health tracker state. *)
 type t
@@ -97,6 +103,24 @@ val error_kind_to_string : error_kind -> string
 
 (** Create a new empty tracker. *)
 val create : unit -> t
+
+(** Durable provider state that can be restored after process restart.
+
+    This intentionally excludes rolling-window events and latency/cost rings:
+    those are short-lived routing signals. Cooldown, failure count, and error
+    fingerprints are enough to prevent a restart from immediately retrying a
+    provider that was just circuit-broken. *)
+type provider_restore = {
+  restore_provider_key : string;
+  restore_consecutive_failures : int;
+  restore_cooldown_until : float option;
+  restore_last_failure_at : float option;
+  restore_top_fingerprints : (string * int) list;
+}
+
+(** Restore durable provider state into a tracker.
+    Returns the number of non-empty provider rows applied. *)
+val restore_providers : t -> provider_restore list -> int
 
 (** Record a successful provider call. Clears cooldown and resets
     consecutive failure counter.
@@ -113,6 +137,7 @@ val record_success :
   provider_key:string ->
   ?latency_ms:float ->
   ?confidence:float ->
+  ?cost_usd:float ->
   unit ->
   unit
 
@@ -304,6 +329,20 @@ type provider_info = {
   (** Number of confidence samples currently retained.  [0] iff
       [avg_confidence] is [None].  Bounded by {!confidence_ring_size}.
       @since 0.183.0 *)
+  avg_cost_usd : float option;
+  (** Mean of recent per-request cost samples from the per-provider cost
+      ring.  [None] when no cost data has been recorded.  Used as input
+      to the composite health score's cost component — providers with
+      lower average cost score higher.
+      @since 0.191.0 *)
+  cost_samples : int;
+  (** Number of cost samples currently retained.  [0] iff
+      [avg_cost_usd] is [None].  Bounded by {!cost_ring_size}.
+      @since 0.191.0 *)
+  health_score : float;
+  (** Composite health score (0.0–1.0) combining success_rate,
+      speed_score (from p95 latency), and cost_score.
+      @since 0.190.0 *)
 }
 
 (** Structured info for a single provider. Returns [None] if untracked.

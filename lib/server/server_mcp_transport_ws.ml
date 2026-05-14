@@ -333,15 +333,22 @@ let verify_dashboard_token ~base_path token =
             | Error err -> Error (Masc_domain.masc_error_to_string err)))
 
 let dashboard_hello ~base_path ~session_id ?token () =
-  match find_session session_id with
-  | None -> Error "WebSocket session not found"
-  | Some session -> (
-      match verify_dashboard_token ~base_path token with
-      | Error msg -> Error msg
-      | Ok agent ->
-          session.dashboard_authenticated <- true;
-          session.dashboard_agent <- agent;
-          Ok (dashboard_auth_success_payload session))
+  let start_time = Unix.gettimeofday () in
+  let result =
+    match find_session session_id with
+    | None -> Error "WebSocket session not found"
+    | Some session -> (
+        match verify_dashboard_token ~base_path token with
+        | Error msg -> Error msg
+        | Ok agent ->
+            session.dashboard_authenticated <- true;
+            session.dashboard_agent <- agent;
+            Ok (dashboard_auth_success_payload session))
+  in
+  Transport_metrics.observe_ws_dashboard_hello_latency
+    ~success:(match result with Ok _ -> true | Error _ -> false)
+    (Unix.gettimeofday () -. start_time);
+  result
 
 let dashboard_snapshot session =
   let slices =
@@ -415,6 +422,21 @@ let dashboard_unsubscribe ~session_id ?slices () =
                   slices);
         Ok (`Assoc [ ("session", dashboard_session_result session) ])
       end
+
+let dashboard_ping ~session_id () =
+  match find_session session_id with
+  | None -> Error "WebSocket session not found"
+  | Some session ->
+      if not session.dashboard_authenticated then
+        Error "dashboard/ping requires dashboard/hello first"
+      else
+        Ok
+          (`Assoc
+            [
+              ("ok", `Bool true);
+              ("session_id", `String session.id);
+              ("seq", `Int session.dashboard_seq);
+            ])
 
 let dashboard_ack ~session_id ~seq ?buffered_amount () =
   match find_session session_id with

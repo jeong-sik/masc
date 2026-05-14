@@ -96,3 +96,13 @@ val coverage_report_to_json : coverage_report -> Yojson.Safe.t
 
 val event_to_json : event -> Yojson.Safe.t
 (** Serialize an event for external consumption (dashboard, tests). *)
+
+val dashboard_issue_events : Yojson.Safe.t list -> Yojson.Safe.t list
+(** Project raw heuristic metric events into the Phase 2 O5
+    [heuristics: {id, ts, rule_id, action, cooldown_remaining_ms?}[]]
+    compatibility shape.  The raw [events] stream remains the canonical
+    diagnostics payload. *)
+
+val dashboard_feed_json : limit:int -> Yojson.Safe.t list -> Yojson.Safe.t
+(** Build the dashboard response carrying both the existing [events] array
+    and the O5 compatibility [heuristics] array. *)

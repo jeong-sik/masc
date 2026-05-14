@@ -12,9 +12,7 @@
     Gating lives in [Keeper_config.keeper_adaptive_thinking_mode ()]; when
     that flag is false, classification is not consulted. *)
 
-type t = Mechanical | Cognitive
-
-val equal : t -> t -> bool
+type t = Mechanical | Cognitive [@@deriving eq]
 
 val to_string : t -> string
 

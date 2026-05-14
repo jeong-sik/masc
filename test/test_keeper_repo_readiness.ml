@@ -174,6 +174,42 @@ let test_auto_provisionable_workspace_repo () =
       Masc_mcp.Tool_code_write.extract_github_org_repo url
       |> Option.value ~default:"")
 
+let test_missing_clone_skips_workspace_discovery () =
+  let base_path = temp_dir "masc-repo-readiness" in
+  write_tool_policy ~base_path;
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  mkdir_p (Filename.dirname repo);
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
+       (Filename.quote remote));
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git clone -q %s %s"
+       (Filename.quote remote) (Filename.quote repo));
+  run_ok ~cwd:repo "git config user.email test@example.com";
+  run_ok ~cwd:repo "git config user.name Test";
+  let readme = Filename.concat repo "README.md" in
+  let oc = open_out readme in
+  output_string oc "# readiness\n";
+  close_out oc;
+  run_ok ~cwd:repo "git add README.md";
+  run_ok ~cwd:repo "git commit -q -m init";
+  run_ok ~cwd:repo "git push -q origin main";
+  set_workspace_origin_to_github ~repo;
+  let config = Masc_mcp.Coord.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let json =
+    Masc_mcp.Keeper_repo_readiness.inspect ~config ~meta
+      ~repo_name:"masc-mcp" ~workspace_discovery:false ()
+  in
+  check bool "not ok" false (json_bool "ok" json);
+  check string "state" "missing_clone" (json_string "state" json);
+  check string "workspace discovery" "skipped"
+    Yojson.Safe.Util.(json |> member "workspace_discovery" |> to_string);
+  check bool "auto provision disabled" false
+    Yojson.Safe.Util.(
+      json |> member "auto_provision_on_worktree_create" |> to_bool)
+
 let test_auto_provisionable_workspace_repo_after_file_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
   write_tool_policy ~base_path;
@@ -287,6 +323,8 @@ let () =
         test_case "invalid repo_name" `Quick test_invalid_repo_name;
         test_case "auto provisionable workspace repo" `Quick
           test_auto_provisionable_workspace_repo;
+        test_case "missing clone skips workspace discovery" `Quick
+          test_missing_clone_skips_workspace_discovery;
         test_case "auto provisionable workspace repo after file storm" `Quick
           test_auto_provisionable_workspace_repo_after_file_storm;
         test_case "auto provisionable workspace repo before hidden dir storm"

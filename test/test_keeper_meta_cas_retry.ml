@@ -101,16 +101,30 @@ let test_retry_succeeds_after_concurrent_bump () =
        once; write_meta_with_retry must lift the payload onto the new
        disk version and succeed. *)
     let cycle_payload = { caller_view with goal = "cycle payload" } in
+    let before_retry_metric =
+      Prometheus.metric_value_or_zero
+        Prometheus.metric_write_meta_cas_retry_total
+        ~labels:[("keeper_name", "beta")]
+        ()
+    in
     (match Keeper_types.write_meta_with_retry config cycle_payload with
      | Ok () -> ()
      | Error e -> fail ("retry write failed: " ^ e));
+    let after_retry_metric =
+      Prometheus.metric_value_or_zero
+        Prometheus.metric_write_meta_cas_retry_total
+        ~labels:[("keeper_name", "beta")]
+        ()
+    in
     let final = match Keeper_types.read_meta config "beta" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
     check string "cycle payload wins (last writer)" "cycle payload" final.goal;
     check bool "version moved past racing write" true
-      (final.meta_version > racing.meta_version + 1))
+      (final.meta_version > racing.meta_version + 1);
+    check (float 0.001) "CAS retry metric increments" 1.0
+      (after_retry_metric -. before_retry_metric))
 
 let test_is_version_conflict_error_classifies () =
   let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in

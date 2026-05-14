@@ -280,6 +280,64 @@ let test_metrics_series_ignores_sparse_tool_events () =
   | other ->
       failf "expected one metrics series row, got %d" (List.length other)
 
+let test_metrics_window_redacts_model_and_handoff_labels () =
+  let row =
+    `Assoc
+      [
+        ("ts_unix", `Float 20.0);
+        ("channel", `String "turn");
+        ("context_ratio", `Float 0.42);
+        ("context_tokens", `Int 420);
+        ("context_max", `Int 1000);
+        ("message_count", `Int 4);
+        ("model_used", `String "openai:gpt-5.4");
+        ( "handoff",
+          `Assoc
+            [
+              ("performed", `Bool true);
+              ("to_model", `String "anthropic:claude-sonnet-4-6");
+              ("prev_trace_id", `String "trace-a");
+              ("new_trace_id", `String "trace-b");
+              ("new_generation", `Int 2);
+            ] );
+      ]
+  in
+  let items, summary, last_handoff, _ =
+    Detail.compute_metrics_window
+      ~parsed_metrics:[ row ]
+      ~generation:0
+      ~compact:false
+      ~series_points:80
+      ~metrics_window_max_bytes:200_000
+      ~primary_model_norm:"gpt-5.4"
+      ~primary_model:"openai:gpt-5.4"
+  in
+  let open Yojson.Safe.Util in
+  check bool "primary model redacted" true
+    (summary |> member "primary_model" = `Null);
+  (match summary |> member "top_models" |> to_list with
+  | [ top ] ->
+      check string "model bucket is runtime" "runtime"
+        (top |> member "model" |> to_string);
+      check int "model bucket count" 1 (top |> member "count" |> to_int)
+  | other ->
+      failf "expected one runtime model bucket, got %d" (List.length other));
+  (match items with
+  | [ item ] ->
+      check bool "series model_used redacted" true
+        (item |> member "model_used" = `Null);
+      check bool "series handoff_to_model redacted" true
+        (item |> member "handoff_to_model" = `Null);
+      check bool "nested handoff to_model redacted" true
+        (item |> member "handoff" |> member "to_model" = `Null)
+  | other ->
+      failf "expected one metrics series row, got %d" (List.length other));
+  (match last_handoff with
+  | Some handoff ->
+      check bool "last handoff to_model redacted" true
+        (handoff |> member "to_model" = `Null)
+  | None -> fail "expected last handoff summary")
+
 let () =
   run "dashboard_keeper_metrics_10286"
     [
@@ -307,5 +365,7 @@ let () =
             test_context_snapshot_classifier_rejects_sparse_tool_events;
           test_case "series ignores sparse tool events" `Quick
             test_metrics_series_ignores_sparse_tool_events;
+          test_case "redacts model and handoff labels" `Quick
+            test_metrics_window_redacts_model_and_handoff_labels;
         ] );
     ]

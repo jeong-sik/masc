@@ -1,6 +1,7 @@
 type candidate_probe_status =
   | Probe_ok
   | Probe_skipped of string
+  | Probe_not_applicable of string
   | Probe_error of string
 
 let probe_timeout_sec = 5.0
@@ -31,6 +32,7 @@ type profile_build = {
   cli_max_concurrent : int option;
   candidates : candidate_runtime list;
   probes : candidate_probe list;
+  required_capability_profile : string option;
 }
 
 type profile_snapshot = profile_build
@@ -40,6 +42,7 @@ type snapshot = {
   mtime : float;
   validated_at : float;
   profiles : profile_snapshot list;
+  default_profile_name : string;
 }
 
 type profile_rejection = {
@@ -125,6 +128,7 @@ let install_snapshot_for_tests ~source_path ~profile_names =
              cli_max_concurrent = None;
              candidates = [];
              probes = [];
+             required_capability_profile = None;
            })
   in
   let snapshot =
@@ -133,6 +137,11 @@ let install_snapshot_for_tests ~source_path ~profile_names =
       mtime;
       validated_at = Unix.gettimeofday ();
       profiles;
+      (* Test helper does not exercise default-profile resolution; an
+         empty string keeps the snapshot well-typed while preserving
+         the helper's "install these profile names verbatim" contract.
+         Field added by RFC-0066 Phase 1 (PR #14652). *)
+      default_profile_name = "";
     }
   in
   with_cache_lock (fun () ->
@@ -142,24 +151,104 @@ let install_snapshot_for_tests ~source_path ~profile_names =
           rejected_update = None;
         })
 
-let discover_profiles = function
-  | `Assoc fields ->
-      fields
-      |> List.filter_map (fun (key, value) ->
-             match value with
-             | `List _ when String.ends_with ~suffix:"_models" key ->
-                 let suffix_len = String.length "_models" in
-                 let profile =
-                   String.sub key 0 (String.length key - suffix_len)
-                 in
-                 if
-                   Cascade_config_loader.is_deprecated_logical_profile_name
-                     profile
-                 then None
-                 else Some profile
-             | _ -> None)
+type declarative_catalog_info = {
+  declarative_snapshot : Cascade_declarative_hotpath.decl_snapshot option;
+  declarative_profile_names : string list;
+  declarative_parse_errors : Cascade_declarative_parser.parse_error list;
+  declarative_errors : Cascade_declarative_adapter.adapter_error list;
+}
+
+let render_declarative_parse_error
+    (error : Cascade_declarative_parser.parse_error) =
+  Printf.sprintf
+    "declarative cascade parse error at %s: %s"
+    error.path
+    error.message
+
+let render_declarative_adapter_error error =
+  Printf.sprintf
+    "declarative cascade adapter error: %s"
+    (Cascade_declarative_adapter.show_adapter_error error)
+
+let load_declarative_catalog_info ~config_path =
+  match Cascade_declarative_parser.parse_file config_path with
+  | Error errors ->
+      Some
+        {
+          declarative_snapshot = None;
+          declarative_profile_names = [];
+          declarative_parse_errors = errors;
+          declarative_errors = [];
+        }
+  | Ok cfg ->
+      let catalog = Cascade_declarative_adapter.adapt_config cfg in
+      let snapshot =
+        Cascade_declarative_hotpath.adapted_catalog_to_snapshot
+          ~source_path:config_path catalog
+      in
+      let profile_names =
+        catalog.profiles
+        |> List.map
+             (fun (profile : Cascade_declarative_adapter.adapted_profile) ->
+               profile.name)
+        |> List.sort_uniq String.compare
+      in
+      Some
+        {
+          declarative_snapshot = snapshot;
+          declarative_profile_names = profile_names;
+          declarative_parse_errors = [];
+          declarative_errors = catalog.errors;
+        }
+
+(* RFC-0066 §3.1 Phase 1: profile name discovery flows through the
+   declarative adapter ({!Cascade_declarative_hotpath.try_load_declarative})
+   reading [cascade.toml] as the sole SSOT (RFC-0058 §9.4). *)
+let discover_profile_names ~config_path ~json : string list =
+  match load_declarative_catalog_info ~config_path with
+  | Some { declarative_parse_errors = errors; _ } when errors <> [] ->
+      ignore json;
+      Cascade_metrics.on_declarative_parse_error ();
+      List.iter
+        (fun err ->
+          Log.Misc.warn
+            "[CascadeProfileDiscovery] declarative parse error: %s"
+            (render_declarative_parse_error err))
+        errors;
+      Cascade_metrics.on_profile_discovery ~path:"declarative_parse_error";
+      []
+  | Some { declarative_profile_names = names; declarative_errors = []; _ } ->
+      Cascade_metrics.on_profile_discovery ~path:"declarative";
+      names
+      |> List.filter (fun profile ->
+             if
+               Cascade_config_loader.is_deprecated_logical_profile_name
+                 profile
+             then begin
+               Cascade_metrics.on_deprecated_profile_name_filter
+                 ~name:profile;
+               false
+             end
+             else true)
       |> List.sort_uniq String.compare
-  | _ -> []
+  | Some { declarative_errors = errs; _ } ->
+      (* Declarative parser ran but produced adapter errors.  Do not fall
+         through to the retired flat TOML reader: cascade.toml is now
+         declarative-only, so adapter errors are fail-closed instead of
+         returning a partial profile set. *)
+      Cascade_metrics.on_declarative_parse_error ();
+      List.iter
+        (fun err ->
+          Log.Misc.warn
+            "[CascadeProfileDiscovery] declarative parse error: %s"
+            (render_declarative_adapter_error err))
+        errs;
+      Cascade_metrics.on_profile_discovery ~path:"declarative_error";
+      []
+  | None ->
+      ignore json;
+      Cascade_metrics.on_profile_discovery ~path:"declarative_missing";
+      []
 
 let float_opt_to_json = function
   | Some value -> `Float value
@@ -171,6 +260,9 @@ let int_opt_to_json = function
 
 let provider_kind_string (cfg : Llm_provider.Provider_config.t) =
   Llm_provider.Provider_config.string_of_provider_kind cfg.kind
+
+let public_runtime_provider_label = "runtime"
+let public_runtime_model_label = "runtime"
 
 let candidate_probe_error (candidate : candidate_runtime) message =
   {
@@ -199,15 +291,30 @@ let candidate_probe_skipped (candidate : candidate_runtime) reason =
     status = Probe_skipped reason;
   }
 
-let advisory_skip_reason =
-  "runtime provider health is advisory; bootstrap skips live probe"
+let candidate_probe_not_applicable (candidate : candidate_runtime) reason =
+  {
+    model_string = candidate.model_string;
+    provider_kind = provider_kind_string candidate.provider_cfg;
+    model_id = candidate.provider_cfg.model_id;
+    base_url = candidate.provider_cfg.base_url;
+    status = Probe_not_applicable reason;
+  }
 
-let cloud_skip_reason =
-  "cloud provider health is advisory; bootstrap probes local endpoints only"
+let local_probe_unavailable_reason =
+  "local provider health probe requires Eio runtime capabilities"
+
+let cloud_probe_not_applicable_reason =
+  "cloud provider live health is not an auth-free bootstrap probe; \
+   credential/config validation is handled before execution"
 
 let profile_probes (profile_candidates : candidate_runtime list) =
   List.map
-    (fun candidate -> candidate_probe_skipped candidate advisory_skip_reason)
+    (fun candidate ->
+      if Llm_provider.Provider_config.is_local candidate.provider_cfg then
+        candidate_probe_error candidate local_probe_unavailable_reason
+      else
+        candidate_probe_not_applicable candidate
+          cloud_probe_not_applicable_reason)
     profile_candidates
 
 let normalize_endpoint_url url =
@@ -232,7 +339,8 @@ let profile_probes_from_statuses statuses profile_candidates =
   List.map
     (fun (candidate : candidate_runtime) ->
       if not (Llm_provider.Provider_config.is_local candidate.provider_cfg) then
-        candidate_probe_skipped candidate cloud_skip_reason
+        candidate_probe_not_applicable candidate
+          cloud_probe_not_applicable_reason
       else
         match endpoint_status_for_candidate statuses candidate with
         | Some status when status.healthy -> candidate_probe_ok candidate
@@ -278,6 +386,7 @@ let attach_probe_results ?sw ?net (profiles : profile_snapshot list) =
 
 let probe_health_value = function
   | Probe_skipped _ -> 0.0
+  | Probe_not_applicable _ -> 0.0
   | Probe_ok -> 1.0
   | Probe_error _ -> 3.0
 
@@ -296,19 +405,43 @@ let record_probe_metrics (profiles : profile_snapshot list) =
                      ("profile_name", profile.name);
                    ]
                  ()
-           | Probe_ok | Probe_error _ -> ());
+           | Probe_error _ ->
+               (* Counter complement to the per-probe gauge below.
+                  The gauge only retains the LAST observed status,
+                  so flapping or sustained probe failures were
+                  invisible to operators; a [rate()] query over this
+                  counter quantifies provider liveness churn. *)
+               Prometheus.inc_counter
+                 Prometheus.metric_provider_health_probe_error
+                 ~labels:
+                   [
+                     ("provider_name", probe.provider_kind);
+                     ("profile_name", profile.name);
+                   ]
+                 ()
+           | Probe_not_applicable _ | Probe_ok -> ());
           Prometheus.set_gauge
             Prometheus.metric_provider_actual_health_status
             ~labels:
               [
-                ("provider_name", probe.provider_kind);
+                ("provider_name", public_runtime_provider_label);
                 ("profile_name", profile.name);
-                ("model_id", probe.model_id);
+                ("model_id", public_runtime_model_label);
               ]
             (probe_health_value probe.status))
         profile.probes)
     profiles
 
+(* JSON serialization for the boot-log snapshot. This is an internal
+   observability surface (server_runtime_bootstrap.ml's "Validated active
+   cascade catalog: ..." log line), NOT an external API or dashboard
+   surface. The Runtime Lens redaction (#15040) intentionally erases
+   provider identity at external boundaries — Prometheus labels via
+   [record_probe_metrics] are still redacted and pinned by
+   test_keeper_hooks_oas_telemetry.ml. But the boot log needs real values
+   so operators can verify which providers/models were loaded into the
+   catalog at startup; without that, a misconfigured cascade.toml is
+   indistinguishable from a healthy one in the log. *)
 let candidate_probe_to_yojson (probe : candidate_probe) =
   `Assoc
     [
@@ -320,12 +453,13 @@ let candidate_probe_to_yojson (probe : candidate_probe) =
         match probe.status with
         | Probe_ok -> `String "ok"
         | Probe_skipped _ -> `String "skipped"
-        | Probe_error message ->
-            `String "error" );
+        | Probe_not_applicable _ -> `String "not_applicable"
+        | Probe_error _ -> `String "error" );
       ( "error",
         match probe.status with
         | Probe_ok -> `Null
         | Probe_skipped message -> `String message
+        | Probe_not_applicable message -> `String message
         | Probe_error message -> `String message );
     ]
 
@@ -347,6 +481,7 @@ let snapshot_to_yojson (snapshot : snapshot) =
       ("source_path", `String snapshot.source_path);
       ("source_mtime", `Float snapshot.mtime);
       ("validated_at", `Float snapshot.validated_at);
+      ("default_profile_name", `String snapshot.default_profile_name);
       ("profile_count", `Int (List.length snapshot.profiles));
       ( "profiles",
         `List (List.map profile_snapshot_to_yojson snapshot.profiles) );
@@ -412,13 +547,22 @@ let candidate_key_of_cfg (cfg : Llm_provider.Provider_config.t) =
       cfg.supports_tool_choice_override )
 
 let expand_weighted_entries
+    ~cascade
     (entries : Cascade_config_loader.weighted_entry list)
     : Cascade_config_loader.weighted_entry list =
-  List.concat_map
-    (fun (entry : Cascade_config_loader.weighted_entry) ->
-      Cascade_config.expand_auto_models [ entry.model ]
-      |> List.map (fun model -> { entry with model }))
-    entries
+  let input_count = List.length entries in
+  let expanded =
+    List.concat_map
+      (fun (entry : Cascade_config_loader.weighted_entry) ->
+        Cascade_config.expand_auto_models [ entry.model ]
+        |> List.map (fun model -> { entry with model }))
+      entries
+  in
+  let output_count = List.length expanded in
+  Cascade_metrics.on_auto_expansion_fanout
+    ~cascade
+    ~fanout:(output_count - input_count);
+  expanded
 
 let profile_lookup profiles name =
   List.find_opt (fun (profile : profile_snapshot) -> String.equal profile.name name) profiles
@@ -459,7 +603,7 @@ let validate_strategy ~config_path ~name =
     match cfg.kind with
     | None -> []
     | Some raw_kind -> (
-        match Cascade_strategy.parse_kind raw_kind with
+        match Cascade_strategy.parse_config_kind raw_kind with
         | Error msg ->
             [
               Printf.sprintf
@@ -498,96 +642,87 @@ let rejection_of_path ~config_path ~attempted_mtime ~checked_at
 let active_source_state ~config_path =
   Cascade_toml_materializer.source_state ~config_path
 
-let validate_profile_static ~config_path name : (profile_build, profile_rejection) result =
-  let weighted_entries =
-    Cascade_config_loader.load_profile_weighted ~config_path ~name
+let profile_build_of_declarative_profile
+    ~required_capability_profile
+    (profile : Cascade_declarative_hotpath.profile)
+  =
+  let candidates =
+    List.map
+      (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+         { model_string = candidate.model_string
+         ; provider_cfg = candidate.provider_cfg
+         })
+      profile.candidates
   in
-  if weighted_entries = [] then
+  { name = profile.name
+  ; weighted_entries = profile.weighted_entries
+  ; inference_params = profile.inference_params
+  ; api_key_env_overrides = []
+  ; strategy = profile.strategy
+  ; ollama_max_concurrent = profile.ollama_max_concurrent
+  ; cli_max_concurrent = profile.cli_max_concurrent
+  ; candidates
+  ; probes = profile_probes candidates
+  ; required_capability_profile
+  }
+
+let validate_profile_static
+    ?declarative_snapshot
+    ~config_path
+    ~required_capability_profile
+    name
+    : (profile_build, profile_rejection) result =
+  let (_ : string) = config_path in
+  match declarative_snapshot with
+  | Some (snapshot : Cascade_declarative_hotpath.decl_snapshot) ->
+    (match
+       List.find_opt
+         (fun (profile : Cascade_declarative_hotpath.profile) ->
+            String.equal profile.name name)
+         snapshot.profiles
+     with
+     | Some profile ->
+       Ok (profile_build_of_declarative_profile ~required_capability_profile profile)
+     | None ->
+       Error
+         { name
+         ; errors = [ "profile has no non-empty configured candidates" ]
+         ; probes = []
+         })
+  | None ->
     Error
-      {
-        name;
-        errors = [ "profile has no non-empty configured candidates" ];
-        probes = [];
+      { name
+      ; errors = [ "profile has no non-empty configured candidates" ]
+      ; probes = []
       }
-  else
-    let inference_params =
-      Cascade_config_loader.resolve_inference_params ~config_path ~name
-    in
-    let api_key_env_overrides =
-      Cascade_config_loader.resolve_api_key_env ~config_path ~name
-    in
-    match validate_strategy ~config_path ~name with
-    | Error errors -> Error { name; errors; probes = [] }
-    | Ok (strategy, ollama_max_concurrent, cli_max_concurrent) ->
-        let expanded_entries = expand_weighted_entries weighted_entries in
-        let candidates, candidate_errors =
-          List.fold_left
-            (fun (ok_acc, err_acc) (entry : Cascade_config_loader.weighted_entry) ->
-              match
-                Cascade_config.parse_weighted_entry_diag
-                  ~api_key_env_overrides
-                  ?keep_alive:inference_params.keep_alive
-                  ?num_ctx:inference_params.num_ctx
-                  entry
-              with
-              | Ok provider_cfg ->
-                  ({ model_string = entry.model; provider_cfg } :: ok_acc, err_acc)
-              | Error
-                  (Cascade_config.Drop_unregistered_scheme { model; scheme }) ->
-                  ( ok_acc,
-                    Printf.sprintf
-                      "candidate %S uses unregistered provider scheme %S"
-                      model scheme
-                    :: err_acc )
-              | Error
-                  (Cascade_config.Drop_unavailable_scheme { model; scheme }) ->
-                  ( ok_acc,
-                    Printf.sprintf
-                      "candidate %S uses unavailable provider scheme %S \
-                       (missing credential or disabled runtime lane)"
-                      model scheme
-                    :: err_acc )
-              | Error (Cascade_config.Drop_invalid_syntax model) ->
-                  ( ok_acc,
-                    Printf.sprintf
-                      "candidate %S has invalid provider:model syntax"
-                      model
-                    :: err_acc ))
-            ([], [])
-            expanded_entries
-        in
-        let candidates = List.rev candidates in
-        let candidate_errors = List.rev candidate_errors in
-        if candidate_errors <> [] then
-          Error
-            {
-              name;
-              errors = candidate_errors;
-              probes = [];
-            }
-        else
-          Ok
-            {
-              name;
-              weighted_entries;
-              inference_params;
-              api_key_env_overrides;
-              strategy;
-              ollama_max_concurrent;
-              cli_max_concurrent;
-              candidates;
-              probes = profile_probes candidates;
-            }
+
+let profile_build_of_declarative
+    (profile : Cascade_declarative_hotpath.profile)
+    : profile_build =
+  let candidates =
+    List.map
+      (fun (candidate : Cascade_declarative_hotpath.candidate) ->
+        { model_string = candidate.model_string; provider_cfg = candidate.provider_cfg })
+      profile.candidates
+  in
+  {
+    name = profile.name;
+    weighted_entries = profile.weighted_entries;
+    inference_params = profile.inference_params;
+    api_key_env_overrides = [];
+    strategy = profile.strategy;
+    ollama_max_concurrent = profile.ollama_max_concurrent;
+    cli_max_concurrent = profile.cli_max_concurrent;
+    candidates;
+    probes = profile_probes candidates;
+    required_capability_profile = None;
+  }
 
 let runtime_required_profiles ~config_path =
   let keepers_from_catalog =
-    match Cascade_config_loader.load_catalog ~config_path with
-    | Ok entries ->
-        List.filter_map
-          (fun (entry : Cascade_config_loader.catalog_entry) ->
-            if entry.keeper_assignable then Some entry.name else None)
-          entries
-    | Error _ -> []
+    match load_declarative_catalog_info ~config_path with
+    | Some { declarative_profile_names; _ } -> declarative_profile_names
+    | None -> []
   in
   List.sort_uniq String.compare
     (keepers_from_catalog
@@ -602,10 +737,8 @@ let runtime_required_profile_names ?config_path () =
         | Some path -> path
         | None -> "")
   in
-  if String.equal config_path "" then
-    Keeper_cascade_profile.known_cascades |> List.sort_uniq String.compare
-  else
-    runtime_required_profiles ~config_path
+  if String.equal config_path "" then []
+  else runtime_required_profiles ~config_path
 
 let validate_path_result ?sw ?net ~config_path () =
   let checked_at = Unix.gettimeofday () in
@@ -618,7 +751,7 @@ let validate_path_result ?sw ?net ~config_path () =
          ~errors:[ Printf.sprintf "active cascade source is missing: %s" source_path ]
          ~profiles:[])
   else
-    match Cascade_config_loader.load_json config_path with
+    match Cascade_config_loader.load_catalog_source config_path with
     | Error msg ->
         Error
           (rejection_of_path ~config_path:source_path ~attempted_mtime ~checked_at
@@ -630,49 +763,95 @@ let validate_path_result ?sw ?net ~config_path () =
                ]
              ~profiles:[])
     | Ok json ->
-        let profiles = discover_profiles json in
-        let required_default_profile =
-          Cascade_routes.cascade_name_for_use
-            ~config_path
-            Cascade_routes.Keeper_turn
+        let declarative_info = load_declarative_catalog_info ~config_path in
+        let declarative_snapshot =
+          match declarative_info with
+          | Some { declarative_snapshot = Some snapshot; _ } -> Some snapshot
+          | Some { declarative_snapshot = None; _ } | None -> None
         in
-        let route_target_errors =
-          Cascade_routes.configured_route_targets ~config_path ()
-          |> List.filter_map (fun target ->
-                 if List.mem target profiles then None
-                 else
-                   Some
-                     (Printf.sprintf
-                        "cascade route targets missing profile %S"
-                        target))
+        let declarative_parse_errors =
+          match declarative_info with
+          | Some { declarative_parse_errors; _ } -> declarative_parse_errors
+          | None -> []
         in
-        let route_key_errors =
-          Cascade_routes.configured_unknown_route_keys ~config_path ()
-          |> List.map (fun key ->
-                 Printf.sprintf "unknown cascade route key %S" key)
+        let declarative_errors =
+          match declarative_info with
+          | Some { declarative_errors; _ } -> declarative_errors
+          | None -> []
         in
-        let top_errors =
-          let base =
-            if profiles = [] then
-              [ "active cascade catalog has no <name>_models profiles" ]
-            else
-              []
+        let fatal_declarative_errors =
+          List.map render_declarative_parse_error declarative_parse_errors
+          @ List.map render_declarative_adapter_error declarative_errors
+        in
+        if fatal_declarative_errors <> [] then
+          Error
+            (rejection_of_path ~config_path:source_path ~attempted_mtime
+               ~checked_at ~errors:fatal_declarative_errors ~profiles:[])
+        else
+        let profiles = discover_profile_names ~config_path ~json in
+        if profiles = [] then
+          Error
+            (rejection_of_path ~config_path:source_path ~attempted_mtime
+               ~checked_at
+               ~errors:[ "active cascade catalog declares no profiles" ]
+               ~profiles:[])
+        else
+          let required_default_profile =
+            Cascade_routes.cascade_name_for_use
+              ~config_path
+              Cascade_routes.Keeper_turn
           in
-          let base = base @ route_key_errors @ route_target_errors in
-          if List.mem required_default_profile profiles then base
-          else
-            base
-            @
-            [
-              Printf.sprintf
-                "required default profile %S is missing"
-                required_default_profile;
-            ]
-        in
+          let route_target_errors =
+            Cascade_routes.configured_route_targets ~config_path ()
+            |> List.filter_map (fun target ->
+                   if List.mem target profiles then None
+                   else
+                     Some
+                       (Printf.sprintf
+                          "cascade route targets missing profile %S"
+                          target))
+          in
+          let route_key_errors =
+            Cascade_routes.configured_unknown_route_keys ~config_path ()
+            |> List.map (fun key ->
+                   Printf.sprintf "unknown cascade route key %S" key)
+          in
+          (* Emit per-class schema-error counters so operators can tell
+             "typo storm" (unknown_route_key) from "deleted profile"
+             (missing_target_profile) on the dashboard.  Detail (the
+             specific route key / target name) stays in the rejection
+             error string; the counter only quantifies frequency. *)
+          Cascade_metrics.on_route_config_error
+            ~error_type:"missing_target_profile"
+            ~count:(List.length route_target_errors);
+          Cascade_metrics.on_route_config_error
+            ~error_type:"unknown_route_key"
+            ~count:(List.length route_key_errors);
+          let top_errors =
+            let base =
+              if profiles = [] then
+                [ "active cascade catalog declares no profiles" ]
+              else
+                []
+            in
+            let base = base @ route_key_errors @ route_target_errors in
+            if List.mem required_default_profile profiles then base
+            else
+              base
+              @
+              [
+                Printf.sprintf
+                  "required default profile %S is missing"
+                  required_default_profile;
+              ]
+          in
         let built_profiles, statically_rejected_profiles =
           List.fold_left
             (fun (ok_acc, err_acc) name ->
-              match validate_profile_static ~config_path name with
+              match
+                validate_profile_static ?declarative_snapshot ~config_path
+                  ~required_capability_profile:None name
+              with
               | Ok profile -> (profile :: ok_acc, err_acc)
               | Error rejection -> (ok_acc, rejection :: err_acc))
             ([], [])
@@ -702,9 +881,70 @@ let validate_path_result ?sw ?net ~config_path () =
               mtime = Option.value attempted_mtime ~default:0.0;
               validated_at = checked_at;
               profiles = profile_snapshots;
+              default_profile_name = required_default_profile;
             }
           in
           record_probe_metrics profile_snapshots;
+          (* RFC-0058 Phase 3: parallel declarative validation.
+
+             The JSON-shape discovery path and the typed declarative
+             parser both produce a profile-name set; we cross-check
+             them to catch silent drift.  Both sides are sorted +
+             deduplicated before [<>] comparison — without that the
+             list-equality check flips on declaration-order
+             differences and produces spurious "profile name mismatch"
+             WARNs ([decl_snapshot_profile_names] now applies
+             [sort_uniq] internally, but we sort [json_names] here as
+             well to make the contract obvious at the call site).
+
+             Each branch emits a Prometheus counter so operators can
+             alert on drift / adapter faults without scraping logs. *)
+          (match declarative_snapshot with
+           | Some decl_snap ->
+             let json_names =
+               List.map (fun (p : profile_build) -> p.name)
+                 profile_snapshots
+               |> List.sort_uniq String.compare
+             in
+             let decl_names =
+               Cascade_declarative_hotpath.decl_snapshot_profile_names decl_snap
+             in
+             if json_names <> decl_names then (
+               Cascade_metrics.on_parallel_validation ~result:"mismatch";
+               let only_in xs ys =
+                 List.filter (fun x -> not (List.mem x ys)) xs
+               in
+               let json_only = only_in json_names decl_names in
+               let decl_only = only_in decl_names json_names in
+               Log.Misc.warn
+                 "[CascadeDeclarative] profile name mismatch: \
+                  json=[%s] decl=[%s] (json_only=[%s] decl_only=[%s])"
+                 (String.concat ", " json_names)
+                 (String.concat ", " decl_names)
+                 (String.concat ", " json_only)
+                 (String.concat ", " decl_only))
+             else (
+               Cascade_metrics.on_parallel_validation ~result:"ok";
+               Log.Misc.info
+                 "[CascadeDeclarative] parallel validation OK, %d profiles"
+                 (List.length decl_names));
+             if declarative_errors <> [] then begin
+               Cascade_metrics.on_parallel_validation ~result:"adapter_error";
+               List.iter
+                 (fun e ->
+                   Log.Misc.warn "[CascadeDeclarative] adapter error: %s"
+                     (Cascade_declarative_adapter.show_adapter_error e))
+                 declarative_errors
+             end
+           | None when declarative_errors <> [] ->
+             Cascade_metrics.on_parallel_validation ~result:"adapter_error";
+             List.iter
+               (fun e ->
+                 Log.Misc.warn "[CascadeDeclarative] adapter error: %s"
+                   (Cascade_declarative_adapter.show_adapter_error e))
+               declarative_errors
+           | None ->
+             Cascade_metrics.on_parallel_validation ~result:"no_decl");
           if rejected_profiles = [] then
             Ok { snapshot; rejected_update = None }
           else
@@ -763,16 +1003,32 @@ let inspect_active ?sw ?net ?clock () =
           profiles = [];
         }
       in
-      (match with_cache_lock (fun () -> !cache.active_snapshot) with
-       | Some snapshot ->
-           with_cache_lock (fun () ->
-               cache :=
-                 {
-                   active_snapshot = Some snapshot;
-                   rejected_update = Some rejection;
-                 });
-           Ok (Serving_last_known_good { snapshot; rejected_update = rejection })
-       | None -> Error rejection)
+      (* Capture prev rejected_update state inside the same lock as
+         the cache write so transition detection (None -> Some) is
+         race-safe. *)
+      let outcome =
+        with_cache_lock (fun () ->
+          match !cache.active_snapshot with
+          | Some snapshot ->
+            let prev_was_failing = Option.is_some !cache.rejected_update in
+            cache :=
+              {
+                active_snapshot = Some snapshot;
+                rejected_update = Some rejection;
+              };
+            `Lkg (snapshot, prev_was_failing)
+          | None -> `Fail)
+      in
+      (match outcome with
+       | `Lkg (snapshot, prev_was_failing) ->
+         Cascade_metrics.on_serving_last_known_good ~reason:"path_unresolved";
+         if not prev_was_failing then
+           Log.Misc.warn
+             "[CascadeCatalog] entering Serving_last_known_good: cascade \
+              path could not be resolved; continuing on cached snapshot \
+              until env/.masc/config layout is fixed";
+         Ok (Serving_last_known_good { snapshot; rejected_update = rejection })
+       | `Fail -> Error rejection)
   | Some config_path ->
       let source_state = active_source_state ~config_path in
       let source_path = source_state.info.source_path in
@@ -799,47 +1055,116 @@ let inspect_active ?sw ?net ?clock () =
             | _ -> None)
       in
       match cached_result with
-      | Some result -> result
+      | Some result ->
+          (match result with
+           | Ok (Serving_last_known_good _) ->
+             (* Same-mtime replay of a previously-cached rejection.
+                Steady-state while the operator hasn't fixed the
+                fault — counter ticks but no log noise. *)
+             Cascade_metrics.on_serving_last_known_good
+               ~reason:"stale_rejection_cached"
+           | Ok (Validated_with_rejections _) ->
+             (* Same-mtime replay of a previously-cached partial
+                rejection.  Steady-state while the operator hasn't
+                fixed the rejected subset — counter ticks but no
+                log noise. *)
+             Cascade_metrics.on_validated_with_rejections
+               ~reason:"stale_partial_rejection_cached"
+           | _ -> ());
+          result
       | None -> (
           match validate_path_result ?sw ?net ~config_path () with
           | Ok { snapshot; rejected_update = None } ->
-              with_cache_lock (fun () ->
+              (* Recovery detection: capture prev rejected_update
+                 inside the same lock as the write so a degraded ->
+                 Validated transition is detected atomically.  The
+                 condition catches BOTH the LKG -> Validated case
+                 (iter 5) and the Validated_with_rejections ->
+                 Validated case (iter 11) since both store the
+                 prev state as [rejected_update = Some _]. *)
+              let recovered =
+                with_cache_lock (fun () ->
+                  let prev_was_failing =
+                    Option.is_some !cache.rejected_update
+                  in
                   cache :=
                     {
                       active_snapshot = Some snapshot;
                       rejected_update = None;
-                    });
+                    };
+                  prev_was_failing)
+              in
+              if recovered then (
+                Cascade_metrics.on_degraded_recovery ();
+                Log.Misc.info
+                  "[CascadeCatalog] cascade.toml degraded state cleared; \
+                   transitioning back to Validated");
               Ok (Validated snapshot)
           | Ok { snapshot; rejected_update = Some rejection } ->
-              with_cache_lock (fun () ->
+              (* Capture prev cache state inside the same lock as
+                 the write so the [Validated -> Validated_with_rejections]
+                 transition is detected atomically (mirrors the LKG
+                 entry pattern in iter 5).  [prev_was_failing] is true
+                 if the previous state was already partial OR fully
+                 failing (LKG); the WARN below fires only on the
+                 clean -> partial transition. *)
+              let prev_was_failing =
+                with_cache_lock (fun () ->
+                  let prev = Option.is_some !cache.rejected_update in
                   cache :=
                     {
                       active_snapshot = Some snapshot;
                       rejected_update = Some rejection;
-                    });
+                    };
+                  prev)
+              in
+              Cascade_metrics.on_validated_with_rejections
+                ~reason:"fresh_partial_rejection";
+              if not prev_was_failing then
+                Log.Misc.warn
+                  "[CascadeCatalog] entering Validated_with_rejections: \
+                   %d profile(s) rejected (%s); cascade serves the validated \
+                   subset, operator should check newly-added profiles"
+                  (List.length rejection.profiles)
+                  (String.concat "; " rejection.errors);
               Ok
                 (Validated_with_rejections
                    { snapshot; rejected_update = rejection })
           | Error rejection ->
-              (match with_cache_lock (fun () -> !cache.active_snapshot) with
-               | Some snapshot ->
-                   with_cache_lock (fun () ->
-                       cache :=
-                         {
-                           active_snapshot = Some snapshot;
-                           rejected_update = Some rejection;
-                         });
-                   Ok
-                     (Serving_last_known_good
-                        { snapshot; rejected_update = rejection })
-               | None ->
-                   with_cache_lock (fun () ->
-                       cache :=
-                         {
-                           active_snapshot = None;
-                           rejected_update = Some rejection;
-                         });
-                   Error rejection))
+              let outcome =
+                with_cache_lock (fun () ->
+                  match !cache.active_snapshot with
+                  | Some snapshot ->
+                    let prev_was_failing =
+                      Option.is_some !cache.rejected_update
+                    in
+                    cache :=
+                      {
+                        active_snapshot = Some snapshot;
+                        rejected_update = Some rejection;
+                      };
+                    `Lkg (snapshot, prev_was_failing)
+                  | None ->
+                    cache :=
+                      {
+                        active_snapshot = None;
+                        rejected_update = Some rejection;
+                      };
+                    `Fail)
+              in
+              (match outcome with
+               | `Lkg (snapshot, prev_was_failing) ->
+                 Cascade_metrics.on_serving_last_known_good
+                   ~reason:"validation_failed";
+                 if not prev_was_failing then
+                   Log.Misc.warn
+                     "[CascadeCatalog] entering Serving_last_known_good: \
+                      validation failed (%s); continuing on cached \
+                      snapshot until cascade.toml is fixed"
+                     (String.concat "; " rejection.errors);
+                 Ok (Serving_last_known_good
+                       { snapshot; rejected_update = rejection })
+               | `Fail -> Error rejection))
 
 let require_snapshot ?sw ?net ?clock () =
   match inspect_active ?sw ?net ?clock () with
@@ -855,28 +1180,69 @@ let require_snapshot ?sw ?net ?clock () =
       in
       Error detail
 
-let normalize_declared_name raw =
-  Keeper_cascade_profile.normalize_declared_name raw
+(* RFC-0066 cycle break: inlined the [Keeper_cascade_profile.normalize_declared_name]
+   body to avoid the [Keeper_cascade_profile → Cascade_catalog_runtime →
+   Keeper_cascade_profile] cycle that RFC-0066 Phase 1 (PR #14652)
+   completed by routing [catalog_names] through this module.
+
+   The body uses only [Cascade_routes] primitives, which this module
+   already depends on (see [Cascade_routes.configured_route_targets]
+   above), so inlining here is dependency-neutral. *)
+let normalize_declared_name (raw : string) : string =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then
+    Cascade_routes.cascade_name_for_use Cascade_routes.Keeper_turn
+  else
+    match Cascade_routes.logical_use_of_string_opt trimmed with
+    | Some use -> Cascade_routes.cascade_name_for_use use
+    | None -> trimmed
 
 let lookup_active_profile ?sw ?net ?clock raw_name =
   match require_snapshot ?sw ?net ?clock () with
   | Error _ as e -> e
   | Ok snapshot -> (
       let trimmed = String.trim raw_name in
-      let normalized =
-        if (not (String.equal trimmed ""))
-           && Option.is_some (profile_lookup snapshot.profiles trimmed)
-        then trimmed
-        else normalize_declared_name raw_name
-      in
-      match profile_lookup snapshot.profiles normalized with
-      | Some profile -> Ok (snapshot, normalized, profile)
-      | None ->
-          let known = profile_names_of_snapshot snapshot |> String.concat ", " in
-          Error
-            (Printf.sprintf
-               "unknown cascade_name %S (active profiles: %s)"
-               normalized known))
+      if String.equal trimmed ""
+      then (
+        (* RFC-0066 Phase 1: blank raw means "the active default cascade".
+           Resolve via the snapshot's [default_profile_name], which the
+           validator builds from [Cascade_routes.cascade_name_for_use
+           Keeper_turn] and guarantees is present in [profiles]
+           (snapshot construction rejects otherwise).  Reading
+           [List.hd snapshot.profiles] would silently return the
+           lexicographically-first profile because [discover_profiles]
+           sorts via [List.sort_uniq String.compare]. *)
+        match profile_lookup snapshot.profiles snapshot.default_profile_name with
+        | Some profile ->
+            Ok (snapshot, snapshot.default_profile_name, profile)
+        | None ->
+            (* Validator invariant violation; stay defensive. *)
+            (match snapshot.profiles with
+             | first :: _ -> Ok (snapshot, first.name, first)
+             | [] ->
+                 Error
+                   "snapshot has no profiles; cannot resolve blank \
+                    cascade name"))
+      else
+        let normalized =
+          match
+            [ trimmed; "tier-group." ^ trimmed; "tier." ^ trimmed ]
+            |> List.find_opt (fun candidate ->
+                   Option.is_some (profile_lookup snapshot.profiles candidate))
+          with
+          | Some candidate -> candidate
+          | None -> normalize_declared_name raw_name
+        in
+        match profile_lookup snapshot.profiles normalized with
+        | Some profile -> Ok (snapshot, normalized, profile)
+        | None ->
+            let known =
+              profile_names_of_snapshot snapshot |> String.concat ", "
+            in
+            Error
+              (Printf.sprintf
+                 "unknown cascade_name %S (active profiles: %s)"
+                 normalized known))
 
 let resolve_declared_name ?sw ?net ?clock ~raw_name () =
   match lookup_active_profile ?sw ?net ?clock raw_name with
@@ -886,18 +1252,74 @@ let resolve_declared_name ?sw ?net ?clock ~raw_name () =
 let models_of_cascade_name ?sw ?net ?clock raw_name =
   match lookup_active_profile ?sw ?net ?clock raw_name with
   | Error _ as e -> e
-  | Ok (_snapshot, _normalized, profile) ->
+  | Ok (_snapshot, normalized, profile) ->
       Ok
-        (expand_weighted_entries profile.weighted_entries
+        (expand_weighted_entries ~cascade:normalized profile.weighted_entries
          |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
                 entry.model))
+
+let direct_candidate_providers (profile : profile_snapshot) =
+  List.map
+    (fun (candidate : candidate_runtime) -> candidate.provider_cfg)
+    profile.candidates
+
+let direct_candidate_providers_ordered_by_entries
+    (profile : profile_snapshot)
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  match profile.candidates with
+  | [] -> []
+  | candidates ->
+    (* Index candidates by [model_string] into per-key FIFO queues so we
+       drain them in declaration order; same model_string may appear
+       multiple times in a profile (e.g. priority duplicates), and the
+       runtime hot path treats this function as O(n) total work. *)
+    let index : (string, candidate_runtime Queue.t) Hashtbl.t =
+      Hashtbl.create (List.length candidates)
+    in
+    List.iter
+      (fun (candidate : candidate_runtime) ->
+         let q =
+           match Hashtbl.find_opt index candidate.model_string with
+           | Some q -> q
+           | None ->
+             let q = Queue.create () in
+             Hashtbl.add index candidate.model_string q;
+             q
+         in
+         Queue.add candidate q)
+      candidates;
+    let take_candidate model_string =
+      match Hashtbl.find_opt index model_string with
+      | Some q when not (Queue.is_empty q) ->
+        let candidate = Queue.pop q in
+        Some candidate.provider_cfg
+      | _ -> None
+    in
+    let ordered =
+      List.filter_map
+        (fun (entry : Cascade_config_loader.weighted_entry) ->
+           take_candidate entry.model)
+        ordered_entries
+    in
+    if List.length ordered = List.length candidates
+    then ordered
+    else direct_candidate_providers profile
+
+let provider_configs_of_ordered_entries
+    ~(profile : profile_snapshot)
+    ~cascade_name:_
+    (ordered_entries : Cascade_config_loader.weighted_entry list) =
+  direct_candidate_providers_ordered_by_entries profile ordered_entries
 
 let resolve_named_providers ?sw ?net ?clock ?provider_filter
     ?(require_tool_choice_support = false)
     ?(require_tool_support = false)
     ?runtime_mcp_policy ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
-  | Error _ as e -> e
+  | Error _ as e ->
+      Cascade_metrics.on_resolve_failure
+        ~cascade:cascade_name ~reason:"lookup_failed";
+      e
   | Ok (_snapshot, normalized, profile) ->
       let provider_label (c : Llm_provider.Provider_config.t) =
         Printf.sprintf "%s:%s"
@@ -907,12 +1329,13 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
       let ordered_entries =
         Cascade_config.order_weighted_entries
           ~rotation_scope:normalized
+          ~cascade:normalized
           profile.weighted_entries
       in
       let parsed_declared_providers =
-        Cascade_config.parse_weighted_entries
-             ~api_key_env_overrides:profile.api_key_env_overrides
-             ~cascade_name:normalized
+        provider_configs_of_ordered_entries
+          ~profile
+          ~cascade_name:normalized
           ordered_entries
       in
       let filtered_declared_providers =
@@ -927,11 +1350,13 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
           ~require_tool_choice_support ~require_tool_support
           ~label:normalized filtered_declared_providers
       in
-      if providers = [] then
+      if providers = [] then (
+        Cascade_metrics.on_resolve_failure
+          ~cascade:normalized ~reason:"no_callable_providers";
         Error
           (Printf.sprintf
              "cascade %s resolved to no callable providers"
-             normalized)
+             normalized))
       else (
         (* Observability for cascade-name -> runtime-provider divergence.  Compare
            against the profile after provider:auto expansion, canonical provider
@@ -946,6 +1371,9 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
         let leaked =
           List.filter (fun m -> not (List.mem m declared)) returned
         in
+        Cascade_metrics.on_resolve_provider_leak
+          ~cascade:normalized
+          ~leak_count:(List.length leaked);
         (if leaked <> [] then
            Log.warn ~ctx:"CascadeCatalog"
              "resolve_named_providers(%s): %d providers NOT in parsed declared \
@@ -965,17 +1393,21 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
     ?(require_tool_support = false)
     ?runtime_mcp_policy ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
-  | Error _ as e -> e
+  | Error _ as e ->
+      Cascade_metrics.on_resolve_failure
+        ~cascade:cascade_name ~reason:"lookup_failed";
+      e
   | Ok (_snapshot, normalized, profile) ->
       let ordered_entries =
         Cascade_config.order_weighted_entries
           ~rotation_scope:normalized
+          ~cascade:normalized
           profile.weighted_entries
       in
       let parsed_declared_providers =
-        Cascade_config.parse_weighted_entries
-             ~api_key_env_overrides:profile.api_key_env_overrides
-             ~cascade_name:normalized
+        provider_configs_of_ordered_entries
+          ~profile
+          ~cascade_name:normalized
           ordered_entries
       in
       let filtered_declared_providers =
@@ -986,7 +1418,10 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
         | Ok ps -> Ok ps
       in
       (match filtered_declared_providers with
-       | Error _ as e -> e
+       | Error _ as e ->
+           Cascade_metrics.on_resolve_failure
+             ~cascade:normalized ~reason:"provider_filter_rejected";
+           e
        | Ok filtered ->
        let providers =
          Provider_tool_support.apply_required_tool_use_filter
@@ -994,11 +1429,13 @@ let resolve_named_providers_strict ?sw ?net ?clock ?provider_filter
            ~require_tool_choice_support ~require_tool_support
            ~label:normalized filtered
        in
-       if providers = [] then
+       if providers = [] then (
+         Cascade_metrics.on_resolve_failure
+           ~cascade:normalized ~reason:"no_callable_providers";
          Error
            (Printf.sprintf
               "cascade %s resolved to no callable providers"
-              normalized)
+              normalized))
        else Ok providers)
 
 type secondary_resolution = {
@@ -1019,50 +1456,33 @@ let provider_filter_allows_single ~provider_filter ~label provider =
       | Ok [ _ ] -> true
       | Ok _ | Error _ -> false
 
-let parse_secondary_from_entry ~api_key_env_overrides
-    (entry : Cascade_config_loader.weighted_entry) =
-  match entry.secondary with
-  | None -> None
-  | Some secondary ->
-      let secondary_entry : Cascade_config_loader.weighted_entry =
-        {
-          model = secondary;
-          weight = 1;
-          supports_tool_choice = entry.secondary_supports_tool_choice;
-          secondary = None;
-          secondary_supports_tool_choice = None;
-        }
-      in
-      Cascade_config.parse_weighted_entry
-        ~api_key_env_overrides secondary_entry
-
 let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
     ?provider_filter ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
-  | Error _ as e -> e
+  | Error _ as e ->
+      (* Iter 10 [on_resolve_failure] also covered the base
+         [resolve_named_providers_strict]; this wrapper is the actual
+         entry point that keeper_turn_driver:127 hits, so its three
+         Error returns were the most common silent cause of keeper
+         turn failures going unobserved.  Same metric + same reason
+         labels (no [function] dimension) so dashboards aggregate
+         "resolve failures per cascade" across both call sites. *)
+      Cascade_metrics.on_resolve_failure
+        ~cascade:cascade_name ~reason:"lookup_failed";
+      e
   | Ok (_snapshot, normalized, profile) ->
       let ordered_entries =
         Cascade_config.order_weighted_entries
           ~rotation_scope:normalized
+          ~cascade:normalized
           profile.weighted_entries
       in
       let parsed_pairs =
-        ordered_entries
-        |> List.filter_map
-             (fun (entry : Cascade_config_loader.weighted_entry) ->
-                match
-                  Cascade_config.parse_weighted_entry
-                    ~api_key_env_overrides:profile.api_key_env_overrides
-                    entry
-                with
-                | None -> None
-                | Some primary ->
-                    Some
-                      ( primary,
-                        parse_secondary_from_entry
-                          ~api_key_env_overrides:
-                            profile.api_key_env_overrides
-                          entry ))
+        let direct_pairs =
+          direct_candidate_providers_ordered_by_entries profile ordered_entries
+          |> List.map (fun cfg -> cfg, None)
+        in
+        direct_pairs
       in
       let primaries = List.map fst parsed_pairs in
       (match
@@ -1070,6 +1490,8 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
            ~provider_filter ~label:normalized primaries
        with
        | Error rejection ->
+           Cascade_metrics.on_resolve_failure
+             ~cascade:normalized ~reason:"provider_filter_rejected";
            Error (Cascade_config.provider_filter_rejection_to_string rejection)
        | Ok _filtered_primaries ->
            let provider_filter_allows =
@@ -1088,11 +1510,13 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
                     (primary, secondary))
            in
            let providers = List.map fst filtered_pairs in
-           if providers = [] then
+           if providers = [] then (
+             Cascade_metrics.on_resolve_failure
+               ~cascade:normalized ~reason:"no_callable_providers";
              Error
                (Printf.sprintf
                   "cascade %s resolved to no callable providers"
-                  normalized)
+                  normalized))
            else
              let slots = Array.of_list filtered_pairs in
              let secondary_resolver provider_index primary =
@@ -1107,78 +1531,16 @@ let resolve_named_providers_strict_with_secondary_resolver ?sw ?net ?clock
              in
              Ok { providers; secondary_resolver })
 
-(** RFC-0027 PR-9b dual-track resolution. The [primary] argument is one
-    of the providers returned by {!resolve_named_providers}; we walk the
-    cascade's parsed weighted entries and, for the entry whose parsed
-    {!Llm_provider.Provider_config.t} matches [primary] by [(kind,
-    model_id)], read its [secondary] field. When present, the secondary
-    string is wrapped in a synthesised {!Cascade_config_loader.weighted_entry}
-    (preserving [secondary_supports_tool_choice] -> [supports_tool_choice]
-    if set) and parsed via {!Cascade_config.parse_weighted_entry}, which
-    applies the cascade's [api_key_env_overrides]. Returns [None] when:
-    - the cascade has no entries with a secondary,
-    - no entry's primary parse matches [primary],
-    - or secondary parsing yields no provider (unregistered/unavailable
-      scheme, invalid syntax).
-    The function never raises; observability for swap success/failure
-    flows through the unified
-    [Llm_metric_bridge.emit_fallback_triggered ~kind:"dual_track_swap"]
-    counter that the caller in [oas_worker_named_cascade] increments —
-    successful swaps tag [~detail:"swapped"], secondary rejections tag
-    [~detail:<filter_rejection_reason>]. (#13097 review: removed stale
-    [cascade_secondary_swap_total] reference; that name was never
-    registered, the unified counter is the SSOT.) *)
+(** Deprecated compatibility hook for RFC-0027 PR-9b dual-track resolution.
+    Declarative cascade execution now carries typed [Provider_config] candidates
+    from TOML materialization. Runtime no longer re-parses weighted-entry model
+    strings to recover secondary providers; callers that need secondaries should
+    consume the precomputed resolver from
+    {!resolve_named_providers_strict_with_secondary_resolver}. *)
 let resolve_secondary_provider_for_primary ?sw ?net ?clock
     ~cascade_name ~(primary : Llm_provider.Provider_config.t) () =
-  match lookup_active_profile ?sw ?net ?clock cascade_name with
-  | Error _ -> None
-  | Ok (_snapshot, _normalized, profile) ->
-      let same_kind_model
-          (cfg : Llm_provider.Provider_config.t) =
-        cfg.kind = primary.kind
-        && String.trim cfg.model_id = String.trim primary.model_id
-      in
-      let synth_secondary_entry
-          (entry : Cascade_config_loader.weighted_entry)
-          (secondary : string) : Cascade_config_loader.weighted_entry =
-        {
-          model = secondary;
-          weight = 1;
-          supports_tool_choice = entry.secondary_supports_tool_choice;
-          secondary = None;
-          secondary_supports_tool_choice = None;
-        }
-      in
-      let try_entry (entry : Cascade_config_loader.weighted_entry) =
-        match entry.secondary with
-        | None -> None
-        | Some _ ->
-            (* Confirm this entry's primary parses to the same provider
-               we were called with. We compare on the parsed
-               Provider_config rather than on raw strings to handle
-               provider:auto expansion (e.g. claude_code:auto could
-               expand to several model strings, and the primary we got
-               carries the resolved model_id). *)
-            let primary_parsed =
-              Cascade_config.parse_weighted_entry
-                ~api_key_env_overrides:profile.api_key_env_overrides
-                entry
-            in
-            (match primary_parsed with
-             | Some parsed when same_kind_model parsed ->
-                 Cascade_config.parse_weighted_entry
-                   ~api_key_env_overrides:profile.api_key_env_overrides
-                   (synth_secondary_entry entry
-                      (Option.get entry.secondary))
-             | _ -> None)
-      in
-      (* Expand provider:auto entries without a rotation scope: this legacy
-         lookup may be called after live provider resolution, so it must not
-         consume round-robin state just to answer a secondary lookup. New
-         execution paths use [resolve_named_providers_strict_with_secondary_resolver]
-         to precompute secondaries from the same ordered snapshot. *)
-      let expanded = expand_weighted_entries profile.weighted_entries in
-      List.find_map try_entry expanded
+  let _ = sw, net, clock, cascade_name, primary in
+  None
 
 let resolve_inference_params ?sw ?net ?clock ~name () =
   match lookup_active_profile ?sw ?net ?clock name with

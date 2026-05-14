@@ -81,7 +81,7 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_meta_json_failures
+           Keeper_metrics.metric_keeper_meta_json_failures
            ~labels:[("site", "scrub")]
            ();
          Log.Keeper.warn

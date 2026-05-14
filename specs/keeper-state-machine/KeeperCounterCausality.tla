@@ -1,13 +1,20 @@
 ---- MODULE KeeperCounterCausality ----
 \* ── STATUS: FUTURE-DESIGN INVARIANT (not yet implemented) ────────────
 \* This spec verifies an invariant a *future* feature must hold, not a
-\* current runtime guarantee. As of 2026-04-20:
+\* current runtime guarantee. As of 2026-04-20, re-verified 2026-05-12
+\* (iter 76 — all four checks below still hold; see
+\*  docs/tla-audit/kcc-r3-counter-causality-dormancy-reverified-2026-05-12.md):
 \*   - rg "last_cause|last_incremented|last_bumped" lib/ -t ml -> 0 hits
-\*   - .claude/plans/curried-moseying-whisper.md (referenced below) -> 0 hits
-\* The OCaml side has the counters themselves
-\* (lib/dashboard/dashboard_http_keeper.ml:keepers_dashboard_json) but no
-\* {last_incremented_at, last_cause_event} pair paired with them; the
-\* Agent Modal hover tooltip described in the redesign is not wired.
+\*   - .claude/plans/curried-moseying-whisper.md (referenced below): the
+\*     repo has no .claude/plans/ tree, and rg "curried-moseying-whisper"
+\*     finds only this spec -> the redesign plan is not wired anywhere
+\*   - the dashboard counters exist (lib/dashboard/dashboard_http_keeper.ml
+\*     keepers_dashboard_json serializes compaction_count from
+\*     m.runtime.compaction_rt.count, a plain int) but compaction_rt
+\*     (type compaction_runtime in lib/keeper/keeper_meta_contract.ml)
+\*     carries no {last_incremented_at, last_cause_event} pair
+\*   - KeeperCounterCausality is in no scripts/*.sh runner
+\* The Agent Modal hover tooltip described in the redesign is not wired.
 \* NOT in scripts/tla-check.sh runner -- this spec records the design
 \* intent for when the cause-stamping extension lands; once the runtime
 \* implements the field, drop this banner and add the spec to the runner

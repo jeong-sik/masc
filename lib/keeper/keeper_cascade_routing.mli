@@ -19,7 +19,7 @@ type routing_decision = {
     [~base_cascade] is the keeper's configured cascade name.
 
     Routing rules (TLA+ mirrored, with logical route names resolved through
-    [cascade.json] [routes]):
+    [cascade.toml] [routes]):
     - [Running], [Draining], [Paused] -> [base_cascade]
     - [Failing] -> [routes.phase_recovery]
     - [Compacting], [HandingOff] -> [routes.phase_buffer]

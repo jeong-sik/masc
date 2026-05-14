@@ -33,7 +33,11 @@ let transition_task_r
   : string Masc_domain.masc_result
   =
   let open Result.Syntax in
-  let* () = if not (is_initialized config) then Error (Masc_domain.System Masc_domain.System_error.NotInitialized) else Ok () in
+  let* () =
+    if not (is_initialized config)
+    then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
+    else Ok ()
+  in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with
     | Error e, _ -> Error e
@@ -56,11 +60,12 @@ let transition_task_r
           match expected_version with
           | Some v when backlog.version <> v ->
             Error
-              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                 (Printf.sprintf
-                    "Version mismatch (expected %d, got %d)"
-                    v
-                    backlog.version)))
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "Version mismatch (expected %d, got %d)"
+                       v
+                       backlog.version)))
           | _ -> Ok ()
         in
         let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
@@ -80,16 +85,20 @@ let transition_task_r
           | Masc_domain.Approve_verification
           | Masc_domain.Reject_verification
           | Masc_domain.Done_action
-          | Masc_domain.Cancel ->
-            Ok ()
+          | Masc_domain.Cancel -> Ok ()
         in
         let* () =
           match action, do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
           | Masc_domain.Claim, Some r ->
             Error
-              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                 (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
-          | _ -> Ok ()
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
+          | Masc_domain.Claim, None
+          | ( Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel
+            | Masc_domain.Release | Masc_domain.Submit_for_verification
+            | Masc_domain.Approve_verification | Masc_domain.Reject_verification
+            | Masc_domain.Submit_pr_evidence ), _ -> Ok ()
         in
         let now = now_iso () in
         let now_ts = Time_compat.now () in
@@ -101,6 +110,7 @@ let transition_task_r
               ~verification_timeout_seconds:
                 (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
+              ~same_agent:(same_task_actor config agent_name)
               ~agent_name
               ~task_id
               ~task_status:task.task_status
@@ -113,20 +123,24 @@ let transition_task_r
           | Ok decision -> Ok decision
           | Error Coord_task_lifecycle.Self_approval ->
             Error
-              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                 "Self-approval not allowed: verifier must be a different agent"))
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "Self-approval not allowed: verifier must be a different agent"))
           | Error Coord_task_lifecycle.Self_rejection ->
             Error
-              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                 "Self-rejection not allowed: verifier must be a different agent"))
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "Self-rejection not allowed: verifier must be a different agent"))
           | Error Coord_task_lifecycle.Verification_disabled ->
             Error
-              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                 "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)"))
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)"))
           | Error Coord_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
-              | Some a when a <> agent_name -> Printf.sprintf ", current_assignee=%s" a
+              | Some a when not (same_task_actor config a agent_name) ->
+                Printf.sprintf ", current_assignee=%s" a
               | _ -> ""
             in
             (* Issue #7646: ownership-mismatch dominates; only show
@@ -143,10 +157,16 @@ let transition_task_r
                retried with the same action rather than claiming first.
                Name the exact next call to make so small-LLM keepers can
                recover on the next turn. *)
-            let remediation =
+            (* WORKAROUND: task_status (6 ctors) × task_action (9 ctors) =
+               54 combos, with ~11 specific hint cases. 명시적 enumeration은
+               hint-string 경로(graceful degradation 가능)에서 churn 비용이
+               컴파일러 강제의 가치를 초과.
+               근본 해결: 도메인 모델링 변경 — (status, action) -> error_kind
+               분류기를 분리한 RFC 후보. *)
+            let[@warning "-4"] remediation =
               let own_assignee =
                 match task_assignee_of_status task.task_status with
-                | Some a when a = agent_name -> true
+                | Some a when same_task_actor config a agent_name -> true
                 | _ -> false
               in
               match task.task_status, action with
@@ -166,8 +186,8 @@ let transition_task_r
               | Masc_domain.Claimed _, Masc_domain.Done_action when not own_assignee ->
                 " Remediation: only the current assignee can mark a task done. Pick a \
                  different task or coordinate via masc_board_post."
-              | (Masc_domain.Claimed _ | Masc_domain.InProgress _), Masc_domain.Cancel when not own_assignee
-                ->
+              | (Masc_domain.Claimed _ | Masc_domain.InProgress _), Masc_domain.Cancel
+                when not own_assignee ->
                 " Remediation: cancellation requires owning the task. Use \
                  masc_board_post to ask the current assignee to cancel or release, or \
                  claim a different task with masc_claim_next."
@@ -183,25 +203,31 @@ let transition_task_r
               | _ -> ""
             in
             Error
-              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                 (Printf.sprintf
-                    "Invalid transition: %s -> %s (%s, agent=%s%s%s).%s"
-                    (task_status_to_string task.task_status)
-                    action_s
-                    task_id
-                    agent_name
-                    assignee_hint
-                    actions_hint
-                    remediation)))
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "Invalid transition: %s -> %s (%s, agent=%s%s%s).%s"
+                       (task_status_to_string task.task_status)
+                       action_s
+                       task_id
+                       agent_name
+                       assignee_hint
+                       actions_hint
+                       remediation)))
         in
         let new_status = decision.Coord_task_lifecycle.new_status in
         let set_current = decision.set_current in
+        (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2)
+           = 648 combos. action+option은 enumeration되었으나 task_status/new_status는
+           대부분 _. task_status enumeration은 cross-product 폭발 — 도메인 신규 ctor
+           추가 시 의미 변경 없는 caller가 churn.
+           근본 해결: precondition validator를 도메인 모델에 흡수 (RFC 후보). *)
         let* () =
-          match action, task.task_status, new_status, prepare_verification_request with
-          | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence),
-              _,
-              Masc_domain.AwaitingVerification { assignee; verification_id; _ },
-              Some prepare ) ->
+          (match action, task.task_status, new_status, prepare_verification_request with
+          | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
+            , _
+            , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
+            , Some prepare ) ->
             let evidence_refs =
               match task.contract with
               | Some c -> c.verify_gate_evidence
@@ -211,50 +237,56 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Masc_domain.System (Masc_domain.System_error.IoError
-                    (Printf.sprintf
-                       "verification request creation failed before status transition \
-                        (task=%s vrf=%s): %s"
-                       task_id
-                       verification_id
-                       e))))
-          | (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence), _, _, Some _ ->
+                 (Masc_domain.System
+                    (Masc_domain.System_error.IoError
+                       (Printf.sprintf
+                          "verification request creation failed before status transition \
+                           (task=%s vrf=%s): %s"
+                          task_id
+                          verification_id
+                          e))))
+          | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
+            , _
+            , _
+            , Some _ ) ->
             Error
-              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                 (Printf.sprintf
-                    "submit_for_verification did not produce AwaitingVerification \
-                     for task %s"
-                    task_id)))
-          | ( Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Done_action
-            | Masc_domain.Cancel
-            | Masc_domain.Release
-            | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification ),
-            _,
-            _,
-            Some _ ->
-            Ok ()
-          | ( Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Done_action
-            | Masc_domain.Cancel
-            | Masc_domain.Release
-            | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification
-            | Masc_domain.Submit_for_verification
-            | Masc_domain.Submit_pr_evidence ),
-            _,
-            _,
-            None ->
-            Ok ()
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "submit_for_verification did not produce AwaitingVerification for \
+                        task %s"
+                       task_id)))
+          | ( ( Masc_domain.Claim
+              | Masc_domain.Start
+              | Masc_domain.Done_action
+              | Masc_domain.Cancel
+              | Masc_domain.Release
+              | Masc_domain.Approve_verification
+              | Masc_domain.Reject_verification )
+            , _
+            , _
+            , Some _ ) -> Ok ()
+          | ( ( Masc_domain.Claim
+              | Masc_domain.Start
+              | Masc_domain.Done_action
+              | Masc_domain.Cancel
+              | Masc_domain.Release
+              | Masc_domain.Approve_verification
+              | Masc_domain.Reject_verification
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Submit_pr_evidence )
+            , _
+            , _
+            , None ) -> Ok ()) [@warning "-4"]
         in
+        (* WORKAROUND: same justification as previous let*. action (9) × task_status (6)
+           × option (2) = 108 combos, action+option enumerated, task_status mostly _.
+           근본 해결: 위와 동일 RFC 후보. *)
         let* () =
-          match action, task.task_status, prepare_verification_verdict with
-          | ( Masc_domain.Approve_verification,
-              Masc_domain.AwaitingVerification { verification_id; _ },
-              Some prepare ) ->
+          (match action, task.task_status, prepare_verification_verdict with
+          | ( Masc_domain.Approve_verification
+            , Masc_domain.AwaitingVerification { verification_id; _ }
+            , Some prepare ) ->
             (match
                prepare
                  ~task
@@ -265,16 +297,17 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Masc_domain.System (Masc_domain.System_error.IoError
-                    (Printf.sprintf
-                       "verification verdict persistence failed before status transition \
-                        (task=%s vrf=%s): %s"
-                       task_id
-                       verification_id
-                       e))))
-          | ( Masc_domain.Reject_verification,
-              Masc_domain.AwaitingVerification { verification_id; _ },
-              Some prepare ) ->
+                 (Masc_domain.System
+                    (Masc_domain.System_error.IoError
+                       (Printf.sprintf
+                          "verification verdict persistence failed before status \
+                           transition (task=%s vrf=%s): %s"
+                          task_id
+                          verification_id
+                          e))))
+          | ( Masc_domain.Reject_verification
+            , Masc_domain.AwaitingVerification { verification_id; _ }
+            , Some prepare ) ->
             let reject_reason = if notes <> "" then notes else reason in
             (match
                prepare
@@ -286,42 +319,44 @@ let transition_task_r
              | Ok () -> Ok ()
              | Error e ->
                Error
-                 (Masc_domain.System (Masc_domain.System_error.IoError
-                    (Printf.sprintf
-                       "verification verdict persistence failed before status transition \
-                        (task=%s vrf=%s): %s"
-                       task_id
-                       verification_id
-                       e))))
-          | (Masc_domain.Approve_verification | Masc_domain.Reject_verification), _, Some _ ->
+                 (Masc_domain.System
+                    (Masc_domain.System_error.IoError
+                       (Printf.sprintf
+                          "verification verdict persistence failed before status \
+                           transition (task=%s vrf=%s): %s"
+                          task_id
+                          verification_id
+                          e))))
+          | ( (Masc_domain.Approve_verification | Masc_domain.Reject_verification)
+            , _
+            , Some _ ) ->
             Error
-              (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                 (Printf.sprintf
-                    "verification verdict action did not start from AwaitingVerification \
-                     for task %s"
-                    task_id)))
-          | ( Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Done_action
-            | Masc_domain.Cancel
-            | Masc_domain.Release
-            | Masc_domain.Submit_for_verification
-            | Masc_domain.Submit_pr_evidence ),
-            _,
-            Some _ ->
-            Ok ()
-          | ( Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Done_action
-            | Masc_domain.Cancel
-            | Masc_domain.Release
-            | Masc_domain.Submit_for_verification
-            | Masc_domain.Submit_pr_evidence
-            | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification ),
-            _,
-            None ->
-            Ok ()
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    (Printf.sprintf
+                       "verification verdict action did not start from \
+                        AwaitingVerification for task %s"
+                       task_id)))
+          | ( ( Masc_domain.Claim
+              | Masc_domain.Start
+              | Masc_domain.Done_action
+              | Masc_domain.Cancel
+              | Masc_domain.Release
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Submit_pr_evidence )
+            , _
+            , Some _ ) -> Ok ()
+          | ( ( Masc_domain.Claim
+              | Masc_domain.Start
+              | Masc_domain.Done_action
+              | Masc_domain.Cancel
+              | Masc_domain.Release
+              | Masc_domain.Submit_for_verification
+              | Masc_domain.Submit_pr_evidence
+              | Masc_domain.Approve_verification
+              | Masc_domain.Reject_verification )
+            , _
+            , None ) -> Ok ()) [@warning "-4"]
         in
         (match decision.drift with
          | Some Coord_task_lifecycle.Claimed_to_done_skip ->
@@ -337,8 +372,7 @@ let transition_task_r
               wired by [lib/coord.ml] at startup to emit a
               Prometheus counter. *)
            (Atomic.get Coord_hooks.fsm_drift_observer_fn)
-             ~variant:(drift_variant_label
-                         Coord_task_lifecycle.Claimed_to_done_skip)
+             ~variant:(drift_variant_label Coord_task_lifecycle.Claimed_to_done_skip)
              ~force
              ~agent_name;
            Log.RoomTask.warn
@@ -355,13 +389,16 @@ let transition_task_r
         (match new_status with
          | Masc_domain.Done _ ->
            let contract_state = classify_contract_state task.contract in
-           let path =
-             classify_completion_path ~action ~drift:decision.drift ~force
-           in
+           let path = classify_completion_path ~action ~drift:decision.drift ~force in
            (Atomic.get Coord_hooks.task_completion_path_observed_fn)
-             ~path ~contract_state ~agent_name
-         | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-         | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _ -> ());
+             ~path
+             ~contract_state
+             ~agent_name
+         | Masc_domain.Todo
+         | Masc_domain.Claimed _
+         | Masc_domain.InProgress _
+         | Masc_domain.AwaitingVerification _
+         | Masc_domain.Cancelled _ -> ());
         (match action, task.task_status with
          | Masc_domain.Release, Masc_domain.Todo ->
            (* Idempotent: already in backlog, nothing to release.
@@ -369,13 +406,19 @@ let transition_task_r
               (e.g. confused the target of a multi-task release) can
               still detect the no-op without seeing it as an error. *)
            Log.RoomTask.debug "release on already-todo task %s — no-op" task_id
-       | Masc_domain.Claim, _ | Masc_domain.Start, _ | Masc_domain.Done_action, _ | Masc_domain.Cancel, _
-       | Masc_domain.Submit_for_verification, _ | Masc_domain.Submit_pr_evidence, _
-       | Masc_domain.Approve_verification, _
-       | Masc_domain.Reject_verification, _
-       | Masc_domain.Release, Masc_domain.Claimed _ | Masc_domain.Release, Masc_domain.InProgress _
-       | Masc_domain.Release, Masc_domain.AwaitingVerification _ | Masc_domain.Release, Masc_domain.Done _
-       | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
+         | Masc_domain.Claim, _
+         | Masc_domain.Start, _
+         | Masc_domain.Done_action, _
+         | Masc_domain.Cancel, _
+         | Masc_domain.Submit_for_verification, _
+         | Masc_domain.Submit_pr_evidence, _
+         | Masc_domain.Approve_verification, _
+         | Masc_domain.Reject_verification, _
+         | Masc_domain.Release, Masc_domain.Claimed _
+         | Masc_domain.Release, Masc_domain.InProgress _
+         | Masc_domain.Release, Masc_domain.AwaitingVerification _
+         | Masc_domain.Release, Masc_domain.Done _
+         | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
         (* #10719: surface tasks that have crossed oscillation thresholds
            so dashboards/triage can pick them up before they reach 20+
            cycles with zero progress.  Production observation
@@ -393,9 +436,12 @@ let transition_task_r
          | Masc_domain.Release ->
            let cc = task.cycle_count + 1 in
            let escalation =
-             if task.cycle_count = 19 then Some ("severe", 20)
-             else if task.cycle_count = 9 then Some ("major", 10)
-             else if task.cycle_count = 4 then Some ("threshold", 5)
+             if task.cycle_count = 19
+             then Some ("severe", 20)
+             else if task.cycle_count = 9
+             then Some ("major", 10)
+             else if task.cycle_count = 4
+             then Some ("threshold", 5)
              else None
            in
            (match escalation with
@@ -410,18 +456,25 @@ let transition_task_r
                  wiring belongs in a callback pattern like
                  [Coord_hooks]. *)
               Log.RoomTask.warn
-                "task_oscillation_%s task=%s agent=%s cycle_count=%d \
-                 threshold=%d (sustained claim->release loop, candidate \
-                 for triage; consider reformulation or human escalation \
-                 if level=severe)"
-                level task_id agent_name cc threshold)
-         | Masc_domain.Claim | Masc_domain.Start
-         | Masc_domain.Done_action | Masc_domain.Cancel
-         | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence
+                "task_oscillation_%s task=%s agent=%s cycle_count=%d threshold=%d \
+                 (sustained claim->release loop, candidate for triage; consider \
+                 reformulation or human escalation if level=severe)"
+                level
+                task_id
+                agent_name
+                cc
+                threshold)
+         | Masc_domain.Claim
+         | Masc_domain.Start
+         | Masc_domain.Done_action
+         | Masc_domain.Cancel
+         | Masc_domain.Submit_for_verification
+         | Masc_domain.Submit_pr_evidence
          | Masc_domain.Approve_verification
          | Masc_domain.Reject_verification -> ());
-      if new_status = task.task_status && set_current = None then
-        (* Idempotent no-op: status unchanged, skip write/events.
+        if new_status = task.task_status && set_current = None
+        then
+          (* Idempotent no-op: status unchanged, skip write/events.
            Match None explicitly so set_current=Some is never silently dropped. *)
           Ok
             (Printf.sprintf
@@ -461,7 +514,8 @@ let transition_task_r
                      | Masc_domain.Submit_for_verification
                      | Masc_domain.Submit_pr_evidence
                      | Masc_domain.Approve_verification
-                     | Masc_domain.Reject_verification -> t.cycle_count, t.do_not_reclaim_reason
+                     | Masc_domain.Reject_verification ->
+                       t.cycle_count, t.do_not_reclaim_reason
                    in
                    { t with
                      task_status = new_status
@@ -499,20 +553,20 @@ let transition_task_r
           log_event
             config
             (transition_log_event
-                  ~event_type:Task_transition
-                  ~agent_name
-                  ~task_id
-                  ~from_status:task.task_status
-                  ~to_status:new_status
-                  ~action:action_s
-                  ~forced:force
-                  ?notes:(trim_opt (Some notes))
-                  ?reason:(trim_opt (Some reason))
-                  ?handoff_context:
-                    (match handoff_context with
-                     | Some _ when action = Masc_domain.Release -> handoff_context
-                     | _ -> None)
-                  ());
+               ~event_type:Task_transition
+               ~agent_name
+               ~task_id
+               ~from_status:task.task_status
+               ~to_status:new_status
+               ~action:action_s
+               ~forced:force
+               ?notes:(trim_opt (Some notes))
+               ?reason:(trim_opt (Some reason))
+               ?handoff_context:
+                 (match handoff_context with
+                  | Some _ when action = Masc_domain.Release -> handoff_context
+                  | _ -> None)
+               ());
           (match action with
            | Masc_domain.Claim ->
              emit_task_activity
@@ -627,20 +681,23 @@ let transition_task_r
              own worktree, leaving the original orphaned.  Best-effort
              matches the existing Done branch: filesystem GC must not
              fail the state transition. *)
-          let cleanup_worktree_for_transition reason_label =
+          (* WORKAROUND: Masc_error.t는 framework-tier 합타입 (7 ctor),
+             각 ctor가 자체 합타입 (Task_error, System_error 등). best-effort
+             cleanup의 변별점은 WorktreeNotFound 한 경로뿐이고 나머지 ctor 전체는
+             동일하게 WARN 처리. 명시적 enumeration은 framework 신규 ctor마다
+             best-effort path가 churn 대상이 됨.
+             근본 해결: Masc_error.t를 best_effort_cleanup_outcome 변환기로
+             1차 분류 후 다루기 (RFC 후보). *)
+          let[@warning "-4"] cleanup_worktree_for_transition reason_label =
             match task.worktree with
             | None -> ()
             | Some _ ->
               (try
-                 match
-                   Coord_worktree.worktree_remove_r config ~agent_name ~task_id
-                 with
+                 match Coord_worktree.worktree_remove_r config ~agent_name ~task_id with
                  | Ok msg ->
-                   Log.RoomTask.info
-                     "%s worktree auto-cleanup: %s" reason_label msg
+                   Log.RoomTask.info "%s worktree auto-cleanup: %s" reason_label msg
                  | Error
-                     (System (System_error.WorktreeNotFound
-                        { worktree; searched_in })) ->
+                     (System (System_error.WorktreeNotFound { worktree; searched_in })) ->
                    (* P2-1: the task had a worktree record (worktree = Some _)
                       but no matching directory was found under the sandbox
                       repo clones — typical for Docker-isolated keepers whose
@@ -655,21 +712,23 @@ let transition_task_r
                       replaces the string match so a future format change in
                       [coord_worktree] cannot silently regress the demotion. *)
                    Log.RoomTask.info
-                     "%s worktree auto-cleanup: skipped (already absent: \
-                      worktree=%s searched_in=%s)"
-                     reason_label worktree searched_in
+                     "%s worktree auto-cleanup: skipped (already absent: worktree=%s \
+                      searched_in=%s)"
+                     reason_label
+                     worktree
+                     searched_in
                  | Error e ->
                    Log.RoomTask.warn
-                     "%s worktree auto-cleanup failed \
-                      (best-effort, suppressed): %s"
-                     reason_label (Masc_domain.masc_error_to_string e)
+                     "%s worktree auto-cleanup failed (best-effort, suppressed): %s"
+                     reason_label
+                     (Masc_domain.masc_error_to_string e)
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
                  Log.RoomTask.warn
-                   "%s worktree auto-cleanup raised \
-                    (best-effort, suppressed): %s"
-                   reason_label (Printexc.to_string exn))
+                   "%s worktree auto-cleanup raised (best-effort, suppressed): %s"
+                   reason_label
+                   (Printexc.to_string exn))
           in
           (match action with
            | Masc_domain.Done_action ->
@@ -757,7 +816,8 @@ let transition_task_r
                (task_status_to_string new_status)))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
+    | e ->
+      Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
 ;;
 
 (** Release task back to backlog - transition wrapper *)
@@ -789,7 +849,9 @@ let force_release_task_r config ~agent_name ~task_id ?handoff_context ()
 ;;
 
 (** Force-done a task regardless of assignee. Keeper privilege. *)
-let force_done_task_r config ~agent_name ~task_id ~notes () : string Masc_domain.masc_result =
+let force_done_task_r config ~agent_name ~task_id ~notes ()
+  : string Masc_domain.masc_result
+  =
   transition_task_r
     config
     ~agent_name
@@ -805,7 +867,8 @@ let force_done_task_r config ~agent_name ~task_id ~notes () : string Masc_domain
     [AwaitingVerification] tasks whose verifier deadline has passed,
     so the FSM does not stall and re-emit Timeout posts forever. *)
 let force_cancel_task_r config ~agent_name ~task_id ~reason ()
-  : string Masc_domain.masc_result =
+  : string Masc_domain.masc_result
+  =
   transition_task_r
     config
     ~agent_name
@@ -844,11 +907,12 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
              if not can_cancel
              then
                Error
-                 (Masc_domain.Task (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf
-                       "Cannot cancel task %s (already done/cancelled or owned by \
-                        another agent)"
-                       task_id)))
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       (Printf.sprintf
+                          "Cannot cancel task %s (already done/cancelled or owned by \
+                           another agent)"
+                          task_id)))
              else (
                let new_tasks =
                  List.map
@@ -868,9 +932,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                               String_util.contains_substring lower "do not reclaim"
                               || String_util.contains_substring lower "scope mismatch"
                             in
-                            if flagged && reason <> ""
-                            then Some reason
-                            else None
+                            if flagged && reason <> "" then Some reason else None
                         in
                         { t with
                           task_status =
@@ -916,18 +978,18 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                log_event
                  config
                  (transition_log_event
-                       ~event_type:Task_cancelled
-                       ~agent_name
-                       ~task_id
-                       ~from_status:task.task_status
-                       ~to_status:
-                         (Masc_domain.Cancelled
-                            { cancelled_by = agent_name
-                            ; cancelled_at = now_iso ()
-                            ; reason = (if reason = "" then None else Some reason)
-                            })
-                       ?reason:(if reason = "" then None else Some reason)
-                       ());
+                    ~event_type:Task_cancelled
+                    ~agent_name
+                    ~task_id
+                    ~from_status:task.task_status
+                    ~to_status:
+                      (Masc_domain.Cancelled
+                         { cancelled_by = agent_name
+                         ; cancelled_at = now_iso ()
+                         ; reason = (if reason = "" then None else Some reason)
+                         })
+                    ?reason:(if reason = "" then None else Some reason)
+                    ());
                observe_task_transition
                  config
                  ~agent_name
@@ -967,7 +1029,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                Ok (Printf.sprintf "%s cancelled %s" agent_name task_id)))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
+      | e ->
+        Error
+          (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
 ;;
 
 (* Scheduling functions are in Coord_task_schedule.
@@ -1061,25 +1125,27 @@ let link_task_execution_artifacts_r
              log_event
                config
                (`Assoc
-                      ([ "type", `String "task_linked"
-                       ; "agent", `String "system"
-                       ; "actor_kind", `String "system"
-                       ; "task", `String task_id
-                       ; "ts", `String (now_iso ())
-                       ]
-                       @ (match trim_opt session_id with
-                          | Some session_id -> [ "session_id", `String session_id ]
-                          | None -> [])
-                       @ (match trim_opt operation_id with
-                          | Some operation_id -> [ "operation_id", `String operation_id ]
-                          | None -> [])
-                       @
-                       match trim_opt autoresearch_loop_id with
-                       | Some autoresearch_loop_id ->
-                         [ "autoresearch_loop_id", `String autoresearch_loop_id ]
-                       | None -> []));
+                   ([ "type", `String "task_linked"
+                    ; "agent", `String "system"
+                    ; "actor_kind", `String "system"
+                    ; "task", `String task_id
+                    ; "ts", `String (now_iso ())
+                    ]
+                    @ (match trim_opt session_id with
+                       | Some session_id -> [ "session_id", `String session_id ]
+                       | None -> [])
+                    @ (match trim_opt operation_id with
+                       | Some operation_id -> [ "operation_id", `String operation_id ]
+                       | None -> [])
+                    @
+                    match trim_opt autoresearch_loop_id with
+                    | Some autoresearch_loop_id ->
+                      [ "autoresearch_loop_id", `String autoresearch_loop_id ]
+                    | None -> []));
              Ok (Printf.sprintf "Linked execution artifacts for %s" task_id))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
+      | e ->
+        Error
+          (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
 ;;

@@ -7,6 +7,74 @@ module Http = Http_server_eio
 let dashboard_feed_limit req =
   int_query_param req "limit" ~default:200 |> clamp ~min_v:1 ~max_v:200
 
+let o5_agent_board_inputs (config : Coord.config) =
+  let queue_depth =
+    Prometheus.metric_value_or_zero Keeper_metrics.metric_keeper_turn_queue_depth
+      ~labels:[("channel", "autonomous_queue")] ()
+    |> int_of_float
+    |> max 0
+  in
+  let now = Unix.gettimeofday () in
+  Keeper_types.keeper_names config
+  |> List.filter_map (fun name ->
+       match Keeper_types.read_meta config name with
+       | Ok (Some meta) ->
+           let blocked_on =
+             match meta.runtime.last_blocker with
+             | Some info ->
+               let value = String.trim info.detail in
+               if value = "" then
+                 Some (Keeper_types.blocker_class_to_string info.klass)
+               else Some value
+             | None -> None
+           in
+           Some {
+             Agent_stress.agent = meta.name;
+             ctx_pressure = Operator_control_snapshot.compute_context_ratio meta;
+             queue_depth = Some queue_depth;
+             blocked_on;
+             ts = Some now;
+           }
+       | Ok None | Error _ -> None)
+
+let dashboard_heuristics_json req =
+  let limit = int_query_param req "limit" ~default:100 in
+  let events = Heuristic_metrics.recent limit in
+  Heuristic_metrics.dashboard_feed_json ~limit events
+
+let dashboard_heuristics_coverage_json req =
+  let limit = int_query_param req "limit" ~default:100 in
+  Heuristic_metrics.recent_coverage limit
+  |> Heuristic_metrics.coverage_report_to_json
+
+let dashboard_stress_json ~config req =
+  let limit = int_query_param req "limit" ~default:100 in
+  let events = Agent_stress.recent limit in
+  let agents = o5_agent_board_inputs config in
+  Agent_stress.dashboard_feed_json ~limit ~agents events
+
+let respond_dashboard_heuristics request reqd =
+  with_public_read (fun _state req reqd ->
+    let json = dashboard_heuristics_json req in
+    Http.Response.json ~compress:true ~request:req
+      (Yojson.Safe.to_string json) reqd
+  ) request reqd
+
+let respond_dashboard_heuristics_coverage request reqd =
+  with_public_read (fun _state req reqd ->
+    let json = dashboard_heuristics_coverage_json req in
+    Http.Response.json ~compress:true ~request:req
+      (Yojson.Safe.to_string json) reqd
+  ) request reqd
+
+let respond_dashboard_stress request reqd =
+  with_public_read (fun state req reqd ->
+    let config = state.Mcp_server.room_config in
+    let json = dashboard_stress_json ~config req in
+    Http.Response.json ~compress:true ~request:req
+      (Yojson.Safe.to_string json) reqd
+  ) request reqd
+
 let add_routes ~sw router =
   router
   |> Http.Router.get "/api/v1/providers" (fun request reqd ->
@@ -176,40 +244,11 @@ let add_routes ~sw router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/heuristics" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let limit = int_query_param req "limit" ~default:100 in
-         let events = Heuristic_metrics.recent limit in
-         let json =
-           `Assoc [
-             ("limit", `Int limit);
-             ("count", `Int (List.length events));
-             ("events", `List events);
-           ]
-         in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/heuristics/coverage" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let limit = int_query_param req "limit" ~default:100 in
-         let report = Heuristic_metrics.recent_coverage limit in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string
-              (Heuristic_metrics.coverage_report_to_json report))
-           reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/stress" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let limit = int_query_param req "limit" ~default:100 in
-         let events = Agent_stress.recent limit in
-         let json =
-           `Assoc [
-             ("limit", `Int limit);
-             ("count", `Int (List.length events));
-             ("events", `List events);
-           ]
-         in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
-       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/heuristics" respond_dashboard_heuristics
+  |> Http.Router.get "/api/v1/heuristics" respond_dashboard_heuristics
+  |> Http.Router.get "/api/v1/dashboard/heuristics/coverage"
+       respond_dashboard_heuristics_coverage
+  |> Http.Router.get "/api/v1/heuristics/coverage"
+       respond_dashboard_heuristics_coverage
+  |> Http.Router.get "/api/v1/dashboard/stress" respond_dashboard_stress
+  |> Http.Router.get "/api/v1/agent_stress" respond_dashboard_stress

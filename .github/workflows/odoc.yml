@@ -21,6 +21,13 @@ concurrency:
 jobs:
   build-doc:
     name: Build odoc
+    # Skip the ~25-minute OCaml build when GitHub Pages deploy is not enabled.
+    # Upload + deploy steps are already gated on vars.ODOC_PAGES_DEPLOY == 'true',
+    # so without the var the build job produced artifacts that were immediately
+    # discarded (152 successful main-push runs / 30d * ~25min = ~63h/month of
+    # dead CI minutes). workflow_dispatch still runs so operators can verify
+    # @doc builds cleanly before flipping the deploy variable.
+    if: ${{ vars.ODOC_PAGES_DEPLOY == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

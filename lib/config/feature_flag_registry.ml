@@ -87,6 +87,11 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.60.0" };
 
   (* ── Keeper ───────────────────────────────────────────────── *)
+  { env_name = "MASC_KEEPER_DOMAIN_POOL_ENABLED";
+    description = "Route per-keeper supervise fork through the shared Eio.Executor_pool (RFC-0059 PR-7-pilot) instead of the main scheduler. Falls back to Eio.Fiber.fork if pool ref is None.";
+    default = false; category = "keeper";
+    lifecycle = Experimental; since = "2.170.0" };
+
   { env_name = "MASC_KEEPER_BOOTSTRAP_ENABLED";
     description = "Startup keeper auto-bootstrap scan";
     default = true; category = "keeper";

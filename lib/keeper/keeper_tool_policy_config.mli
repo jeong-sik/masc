@@ -19,6 +19,12 @@ type preset_resolution =
     Returns [Error msg] if the file is missing or malformed. *)
 val load : base_path:string -> (t, string) result
 
+(** True when [name] is valid in [tool_policy.toml]. This checks the full
+    keeper-facing policy surface, including static tag-dispatch tools and OAS
+    core tools that are not direct handler-registry entries. Exposed for
+    policy-validation tests. *)
+val is_known_policy_tool_name : string -> bool
+
 (** Resolve a preset name to its tool name list.
     Shard-backed groups are resolved via [Tool_shard] at call time.
     MASC tools are filtered through [masc_filter] if provided.

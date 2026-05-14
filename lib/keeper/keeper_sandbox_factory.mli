@@ -28,6 +28,7 @@ val create :
   ?default_network_override:Keeper_types.network_mode ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
+  ?turn_id:int ->
   unit ->
   t
 (** Create an empty factory.  [default_network_override], when supplied,

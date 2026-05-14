@@ -8,13 +8,13 @@
     stripped so callers receive only prompt body text.
 
     Missing files do not crash.  [get name] returns [None] and logs
-    once per name so callers can fall back to an in-source string while
-    operators iterate on the external file.
+    once per name so callers can render an explicit config-drift marker
+    while operators restore the external file.
 
     This module is a thin sibling of [Prompt_registry]: that registry
     handles versioned, override-able, frontmatter-aware system prompts.
     [Keeper_prompt_external] is for the long tail of operator-facing
-    *behavior* blocks that today live as OCaml string literals in
+    *behavior* blocks that used to live as OCaml string literals in
     [keeper_prompt.ml] — content that operators want to tune without
     rebuilding the binary, but that does not need version management
     or runtime overrides. *)

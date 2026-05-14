@@ -28,6 +28,9 @@ type inbound_message = {
 (** Turn-level statistics from the keeper. *)
 type turn_stats = {
   model_used : string;
+      (** Legacy in-memory compatibility slot. Public JSON redacts this field;
+          callers should use duration/token metrics, not provider/model
+          identity. *)
   duration_ms : int;
   tokens_used : int;
 }

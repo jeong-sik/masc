@@ -1,4 +1,3 @@
-
 (** Tool_inline_dispatch_coord — room lifecycle tool handlers.
 
     Three [masc_*] handlers covering the agent room lifecycle:
@@ -8,14 +7,18 @@
 
     Extracted from {!Tool_inline_dispatch} to keep the dispatch
     table file under the lint cap.  All three return
-    [tool_result option] = [Some (success, message)] or [None]
-    when the dispatcher should fall through to a default handler. *)
+    [Tool_result.t option] — [Some] when the tool name matches,
+    [None] when the dispatcher should fall through to a default handler.
+
+    RFC-0062 Phase 4c-2: handlers now accept [~tool_name ~start_time]
+    and return structured [Tool_result.t] instead of [(bool * string)]. *)
 
 val handle_start :
+  tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_inline_dispatch_types.tool_result option
-(** [handle_start ctx] handles [masc_start] — the compound
-    "set project root + join + optional task" onboarding flow.
+  Tool_result.t option
+(** [handle_start ~tool_name ~start_time ctx] handles [masc_start] —
+    the compound "set project root + join + optional task" onboarding flow.
 
     {2 Argument resolution}
 
@@ -59,15 +62,17 @@ val handle_start :
     must touch this. *)
 
 val handle_join :
+  tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_inline_dispatch_types.tool_result option
-(** [handle_join ctx] handles [masc_join] — register the agent
-    in the project namespace.  Idempotent: re-joining is a
-    no-op success.  Reads [path] / [room] / [agent] /
-    [capabilities] (string list) from [ctx.arguments]. *)
+  Tool_result.t option
+(** [handle_join ~tool_name ~start_time ctx] handles [masc_join] —
+    register the agent in the project namespace.  Idempotent:
+    re-joining is a no-op success.  Reads [path] / [room] /
+    [agent] / [capabilities] (string list) from [ctx.arguments]. *)
 
 val handle_leave :
+  tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_inline_dispatch_types.tool_result option
-(** [handle_leave ctx] handles [masc_leave] — graceful agent
-    exit. *)
+  Tool_result.t option
+(** [handle_leave ~tool_name ~start_time ctx] handles [masc_leave] —
+    graceful agent exit. *)

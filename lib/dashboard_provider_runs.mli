@@ -23,11 +23,10 @@
     ([discovery_info_to_json], [provider_snapshot_to_json],
     [run_record_to_json]), Hashtbl mutators
     ([set_run_record], [update_run_record], [find_run_record]),
-    [make_run_id], model-list resolvers
-    ([model_id_of_label], [catalog_models_for_provider],
-    [default_model_for_provider],
-    [candidate_models_for_provider]), [llama_snapshot] +
-    [provider_snapshot_of_adapter] + [provider_snapshots] +
+    [make_run_id], OAS binding projection helpers
+    ([auth_detail_of_binding], [models_for_binding],
+    [runtime_kind_string], [dashboard_kind_string]),
+    [llama_snapshot] + [provider_snapshot_of_binding] + [provider_snapshots] +
     [provider_snapshot_by_name],
     [response_text_of_api_response],
     [provider_label_for_model],

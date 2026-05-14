@@ -9,6 +9,19 @@ module OT = Opentelemetry
 
 let initialized = Atomic.make false
 let exporter_active = Atomic.make false
+let enabled_override : bool option ref = ref None
+
+let event_emitter_override
+      : (name:string -> attrs:OT.key_value list -> unit) option ref
+  =
+  ref None
+;;
+
+let enabled () =
+  match !enabled_override with
+  | Some value -> value
+  | None -> Otel_config.enabled
+;;
 
 let init () =
   if Otel_config.enabled && not (Atomic.get initialized) then begin
@@ -70,6 +83,32 @@ let with_span ~name ?(attrs = []) f =
       f (fun () ->
         let ctx = OT.Scope.to_span_ctx scope in
         Some (OT.Trace_id.to_hex (OT.Span_ctx.trace_id ctx))))
+
+(** Add an event to the active OTel span. No-op when disabled or when no
+    ambient span exists. *)
+let add_event ~name ?(attrs = []) () =
+  if enabled ()
+  then
+    match !event_emitter_override with
+    | Some emit -> emit ~name ~attrs
+    | None ->
+      (match OT.Scope.get_ambient_scope () with
+       | Some scope ->
+         OT.Scope.add_event scope (fun () -> OT.Event.make ~attrs name)
+       | None -> ())
+;;
+
+let with_test_event_emitter ~enabled:enabled_value ~emit_event f =
+  let prev_enabled = !enabled_override in
+  let prev_emitter = !event_emitter_override in
+  enabled_override := Some enabled_value;
+  event_emitter_override := Some emit_event;
+  Eio_guard.protect
+    ~finally:(fun () ->
+      enabled_override := prev_enabled;
+      event_emitter_override := prev_emitter)
+    f
+;;
 
 (** Get the current OTel trace ID as a hex string, or None if disabled / no active span. *)
 let current_trace_id () =

@@ -29,6 +29,13 @@ const baseSummary: TelemetrySummaryResponse = {
       entry_count: 1,
       keeper_count: 1,
       exists: true,
+      producer: 'Telemetry_unified.summary_json',
+      durable_store: '.masc/tool_metrics/YYYY-MM/DD.jsonl',
+      dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+      freshness_slo_s: 300,
+      latest_age_s: 45,
+      health: 'stale',
+      stale_reason: 'freshness_slo_exceeded',
     },
   ],
   total_entries: 1,
@@ -90,6 +97,7 @@ describe('TelemetryUnified', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+    window.location.hash = ''
     vi.clearAllMocks()
     vi.resetModules()
     vi.doUnmock('../api/dashboard')
@@ -205,6 +213,10 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('Auto-refresh 30s')
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
+    expect(container.textContent).toContain('freshness_slo_exceeded')
+    expect(container.textContent).toContain('Telemetry_unified.summary_json')
+    expect(container.textContent).toContain('.masc/tool_metrics/YYYY-MM/DD.jsonl')
+    expect(container.textContent).toContain('/api/v1/dashboard/telemetry/summary')
 
     // MASC Store Diagnosis cards (live state)
     expect(container.textContent).toContain('키퍼 현황 (실시간)')
@@ -214,6 +226,124 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('1 차단 작업')
     expect(container.textContent).not.toContain('활성 세션')
     expect(container.textContent).toContain('5 public')
+  })
+
+  it('renders telemetry summary coverage gap provenance', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue({
+      ...baseSummary,
+      sources: [
+        {
+          ...baseSummary.sources[0],
+          health: 'coverage_gap',
+          stale_reason: 'append_failed',
+          coverage_gap_count: 1,
+          coverage_gaps: [
+            {
+              schema: 'masc.telemetry_coverage_gap.v1',
+              source: 'tool_metric',
+              producer: 'telemetry_eio',
+              durable_store: '.masc/telemetry',
+              dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+              stale_reason: 'append_failed',
+              trace_id: 'trace-summary-gap',
+              error: 'disk full',
+            },
+          ],
+        },
+      ],
+    })
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('coverage gaps 1: append_failed')
+    expect(container.textContent).toContain('gap producer')
+    expect(container.textContent).toContain('telemetry_eio')
+    expect(container.textContent).toContain('gap store')
+    expect(container.textContent).toContain('.masc/telemetry')
+    expect(container.textContent).toContain('gap surface')
+    expect(container.textContent).toContain('/api/v1/dashboard/telemetry/summary')
+    expect(container.textContent).toContain('gap trace')
+    expect(container.textContent).toContain('trace-summary-gap')
+    expect(container.textContent).toContain('gap error')
+    expect(container.textContent).toContain('disk full')
+  })
+
+  it('hydrates telemetry scope and entry focus from route params', async () => {
+    window.location.hash = '#monitoring?section=fleet-health&view=event-log&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
+    const fetchTelemetry = vi.fn().mockResolvedValue({
+      ...baseTelemetry,
+      count: 2,
+      entries: [
+        {
+          source: 'tool_metric',
+          ts: 1_775_709_100,
+          session_id: 'sess-route',
+          operation_id: 'op-route',
+          worker_run_id: 'wr-route',
+          tool_name: 'turn-9-evidence',
+          duration_ms: 22,
+          success: true,
+        },
+        {
+          source: 'keeper_metric',
+          ts: 1_775_709_000,
+          session_id: 'sess-route',
+          name: 'keeper-other',
+          channel: 'turn_end',
+          tool_call_count: 1,
+        },
+      ],
+    })
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      session_id: 'sess-route',
+      operation_id: 'op-route',
+      worker_run_id: 'wr-route',
+      n: 100,
+    }))
+    expect(container.textContent).toContain('session sess-route')
+    expect(container.textContent).toContain('operation op-route')
+    expect(container.textContent).toContain('worker_run wr-route')
+    expect(container.textContent).toContain('focus turn-9')
+    expect(container.querySelector('[data-testid="telemetry-route-focus"]')).not.toBeNull()
+    expect(container.textContent).toContain('SESSION sess-route')
+    expect(container.textContent).toContain('OPERATION op-route')
+    expect(container.textContent).toContain('WORKER wr-route')
+    expect(container.textContent).toContain('QUERY turn-9')
+    expect(container.textContent).toContain('1 focused item')
+    const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="엔트리 텍스트 검색"]')
+    expect(searchInput?.value).toBe('turn-9')
+    expect(container.textContent).toContain('검색 매치 1건')
+    expect(container.textContent).toContain('turn-9-evidence')
+    expect(container.textContent).not.toContain('keeper-other')
+    expect(container.querySelectorAll('[data-route-focused-telemetry="true"]')).toHaveLength(1)
+
+    const clearButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.includes('CLEAR'))
+    expect(clearButton).not.toBeUndefined()
+    await act(async () => {
+      clearButton!.click()
+    })
+
+    expect(window.location.hash).toContain('#monitoring?section=fleet-health&view=event-log')
+    expect(window.location.hash).not.toContain('session_id=')
+    expect(window.location.hash).not.toContain('operation_id=')
+    expect(window.location.hash).not.toContain('worker_run_id=')
+    expect(window.location.hash).not.toContain('q=')
   })
 
   it('renders a telemetry entry raw JSON copy action', async () => {
@@ -398,6 +528,7 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     expect(container.textContent).toContain('하트비트 · fleet heartbeat · 2 events')
+    expect(container.textContent).not.toContain('model=glm-5.1')
   })
 
   it('collapses interleaved heartbeat + oas snapshot polling across multiple keepers into one group (#13002)', async () => {

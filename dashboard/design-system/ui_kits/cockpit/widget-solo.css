@@ -151,7 +151,7 @@ body.widget-solo-mode #root { height: 100vh; }
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 .ws-empty-msg li a {
   color: var(--brass-1, #f0c674);

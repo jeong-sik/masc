@@ -437,20 +437,65 @@ let test_parse_kind_known () =
   check_ok "weighted_random" S.Weighted_random;
   check_ok "circuit_breaker_cycling" S.Circuit_breaker_cycling
 
+let string_contains haystack needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  let rec loop i =
+    if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  nlen = 0 || loop 0
+
 let test_parse_kind_unknown () =
   match S.parse_kind "round_robin_xx" with
   | Ok _ -> fail "expected Error for unknown kind"
   | Error msg ->
     check bool "error mentions the rejected name"
-      true (String.length msg > 0
-            && (let needle = "round_robin_xx" in
-                let nlen = String.length needle in
-                let hlen = String.length msg in
-                let rec loop i =
-                  if i + nlen > hlen then false
-                  else if String.sub msg i nlen = needle then true
-                  else loop (i + 1)
-                in loop 0))
+      true
+      (String.length msg > 0 && string_contains msg "round_robin_xx")
+
+let test_parse_config_kind_supported () =
+  check
+    (list string)
+    "config kind strings"
+    [ "failover"; "priority_tier" ]
+    S.config_kind_strings;
+  let check_ok s expected =
+    match S.parse_config_kind s with
+    | Ok k ->
+      check string ("parse config " ^ s) (S.kind_to_string expected) (S.kind_to_string k)
+    | Error msg -> fail (Printf.sprintf "expected Ok, got Error %s" msg)
+  in
+  check_ok "failover" S.Failover;
+  check_ok "priority_tier" S.Priority_tier
+
+let test_parse_config_kind_retired_rejected () =
+  let rejected =
+    [ "capacity_aware"
+    ; "weighted_random"
+    ; "circuit_breaker_cycling"
+    ; "sticky"
+    ; "round_robin"
+    ; "does_not_exist"
+    ]
+  in
+  List.iter
+    (fun raw ->
+       match S.parse_config_kind raw with
+       | Ok kind ->
+         fail
+           (Printf.sprintf
+              "expected Error for %s, got %s"
+              raw
+              (S.kind_to_string kind))
+       | Error msg ->
+         check
+           bool
+           ("config error mentions supported kinds for " ^ raw)
+           true
+           (string_contains msg "failover" && string_contains msg "priority_tier"))
+    rejected
 
 (* ── Cascade_client_capacity ─────────────────────────────────── *)
 
@@ -512,30 +557,14 @@ let test_client_capacity_clamp_max () =
   | Some info ->
     check int "max_concurrent <=0 clamped to 1" 1 info.total
 
-let test_ollama_auto_register () =
-  C.unregister_all ();
-  C.auto_register_for_candidates ~base_urls:[
-    "http://127.0.0.1:11434";
-    "http://glm.example.com/api";    (* not ollama: 11434 not in URL *)
-    "http://other:11434/api";        (* ollama-like *)
-  ];
-  let urls = C.registered_urls () in
-  check bool "127.0.0.1:11434 registered"
-    true (List.mem "http://127.0.0.1:11434" urls);
-  check bool "other:11434 registered"
-    true (List.mem "http://other:11434/api" urls);
-  check bool "glm.example.com NOT registered"
-    false (List.mem "http://glm.example.com/api" urls)
-
-let test_ollama_register_with_override () =
-  C.unregister_all ();
-  C.auto_register_ollama_with_override
-    ~base_urls:["http://127.0.0.1:11434"]
-    ~max_concurrent:4;
-  match C.capacity "http://127.0.0.1:11434" with
-  | None -> fail "expected registration"
-  | Some info ->
-    check int "override max=4" 4 info.total
+(* The previous [test_ollama_auto_register] /
+   [test_ollama_register_with_override] tests exercised the substring-scan
+   auto-registration path inside [Cascade_client_capacity]. That path is
+   gone now — the caller ([Keeper_turn_driver]) consults
+   [Provider_adapter.is_http_probe_capable_kind] and calls
+   [Cascade_client_capacity.register] explicitly, so the test surface
+   for the removed [auto_register_for_candidates] /
+   [auto_register_ollama_with_override] functions is gone with them. *)
 
 (* ── Phase C3: CLI sentinel auto-registration ──────────────── *)
 
@@ -960,7 +989,7 @@ let test_history_prometheus_counter_increments () =
 
 (* ── Strategy decision trace (LT-5) ─────────────────── *)
 
-let mk_trace_event ?(ts = 0.0) ?(cascade_name = "big_three")
+let mk_trace_event ?(ts = 0.0) ?(cascade_name = "primary")
     ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
     ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered)
     ?trace_id ?(confidence_score = None) () =
@@ -989,14 +1018,14 @@ let test_trace_record_snapshot_roundtrip () =
 
 let test_trace_cascade_filter () =
   ST.clear ();
-  ST.record (mk_trace_event ~cascade_name:"big_three" ~ts:1.0 ());
+  ST.record (mk_trace_event ~cascade_name:"primary" ~ts:1.0 ());
   ST.record (mk_trace_event ~cascade_name:"nick0cave" ~ts:2.0 ());
-  ST.record (mk_trace_event ~cascade_name:"big_three" ~ts:3.0 ());
-  let unified = ST.snapshot ~cascade:"big_three" () in
-  check int "big_three → 2 events" 2 (List.length unified);
+  ST.record (mk_trace_event ~cascade_name:"primary" ~ts:3.0 ());
+  let unified = ST.snapshot ~cascade:"primary" () in
+  check int "primary → 2 events" 2 (List.length unified);
   List.iter
     (fun e ->
-      check string "cascade filter" "big_three"
+      check string "cascade filter" "primary"
         (Kcp.runtime_name_to_string e.ST.cascade_name))
     unified;
   let missing = ST.snapshot ~cascade:"does_not_exist" () in
@@ -1075,12 +1104,12 @@ let test_trace_prometheus_counter_increments () =
   let before =
     find_strategy_counter_value
       (Masc_mcp.Prometheus.to_prometheus_text ())
-      ~cascade:"big_three" ~strategy:"failover" ~kind:"ordered"
+      ~cascade:"primary" ~strategy:"failover" ~kind:"ordered"
     |> Option.value ~default:0.0
   in
-  ST.record (mk_trace_event ~cascade_name:"big_three"
+  ST.record (mk_trace_event ~cascade_name:"primary"
                ~strategy:"failover" ~kind:ST.Ordered ());
-  ST.record (mk_trace_event ~cascade_name:"big_three"
+  ST.record (mk_trace_event ~cascade_name:"primary"
                ~strategy:"failover" ~kind:ST.Ordered ());
   ST.record (mk_trace_event ~cascade_name:"nick0cave"
                ~strategy:"circuit_breaker_cycling"
@@ -1088,7 +1117,7 @@ let test_trace_prometheus_counter_increments () =
   let text = Masc_mcp.Prometheus.to_prometheus_text () in
   let ordered =
     find_strategy_counter_value text
-      ~cascade:"big_three" ~strategy:"failover" ~kind:"ordered"
+      ~cascade:"primary" ~strategy:"failover" ~kind:"ordered"
     |> Option.value ~default:0.0
   in
   let filtered =
@@ -1097,7 +1126,7 @@ let test_trace_prometheus_counter_increments () =
       ~kind:"filtered_empty"
     |> Option.value ~default:0.0
   in
-  check bool "big_three/failover/ordered advanced by >= 2"
+  check bool "primary/failover/ordered advanced by >= 2"
     true (ordered >= before +. 2.0);
   check bool "nick0cave/circuit_breaker_cycling/filtered_empty >= 1"
     true (filtered >= 1.0)
@@ -1237,6 +1266,9 @@ let () =
       test_case "known kinds parse" `Quick test_parse_kind_known;
       test_case "unknown kind returns Error with name" `Quick
         test_parse_kind_unknown;
+      test_case "config kinds parse" `Quick test_parse_config_kind_supported;
+      test_case "retired config kinds rejected" `Quick
+        test_parse_config_kind_retired_rejected;
     ];
     "client_capacity", [
       test_case "register + query" `Quick test_client_capacity_register_query;
@@ -1248,10 +1280,6 @@ let () =
         test_client_capacity_unregistered_url;
       test_case "max_concurrent <= 0 clamped to 1" `Quick
         test_client_capacity_clamp_max;
-      test_case "auto-register matches :11434 hosts" `Quick
-        test_ollama_auto_register;
-      test_case "auto_register override sets max" `Quick
-        test_ollama_register_with_override;
       test_case "cli sentinel auto-register filters non-CLI" `Quick
         test_cli_auto_register_filters_sentinels;
       test_case "cli auto_register override sets max" `Quick

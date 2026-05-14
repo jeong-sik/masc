@@ -1,0 +1,89 @@
+# Keeper tool guidance hints.
+# Loaded by lib/keeper/keeper_tool_guidance.ml via otoml on first use (lazy).
+# Order is significant — render_preferred_tools preserves it.
+# Substitution: {{web_fetch_timeout}} -> Tool_misc_web_fetch.default_timeout_sec at load time.
+
+[[hints]]
+name = "keeper_task_claim"
+call = "`keeper_task_claim` {}"
+description = "reserve the next eligible task"
+
+[[hints]]
+name = "keeper_tasks_list"
+call = "`keeper_tasks_list` {}"
+description = "inspect eligible task context"
+
+[[hints]]
+name = "keeper_task_create"
+call = "`keeper_task_create` { title: \"<verb + object>\", description: \"<acceptance criteria>\" }"
+description = "create a new backlog task with keeper-native evidence"
+
+[[hints]]
+name = "keeper_board_get"
+call = "`keeper_board_get` { id: \"<post-id>\" }"
+description = "read a board post before replying"
+
+[[hints]]
+name = "keeper_board_comment"
+call = "`keeper_board_comment` { post_id: \"<post-id>\", content: \"<reply>\" }"
+description = "reply to a board post"
+
+[[hints]]
+name = "keeper_board_post"
+call = "`keeper_board_post` { content: \"<note>\" }"
+description = "coordinate via board"
+
+[[hints]]
+name = "keeper_broadcast"
+call = "`keeper_broadcast` { message: \"<note>\" }"
+description = "share broadly in the namespace"
+
+[[hints]]
+name = "keeper_fs_read"
+call = "`keeper_fs_read` { path: \"<path>\" }"
+description = "read a file before editing or reporting"
+
+[[hints]]
+name = "keeper_fs_edit"
+call = "`keeper_fs_edit` { path: \"<path>\", mode: \"patch\", old_string: \"...\", new_string: \"...\" }"
+description = "edit files inside the keeper workspace"
+
+[[hints]]
+name = "keeper_shell"
+call = "`keeper_shell` { op: \"gh\", cmd: \"pr list --state open\" }"
+description = "inspect GitHub after a task/worktree is bound"
+
+[[hints]]
+name = "keeper_bash"
+call = "`keeper_bash` { cmd: \"<single shell command>\" }"
+description = "run one shell command in the keeper workspace"
+
+[[hints]]
+name = "masc_web_search"
+call = "`masc_web_search` { query: \"<current-info query>\", limit: 5 }"
+description = "look up current public context before time-sensitive claims"
+
+[[hints]]
+name = "masc_web_fetch"
+call = "`masc_web_fetch` { url: \"<page-url>\", timeout: {{web_fetch_timeout}} }"
+description = "fetch and read a web page before citing it"
+
+[[hints]]
+name = "masc_worktree_create"
+call = "`masc_worktree_create` { task_id: \"<task-id>\", repo_name: \"masc-mcp\" }"
+description = "create a repo worktree before code edits"
+
+[[hints]]
+name = "keeper_task_submit_for_verification"
+call = "`keeper_task_submit_for_verification` { notes: \"<evidence>\", pr_url: \"<url>\" }"
+description = "submit PR/code work for verification"
+
+[[hints]]
+name = "keeper_task_done"
+call = "`keeper_task_done` { notes: \"<evidence>\" }"
+description = "close non-PR task work with evidence"
+
+[[hints]]
+name = "keeper_stay_silent"
+call = "`keeper_stay_silent` {}"
+description = "nothing genuinely actionable fits your role"

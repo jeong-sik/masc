@@ -2,21 +2,39 @@
           MASC_DATA, WorkPlane, CommsPlane, ObservePlane, CognitionPlane, IdePlane,
           ViewportBanner, useCockpitState, useLayoutProfile, Drawer */
 const { useState, useCallback, useEffect } = React;
-const useCockpitLayoutProfile = window.useLayoutProfile || function useCockpitLayoutProfileNoop() {
-  return undefined;
-};
+const cockpitStateAvailable = typeof window.useCockpitState === "function";
+const useCockpitStateHook = cockpitStateAvailable
+  ? window.useCockpitState
+  : () => [{}, () => {}];
+const layoutProfileAvailable = typeof window.useLayoutProfile === "function";
+const useLayoutProfileHook = layoutProfileAvailable ? window.useLayoutProfile : () => {};
 
 function App() {
-  // sync mode/branch with the cockpit-state singleton (URL+localStorage)
-  const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{}, () => {}]);
-  // Always call the same hook-shaped function so hook order stays stable.
-  useCockpitLayoutProfile();
+  // sync mode/branch with the cockpit-state singleton (URL+localStorage).
+  const [cs, setCs] = useCockpitStateHook();
+  // run layout profile — auto-collapses chrome per mode
+  useLayoutProfileHook();
   const [mode, setModeRaw] = useState(cs.mode || "Dashboard");
   const [density, setDensity] = useState("normal");
   const [selKeeper, setSelKeeper] = useState("nick0cave");
   const [selGoal, setSelGoal] = useState("goal-merge-blockers");
   const [branch, setBranchRaw] = useState(cs.branch || "main");
   const [selectedKeepers, setSelectedKeepers] = useState(new Set(["nick0cave","sangsu"]));
+
+  if (!cockpitStateAvailable) {
+    return (
+      <div className="app app-error" role="alert" data-error="missing-cockpit-state">
+        <h1>Cockpit state unavailable</h1>
+        <p>
+          <code>window.useCockpitState</code> did not load. Verify
+          cockpit-ext.jsx is loaded before App.jsx.
+        </p>
+      </div>
+    );
+  }
+  if (!layoutProfileAvailable) {
+    console.error("[App] window.useLayoutProfile missing — layout auto-collapse disabled");
+  }
 
   // cs is the source of truth for mode/branch — mirror to local state for child props
   useEffect(() => {
@@ -28,6 +46,19 @@ function App() {
   const setBranch = useCallback((b) => { setBranchRaw(b); setCs({ branch: b }); }, [setCs]);
 
   const D = window.MASC_DATA;
+  // Without the data layer the cockpit cannot render anything meaningful.
+  // Show a visible error instead of crashing on D.goals.find below.
+  if (!D || !Array.isArray(D.goals)) {
+    return (
+      <div className="app app-error" role="alert" data-error="missing-masc-data">
+        <h1>Cockpit data unavailable</h1>
+        <p>
+          <code>window.MASC_DATA</code> is missing or malformed. Verify the data
+          layer script loaded before App.jsx.
+        </p>
+      </div>
+    );
+  }
   const activeGoal = D.goals.find(g => g.id === selGoal) || D.goals[0];
 
   const toggleKeeper = useCallback((id) => {
@@ -52,6 +83,7 @@ function App() {
     if (mode === "Comms")     return <div className="center"><CommsPlane {...ctx}/></div>;
     if (mode === "Observe")   return <div className="center"><ObservePlane {...ctx}/></div>;
     if (mode === "Cognition") return <div className="center"><CognitionPlane {...ctx}/></div>;
+    if (mode === "Crew")      return <div className="center"><CrewPlane {...ctx}/></div>;
     if (mode === "IDE")       return <div className="center"><IdePlane {...ctx}/></div>;
     return <div className="center"></div>;
   };

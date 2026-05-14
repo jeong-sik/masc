@@ -144,8 +144,12 @@ let message_json (msg : Masc_domain.message) =
     ; "room_id", `String default_room_id
     ; "ts", `String msg.timestamp
     ; "sender", `String msg.from_agent
+    ; "type", `String msg.msg_type
     ; "body", `String body
     ; "mentions", `List (List.map (fun target -> `String target) mentions)
+    ; ( "expires_at"
+      , match msg.expires_at with Some value -> `Float value | None -> `Null )
+    ; "relevance", `String msg.relevance
     ]
   in
   let fields =

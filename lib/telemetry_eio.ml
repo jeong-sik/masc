@@ -169,8 +169,9 @@ let read_all_events_from_path (file : string) : event_record list =
                    ~path:file ~detail:msg;
                  None
            with Yojson.Json_error msg ->
-             report_telemetry_drop ~reason:"json_syntax_error" ~path:file
-               ~detail:msg;
+             report_telemetry_drop
+               ~reason:Safe_ops.persistence_read_drop_reason_json_syntax_error
+               ~path:file ~detail:msg;
              None)
 
 let event_to_json event =
@@ -302,46 +303,50 @@ let read_events_since ?fs config ~since : event_record list =
   List.filter (fun r -> r.timestamp >= since) all
 
 (** Metrics calculation functions (pure) *)
+
+(* [count_active_agents] = joined \ left,
+   [count_tasks_in_progress] = started \ completed.
+   Kernel lives in [Set_util.count_difference] (lib/core/set_util.ml). *)
 let count_active_agents events =
-  let joined = List.filter_map (fun r ->
-    match r.event with
-    | Agent_joined { agent_id; _ } -> Some agent_id
-    | _ -> None
-  ) events in
-  let left = List.filter_map (fun r ->
-    match r.event with
-    | Agent_left { agent_id; _ } -> Some agent_id
-    | _ -> None
-  ) events in
-  let active = List.filter (fun id -> not (List.mem id left)) joined in
-  List.length (List.sort_uniq String.compare active)
+  Set_util.count_difference events
+    ~present:(fun r ->
+      match r.event with
+      | Agent_joined { agent_id; _ } -> Some agent_id
+      | Agent_left _ | Task_started _ | Task_completed _ | Handoff_triggered _
+      | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
+    ~absent:(fun r ->
+      match r.event with
+      | Agent_left { agent_id; _ } -> Some agent_id
+      | Agent_joined _ | Task_started _ | Task_completed _ | Handoff_triggered _
+      | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
 
 let count_tasks_in_progress events =
-  let started = List.filter_map (fun r ->
-    match r.event with
-    | Task_started { task_id; _ } -> Some task_id
-    | _ -> None
-  ) events in
-  let completed = List.filter_map (fun r ->
-    match r.event with
-    | Task_completed { task_id; _ } -> Some task_id
-    | _ -> None
-  ) events in
-  let in_progress = List.filter (fun id -> not (List.mem id completed)) started in
-  List.length (List.sort_uniq String.compare in_progress)
+  Set_util.count_difference events
+    ~present:(fun r ->
+      match r.event with
+      | Task_started { task_id; _ } -> Some task_id
+      | Agent_joined _ | Agent_left _ | Task_completed _ | Handoff_triggered _
+      | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
+    ~absent:(fun r ->
+      match r.event with
+      | Task_completed { task_id; _ } -> Some task_id
+      | Agent_joined _ | Agent_left _ | Task_started _ | Handoff_triggered _
+      | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
 
 let count_completed_tasks events =
   List_util.count_if (fun r ->
     match r.event with
     | Task_completed _ -> true
-    | _ -> false
+    | Agent_joined _ | Agent_left _ | Task_started _ | Handoff_triggered _
+    | Error_occurred _ | Tool_called _ | Tool_assigned _ -> false
   ) events
 
 let avg_duration events =
   let durations = List.filter_map (fun r ->
     match r.event with
     | Task_completed { duration_ms; _ } -> Some (float_of_int duration_ms)
-    | _ -> None
+    | Agent_joined _ | Agent_left _ | Task_started _ | Handoff_triggered _
+    | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None
   ) events in
   match durations with
   | [] -> 0.0
@@ -353,12 +358,14 @@ let calculate_handoff_rate events =
   let handoffs = List_util.count_if (fun r ->
     match r.event with
     | Handoff_triggered _ -> true
-    | _ -> false
+    | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
+    | Error_occurred _ | Tool_called _ | Tool_assigned _ -> false
   ) events in
   let task_events = List_util.count_if (fun r ->
     match r.event with
     | Task_started _ | Task_completed _ -> true
-    | _ -> false
+    | Agent_joined _ | Agent_left _ | Handoff_triggered _ | Error_occurred _
+    | Tool_called _ | Tool_assigned _ -> false
   ) events in
   if task_events = 0 then 0.0
   else float_of_int handoffs /. float_of_int task_events
@@ -367,7 +374,8 @@ let calculate_error_rate events =
   let errors = List_util.count_if (fun r ->
     match r.event with
     | Error_occurred _ -> true
-    | _ -> false
+    | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
+    | Handoff_triggered _ | Tool_called _ | Tool_assigned _ -> false
   ) events in
   let total = List.length events in
   if total = 0 then 0.0

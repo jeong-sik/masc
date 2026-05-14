@@ -345,8 +345,8 @@ let classify_tool_correctness
   | Some recommendation, Some stats when stats.calls >= 3 && stats.success_pct < 80.0 ->
       let summary =
         Printf.sprintf
-          "benchmark recommends %s but live tool success is %.1f%% across %d calls"
-          recommendation.model_label stats.success_pct stats.calls
+          "benchmark recommends runtime adjustment but live tool success is %.1f%% across %d calls"
+          stats.success_pct stats.calls
       in
       ( make_domain ~id:tool_domain_id ~status:Fail ~score:stats.success_pct
           ~summary ~evidence_refs,
@@ -370,8 +370,8 @@ let classify_tool_correctness
       in
       let summary =
         Printf.sprintf
-          "benchmark recommends %s (score %.1f, stability %.2f)"
-          recommendation.model_label recommendation.composite_score stability
+          "benchmark recommends runtime adjustment (score %.1f, stability %.2f)"
+          recommendation.composite_score stability
       in
       ( make_domain ~id:tool_domain_id ~status
           ~score:recommendation.composite_score
@@ -716,7 +716,9 @@ let build_keeper_snapshot
     ~(activity_by_keeper : (string, activity_stats) Hashtbl.t)
     (meta : keeper_meta) =
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
-  let repo_readiness = Keeper_repo_readiness.inspect ~config ~meta () in
+  let repo_readiness =
+    Keeper_repo_readiness.inspect ~workspace_discovery:false ~config ~meta ()
+  in
   let recommendation =
     recommendation_for_keeper bench_manifest ~keeper_name:meta.name
   in
@@ -765,10 +767,10 @@ let build_keeper_snapshot
       @ cascade_findings @ audit_findings;
   }
 
-(* The safe-autonomy screen renders one row per keeper.  This probe is
-   intentionally much shorter than interactive sandbox-status calls; otherwise
-   a slow Docker daemon costs [timeout * keeper_count] before the dashboard can
-   return any bytes.
+(* The safe-autonomy screen renders one row per keeper. Its Docker probe is
+   intentionally much shorter than interactive sandbox-status calls, and the
+   fleet renderer batches the base-path-scoped container listing once per
+   payload before filtering by keeper in memory.
 
    Floor at 1.0s rather than 0.25s: [Process_eio] timeouts surface
    through [Log.warn]-style sites that format duration with [%.0f],
@@ -776,29 +778,41 @@ let build_keeper_snapshot
    reading "command timed out after 0s".  1.0s produces a
    self-explanatory diagnostic when Docker is genuinely slow.
 
-   Worst-case budget bookkeeping (PR #13113 review):
    [Keeper_sandbox_runtime.list_containers] internally runs TWO
    sequential Docker commands (`docker ps` then `docker inspect`),
-   each gated by [~timeout_sec].  The per-row worst case is
-   therefore [2 * timeout_sec], not [timeout_sec].  At 1.0s × 2
-   commands × 50 keepers the screen budget is ~100s in the
-   worst case where every Docker call stalls — well above the
-   typical 15s client deadline, but bounded.  In the common case
-   Docker responds in tens of ms and the screen returns in <1s.
-   Operators who need a tighter overall budget should either
-   reduce keeper count surfaced here, or wait for the upstream
-   "single overall probe budget" follow-up (RFC TBD) that would
-   short-circuit further probes once a wall-clock deadline is hit.
+   each gated by [~timeout_sec]. Because the dashboard calls it once for the
+   fleet rather than once per keeper, a stalled Docker daemon costs about
+   [2 * timeout_sec] per render instead of [2 * timeout_sec * keeper_count].
 *)
 let sandbox_live_probe_timeout_sec = 1.0
 
-let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
+let dashboard_sandbox_containers ~(config : Coord.config) keepers =
+  if
+    List.exists
+      (fun (meta : keeper_meta) -> meta.sandbox_profile = Docker)
+      keepers
+  then
+    Some
+      (Keeper_sandbox_runtime.list_containers
+         ~base_path:config.Coord.base_path
+         ~timeout_sec:sandbox_live_probe_timeout_sec
+         ())
+  else
+    None
+
+let keeper_snapshot_json
+    ?containers_override
+    ~(config : Coord.config)
+    (snapshot : keeper_snapshot)
+  =
   let meta = snapshot.meta in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let sandbox = snapshot.sandbox in
   let sandbox_live =
     Keeper_sandbox_control.live_status_json
       ~include_preflight:false
+      ?containers_override
+      ~include_playground_repos:false
       ~config ~meta ~timeout_sec:sandbox_live_probe_timeout_sec ~verbose:false ()
   in
   let domains =
@@ -842,11 +856,10 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
       ("approval_pending_count", `Int snapshot.approval.count);
       ("recent_activity_count", `Int snapshot.activity.count);
       ("last_activity_ts", float_opt_to_json snapshot.activity.last_ts);
-      ("last_blocker", string_opt_to_json (non_empty_string_opt meta.runtime.last_blocker));
-      ( "last_blocker_class",
-        string_opt_to_json
-          (Option.map Keeper_types.blocker_class_to_string
-             meta.runtime.last_blocker_class) );
+      ( "last_blocker"
+      , match meta.runtime.last_blocker with
+        | Some info -> Keeper_types.blocker_info_to_json info
+        | None -> `Null );
       ( "benchmark_recommendation",
         match snapshot.bench_recommendation with
         | None -> `Null
@@ -854,7 +867,7 @@ let keeper_snapshot_json ~(config : Coord.config) (snapshot : keeper_snapshot) =
             `Assoc
               [
                 ("keeper_profile", `String recommendation.keeper_profile);
-                ("model_label", `String recommendation.model_label);
+                ("model_label", `String "runtime");
                 ("composite_score", `Float recommendation.composite_score);
                 ("task_pass_rate", `Float recommendation.task_pass_rate);
                 ("stability_score", float_opt_to_json recommendation.stability_score);
@@ -931,7 +944,13 @@ let timeline_entries_json
   List.iter
     (fun snapshot ->
       let blocker =
-        non_empty_string_opt snapshot.meta.runtime.last_blocker
+        match snapshot.meta.runtime.last_blocker with
+        | Some info ->
+          let trimmed = String.trim info.detail in
+          if trimmed = "" then
+            Some (Keeper_types.blocker_class_to_string info.klass)
+          else Some trimmed
+        | None -> None
       in
       match blocker with
       | None -> ()
@@ -1163,7 +1182,10 @@ let json ~(config : Coord.config) () =
     ]
   in
   let per_keeper =
-    List.map (keeper_snapshot_json ~config) keeper_snapshots
+    let containers_override = dashboard_sandbox_containers ~config keepers in
+    List.map
+      (keeper_snapshot_json ?containers_override ~config)
+      keeper_snapshots
   in
   let total_active_goals =
     List.fold_left

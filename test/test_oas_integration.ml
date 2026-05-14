@@ -41,6 +41,26 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let json_string_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> value
+  | _ -> ""
+
+let json_bool_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Bool value) -> value
+  | _ -> false
+
+let json_int_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> value
+  | _ -> -1
+
+let json_assoc_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Assoc values) -> values
+  | _ -> Alcotest.failf "expected %s assoc" name
+
 let sse_data_json raw_event =
   let prefix = "data: " in
   let prefix_len = String.length prefix in
@@ -63,7 +83,7 @@ let relay_test_config broken_root =
   { base with base_path = broken_root; workspace_path = broken_root }
 
 (* ================================================================ *)
-(* Oas_events tests                                                  *)
+(* Cascade_events tests                                                  *)
 (* ================================================================ *)
 
 let test_event_bus_broadcast () =
@@ -72,7 +92,7 @@ let test_event_bus_broadcast () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Oas_events.publish_broadcast bus ~agent_name:"test-agent" ~content:"hello";
+  Cascade_events.publish_broadcast bus ~agent_name:"test-agent" ~content:"hello";
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
@@ -87,7 +107,7 @@ let test_event_bus_heartbeat () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Oas_events.publish_heartbeat bus ~agent_name:"keeper-runtime" ~turn:5 ~context_pct:0.42;
+  Cascade_events.publish_heartbeat bus ~agent_name:"keeper-runtime" ~turn:5 ~context_pct:0.42;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
@@ -102,13 +122,21 @@ let test_oas_worker_failed_lifecycle_includes_error () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Oas_worker_exec.publish_lifecycle bus
+  Cascade_runner.publish_lifecycle bus
     ~name:"worker-a"
     ~event:"failed"
     ~detail:"session=session-1"
     ~error:"tool call rejected"
     ~session_id:"session-1"
     ~status:"failed"
+    ~attrs:
+      [
+        ("provider_kind", `String "openai_compat");
+        ("model_id", `String "deepseek-v4-pro:cloud");
+        ("base_url", `String "https://ollama.com/v1");
+        ("request_path", `String "/chat/completions");
+        ("endpoint", `String "https://ollama.com/v1/chat/completions");
+      ]
     ();
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
@@ -122,7 +150,14 @@ let test_oas_worker_failed_lifecycle_includes_error () =
       Alcotest.(check string) "session_id" "session-1"
         (payload |> member "session_id" |> to_string);
       Alcotest.(check string) "status" "failed"
-        (payload |> member "status" |> to_string)
+        (payload |> member "status" |> to_string);
+      Alcotest.(check string) "provider_kind" "openai_compat"
+        (payload |> member "provider_kind" |> to_string);
+      Alcotest.(check string) "model_id" "deepseek-v4-pro:cloud"
+        (payload |> member "model_id" |> to_string);
+      Alcotest.(check string) "endpoint"
+        "https://ollama.com/v1/chat/completions"
+        (payload |> member "endpoint" |> to_string)
   | _ -> Alcotest.fail "expected Custom masc.oas_worker.failed event"
 
 let test_event_bus_task_transition () =
@@ -131,7 +166,7 @@ let test_event_bus_task_transition () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Oas_events.publish_task_transition bus ~agent_name:"worker"
+  Cascade_events.publish_task_transition bus ~agent_name:"worker"
     ~task_id:"task-1" ~transition:Types_core.Done_action;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
@@ -147,7 +182,7 @@ let test_event_bus_keeper_lifecycle_includes_phase () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Oas_events.publish_keeper_lifecycle bus
+  Cascade_events.publish_keeper_lifecycle bus
     ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
               { verb = Masc_mcp.Keeper_lifecycle_events.Started;
                 phase = Some Masc_mcp.Keeper_state_machine.Running })
@@ -175,14 +210,14 @@ let test_keeper_snapshot_envelope_agent_name () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Oas_events.publish_keeper_snapshot bus
+  Cascade_events.publish_keeper_snapshot bus
     ~keeper_name:"sojin"
     ~generation:4
     ~context_ratio:0.25
     ~message_count:47;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
-  match Oas_event_bridge.native_event_to_json (List.hd events) with
+  match Cascade_event_bridge.native_event_to_json (List.hd events) with
   | None -> Alcotest.fail "expected native_event_to_json to emit"
   | Some (`Assoc fields) ->
     let field_string name =
@@ -204,7 +239,7 @@ let test_keeper_lifecycle_envelope_agent_name () =
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
-  Oas_events.publish_keeper_lifecycle bus
+  Cascade_events.publish_keeper_lifecycle bus
     ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
               { verb = Masc_mcp.Keeper_lifecycle_events.Started;
                 phase = Some Masc_mcp.Keeper_state_machine.Running })
@@ -213,7 +248,7 @@ let test_keeper_lifecycle_envelope_agent_name () =
     ();
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
-  match Oas_event_bridge.native_event_to_json (List.hd events) with
+  match Cascade_event_bridge.native_event_to_json (List.hd events) with
   | None -> Alcotest.fail "expected native_event_to_json to emit"
   | Some (`Assoc fields) ->
     let field_string name =
@@ -235,10 +270,9 @@ let test_oas_event_bridge_persists_native_events () =
     (fun () ->
       let config = Coord.default_config dir in
       let bus = Event_bus.create () in
-      Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
-            Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
+            Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event
@@ -288,16 +322,15 @@ let test_oas_event_bridge_broadcasts_lifecycle_to_observers () =
       let config = Coord.default_config dir in
       let bus = Event_bus.create () in
       Masc_event_bus.set bus;
-      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
                       "observer-lifecycle" ~last_event_id:0);
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator
                       "coordinator-lifecycle" ~last_event_id:0);
-            Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
+            Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
-            Oas_events.publish_keeper_lifecycle bus
+            Cascade_events.publish_keeper_lifecycle bus
               ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
                         { verb = Masc_mcp.Keeper_lifecycle_events.Started;
                           phase = Some Masc_mcp.Keeper_state_machine.Running })
@@ -327,12 +360,11 @@ let test_oas_event_bridge_retries_append_failure_then_recovers () =
     (fun () ->
       let config = relay_test_config broken_root in
       let bus = Event_bus.create () in
-      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
                       "observer-retry" ~last_event_id:0);
-            Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
+            Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event
@@ -372,12 +404,11 @@ let test_oas_event_bridge_drop_marker_on_exhausted_append_failure () =
     (fun () ->
       let config = relay_test_config broken_root in
       let bus = Event_bus.create () in
-      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
                       "observer-drop" ~last_event_id:0);
-            Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
+            Cascade_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event
@@ -412,7 +443,7 @@ let test_oas_event_bridge_broadcast_retry_does_not_duplicate_append () =
   let append_count = ref 0 in
   let broadcast_count = ref 0 in
   let pending =
-    Oas_event_bridge.For_testing.make_pending
+    Cascade_event_bridge.For_testing.make_pending
       (`Assoc
          [
            ("type", `String "oas:tool_called");
@@ -422,7 +453,7 @@ let test_oas_event_bridge_broadcast_retry_does_not_duplicate_append () =
          ])
   in
   let first =
-    Oas_event_bridge.For_testing.deliver_pending_with
+    Cascade_event_bridge.For_testing.deliver_pending_with
       ~append_json:(fun _json -> incr append_count)
       ~broadcast_json:(fun _json ->
         incr broadcast_count;
@@ -431,29 +462,48 @@ let test_oas_event_bridge_broadcast_retry_does_not_duplicate_append () =
   in
   let pending_after_failure =
     match first with
-    | Oas_event_bridge.For_testing.Retryable_failure
-        (pending, Oas_event_bridge.For_testing.Broadcast, _) ->
+    | Cascade_event_bridge.For_testing.Retryable_failure
+        (pending, Cascade_event_bridge.For_testing.Broadcast, _) ->
         pending
-    | Oas_event_bridge.For_testing.Retryable_failure _ ->
+    | Cascade_event_bridge.For_testing.Retryable_failure _ ->
         Alcotest.fail "expected broadcast-stage retryable failure"
-    | Oas_event_bridge.For_testing.Delivered ->
+    | Cascade_event_bridge.For_testing.Delivered ->
         Alcotest.fail "expected first delivery to fail on broadcast"
   in
   Alcotest.(check int) "append happens exactly once before retry" 1 !append_count;
   Alcotest.(check bool) "pending remembers durable append" true
     pending_after_failure.appended;
   let second =
-    Oas_event_bridge.For_testing.deliver_pending_with
+    Cascade_event_bridge.For_testing.deliver_pending_with
       ~append_json:(fun _json -> incr append_count)
       ~broadcast_json:(fun _json -> incr broadcast_count)
       pending_after_failure
   in
   (match second with
-   | Oas_event_bridge.For_testing.Delivered -> ()
-   | Oas_event_bridge.For_testing.Retryable_failure _ ->
+   | Cascade_event_bridge.For_testing.Delivered -> ()
+   | Cascade_event_bridge.For_testing.Retryable_failure _ ->
        Alcotest.fail "expected retry to deliver after broadcast recovery");
   Alcotest.(check int) "retry does not duplicate durable append" 1 !append_count;
   Alcotest.(check int) "broadcast retried once" 2 !broadcast_count
+
+let test_oas_event_bridge_backpressures_when_retry_queue_full () =
+  let json =
+    `Assoc
+      [
+        ("type", `String "oas:tool_called");
+        ("event_type", `String "tool_called");
+        ("correlation_id", `String "sess-backpressure");
+        ("run_id", `String "run-backpressure");
+      ]
+  in
+  let pending =
+    List.init Cascade_event_bridge.For_testing.relay_max_queue_depth
+      (fun _ -> Cascade_event_bridge.For_testing.make_pending json)
+  in
+  Alcotest.(check bool) "empty queue drains subscription" true
+    (Cascade_event_bridge.For_testing.should_drain_subscription []);
+  Alcotest.(check bool) "full retry queue blocks subscription drain" false
+    (Cascade_event_bridge.For_testing.should_drain_subscription pending)
 
 (* ================================================================ *)
 (* Message conversion tests (formerly oas_checkpoint_bridge)         *)
@@ -539,6 +589,17 @@ let test_compact_syncs_oas_context () =
 (* ================================================================ *)
 let test_agent_completed_includes_usage () =
   let open Agent_sdk in
+  let cost_labels =
+    [ ("provider", "openai"); ("model_bucket", "openai") ]
+  in
+  let cost_metric = Prometheus.metric_oas_inference_cost_usd in
+  let before_cost =
+    Prometheus.metric_value_or_zero cost_metric ~labels:cost_labels ()
+  in
+  let before_cost_count =
+    Prometheus.metric_value_or_zero (cost_metric ^ "_count")
+      ~labels:cost_labels ()
+  in
   let usage : Llm_provider.Types.api_usage =
     {
       input_tokens = 500;
@@ -551,7 +612,7 @@ let test_agent_completed_includes_usage () =
   let resp : Llm_provider.Types.api_response =
     {
       id = "msg-test";
-      model = "test-model";
+      model = "gpt-5";
       stop_reason = EndTurn;
       content = [];
       usage = Some usage;
@@ -568,7 +629,7 @@ let test_agent_completed_includes_usage () =
            elapsed = 1.5;
          })
   in
-  match Oas_event_bridge.native_event_to_json evt with
+  match Cascade_event_bridge.native_event_to_json evt with
   | None -> Alcotest.fail "expected Some for AgentCompleted"
   | Some (`Assoc fields) ->
       let payload_fields =
@@ -594,7 +655,7 @@ let test_agent_completed_includes_usage () =
       Alcotest.(check bool) "success" true (bool_field "success");
       Alcotest.(check string) "result" "ok" (string_field "result");
       Alcotest.(check string) "response_id" "msg-test" (string_field "response_id");
-      Alcotest.(check string) "model" "test-model" (string_field "model");
+      Alcotest.(check string) "model" "gpt-5" (string_field "model");
       Alcotest.(check string) "stop_reason" "end_turn" (string_field "stop_reason");
       Alcotest.(check bool) "usage_reported" true (bool_field "usage_reported");
       Alcotest.(check int) "input_tokens" 500 (int_field "input_tokens");
@@ -607,7 +668,16 @@ let test_agent_completed_includes_usage () =
       Alcotest.(check string) "event_type" "agent_completed"
         (match List.assoc_opt "event_type" fields with
          | Some (`String s) -> s
-         | _ -> "")
+         | _ -> "");
+      Alcotest.(check (float 0.0001))
+        "cost histogram labels provider"
+        (before_cost +. 0.003)
+        (Prometheus.metric_value_or_zero cost_metric ~labels:cost_labels ());
+      Alcotest.(check (float 0.0001))
+        "cost histogram count"
+        (before_cost_count +. 1.0)
+        (Prometheus.metric_value_or_zero (cost_metric ^ "_count")
+           ~labels:cost_labels ())
   | Some _ -> Alcotest.fail "expected assoc"
 
 let test_agent_completed_omits_usage_fields_when_success_has_no_usage () =
@@ -632,7 +702,7 @@ let test_agent_completed_omits_usage_fields_when_success_has_no_usage () =
            elapsed = 0.25;
          })
   in
-  match Oas_event_bridge.native_event_to_json evt with
+  match Cascade_event_bridge.native_event_to_json evt with
   | None -> Alcotest.fail "expected Some for AgentCompleted without usage"
   | Some (`Assoc fields) ->
       let payload_fields =
@@ -670,7 +740,7 @@ let test_agent_completed_no_usage_on_error () =
            elapsed = 0.5;
          })
   in
-  match Oas_event_bridge.native_event_to_json evt with
+  match Cascade_event_bridge.native_event_to_json evt with
   | None -> Alcotest.fail "expected Some for AgentCompleted error"
   | Some (`Assoc fields) ->
       let payload_fields =
@@ -700,8 +770,84 @@ let test_agent_completed_no_usage_on_error () =
        | _ -> Alcotest.fail "expected error string")
   | Some _ -> Alcotest.fail "expected assoc"
 
+let agent_failed_payload_fields error =
+  let open Agent_sdk in
+  let evt =
+    Event_bus.mk_event
+      ~correlation_id:"sess-agent-failed"
+      ~run_id:"run-agent-failed"
+      (AgentFailed
+         {
+           agent_name = "failed-agent";
+           task_id = "task-failed";
+           error;
+           elapsed = 2.5;
+         })
+  in
+  match Cascade_event_bridge.native_event_to_json evt with
+  | None -> Alcotest.fail "expected Some for AgentFailed"
+  | Some (`Assoc fields) -> json_assoc_field "payload" fields
+  | Some _ -> Alcotest.fail "expected assoc"
+
+let test_agent_failed_preserves_api_structured_error () =
+  let open Agent_sdk in
+  let payload_fields =
+    agent_failed_payload_fields
+      (Error.Api
+         (Retry.RateLimited
+            { retry_after = Some 2.5; message = "slow down" }))
+  in
+  let detail_fields = json_assoc_field "error_detail" payload_fields in
+  Alcotest.(check string) "error string" "Rate limited: slow down"
+    (json_string_field "error" payload_fields);
+  Alcotest.(check string) "error domain" "api"
+    (json_string_field "error_domain" payload_fields);
+  Alcotest.(check string) "error code" "api_error_rate_limited"
+    (json_string_field "error_code" payload_fields);
+  Alcotest.(check bool) "retryable" true
+    (json_bool_field "error_retryable" payload_fields);
+  Alcotest.(check string) "detail domain" "api"
+    (json_string_field "domain" detail_fields);
+  Alcotest.(check string) "detail variant" "rate_limited"
+    (json_string_field "variant" detail_fields);
+  Alcotest.(check string) "detail message" "slow down"
+    (json_string_field "message" detail_fields);
+  (match List.assoc_opt "retry_after_s" detail_fields with
+   | Some (`Float value) ->
+       Alcotest.(check (float 0.001)) "retry_after_s" 2.5 value
+   | _ -> Alcotest.fail "expected retry_after_s float")
+
+let test_agent_failed_preserves_agent_structured_error () =
+  let open Agent_sdk in
+  let payload_fields =
+    agent_failed_payload_fields
+      (Error.Agent
+         (Error.TokenBudgetExceeded
+            { kind = "input"; used = 1200; limit = 1000 }))
+  in
+  let detail_fields = json_assoc_field "error_detail" payload_fields in
+  Alcotest.(check bool) "error string includes token budget" true
+    (contains_substring
+       (json_string_field "error" payload_fields)
+       "token budget exceeded");
+  Alcotest.(check string) "error domain" "agent"
+    (json_string_field "error_domain" payload_fields);
+  Alcotest.(check string) "error code"
+    "agent_error_token_budget_exceeded:kind=input,used=1200,limit=1000"
+    (json_string_field "error_code" payload_fields);
+  Alcotest.(check bool) "retryable" false
+    (json_bool_field "error_retryable" payload_fields);
+  Alcotest.(check string) "detail variant" "token_budget_exceeded"
+    (json_string_field "variant" detail_fields);
+  Alcotest.(check string) "detail kind" "input"
+    (json_string_field "kind" detail_fields);
+  Alcotest.(check int) "detail used" 1200
+    (json_int_field "used" detail_fields);
+  Alcotest.(check int) "detail limit" 1000
+    (json_int_field "limit" detail_fields)
+
 let test_oas_log_bridge_turn_completed_summary () =
-  Oas_log_bridge.install ();
+  Agent_sdk_log_bridge.install ();
   let before_seq =
     match Masc_log.Ring.recent ~module_filter:"oas:agent" ~limit:1 () with
     | [] -> None
@@ -749,10 +895,9 @@ let test_oas_event_bridge_logs_turn_completed_with_agent_name () =
         | [] -> None
         | entry :: _ -> Some entry.seq
       in
-      Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
-          Oas_event_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Cascade_event_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
           Event_bus.publish bus
             (Event_bus.mk_event
                ~correlation_id:"sess-turn" ~run_id:"run-turn"
@@ -811,10 +956,9 @@ let test_oas_event_bridge_logs_tool_completed_with_agent_name () =
         | [] -> None
         | entry :: _ -> Some entry.seq
       in
-      Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
-          Oas_event_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Cascade_event_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
           Event_bus.publish bus
             (Event_bus.mk_event
                ~correlation_id:"sess-tool" ~run_id:"run-tool"
@@ -923,24 +1067,24 @@ let test_inference_telemetry_aggregates_without_sse_relay () =
            decode_tok_s = Some 100.0;
          })
   in
-  (match Oas_event_bridge.native_event_to_json evt with
+  (match Cascade_event_bridge.native_event_to_json evt with
    | None -> ()
    | Some _ ->
        Alcotest.fail
          "InferenceTelemetry must remain None — catch-all fallback \
           must not absorb the high-frequency suppression case");
   Alcotest.(check (float 0.0001))
-    "prompt token histogram sum"
-    (before_prompt_tokens +. 10.0)
+    "prompt token histogram sum unchanged"
+    before_prompt_tokens
     (Prometheus.metric_value_or_zero token_metric ~labels:prompt_labels ());
   Alcotest.(check (float 0.0001))
-    "prompt token histogram count"
-    (before_prompt_count +. 1.0)
+    "prompt token histogram count unchanged"
+    before_prompt_count
     (Prometheus.metric_value_or_zero (token_metric ^ "_count")
        ~labels:prompt_labels ());
   Alcotest.(check (float 0.0001))
-    "completion token histogram sum"
-    (before_completion_tokens +. 9000.0)
+    "completion token histogram sum unchanged"
+    before_completion_tokens
     (Prometheus.metric_value_or_zero token_metric ~labels:completion_labels ());
   Alcotest.(check (float 0.0001))
     "prompt throughput histogram sum"
@@ -970,7 +1114,7 @@ let test_payload_kind_labels_match_envelope_event_type () =
   in
   let kind = Event_bus.payload_kind evt.payload in
   Alcotest.(check string) "kind label" "agent_started" kind;
-  match Oas_event_bridge.native_event_to_json evt with
+  match Cascade_event_bridge.native_event_to_json evt with
   | Some (`Assoc fields) ->
       let event_type =
         match List.assoc_opt "event_type" fields with
@@ -1012,6 +1156,9 @@ let () =
         test_oas_event_bridge_drop_marker_on_exhausted_append_failure;
       Alcotest.test_case "sse bridge retry avoids duplicate append after broadcast failure" `Quick
         test_oas_event_bridge_broadcast_retry_does_not_duplicate_append;
+      Alcotest.test_case "sse bridge retry queue backpressures instead of dropping head"
+        `Quick
+        test_oas_event_bridge_backpressures_when_retry_queue_full;
       Alcotest.test_case "agent_completed includes usage" `Quick
         test_agent_completed_includes_usage;
       Alcotest.test_case "agent_completed success without usage omits usage fields"
@@ -1019,6 +1166,10 @@ let () =
         test_agent_completed_omits_usage_fields_when_success_has_no_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick
         test_agent_completed_no_usage_on_error;
+      Alcotest.test_case "agent_failed preserves api structured error" `Quick
+        test_agent_failed_preserves_api_structured_error;
+      Alcotest.test_case "agent_failed preserves agent structured error" `Quick
+        test_agent_failed_preserves_agent_structured_error;
       Alcotest.test_case "oas log bridge adds turn completed summary" `Quick
         test_oas_log_bridge_turn_completed_summary;
       Alcotest.test_case "sse bridge logs turn completed with agent name" `Quick

@@ -143,6 +143,30 @@ type permission =
   | CanAdmin
 [@@deriving show { with_path = false }]
 
+(** Stable wire format for [permission].  Returns the same string as
+    [show_permission] does today (PascalCase constructor name), but
+    locks the contract: future renames of the variant constructor will
+    NOT change the wire string, because callers must update this
+    explicit match at the same time.  Public API/SSE/error output
+    (tool_catalog requiredPermission, Auth_error.Forbidden action)
+    depends on these exact strings. *)
+let permission_to_string = function
+  | CanInit -> "CanInit"
+  | CanReset -> "CanReset"
+  | CanJoin -> "CanJoin"
+  | CanLeave -> "CanLeave"
+  | CanReadState -> "CanReadState"
+  | CanAddTask -> "CanAddTask"
+  | CanClaimTask -> "CanClaimTask"
+  | CanCompleteTask -> "CanCompleteTask"
+  | CanBroadcast -> "CanBroadcast"
+  | CanOpenPortal -> "CanOpenPortal"
+  | CanSendPortal -> "CanSendPortal"
+  | CanCreateWorktree -> "CanCreateWorktree"
+  | CanRemoveWorktree -> "CanRemoveWorktree"
+  | CanVote -> "CanVote"
+  | CanAdmin -> "CanAdmin"
+
 (** Get permissions for a role *)
 let permissions_for_role = function
   | Worker -> [
@@ -163,8 +187,25 @@ let permissions_for_role = function
       CanVote; CanAdmin;
     ]
 
+(* Direct (role, permission) variant match — O(1), no per-call list
+   allocation.  Hot path: [Auth.check_permission] runs this on every
+   protected operation; [Auth_doctor] runs it 10+ times per snapshot.
+   The previous [List.mem permission (permissions_for_role role)] form
+   built a fresh 12-element (Worker) / 15-element (Admin) list each
+   call.
+
+   Parallel to [permissions_for_role]: both forms are compiler-checked
+   exhaustive against the [permission] variant, so adding a new
+   constructor breaks both at compile time rather than letting one
+   silently fall through to a default. *)
 let has_permission role permission =
-  List.mem permission (permissions_for_role role)
+  match role, permission with
+  | Admin, _ -> true
+  | Worker, (CanInit | CanReset | CanAdmin) -> false
+  | Worker, ( CanJoin | CanLeave | CanReadState | CanAddTask
+            | CanClaimTask | CanCompleteTask | CanBroadcast
+            | CanOpenPortal | CanSendPortal | CanCreateWorktree
+            | CanRemoveWorktree | CanVote ) -> true
 
 (* ============================================ *)
 (* Rate limit role integration                  *)

@@ -85,40 +85,94 @@ let error_code_to_string = function
   | Internal_error -> "internal_error"
   | Precondition_failed -> "precondition_failed"
 
-(** {1 Canonical Error/OK Response Helpers}
+(** {1 Raw JSON String Builders}
 
-    New tool handlers should use these instead of defining local helpers.
-    Returns [(bool * string)] matching the standard tool dispatch signature. *)
+    These produce plain JSON strings without [Tool_result.t] wrapping.
+    Used by [get_string_required] error paths and legacy callers. *)
+
+(** Build a JSON error envelope as a [Yojson.Safe.t] node (unserialized).
+    Counterpart to {!ok_response} / {!ok_result} on the success side,
+    but returning the unserialized [Yojson.Safe.t] node so it can be
+    composed into a larger structure or returned as
+    [(Yojson.Safe.t, _) result]. *)
+let without_status_field fields =
+  List.filter (fun (key, _) -> not (String.equal key "status")) fields
+
+let error_assoc fields : Yojson.Safe.t =
+  `Assoc (("status", `String "error") :: without_status_field fields)
 
 (** Build a JSON error response string: [\{"status":"error","message":"..."\}] *)
 let error_response message =
-  Yojson.Safe.to_string
-    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
+  Yojson.Safe.to_string (error_assoc [ ("message", `String message) ])
+
+(** Build a JSON error response string with caller-supplied fields.
+    Use when the error payload needs more than just [message] (e.g.
+    [error]/[agent_id]/[config_path] context).  Field-order semantics:
+    [status] is prepended to the head of the [`Assoc].  Caller-supplied
+    [status] fields are discarded so the canonical envelope cannot be
+    overridden by duplicate JSON keys. *)
+let error_response_with fields =
+  Yojson.Safe.to_string (error_assoc fields)
 
 (** Build a JSON error response string with machine-readable error code:
-    [\{"status":"error","error_code":"validation_error","message":"..."\}]
-
-    Preferred over [error_response] for new tool handlers. *)
+    [\{"status":"error","error_code":"validation_error","message":"..."\}] *)
 let error_response_typed ~code message =
-  Yojson.Safe.to_string
-    (`Assoc [
-      ("status", `String "error");
+  error_response_with
+    [
       ("error_code", `String (error_code_to_string code));
       ("message", `String message);
-    ])
+    ]
+
+(** Build a JSON OK envelope as a [Yojson.Safe.t] (unserialized).  Use
+    when the caller needs the envelope as part of a larger composed
+    response — for example HTTP body builders that wrap multiple
+    sub-payloads, or [(Yojson.Safe.t, string) result] pipelines that
+    serialize at a later stage.  Same field-order guarantee as
+    [ok_response]: status is prepended to the head of the [`Assoc]. *)
+let ok_assoc fields : Yojson.Safe.t =
+  `Assoc (("status", `String "ok") :: without_status_field fields)
 
 (** Build a JSON OK response string with additional fields. *)
 let ok_response fields =
-  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
+  Yojson.Safe.to_string (ok_assoc fields)
 
-(** Convenience: [(false, error_response msg)] *)
-let error_result msg = (false, error_response msg)
+(** {1 Tool_result.t Helpers}
 
-(** Convenience: [(false, error_response_typed ~code msg)] *)
-let error_result_typed ~code msg = (false, error_response_typed ~code msg)
+    These return structured [Tool_result.t] instead of [(bool * string)].
+    Handlers should use these directly — the dispatch boundary no longer
+    needs [wrap_result] conversion. *)
 
-(** Convenience: [(true, ok_response fields)] *)
-let ok_result fields = (true, ok_response fields)
+(** [Tool_result.t] error from a plain message string. *)
+let error_result ?tool_name ?start_time msg =
+  match (tool_name, start_time) with
+  | Some name, Some t ->
+    Tool_result.error ~tool_name:name ~start_time:t msg
+  | Some name, None ->
+    Tool_result.quick_error ~tool_name:name msg
+  | None, _ ->
+    Tool_result.quick_error msg
+
+(** [Tool_result.t] error with machine-readable error code. *)
+let error_result_typed ?tool_name ?start_time ~code msg =
+  let msg_with_code = error_response_typed ~code msg in
+  match (tool_name, start_time) with
+  | Some name, Some t ->
+    Tool_result.error ~tool_name:name ~start_time:t msg_with_code
+  | Some name, None ->
+    Tool_result.quick_error ~tool_name:name msg_with_code
+  | None, _ ->
+    Tool_result.quick_error msg_with_code
+
+(** [Tool_result.t] success with additional JSON fields. *)
+let ok_result ?tool_name ?start_time fields =
+  let msg = ok_response fields in
+  match (tool_name, start_time) with
+  | Some name, Some t ->
+    Tool_result.ok ~tool_name:name ~start_time:t msg
+  | Some name, None ->
+    Tool_result.quick_ok ~tool_name:name msg
+  | None, _ ->
+    Tool_result.quick_ok msg
 
 (** {1 Parse, Don't Validate — Required Field Extractors}
 
@@ -141,9 +195,9 @@ let get_int_required args key =
   | Some i -> Ok i
   | None -> Error (error_response (Printf.sprintf "%s is required" key))
 
-(** Monadic bind for [(ok, string) Result.t] → [(bool * string)].
+(** Monadic bind for [('a, string) Result.t] → [Tool_result.t].
     Chains required field extractions with early error return. *)
-let ( let*! ) r f = match r with Ok v -> f v | Error e -> (false, e)
+let ( let*! ) r f = match r with Ok v -> f v | Error e -> Tool_result.quick_error e
 
 (** {1 Structured Field Validation}
 
@@ -200,16 +254,23 @@ let field_error_to_yojson (e : field_error) : Yojson.Safe.t =
     "field_errors":[...],"message":"N field error(s)"\}] *)
 let validation_error_response (errors : field_error list) : string =
   let field_errors = List.map field_error_to_yojson errors in
-  Yojson.Safe.to_string
-    (`Assoc [
-      ("status", `String "error");
+  error_response_with
+    [
       ("error_code", `String "validation_error");
       ("field_errors", `List field_errors);
       ("message", `String (Printf.sprintf "%d field error(s)" (List.length errors)));
-    ])
+    ]
 
-(** Convenience: [(false, validation_error_response errors)] *)
-let validation_error_result errors = (false, validation_error_response errors)
+(** Convenience: [Tool_result.t] validation error. *)
+let validation_error_result ?tool_name ?start_time errors =
+  let msg = validation_error_response errors in
+  match (tool_name, start_time) with
+  | Some name, Some t ->
+    Tool_result.error ~tool_name:name ~start_time:t msg
+  | Some name, None ->
+    Tool_result.quick_error ~tool_name:name msg
+  | None, _ ->
+    Tool_result.quick_error msg
 
 (** {2 Field Validators}
 

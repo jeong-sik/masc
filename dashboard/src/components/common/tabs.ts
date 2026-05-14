@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { createContext } from 'preact'
 import { useCallback, useContext, useId, useRef, useState } from 'preact/hooks'
+import { ringFocusClasses } from './ring'
 
 interface TabsCtx {
   value: string
@@ -27,7 +28,7 @@ const TAB_DEFAULT_CLASS = [
   'aria-selected:border-[var(--color-state-active-border)]',
   'aria-selected:text-[var(--color-state-active-fg)]',
   'aria-selected:shadow-[inset_0_-1px_0_var(--color-tab-indicator)]',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)]',
+  ringFocusClasses({ tone: 'accent-medium', width: 2 }),
 ].join(' ')
 
 function useCtx() {

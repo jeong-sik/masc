@@ -10,10 +10,34 @@ import { Checkbox } from './common/checkbox'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteContext,
+  type IdeContextRouteLink,
+} from './ide/ide-context-lens'
 
 interface LogData {
   entries: LogEntry[]
   total: number
+}
+
+export interface LogCauseCount {
+  cause: string
+  count: number
+}
+
+export interface LogModuleCount {
+  module: string
+  count: number
+}
+
+export interface LogWindowSummary {
+  errors: number
+  warnings: number
+  failureEnvelopes: number
+  topCauses: LogCauseCount[]
+  topModules: LogModuleCount[]
 }
 
 const logResource = createAsyncResource<LogData>()
@@ -43,8 +67,8 @@ const LEVEL_COLORS: Record<string, string> = {
 
 const SOURCE_LABELS: Record<string, string> = {
   structured: 'structured',
-  legacy_stderr: 'legacy stderr',
-  legacy_traceln: 'legacy traceln',
+  legacy_stderr: 'stderr',
+  legacy_traceln: 'trace line',
   client_tool_host: 'client tool-host',
   sse: 'sse',
 }
@@ -62,8 +86,35 @@ type FailureEnvelope = {
   evidence_ref: Record<string, unknown> | null
 }
 
+interface LogCodeLocation {
+  readonly filePath: string
+  readonly line?: number
+}
+
+type LogRouteContextFields = Pick<
+  IdeContextRouteContext,
+  | 'filePath'
+  | 'line'
+  | 'goalId'
+  | 'taskId'
+  | 'boardPostId'
+  | 'commentId'
+  | 'prId'
+  | 'gitRef'
+  | 'logId'
+  | 'sessionId'
+  | 'operationId'
+  | 'workerRunId'
+>
+type MutableLogRouteContext = {
+  -readonly [K in keyof LogRouteContextFields]?: LogRouteContextFields[K]
+}
+
 function normalizedLevel(entry: LogEntry): string {
-  return (entry.normalized_level || entry.level || 'INFO').toUpperCase()
+  // RFC-0079: backend now emits a typed level via Log.Ring.entry_to_json.
+  // The schema rejects rows without `level`, so the read-side fallback
+  // chain (`normalized_level || level || 'INFO'`) is gone.
+  return entry.level.toUpperCase()
 }
 
 function sortLogEntries(entries: LogEntry[]): LogEntry[] {
@@ -89,7 +140,7 @@ function mergeLogEntries(
 }
 
 function sourceLabel(source: string): string {
-  return SOURCE_LABELS[source] ?? (source || 'structured')
+  return SOURCE_LABELS[source] ?? (source || '(unknown source)')
 }
 
 function entryDetails(entry: LogEntry): Record<string, unknown> | null {
@@ -140,6 +191,82 @@ function nestedString(value: unknown): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+function positiveLine(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
+}
+
+function idString(value: unknown): string | undefined {
+  const text = nestedString(value)
+  if (text) return text
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? String(value)
+    : undefined
+}
+
+function codeLocationFromRecord(record: Record<string, unknown> | null): LogCodeLocation | null {
+  if (!record) return null
+  const filePath =
+    nestedString(record.file_path)
+    ?? nestedString(record.path)
+    ?? nestedString(record.file)
+  if (filePath) {
+    return {
+      filePath,
+      line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
+    }
+  }
+  return null
+}
+
+function mergeLogRouteRecord(
+  context: MutableLogRouteContext,
+  record: Record<string, unknown> | null,
+  overwrite = false,
+): void {
+  if (!record) return
+  const location = codeLocationFromRecord(record)
+  if (location && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
+  if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
+
+  const goalId = idString(record.goal_id)
+  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
+  const taskId = idString(record.task_id)
+  if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
+  const boardPostId = idString(record.board_post_id) ?? idString(record.post_id)
+  if (boardPostId && (overwrite || context.boardPostId === undefined)) context.boardPostId = boardPostId
+  const commentId = idString(record.comment_id) ?? idString(record.reply_id) ?? idString(record.comment_number)
+  if (commentId && (overwrite || context.commentId === undefined)) context.commentId = commentId
+  const prId = idString(record.pr_id) ?? idString(record.pull_request) ?? idString(record.pr_number)
+  if (prId && (overwrite || context.prId === undefined)) context.prId = prId
+  const gitRef = idString(record.git_ref) ?? idString(record.commit) ?? idString(record.branch)
+  if (gitRef && (overwrite || context.gitRef === undefined)) context.gitRef = gitRef
+  const logId = idString(record.log_id)
+  if (logId && (overwrite || context.logId === undefined)) context.logId = logId
+  const sessionId = idString(record.session_id)
+  if (sessionId && (overwrite || context.sessionId === undefined)) context.sessionId = sessionId
+  const operationId = idString(record.operation_id)
+  if (operationId && (overwrite || context.operationId === undefined)) context.operationId = operationId
+  const workerRunId = idString(record.worker_run_id)
+  if (workerRunId && (overwrite || context.workerRunId === undefined)) context.workerRunId = workerRunId
+}
+
+function hasLogRouteContext(context: MutableLogRouteContext): boolean {
+  return context.filePath !== undefined
+    || context.goalId !== undefined
+    || context.taskId !== undefined
+    || context.boardPostId !== undefined
+    || context.commentId !== undefined
+    || context.prId !== undefined
+    || context.gitRef !== undefined
+    || context.logId !== undefined
+    || context.sessionId !== undefined
+    || context.operationId !== undefined
+    || context.workerRunId !== undefined
+}
+
 function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   const details = entryDetails(entry)
   const envelope = nestedRecord(details?.failure_envelope)
@@ -167,6 +294,82 @@ function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
     operator_action: nestedString(envelope.operator_action),
     evidence_ref: nestedRecord(envelope.evidence_ref),
   }
+}
+
+export function logDiagnosticCause(entry: LogEntry): string | null {
+  const failure = failureEnvelope(entry)
+  if (failure) return failure.cause_code
+  const details = entryDetails(entry)
+  const event = detailLabel(details, 'event')
+  if (event) return event
+  return null
+}
+
+function topCounts(map: Map<string, number>, limit = 3): LogCauseCount[] {
+  return [...map.entries()]
+    .map(([cause, count]) => ({ cause, count }))
+    .sort((a, b) => b.count - a.count || a.cause.localeCompare(b.cause))
+    .slice(0, limit)
+}
+
+export function summarizeLogWindow(entries: LogEntry[]): LogWindowSummary {
+  const causes = new Map<string, number>()
+  const modules = new Map<string, number>()
+  let errors = 0
+  let warnings = 0
+  let failureEnvelopes = 0
+
+  for (const entry of entries) {
+    const level = normalizedLevel(entry)
+    if (level === 'ERROR') errors += 1
+    if (level === 'WARN') warnings += 1
+
+    const mod = entry.module?.trim() || '(root)'
+    modules.set(mod, (modules.get(mod) ?? 0) + 1)
+
+    const failure = failureEnvelope(entry)
+    if (failure) failureEnvelopes += 1
+    const cause = failure?.cause_code ?? logDiagnosticCause(entry)
+    if (cause) causes.set(cause, (causes.get(cause) ?? 0) + 1)
+  }
+
+  return {
+    errors,
+    warnings,
+    failureEnvelopes,
+    topCauses: topCounts(causes),
+    topModules: topCounts(modules).map(({ cause, count }) => ({
+      module: cause,
+      count,
+    })),
+  }
+}
+
+export function logRouteLinks(entry: LogEntry): ReadonlyArray<IdeContextRouteLink> {
+  const details = entryDetails(entry)
+  const failureEnvelopeRecord = nestedRecord(details?.failure_envelope)
+  const context: MutableLogRouteContext = {}
+  mergeLogRouteRecord(context, nestedRecord(details?.context))
+  mergeLogRouteRecord(context, nestedRecord(details?.evidence_ref))
+  mergeLogRouteRecord(context, nestedRecord(failureEnvelopeRecord?.evidence_ref))
+  mergeLogRouteRecord(context, nestedRecord(details?.tool_args))
+  mergeLogRouteRecord(context, nestedRecord(details?.input))
+  mergeLogRouteRecord(context, details, true)
+  if (!hasLogRouteContext(context)) return []
+  return routeLinksForContext({
+    ...context,
+    surface: 'Log',
+    label: entry.module || entry.message,
+    sourceId: `log:${entry.seq}`,
+    telemetry: context.logId !== undefined
+      || context.sessionId !== undefined
+      || context.operationId !== undefined
+      || context.workerRunId !== undefined,
+  })
+}
+
+export function logCodeRouteLink(entry: LogEntry): IdeContextRouteLink | null {
+  return logRouteLinks(entry).find(link => link.label === 'Code') ?? null
 }
 
 function renderLogMessage(entry: LogEntry): string {
@@ -201,7 +404,10 @@ async function loadLogs(mode: LoadMode = 'reset') {
       })
       const entries = sortLogEntries(resp.entries).slice(0, Math.max(1, logLimit.value))
       latestSeq.value = latestLogSeq(entries)
-      return { entries, total: resp.total }
+      return {
+        entries,
+        total: resp.total,
+      }
     })
   }
 
@@ -221,7 +427,10 @@ async function loadLogs(mode: LoadMode = 'reset') {
     const nextEntries = mergeLogEntries(currentEntries, incoming, logLimit.value)
 
     latestSeq.value = latestLogSeq(nextEntries)
-    logResource.state.value = loaded({ entries: nextEntries, total: resp.total })
+    logResource.state.value = loaded({
+      entries: nextEntries,
+      total: resp.total,
+    })
   } catch {
     if (requestId !== latestRequestId) return
     // Delta failures don't overwrite loaded state — keep existing data visible
@@ -230,8 +439,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
 
 function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
-  const rawLevelChanged = entry.raw_level && entry.raw_level !== level
-  const source = entry.source || 'structured'
+  const source = entry.source || '(unknown source)'
   const details = entryDetails(entry)
   const clientName = detailLabel(details, 'client_name')
   const toolName = detailLabel(details, 'tool_name') ?? detailLabel(details, 'tool')
@@ -239,9 +447,18 @@ function renderLogRow(entry: LogEntry) {
   const requestId = detailLabel(details, 'request_id')
   const sessionId = detailLabel(details, 'session_id')
   const fixes = detailLabel(details, 'fixes')
+  const event = detailLabel(details, 'event')
   const failure = failureEnvelope(entry)
+  const diagnosticCause = failure?.cause_code ?? logDiagnosticCause(entry)
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
+  const routeLinks = logRouteLinks(entry)
+  const diagnosticChip = failure
+    ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
+    : null
+  const fallbackDiagnosticChip = !failure && diagnosticCause
+    ? html`<${StatusChip} tone=${level === 'ERROR' ? 'bad' : 'warn'} uppercase=${false}>${diagnosticCause}</${StatusChip}>`
+    : null
   let backgroundClass = 'bg-[var(--color-bg-surface)]'
   if (level === 'ERROR') {
     backgroundClass = 'bg-[var(--bad-6)]'
@@ -265,12 +482,6 @@ function renderLogRow(entry: LogEntry) {
       </div>
       <div class="flex flex-wrap items-start gap-1">
         <${StatusChip} tone=${sourceClass}>${sourceLabel(source)}</${StatusChip}>
-        ${entry.legacy_classified
-          ? html`<${MetaTag}>classified</${MetaTag}>`
-          : null}
-        ${rawLevelChanged
-          ? html`<${MetaTag}>${entry.raw_level}</${MetaTag}>`
-          : null}
         ${clientName
           ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[var(--color-accent-fg)]" uppercase=${false}>${clientName}</${StatusChip}>`
           : null}
@@ -283,20 +494,40 @@ function renderLogRow(entry: LogEntry) {
         ${phase
           ? html`<${MetaTag}>${phase}</${MetaTag}>`
           : null}
+        ${event
+          ? html`<${MetaTag}>event ${event}</${MetaTag}>`
+          : null}
         ${requestId
           ? html`<${MetaTag}>req ${requestId}</${MetaTag}>`
           : null}
         ${sessionId
           ? html`<${MetaTag}>session ${sessionId}</${MetaTag}>`
           : null}
+        ${diagnosticChip}
+        ${fallbackDiagnosticChip}
         ${failure
-          ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
+          ? html`<${StatusChip} tone="info" uppercase=${false}>${failure.surface}</${StatusChip}>`
           : null}
         ${failure
           ? html`<${MetaTag}>${failure.recoverability}</${MetaTag}>`
           : null}
         ${failure?.operator_action
           ? html`<${StatusChip} tone="info" uppercase=${false}>next ${failure.operator_action}</${StatusChip}>`
+          : null}
+        ${routeLinks.length > 0
+          ? html`
+            ${routeLinks.map(link => html`
+              <button
+                key=${link.id}
+                type="button"
+                data-testid=${link.label === 'Code' ? 'logs-code-link' : undefined}
+                class="logs-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)]"
+                title=${link.evidence}
+                aria-label=${`Open ${link.evidence}`}
+                onClick=${() => openIdeContextRouteLink(link)}
+              >${link.label}</button>
+            `)}
+          `
           : null}
       </div>
       <div
@@ -311,6 +542,27 @@ function renderLogRow(entry: LogEntry) {
       >
         ${renderedMessage}
       </div>
+    </div>
+  `
+}
+
+function renderSummaryChip(label: string, value: string | number, tone = 'neutral') {
+  return html`
+    <${StatusChip} tone=${tone} uppercase=${false}>
+      <span>${label}</span>
+      <span class="font-mono tabular-nums">${value}</span>
+    </${StatusChip}>
+  `
+}
+
+function renderLogSummary(summary: LogWindowSummary) {
+  return html`
+    <div class="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
+      ${renderSummaryChip('ERROR', summary.errors, summary.errors > 0 ? 'bad' : 'neutral')}
+      ${renderSummaryChip('WARN', summary.warnings, summary.warnings > 0 ? 'warn' : 'neutral')}
+      ${renderSummaryChip('failure envelope', summary.failureEnvelopes, summary.failureEnvelopes > 0 ? 'info' : 'neutral')}
+      ${summary.topModules.map(item => renderSummaryChip(`module ${item.module}`, item.count))}
+      ${summary.topCauses.map(item => renderSummaryChip(`cause ${item.cause}`, item.count, 'info'))}
     </div>
   `
 }
@@ -364,6 +616,7 @@ export function LogViewer() {
   const logTotal = logData?.total ?? 0
   const logLoading = s.status === 'loading'
   const logError = s.status === 'error' ? s.message : null
+  const summary = summarizeLogWindow(logEntries)
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
@@ -417,7 +670,9 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
-            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
+            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">
+              ${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}
+            </span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
                 name="log-auto-refresh"
@@ -445,6 +700,8 @@ export function LogViewer() {
         ${logError ? html`
           <div class="mx-4 mt-4 rounded-[var(--r-1)] border border-solid border-[var(--err-border)] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[var(--err-fg)]">${logError}</div>
         ` : null}
+
+        ${renderLogSummary(summary)}
 
         <div class="px-3 pt-3">
           <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">

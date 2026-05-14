@@ -9,10 +9,31 @@ type outcome =
   | Dispatch_unavailable
   | Internal_error of string
 
-type error_kind = Error_kind of string
+(* Closed sum mirroring the in-module producer surface (5 sites in this
+   file).  [Ek_none] replaces the [Error_kind ""] sentinel previously
+   used to encode the no-error state for [Success] and [Duplicate]
+   outcomes. *)
+type error_kind =
+  | Ek_none
+  | Ek_validation
+  | Ek_keeper
+  | Ek_dispatch_unavailable
+  | Ek_internal
 
-let error_kind_of_string value = Error_kind value
-let error_kind_to_string (Error_kind value) = value
+let error_kind_to_string = function
+  | Ek_none -> ""
+  | Ek_validation -> "validation"
+  | Ek_keeper -> "keeper"
+  | Ek_dispatch_unavailable -> "dispatch_unavailable"
+  | Ek_internal -> "internal"
+
+let error_kind_of_string = function
+  | "" -> Some Ek_none
+  | "validation" -> Some Ek_validation
+  | "keeper" -> Some Ek_keeper
+  | "dispatch_unavailable" -> Some Ek_dispatch_unavailable
+  | "internal" -> Some Ek_internal
+  | _ -> None
 
 type channel_stats = {
   channel : string;
@@ -130,7 +151,7 @@ let make_binding_acc () =
     last_error_ts = 0.0;
     keeper = "";
     last_error = "";
-    last_error_kind = error_kind_of_string "";
+    last_error_kind = Ek_none;
     last_outcome = "idle";
     total_dur_ms = 0;
     timed_count = 0;
@@ -153,7 +174,7 @@ let make_acc () =
     last_keeper = "";
     last_room_id = "";
     last_error = "";
-    last_error_kind = error_kind_of_string "";
+    last_error_kind = Ek_none;
     last_outcome = "idle";
     total_dur_ms = 0;
     timed_count = 0;
@@ -233,12 +254,12 @@ let get_or_create_binding acc room_id =
       binding
 
 let outcome_error_details = function
-  | Validation_error message -> (error_kind_of_string "validation", message)
-  | Keeper_error message -> (error_kind_of_string "keeper", message)
+  | Validation_error message -> (Ek_validation, message)
+  | Keeper_error message -> (Ek_keeper, message)
   | Dispatch_unavailable ->
-      (error_kind_of_string "dispatch_unavailable", "keeper dispatch unavailable")
-  | Internal_error message -> (error_kind_of_string "internal", message)
-  | Success | Duplicate -> (error_kind_of_string "", "")
+      (Ek_dispatch_unavailable, "keeper dispatch unavailable")
+  | Internal_error message -> (Ek_internal, message)
+  | Success | Duplicate -> (Ek_none, "")
 
 let append_event ~channel ~room_id ~keeper ~duration_ms outcome ~timestamp =
   let error_kind, error = outcome_error_details outcome in
@@ -315,40 +336,40 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
       | Validation_error message ->
           acc.validation_error_count <- acc.validation_error_count + 1;
           update_error_fields acc ~now
-            ~kind:(error_kind_of_string "validation") ~message;
+            ~kind:(Ek_validation) ~message;
           (match binding with
            | Some binding ->
                update_binding_error_fields binding ~now
-                 ~kind:(error_kind_of_string "validation") ~message
+                 ~kind:(Ek_validation) ~message
            | None -> ())
       | Keeper_error message ->
           acc.keeper_error_count <- acc.keeper_error_count + 1;
-          update_error_fields acc ~now ~kind:(error_kind_of_string "keeper")
+          update_error_fields acc ~now ~kind:(Ek_keeper)
             ~message;
           (match binding with
            | Some binding ->
                update_binding_error_fields binding ~now
-                 ~kind:(error_kind_of_string "keeper") ~message
+                 ~kind:(Ek_keeper) ~message
            | None -> ())
       | Dispatch_unavailable ->
           acc.dispatch_unavailable_count <- acc.dispatch_unavailable_count + 1;
           update_error_fields acc ~now
-            ~kind:(error_kind_of_string "dispatch_unavailable")
+            ~kind:(Ek_dispatch_unavailable)
             ~message:"keeper dispatch unavailable";
           (match binding with
            | Some binding ->
                update_binding_error_fields binding ~now
-                 ~kind:(error_kind_of_string "dispatch_unavailable")
+                 ~kind:(Ek_dispatch_unavailable)
                  ~message:"keeper dispatch unavailable"
            | None -> ())
       | Internal_error message ->
           acc.internal_error_count <- acc.internal_error_count + 1;
-          update_error_fields acc ~now ~kind:(error_kind_of_string "internal")
+          update_error_fields acc ~now ~kind:(Ek_internal)
             ~message;
           (match binding with
            | Some binding ->
                update_binding_error_fields binding ~now
-                 ~kind:(error_kind_of_string "internal") ~message
+                 ~kind:(Ek_internal) ~message
            | None -> ()));
       append_event ~channel:channel_key ~room_id:trimmed_room ~keeper:trimmed_keeper
         ~duration_ms outcome ~timestamp:now)

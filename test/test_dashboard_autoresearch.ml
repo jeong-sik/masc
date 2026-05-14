@@ -208,6 +208,44 @@ let test_cycle_result_parser_rejects_bad_decision () =
       check bool "has decision error" true
         (String.length message > 0)
 
+let test_cycle_to_yojson_redacts_model_used () =
+  let record : Lib.Autoresearch.cycle_record =
+    {
+      cycle = 1;
+      hypothesis = "try something";
+      score_before = 0.1;
+      score_after = 0.2;
+      delta = 0.1;
+      decision = Lib.Autoresearch.Keep;
+      commit_hash = None;
+      elapsed_ms = 12;
+      model_used = "openai:gpt-5.4";
+      timestamp = 1.0;
+    }
+  in
+  let json = Lib.Autoresearch.cycle_to_yojson record in
+  check bool "model_used redacted" true
+    Yojson.Safe.Util.(json |> member "model_used" = `Null)
+
+let test_cycle_result_parser_accepts_redacted_model_used () =
+  let json =
+    `Assoc
+      [
+        ("cycle", `Int 1);
+        ("hypothesis", `String "try something");
+        ("score_before", `Float 0.1);
+        ("score_after", `Float 0.2);
+        ("delta", `Float 0.1);
+        ("decision", `String "keep");
+        ("elapsed_ms", `Int 12);
+        ("model_used", `Null);
+        ("timestamp", `Float 1.0);
+      ]
+  in
+  match Lib.Autoresearch.cycle_of_yojson_result json with
+  | Ok cycle -> check string "model_used normalized" "runtime" cycle.model_used
+  | Error message -> failwith message
+
 let test_execution_link_result_parser_rejects_missing_session_id () =
   let json =
     `Assoc
@@ -524,6 +562,10 @@ let () =
             test_state_result_parser_rejects_missing_required_field;
           test_case "cycle result parser rejects bad decision" `Quick
             test_cycle_result_parser_rejects_bad_decision;
+          test_case "cycle serializer redacts model_used" `Quick
+            test_cycle_to_yojson_redacts_model_used;
+          test_case "cycle parser accepts redacted model_used" `Quick
+            test_cycle_result_parser_accepts_redacted_model_used;
           test_case "swarm link result parser rejects missing session_id" `Quick
             test_execution_link_result_parser_rejects_missing_session_id;
         ] );

@@ -13,11 +13,11 @@ let kind value = H.error_kind_of_string value
 let provider_block_metric_labels provider_key = [("provider", provider_key)]
 
 let provider_block_duration_sum provider_key =
-  P.metric_value_or_zero P.metric_keeper_provider_block_duration_sec
+  P.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_provider_block_duration_sec
     ~labels:(provider_block_metric_labels provider_key) ()
 
 let provider_block_duration_count provider_key =
-  P.metric_value_or_zero (P.metric_keeper_provider_block_duration_sec ^ "_count")
+  P.metric_value_or_zero (Masc_mcp.Keeper_metrics.metric_keeper_provider_block_duration_sec ^ "_count")
     ~labels:(provider_block_metric_labels provider_key) ()
 
 let test_record_success_keeps_rate_1 () =
@@ -40,6 +40,42 @@ let test_cooldown_after_threshold () =
   H.record_failure t ~provider_key:"p" ();
   check bool "cooldown trips after 3 consecutive failures"
     true (H.is_in_cooldown t ~provider_key:"p")
+
+(* RFC-0037 §4.5: local providers (ollama, llama.cpp) get a more
+   generous failure budget than remote APIs.  Remote default is
+   3 fails / 30s; local default is 5 fails / 10s. *)
+
+let test_local_provider_threshold_higher_than_remote () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"ollama" ();
+  H.record_failure t ~provider_key:"ollama" ();
+  H.record_failure t ~provider_key:"ollama" ();
+  H.record_failure t ~provider_key:"ollama" ();
+  check bool "ollama not yet in cooldown after 4 failures (remote would be)"
+    false (H.is_in_cooldown t ~provider_key:"ollama");
+  H.record_failure t ~provider_key:"ollama" ();
+  check bool "ollama enters cooldown at 5 failures"
+    true (H.is_in_cooldown t ~provider_key:"ollama")
+
+let test_remote_provider_threshold_unchanged () =
+  let t = H.create () in
+  H.record_failure t ~provider_key:"claude" ();
+  H.record_failure t ~provider_key:"claude" ();
+  check bool "claude not in cooldown after 2 failures"
+    false (H.is_in_cooldown t ~provider_key:"claude");
+  H.record_failure t ~provider_key:"claude" ();
+  check bool "claude enters cooldown at 3 failures (existing default)"
+    true (H.is_in_cooldown t ~provider_key:"claude")
+
+let test_unknown_provider_uses_remote_threshold () =
+  (* Defensive: a provider name not registered in Provider_adapter
+     defaults to the conservative (remote) threshold. *)
+  let t = H.create () in
+  H.record_failure t ~provider_key:"unknown_xyz" ();
+  H.record_failure t ~provider_key:"unknown_xyz" ();
+  H.record_failure t ~provider_key:"unknown_xyz" ();
+  check bool "unknown provider treated as remote (cools at 3)"
+    true (H.is_in_cooldown t ~provider_key:"unknown_xyz")
 
 let test_success_resets_streak () =
   let t = H.create () in
@@ -721,6 +757,46 @@ let test_recent_outcome_count_success_separate () =
          ~outcome:H.Outcome_soft_rate_limited
          ~window_s:60.0)
 
+let test_restore_providers_reinstates_active_cooldown () =
+  let t = H.create () in
+  let until = Unix.gettimeofday () +. 60.0 in
+  let restored =
+    H.restore_providers
+      t
+      [ { restore_provider_key = "restored-provider"
+        ; restore_consecutive_failures = 4
+        ; restore_cooldown_until = Some until
+        ; restore_last_failure_at = Some (until -. 10.0)
+        ; restore_top_fingerprints = [ "timeout|abc12345", 2 ]
+        }
+      ]
+  in
+  check int "one provider restored" 1 restored;
+  check bool "restored cooldown blocks provider" true
+    (H.is_in_cooldown t ~provider_key:"restored-provider");
+  match H.provider_info t ~provider_key:"restored-provider" with
+  | None -> fail "expected restored provider_info"
+  | Some info ->
+    check int "consecutive failures restored" 4 info.consecutive_failures;
+    check (list (pair string int)) "fingerprints restored"
+      [ "timeout|abc12345", 2 ]
+      info.top_fingerprints
+
+let test_restore_providers_ignores_blank_provider_key () =
+  let t = H.create () in
+  let restored =
+    H.restore_providers
+      t
+      [ { restore_provider_key = " "
+        ; restore_consecutive_failures = 3
+        ; restore_cooldown_until = Some (Unix.gettimeofday () +. 60.0)
+        ; restore_last_failure_at = None
+        ; restore_top_fingerprints = []
+        }
+      ]
+  in
+  check int "blank key ignored" 0 restored
+
 let () =
   run "cascade_health_tracker" [
     "record", [
@@ -806,6 +882,12 @@ let () =
         test_terminal_failure_preserves_longer_existing_cooldown;
       test_case "terminal_failure records fingerprint" `Quick
         test_terminal_failure_records_fingerprint;
+      test_case "RFC-0037 §4.5: local provider threshold is generous (5 vs 3)" `Quick
+        test_local_provider_threshold_higher_than_remote;
+      test_case "RFC-0037 §4.5: remote provider threshold unchanged (3)" `Quick
+        test_remote_provider_threshold_unchanged;
+      test_case "RFC-0037 §4.5: unknown provider treated as remote" `Quick
+        test_unknown_provider_uses_remote_threshold;
     ];
     "soft_rate_limit", [
       test_case "single 429 trips immediate cooldown" `Quick
@@ -850,5 +932,11 @@ let () =
         test_recent_outcome_count_filters_by_outcome;
       test_case "success counts independently" `Quick
         test_recent_outcome_count_success_separate;
+    ];
+    "restore", [
+      test_case "reinstates active cooldown" `Quick
+        test_restore_providers_reinstates_active_cooldown;
+      test_case "ignores blank provider key" `Quick
+        test_restore_providers_ignores_blank_provider_key;
     ];
   ]

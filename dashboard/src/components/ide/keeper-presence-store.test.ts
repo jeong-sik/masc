@@ -5,15 +5,14 @@ import {
 } from './keeper-presence-store'
 
 const sample: KeeperPresenceSnapshot = {
+  kind: 'live',
   runtime_id: 'runtime',
   branch: 'main',
   supervisor: 'local',
-  connected: true,
   entries: [
     {
       keeper_id: 'idle-keeper',
       workspace_label: 'wt-idle',
-      branch: 'main',
       role: 'observer',
       status: 'idle',
       last_seen_ms: 1000,
@@ -21,7 +20,6 @@ const sample: KeeperPresenceSnapshot = {
     {
       keeper_id: 'nick0cave',
       workspace_label: 'dkr-a1',
-      branch: 'main',
       role: 'driver',
       status: 'active',
       last_seen_ms: 2000,
@@ -34,10 +32,10 @@ describe('createKeeperPresenceStore', () => {
     const store = createKeeperPresenceStore(sample)
 
     expect(store.snapshot()).toMatchObject({
+      kind: 'live',
       runtime_id: 'runtime',
       branch: 'main',
       supervisor: 'local',
-      connected: true,
     })
     expect(store.entries().map(entry => entry.keeper_id)).toEqual(['nick0cave', 'idle-keeper'])
     expect(store.activeEntries().map(entry => entry.keeper_id)).toEqual(['nick0cave'])

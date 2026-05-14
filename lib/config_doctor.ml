@@ -107,17 +107,41 @@ let option_field name = function
   | Some value -> (name, `String value)
   | None -> (name, `Null)
 
+type cascade_diagnosis = {
+  issues : catalog_issue list;
+  missing_source : bool;
+}
+
 let diagnose_cascade_catalog ~active_config_root =
   let config_path =
-    Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
+    Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
   in
   if not (Env_config_core.existing_file config_path) then
-    []
+    {
+      missing_source = true;
+      issues =
+        [
+          {
+            profile = None;
+            severity = Catalog_error;
+            message =
+              Printf.sprintf
+                "Cascade catalog source is missing: %s. Runtime cascade \
+                 resolution requires cascade.toml."
+                config_path;
+          };
+        ];
+    }
   else
-    let profiles = Cascade_catalog_validator.discover_profiles ~config_path in
-    let issues = Cascade_catalog_validator.diagnose_catalog ~config_path in
+    let profiles =
+      Cascade_catalog_validator.discover_profiles_for_diagnostics ~config_path
+    in
+    let validator_issues =
+      Cascade_catalog_validator.diagnose_catalog_for_diagnostics ~config_path
+    in
+    let issues = validator_issues in
     if issues = [] then
-      []
+      { issues = []; missing_source = false }
     else
       let error_count =
         issues
@@ -125,7 +149,7 @@ let diagnose_cascade_catalog ~active_config_root =
         |> List.length
       in
       let warn_count = List.length issues - error_count in
-      {
+      let summary = {
         profile = None;
         severity = if error_count > 0 then Catalog_error else Catalog_warn;
         message =
@@ -135,10 +159,10 @@ let diagnose_cascade_catalog ~active_config_root =
             (List.length profiles)
             error_count
             warn_count;
-      }
-      :: issues
+      } in
+      { issues = summary :: issues; missing_source = false }
 
-let cascade_catalog_next_actions ~config_path issues =
+let cascade_catalog_next_actions ~config_path { issues; missing_source } =
   if issues = [] then
     []
   else
@@ -146,7 +170,12 @@ let cascade_catalog_next_actions ~config_path issues =
       List.exists (fun issue -> issue.severity = Catalog_error) issues
     in
     let primary_action =
-      if has_errors then
+      if missing_source then
+        Printf.sprintf
+          "Create or bootstrap cascade.toml at %s before assigning keepers or \
+           starting the server."
+          config_path
+      else if has_errors then
         Printf.sprintf
           "Fix or disable the broken cascade preset entries in %s before \
            assigning keepers to them."
@@ -159,7 +188,7 @@ let cascade_catalog_next_actions ~config_path issues =
     in
     [
       primary_action;
-      "Rerun `masc-mcp doctor config` after editing cascade.json.";
+      "Rerun `masc-mcp doctor config` after editing cascade.toml.";
     ]
 
 let current_inputs ~base_path_input ~default_base_path () =
@@ -289,11 +318,12 @@ let analyze_with (inputs : inputs) =
       ~effective_masc_root:runtime_data_root
       ()
   in
-  let cascade_catalog_issues =
+  let cascade_diagnosis =
     diagnose_cascade_catalog ~active_config_root
   in
+  let cascade_catalog_issues = cascade_diagnosis.issues in
   let cascade_config_path =
-    Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
+    Filename.concat active_config_root Config_dir_resolver.cascade_toml_filename
   in
   let warnings =
     [
@@ -355,7 +385,7 @@ let analyze_with (inputs : inputs) =
   let cascade_actions =
     cascade_catalog_next_actions
       ~config_path:cascade_config_path
-      cascade_catalog_issues
+      cascade_diagnosis
   in
   let next_actions =
     match init_state with
@@ -504,6 +534,107 @@ let live_catalog_summary = function
               Cascade_catalog_runtime.rejection_to_yojson rejection );
           ] )
 
+let live_catalog_snapshot = function
+  | Stdlib.Ok (Cascade_catalog_runtime.Validated snapshot) -> Some snapshot
+  | Stdlib.Ok
+      (Cascade_catalog_runtime.Validated_with_rejections { snapshot; _ })
+  | Stdlib.Ok
+      (Cascade_catalog_runtime.Serving_last_known_good { snapshot; _ }) ->
+      Some snapshot
+  | Stdlib.Error _ -> None
+
+let find_live_profile (snapshot : Cascade_catalog_runtime.snapshot) name =
+  List.find_opt
+    (fun (profile : Cascade_catalog_runtime.profile_build) ->
+       String.equal profile.name name)
+    snapshot.profiles
+
+let provider_forced_tool_rejection_label provider_cfg =
+  match
+    Provider_tool_support.classify_rejection
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      provider_cfg
+  with
+  | Some reason -> Provider_tool_support.rejection_reason_label reason
+  | None -> "passes"
+
+let forced_tool_route_issue
+    (snapshot : Cascade_catalog_runtime.snapshot)
+    (use : Cascade_routes.logical_use)
+  =
+  let route_key = Cascade_routes.logical_use_key use in
+  let target =
+    try
+      Some
+        (Cascade_routes.cascade_name_for_use
+           ~config_path:snapshot.source_path use)
+    with
+    | Failure _ | Sys_error _ | Unix.Unix_error _ -> None
+  in
+  match target with
+  | None ->
+      Some
+        (Printf.sprintf
+           "Tool-required cascade route %s could not be resolved from %s."
+           route_key snapshot.source_path)
+  | Some target -> (
+      match find_live_profile snapshot target with
+      | None ->
+          Some
+            (Printf.sprintf
+               "Tool-required cascade route %s targets %s, but that profile is \
+                absent from the live validated catalog."
+               route_key target)
+      | Some profile ->
+          let candidates =
+            List.map
+              (fun (candidate : Cascade_catalog_runtime.candidate_runtime) ->
+                 candidate.provider_cfg)
+              profile.candidates
+          in
+          if candidates = []
+          then
+            Some
+              (Printf.sprintf
+                 "Tool-required cascade route %s targets %s, but that profile \
+                  has no provider candidates. Keeper turns that require tools \
+                  will fail with no_tool_capable_provider."
+                 route_key target)
+          else if
+            List.exists
+              (Provider_tool_support.supports_required_tool_use
+                 ~require_tool_choice_support:true
+                 ~require_tool_support:true)
+              candidates
+          then
+            None
+          else
+            let rejected =
+              candidates
+              |> List.map (fun provider_cfg ->
+                     Printf.sprintf
+                       "%s:%s"
+                       (Provider_tool_support.provider_debug_label provider_cfg)
+                       (provider_forced_tool_rejection_label provider_cfg))
+              |> String.concat ", "
+            in
+            Some
+              (Printf.sprintf
+                 "Tool-required cascade route %s targets %s, but none of its \
+                  %d provider candidate(s) satisfy forced required-tool use \
+                  (needs inline tool_choice or runtime MCP). rejected=[%s]. \
+                  Keeper turns that require tools will fail with \
+                  no_tool_capable_provider."
+                 route_key target (List.length candidates) rejected))
+
+let forced_tool_route_issues live_state_result =
+  match live_catalog_snapshot live_state_result with
+  | None -> []
+  | Some snapshot ->
+      [ Cascade_routes.Keeper_turn; Cascade_routes.Tool_required ]
+      |> List.filter_map (forced_tool_route_issue snapshot)
+
 let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
     ~default_base_path () =
   let report = analyze ~base_path_input ~default_base_path () in
@@ -525,18 +656,20 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
     | Some _ -> (None, [], true)
     | None -> (None, [], true)
   in
+  let live_state_result =
+    Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ()
+  in
   let live_outcome, live_warning, catalog_validation =
-    match
-      Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ()
-      |> live_catalog_summary
-    with
+    match live_catalog_summary live_state_result with
     | outcome, warning, validation -> (outcome, warning, validation)
   in
+  let tool_route_issues = forced_tool_route_issues live_state_result in
   let warnings =
     [ report.warnings;
       (match live_warning with
        | None -> []
        | Some warning -> [ warning ]);
+      tool_route_issues;
       (match sandbox_warning with
        | None -> []
        | Some warning -> [ warning ]) ]
@@ -555,7 +688,15 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
       else
         []
     in
-    report.next_actions @ catalog_actions @ sandbox_actions
+    let tool_route_actions =
+      if tool_route_issues = [] then
+        []
+      else
+        [
+          "Route keeper_turn/tool_required to at least one provider with inline tool_choice or runtime MCP support, then rerun `masc-mcp doctor config`.";
+        ]
+    in
+    report.next_actions @ catalog_actions @ tool_route_actions @ sandbox_actions
     |> dedupe_keep_order
   in
   let status =
@@ -563,6 +704,7 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
     | (Invalid_env | Missing_init), _, _, _ -> Error
     | _, _, (Live_catalog_serving_last_known_good | Live_catalog_invalid), _ ->
         Error
+    | _, _, _, _ when tool_route_issues <> [] -> Error
     | _, _, Live_catalog_partial, _ -> Warn
     | _, Error, Live_catalog_valid, _ -> Error
     | _, Warn, Live_catalog_valid, _ -> Warn

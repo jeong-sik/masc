@@ -44,23 +44,23 @@ module Prom = Masc_mcp.Prometheus
 let with_eio f () = Eio_main.run @@ fun _env -> f ()
 
 let starts_for ~keeper =
-  Prom.metric_value_or_zero Prom.metric_keeper_turn_starts
+  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_turn_starts
     ~labels:[ ("keeper", keeper) ] ()
 
 let scheduled_for ~keeper =
-  Prom.metric_value_or_zero Prom.metric_keeper_turn_scheduled
+  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_turn_scheduled
     ~labels:[ ("keeper_name", keeper) ] ()
 
 let reattempts_for ~keeper =
-  Prom.metric_value_or_zero Prom.metric_keeper_turn_reattempts
+  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_turn_reattempts
     ~labels:[ ("keeper", keeper) ] ()
 
 let regressions_for ~keeper =
-  Prom.metric_value_or_zero Prom.metric_keeper_turn_regressions
+  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_turn_regressions
     ~labels:[ ("keeper", keeper) ] ()
 
 let blocks_for ~keeper ~reason =
-  Prom.metric_value_or_zero Prom.metric_keeper_turn_livelock_blocks
+  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_turn_livelock_blocks
     ~labels:[ ("keeper", keeper); ("reason", reason) ] ()
 
 (* Fresh start: no prior state → [Fresh] outcome, starts counter

@@ -4,13 +4,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import '@testing-library/jest-dom'
 
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
+import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import {
   AllowlistPreview,
   BudgetSourceBadge,
+  RuntimeLensSection,
   RuntimeSignals,
   budgetSourceLabel,
   budgetSourceTone,
   filterSignalGroups,
+  deriveKeeperLiveTruth,
   resolveAllowlistPreview,
   resolveKeeperCurrentTaskLabel,
 } from './keeper-detail-runtime'
@@ -323,10 +326,10 @@ describe('RuntimeSignals', () => {
     render(h(RuntimeSignals, { keeper }))
 
     expect(screen.getByText('주요 도구')).toBeInTheDocument()
-    expect(screen.getByText('주요 모델')).toBeInTheDocument()
+    expect(screen.queryByText('주요 모델')).not.toBeInTheDocument()
     expect(screen.getByText('주요 작업 종류')).toBeInTheDocument()
     expect(screen.getByText('masc_board_post')).toBeInTheDocument()
-    expect(screen.getByText('gpt-5')).toBeInTheDocument()
+    expect(screen.queryByText('gpt-5')).not.toBeInTheDocument()
     expect(screen.getByText('planning')).toBeInTheDocument()
   })
 
@@ -372,6 +375,399 @@ describe('RuntimeSignals', () => {
     fireEvent.input(input, { target: { value: 'nonexistent-zzz' } })
 
     expect(screen.getByText(/필터 결과 없음/)).toBeInTheDocument()
+  })
+})
+
+describe('RuntimeLensSection', () => {
+  const lane = (
+    key: string,
+    label: string,
+    eventCount: number,
+    terminalStatus: string,
+    gapCodes: string[] = [],
+  ) => ({
+    lane: key,
+    label,
+    event_count: eventCount,
+    terminal_status: terminalStatus,
+    gap_codes: gapCodes,
+    gap_badge: gapCodes[0] ?? null,
+    events: eventCount > 0 ? [{ event: `${key}_event`, count: eventCount }] : [],
+  })
+
+  function runtimeTraceFixture(): KeeperRuntimeTraceResponse {
+    return {
+      keeper: 'sangsu',
+      trace_id: 'trace-lens',
+      turn_id: 7,
+      manifest_path: '/tmp/runtime-manifest.jsonl',
+      manifest_path_present: true,
+      manifest_total_rows: 6,
+      manifest_returned_rows: 6,
+      receipt_returned_rows: 1,
+      turn_identity: {
+        requested_keeper_turn_id: 7,
+        manifest_keeper_turn_ids: [7],
+        receipt_turn_counts: [7],
+        max_oas_turn_count: 3,
+        provider_lane_resolved_count: 1,
+        provider_attempt_started_count: 1,
+        provider_attempt_finished_count: 1,
+        checkpoint_saved_count: 1,
+        event_bus_correlated_count: 1,
+        memory_injected_count: 1,
+        memory_flushed_count: 1,
+        receipt_appended_count: 1,
+        turn_finished_count: 1,
+      },
+      provider_attempts: {
+        started_count: 1,
+        finished_count: 1,
+        terminal_status: 'timeout',
+        terminal_error: 'Timeout after 120s',
+        terminal_exception_kind: 'outer_oas_timeout',
+        attempts: [],
+      },
+      event_bus: {
+        event_bus_correlated_count: 1,
+        correlation_ids: ['corr-1'],
+        run_ids: ['run-1'],
+        context_compact_started_count: 1,
+        context_compacted_count: 1,
+        last_compaction: null,
+      },
+      memory: {
+        memory_injected_count: 1,
+        memory_injected_present_count: 1,
+        memory_flushed_count: 1,
+        memory_flush_success_count: 1,
+        memory_flush_error_count: 0,
+        episodes_flushed: 2,
+        procedures_flushed: 1,
+      },
+      runtime_lens: {
+        turn_clock: {
+          trace_id: 'trace-lens',
+          keeper_turn_id: 7,
+          max_oas_turn_count: 3,
+          terminal_event_present: true,
+          terminal_event: 'turn_finished',
+          manifest_total_rows: 6,
+        },
+        axes: {
+          lifecycle: {
+            turn_started_count: 1,
+            phase_gate_decided_count: 1,
+            pre_dispatch_blocked_count: 0,
+            receipt_appended_count: 1,
+            turn_finished_count: 1,
+            terminal_status: 'finished',
+          },
+          tool_surface: {
+            requested_tools: ['read_file'],
+            required_tools: ['keeper_task_done'],
+            materialized_tools: ['read_file'],
+            missing_required_tools: ['keeper_task_done'],
+            turn_lane: 'tool_required',
+            tool_surface_class: 'runtime_mcp',
+            tool_requirement: 'required',
+            visible_tool_count: 1,
+            tool_gate_enabled: true,
+            tool_surface_fallback_used: false,
+            terminal_status: 'missing_required_tool',
+          },
+          provider_lane: {
+            resolved: true,
+            status: 'error',
+            resolved_lane: 'inline',
+            effective_tool_count: 1,
+            runtime_mcp_policy_present: false,
+            required_tools: ['keeper_task_done'],
+            materialized_tools: ['read_file'],
+            missing_required_tools: ['keeper_task_done'],
+          },
+          provider_attempt: {
+            started_count: 1,
+            finished_count: 1,
+            terminal_status: 'timeout',
+          },
+          claim_scope: {
+            present: false,
+            source: 'tool_call_log',
+            status: 'not_observed',
+            result: null,
+            mode: null,
+            scoped: null,
+            active_goal_ids: [],
+            effective_goal_ids: [],
+            fallback_reason: null,
+            matched_goal_id: null,
+            excluded_count: null,
+            claimed_task_id: null,
+            claimed_goal_id: null,
+          },
+          config_drift: {
+            present: false,
+            status: 'ok',
+            error: null,
+            has_live_override: false,
+            cascade_override: false,
+            override_fields: [],
+            default_cascade_name: null,
+            live_cascade_name: null,
+            active_config_root: null,
+            active_config_root_source: null,
+            default_manifest_path: null,
+          },
+          context: {
+            context_injected_count: 1,
+            context_compacted_event_count: 1,
+            event_bus_correlated_count: 1,
+            context_compact_started_count: 1,
+            context_compacted_count: 1,
+            checkpoint_loaded_count: 1,
+            checkpoint_saved_count: 1,
+            state_snapshot_sidecar_saved_count: 1,
+            last_compaction: null,
+          },
+          memory: {
+            memory_injected_count: 1,
+            memory_injected_present_count: 1,
+            memory_flushed_count: 1,
+            memory_flush_success_count: 1,
+            memory_flush_error_count: 0,
+            episodes_flushed: 2,
+            procedures_flushed: 1,
+          },
+        },
+        swimlanes: {
+          keeper: lane('keeper', 'Keeper', 2, 'finished'),
+          masc_policy_cascade: lane('masc_policy_cascade', 'MASC Cascade', 1, 'error'),
+          oas_agent: lane('oas_agent', 'OAS', 2, 'checkpoint_saved'),
+          provider: lane('provider', 'Provider', 2, 'timeout'),
+          tool_runtime: lane('tool_runtime', 'Tool Runtime', 1, 'missing_required_tool', ['required_tool_not_materialized']),
+          memory_context: lane('memory_context', 'Memory/Context', 3, 'flushed'),
+        },
+        gaps: [
+          {
+            code: 'required_tool_not_materialized',
+            severity: 'bad',
+            lane: 'tool_runtime',
+            detail: 'missing required tools: keeper_task_done',
+          },
+        ],
+      },
+      health: 'partial',
+      linked_artifacts: {
+        receipts: [
+          {
+            kind: 'execution_receipt',
+            path: '/tmp/receipt.jsonl',
+            present: true,
+            file_stat: { size: 120 },
+          },
+        ],
+        checkpoints: [
+          {
+            kind: 'oas_checkpoint',
+            path: '/tmp/checkpoint.json',
+            present: false,
+            file_stat: null,
+          },
+        ],
+        tool_call_logs: [
+          {
+            kind: 'tool_call_log',
+            path: '/tmp/tool-calls.jsonl',
+            present: true,
+            file_stat: { size: 80 },
+          },
+        ],
+      },
+      manifest_rows: [{ event: 'Turn_started', trace_id: 'trace-lens' }],
+      receipts: [{ terminal_reason_code: 'completed' }],
+      stale_reason: null,
+    }
+  }
+
+  function compositeFixture(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompositeSnapshot {
+    const base: KeeperCompositeSnapshot = {
+      keeper: 'sangsu',
+      correlation_id: 'keeper:sangsu:1',
+      run_id: 'run-1',
+      ts: 1_778_688_700,
+      phase: 'running',
+      turn_phase: 'idle',
+      decision: { stage: 'undecided' },
+      cascade: { state: 'idle' },
+      compaction: { stage: 'accumulating' },
+      circuit_breaker: { state: 'clean' },
+      measurement: { captured: false },
+      invariants: {
+        phase_turn_alignment: true,
+        no_cascade_before_measurement: true,
+        compaction_atomicity: true,
+        event_priority_monotone: true,
+        phase_derivation_agreement: true,
+      },
+      phase_diagnosis: {
+        current_phase: 'running',
+        derived_phase: 'running',
+        can_execute_turn: true,
+        conditions: {
+          launch_pending: false,
+          fiber_alive: true,
+          heartbeat_healthy: true,
+          turn_healthy: true,
+          context_within_budget: true,
+          context_handoff_needed: false,
+          compaction_active: false,
+          handoff_active: false,
+          operator_paused: false,
+          stop_requested: false,
+          restart_budget_remaining: true,
+          backoff_elapsed: false,
+          guardrail_triggered: false,
+          drain_complete: false,
+          context_overflow: false,
+          compact_retry_exhausted: false,
+          terminal_failure_latched: false,
+        },
+        determining_condition: 'running_fiber_alive',
+        rows: [],
+      },
+      is_live: false,
+      idle_seconds: 117,
+      last_turn_ts: 1_778_688_606,
+      last_outcome: null,
+      execution: {
+        latest_receipt_present: true,
+        recorded_at: '2026-05-13T16:10:14Z',
+        outcome: 'receipt_done',
+        terminal_reason_code: 'completed',
+        operator_disposition: 'pass',
+        operator_disposition_reason: 'healthy',
+        model_used: null,
+        stop_reason: 'completed',
+        tool_contract_result: 'needs_execution_progress',
+        duration_ms: 16000,
+        error: null,
+        cascade: null,
+        tool_surface: {
+          tool_requirement: 'optional',
+          tool_gate_enabled: false,
+          missing_required_tools: [],
+          required_tools: [],
+        },
+      },
+      runtime_attention: {
+        state: 'blocked',
+        needs_attention: true,
+        blocked: true,
+        fiber_stop_requested: false,
+        reason: 'healthy',
+        raw_phase: 'running',
+        is_live: false,
+        source: 'execution_receipt',
+      },
+      recommended_actions: [],
+      fsm_guard_violations: 0,
+    }
+    return { ...base, ...overrides }
+  }
+
+  it('renders axis summary, swimlanes, and gap badges', () => {
+    render(h(RuntimeLensSection, { trace: runtimeTraceFixture() }))
+
+    expect(screen.getByTestId('runtime-lens')).toBeInTheDocument()
+    expect(screen.getByText('keeper / OAS turn')).toBeInTheDocument()
+    expect(screen.getByText('7 / 3')).toBeInTheDocument()
+    expect(screen.getByText('trace id')).toBeInTheDocument()
+    expect(screen.getByText('trace-lens')).toBeInTheDocument()
+    expect(screen.getByText('manifest rows')).toBeInTheDocument()
+    expect(screen.getByText('6/6')).toBeInTheDocument()
+    expect(screen.getByText('receipt rows')).toBeInTheDocument()
+    expect(screen.getByText('manifest file')).toBeInTheDocument()
+    expect(screen.getByText('manifest raw rows')).toBeInTheDocument()
+    expect(screen.getByText('receipt raw rows')).toBeInTheDocument()
+    expect(screen.getByText('receipt artifacts')).toBeInTheDocument()
+    expect(screen.getByText('checkpoint artifacts')).toBeInTheDocument()
+    expect(screen.getByText('tool log artifacts')).toBeInTheDocument()
+    expect(screen.getAllByText('1/1').length).toBeGreaterThan(1)
+    expect(screen.getByText('0/1')).toBeInTheDocument()
+    expect(screen.getByText('provider attempts')).toBeInTheDocument()
+    expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
+    expect(screen.getByText('provider terminal')).toBeInTheDocument()
+    expect(screen.getByText('timeout / outer_oas_timeout')).toBeInTheDocument()
+    expect(screen.getByText('event ids')).toBeInTheDocument()
+    expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
+    expect(screen.getByText('memory evidence')).toBeInTheDocument()
+    expect(screen.getByText('inj 1/1 · flush 1/0 · ep/proc 2/1')).toBeInTheDocument()
+    expect(screen.getAllByText('keeper_task_done').length).toBeGreaterThan(0)
+    expect(screen.getByText('Provider')).toBeInTheDocument()
+    expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
+    expect(screen.getAllByText('required_tool_not_materialized').length).toBeGreaterThan(0)
+  })
+
+  it('renders an empty state while runtime trace is unavailable', () => {
+    render(h(RuntimeLensSection, { trace: null }))
+
+    expect(screen.getByText('runtime_trace_unavailable')).toBeInTheDocument()
+  })
+
+  it('derives visible live-truth rows from composite and runtime trace evidence', () => {
+    const summary = deriveKeeperLiveTruth({
+      keeper: {
+        name: 'sangsu',
+        status: 'active',
+        keepalive_running: true,
+      },
+      compositeSnapshot: compositeFixture(),
+      runtimeTrace: runtimeTraceFixture(),
+      runtimeResolution: null,
+    })
+
+    expect(summary.headline).toBe('조치 필요')
+    expect(summary.rows.find(row => row.label === '런타임')?.value).toBe('fiber alive')
+    expect(summary.rows.find(row => row.label === '현재 턴')?.value).toBe('no live turn')
+    expect(summary.rows.find(row => row.label === '최신 증거')?.value).toBe('turn #7 finished')
+    expect(summary.rows.find(row => row.label === 'FSM')?.value).toBe('KSM running / KTC idle')
+    expect(summary.rows.find(row => row.label === '차단')?.detail).toContain('needs_execution_progress')
+  })
+
+  it('surfaces runtime resolution warnings in the live-truth summary', () => {
+    const summary = deriveKeeperLiveTruth({
+      keeper: {
+        name: 'sangsu',
+        status: 'active',
+        keepalive_running: true,
+      },
+      compositeSnapshot: compositeFixture({
+        runtime_attention: {
+          state: 'healthy',
+          needs_attention: false,
+          blocked: false,
+          reason: null,
+          raw_phase: 'running',
+          is_live: false,
+          source: 'execution_receipt',
+        },
+      }),
+      runtimeTrace: runtimeTraceFixture(),
+      runtimeResolution: {
+        status: 'warn',
+        warnings: ['Runtime build commit differs from server repo HEAD.'],
+        source_mismatch: true,
+        server_repo_git_commit: '386514c1f9',
+        workspace_git_commit: 'd0add960d7',
+        server_repo_path: { path: '/repo/.worktrees/stale-server' },
+      },
+    })
+
+    expect(summary.tone).toBe('warn')
+    expect(summary.runtimeWarnings).toEqual(['Runtime build commit differs from server repo HEAD.'])
+    expect(summary.runtimeBuildLabel).toBe('386514c1f9 vs workspace d0add960d7')
+    expect(summary.runtimeRepoLabel).toBe('.worktrees/stale-server')
   })
 })
 

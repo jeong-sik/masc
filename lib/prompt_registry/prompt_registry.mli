@@ -172,6 +172,12 @@ val restore_overrides : string -> unit
     Stale or manually-edited entries are skipped with a
     [Log.Misc.warn] instead of being silently accepted. *)
 
+val set_restore_failure_observer : (unit -> unit) -> unit
+(** Installs the process-local observer called whenever override
+    restore rejects an entry or cannot parse the persisted override
+    file. The default observer is a no-op so this sub-library stays
+    independent of the runtime metrics implementation. *)
+
 (** {1 Listing + JSON export} *)
 
 val list_prompts : unit -> Yojson.Safe.t list

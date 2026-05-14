@@ -3,14 +3,16 @@
     Foundation for the lifecycle_cleanup_hook plumbing described in
     [docs/rfc/RFC-0036-multi-keeper-docker-orchestration.md].
 
-    This PR wires the first call site:
-    [Keeper_supervisor.sweep_and_recover] fires [Tombstone_reaped] after
-    a dead-keeper unregister succeeds (see [Keeper_lifecycle_hooks.run]
-    invocation in keeper_supervisor.ml). [Phase_transition] is
-    declared but not yet emitted from any call site — Phase A.2
-    follow-up wires it; until that PR lands no hook will receive a
-    Phase_transition event. Phase B/C uses the same registration API
-    to attach the [Docker_runtime] bridge.
+    The two production call sites are:
+    - [Keeper_registry.dispatch_event_with_audit] fires [Phase_transition]
+      after the state machine accepts a phase change and before the
+      registry write commits.
+    - [Keeper_supervisor.sweep_and_recover] fires [Tombstone_reaped] after
+      a dead-keeper unregister succeeds (see [Keeper_lifecycle_hooks.run]
+      invocation in keeper_supervisor.ml).
+
+    Phase B/C uses the same registration API to attach the
+    [Docker_runtime] bridge.
 
     Contract:
     - Hooks are best-effort, synchronous, and exception-safe. The runner
@@ -31,13 +33,9 @@ type event =
       from_phase : Keeper_state_machine.phase;
       to_phase   : Keeper_state_machine.phase;
     }
-      (** Reserved for the Phase A.2 follow-up: a future supervisor
-          phase-transition call site will fire this before the
-          registry write commits. No call site emits it in this PR;
-          [Keeper_lifecycle_hooks.run] is currently invoked only with
-          [Tombstone_reaped] (from [Keeper_supervisor.sweep_and_recover]).
-          Hooks will observe the intent of the transition; they cannot
-          veto. *)
+      (** Fired from [Keeper_registry.dispatch_event_with_audit] for real
+          phase changes before the registry write commits. Hooks observe
+          the intent of the transition; they cannot veto. *)
   | Tombstone_reaped
       (** Fired by [Keeper_supervisor.cleanup_dead_tombstone] after the
           registry unregister completes. The keeper is fully gone from
@@ -50,10 +48,20 @@ type hook = keeper_id:string -> event -> unit
     — calling twice with the same closure registers it twice. *)
 val register : hook -> unit
 
-(** Run every registered hook with the given event. Exceptions raised
-    from a hook are caught and logged via [Log.Server.warn]; the runner
-    always returns normally. *)
-val run : keeper_id:string -> event -> unit
+(** Run every registered hook with the given event. Non-cancellation
+    exceptions raised from a hook are caught, counted via
+    [metric_keeper_lifecycle_callback_failures], and logged via
+    [Log.Server.warn]. When [base_dir] and [meta] are supplied, the
+    failure also writes a durable telemetry coverage-gap row so the
+    best-effort hook contract is visible outside process-local logs.
+    [Eio.Cancel.Cancelled] is re-raised to preserve cooperative
+    cancellation. *)
+val run :
+  ?base_dir:string ->
+  ?meta:Keeper_types.keeper_meta ->
+  keeper_id:string ->
+  event ->
+  unit
 
 (** Number of currently registered hooks. Useful for tests. *)
 val registered_count : unit -> int

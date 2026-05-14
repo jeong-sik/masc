@@ -59,7 +59,7 @@ let make_meta ?(name = "bench-analyst") ?(trace_id = "trace-safe-autonomy") () =
           ("name", `String name);
           ("agent_name", `String "bench-analyst-agent");
           ("trace_id", `String trace_id);
-          ("cascade_name", `String Keeper_config.default_cascade_name);
+          ("cascade_name", `String (Keeper_config.default_cascade_name ()));
           ("last_model_used", `String "openai:gpt-5.4");
           ("sandbox_profile", `String "local");
           (* PR #13113 review: align with the canonical local-keeper
@@ -239,25 +239,31 @@ let test_history_field_returns_last_15_scores () =
     (List.init 15 (fun idx -> float_of_int (idx + 6)))
     history
 
-let test_sandbox_live_probe_is_bounded_per_keeper () =
+let test_sandbox_live_probe_is_batched_for_dashboard () =
   with_safe_autonomy_store @@ fun config ->
   ignore (persist_docker_keeper config ~name:"docker-a");
   ignore (persist_docker_keeper config ~name:"docker-b");
+  ignore (persist_docker_keeper config ~name:"docker-c");
+  ignore (persist_docker_keeper config ~name:"docker-d");
   let fake_docker = write_slow_fake_docker () in
   with_env "MASC_TEST_FAKE_DOCKER_PATH" (Some fake_docker) (fun () ->
     let started_at = Unix.gettimeofday () in
     let json = Dashboard_safe_autonomy.json ~config () in
     let elapsed_sec = Unix.gettimeofday () -. started_at in
-    (* PR #13113: per-keeper probe timeout is 1.0s (raised from
-       0.25s so [Process_eio]'s [%.0f] log formatter prints "1s"
-       instead of the misleading "0s").  With 2 stalled docker
-       keepers serialised through the screen, the worst-case is
-       roughly 2 * 1.0s + scheduler / I-O overhead.  Bound at 3.5s
-       to keep the regression test alarm narrow without flaking on
-       slow CI runners. *)
-    check bool "slow docker probe is bounded" true (elapsed_sec < 3.5);
+    (* The dashboard should pay the stalled Docker listing timeout once
+       for the fleet, not once per Docker keeper. Four keepers would exceed
+       this bound if the probe were still serialized per row. *)
+    check bool "slow docker probe is batched" true (elapsed_sec < 3.5);
     let per_keeper = Yojson.Safe.Util.(json |> member "per_keeper" |> to_list) in
-    check int "docker keeper count" 2 (List.length per_keeper))
+    check int "docker keeper count" 4 (List.length per_keeper);
+    check bool "playground repo git enrichment skipped" true
+      (List.for_all
+         (fun keeper ->
+           Yojson.Safe.Util.(
+             keeper |> member "sandbox_live" |> member "playground_repos_source"
+             |> to_string)
+           = "skipped_dashboard_hot_path")
+         per_keeper))
 
 let () =
   run "dashboard_safe_autonomy"
@@ -270,7 +276,7 @@ let () =
             test_history_dedupes_identical_payloads;
           test_case "history field returns last 15 scores" `Quick
             test_history_field_returns_last_15_scores;
-          test_case "sandbox live probe is bounded per keeper" `Quick
-            test_sandbox_live_probe_is_bounded_per_keeper;
+          test_case "sandbox live probe is batched for dashboard" `Quick
+            test_sandbox_live_probe_is_batched_for_dashboard;
         ] );
     ]

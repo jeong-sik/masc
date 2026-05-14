@@ -286,7 +286,7 @@ describe('normalizeGovernanceJudgment', () => {
       evidence_refs: ['e1', 'e2'],
     })
     expect(result!.judgment_id).toBe('j-1')
-    expect(result!.model_used).toBe('gpt-4')
+    expect(result!.model_used).toBeNull()
     expect(result!.evidence_refs).toEqual(['e1', 'e2'])
   })
 
@@ -425,7 +425,7 @@ describe('normalizeGovernanceJudgeSummary', () => {
     expect(result!.status).toBe('stale_visible')
     expect(result!.degraded_reason).toBe('timeout')
     expect(result!.cached_judgments_visible).toBe(true)
-    expect(result!.model_used).toBe('gpt-4')
+    expect(result!.model_used).toBeNull()
     expect(result!.keeper_name).toBe('janitor')
     expect(result!.last_error).toBeNull()
   })
@@ -455,6 +455,18 @@ describe('fetchBoard', () => {
           has_voted: true,
           report_count: 2,
           moderation_status: 'flagged',
+          contributor_quality: {
+            score: 0.72,
+            band: 'strong',
+            source: 'agent_reputation',
+            completion_rate: 0.8,
+            response_rate: 0.6,
+            board_posts: 3,
+            board_comments: 5,
+            accountability_score: 0.9,
+            autonomy_level: 'elevated',
+            thompson_confidence: 0.7,
+          },
           reactions: [
             {
               emoji: '🔥',
@@ -490,6 +502,18 @@ describe('fetchBoard', () => {
       has_voted: true,
       report_count: 2,
       moderation_status: 'flagged',
+      contributor_quality: {
+        score: 0.72,
+        band: 'strong',
+        source: 'agent_reputation',
+        completion_rate: 0.8,
+        response_rate: 0.6,
+        board_posts: 3,
+        board_comments: 5,
+        accountability_score: 0.9,
+        autonomy_level: 'elevated',
+        thompson_confidence: 0.7,
+      },
       reactions: [
         {
           emoji: '🔥',
@@ -526,6 +550,43 @@ describe('fetchBoard', () => {
     expect(url).toContain('/api/v1/board?')
     expect(url).toContain('hearth=ops')
     expect(url).toContain('limit=150')
+  })
+
+  it('normalizes vote-blind rows and opts into the board projection when requested', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-blind',
+            author: 'analyst',
+            title: 'Blind score',
+            body: 'Working',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+            votes: null,
+            score: null,
+            votes_up: null,
+            votes_down: null,
+            vote_blind: true,
+            vote_blind_reason: 'vote_before_score',
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard('hot', { blindVotes: true })
+
+    expect(result.posts[0]).toMatchObject({
+      id: 'post-blind',
+      vote_blind: true,
+      vote_blind_reason: 'vote_before_score',
+    })
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('blind_votes=true')
   })
 })
 
@@ -723,6 +784,7 @@ describe('fetchBoardPost', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')
+    expect(url).toContain('blind_votes=true')
   })
 })
 

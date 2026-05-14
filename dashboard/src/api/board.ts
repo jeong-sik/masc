@@ -1,10 +1,10 @@
-import { currentDashboardActor, get, post, withRetries, defaultBoardVoter } from './core'
+import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
-  BoardVoteDirection, BoardModerationStatus,
+  BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
   GovernanceContextRef,
   GovernanceDecisionItem, GovernanceExecutedRoute,
@@ -91,7 +91,7 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     goal_id: asNullableString(raw.goal_id),
     goal_ids: asStringList(raw.goal_ids),
     runtime_contract: runtimeContract,
-    selected_model: asNullableString(raw.selected_model),
+    selected_model: null,
     disposition: asNullableString(raw.disposition),
     disposition_reason: asNullableString(raw.disposition_reason),
     rule_match: ruleMatch,
@@ -171,7 +171,7 @@ export function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | 
     confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
     generated_at: asNullableIsoTimestamp(raw.generated_at),
     expires_at: asNullableIsoTimestamp(raw.expires_at),
-    model_used: asNullableString(raw.model_used),
+    model_used: null,
     keeper_name: asNullableString(raw.keeper_name),
     evidence_refs: asStringList(raw.evidence_refs),
     recommended_action: normalizeGovernanceResolvedAction(raw.recommended_action),
@@ -245,7 +245,7 @@ export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSu
       : undefined,
     generated_at: asNullableIsoTimestamp(raw.generated_at),
     expires_at: asNullableIsoTimestamp(raw.expires_at),
-    model_used: asNullableString(raw.model_used),
+    model_used: null,
     keeper_name: asNullableString(raw.keeper_name),
     last_error: asNullableString(raw.last_error),
   }
@@ -353,6 +353,24 @@ function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
   }
 }
 
+function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality | null {
+  if (!isRecord(raw)) return null
+  const score = asNumber(raw.score)
+  if (score === undefined) return null
+  return {
+    score,
+    band: asString(raw.band, '').trim() || undefined,
+    source: asString(raw.source, '').trim() || undefined,
+    completion_rate: asNumber(raw.completion_rate),
+    response_rate: asNumber(raw.response_rate),
+    board_posts: asNumber(raw.board_posts),
+    board_comments: asNumber(raw.board_comments),
+    accountability_score: asNumber(raw.accountability_score),
+    autonomy_level: asString(raw.autonomy_level, '').trim() || undefined,
+    thompson_confidence: asNumber(raw.thompson_confidence),
+  }
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -367,6 +385,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   const votes = asNumber(raw.votes, score || (votesUp - votesDown))
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const voteBlind = raw.vote_blind === true
+  const voteBlindReason = asString(raw.vote_blind_reason, '').trim() || undefined
   const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
   const flairValue = (() => {
     const flair = raw.flair
@@ -412,6 +432,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     tags,
     votes,
     vote_balance: score,
+    vote_blind: voteBlind,
+    ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
     comment_count: commentCount,
@@ -429,6 +451,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     hearth_count: asNumber(raw.hearth_count, 0),
     report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
     moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
+    contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
     ...(reactions !== undefined ? { reactions } : {}),
   }
 }
@@ -446,6 +469,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
+  const voteBlind = raw.vote_blind === true
+  const voteBlindReason = asString(raw.vote_blind_reason, '').trim() || undefined
   const reactions = Array.isArray(raw.reactions)
     ? raw.reactions
         .map(normalizeBoardReactionSummary)
@@ -463,6 +488,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     vote_balance: score,
     votes_up: votesUp,
     votes_down: votesDown,
+    vote_blind: voteBlind,
+    ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
     report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
@@ -652,7 +679,13 @@ function normalizeBoardReactionToggleResult(raw: unknown): BoardReactionToggleRe
 
 export async function fetchBoard(
   sortBy?: BoardSortMode,
-  options?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string; hearth?: string },
+  options?: {
+    excludeSystem?: boolean
+    excludeAutomation?: boolean
+    author?: string
+    hearth?: string
+    blindVotes?: boolean
+  },
 ): Promise<{ posts: BoardPost[] }> {
   return timeBoardRequest('list', () => withRetries('fetchBoard', async () => {
     const params = new URLSearchParams()
@@ -662,6 +695,7 @@ export async function fetchBoard(
     if (options?.author) params.set('author', options.author)
     if (options?.hearth) params.set('hearth', options.hearth)
     params.set('voter', currentDashboardActor())
+    if (options?.blindVotes) params.set('blind_votes', 'true')
     params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author || options?.hearth ? '150' : '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
@@ -724,6 +758,7 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
     const params = new URLSearchParams({
       format: 'flat',
       voter: currentDashboardActor(),
+      blind_votes: 'true',
     })
     const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
     const postRaw = isRecord(raw.post) ? raw.post : raw
@@ -866,4 +901,23 @@ export function createSubBoard(
   const normalizedMembers = members.map(member => member.trim()).filter(Boolean)
   if (normalizedMembers.length > 0) body.members = normalizedMembers
   return post('/api/v1/board/sub-boards', body)
+}
+
+export function deleteSubBoard(subBoardId: string): Promise<unknown> {
+  return del(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`)
+}
+
+export function updateSubBoard(
+  subBoardId: string,
+  updates: { name?: string; description?: string; access?: SubBoardAccess; members?: string[] },
+): Promise<unknown> {
+  const body: Record<string, string | string[]> = {}
+  if (updates.name !== undefined) body.name = updates.name
+  if (updates.description !== undefined) body.description = updates.description
+  if (updates.access !== undefined) body.access = updates.access
+  if (updates.members !== undefined) {
+    const normalizedMembers = updates.members.map(m => m.trim()).filter(Boolean)
+    if (normalizedMembers.length > 0) body.members = normalizedMembers
+  }
+  return put(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`, body)
 }

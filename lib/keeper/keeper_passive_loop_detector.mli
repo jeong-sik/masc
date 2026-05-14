@@ -14,10 +14,13 @@
 
     @since #12799 *)
 
-val progress_class_of_terminal_reason_code : string -> string option
-(** Map typed terminal-reason codes into detector progress classes. Returns
-    [Some _] only for required-tool failures that should count toward an
-    inter-turn no-progress loop. *)
+val progress_class_of_disposition :
+  Keeper_turn_disposition.t -> string option
+(** Map a typed [Keeper_turn_disposition.t] into a detector progress class.
+    Returns [Some _] only for required-tool failure dispositions
+    ([Required_tool_use_no_tool_call] and [Required_tool_use_unsatisfied])
+    that should count toward an inter-turn no-progress loop; every other
+    disposition variant returns [None]. *)
 
 val record_turn :
   keeper_name:string ->

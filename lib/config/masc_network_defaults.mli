@@ -23,7 +23,7 @@ val ollama_default_url : string
 val ollama_port_needle : string
 
 (** Ollama native API path for the running-models ("process status")
-    endpoint. Used by {!Cascade_ollama_probe} and
+    endpoint. Used by {!Cascade_http_probe} and
     {!Tool_local_runtime_probe}. *)
 val ollama_api_ps_path : string
 

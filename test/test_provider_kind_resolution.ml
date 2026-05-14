@@ -1,5 +1,5 @@
 (** Tests for [Provider_kind_resolver] and the cascade parser's
-    use of it. Covers issue #8159: ["gemini:gemini-2.5-flash"] must
+    use of it. Covers issue #8159: ["gemini:gemini-3-flash-preview"] must
     resolve to [Gemini], never silently flatten to [OpenAI_compat]. *)
 
 open Alcotest
@@ -31,10 +31,10 @@ let kind_testable : Pk.provider_kind testable =
 (* ────────────────────────────────────────────────────────────────── *)
 
 let test_gemini_prefix_resolves_to_gemini () =
-  match Resolver.resolve "gemini:gemini-2.5-flash" with
+  match Resolver.resolve "gemini:gemini-3-flash-preview" with
   | Registered { provider_name; model_id; kind } ->
     check string "provider_name" "gemini" provider_name;
-    check string "model_id" "gemini-2.5-flash" model_id;
+    check string "model_id" "gemini-3-flash-preview" model_id;
     check kind_testable "kind is Gemini" Pk.Gemini kind
   | Custom_url _ -> fail "gemini: resolved to Custom_url"
   | Unknown msg -> fail ("gemini: resolved to Unknown: " ^ msg)
@@ -100,7 +100,7 @@ let test_custom_prefix_resolves_to_custom_url () =
 let test_kind_of_spec_api () =
   check (option kind_testable) "gemini kind via helper"
     (Some Pk.Gemini)
-    (Resolver.kind_of_spec "gemini:gemini-2.5-flash");
+    (Resolver.kind_of_spec "gemini:gemini-3-flash-preview");
   check (option kind_testable) "unknown returns None"
     None
     (Resolver.kind_of_spec "unknownvendor:foo")
@@ -112,7 +112,7 @@ let test_kind_of_spec_api () =
 let test_cascade_parse_gemini_preserves_kind () =
   (* End-to-end: the exact spec from issue #8159 must yield kind=Gemini
      after going through Cascade_config.parse_model_string. *)
-  match Cascade.parse_model_string "gemini:gemini-2.5-flash" with
+  match Cascade.parse_model_string "gemini:gemini-3-flash-preview" with
   | None ->
     (* parse_model_string returns None when the provider is not
        available (missing GEMINI_API_KEY env var in test env). In that
@@ -120,12 +120,12 @@ let test_cascade_parse_gemini_preserves_kind () =
        classification; accept None here. *)
     check bool "resolver confirms Gemini kind when provider unavailable"
       true
-      (Resolver.kind_of_spec "gemini:gemini-2.5-flash"
+      (Resolver.kind_of_spec "gemini:gemini-3-flash-preview"
        = Some Pk.Gemini)
   | Some cfg ->
     check kind_testable "cfg.kind is Gemini (not OpenAI_compat)"
       Pk.Gemini cfg.kind;
-    check string "cfg.model_id" "gemini-2.5-flash" cfg.model_id
+    check string "cfg.model_id" "gemini-3-flash-preview" cfg.model_id
 
 let test_cascade_parse_unknown_returns_none () =
   match Cascade.parse_model_string "unknownvendor:foo" with

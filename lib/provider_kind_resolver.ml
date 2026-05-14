@@ -84,3 +84,14 @@ let kind_of_spec (spec : string) :
   | Registered { kind; _ } -> Some kind
   | Custom_url _ -> Some Llm_provider.Provider_config.OpenAI_compat
   | Unknown _ -> None
+
+let uses_anthropic_caching_for_kind kind =
+  match Provider_adapter.adapter_of_provider_kind kind with
+  | Some adapter -> adapter.tool_policy.uses_anthropic_caching
+  | None -> false
+
+let uses_anthropic_caching_for_spec spec =
+  kind_of_spec spec |> Option.map uses_anthropic_caching_for_kind
+
+let env_var_for_kind kind =
+  Llm_provider.Provider_kind.default_api_key_env kind

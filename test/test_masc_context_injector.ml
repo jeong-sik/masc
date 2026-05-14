@@ -72,6 +72,52 @@ let test_context_populated_after_injection () =
      | _ -> fail "wall_time not set")
   | None -> fail "expected Some injection"
 
+let test_context_updates_overwrite_bounded_keys () =
+  let config = MCI.default_config () in
+  let injector = MCI.make ~config () in
+  let ctx = Agent_sdk.Context.create () in
+  let expected_keys =
+    [
+      MCI.key_wall_time;
+      MCI.key_elapsed_seconds;
+      MCI.key_tool_call_count;
+      MCI.key_last_tool_name;
+      MCI.key_last_tool_outcome;
+      MCI.key_tool_success_count;
+      MCI.key_tool_error_count;
+    ]
+    |> List.sort String.compare
+  in
+  for idx = 1 to 200 do
+    let tool_name = Printf.sprintf "tool_%03d" idx in
+    match injector ~tool_name ~input:`Null ~output:(ok_output "done") with
+    | Some inj ->
+      List.iter
+        (fun (key, value) -> Agent_sdk.Context.set ctx key value)
+        inj.Agent_sdk.Hooks.context_updates
+    | None -> fail "expected Some injection"
+  done;
+  check
+    (list string)
+    "context keys stay bounded"
+    expected_keys
+    (Agent_sdk.Context.keys ctx |> List.sort String.compare);
+  (match Agent_sdk.Context.get ctx MCI.key_tool_call_count with
+   | Some (`Int 200) -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected 200 tool calls, got %s"
+          (Yojson.Safe.to_string
+             (Option.value ~default:`Null other))));
+  match Agent_sdk.Context.get ctx MCI.key_last_tool_name with
+  | Some (`String "tool_200") -> ()
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected last tool to be tool_200, got %s"
+         (Yojson.Safe.to_string (Option.value ~default:`Null other)))
+
 (* ── Temporal summary rendering ─────────────────────── *)
 
 let test_render_temporal_summary_empty () =
@@ -126,6 +172,8 @@ let () =
     "context", [
       test_case "populated after injection" `Quick
         test_context_populated_after_injection;
+      test_case "repeated injections overwrite bounded keys" `Quick
+        test_context_updates_overwrite_bounded_keys;
     ];
     "temporal_summary", [
       test_case "empty context" `Quick

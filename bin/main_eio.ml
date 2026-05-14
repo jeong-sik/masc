@@ -31,11 +31,16 @@ module Build_identity = Masc_mcp.Build_identity
 module Config_doctor = Masc_mcp.Config_doctor
 module Auth_doctor = Masc_mcp.Auth_doctor
 module Auth_login = Masc_mcp.Auth_login
+module Keeper_id = Masc_mcp.Keeper_id
+module Keeper_msg_async = Masc_mcp.Keeper_msg_async
+module Keeper_status_bridge = Masc_mcp.Keeper_status_bridge
+module Keeper_tool_call_log = Masc_mcp.Keeper_tool_call_log
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Masc_domain
 module Tempo = Masc_mcp.Tempo
 module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
+module Board_curation = Masc_mcp.Board_curation
 module Board_dispatch = Masc_mcp.Board_dispatch
 module Task_dispatch = Masc_mcp.Task_dispatch
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
@@ -311,6 +316,50 @@ let dispatch_route ~routes ~request ~path reqd =
         ) hearths));
       ] in
       Http.Response.json (Yojson.Safe.to_string json) reqd
+  | `GET, "/api/v1/board/curation" ->
+      let json =
+        match Board_dispatch.latest_curation_snapshot () with
+        | None -> `Assoc [ ("snapshot", `Null) ]
+        | Some snap ->
+            `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
+      in
+      Http.Response.json (Yojson.Safe.to_string json) reqd
+  | `GET, "/api/v1/board/sub-boards" ->
+      let sub_boards = Board_dispatch.list_sub_boards () in
+      let json =
+        `Assoc
+          [
+            ( "sub_boards",
+              `List (List.map Board.sub_board_to_yojson sub_boards) );
+          ]
+      in
+      Http.Response.json (Yojson.Safe.to_string json) reqd
+  | `GET, "/api/v1/board/karma/ledger" ->
+      let agent = query_param request "agent" in
+      let limit =
+        int_query_param request "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000
+      in
+      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+      let totals =
+        Board_dispatch.get_all_karma ()
+        |> List.sort (fun (_, a) (_, b) -> compare b a)
+      in
+      let json =
+        `Assoc
+          [
+            ("events", `List (List.map Board.karma_event_to_yojson events));
+            ("count", `Int (List.length events));
+            ("scoring_rule", `String "up=+1,down=0");
+            ( "totals",
+              `List
+                (List.map
+                   (fun (agent_name, k) ->
+                     `Assoc
+                       [ ("agent", `String agent_name); ("karma", `Int k) ])
+                   totals) );
+          ]
+      in
+      Http.Response.json (Yojson.Safe.to_string json) reqd
   | `POST, "/api/v1/board/reactions" ->
       Http.Request.read_body_async reqd (fun body ->
         try
@@ -393,9 +442,12 @@ let dispatch_route ~routes ~request ~path reqd =
       let post_id = String.sub p 14 (String.length p - 14) in
       let format = Option.value ~default:"nested" (query_param request "format") in
       let voter = board_voter_query request in
+      let config =
+        Option.map (fun state -> state.Mcp_server.room_config) !server_state
+      in
       let (status, body) =
-        board_post_detail_json ~include_moderation:false ~voter
-          ~response_format:format ~post_id
+        board_post_detail_json ~include_moderation:false ~blind_votes:false
+          ~config ~voter ~response_format:format ~post_id
       in
       Http.Response.json ~status body reqd
   | _ -> Http.Router.dispatch routes request reqd
@@ -852,6 +904,430 @@ let doctor_auth_cmd_exit base_path as_json =
   print_endline output;
   Auth_doctor.exit_code report
 
+let keeper_doctor_json_member key = function
+  | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt key fields)
+  | _ -> `Null
+
+let keeper_doctor_json_string key json =
+  match keeper_doctor_json_member key json with
+  | `String value -> Some value
+  | _ -> None
+
+let keeper_doctor_json_int key json =
+  match keeper_doctor_json_member key json with
+  | `Int value -> Some value
+  | `Intlit raw -> int_of_string_opt raw
+  | _ -> None
+
+let keeper_doctor_json_bool key json =
+  match keeper_doctor_json_member key json with
+  | `Bool value -> Some value
+  | _ -> None
+
+let keeper_doctor_json_string_list key json =
+  match keeper_doctor_json_member key json with
+  | `List values ->
+    values
+    |> List.filter_map (function
+      | `String value when String.trim value <> "" -> Some value
+      | _ -> None)
+    |> List.sort_uniq String.compare
+  | _ -> []
+
+let keeper_doctor_string_has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+
+let keeper_doctor_string_contains ~needle value =
+  let value = String.lowercase_ascii value in
+  let needle = String.lowercase_ascii needle in
+  let value_len = String.length value in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    idx + needle_len <= value_len
+    && (String.equal (String.sub value idx needle_len) needle || loop (idx + 1))
+  in
+  needle_len = 0 || loop 0
+
+let keeper_doctor_json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+
+let keeper_doctor_string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let keeper_doctor_json_bool_opt = function
+  | Some value -> `Bool value
+  | None -> `Null
+
+let keeper_doctor_json_int_opt = function
+  | Some value -> `Int value
+  | None -> `Null
+
+let keeper_doctor_tool_output_text json =
+  match keeper_doctor_json_member "output" json with
+  | `String value -> Some value
+  | `Assoc _ as output -> (
+    match keeper_doctor_json_member "_blob" output with
+    | `Assoc _ as blob -> keeper_doctor_json_string "preview" blob
+    | _ -> None)
+  | _ -> None
+
+let keeper_doctor_parse_tool_output json =
+  match keeper_doctor_tool_output_text json with
+  | None -> None
+  | Some output -> (
+    match Safe_ops.parse_json_safe ~context:"doctor_keeper.tool_output" output with
+    | Ok parsed -> Some parsed
+    | Error _ -> None)
+
+let keeper_doctor_claim_status output =
+  let result =
+    Option.value ~default:"" (keeper_doctor_json_string "result" output)
+    |> String.trim
+  in
+  match keeper_doctor_json_member "claimed_task" output with
+  | `Assoc _ -> "claimed"
+  | _ when keeper_doctor_string_has_prefix ~prefix:"No eligible tasks" result ->
+    "no_eligible"
+  | _ when keeper_doctor_string_has_prefix ~prefix:"No unclaimed tasks" result ->
+    "no_unclaimed"
+  | _ when keeper_doctor_string_has_prefix ~prefix:"Error:" result -> "error"
+  | _ when result = "" -> "unknown"
+  | _ -> "observed"
+
+let keeper_doctor_claim_scope_json ~keeper_name =
+  Keeper_tool_call_log.read_recent ~keeper_name ~n:100 ()
+  |> List.find_opt (fun json ->
+       String.equal
+         (Option.value ~default:"" (keeper_doctor_json_string "tool" json))
+         "keeper_task_claim")
+  |> function
+  | None ->
+    `Assoc
+      [ "present", `Bool false
+      ; "status", `String "not_observed"
+      ; "mode", `Null
+      ; "excluded_count", `Null
+      ; "active_goal_ids", `List []
+      ; "effective_goal_ids", `List []
+      ; "claimed_task_id", `Null
+      ; "result", `Null
+      ]
+  | Some call ->
+    let output =
+      match keeper_doctor_parse_tool_output call with
+      | Some (`Assoc _ as output) -> output
+      | _ -> `Assoc []
+    in
+    let scope =
+      match keeper_doctor_json_member "claim_scope" output with
+      | `Assoc _ as scope -> scope
+      | _ -> `Assoc []
+    in
+    let claimed_task =
+      match keeper_doctor_json_member "claimed_task" output with
+      | `Assoc _ as task -> Some task
+      | _ -> None
+    in
+    `Assoc
+      [ "present", `Bool true
+      ; "status", `String (keeper_doctor_claim_status output)
+      ; "mode", keeper_doctor_json_string_opt (keeper_doctor_json_string "mode" scope)
+      ; "scoped", keeper_doctor_json_bool_opt (keeper_doctor_json_bool "scoped" scope)
+      ; ( "excluded_count",
+          keeper_doctor_json_int_opt
+            (keeper_doctor_json_int "excluded_count" scope) )
+      ; ( "active_goal_ids",
+          keeper_doctor_string_list_json
+            (keeper_doctor_json_string_list "active_goal_ids" scope) )
+      ; ( "effective_goal_ids",
+          keeper_doctor_string_list_json
+            (keeper_doctor_json_string_list "effective_goal_ids" scope) )
+      ; ( "claimed_task_id",
+          match claimed_task with
+          | Some task -> keeper_doctor_json_string_opt (keeper_doctor_json_string "task_id" task)
+          | None -> `Null )
+      ; "result", keeper_doctor_json_string_opt (keeper_doctor_json_string "result" output)
+      ]
+
+let keeper_doctor_config_drift_json ~config ~keeper_name =
+  match Keeper_types.read_meta config keeper_name with
+  | Ok (Some meta) ->
+    let sources = Keeper_status_bridge.source_provenance_json config meta in
+    let override_fields = keeper_doctor_json_string_list "override_fields" sources in
+    let cascade_detail =
+      match keeper_doctor_json_member "override_field_sources" sources with
+      | `List values ->
+        List.find_opt
+          (fun value ->
+            keeper_doctor_json_string "field" value = Some "model.cascade_name")
+          values
+      | _ -> None
+    in
+    let string_value key json =
+      match keeper_doctor_json_member key json with
+      | `String value -> Some value
+      | _ -> None
+    in
+    let default_cascade_name, live_cascade_name =
+      match cascade_detail with
+      | Some detail -> string_value "default_value" detail, string_value "live_value" detail
+      | None -> None, None
+    in
+    let cascade_override = Option.is_some cascade_detail in
+    `Assoc
+      [ "status", `String (if cascade_override then "drift" else "ok")
+      ; "cascade_override", `Bool cascade_override
+      ; "override_fields", keeper_doctor_string_list_json override_fields
+      ; "default_cascade_name", keeper_doctor_json_string_opt default_cascade_name
+      ; "live_cascade_name", keeper_doctor_json_string_opt live_cascade_name
+      ; ( "active_config_root",
+          keeper_doctor_json_string_opt
+            (keeper_doctor_json_string "active_config_root" sources) )
+      ]
+  | Ok None ->
+    `Assoc
+      [ "status", `String "keeper_missing"
+      ; "cascade_override", `Bool false
+      ; "override_fields", `List []
+      ; "default_cascade_name", `Null
+      ; "live_cascade_name", `Null
+      ; "active_config_root", `Null
+      ]
+  | Error message ->
+    `Assoc
+      [ "status", `String "error"
+      ; "error", `String message
+      ; "cascade_override", `Bool false
+      ; "override_fields", `List []
+      ; "default_cascade_name", `Null
+      ; "live_cascade_name", `Null
+      ; "active_config_root", `Null
+      ]
+
+let keeper_doctor_current_task_json config meta =
+  match meta.Keeper_types.current_task_id with
+  | None -> `Assoc [ "present", `Bool false; "task_id", `Null ]
+  | Some task_id ->
+    let task_id_s = Keeper_id.Task_id.to_string task_id in
+    let task_result =
+      try
+        Ok
+          (Coord.get_tasks_raw config
+           |> List.find_opt (fun (task : Types.task) ->
+                String.equal task.id task_id_s))
+      with exn -> Error (Printexc.to_string exn)
+    in
+    (match task_result with
+     | Error message ->
+       `Assoc
+         [ "present", `Bool true
+         ; "task_id", `String task_id_s
+         ; "status", `String "task_store_unavailable"
+         ; "assignee", `Null
+         ; "error", `String message
+         ]
+     | Ok task -> (
+       match task with
+       | None ->
+         `Assoc
+           [ "present", `Bool true
+           ; "task_id", `String task_id_s
+         ; "status", `String "missing_from_task_store"
+         ; "assignee", `Null
+         ]
+     | Some task ->
+       `Assoc
+         [ "present", `Bool true
+         ; "task_id", `String task.id
+         ; "title", `String task.title
+         ; "status", `String (Types.task_status_to_string task.task_status)
+         ; "assignee", `String (Types.task_display_assignee task.task_status)
+         ; "goal_id", keeper_doctor_json_string_opt task.goal_id
+         ]))
+
+let keeper_doctor_async_json ~keeper_name ~claim_scope =
+  let latest =
+    match Keeper_msg_async.list_for_keeper ~keeper_name with
+    | entry :: _ -> Some entry
+    | [] -> None
+  in
+  let latest_json =
+    match latest with
+    | Some entry -> Keeper_msg_async.entry_to_json entry
+    | None -> `Null
+  in
+  let latest_status =
+    match latest with
+    | Some entry -> Keeper_msg_async.status_to_string entry.Keeper_msg_async.status
+    | None -> "none"
+  in
+  let side_effect_visible =
+    keeper_doctor_json_string "claimed_task_id" claim_scope <> None
+  in
+  `Assoc
+    [ "latest_status", `String latest_status
+    ; "latest", latest_json
+    ; "side_effect_visible", `Bool side_effect_visible
+    ; ( "lost_after_side_effect",
+        `Bool (String.equal latest_status "lost" && side_effect_visible) )
+    ]
+
+let keeper_doctor_primary_reason ~claim_scope ~config_drift ~config_report ~async =
+  let claim_status = keeper_doctor_json_string "status" claim_scope in
+  let cascade_override =
+    Option.value ~default:false
+      (keeper_doctor_json_bool "cascade_override" config_drift)
+  in
+  let route_gap =
+    List.exists
+      (fun warning ->
+        keeper_doctor_string_contains ~needle:"no_tool_capable_provider" warning
+        || keeper_doctor_string_contains ~needle:"forced required-tool" warning)
+      config_report.Config_doctor.warnings
+  in
+  let lost_after_side_effect =
+    Option.value ~default:false
+      (keeper_doctor_json_bool "lost_after_side_effect" async)
+  in
+  match claim_status with
+  | Some "no_eligible" -> "claim_scope_no_eligible"
+  | _ when cascade_override -> "keeper_cascade_override_drift"
+  | _ when route_gap -> "route_tool_capability_gap"
+  | _ when lost_after_side_effect -> "request_lost_after_side_effect"
+  | _ when Config_doctor.exit_code config_report <> 0 -> "config_doctor_not_ok"
+  | _ -> "ok"
+
+let keeper_doctor_next_actions reason =
+  match reason with
+  | "claim_scope_no_eligible" ->
+    [ "Inspect active_goal_ids and link/create an eligible task before retrying." ]
+  | "keeper_cascade_override_drift" ->
+    [ "Inspect keeper TOML/live meta cascade_name and align it with the intended route." ]
+  | "route_tool_capability_gap" ->
+    [ "Run `masc-mcp doctor config --json` and route keeper_turn/tool_required to a tool-capable runtime lane." ]
+  | "request_lost_after_side_effect" ->
+    [ "Inspect current_task and recent tool-calls before retrying the same keeper message." ]
+  | "config_doctor_not_ok" ->
+    [ "Resolve config doctor warnings before restarting or retrying the keeper." ]
+  | _ -> []
+
+let doctor_keeper_report base_path keeper_name =
+  let config_report =
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Config_doctor.analyze_live
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~fs:(Eio.Stdenv.fs env)
+      ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~base_path_input:base_path
+      ~default_base_path:(default_base_path ())
+      ()
+  in
+  let config = Coord.default_config config_report.base_path in
+  Keeper_tool_call_log.init ~base_path:config.base_path ();
+  let meta_result = Keeper_types.read_meta config keeper_name in
+  let claim_scope = keeper_doctor_claim_scope_json ~keeper_name in
+  let config_drift = keeper_doctor_config_drift_json ~config ~keeper_name in
+  let async = keeper_doctor_async_json ~keeper_name ~claim_scope in
+  let current_task =
+    match meta_result with
+    | Ok (Some meta) -> keeper_doctor_current_task_json config meta
+    | Ok None -> `Assoc [ "present", `Bool false; "error", `String "keeper_missing" ]
+    | Error message -> `Assoc [ "present", `Bool false; "error", `String message ]
+  in
+  let reason =
+    match meta_result with
+    | Ok (Some _) ->
+      keeper_doctor_primary_reason ~claim_scope ~config_drift ~config_report ~async
+    | Ok None -> "keeper_missing"
+    | Error _ -> "keeper_meta_error"
+  in
+  let next_actions = keeper_doctor_next_actions reason in
+  let status =
+    if String.equal reason "ok" then "ok"
+    else if String.equal reason "claim_scope_no_eligible" then "warn"
+    else "error"
+  in
+  let payload =
+    `Assoc
+      [ "status", `String status
+      ; "keeper", `String keeper_name
+      ; "server",
+        `Assoc
+          [ "base_path", `String config.base_path
+          ; "config_status", `String (Config_doctor.status_to_string config_report.status)
+          ; "active_config_root", `String config_report.active_config_root
+          ]
+      ; "scope", claim_scope
+      ; "route",
+        `Assoc
+          [ "config_drift", config_drift
+          ; "doctor_warnings",
+            keeper_doctor_string_list_json config_report.warnings
+          ]
+      ; "tools",
+        `Assoc
+          [ "route_tool_capability_gap",
+            `Bool
+              (List.exists
+                 (fun warning ->
+                   keeper_doctor_string_contains
+                     ~needle:"no_tool_capable_provider" warning)
+                 config_report.warnings)
+          ]
+      ; "current_task", current_task
+      ; "async_request", async
+      ; "disposition", `Assoc [ "reason", `String reason ]
+      ; "recommended_actions", keeper_doctor_string_list_json next_actions
+      ]
+  in
+  payload, if String.equal status "ok" then 0 else 1
+
+let render_doctor_keeper_text json =
+  let section name =
+    match keeper_doctor_json_member name json with
+    | `Assoc _ as value -> Yojson.Safe.to_string value
+    | `List _ as value -> Yojson.Safe.to_string value
+    | `String value -> value
+    | `Bool value -> string_of_bool value
+    | `Int value -> string_of_int value
+    | `Null -> "null"
+    | other -> Yojson.Safe.to_string other
+  in
+  String.concat
+    "\n"
+    [ "MASC Keeper Doctor"
+    ; "status: " ^ section "status"
+    ; "keeper: " ^ section "keeper"
+    ; "server: " ^ section "server"
+    ; "scope: " ^ section "scope"
+    ; "route: " ^ section "route"
+    ; "tools: " ^ section "tools"
+    ; "current_task: " ^ section "current_task"
+    ; "async_request: " ^ section "async_request"
+    ; "disposition: " ^ section "disposition"
+    ; "recommended_actions: " ^ section "recommended_actions"
+    ]
+
+let doctor_keeper_cmd_exit base_path keeper_name as_json =
+  let keeper_name = String.trim keeper_name in
+  if keeper_name = "" then (
+    Printf.eprintf "keeper name is required\n%!";
+    1)
+  else
+    let payload, rc = doctor_keeper_report base_path keeper_name in
+    let output =
+      if as_json then Yojson.Safe.pretty_to_string payload
+      else render_doctor_keeper_text payload
+    in
+    print_endline output;
+    rc
+
 let doctor_sidecar_exit name as_json =
   match Masc_mcp.Doctor_dispatch.sidecar_dir name with
   | None ->
@@ -920,6 +1396,10 @@ let sidecar_name_arg =
   in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"SIDECAR" ~doc)
 
+let doctor_keeper_name =
+  let doc = "Keeper name to diagnose" in
+  Arg.(required & opt (some string) None & info ["name"] ~docv:"KEEPER" ~doc)
+
 let doctor_config_cmd =
   let doc =
     "Diagnose config initialization, active config roots, and base-path shadowing"
@@ -933,6 +1413,13 @@ let doctor_auth_cmd =
   in
   let info = Cmd.info "auth" ~doc in
   Cmd.v info Term.(const doctor_auth_cmd_exit $ base_path $ doctor_json)
+
+let doctor_keeper_cmd =
+  let doc =
+    "Diagnose one keeper's scope, cascade drift, tool lane, task, and async state"
+  in
+  let info = Cmd.info "keeper" ~doc in
+  Cmd.v info Term.(const doctor_keeper_cmd_exit $ base_path $ doctor_keeper_name $ doctor_json)
 
 let doctor_sidecar_cmd =
   let doc =
@@ -1089,7 +1576,12 @@ let doctor_cmd =
   Cmd.group
     ~default:Term.(const doctor_cmd_exit $ base_path $ doctor_json)
     info
-    [ doctor_config_cmd; doctor_auth_cmd; doctor_sidecar_cmd; doctor_all_cmd ]
+    [ doctor_config_cmd
+    ; doctor_auth_cmd
+    ; doctor_keeper_cmd
+    ; doctor_sidecar_cmd
+    ; doctor_all_cmd
+    ]
 
 let login_cmd_exit base_path host port agent role as_json as_shell =
   match

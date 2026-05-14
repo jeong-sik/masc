@@ -18,7 +18,7 @@ type session = {
   created_at: float;          (** Unix timestamp *)
   mutable last_seen: float [@atomic];   (** Last activity timestamp; atomic read/write for unlocked concurrent update via [Session.touch]. *)
   transport: transport;       (** Transport type for this session *)
-  mutable subscriptions: string list; (** Event types subscribed *)
+  subscriptions: string list; (** Event types subscribed *)
 }
 
 (** Session manager *)

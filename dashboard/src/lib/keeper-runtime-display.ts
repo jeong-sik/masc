@@ -50,48 +50,14 @@ type ActivityCandidate = {
   ageSeconds: number
 }
 
-const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a', 'null', 'undefined', 'default', 'auto'])
-
 function trimmed(value: string | null | undefined): string | null {
   const text = value?.trim()
   return text ? text : null
 }
 
-function modelText(value: string | null | undefined): string | null {
-  const text = trimmed(value)
-  if (!text || MODEL_PLACEHOLDERS.has(text.toLowerCase())) return null
-  return text
-}
-
-function latestMetricModel(source: KeeperModelDisplaySource | null | undefined): string | null {
-  const series = source?.metrics_series ?? []
-  for (let index = series.length - 1; index >= 0; index -= 1) {
-    const model = modelText(series[index]?.model_used)
-    if (model) return model
-  }
-  return null
-}
-
 export function keeperDisplayModel(
-  source: KeeperModelDisplaySource | null | undefined,
+  _source: KeeperModelDisplaySource | null | undefined,
 ): KeeperModelDisplay | null {
-  const lastModelLabel = modelText(source?.last_model_used_label)
-  if (lastModelLabel) return { label: '최근 모델', value: lastModelLabel }
-
-  const lastModel = modelText(source?.last_model_used)
-  if (lastModel) return { label: '최근 모델', value: lastModel }
-
-  const activeModelLabel = modelText(source?.active_model_label)
-  if (activeModelLabel) return { label: '현재 모델', value: activeModelLabel }
-
-  const activeModel = modelText(source?.active_model)
-  if (activeModel) return { label: '현재 모델', value: activeModel }
-
-  const metricModel = latestMetricModel(source)
-  if (metricModel) return { label: '최근 모델', value: metricModel }
-
-  const fallbackModel = modelText(source?.model) ?? modelText(source?.primary_model)
-  if (fallbackModel) return { label: '모델', value: fallbackModel }
   return null
 }
 
@@ -207,12 +173,7 @@ function isHeartbeatAlive(heartbeat: string): boolean {
 
 function socialModelFallbackHint(keeper: Keeper): string | null {
   if (keeper.social_model_recognized !== false) return null
-  const configured = keeper.configured_social_model?.trim()
-  const fallback = keeper.social_model_fallback?.trim()
-  if (configured && fallback) return `대화 모델 ${configured} 미인식 · ${fallback}로 대체 중`
-  if (configured) return `대화 모델 ${configured} 미인식`
-  if (fallback) return `대화 모델 fallback · ${fallback}`
-  return '미인식 대화 모델 설정'
+  return '대화 런타임 설정 확인 필요'
 }
 
 function continueGateHint(keeper: Keeper): string {
@@ -247,6 +208,20 @@ const runtimeBlockerLabels = {
   turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
   stale_fleet_batch: 'Fleet stale 배치',
+  awaiting_operator: '운영자 조치 대기',
+  awaiting_sandbox_egress: '샌드박스 egress 대기',
+  supervisor_paused: 'Supervisor 일시정지',
+  synthetic_stall: '합성 상태 정체',
+  self_imposed_idle: '자체 대기',
+  sdk_max_turns_exceeded: 'SDK 최대 턴 초과',
+  sdk_token_budget_exceeded: 'SDK 토큰 예산 초과',
+  sdk_cost_budget_exceeded: 'SDK 비용 예산 초과',
+  sdk_unrecognized_stop_reason: 'SDK 미식별 정지 사유',
+  sdk_idle_detected: 'SDK Idle 감지',
+  sdk_tool_retry_exhausted: 'SDK 도구 재시도 소진',
+  sdk_guardrail_violation: 'SDK 가드레일 위반',
+  sdk_tripwire_violation: 'SDK Tripwire 위반',
+  sdk_exit_condition_met: 'SDK 종료 조건 충족',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(
@@ -272,7 +247,7 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return '자율 턴이 실행 슬롯을 기다리다 타임아웃되었습니다.'
   }
   if (blockerClass === 'admission_queue_wait_timeout') {
-    return 'OAS admission queue 대기 시간이 초과되었습니다.'
+    return 'Keeper admission FIFO 대기 시간이 초과되었습니다.'
   }
   if (blockerClass === 'turn_timeout_after_queue_wait') {
     return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'
@@ -287,7 +262,7 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
   }
   if (blockerClass === 'cascade_exhausted') {
-    return '캐스케이드 후보가 모두 소진되어 provider 상태 확인이 필요합니다.'
+    return '캐스케이드 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
   }
   if (blockerClass === 'no_tool_capable_provider') {
     return '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.'
@@ -318,6 +293,21 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'stale_fleet_batch') {
     return '여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.'
+  }
+  if (blockerClass === 'awaiting_operator') {
+    return '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.'
+  }
+  if (blockerClass === 'awaiting_sandbox_egress') {
+    return '샌드박스 네트워크 또는 push egress 정책 때문에 keeper가 진행하지 못하고 있습니다.'
+  }
+  if (blockerClass === 'supervisor_paused') {
+    return 'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.'
+  }
+  if (blockerClass === 'synthetic_stall') {
+    return '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물을 재확인해야 합니다.'
+  }
+  if (blockerClass === 'self_imposed_idle') {
+    return 'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.'
   }
   return null
 }

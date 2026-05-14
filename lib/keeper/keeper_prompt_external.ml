@@ -40,11 +40,10 @@ let strip_frontmatter (content : string) : string =
 
 let read_file path =
   try
-    let raw = In_channel.with_open_text path In_channel.input_all in
+    let raw = Fs_compat.load_file path in
     Some (strip_frontmatter raw)
   with
   | Sys_error _ -> None
-  | End_of_file -> None
 
 let load_uncached name =
   let path = behavior_path name in
@@ -54,18 +53,18 @@ let load_uncached name =
     | None ->
         Log.Keeper.warn
           "keeper_prompt_external: failed to read %s (returning None; \
-           caller will use fallback)"
+           caller will render config-drift marker)"
           path;
         None)
   else (
     (* P1-4: missing external prompt file is expected during startup when
-       the operator's base-path config does not yet have the file.  The
-       in-source OCaml fallback in keeper_prompt.ml handles this path
-       explicitly, so a WARN here fires on every startup and becomes noise.
-       Downgrade to INFO so the path is visible but not alarming. *)
+       the operator's base-path config does not yet have the file.
+       keeper_prompt.ml renders an explicit config-drift marker, so a WARN
+       here fires on every startup and becomes noise. Downgrade to INFO so
+       the path is visible but not alarming. *)
     Log.Keeper.info
       "keeper_prompt_external: missing %s (returning None; caller will \
-       use in-source fallback)"
+       render config-drift marker)"
       path;
     None)
 

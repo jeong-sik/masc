@@ -21,10 +21,12 @@ import {
   formatActivity,
   formatActivitySignal,
   numericAge,
+  sourceDetail,
   toneForToolSuccess,
   toneForPressure,
   toolSummary,
   summaryCounts,
+  toolTelemetryCoverageDetail,
   buildToolQualityMap,
   buildFleetRows,
   buildRuntimeWarnings,
@@ -66,6 +68,8 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     effective_sandbox_image: null,
     decision_required: false,
     budget_source: null,
+    provider_health_status: null,
+    provider_health_label: null,
     ...overrides,
   }
 }
@@ -123,15 +127,39 @@ describe('normalizeModelText', () => {
   })
 })
 
+describe('sourceDetail', () => {
+  it('includes telemetry source provenance and freshness metadata', () => {
+    const detail = sourceDetail({
+      source: 'tool_metric',
+      entry_count: 7,
+      exists: true,
+      latest_age_s: 42,
+      health: 'stale',
+      stale_reason: 'freshness_slo_exceeded',
+      freshness_slo_s: 300,
+      producer: 'Telemetry_unified.summary_json',
+      durable_store: '.masc/tool_metrics/YYYY-MM/DD.jsonl',
+      dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+    })
+
+    expect(detail).toContain('last 42s ago')
+    expect(detail).toContain('stale: freshness_slo_exceeded')
+    expect(detail).toContain('SLO 5m 0s')
+    expect(detail).toContain('producer Telemetry_unified.summary_json')
+    expect(detail).toContain('store .masc/tool_metrics/YYYY-MM/DD.jsonl')
+    expect(detail).toContain('surface /api/v1/dashboard/telemetry/summary')
+  })
+})
+
 describe('buildFleetRows runtime labels', () => {
-  it('surfaces cascade, provider, and fallback labels from keeper telemetry', () => {
+  it('redacts model/provider identity while keeping lane outcome evidence', () => {
     const [row] = buildFleetRows([
       {
         name: 'cascade-keeper',
         status: 'active',
         keepalive_running: true,
         cascade_name: 'oas-keeper_unified',
-        cascade_canonical: 'big_three',
+        cascade_canonical: 'primary',
         active_model_label: 'codex_cli:auto',
         trust: {
           execution_summary: {
@@ -167,7 +195,7 @@ describe('buildFleetRows runtime labels', () => {
             total_tokens: null,
             wall_tokens_per_second: null,
             inference_telemetry: null,
-            cascade_name: 'big_three',
+            cascade_name: 'primary',
             cascade_selected_model: 'anthropic:claude-sonnet-4-6',
             cascade_attempt_count: 2,
             cascade_outcome: 'passed_to_next_model',
@@ -192,10 +220,10 @@ describe('buildFleetRows runtime labels', () => {
     })
 
     expect(row).toMatchObject({
-      model: 'codex_cli:auto',
-      cascade_label: 'oas-keeper_unified -> big_three',
-      provider_label: 'anthropic:claude-sonnet-4-6 · 2 attempts · fallback',
-      fallback_label: 'openai:gpt-5.4 -> anthropic:claude-sonnet-4-6 · turn_timeout · 1 hops',
+      model: 'runtime',
+      cascade_label: 'oas-keeper_unified -> primary',
+      provider_label: 'passed_to_next_model · 2 attempts · fallback',
+      fallback_label: 'fallback · turn_timeout · 1 hops',
     })
   })
 })
@@ -484,12 +512,48 @@ describe('summaryCounts', () => {
   it('counts live, hot, warn, stale correctly', () => {
     const rows = [
       makeRow({ name: 'a', keepalive_running: true, context_ratio: 0.1, last_activity_ago_s: 60, tool_calls: 1 }),
-      makeRow({ name: 'b', keepalive_running: true, context_ratio: PRESSURE_HOT_RATIO, last_activity_ago_s: 60, tool_calls: 0, recent_tools: [] }),
-      makeRow({ name: 'c', keepalive_running: false, context_ratio: 0.1, last_activity_ago_s: null, tool_calls: 0, recent_tools: [] }),
+      makeRow({ name: 'b', keepalive_running: true, context_ratio: PRESSURE_HOT_RATIO, last_activity_ago_s: 60, tool_calls: 0, recent_tools: [], tool_activity_known: false }),
+      makeRow({ name: 'c', keepalive_running: false, context_ratio: 0.1, last_activity_ago_s: null, tool_calls: 0, recent_tools: [], tool_activity_known: false }),
     ]
     const counts = summaryCounts(rows)
     expect(counts.live).toBe(2)
     expect(counts.hot).toBe(1)
+    expect(counts.toolCovered).toBe(1)
+    expect(counts.toolTelemetryCovered).toBe(1)
+    expect(counts.toolActive).toBe(1)
+    expect(counts.toolQuiet).toBe(0)
+    expect(counts.toolUnknown).toBe(2)
+  })
+
+  it('counts known quiet tool telemetry as covered, not active', () => {
+    const counts = summaryCounts([
+      makeRow({ name: 'quiet', tool_calls: 0, recent_tools: [], tool_activity_known: true }),
+      makeRow({ name: 'unknown', tool_calls: 0, recent_tools: [], tool_activity_known: false }),
+    ])
+
+    expect(counts.toolCovered).toBe(1)
+    expect(counts.toolTelemetryCovered).toBe(1)
+    expect(counts.toolActive).toBe(0)
+    expect(counts.toolQuiet).toBe(1)
+    expect(counts.toolUnknown).toBe(1)
+  })
+
+  it('formats tool telemetry coverage detail for operator summaries', () => {
+    const counts = summaryCounts([
+      makeRow({ name: 'active', tool_calls: 2, recent_tools: ['masc_status'], tool_activity_known: true }),
+      makeRow({ name: 'quiet', tool_calls: 0, recent_tools: [], tool_activity_known: true }),
+      makeRow({ name: 'unknown', tool_calls: 0, recent_tools: [], tool_activity_known: false }),
+    ])
+
+    expect(toolTelemetryCoverageDetail(counts, 3)).toBe('도구 telemetry 확인 2/3 · 활동 1 · 기록 없음 1 · 미확인 1')
+  })
+
+  it('counts explicit zero-tool telemetry as covered', () => {
+    const counts = summaryCounts([
+      makeRow({ recent_tools: [], tool_calls: 0, tool_activity_known: true }),
+      makeRow({ recent_tools: [], tool_calls: 0, tool_activity_known: false }),
+    ])
+
     expect(counts.toolCovered).toBe(1)
   })
 })
@@ -539,7 +603,7 @@ describe('buildRuntimeWarnings', () => {
     const rows = [makeRow({ runtime_blocker_class: 'admission_queue_wait_timeout' })]
     const warnings = buildRuntimeWarnings(rows)
     expect(warnings.length).toBe(1)
-    expect(warnings[0]).toContain('admission queue')
+    expect(warnings[0]).toContain('keeper admission FIFO')
   })
 
   it('warns about slot blockage', () => {

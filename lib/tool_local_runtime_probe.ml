@@ -418,14 +418,11 @@ let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
 
 let select_effective_model ~requested_model loaded_models =
   match Option.bind requested_model trim_to_option with
-  | Some model_id -> Some model_id
-  | None -> (
-      match loaded_models with
-      | model :: _ -> loaded_model_name model
-      | [] -> (
-          match trim_to_option Env_config_runtime.Ollama.default_model with
-          | Some configured -> Some configured
-          | None -> None))
+  | Some _ as result -> result
+  | None ->
+    (match loaded_models with
+     | model :: _ -> loaded_model_name model
+     | [] -> trim_to_option Env_config_runtime.Ollama.default_model)
 
 let model_is_loaded model_id loaded_models =
   List.exists

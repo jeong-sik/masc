@@ -18,6 +18,11 @@ val default_config : label:string -> interval_s:float -> config
 (** [default_config ~label ~interval_s] returns a config with
     [max_backoff_s = 120.0], [failure_threshold = 5], [timeout_s = 10.0]. *)
 
+module For_testing : sig
+  val timeout_failure_message :
+    label:string -> phase:string -> timeout_s:float -> elapsed_s:float -> string
+end
+
 val start :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

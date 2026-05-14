@@ -109,6 +109,12 @@ val extract_gh_target_number :
 val gh_mutates_entity :
   string -> entity_kind option
 
+(** Return [Some (error, required_tool, hint)] when a [keeper_shell op=gh]
+    command targets PR mutations that must go through dedicated keeper PR
+    tools rather than raw gh. *)
+val dedicated_pr_tool_required :
+  string -> (string * string * string) option
+
 (** Deterministic safety classifier for destructive or credential-sensitive
     gh CLI commands. Ignores leading global flags like [--repo owner/name]
     before matching the command shape. Returns the canonical blocked pattern

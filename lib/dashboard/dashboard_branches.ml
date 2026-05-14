@@ -25,7 +25,7 @@ let exec_gate_raw_source argv = String.concat " " (List.map Filename.quote argv)
 let run_git ~repo args =
   let argv = [ "git"; "-C"; repo; "--no-optional-locks" ] @ args in
   Masc_exec.Exec_gate.run_argv
-    ~actor:"dashboard/branches"
+    ~actor:(Masc_exec.Agent_id.of_string "dashboard/branches")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"dashboard branches git"
     ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec

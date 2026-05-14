@@ -50,7 +50,7 @@ let test_distinct_errors_both_emit () =
     ~file:"janitor.toml" ~error:"invalid cascade_name 'ollama_only'"
   in
   let b = K.log_toml_skip_once
-    ~file:"janitor.toml" ~error:"invalid cascade_name 'big_three'"
+    ~file:"janitor.toml" ~error:"invalid cascade_name 'primary'"
   in
   check bool "first error emits" true a;
   check bool "different error text re-emits" true b

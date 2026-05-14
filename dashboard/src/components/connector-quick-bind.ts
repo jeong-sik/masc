@@ -13,6 +13,7 @@ import type { GateKeeperInfo } from '../api/gate'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
+import { SurfaceCard } from './common/card'
 import { bindConnector } from './connector-status'
 
 interface FormEntry {
@@ -99,8 +100,8 @@ export function QuickBindForm({ connectorId, keepers }: {
   const disabled = entry.submitting || entry.channelId.trim() === ''
 
   return html`
-    <div
-      class="mt-3 flex flex-wrap items-end gap-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5"
+    <${SurfaceCard}
+      class="mt-3 flex flex-wrap items-end gap-2 !border-dashed !border-[var(--color-border-default)] !bg-[var(--color-bg-surface)] !px-3 !py-2.5"
       data-quick-bind=${connectorId}
     >
       <div class="min-w-0 flex-1 basis-[160px]">

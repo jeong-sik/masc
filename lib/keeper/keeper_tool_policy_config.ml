@@ -77,6 +77,46 @@ let collect_table_names (doc : Keeper_toml_loader.toml_doc) ~(prefix : string) :
       None)
   |> List.sort_uniq String.compare
 
+let normalize_tool_names ~scope tools =
+  let alias_notes = ref [] in
+  let dropped_notes = ref [] in
+  let rec add seen acc = function
+    | [] -> List.rev acc
+    | raw :: rest ->
+        let raw = String.trim raw in
+        if String.equal raw "" then
+          add seen acc rest
+        else
+          let resolved =
+            match raw with
+            | "keeper_fs_write" ->
+                alias_notes := "keeper_fs_write -> keeper_fs_edit" :: !alias_notes;
+                Some "keeper_fs_edit"
+            | "keeper_fs_delete" ->
+                dropped_notes :=
+                  "keeper_fs_delete removed; use keeper_fs_edit patch/write or masc_code_delete"
+                  :: !dropped_notes;
+                None
+            | name -> Some name
+          in
+          match resolved with
+          | None -> add seen acc rest
+          | Some name when List.mem name seen -> add seen acc rest
+          | Some name -> add (name :: seen) (name :: acc) rest
+  in
+  let normalized = add [] [] tools in
+  (match List.rev !alias_notes with
+  | [] -> ()
+  | notes ->
+      Log.Keeper.info "tool_policy_config: normalized legacy tool name(s) in %s: %s"
+        scope (String.concat ", " notes));
+  (match List.rev !dropped_notes with
+  | [] -> ()
+  | notes ->
+      Log.Keeper.info "tool_policy_config: dropped removed legacy tool name(s) in %s: %s"
+        scope (String.concat ", " notes));
+  normalized
+
 (* ── Loading ──────────────────────────────────────────────────────── *)
 
 let parse_groups (doc : Keeper_toml_loader.toml_doc) : ((string, group_source) Hashtbl.t, string) result =
@@ -94,6 +134,7 @@ let parse_groups (doc : Keeper_toml_loader.toml_doc) : ((string, group_source) H
         Hashtbl.replace tbl name (Shard_ref shard_name);
         None
       | None, _ :: _ ->
+        let tools = normalize_tool_names ~scope:("groups." ^ name ^ ".tools") tools in
         Hashtbl.replace tbl name (Static tools);
         None
       | None, [] ->
@@ -111,6 +152,7 @@ let parse_masc_groups (doc : Keeper_toml_loader.toml_doc) : (string, string list
   List.iter (fun name ->
     let tools = toml_string_list_at doc "masc" (name ^ ".tools") in
     if tools <> [] then
+      let tools = normalize_tool_names ~scope:("masc." ^ name ^ ".tools") tools in
       Hashtbl.replace tbl name tools
   ) names;
   tbl
@@ -123,7 +165,10 @@ let parse_presets
   List.iter (fun name ->
     let groups = toml_string_list_at doc "presets" (name ^ ".groups") in
     let masc_groups = toml_string_list_at doc "presets" (name ^ ".masc_groups") in
-    let masc_tools = toml_string_list_at doc "presets" (name ^ ".masc_tools") in
+    let masc_tools =
+      toml_string_list_at doc "presets" (name ^ ".masc_tools")
+      |> normalize_tool_names ~scope:("presets." ^ name ^ ".masc_tools")
+    in
     let all_candidates =
       Option.value ~default:false
         (toml_bool_at doc "presets" (name ^ ".all_candidates"))
@@ -174,13 +219,22 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
   { allowed_orgs; denied_repos; default_depth;
     clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
+let unresolved_tool_message ~label ~name =
+  match Tool_resolution.resolve name with
+  | Tool_resolution.Resolved _ | Tool_resolution.Alias_to _ -> None
+  | Tool_resolution.Unknown { tried; _ } ->
+      Some (Printf.sprintf "%s: tool '%s' unresolved: tried [%s]"
+              label name (Tool_resolution.string_of_tried tried))
+
+let is_known_policy_tool_name = Tool_resolution.is_known_policy_tool_name
+
 (* Shortcut: if the caller's [base_path] already points at a project root
    that has [base_path/config/tool_policy.toml], prefer that directly.
    This is the common case when callers pass the result of
    [Masc_test_deps.find_project_root ()] in tests or the repo root in
    production. The direct check avoids the executable-relative walk in
    [Config_dir_resolver] which can pick up partial config shards
-   materialised by dune into [_build/default/config/cascade.json] and
+   materialised by dune into [_build/default/config/cascade.toml] and
    resolve the wrong root. Scoped to this loader only — the generic
    resolver (used by dashboard/runtime code that reads per-env state
    from the resolved root) is untouched. *)
@@ -245,6 +299,44 @@ let load ~base_path : (t, string) result =
         (match all_errors with
         | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
+          (* Validate tool names against the keeper-facing policy surface.
+             Skip shard-backed groups because their members resolve from
+             [Tool_shard] at runtime. *)
+          let unknown_tools =
+            Hashtbl.fold (fun group_name (group : group_source) acc ->
+              match group with
+              | Static tools ->
+                  List.filter_map (fun t ->
+                    unresolved_tool_message ~label:(Printf.sprintf "groups.%s" group_name) ~name:t
+                  ) tools
+                  |> List.rev_append acc
+              | Shard_ref _ -> acc
+            ) groups []
+          in
+          let unknown_masc_tools =
+            Hashtbl.fold (fun group_name tools acc ->
+              List.filter_map (fun t ->
+                unresolved_tool_message ~label:(Printf.sprintf "masc.%s" group_name) ~name:t
+              ) tools
+              |> List.rev_append acc
+            ) masc_groups []
+          in
+          let unknown_preset_tools =
+            Hashtbl.fold (fun preset_name (def : preset_def) acc ->
+              List.filter_map (fun t ->
+                unresolved_tool_message
+                  ~label:(Printf.sprintf "presets.%s.masc_tools" preset_name)
+                  ~name:t
+              ) def.masc_tools
+              |> List.rev_append acc
+            ) presets []
+          in
+          let all_tool_errors = unknown_tools @ unknown_masc_tools @ unknown_preset_tools in
+          (match all_tool_errors with
+          | _ :: _ ->
+              Log.Keeper.warn "tool_policy_config: %d unknown tools in %s" (List.length all_tool_errors) path;
+              List.iter (fun e -> Log.Keeper.warn "  %s" e) all_tool_errors
+          | [] -> ());
           let gh_cache = parse_gh_cache doc in
           let git_clone = parse_git_clone doc in
           Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"

@@ -6,9 +6,16 @@ import { FilterChips } from './common/filter-chips'
 import { KeeperDecisionsStream } from './keeper-decisions-stream'
 import { KeeperCognitionInspector } from './keeper-cognition-inspector'
 import { KeeperTokenStats } from './keeper-token-stats'
-import { MemorySubsystems, type MemorySubsystemsFocus } from './memory-subsystems'
+import { MemorySubsystems } from './memory-subsystems'
 
-type CognitionView = 'overview' | 'keeper' | 'token-stats' | 'decisions' | 'memory' | 'episodes' | 'autoresearch'
+type CognitionView =
+  | 'overview'
+  | 'keeper'
+  | 'token-stats'
+  | 'decisions'
+  | 'memory'
+  | 'episodes'
+  | 'autoresearch'
 
 const COGNITION_VIEWS: CognitionView[] = [
   'overview',
@@ -49,14 +56,8 @@ function updateViewParam(view: CognitionView): void {
   navigate('monitoring', next)
 }
 
-function currentMemoryFocus(view: CognitionView): MemorySubsystemsFocus {
-  if (view === 'episodes') return 'episodes'
-  return route.value.params.focus === 'entries' ? 'entries' : 'overview'
-}
-
 export function CognitionPlane() {
   const view = currentView()
-  const memoryFocus = currentMemoryFocus(view)
 
   return html`
     <div class="flex flex-col gap-5">
@@ -74,17 +75,15 @@ export function CognitionPlane() {
         <${KeeperTokenStats} />
       ` : view === 'decisions' ? html`
         <${KeeperDecisionsStream} />
-      ` : view === 'memory' || view === 'episodes' ? html`
-        <${MemorySubsystems} focus=${memoryFocus} />
+      ` : view === 'memory' ? html`
+        <${MemorySubsystems} focus=${route.value.params.focus} />
+      ` : view === 'episodes' ? html`
+        <${MemorySubsystems} focus="episodes" />
       ` : view === 'autoresearch' ? html`
         <${Autoresearch} />
       ` : html`
-        <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <${KeeperTokenStats} />
-          <${Autoresearch} />
-        </div>
         <${AgentsUnified} />
-        <${MemorySubsystems} />
+        <${KeeperTokenStats} />
       `}
     </div>
   `

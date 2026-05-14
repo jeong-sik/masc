@@ -40,20 +40,21 @@ let string_of_source = function
   | Keeper_internal -> "keeper_internal"
   | Inline_dispatch -> "inline_dispatch"
   | Deprecated_alias -> "deprecated_alias"
+;;
 
 (** Per-tool call statistics *)
-type call_stats = {
-  call_count : int Atomic.t;
-  success_count : int Atomic.t;
-  failure_count : int Atomic.t;
-  last_called_at : float Atomic.t;  (** Unix timestamp, 0.0 = never *)
-  total_duration_ms : int Atomic.t;
-  external_mcp_count : int Atomic.t;
-  keeper_internal_count : int Atomic.t;
-  inline_dispatch_count : int Atomic.t;
-  deprecated_alias_count : int Atomic.t;
-  last_assignment_id : string option Atomic.t;
-}
+type call_stats =
+  { call_count : int Atomic.t
+  ; success_count : int Atomic.t
+  ; failure_count : int Atomic.t
+  ; last_called_at : float Atomic.t (** Unix timestamp, 0.0 = never *)
+  ; total_duration_ms : int Atomic.t
+  ; external_mcp_count : int Atomic.t
+  ; keeper_internal_count : int Atomic.t
+  ; inline_dispatch_count : int Atomic.t
+  ; deprecated_alias_count : int Atomic.t
+  ; last_assignment_id : string option Atomic.t
+  }
 
 (** Global registry — process-lifetime. Protected by [registry_mu] against
     concurrent access from tool dispatch (write path via [record_call]) and
@@ -70,19 +71,26 @@ let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
 let registry_mu = Eio.Mutex.create ()
 let with_registry_rw f = Eio_guard.with_mutex registry_mu f
 let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
-(** Use raw_all_tool_schemas to include hidden/internal tools.
-    Previously used Config.all_tool_schemas (public-filtered), which caused
-    hidden tools to be structurally undercounted in telemetry. *)
+
 module StringSet = Set.Make (String)
 
+(** Use the leaf surface-name SSOT instead of Config.raw_all_tool_schemas.
+    Tool_registry sits below keeper/OAS dispatch, and depending on Config
+    creates Config -> keeper -> Tool_registry -> Config cycles.  Surface names
+    still include hidden/internal tools without importing the full schema graph. *)
 let known_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     List.fold_left
-      (fun set (schema : Masc_domain.tool_schema) -> StringSet.add schema.name set)
-      StringSet.empty Config.raw_all_tool_schemas)
+      (fun set surface ->
+         List.fold_left
+           (fun set name -> StringSet.add name set)
+           set
+           (Tool_catalog_surfaces.tools_for_surface surface))
+      StringSet.empty
+      Tool_catalog_surfaces.all_surfaces)
+;;
 
-let is_known_tool tool_name =
-  StringSet.mem tool_name (Eio.Lazy.force known_tool_names)
+let is_known_tool tool_name = StringSet.mem tool_name (Eio.Lazy.force known_tool_names)
 
 (** Record a tool call with source attribution.
 
@@ -95,26 +103,35 @@ let get_or_create_stats tool_name =
   match with_registry_ro (fun () -> Hashtbl.find_opt registry tool_name) with
   | Some s -> s
   | None ->
-      with_registry_rw (fun () ->
-        match Hashtbl.find_opt registry tool_name with
-        | Some s -> s
-        | None ->
-            let s = {
-              call_count = Atomic.make 0;
-              success_count = Atomic.make 0;
-              failure_count = Atomic.make 0;
-              last_called_at = Atomic.make 0.0;
-              total_duration_ms = Atomic.make 0;
-              external_mcp_count = Atomic.make 0;
-              keeper_internal_count = Atomic.make 0;
-              inline_dispatch_count = Atomic.make 0;
-              deprecated_alias_count = Atomic.make 0;
-              last_assignment_id = Atomic.make None;
-            } in
-            Hashtbl.replace registry tool_name s;
-            s)
+    with_registry_rw (fun () ->
+      match Hashtbl.find_opt registry tool_name with
+      | Some s -> s
+      | None ->
+        let s =
+          { call_count = Atomic.make 0
+          ; success_count = Atomic.make 0
+          ; failure_count = Atomic.make 0
+          ; last_called_at = Atomic.make 0.0
+          ; total_duration_ms = Atomic.make 0
+          ; external_mcp_count = Atomic.make 0
+          ; keeper_internal_count = Atomic.make 0
+          ; inline_dispatch_count = Atomic.make 0
+          ; deprecated_alias_count = Atomic.make 0
+          ; last_assignment_id = Atomic.make None
+          }
+        in
+        Hashtbl.replace registry tool_name s;
+        s)
+;;
 
-let record_call ?(source = External_mcp) ?assignment_id ~tool_name ~success ~duration_ms () =
+let record_call
+      ?(source = External_mcp)
+      ?assignment_id
+      ~tool_name
+      ~success
+      ~duration_ms
+      ()
+  =
   let stats = get_or_create_stats tool_name in
   Atomic.incr stats.call_count;
   (match source with
@@ -122,19 +139,25 @@ let record_call ?(source = External_mcp) ?assignment_id ~tool_name ~success ~dur
    | Keeper_internal -> Atomic.incr stats.keeper_internal_count
    | Inline_dispatch -> Atomic.incr stats.inline_dispatch_count
    | Deprecated_alias -> Atomic.incr stats.deprecated_alias_count);
-  if success then
-    Atomic.incr stats.success_count
-  else
-    Atomic.incr stats.failure_count;
+  if success then Atomic.incr stats.success_count else Atomic.incr stats.failure_count;
   Atomic.set stats.last_called_at (Time_compat.now ());
   ignore (Atomic.fetch_and_add stats.total_duration_ms duration_ms);
-  (match assignment_id with
-   | Some _ as aid -> Atomic.set stats.last_assignment_id aid
-   | None -> ())
+  match assignment_id with
+  | Some _ as aid -> Atomic.set stats.last_assignment_id aid
+  | None -> ()
+;;
 
-let record_call_if_known ?(source = External_mcp) ?assignment_id ~tool_name ~success ~duration_ms () =
-  if is_known_tool tool_name then
-    record_call ~source ?assignment_id ~tool_name ~success ~duration_ms ()
+let record_call_if_known
+      ?(source = External_mcp)
+      ?assignment_id
+      ~tool_name
+      ~success
+      ~duration_ms
+      ()
+  =
+  if is_known_tool tool_name
+  then record_call ~source ?assignment_id ~tool_name ~success ~duration_ms ()
+;;
 
 (** Get all stats as a sorted list (by call_count descending).
 
@@ -148,7 +171,9 @@ let record_call_if_known ?(source = External_mcp) ?assignment_id ~tool_name ~suc
 let get_stats () : (string * call_stats) list =
   with_registry_ro (fun () ->
     Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry [])
-  |> List.sort (fun (_, a) (_, b) -> compare (Atomic.get b.call_count) (Atomic.get a.call_count))
+  |> List.sort (fun (_, a) (_, b) ->
+    compare (Atomic.get b.call_count) (Atomic.get a.call_count))
+;;
 
 (** Get top N tools by call count *)
 let get_top_n n : (string * call_stats) list =
@@ -159,6 +184,7 @@ let get_top_n n : (string * call_stats) list =
     | x :: xs -> take (x :: acc) (n - 1) xs
   in
   take [] n all
+;;
 
 (** Get tool names not called since the given Unix timestamp.
     Only includes tools that are registered (have been called at least once)
@@ -167,52 +193,55 @@ let get_unused_since (cutoff : float) : string list =
   with_registry_ro (fun () ->
     Hashtbl.fold
       (fun name stats acc ->
-        if Stdlib.Float.compare (Atomic.get stats.last_called_at) cutoff < 0 then name :: acc else acc)
-      registry [])
+         if Stdlib.Float.compare (Atomic.get stats.last_called_at) cutoff < 0
+         then name :: acc
+         else acc)
+      registry
+      [])
   |> List.sort String.compare
+;;
 
 (** Get tools that have never been called (not in registry at all)
     compared against a list of all known tool names *)
 let get_never_called (all_tool_names : string list) : string list =
   with_registry_ro (fun () ->
-    List.filter
-      (fun name -> not (Hashtbl.mem registry name))
-      all_tool_names)
+    List.filter (fun name -> not (Hashtbl.mem registry name)) all_tool_names)
   |> List.sort String.compare
+;;
 
 (** Total calls across all tools *)
 let total_calls () : int =
   with_registry_ro (fun () ->
     Hashtbl.fold (fun _ stats acc -> acc + Atomic.get stats.call_count) registry 0)
+;;
 
 (** Number of distinct tools that have been called *)
-let distinct_tools_called () : int =
-  with_registry_ro (fun () -> Hashtbl.length registry)
+let distinct_tools_called () : int = with_registry_ro (fun () -> Hashtbl.length registry)
 
 (** Convert call_stats to JSON *)
 let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
   let calls = Atomic.get stats.call_count in
-  `Assoc [
-    ("name", `String name);
-    ("call_count", `Int calls);
-    ("success_count", `Int (Atomic.get stats.success_count));
-    ("failure_count", `Int (Atomic.get stats.failure_count));
-    ("avg_duration_ms",
-     `Int (if calls > 0
-           then (Atomic.get stats.total_duration_ms) / calls
-           else 0));
-    ("last_called_at", `Float (Atomic.get stats.last_called_at));
-    ("last_assignment_id",
-     match Atomic.get stats.last_assignment_id with
-     | Some aid -> `String aid
-     | None -> `Null);
-    ("by_source", `Assoc [
-       ("external_mcp", `Int (Atomic.get stats.external_mcp_count));
-       ("keeper_internal", `Int (Atomic.get stats.keeper_internal_count));
-       ("inline_dispatch", `Int (Atomic.get stats.inline_dispatch_count));
-       ("deprecated_alias", `Int (Atomic.get stats.deprecated_alias_count));
-     ]);
-  ]
+  `Assoc
+    [ "name", `String name
+    ; "call_count", `Int calls
+    ; "success_count", `Int (Atomic.get stats.success_count)
+    ; "failure_count", `Int (Atomic.get stats.failure_count)
+    ; ( "avg_duration_ms"
+      , `Int (if calls > 0 then Atomic.get stats.total_duration_ms / calls else 0) )
+    ; "last_called_at", `Float (Atomic.get stats.last_called_at)
+    ; ( "last_assignment_id"
+      , match Atomic.get stats.last_assignment_id with
+        | Some aid -> `String aid
+        | None -> `Null )
+    ; ( "by_source"
+      , `Assoc
+          [ "external_mcp", `Int (Atomic.get stats.external_mcp_count)
+          ; "keeper_internal", `Int (Atomic.get stats.keeper_internal_count)
+          ; "inline_dispatch", `Int (Atomic.get stats.inline_dispatch_count)
+          ; "deprecated_alias", `Int (Atomic.get stats.deprecated_alias_count)
+          ] )
+    ]
+;;
 
 (** Generate a full stats report as JSON *)
 let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
@@ -221,18 +250,19 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
   let cutoff_30d = Time_compat.now () -. Masc_time_constants.days_to_seconds 30 in
   let unused_30d = get_unused_since cutoff_30d in
   let never_called = get_never_called all_tool_names in
-  `Assoc [
-    ("total_calls", `Int (total_calls ()));
-    ("distinct_tools_called", `Int (distinct_tools_called ()));
-    ("total_tools_available", `Int (List.length all_tool_names));
-    ("top_n_requested", `Int bounded_top_n);
-    ("top_tools", `List (List.map stats_to_json top_tools));
-    ("top_20", `List (List.map stats_to_json top_tools));
-    ("unused_30d", `List (List.map (fun s -> `String s) unused_30d));
-    ("unused_30d_count", `Int (List.length unused_30d));
-    ("never_called", `List (List.map (fun s -> `String s) never_called));
-    ("never_called_count", `Int (List.length never_called));
-  ]
+  `Assoc
+    [ "total_calls", `Int (total_calls ())
+    ; "distinct_tools_called", `Int (distinct_tools_called ())
+    ; "total_tools_available", `Int (List.length all_tool_names)
+    ; "top_n_requested", `Int bounded_top_n
+    ; "top_tools", `List (List.map stats_to_json top_tools)
+    ; "top_20", `List (List.map stats_to_json top_tools)
+    ; "unused_30d", `List (List.map (fun s -> `String s) unused_30d)
+    ; "unused_30d_count", `Int (List.length unused_30d)
+    ; "never_called", `List (List.map (fun s -> `String s) never_called)
+    ; "never_called_count", `Int (List.length never_called)
+    ]
+;;
 
 (** Warm up registry from telemetry summary.
     Called once at server startup to restore persistent metrics.
@@ -245,26 +275,30 @@ let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
   with_registry_rw (fun () ->
     Hashtbl.iter
       (fun tool_name (stats : Telemetry_eio.tool_usage_stats) ->
-        if not (Hashtbl.mem registry tool_name) then (
-          Hashtbl.replace registry tool_name
-            {
-              call_count = Atomic.make stats.count;
-              success_count = Atomic.make stats.success_count;
-              failure_count = Atomic.make stats.failure_count;
-              last_called_at =
-                Atomic.make (match stats.last_used_at with
-                | Some t -> t
-                | None -> 0.0);
-              total_duration_ms = Atomic.make 0;
-              external_mcp_count = Atomic.make 0;
-              keeper_internal_count = Atomic.make 0;
-              inline_dispatch_count = Atomic.make 0;
-              deprecated_alias_count = Atomic.make 0;
-              last_assignment_id = Atomic.make None;
-            };
-          Stdlib.incr count))
+         if not (Hashtbl.mem registry tool_name)
+         then (
+           Hashtbl.replace
+             registry
+             tool_name
+             { call_count = Atomic.make stats.count
+             ; success_count = Atomic.make stats.success_count
+             ; failure_count = Atomic.make stats.failure_count
+             ; last_called_at =
+                 Atomic.make
+                   (match stats.last_used_at with
+                    | Some t -> t
+                    | None -> 0.0)
+             ; total_duration_ms = Atomic.make 0
+             ; external_mcp_count = Atomic.make 0
+             ; keeper_internal_count = Atomic.make 0
+             ; inline_dispatch_count = Atomic.make 0
+             ; deprecated_alias_count = Atomic.make 0
+             ; last_assignment_id = Atomic.make None
+             };
+           Stdlib.incr count))
       summary.stats_by_tool);
   !count
+;;
 
 (** Reset all counters (for testing) *)
 let reset () = with_registry_rw (fun () -> Hashtbl.clear registry)

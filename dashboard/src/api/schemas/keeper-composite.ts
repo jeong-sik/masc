@@ -75,6 +75,7 @@ const KeeperCompositeInvariantsSchema = object({
   no_cascade_before_measurement: boolean(),
   compaction_atomicity: boolean(),
   event_priority_monotone: boolean(),
+  phase_derivation_agreement: boolean(),
 })
 
 const KeeperPhaseDiagnosisRowSchema = object({
@@ -154,11 +155,17 @@ const KeeperCompositeExecutionSchema = object({
   tool_surface: nullable(
     object({
       tool_requirement: nullable(string()),
+      turn_lane: optional(nullable(string())),
+      tool_surface_class: optional(nullable(string())),
+      visible_tool_count: optional(nullable(number())),
       tool_gate_enabled: nullable(boolean()),
+      tool_surface_fallback_used: optional(nullable(boolean())),
       missing_required_tools: array(string()),
       required_tools: array(string()),
     }),
   ),
+  claim_scope: optional(unknown()),
+  config_drift: optional(unknown()),
 })
 
 const KeeperRuntimeAttentionSchema = object({
@@ -191,6 +198,11 @@ export const KeeperCompositeSnapshotSchema = object({
   run_id: string(),
   ts: number(),
   phase: KeeperCompositePhaseSchema,
+  // When `phase` is `Stable`, the backend may carry the underlying raw
+  // keeper phase (e.g. `paused`) so the dashboard can tell a true idle
+  // Stable from a Stable that masks a non-idle source. Absent on older
+  // backends and on non-Stable phases — `optional` + `nullable` matches
+  // both the missing-key and explicit-null shapes the backend emits.
   collapsed_from: optional(nullable(string())),
   turn_phase: KeeperCompositeTurnPhaseSchema,
   decision: object({ stage: KeeperCompositeDecisionStageSchema }),
@@ -208,9 +220,12 @@ export const KeeperCompositeSnapshotSchema = object({
   ),
   measurement: KeeperCompositeMeasurementSchema,
   invariants: KeeperCompositeInvariantsSchema,
+  fsm_guard_violations: number(),
   phase_diagnosis: optional(KeeperPhaseDiagnosisSchema),
   is_live: boolean(),
   last_outcome: nullable(KeeperLastOutcomeSchema),
+  idle_seconds: optional(number()),
+  last_turn_ts: optional(number()),
   execution: optional(KeeperCompositeExecutionSchema),
   runtime_attention: optional(KeeperRuntimeAttentionSchema),
   recommended_actions: fallback(array(OperatorRecommendedActionSchema), []),

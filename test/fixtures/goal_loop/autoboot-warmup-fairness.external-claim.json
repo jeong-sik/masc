@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "evidence_id": "goal-loop-autoboot-warmup-fairness-2026-05-06",
+  "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+  "status": "PASS",
+  "claim_ref": "NF-5",
+  "checked_at": "2026-05-06T00:00:00Z",
+  "scheduler_decision": {
+    "algorithm": "int32_djb2_bounded_jitter",
+    "base_warmup_sec": 60,
+    "stagger_window_sec": 15,
+    "max_delay_sec": 75,
+    "position_independent": true,
+    "code_refs": [
+      "lib/server/server_bootstrap_loops.ml#autoboot_proactive_warmup_sec",
+      "lib/server/server_bootstrap_loops.ml#autoboot: calling start_keepalive",
+      "lib/keeper/keeper_config.ml#keeper_bootstrap_stagger_step_sec"
+    ]
+  },
+  "keeper_rows": [
+    {
+      "keeper_name": "analyst",
+      "boot_position": 0,
+      "name_hash": 910207873,
+      "jitter_bucket": 1,
+      "warmup_sec": 61,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "executor",
+      "boot_position": 1,
+      "name_hash": 970155828,
+      "jitter_bucket": 4,
+      "warmup_sec": 64,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "glm-coding-plan",
+      "boot_position": 2,
+      "name_hash": 846962750,
+      "jitter_bucket": 14,
+      "warmup_sec": 74,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "issue_king",
+      "boot_position": 3,
+      "name_hash": 879175606,
+      "jitter_bucket": 6,
+      "warmup_sec": 66,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "janitor",
+      "boot_position": 4,
+      "name_hash": 228803004,
+      "jitter_bucket": 12,
+      "warmup_sec": 72,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "masc-improver",
+      "boot_position": 5,
+      "name_hash": 845147082,
+      "jitter_bucket": 10,
+      "warmup_sec": 70,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "nick0cave",
+      "boot_position": 6,
+      "name_hash": 680489273,
+      "jitter_bucket": 9,
+      "warmup_sec": 69,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "qa-king",
+      "boot_position": 7,
+      "name_hash": 602119181,
+      "jitter_bucket": 13,
+      "warmup_sec": 73,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "ramarama",
+      "boot_position": 8,
+      "name_hash": 556982023,
+      "jitter_bucket": 7,
+      "warmup_sec": 67,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "sangsu",
+      "boot_position": 9,
+      "name_hash": 456762646,
+      "jitter_bucket": 6,
+      "warmup_sec": 66,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "scholar",
+      "boot_position": 10,
+      "name_hash": 112216369,
+      "jitter_bucket": 1,
+      "warmup_sec": 61,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "taskmaster",
+      "boot_position": 11,
+      "name_hash": 19339588,
+      "jitter_bucket": 4,
+      "warmup_sec": 64,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "velvet-hammer",
+      "boot_position": 12,
+      "name_hash": 929304706,
+      "jitter_bucket": 2,
+      "warmup_sec": 62,
+      "within_bound": true
+    },
+    {
+      "keeper_name": "verifier",
+      "boot_position": 13,
+      "name_hash": 307708225,
+      "jitter_bucket": 1,
+      "warmup_sec": 61,
+      "within_bound": true
+    }
+  ],
+  "late_keeper_check": {
+    "keeper_name": "verifier",
+    "boot_position": 13,
+    "warmup_sec": 61,
+    "claimed_linear_warmup_sec": 255,
+    "bounded_by_max_delay": true,
+    "not_position_delay": true
+  },
+  "ordering_replay": {
+    "status": "PASS",
+    "evidence_ref": "test/test_env_config_keeper_bootstrap_intervals.ml#test_autoboot_warmup_is_order_independent",
+    "forward_reverse_stable": true,
+    "distinct_warmups_min": 3
+  },
+  "post_warmup_turn_outcome": {
+    "status": "PASS",
+    "evidence_ref": "lib/keeper/keeper_heartbeat_loop.ml#proactive_warmup_elapsed",
+    "condition": "proactive_warmup_sec <= 0 || now_ts - keepalive_started_ts >= proactive_warmup_sec",
+    "board_cursor_blocked_until_warmup": true,
+    "turn_dispatch_receives_proactive_warmup_elapsed": true
+  },
+  "implementation_pr_refs": [
+    "https://github.com/jeong-sik/masc-mcp/pull/13119",
+    "https://github.com/jeong-sik/masc-mcp/pull/13156",
+    "https://github.com/jeong-sik/masc-mcp/pull/13167"
+  ],
+  "tracking_issue_refs": [
+    "https://github.com/jeong-sik/masc-mcp/issues/13690"
+  ]
+}

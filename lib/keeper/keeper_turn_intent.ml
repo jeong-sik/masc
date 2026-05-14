@@ -1,9 +1,4 @@
-type t = Mechanical | Cognitive
-
-let equal a b =
-  match a, b with
-  | Mechanical, Mechanical | Cognitive, Cognitive -> true
-  | _ -> false
+type t = Mechanical | Cognitive [@@deriving eq]
 
 let to_string = function
   | Mechanical -> "mechanical"

@@ -4,6 +4,7 @@ module R = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
 module Audit = Masc_mcp.Keeper_transition_audit
+module Hooks = Masc_mcp.Keeper_lifecycle_hooks
 module Meas = Masc_mcp.Keeper_measurement
 module Pages = Masc_mcp.Server_routes_http_pages
 module Json = Yojson.Safe.Util
@@ -166,7 +167,12 @@ let test_register_offline_and_start () =
 
 let test_register_restarting_and_start () =
   R.clear ();
-  let entry = R.register_restarting ~base_path:bp "k1-restart" (make_meta "k1-restart") in
+  let entry =
+    match R.register_restarting ~base_path:bp "k1-restart" (make_meta "k1-restart") with
+    | Ok e -> e
+    | Error (R.Budget_already_exhausted _) ->
+      fail "register_restarting should succeed on a fresh keeper (no prior entry)"
+  in
   check string "restarting phase" "restarting" (KSM.phase_to_string entry.phase);
   check bool "not running yet" false (R.is_running ~base_path:bp "k1-restart");
   ignore (R.dispatch_event ~base_path:bp "k1-restart" KSM.Fiber_started);
@@ -181,7 +187,12 @@ let test_register_restarting_and_start () =
 let test_prepare_fiber_launch_resets_stale_runtime_latches () =
   R.clear ();
   let name = "k1-stale-stop" in
-  let entry = R.register_restarting ~base_path:bp name (make_meta name) in
+  let entry =
+    match R.register_restarting ~base_path:bp name (make_meta name) with
+    | Ok e -> e
+    | Error (R.Budget_already_exhausted _) ->
+      fail "register_restarting should succeed on a fresh keeper (no prior entry)"
+  in
   Atomic.set entry.fiber_stop true;
   Atomic.set entry.fiber_wakeup true;
   Atomic.set entry.waiting_for_inference true;
@@ -200,6 +211,32 @@ let test_prepare_fiber_launch_resets_stale_runtime_latches () =
       check string "running after prepare launch" "running"
         (KSM.phase_to_string updated.phase);
       check bool "fsm stop_requested reset" false updated.conditions.stop_requested
+
+(* R-A-6.a — register_restarting must refuse to revive a keeper whose
+   restart_budget_remaining=false (TLA+ §S3 BudgetNeverRevives). *)
+let test_register_restarting_refuses_exhausted_budget () =
+  R.clear ();
+  let name = "k-budget-exhausted" in
+  (* Phase 1: register fresh keeper (budget=true initially) and dispatch
+     Restart_budget_exhausted to clear the flag in-place. *)
+  let _ = R.register ~base_path:bp name (make_meta name) in
+  (* Clear the budget directly via Restart_budget_exhausted — bypasses
+     the production path (supervisor's mark_dead emits this event after
+     observing restart_count >= max_restarts), so the test focuses on
+     register_restarting's guard rather than the supervisor wiring. *)
+  (match
+     R.dispatch_event ~base_path:bp name KSM.Restart_budget_exhausted
+   with
+   | Ok _ -> ()
+   | Error err -> fail (KSM.transition_error_to_string err));
+  (* Phase 2: attempt to revive — must be refused by R-A-6.a guard. *)
+  match R.register_restarting ~base_path:bp name (make_meta name) with
+  | Ok _ ->
+    fail
+      "register_restarting must refuse when prior entry has \
+       restart_budget_remaining=false (BudgetNeverRevives violation)"
+  | Error (R.Budget_already_exhausted r) ->
+    check string "refusal carries keeper name" name r.name
 
 let test_dispatch_event_with_audit_preserves_snapshot () =
   R.clear ();
@@ -303,7 +340,7 @@ let test_mark_turn_finished_records_completed_turn_outcome_once () =
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   R.mark_turn_started ~base_path:bp keeper_name;
   R.set_turn_decision_stage
-    ~base_path:bp keeper_name R.Decision_tool_policy_selected;
+    ~base_path:bp keeper_name R.Decision_active_tool_policy_selected;
   R.mark_turn_gate_rejected_by_name keeper_name;
   R.mark_turn_finished ~base_path:bp keeper_name;
   R.mark_turn_finished ~base_path:bp keeper_name;
@@ -457,23 +494,47 @@ let test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change (
   in
   let changed_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+      Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_transitions
       ~labels:changed_labels ()
   in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
   ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Fiber_started);
   check (float 0.001) "no same-phase metric emitted" 0.0
     (Masc_mcp.Prometheus.metric_value_or_zero
-       Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+       Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_transitions
        ~labels:unchanged_labels ());
   ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Operator_pause);
   let changed_after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+      Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_transitions
       ~labels:changed_labels ()
   in
   check (float 0.001) "phase-change transition metric incremented"
     (changed_before +. 1.0) changed_after
+
+let test_dispatch_event_runs_phase_transition_hook () =
+  R.clear ();
+  Hooks.reset_for_testing ();
+  let keeper_name = "k4-lifecycle-hook" in
+  let seen = ref [] in
+  Fun.protect
+    ~finally:Hooks.reset_for_testing
+    (fun () ->
+      Hooks.register (fun ~keeper_id event ->
+          match event with
+          | Hooks.Phase_transition { from_phase; to_phase } ->
+            seen := (keeper_id, from_phase, to_phase) :: !seen
+          | Hooks.Tombstone_reaped -> ());
+      ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+      ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Fiber_started);
+      check int "same-phase event does not run hook" 0 (List.length !seen);
+      ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Operator_pause);
+      match !seen with
+      | [ (seen_keeper, from_phase, to_phase) ] ->
+        check string "keeper" keeper_name seen_keeper;
+        check string "from" "running" (KSM.phase_to_string from_phase);
+        check string "to" "paused" (KSM.phase_to_string to_phase)
+      | _ -> fail "expected exactly one phase transition hook event")
 
 let test_dispatch_event_observes_phase_sse_broadcast_failure () =
   R.clear ();
@@ -481,7 +542,7 @@ let test_dispatch_event_observes_phase_sse_broadcast_failure () =
   let labels = [("keeper", keeper_name); ("site", "phase_changed")] in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_sse_broadcast_failures
+      Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
       ~labels ()
   in
   ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
@@ -499,7 +560,7 @@ let test_dispatch_event_observes_phase_sse_broadcast_failure () =
       | Ok _ -> ());
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_keeper_sse_broadcast_failures
+      Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
       ~labels ()
   in
   check (float 0.001) "phase SSE failure metric incremented"
@@ -889,6 +950,163 @@ let test_cleanup_tracking () =
   let allowed = R.board_wakeup_allowed ~base_path:bp "ct1" ~post_id:"x" ~debounce_sec:60.0 in
   check bool "wakeup allowed after cleanup" true allowed
 
+(* P0-2 (2026-05-07): orphan-drop counter wiring through update_entry.
+
+   Validation strategy: call a public update_entry caller
+   ([R.set_last_agent_count]) against a [name] that was never registered.
+   Each call hits the [None] branch and bumps the orphan-drop metric.
+   At drop #5 (= [orphan_drop_threshold]) the threshold-breached
+   counter increments exactly once. The 6th drop within the window
+   does NOT bump it again (edge-trigger). After a successful update on
+   the same name (post-register), the per-name state is cleared.
+
+   We deliberately do not assert specific counter totals across
+   registry tests because the metric is process-wide; instead, we
+   pin deltas inside this single test using a unique [name]. *)
+let test_update_entry_orphan_drop_emits_metrics () =
+  R.clear ();
+  let name = "orphan-drop-counter-test" in
+  let labels = [ "name", name ] in
+  let dropped_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  let breached_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
+      ~labels ()
+  in
+  (* 5 drops on a never-registered name: each bumps _dropped, the 5th
+     bumps _orphan_threshold_breached exactly once. *)
+  for _ = 1 to 5 do
+    R.set_last_agent_count ~base_path:bp name 0
+  done;
+  let dropped_after_5 =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  let breached_after_5 =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
+      ~labels ()
+  in
+  check (float 0.001) "dropped counter +=5"
+    (dropped_before +. 5.0) dropped_after_5;
+  check (float 0.001) "threshold breached exactly once at drop #5"
+    (breached_before +. 1.0) breached_after_5;
+  (* 6th drop in same window: only _dropped bumps, breach edge-trigger
+     does not re-fire. *)
+  R.set_last_agent_count ~base_path:bp name 0;
+  let dropped_after_6 =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  let breached_after_6 =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
+      ~labels ()
+  in
+  check (float 0.001) "dropped counter +=6"
+    (dropped_before +. 6.0) dropped_after_6;
+  check (float 0.001) "threshold breach is edge-triggered (still +1)"
+    (breached_before +. 1.0) breached_after_6;
+  (* Once the keeper is registered and update succeeds, per-name state
+     is cleared. Subsequent re-deregistration would start a fresh
+     window, but we don't simulate that here — the cleared-on-success
+     contract is enough to prove orphan resolution detected. *)
+  ignore (R.register ~base_path:bp name (make_meta name));
+  R.set_last_agent_count ~base_path:bp name 7;
+  check int "successful update applies"
+    7 (R.get_last_agent_count ~base_path:bp name)
+
+let test_meta_write_sync_updates_registered_only () =
+  R.clear ();
+  let base_path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc-test-meta-write-sync-%d-%06x"
+         (Unix.getpid ())
+         (Random.bits ()))
+  in
+  if Sys.file_exists base_path then rm_rf base_path;
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      R.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_path in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "registry-test"));
+      let dormant_name = "meta-sync-dormant" in
+      let labels = [ "name", dormant_name ] in
+      let dropped_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+          ~labels ()
+      in
+      (match Keeper_types.write_meta ~force:true config (make_meta dormant_name) with
+       | Ok () -> ()
+       | Error err -> fail ("write_meta dormant failed: " ^ err));
+      let dropped_after =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+          ~labels ()
+      in
+      check (float 0.001)
+        "durable meta write for dormant keeper does not count as orphan registry drop"
+        dropped_before
+        dropped_after;
+      let live_name = "meta-sync-live" in
+      let live_meta = make_meta live_name in
+      ignore (R.register ~base_path live_name live_meta);
+      let updated_meta = { live_meta with goal = "updated from disk write" } in
+      (match Keeper_types.write_meta ~force:true config updated_meta with
+       | Ok () -> ()
+       | Error err -> fail ("write_meta live failed: " ^ err));
+      match R.get ~base_path live_name with
+      | Some entry ->
+        check string "registered keeper meta synced"
+          "updated from disk write"
+          entry.meta.goal
+      | None -> fail "expected registered keeper entry")
+
+let test_missing_turn_observation_updates_are_silent () =
+  R.clear ();
+  let name = "missing-turn-observation-test" in
+  let labels = [ "name", name ] in
+  let dropped_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  R.mark_turn_started ~base_path:bp name;
+  R.mark_sdk_turn_started ~base_path:bp name;
+  R.mark_turn_measurement ~base_path:bp name;
+  R.set_turn_decision_stage
+    ~base_path:bp
+    name
+    R.Decision_active_tool_policy_selected;
+  R.set_turn_cascade_state ~base_path:bp name (R.Packed R.Cascade_selecting);
+  R.set_turn_phase ~base_path:bp name (R.Packed R.Turn_executing);
+  R.set_turn_selected_model ~base_path:bp name (Some "runtime");
+  R.prepare_turn_retry_after_compaction ~base_path:bp name;
+  R.mark_turn_finished ~base_path:bp name;
+  let dropped_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_registry_update_dropped
+      ~labels ()
+  in
+  check
+    (float 0.001)
+    "missing turn-observation writes are documented no-ops, not orphan drops"
+    dropped_before
+    dropped_after
+;;
+
 let test_find_by_agent_name () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fn1" (make_meta "fn1") in
@@ -962,11 +1180,22 @@ let test_directive_pause () =
 
 let test_directive_resume () =
   R.clear ();
+  Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
   let _entry = R.register ~base_path:bp "dr1" (make_meta "dr1") in
+  ignore
+    (Masc_mcp.Keeper_turn_livelock.guard_and_record_turn_start
+       ~keeper:"dr1"
+       ~turn_id:7
+       ~max_attempts:3
+       ~stuck_after_sec:1800.0
+       ());
   KK.process_directive ~agent_name:"agent-dr1" "pause";
   KK.process_directive ~agent_name:"agent-dr1" "resume";
   match R.get ~base_path:bp "dr1" with
-  | Some e -> check bool "resumed after directive" false e.meta.paused
+  | Some e ->
+    check bool "resumed after directive" false e.meta.paused;
+    check bool "resume clears livelock attempt state" true
+      (Option.is_none (Masc_mcp.Keeper_turn_livelock.current_state ~keeper:"dr1"))
   | None -> fail "expected dr1"
 
 let test_directive_keeper_name_alias () =
@@ -1279,6 +1508,134 @@ let test_effective_keepalive_meta_prefers_registry_when_disk_unchanged () =
   check int "turn count comes from registry" 9
     chosen.runtime.usage.total_turns
 
+(* ── RFC-0045: SDK turn boundary alignment ─────────────────── *)
+
+let drive_turn_to_finalizing keeper_name =
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.set_turn_decision_stage
+    ~base_path:bp keeper_name R.Decision_active_tool_policy_selected;
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_trying);
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_done)
+
+let test_mark_sdk_turn_started_resets_after_finalizing () =
+  R.clear ();
+  let keeper_name = "k-rfc-0045-reset" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  drive_turn_to_finalizing keeper_name;
+  R.mark_sdk_turn_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | None -> fail "entry missing after mark_sdk_turn_started"
+  | Some entry ->
+    (match entry.R.current_turn_observation with
+     | None -> fail "observation cleared by mark_sdk_turn_started"
+     | Some obs ->
+       check bool "turn_phase reset to Turn_prompting" true
+         (obs.R.turn_phase = R.Packed R.Turn_prompting);
+       check bool "cascade_state reset to Cascade_idle" true
+         (obs.R.cascade_state = R.Packed R.Cascade_idle);
+       check bool "decision_stage reset to Decision_undecided" true
+         (obs.R.decision_stage = R.Packed R.Decision_undecided))
+
+let test_mark_sdk_turn_started_preserves_keeper_scope () =
+  R.clear ();
+  let keeper_name = "k-rfc-0045-preserve" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  drive_turn_to_finalizing keeper_name;
+  let started_at_before, turn_id_before =
+    match R.get ~base_path:bp keeper_name with
+    | Some { current_turn_observation = Some obs; _ } ->
+      (obs.R.started_at, obs.R.turn_id)
+    | _ -> fail "obs missing before SDK boundary"
+  in
+  R.mark_sdk_turn_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check int "turn_id preserved across SDK boundary"
+      turn_id_before obs.R.turn_id;
+    check (float 1e-6) "started_at preserved" started_at_before obs.R.started_at
+  | _ -> fail "obs missing after SDK boundary"
+
+let test_mark_sdk_turn_started_no_op_without_obs () =
+  R.clear ();
+  let keeper_name = "k-rfc-0045-no-obs" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  (* No mark_turn_started has been called yet. *)
+  R.mark_sdk_turn_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = None; _ } -> ()
+  | Some { current_turn_observation = Some _; _ } ->
+    fail "mark_sdk_turn_started installed observation without keeper-turn"
+  | None -> fail "entry missing"
+
+let test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path () =
+  R.clear ();
+  let keeper_name = "k-cascade-exhausted-pre-disclosure" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.mark_turn_cascade_exhausted ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "cascade_state lands on Cascade_exhausted" true
+      (obs.R.cascade_state = R.Packed R.Cascade_exhausted);
+    check bool "turn_phase lands on Turn_exhausted" true
+      (obs.R.turn_phase = R.Packed R.Turn_exhausted);
+    check bool "decision_stage records tool policy boundary" true
+      (obs.R.decision_stage = R.Packed R.Decision_tool_policy_selected)
+  | Some { current_turn_observation = None; _ } ->
+    fail "mark_turn_cascade_exhausted cleared observation"
+  | None -> fail "entry missing"
+
+(* The production [Assert_failure] at keeper_registry.ml:775 was triggered
+   when the SDK fired [before_turn_params] for a second time inside one
+   keeper-turn.  This test reproduces the same shape: two
+   [set_turn_cascade_state(Cascade_selecting)] calls separated by a
+   [Cascade_done] terminal, with [mark_sdk_turn_started] used as the
+   boundary.  Without the RFC-0045 boundary call this test would crash
+   on the second [set_turn_cascade_state]. *)
+let test_two_sdk_turn_boundaries_no_assert () =
+  R.clear ();
+  let keeper_name = "k-rfc-0045-two-boundaries" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  drive_turn_to_finalizing keeper_name;
+  (* Second SDK turn arrives via before_turn_params hook. *)
+  R.mark_sdk_turn_started ~base_path:bp keeper_name;
+  R.set_turn_decision_stage
+    ~base_path:bp keeper_name R.Decision_active_tool_policy_selected;
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_selecting);
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "second SDK turn lands in Cascade_selecting / Turn_routing" true
+      (obs.R.cascade_state = R.Packed R.Cascade_selecting
+       && obs.R.turn_phase = R.Packed R.Turn_routing)
+  | _ -> fail "obs missing after second SDK boundary"
+
+let fsm_guard_count () =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_fsm_guard_violation
+    ~labels:[ ("action", "turn_phase_transition"); ("stage", "guard") ]
+    ()
+
+let test_set_turn_phase_rejection_bumps_guard_metric () =
+  R.clear ();
+  let keeper_name = "k-turn-phase-guard-metric" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  let before = fsm_guard_count () in
+  let raised =
+    try
+      R.set_turn_phase ~base_path:bp keeper_name R.(Packed Turn_compacting);
+      false
+    with
+    | R.Turn_phase_transition_violation { where; _ } ->
+      String.equal where "set_turn_phase"
+  in
+  let after = fsm_guard_count () in
+  check bool
+    "forbidden set_turn_phase raises Turn_phase_transition_violation from the setter"
+    true raised;
+  check (float 0.0001) "guard metric increments" (before +. 1.0) after
+
 let test_effective_keepalive_meta_prefers_disk_when_present () =
   R.clear ();
   let stale = make_meta "loop-meta-disk" in
@@ -1326,6 +1683,8 @@ let () =
           eio_test "register and get" test_register_and_get;
           eio_test "register offline and start" test_register_offline_and_start;
           eio_test "register restarting and start" test_register_restarting_and_start;
+          eio_test "R-A-6.a register_restarting refuses exhausted budget"
+            test_register_restarting_refuses_exhausted_budget;
           eio_test "prepare fiber launch resets stale latches"
             test_prepare_fiber_launch_resets_stale_runtime_latches;
           eio_test "dispatch event with audit preserves snapshot"
@@ -1346,6 +1705,8 @@ let () =
             test_dispatch_event_emits_phase_sse;
           eio_test "dispatch event emits lifecycle metric only on phase change"
             test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change;
+          eio_test "dispatch event runs phase transition hook"
+            test_dispatch_event_runs_phase_transition_hook;
           eio_test "dispatch event observes phase SSE broadcast failure"
             test_dispatch_event_observes_phase_sse_broadcast_failure;
           eio_test "extended states" test_extended_states;
@@ -1396,6 +1757,15 @@ let () =
         [
           eio_test "find_by_agent_name" test_find_by_agent_name;
         ] );
+      ( "orphan_observability",
+        [
+          eio_test "update_entry orphan drops emit metrics + edge breach"
+            test_update_entry_orphan_drop_emits_metrics;
+          eio_test "meta write sync skips dormant registry drops"
+            test_meta_write_sync_updates_registered_only;
+          eio_test "missing turn observation updates are silent"
+            test_missing_turn_observation_updates_are_silent;
+        ] );
       ( "resolve_config",
         [
           eio_test "scoped hit" test_resolve_config_scoped_hit;
@@ -1429,5 +1799,20 @@ let () =
             test_effective_keepalive_meta_prefers_registry_when_disk_unchanged;
           eio_test "effective keepalive meta prefers disk when present"
             test_effective_keepalive_meta_prefers_disk_when_present;
+        ] );
+      ( "rfc_0045_sdk_turn_boundary",
+        [
+          eio_test "mark_sdk_turn_started resets in-turn FSM after Turn_finalizing"
+            test_mark_sdk_turn_started_resets_after_finalizing;
+          eio_test "mark_sdk_turn_started preserves keeper-turn-scoped data"
+            test_mark_sdk_turn_started_preserves_keeper_scope;
+          eio_test "mark_sdk_turn_started no-op without observation"
+            test_mark_sdk_turn_started_no_op_without_obs;
+          eio_test "mark_turn_cascade_exhausted materializes pre-disclosure path"
+            test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path;
+          eio_test "two SDK-turn boundaries inside one keeper-turn"
+            test_two_sdk_turn_boundaries_no_assert;
+          eio_test "set_turn_phase rejection bumps guard metric"
+            test_set_turn_phase_rejection_bumps_guard_metric;
         ] );
     ]

@@ -54,6 +54,30 @@ let write_json path json =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let write_minimal_cascade_toml config_root =
+  write_file
+    (Filename.concat config_root "cascade.toml")
+    {|[providers.custom]
+protocol = "openai-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.mock]
+api-name = "mock"
+max-context = 128000
+tools-support = true
+
+[custom.mock]
+
+[tier.keeper_unified]
+members = ["custom.mock"]
+
+[tier-group.keeper_unified]
+tiers = ["keeper_unified"]
+
+[routes.keeper_turn]
+target = "tier-group.keeper_unified"
+|}
+
 let write_keeper_toml_exn ?autoboot_enabled config ~name =
   let keepers_dir =
     Filename.concat (Coord.masc_root_dir config) "config/keepers"
@@ -120,7 +144,13 @@ let write_corrupt_keeper_meta_exn config ~name =
 
 let write_keeper_meta_exn ?(autoboot_enabled = true)
     ?(social_model = "bdi_speech_v1")
-    ?(last_social_transition_reason = "") config ~name ~trace_id =
+    ?(last_social_transition_reason = "")
+    ?active_goal_ids config ~name ~trace_id =
+  let active_goal_ids =
+    match active_goal_ids with
+    | Some goal_ids -> goal_ids
+    | None -> [ "goal-" ^ name ]
+  in
   let json =
     `Assoc
       [
@@ -131,7 +161,8 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
         ("social_model", `String social_model);
         ("last_social_transition_reason", `String last_social_transition_reason);
         ("autoboot_enabled", `Bool autoboot_enabled);
-        ("active_goal_ids", `List [ `String ("goal-" ^ name) ]);
+        ( "active_goal_ids",
+          `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) );
       ]
   in
   let meta =
@@ -150,6 +181,30 @@ let register_keeper_offline_exn config ~name =
         (Keeper_registry.register_offline ~base_path:config.base_path name meta)
   | Ok None -> fail ("expected keeper meta for " ^ name)
   | Error e -> fail ("read_meta failed: " ^ e)
+
+let mark_task_done_by_title config ~title ~agent_name =
+  let backlog = Coord.read_backlog config in
+  let seen = ref false in
+  let tasks =
+    List.map
+      (fun (task : Masc_domain.task) ->
+        if String.equal task.title title then (
+          seen := true;
+          {
+            task with
+            task_status =
+              Masc_domain.Done
+                {
+                  assignee = agent_name;
+                  completed_at = Masc_domain.now_iso ();
+                  notes = Some "done";
+                };
+          })
+        else task)
+      backlog.tasks
+  in
+  if not !seen then fail ("expected task to mark done: " ^ title);
+  Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
 
 let parse_json_exn body =
   try Yojson.Safe.from_string body
@@ -197,6 +252,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_toml_exn config ~name:"dot.name";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
@@ -260,7 +316,11 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       let json_detailed = parse_json_exn body_detailed in
       let listed_detailed =
         Yojson.Safe.Util.(
-          json_detailed |> member "keepers" |> to_list |> filter_string)
+          json_detailed |> member "keepers" |> to_list
+          |> List.filter_map (fun row ->
+                 match row |> member "name" with
+                 | `String name -> Some name
+                 | _ -> None))
       in
       check (list string)
         "tool keeper list (detailed) includes persisted keepers"
@@ -271,7 +331,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       check int
         "tool keeper list (detailed) rows include persisted keepers" 2
         Yojson.Safe.Util.(
-          json_detailed |> member "items" |> to_list |> List.length))
+          json_detailed |> member "keepers" |> to_list |> List.length))
 
 let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
   Eio_main.run @@ fun env ->
@@ -290,6 +350,7 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn
@@ -315,6 +376,7 @@ let test_declarative_autoboot_disabled_skips_boot_without_meta () =
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn ~autoboot_enabled:false config ~name:"sangsu";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       let bootable_names = Keeper_runtime.bootable_keeper_names config in
@@ -342,17 +404,13 @@ let test_autoboot_policy_resync_from_declarative_toml () =
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn ~autoboot_enabled:false config ~name:"sangsu";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
-      let cascade_path = Filename.concat config_root "cascade.json" in
-      write_file
-        cascade_path
-        {|{
-  "big_three_models": ["test-only:model"]
-}|};
+      let cascade_path = Filename.concat config_root "cascade.toml" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       Cascade_catalog_runtime.install_snapshot_for_tests
         ~source_path:cascade_path
-        ~profile_names:[ Keeper_config.default_cascade_name ];
+        ~profile_names:[ (Keeper_config.default_cascade_name ()) ];
       write_keeper_meta_exn
         ~autoboot_enabled:true config ~name:"sangsu" ~trace_id:"trace-sangsu";
       match Keeper_runtime.ensure_keeper_meta config "sangsu" with
@@ -380,6 +438,7 @@ let test_keeper_up_uses_toml_autoboot_default () =
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn ~autoboot_enabled:false config ~name:keeper_name;
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       let ctx = keeper_ctx env sw config "operator" in
@@ -498,6 +557,7 @@ let test_keeper_persona_audit_reports_durable_live_persona_keeper () =
         ~persona_name:"analyst";
       write_keeper_meta_exn config ~name:"analyst" ~trace_id:"trace-analyst";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       (match Keeper_types.read_meta config "analyst" with
@@ -547,6 +607,151 @@ let test_keeper_persona_audit_reports_durable_live_persona_keeper () =
           check int "no issues" 0
             Yojson.Safe.Util.(item |> member "issues" |> to_list |> List.length))
 
+let test_keeper_persona_audit_reports_dormant_autoboot_disabled_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_persona_profile_exn config ~name:"dormant";
+      write_keeper_persona_toml_exn config ~name:"dormant"
+        ~persona_name:"dormant" ~autoboot_enabled:false;
+      write_keeper_meta_exn config ~name:"dormant" ~trace_id:"trace-dormant"
+        ~autoboot_enabled:false;
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
+            ~args:(`Assoc [ ("name", `String "dormant") ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_persona_audit dispatch"
+      in
+      check bool "tool audit ok" true ok;
+      let json = parse_json_exn body in
+      check int "summary ok" 1
+        Yojson.Safe.Util.(json |> member "summary" |> member "ok" |> to_int);
+      check int "summary registry missing" 0
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "registry_missing" |> to_int);
+      check int "summary dormant" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "dormant_autoboot_disabled"
+          |> to_int);
+      check int "summary autoboot disabled" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "autoboot_disabled" |> to_int);
+      match audit_item_by_name json "dormant" with
+      | None -> fail "expected dormant audit item"
+      | Some item ->
+          check bool "item ok" true
+            Yojson.Safe.Util.(item |> member "ok" |> to_bool);
+          check bool "dormant flag" true
+            Yojson.Safe.Util.(item |> member "dormant" |> to_bool);
+          check string "dormant reason" "autoboot_disabled"
+            Yojson.Safe.Util.(item |> member "dormant_reason" |> to_string);
+          check int "no issues" 0
+            Yojson.Safe.Util.(item |> member "issues" |> to_list |> List.length))
+
+let test_keeper_persona_audit_flags_stale_active_goal_ids () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_persona_profile_exn config ~name:"analyst";
+      write_keeper_persona_toml_exn config ~name:"analyst"
+        ~persona_name:"analyst";
+      let stale_goal, _ =
+        match Goal_store.upsert_goal config ~title:"Finished scoped goal" () with
+        | Ok payload -> payload
+        | Error msg -> fail msg
+      in
+      let other_goal, _ =
+        match Goal_store.upsert_goal config ~title:"Open global goal" () with
+        | Ok payload -> payload
+        | Error msg -> fail msg
+      in
+      write_keeper_meta_exn config ~name:"analyst" ~trace_id:"trace-analyst"
+        ~active_goal_ids:[ stale_goal.id ];
+      ignore
+        (Coord_task.add_task ~goal_id:stale_goal.id config
+           ~title:"Done scoped task" ~priority:3 ~description:"desc");
+      ignore
+        (Coord_task.add_task ~goal_id:other_goal.id config
+           ~title:"Open global task" ~priority:1 ~description:"desc");
+      mark_task_done_by_title config ~title:"Done scoped task"
+        ~agent_name:"keeper-analyst-agent";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      (match Keeper_types.read_meta config "analyst" with
+       | Ok (Some meta) ->
+           ignore
+             (Keeper_registry.register ~base_path:config.base_path "analyst"
+                meta)
+       | Ok None -> fail "expected analyst meta"
+       | Error e -> fail ("read_meta failed: " ^ e));
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
+            ~args:(`Assoc [ ("name", `String "analyst") ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_persona_audit dispatch"
+      in
+      check bool "tool audit ok" true ok;
+      let json = parse_json_exn body in
+      check int "summary stale active goal ids" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "stale_active_goal_ids" |> to_int);
+      match audit_item_by_name json "analyst" with
+      | None -> fail "expected analyst audit item"
+      | Some item ->
+          let issues =
+            Yojson.Safe.Util.(item |> member "issues") |> string_list_of_json
+          in
+          let scope = Yojson.Safe.Util.(item |> member "active_goal_scope") in
+          check bool "flags stale active goals" true
+            (List.mem "stale_active_goal_ids" issues);
+          check bool "item not ok" false
+            Yojson.Safe.Util.(item |> member "ok" |> to_bool);
+          check int "scoped tasks counted" 1
+            Yojson.Safe.Util.(scope |> member "scoped_task_count" |> to_int);
+          check int "scoped open tasks counted" 0
+            Yojson.Safe.Util.(scope |> member "scoped_open_task_count" |> to_int);
+          check int "scoped terminal tasks counted" 1
+            Yojson.Safe.Util.(
+              scope |> member "scoped_terminal_task_count" |> to_int);
+          check int "global open tasks counted" 1
+            Yojson.Safe.Util.(scope |> member "global_open_task_count" |> to_int);
+          check bool "scope marked stale" true
+            Yojson.Safe.Util.(scope |> member "stale" |> to_bool))
+
 let test_keeper_persona_audit_flags_missing_persona_runtime () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -565,6 +770,7 @@ let test_keeper_persona_audit_flags_missing_persona_runtime () =
       write_keeper_persona_toml_exn config ~name:"ghost"
         ~persona_name:"missing-persona";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       let ctx = keeper_ctx env sw config "operator" in
@@ -629,6 +835,7 @@ let test_keeper_persona_audit_flags_runtime_meta_parse_error () =
       write_keeper_persona_toml_exn config ~name:"broken" ~persona_name:"broken";
       write_corrupt_keeper_meta_exn config ~name:"broken";
       let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       let ctx = keeper_ctx env sw config "operator" in
@@ -751,6 +958,11 @@ let () =
             `Quick test_keeper_list_exposes_last_social_transition_reason;
           test_case "keeper persona audit reports durable live keeper" `Quick
             test_keeper_persona_audit_reports_durable_live_persona_keeper;
+          test_case "keeper persona audit reports dormant autoboot-disabled keeper"
+            `Quick
+            test_keeper_persona_audit_reports_dormant_autoboot_disabled_keeper;
+          test_case "keeper persona audit flags stale active goal ids" `Quick
+            test_keeper_persona_audit_flags_stale_active_goal_ids;
           test_case "keeper persona audit flags missing persona runtime" `Quick
             test_keeper_persona_audit_flags_missing_persona_runtime;
           test_case "keeper persona audit flags runtime meta parse error" `Quick

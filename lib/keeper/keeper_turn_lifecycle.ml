@@ -21,12 +21,17 @@ let handle_keeper_down ctx args : tool_result =
          stop_keepalive ~base_path:ctx.config.base_path resolved_name
      | _ -> ());
     match read_meta_resolved ctx.config requested_name with
-    | Error e -> (false, "" ^ e)
+    | Error e -> (false, e)
     | Ok None -> (true, Printf.sprintf "keeper already absent: %s" requested_name)
     | Ok (Some (name, m)) ->
-      ignore
-        (Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
-           ~target_type:"keeper" ~target_id:(Some name));
+      let pending_confirms_removed =
+        Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
+          ~target_type:"keeper" ~target_id:(Some name)
+      in
+      Log.Misc.info
+        "[keeper_down] cleanup keeper=%s pending_confirms_removed=%d \
+         remove_meta=%b remove_session=%b"
+        name pending_confirms_removed remove_meta remove_session;
       (if remove_meta then
          ( Safe_ops.remove_file_logged ~context:"keeper_down"
              (keeper_meta_path ctx.config name);
@@ -46,11 +51,11 @@ let handle_keeper_down ctx args : tool_result =
              paused = true;
            }
          in
-         ((match write_meta ctx.config retained with
+         ((match write_meta_with_retry ctx.config retained with
            | Ok () -> ()
            | Error err ->
                Prometheus.inc_counter
-                 Prometheus.metric_keeper_write_meta_failures
+                 Keeper_metrics.metric_keeper_write_meta_failures
                  ~labels:[("keeper", name);
                           ("phase",
                            if Keeper_meta_store.is_version_conflict_error err
@@ -80,7 +85,7 @@ let handle_keeper_down ctx args : tool_result =
           let dir = Filename.concat (session_base_dir ctx.config) (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
           try rm_rf dir with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Prometheus.inc_counter
-              Prometheus.metric_keeper_session_cleanup_failures
+              Keeper_metrics.metric_keeper_session_cleanup_failures
               ();
             Log.Keeper.error "session dir cleanup failed: %s"
               (Printexc.to_string exn)));
@@ -89,5 +94,6 @@ let handle_keeper_down ctx args : tool_result =
         ("stopped", `Bool true);
         ("remove_meta", `Bool remove_meta);
         ("remove_session", `Bool remove_session);
+        ("pending_confirms_removed", `Int pending_confirms_removed);
       ] in
       (true, Yojson.Safe.to_string json)

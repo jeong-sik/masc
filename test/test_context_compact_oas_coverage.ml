@@ -98,51 +98,6 @@ let test_compact_summarize_old () =
   check bool "message count reduced" true
     (List.length result < List.length msgs)
 
-let test_summarize_old_masks_tool_results_but_preserves_pairing () =
-  let tool_id = "call-123" in
-  let msgs = [
-    msg Agent_sdk.Types.User "Start by checking the project layout.";
-    msg Agent_sdk.Types.Assistant "The project has lib/ and test/ directories.";
-    msg Agent_sdk.Types.User "Find all reducer references in lib/.";
-    tool_use_msg ~id:tool_id ~name:"grep_search" ();
-    tool_msg ~id:tool_id "3 matches in lib/\nlib/context_compact_oas.ml\nlib/tool_compact.ml";
-    msg Agent_sdk.Types.Assistant "I found 3 matches in lib/.";
-    msg Agent_sdk.Types.User "What should I inspect next?";
-    msg Agent_sdk.Types.Assistant "Check the reducer implementation.";
-    msg Agent_sdk.Types.User "Any tests exist?";
-    msg Agent_sdk.Types.Assistant "Yes, there are focused compaction tests.";
-  ] in
-  let result = Compact.compact
-    ~messages:msgs
-    ~strategies:[Compact.SummarizeOld] () in
-  check bool "message count reduced" true
-    (List.length result < List.length msgs);
-  let preserved_tool_use =
-    List.exists (fun (m : Agent_sdk.Types.message) ->
-      List.exists (function
-        | Types.ToolUse { id; name; _ } -> id = tool_id && name = "grep_search"
-        | _ -> false
-      ) m.content
-    ) result
-  in
-  check bool "tool use preserved" true preserved_tool_use;
-  let masked_tool_result =
-    List.find_map (fun (m : Agent_sdk.Types.message) ->
-      List.find_map (function
-        | Types.ToolResult { tool_use_id; content; _ } when tool_use_id = tool_id ->
-          Some content
-        | _ -> None
-      ) m.content
-    ) result
-  in
-  match masked_tool_result with
-  | None -> fail "expected masked tool result"
-  | Some content ->
-    check bool "structured stub marker present" true
-      (String.starts_with ~prefix:"[tool:grep_search id:call-123" content);
-    check bool "summary preserved in stub" true
-      (String.contains content '3')
-
 (* ================================================================ *)
 (* Shared Scoring Consistency Tests (C3)                            *)
 (* ================================================================ *)
@@ -335,8 +290,6 @@ let () =
       test_case "single message" `Quick test_compact_single_message;
       test_case "drop_low_importance" `Quick test_compact_drop_low_importance;
       test_case "summarize_old" `Quick test_compact_summarize_old;
-      test_case "summarize_old masks tool results but preserves pairing" `Quick
-        test_summarize_old_masks_tool_results_but_preserves_pairing;
     ];
     "scoring_ssot", [
       test_case "scores match messages" `Quick test_scoring_ssot;

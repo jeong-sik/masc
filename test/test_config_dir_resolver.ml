@@ -59,7 +59,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.json") "{}";
+  write_file (Filename.concat config "cascade.toml") "";
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config
 
@@ -71,8 +71,32 @@ let make_toml_only_config_root root =
   write_file
     (Filename.concat config "cascade.toml")
     {|
-[big_three]
-models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+[providers.ollama]
+display-name = "Ollama Local"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen]
+api-name = "qwen3.5:35b-a3b-nvfp4"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[ollama.qwen]
+is-default = true
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen"]
+strategy = "failover"
+
+[tier-group.primary]
+tiers = ["primary"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.primary"
 |};
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config
@@ -201,7 +225,7 @@ let test_env_override_valid () =
     (Lib.Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade authoring missing" false resolution.cascade_authoring.exists;
+  check bool "cascade authoring exists" true resolution.cascade_authoring.exists;
   check bool "cascade exists" true resolution.cascade.exists;
   check bool "prompts exists" true resolution.prompts.exists
 
@@ -220,9 +244,9 @@ let test_env_override_valid_with_toml_only_root () =
   check string "cascade authoring path targets toml"
     (Filename.concat config "cascade.toml")
     resolution.cascade_authoring.path;
-  check bool "cascade exists via toml source" true resolution.cascade.exists;
-  check string "cascade runtime path still targets json"
-    (Filename.concat config "cascade.json")
+  check bool "cascade points at toml" true resolution.cascade.exists;
+  check string "cascade path targets toml"
+    (Filename.concat config "cascade.toml")
     resolution.cascade.path
 
 let test_env_override_invalid_no_fallback () =
@@ -400,7 +424,7 @@ let test_personas_dirs_ignores_base_path_fallback () =
   mkdir_p (Filename.concat config_root "prompts");
   mkdir_p (Filename.concat config_root "keepers");
   mkdir_p (Filename.concat config_root "personas");
-  write_file (Filename.concat config_root "cascade.json") "{}";
+  write_file (Filename.concat config_root "cascade.toml") "";
   write_file (Filename.concat config_root "tool_policy.toml") "# test marker\n";
   let base = Filename.dirname config_root in
   let base_personas = Filename.concat (Filename.concat base Common.masc_dirname) "personas" in

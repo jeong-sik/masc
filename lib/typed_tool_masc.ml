@@ -26,10 +26,11 @@ let create ~name ~description ~module_tag ~params ~parse ~handler ~encode
     The handler is registered via [Tool_spec.Direct] for a specific tool name,
     so the [name] parameter will always match — no guard needed. *)
 let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
-  fun ~name:_ ~args ->
+  fun ~name ~args ->
+    let start_time = Time_compat.now () in
     match Agent_sdk.Typed_tool.execute tool.oas_tool args with
-    | Ok { content } -> Some (true, content)
-    | Error { message; _ } -> Some (false, message)
+    | Ok { content } -> Some (Tool_result.ok ~tool_name:name ~start_time content)
+    | Error { message; _ } -> Some (Tool_result.error ~tool_name:name ~start_time message)
 
 let to_spec tool =
   let schema = Agent_sdk.Typed_tool.schema tool.oas_tool in

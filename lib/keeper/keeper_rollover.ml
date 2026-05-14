@@ -56,30 +56,39 @@ type handoff_rollover = {
   message_count : int;
 }
 
-(** [blocker_indicates_overflow blocker] returns true when [blocker] matches any
-    of the provider-specific context-overflow strings. Provider-agnostic list
-    covers GLM, OpenAI, Ollama, and Anthropic wording.
+(** [blocker_class_indicates_overflow klass] returns true when [klass] is the
+    typed equivalent of a provider context-overflow signal.
 
-    Exposed for unit testing. Pure — no runtime dependency. *)
-let blocker_indicates_overflow (blocker : string) : bool =
-  let b = String.lowercase_ascii blocker in
-  let blen = String.length b in
-  let contains needle =
-    let nlen = String.length needle in
-    if nlen = 0 || blen < nlen then false
-    else
-      let rec scan i =
-        if i + nlen > blen then false
-        else if String.sub b i nlen = needle then true
-        else scan (i + 1)
-      in
-      scan 0
-  in
-  contains "exceeds max length"
-  || contains "context_length_exceeded"
-  || contains "prompt is too long"
-  || contains "prompt too long"
-  || contains "maximum context length"
+    Provider/model are treated as opaque aliases at the keeper layer: the
+    SDK boundary ([Keeper_status_bridge.blocker_class_of_sdk_error] /
+    [blocker_class_of_string]) is the only place where wire-level phrasing
+    is inspected.  Once the boundary has classified the error, downstream
+    consumers (rollover, dashboard, supervisor) reason only over the typed
+    [blocker_class] — never substring-matching the [detail] field. *)
+let blocker_class_indicates_overflow (klass : blocker_class) : bool =
+  match klass with
+  | Sdk_token_budget_exceeded -> true
+  | Cascade_exhausted _
+  | Ambiguous_post_commit_timeout
+  | Ambiguous_post_commit_failure
+  | Autonomous_slot_wait_timeout
+  | Admission_queue_wait_timeout
+  | Turn_timeout_after_queue_wait
+  | Oas_timeout_budget
+  | Turn_timeout
+  | Completion_contract_violation
+  | No_tool_capable_provider
+  | Fiber_unresolved
+  | Stale_turn_timeout
+  | Stale_fleet_batch
+  | Sdk_max_turns_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_tool_retry_exhausted
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met -> false
 
 type rollover_gate_decision =
   | Skip of string
@@ -106,7 +115,7 @@ let append_lineage_artifacts_best_effort
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_rollover_failures
+        Keeper_metrics.metric_keeper_rollover_failures
         ~labels:[("keeper", child.name); ("site", "lineage_append")]
         ();
       Log.Keeper.warn
@@ -122,27 +131,38 @@ let append_lineage_artifacts_best_effort
     the *actual* LLM response for the last turn: when a proactive turn errored
     with an overflow-class blocker, rollover is triggered regardless of the
     checkpoint ratio — the ratio gate structurally cannot fire once compaction
-    shrinks the checkpoint below the threshold (umbrella #7036). *)
+    shrinks the checkpoint below the threshold (umbrella #7036).
+
+    Spec mirror: [specs/keeper-state-machine/KeeperRolloverDecision.tla] models
+    this gate (vars autoHandoff / cooldownElapsed / ratioGate / lastOutcome /
+    blockerClass / decision); [SignalGateOverflowOnly] is the safety invariant
+    that the signal half fires only on an overflow-class blocker, and the
+    bug-model cfg checks that the historical "any non-empty class" substring
+    drift would violate it.  The spec models the [last_blocker_info] +
+    [Proactive_error] disjunct only; the [?current_turn_blocker_info] disjunct
+    uses the same typed [blocker_class_indicates_overflow] predicate so it is
+    covered by construction.  Reverse-citation so code search for
+    "KeeperRolloverDecision" lands here. *)
 let classify_rollover_gate
     ~(auto_handoff : bool) ~(cooldown_elapsed : bool)
     ~(ratio : float) ~(handoff_threshold : float)
     ~(last_outcome : proactive_cycle_outcome)
-    ~(last_blocker : string)
-    ?(current_turn_overflow_blocker : string option = None)
+    ~(last_blocker_info : blocker_info option)
+    ?(current_turn_blocker_info : blocker_info option = None)
     () : rollover_gate_decision =
   if not auto_handoff then Skip "auto_handoff_disabled"
   else if not cooldown_elapsed then Skip "cooldown"
   else
     let ratio_gate = ratio >= handoff_threshold in
-    let current_turn_signal =
-      match current_turn_overflow_blocker with
-      | Some blocker -> blocker_indicates_overflow blocker
+    let info_indicates_overflow = function
+      | Some { klass; _ } -> blocker_class_indicates_overflow klass
       | None -> false
     in
+    let current_turn_signal = info_indicates_overflow current_turn_blocker_info in
     let signal_gate =
       current_turn_signal
       || (last_outcome = Proactive_error
-          && blocker_indicates_overflow last_blocker)
+          && info_indicates_overflow last_blocker_info)
     in
     match ratio_gate, signal_gate with
     | true, true -> Go "ratio+signal"
@@ -156,7 +176,7 @@ let maybe_rollover_oas_handoff
     ~(meta : keeper_meta)
     ~(model : string)
     ~(primary_model_max_tokens : int)
-    ~(current_turn_overflow_blocker : string option)
+    ~(current_turn_blocker_info : blocker_info option)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : handoff_rollover =
   match checkpoint with
   | None ->
@@ -198,8 +218,8 @@ let maybe_rollover_oas_handoff
           ~ratio
           ~handoff_threshold:base_meta.handoff_threshold
           ~last_outcome:base_meta.runtime.proactive_rt.last_outcome
-          ~last_blocker:base_meta.runtime.last_blocker
-          ~current_turn_overflow_blocker
+          ~last_blocker_info:base_meta.runtime.last_blocker
+          ~current_turn_blocker_info
           ()
       in
       let rollover_base =
@@ -255,7 +275,7 @@ let maybe_rollover_oas_handoff
                   ~model ~ctx:save_ctx ~generation:next_generation with
           | Error e ->
               Prometheus.inc_counter
-                Prometheus.metric_keeper_checkpoint_failures
+                Keeper_metrics.metric_keeper_checkpoint_failures
                 ~labels:[("keeper", base_meta.name); ("site", "rollover_handoff_save")]
                 ();
               Log.Keeper.error
@@ -266,7 +286,7 @@ let maybe_rollover_oas_handoff
               (match Keeper_id.Trace_id.of_string new_trace_id with
                | Error err ->
                  Prometheus.inc_counter
-                   Prometheus.metric_keeper_rollover_failures
+                   Keeper_metrics.metric_keeper_rollover_failures
                    ~labels:[("keeper", base_meta.name); ("site", "invalid_trace_id")]
                    ();
                  Log.Keeper.error
@@ -290,6 +310,7 @@ let maybe_rollover_oas_handoff
                      };
                    }
                  in
+                 let model = "runtime" in
                  let handoff_json =
                    `Assoc
                      [

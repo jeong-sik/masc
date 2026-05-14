@@ -1,4 +1,4 @@
-(** Keeper_memory_recall — cost calculation, recall scoring, auto-rules, and memory eval. *)
+(** Keeper_memory_recall — recall scoring, auto-rules, and memory eval. *)
 
 open Keeper_types
 
@@ -12,10 +12,6 @@ let re_weather_ko = Re.str "날씨" |> Re.compile
 let re_weather_en = Re.str "weather" |> Re.compile
 let re_first_ko = Re.str "첫" |> Re.compile
 let re_first_en = Re.str "first" |> Re.compile
-
-let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) ~(model_id : string) : float =
-  let pricing = Llm_provider.Pricing.pricing_for_model model_id in Llm_provider.Pricing.estimate_cost ~pricing
-        ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ()
 
 let read_file_tail_lines path ~max_bytes ~max_lines : string list =
   if max_lines <= 0 then []
@@ -418,30 +414,8 @@ let keeper_auto_rule_eval_of_measurement
   }
 
 (* ================================================================ *)
-(* Model-aware threshold adjustment (#3069)                          *)
+(* Runtime-aware threshold adjustment (#3069)                        *)
 (* ================================================================ *)
-
-(** Adjust compaction/handoff thresholds based on model metadata from OAS.
-    Returns [(ratio_gate_multiplier, handoff_threshold_multiplier)].
-
-    Uses concrete parameters (context_window, is_local) from
-    [Llm_provider.Model_meta] instead of tier classification.
-
-    - Local models with small context (< 64K): (0.75, 0.75) — earlier handoff.
-    - Models with large context (>= 200K): (1.15, 1.10) — prefer compaction.
-    - Everything else: (1.0, 1.0) (no adjustment).
-
-    64K floor: llama-server default 8K is too small for keeper sessions.
-    Models below 64K get early-handoff to avoid context overflow. *)
-let model_threshold_multipliers_of_model_id (model_id : string) : float * float =
-  let meta = Llm_provider.Model_meta.for_model_id model_id in
-  let ctx = meta.context_window in
-  if meta.is_local && ctx < 64_000 then
-    (0.75, 0.75)
-  else if ctx >= 200_000 then
-    (1.15, 1.10)
-  else
-    (1.0, 1.0)
 
 let evaluate_keeper_auto_rules
     ~(meta : keeper_meta)
@@ -450,13 +424,9 @@ let evaluate_keeper_auto_rules
     ~(token_count : int)
     ~(repetition_risk : float)
     ~(goal_alignment : float)
-    ~(response_alignment : float)
-    ?(model_id : string option) () : keeper_auto_rule_eval =
-  let (ratio_mult, handoff_mult) =
-    match model_id with
-    | Some id -> model_threshold_multipliers_of_model_id id
-    | None -> (1.0, 1.0)
-  in
+    ~(response_alignment : float) () : keeper_auto_rule_eval =
+  let ratio_mult = 1.0 in
+  let handoff_mult = 1.0 in
   let measurement =
     Keeper_measurement.capture
       ~snapshot_id:(Printf.sprintf "auto-rules-%s" meta.name)
@@ -559,13 +529,9 @@ let learned_policy_auto_rules
     ~(token_count : int)
     ~(repetition_risk : float)
     ~(goal_alignment : float)
-    ~(response_alignment : float)
-    ?(model_id : string option) () : keeper_auto_rule_eval =
-  let (ratio_mult, handoff_mult) =
-    match model_id with
-    | Some id -> model_threshold_multipliers_of_model_id id
-    | None -> (1.0, 1.0)
-  in
+    ~(response_alignment : float) () : keeper_auto_rule_eval =
+  let ratio_mult = 1.0 in
+  let handoff_mult = 1.0 in
   let ratio_gate = Float.min Env_config_keeper.context_ratio_hard_cap (meta.compaction.ratio_gate *. ratio_mult) in
   let message_gate = meta.compaction.message_gate in
   let token_gate = meta.compaction.token_gate in

@@ -69,7 +69,9 @@ let backend_get config ~key =
   (match result with
    | Ok v -> Ok (Some v)
    | Error (Backend_types.NotFound _) -> Ok None
-   | Error e -> Error e)
+   | Error (Backend_types.AlreadyExists _ | Backend_types.IOError _
+           | Backend_types.InvalidKey _ | Backend_types.ConnectionFailed _
+           | Backend_types.BackendNotSupported _) as err -> err)
 
 let backend_set config ~key ~value =
   match config.backend with
@@ -86,7 +88,9 @@ let backend_delete config ~key =
   (match result with
    | Ok () -> Ok true
    | Error (Backend_types.NotFound _) -> Ok false
-   | Error e -> Error e)
+   | Error (Backend_types.AlreadyExists _ | Backend_types.IOError _
+           | Backend_types.InvalidKey _ | Backend_types.ConnectionFailed _
+           | Backend_types.BackendNotSupported _) as err -> err)
 
 let backend_exists config ~key =
   match config.backend with
@@ -109,7 +113,7 @@ let backend_get_all config ~prefix =
            let pairs = List.filter_map (fun k ->
              match backend_get config ~key:k with
              | Ok (Some v) -> Some (k, v)
-             | _ -> None
+             | Ok None | Error _ -> None
            ) keys in
            Ok pairs)
 

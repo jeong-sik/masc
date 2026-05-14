@@ -9,7 +9,7 @@
 open Masc_mcp
 open Alcotest
 
-module CP = Oas_worker_exec_checkpoint
+module CP = Keeper_oas_checkpoint
 
 let rec rm_rf path =
   if Sys.file_exists path then

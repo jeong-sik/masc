@@ -24,7 +24,7 @@ val role_counts_with_pending_user :
   Agent_sdk.Types.message list -> (string * int) list
 
 (** Compute payload-size estimates and role distribution for a keeper
-    turn about to invoke [Oas_worker.run_named]. The result assumes OAS
+    turn about to invoke [Keeper_turn_driver.run_named]. The result assumes OAS
     will synthesize a new User message from [~user_message] and append
     it after [~history_messages]; therefore [message_count] and
     [role_counts] include that pending user turn.

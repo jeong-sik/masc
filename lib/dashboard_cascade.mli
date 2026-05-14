@@ -1,4 +1,3 @@
-
 (** Dashboard projection for cascade configuration and runtime health.
 
     Exposes the validated runtime cascade catalog alongside the live
@@ -21,9 +20,9 @@
     {[
       {
         "updated_at": "2026-04-15T08:15:00Z",
-        "config_path": "/path/to/cascade.json" | null,
-        "source_kind": "json" | "toml",
-        "source_path": "/path/to/cascade.json" | "/path/to/cascade.toml",
+        "config_path": "/path/to/cascade.toml" | null,
+        "source_kind": "toml",
+        "source_path": "/path/to/cascade.toml",
         "profiles": [
           { "name": "keeper_unified",
             "keeper_assignable": true,
@@ -42,40 +41,62 @@
 
     Only validated profiles from the active runtime snapshot are surfaced in
     [profiles]. Each profile also carries [keeper_assignable] metadata from the
-    live [cascade.json] catalog so the UI can distinguish keeper-routing
+    live [cascade.toml] catalog so the UI can distinguish keeper-routing
     profiles from manual/system-only trial profiles. Keepers whose raw
     [cascade_name] drifts from the validated catalog still appear in
     [keeper_profiles] so the UI can show the mismatch.
 
     @since 0.6.0 *)
-val config_json : unit -> Yojson.Safe.t
+val config_json : ?base_path:string -> unit -> Yojson.Safe.t
 
-(** Raw [cascade.json] payload from the active resolved config root.
+(** Public profile display name for dashboard surfaces. Declarative
+    runtime names such as ["tier.primary"] and ["tier-group.primary"]
+    are rendered as ["primary"] for operator-facing JSON and route
+    payloads. *)
+val public_cascade_profile_name : string -> string
+
+val public_profile_names : string list -> string list
+(** Apply {!public_cascade_profile_name}, then sort and deduplicate. *)
+
+val invalid_profiles_with_internal_names :
+  (string * string list) list -> (string * string list) list
+(** Merge validation errors by exact internal profile name. Names such as
+    ["tier.primary"] and ["tier-group.primary"] are intentionally kept
+    distinct; callers may separately apply {!public_cascade_profile_name}
+    only when a display-only label is needed. *)
+
+val invalid_assignments_for_public_profiles :
+  known_internal_profiles:string list ->
+  invalid_profiles:(string * string list) list ->
+  string list ->
+  (string * string list) list
+(** Match keeper-facing profile names against internal invalid-profile
+    diagnostics using runtime profile preference order. Qualified names such
+    as ["tier.primary"] are checked exactly. For an unqualified legacy name
+    such as ["primary"], ["tier-group.primary"] is checked before
+    ["tier.primary"] so a valid preferred tier-group is not rejected because a
+    lower-priority tier with the same public name is invalid. *)
+
+(** Raw cascade TOML payload from the active resolved config root.
 
     Shape:
     {[
       {
         "updated_at": "2026-04-21T08:15:00Z",
-        "config_path": "/path/to/cascade.json" | null,
-        "source_kind": "json" | "toml",
-        "source_path": "/path/to/cascade.json" | "/path/to/cascade.toml",
+        "source_kind": "toml",
+        "source_path": "/path/to/cascade.toml",
         "source_editable": true,
-        "source_text": "{ ... }\n" | "comment = ...\n[profile]\n...",
-        "raw_json_editable": true | false,
-        "raw_json": "{ ... }\n"
+        "source_text": "comment = ...\n[providers.X]\n...",
+        "raw_json": "{ ... }\n",
+        "materialization_error": null | "..."
       }
     ]}
 
-    [source_text] is the editable active source file content. In JSON mode it
-    matches [raw_json]; in TOML mode it is the live [cascade.toml] source while
-    [raw_json] remains the generated runtime [cascade.json] preview.
-
-    [config_path] is the resolver's candidate [cascade.json] path under the
-    active config root, even when the file does not exist yet. In that missing
-    JSON-file case, both [source_text] and [raw_json] default to ["{}\n"] so
-    operators can bootstrap a config from the dashboard editor. When
-    [source_kind] is ["toml"], [raw_json_editable] stays [false] because the
-    preview is generated, but [source_editable] remains [true].
+    [source_text] is the editable TOML source file content; [raw_json] is the
+    in-memory rendering returned by
+    {!Cascade_toml_materializer.render_toml_to_json_string}. RFC-0058 §9
+    Phase 9.3 retired the JSON-native authoring mode and the on-disk JSON
+    sibling, so the [config_path] and [raw_json_editable] fields are gone.
 
     @since 0.160.1 *)
 val raw_config_json : unit -> Yojson.Safe.t
@@ -83,10 +104,9 @@ val raw_config_json : unit -> Yojson.Safe.t
 (** Validate and persist the active cascade authoring source, then return the
     refreshed {!config_json} snapshot.
 
-    In JSON mode, the input must be syntactically valid JSON and is written to
-    the active [cascade.json]. In TOML mode, the input must be syntactically
-    valid TOML and is written to the active [cascade.toml], after which the
-    generated runtime [cascade.json] is materialized from that source.
+    The input must be syntactically valid TOML. RFC-0058 §9 Phase 9.3
+    removed the JSON-native save path; only [cascade.toml] is writable
+    through this endpoint.
 
     Semantic validation is not a hard gate here: invalid cascades are still
     written and surfaced through the returned validation metadata so the
@@ -94,8 +114,7 @@ val raw_config_json : unit -> Yojson.Safe.t
     directories are created on demand under the active config root.
 
     @since 0.160.1 *)
-val save_raw_config_json :
-  string -> (Yojson.Safe.t, string) Result.t
+val save_raw_config_json : string -> (Yojson.Safe.t, string) Result.t
 
 (** Build the per-keeper row of [keeper_profiles] without a full
     {!Keeper_registry.registry_entry}. Exposed so the raw-vs-canonical
@@ -107,16 +126,18 @@ val save_raw_config_json :
     canonical column.
 
     @since 0.9.9 *)
-val keeper_profile_fields :
-  keeper:string -> cascade_name:string -> (string * Yojson.Safe.t) list
+val keeper_profile_fields
+  :  keeper:string
+  -> cascade_name:string
+  -> (string * Yojson.Safe.t) list
 
 (** JSON snapshot of the cascade health tracker, merged with
-    [cascade.json]'s declared candidate list.
+    [cascade.toml]'s declared candidate list.
 
     Entries come from two sources:
     1. {!Cascade_health_tracker.all_providers Health.global} — every
        provider the tracker has observed events for.
-    2. Providers declared in any [cascade.json] profile but absent from
+    2. Providers declared in any [cascade.toml] profile but absent from
        the tracker, synthesised via {!zero_provider_info}.  Lets the UI
        surface "why isn't this provider being used?" for candidates that
        never get selected.
@@ -158,7 +179,7 @@ val keeper_profile_fields :
     ]}
 
     [status] is one of [active | cooldown | configured]; see
-    {!provider_status}.  [declared] is [true] iff [cascade.json] lists a
+    {!provider_status}.  [declared] is [true] iff [cascade.toml] lists a
     model whose scheme prefix matches [provider_key].
 
     When [?base_path] is supplied, each provider entry additionally
@@ -177,17 +198,14 @@ val keeper_profile_fields :
     @since 0.173.1 [?base_path] + [?window_minutes] added; per-provider
                    perf fields are now part of the shape.
     @since 0.184.0 [trust_score] and [health_score] fields added. *)
-val health_json :
-  ?window_minutes:int ->
-  ?base_path:string ->
-  unit -> Yojson.Safe.t
+val health_json : ?window_minutes:int -> ?base_path:string -> unit -> Yojson.Safe.t
 
 (** Classify a provider's operational state from tracker fields.  See
     the [status] enum in {!health_json}. *)
 val provider_status : Cascade_health_tracker.provider_info -> string
 
 (** Synthesise a provider_info with optimistic defaults for a provider
-    that is declared in [cascade.json] but has no tracker events in the
+    that is declared in [cascade.toml] but has no tracker events in the
     current window.  Used by {!health_json} to merge declared-only
     candidates; exposed for tests so fixtures don't have to hand-build
     the record. *)
@@ -202,11 +220,11 @@ val zero_provider_info : string -> Cascade_health_tracker.provider_info
     are [null].  [trust_score] is derived from
     {!Cascade_trust.trust_score}; [health_score] is the rounded
     percentage form used by the dashboard. *)
-val provider_entry_to_json :
-  declared:bool ->
-  ?perf:Model_inference_metrics.provider_stats ->
-  Cascade_health_tracker.provider_info ->
-  Yojson.Safe.t
+val provider_entry_to_json
+  :  declared:bool
+  -> ?perf:Model_inference_metrics.provider_stats
+  -> Cascade_health_tracker.provider_info
+  -> Yojson.Safe.t
 
 (** {1 Phase 2a operator recommendations}
 
@@ -219,52 +237,53 @@ val provider_entry_to_json :
 (** Recommended operator action for a low-trust provider. *)
 type recommendation_action =
   | Reduce_weight
-      (** Trust ∈ [0.1, 0.3): partially working but unreliable.
+  (** Trust ∈ [0.1, 0.3): partially working but unreliable.
           Suggested response: halve the cascade.toml weight. *)
   | Disable
-      (** Trust < 0.1 with no stuck-fingerprint streak: provider has
+  (** Trust < 0.1 with no stuck-fingerprint streak: provider has
           decayed across multiple persistent failures. *)
   | Investigate
-      (** Stuck on the same fingerprint ≥ 5 times, OR trust < 0.1 with
+  (** Stuck on the same fingerprint ≥ 5 times, OR trust < 0.1 with
           high-volume failures: likely a config / auth issue, not a
           provider quality problem.  Operator should inspect
           [cascade_audit] before reducing weight. *)
 
 val recommendation_action_to_string : recommendation_action -> string
 
-type recommendation = {
-  rec_provider_key : string;
-  rec_trust_score : float;
-  rec_same_fingerprint_count : int;
-  rec_events_in_window : int;
-  rec_top_fingerprint : string option;
-  rec_action : recommendation_action;
-  rec_rationale : string;
-}
+type recommendation =
+  { rec_provider_key : string
+  ; rec_trust_score : float
+  ; rec_same_fingerprint_count : int
+  ; rec_events_in_window : int
+  ; rec_top_fingerprint : string option
+  ; rec_action : recommendation_action
+  ; rec_rationale : string
+  }
 
-val classify_recommendation :
-  Cascade_health_tracker.provider_info -> recommendation option
 (** Classify a single provider snapshot.  Returns [None] for healthy
     providers (no operator action recommended). *)
+val classify_recommendation
+  :  Cascade_health_tracker.provider_info
+  -> recommendation option
 
-val low_trust_recommendations :
-  Cascade_health_tracker.provider_info list -> recommendation list
 (** Apply {!classify_recommendation} to each provider, drop the
     healthy ones, and sort ascending by [trust_score] so the most
     urgent items render first. *)
+val low_trust_recommendations
+  :  Cascade_health_tracker.provider_info list
+  -> recommendation list
 
 val recommendation_to_json : recommendation -> Yojson.Safe.t
 
-val recommendations_json : unit -> Yojson.Safe.t
 (** Standalone endpoint — reads {!Cascade_health_tracker.global},
     runs {!low_trust_recommendations}, returns a JSON array.
     Also embedded under ["recommendations"] in {!health_json}. *)
+val recommendations_json : unit -> Yojson.Safe.t
 
 (** [provider_scheme_of_model_string s] returns the scheme prefix of a
-    [cascade.json] model spec (the text before the first [:]), or [s]
-    unchanged when no [:] is present.  The scheme corresponds to the
-    [provider_key] produced at runtime by
-    [Keeper_hooks_oas.provider_of_model] for prefixed specs. *)
+    cascade model spec (the text before the first [:]), or [s]
+    unchanged when no [:] is present.  This legacy cascade-health helper is not
+    used for keeper-facing provider/model telemetry. *)
 val provider_scheme_of_model_string : string -> string
 
 (** [declared_provider_schemes_of_config ?config_path ()] returns the
@@ -275,8 +294,7 @@ val provider_scheme_of_model_string : string -> string
     cannot be loaded — a failure here must not take the health
     endpoint offline.  Used by {!health_json} to augment the tracker's
     provider list with zero-traffic candidates. *)
-val declared_provider_schemes_of_config :
-  ?config_path:string -> unit -> string list
+val declared_provider_schemes_of_config : ?config_path:string -> unit -> string list
 
 (** JSON snapshot of the {!Cascade_client_capacity} registry —
     the per-URL/sentinel slot table used for ollama HTTP and CLI
@@ -349,11 +367,12 @@ val client_capacity_json : unit -> Yojson.Safe.t
     @param since_ts  keep only events with [ts >= since_ts].
 
     @since 0.9.9 *)
-val client_capacity_history_json :
-  ?limit:int ->
-  ?kind:string ->
-  ?since_ts:float ->
-  unit -> Yojson.Safe.t
+val client_capacity_history_json
+  :  ?limit:int
+  -> ?kind:string
+  -> ?since_ts:float
+  -> unit
+  -> Yojson.Safe.t
 
 (** JSON projection of {!Cascade_strategy_trace} — recent per-cycle
     strategy decisions (candidate in/out counts, backoff, kind).
@@ -382,10 +401,51 @@ val client_capacity_history_json :
     @param cascade  filter by [cascade_name]; omit to include every cascade.
 
     @since 0.9.10 *)
-val strategy_trace_json :
-  ?limit:int ->
-  ?cascade:string ->
-  unit -> Yojson.Safe.t
+val strategy_trace_json : ?limit:int -> ?cascade:string -> unit -> Yojson.Safe.t
+
+(** JSON projection of durable cascade audit records for the O1 Cascade
+    Inspector.
+
+    Reads [base_path/.masc/cascade_audit/YYYY-MM/DD.jsonl] and reshapes each
+    runtime audit record into one run row:
+    {[
+      {
+        "updated_at": "ISO-8601",
+        "total_runs": <int>,
+        "audit_runs": [
+          { "id": "cascade-audit-...",
+            "cascade": "keeper_unified",
+            "trigger": "sangsu",
+            "at": <unix seconds>,
+            "outcome": "success" | "failure" | "rejected",
+            "error_category": "..."?,
+            "configured": ["glm-coding:auto", ...],
+            "primary": "glm-coding:auto" | null,
+            "selected": "glm-coding:auto" | null,
+            "total_ms": <int>,
+            "hops": [
+              { "i": 0,
+                "model": "glm-coding:auto",
+                "status": "success" | "fallback" | "error" | "attempted",
+                "ms": <int>,
+                "reason": "..."? }, ...
+            ] }, ...
+        ]
+      }
+    ]}
+
+    [total_ms_source] and per-hop [ms_source] are also emitted so missing
+    callback timings are explicit instead of hidden behind fake numbers.
+
+    @param limit    max runs returned (default 100, clamped to [1, 1024]).
+    @param cascade  filter by projected [cascade]; omit to include every
+                    cascade. *)
+val audit_runs_json
+  :  base_path:string
+  -> ?limit:int
+  -> ?cascade:string
+  -> unit
+  -> Yojson.Safe.t
 
 (** Instantaneous SLO snapshot computed from the live
     {!Cascade_strategy_trace} ring buffer.

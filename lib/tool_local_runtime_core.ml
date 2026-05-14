@@ -43,12 +43,8 @@ type bench_sample = {
   error : string option;
 }
 
-let json_error message =
-  Yojson.Safe.to_string
-    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
-
-let json_ok fields =
-  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
+let json_error = Tool_args.error_response
+let json_ok = Tool_args.ok_response
 
 let int_opt_to_json = Json_util.int_opt_to_json
 let string_opt_to_json = Json_util.string_opt_to_json
@@ -129,7 +125,7 @@ let discover_processes () =
   let argv = [ "ps"; "-ax"; "-o"; "pid=,command=" ] in
   let status, body =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"tool/local_runtime"
+      ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime process discovery"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
@@ -191,7 +187,7 @@ let fetch_models_at base_url =
   let argv = [ "curl"; "-sS"; "--max-time"; "10"; url ] in
   let status, body =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"tool/local_runtime"
+      ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime fetch models"
       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())

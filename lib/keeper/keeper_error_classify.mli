@@ -60,9 +60,28 @@ val should_cap_rotation_for_contract_violation :
   Agent_sdk.Error.sdk_error ->
   bool
 
+(** Classification of why a degraded retry is being attempted. Closed
+    set; producer-side is [keeper_error_classify]. Wire form is the
+    lowercase string via [degraded_retry_reason_to_string]. *)
+type degraded_retry_reason =
+  | Hard_quota
+  | Max_turns
+  | Resumable_cli_session
+  | Admission_queue_timeout
+  | Oas_timeout_budget
+  | Turn_timeout
+  | Cascade_candidates_filtered
+  | Required_tool_contract_violation
+  | Cascade_exhausted
+  | Rate_limit
+  | Server_error
+  | Auth_error
+
+val degraded_retry_reason_to_string : degraded_retry_reason -> string
+
 type degraded_retry =
   { next_cascade : string
-  ; fallback_reason : string
+  ; fallback_reason : degraded_retry_reason
   }
 
 (** Opportunistically fail open to a broader cascade when the current
@@ -88,7 +107,7 @@ val fallback_cascade_for_unavailable_profile :
     [degraded_retry_after_recoverable_error] or
     [degraded_rotation_after_recoverable_error]. *)
 val recoverable_cascade_failure_reason :
-  Agent_sdk.Error.sdk_error -> string option
+  Agent_sdk.Error.sdk_error -> degraded_retry_reason option
 
 (** Returns the one-shot degraded retry lane for recoverable whole-cascade
     failures. Required-tool turns stay terminal, and already-degraded lanes

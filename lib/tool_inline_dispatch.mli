@@ -34,8 +34,14 @@ type context = Tool_inline_dispatch_types.context = {
     Coord.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
-(** {1 Functions} *)
+(** {1 Dispatch} *)
 
-val safe_exec : string list -> tool_result
+val dispatch : context -> name:string -> Tool_result.t option
 
-val dispatch : context -> name:string -> tool_result option
+module For_testing : sig
+  val discover_tools_json :
+       query:string
+    -> limit:int
+    -> Masc_domain.tool_schema list
+    -> Yojson.Safe.t
+end

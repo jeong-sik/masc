@@ -311,6 +311,13 @@ let explicit_metadata : (string * metadata) list =
        signaling endpoints in server_h2_gateway.ml — kept for now. *)
     ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
     ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
+    ( "sidecar",
+      {
+        destructive_tool with
+        visibility = Hidden;
+        required_permission = Some Masc_domain.CanBroadcast;
+        effect_domain = Some Masc_coordination;
+      } );
   ]
 
 (* ================================================================ *)
@@ -331,8 +338,6 @@ let registered_metadata name =
 (* ================================================================ *)
 
 (* Delegate to surfaces sub-module *)
-let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_tools
-
 let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
 
 let public_mcp_tools = Tool_catalog_surfaces.public_mcp_surface_tools
@@ -428,6 +433,8 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Board_curation_read
   | TN.Keeper TK.Board_search
   | TN.Keeper TK.Board_stats
+  | TN.Keeper TK.Board_sub_board_get
+  | TN.Keeper TK.Board_sub_board_list
   | TN.Keeper TK.Code_read
   | TN.Keeper TK.Context_status
   | TN.Keeper TK.Discovery
@@ -450,12 +457,17 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Fs_edit
   | TN.Keeper TK.Write ->
       Some Playground_write
+  | TN.Keeper TK.Memory_write ->
+      Some Masc_coordination
   | TN.Keeper TK.Board_cleanup
   | TN.Keeper TK.Board_comment
   | TN.Keeper TK.Board_comment_vote
   | TN.Keeper TK.Board_curation_submit
   | TN.Keeper TK.Board_delete
   | TN.Keeper TK.Board_post
+  | TN.Keeper TK.Board_sub_board_create
+  | TN.Keeper TK.Board_sub_board_delete
+  | TN.Keeper TK.Board_sub_board_update
   | TN.Keeper TK.Board_vote
   | TN.Keeper TK.Broadcast
   | TN.Keeper TK.Handoff
@@ -467,6 +479,8 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Task_done
   | TN.Keeper TK.Task_force_done
   | TN.Keeper TK.Task_force_release
+  (* [Memory_write] matched above in [access_of_tool_name] (merged from main);
+     removed duplicate that was in [tool_group_of_tool_name] arm. *)
   | TN.Keeper TK.Task_submit_for_verification
   | TN.Keeper TK.Voice_agent
   | TN.Keeper TK.Voice_listen
@@ -519,10 +533,13 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Tool_help
   | TN.Masc TM.Tool_list
   | TN.Masc TM.Tool_stats
+  | TN.Masc TM.Web_fetch
   | TN.Masc TM.Web_search
   | TN.Masc TM.Who
   | TN.Masc TM.Workflow_guide
   | TN.Masc TM.Worktree_list
+  | TN.Masc TM.Board_sub_board_get
+  | TN.Masc TM.Board_sub_board_list
   | TN.Masc TM.Approval_pending
   | TN.Masc TM.Approval_get
   | TN.Masc TM.Webrtc_answer
@@ -548,6 +565,9 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Board_delete
   | TN.Masc TM.Board_post
   | TN.Masc TM.Board_reaction
+  | TN.Masc TM.Board_sub_board_create
+  | TN.Masc TM.Board_sub_board_delete
+  | TN.Masc TM.Board_sub_board_update
   | TN.Masc TM.Board_vote
   | TN.Masc TM.Broadcast
   | TN.Masc TM.Cancel_task
@@ -617,9 +637,14 @@ let tool_group_of_typed_tool_name = function
       | TK.Board_post
       | TK.Board_search
       | TK.Board_stats
+      | TK.Board_sub_board_create
+      | TK.Board_sub_board_delete
+      | TK.Board_sub_board_get
+      | TK.Board_sub_board_list
+      | TK.Board_sub_board_update
       | TK.Board_vote ) ->
       Some Board
-  | TN.Keeper (TK.Memory_search | TK.Library_read | TK.Library_search) ->
+  | TN.Keeper (TK.Memory_search | TK.Memory_write | TK.Library_read | TK.Library_search) ->
       Some Knowledge
   | TN.Keeper
       ( TK.Task_claim
@@ -676,6 +701,11 @@ let tool_group_of_typed_tool_name = function
       | TM.Board_reaction
       | TM.Board_search
       | TM.Board_stats
+      | TM.Board_sub_board_create
+      | TM.Board_sub_board_delete
+      | TM.Board_sub_board_get
+      | TM.Board_sub_board_list
+      | TM.Board_sub_board_update
       | TM.Board_vote ) ->
       Some Masc_board
   | TN.Masc_keeper _ -> Some Masc_keeper
@@ -770,6 +800,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Tool_stats
       | TM.Transition
       | TM.Update_priority
+      | TM.Web_fetch
       | TM.Web_search
       | TM.Webrtc_answer
       | TM.Webrtc_offer
@@ -788,14 +819,20 @@ let attach_inferred_effect_domain name (meta : metadata) =
   | None -> { meta with effect_domain = inferred_effect_domain name }
 
 let metadata name =
+  (* Hot path: called from MCP execute, tool list, OAS bridge, capability
+     registry, keeper guards, help registry, governance risk, etc.  Cache
+     surface-membership checks per call rather than re-querying. *)
+  let is_system_internal =
+    Tool_catalog_surfaces.is_on_surface System_internal name
+  in
   let base =
     match Hashtbl.find_opt metadata_table name with
     | Some meta -> meta
     | None ->
       if is_public_mcp name then default_metadata
-      else if List.mem name keeper_internal_set then
+      else if Tool_catalog_surfaces.is_on_surface Keeper_internal name then
         keeper_internal_metadata name
-      else if Tool_catalog_surfaces.is_on_surface System_internal name then
+      else if is_system_internal then
         { default_metadata with
           visibility = Hidden;
           allow_direct_call_when_hidden = true;
@@ -809,7 +846,7 @@ let metadata name =
           reason = Some "Internal tool; not on public MCP surface." }
   in
   let with_surface_visibility =
-    if Tool_catalog_surfaces.is_on_surface System_internal name then
+    if is_system_internal then
     (* Surface membership is the canonical "hidden but callable" contract for
        system-internal tools, even when a tool also carries explicit metadata
        for semantic hints like readonly/destructive. *)
@@ -933,7 +970,7 @@ let metadata_to_fields name =
   in
   match meta.required_permission with
   | Some permission ->
-      ("requiredPermission", `String (Masc_domain.show_permission permission))
+      ("requiredPermission", `String (Masc_domain.permission_to_string permission))
       :: with_actor_binding
   | None -> with_actor_binding
 

@@ -10,11 +10,13 @@
    the slot leaked permanently — turn_available pinned at 0 while
    the entire 14-keeper fleet skipped turns with "wait > 180s".
 
-   The fix wraps each bookkeeping call in [safe_bookkeeping ~op],
-   which catches Cancelled and lets the subsequent semaphore
-   release run. This test asserts the structural pattern by
-   anchored substring search, so a future refactor that removes
-   the wrap fails CI before it deadlocks production.
+   The fix keeps each bookkeeping failure isolated from the semaphore
+   release: standalone cleanup callbacks go through [safe_bookkeeping ~op],
+   while recorded-holder cleanup catches [consume_force_release] failures
+   inside [release_recorded_holder]. Both paths now emit a metric before
+   continuing. This test asserts the structural pattern by anchored
+   substring search, so a future refactor that removes the guard fails CI
+   before it deadlocks production.
 
    Why structural rather than behavioural: deterministically
    raising Cancelled inside a sub-mutex during fiber teardown
@@ -79,20 +81,21 @@ let () =
             (cwd=%s, exe=%s): %s"
            (Sys.getcwd ()) exe (String.concat ", " candidates))
   in
-  (* The five labeled wraps that the fix introduces.  Ordering
-     is not asserted (release order is documented as quota-
-     independent) — only presence of each anchored op label. *)
+  (* The cancel-safe release path has two cleanup shapes:
+     [safe_bookkeeping] wraps standalone cleanup callbacks, while
+     recorded-holder release catches [consume_force_release] failures
+     and still releases the semaphore. Ordering is not asserted
+     (release order is quota-independent); the source contract only
+     pins each labeled cleanup site. *)
   let must_contain =
     [ "drop_autonomous_waiter wrap",
       {|safe_bookkeeping ~op:"drop_autonomous_waiter"|}
-    ; "drop_holder turn wrap",
-      {|safe_bookkeeping ~op:"drop_holder turn"|}
     ; "record_autonomous_completion wrap",
       {|safe_bookkeeping ~op:"record_autonomous_completion"|}
-    ; "drop_holder autonomous wrap",
-      {|safe_bookkeeping ~op:"drop_holder autonomous"|}
-    ; "drop_holder reactive wrap",
-      {|safe_bookkeeping ~op:"drop_holder reactive"|}
+    ; "drop_holder metric op",
+      {|~op:("drop_holder " ^ label)|}
+    ; "drop_holder cancellation catch",
+      {|release_keeper_turn_slot: drop_holder %s skipped (Cancelled)|}
     ]
   in
   List.iter
@@ -105,6 +108,26 @@ let () =
     ~label:"safe_bookkeeping catches Cancelled"
     src
     "Eio.Cancel.Cancelled _ ->";
+  assert_contains
+    ~label:"safe_bookkeeping metrics cancelled"
+    src
+    {|observe_bookkeeping_failure ~op ~kind:"cancelled"|};
+  assert_contains
+    ~label:"safe_bookkeeping metrics exception"
+    src
+    {|observe_bookkeeping_failure ~op ~kind:"exception"|};
+  assert_contains
+    ~label:"safe_bookkeeping metric name"
+    src
+    "metric_keeper_turn_slot_bookkeeping_failures";
+  assert_contains
+    ~label:"drop_holder metrics cancelled"
+    src
+    {|~op:("drop_holder " ^ label) ~kind:"cancelled"|};
+  assert_contains
+    ~label:"drop_holder metrics exception"
+    src
+    {|~op:("drop_holder " ^ label) ~kind:"exception"|};
   (* All three semaphore releases must remain reachable
      (turn / autonomous / reactive). *)
   let count_substring ~needle s =

@@ -105,9 +105,18 @@ let draft_request_allowed args =
    tried a Docker PR-lifecycle proof. Mirrors
    [Keeper_tool_pr_review.pr_review_mutation_preset_ok], which already
    includes Research. *)
+(* For a guard predicate a catch-all default loses exhaustiveness:
+   any future preset would silently inherit whichever side of the
+   guard the wildcard happens to land on (the previous [_ -> false]
+   would have defaulted new presets to "disallowed").  Enumerate
+   every variant so the compiler's Warning 8 forces a deliberate
+   classification when [Keeper_meta_tool_access.tool_access_preset]
+   grows, instead of letting policy drift through a wildcard.
+   PR #14716 / #14762 follow-up. *)
 let mutation_preset_ok = function
   | Some (Research | Delivery | Coding | Full) -> true
-  | _ -> false
+  | Some (Minimal | Social | Messaging | Dispatch) -> false
+  | None -> false
 
 let scoped_credential_or_error ~config ~meta =
   match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with
@@ -169,6 +178,27 @@ let pr_create_failure_may_have_created_pr output =
       "i/o timeout";
     ]
 
+(* gh CLI verbatim prefix when a PR for the same head already exists:
+   "a pull request for branch \"<owner:branch>\" into branch \"<base>\"
+    already exists:\n<url>\n"
+   Match the leading clause case-insensitively so future gh versions with
+   minor wording shifts still classify correctly. *)
+let pr_create_failure_already_exists output =
+  let output = String.lowercase_ascii output in
+  contains_substring output "a pull request for branch"
+  && contains_substring output "already exists"
+
+(* Recovery reason classifier — returned alongside the recovery result so
+   observers can distinguish a transient retry-style recovery (504/timeout)
+   from a deterministic idempotency hit (PR already exists). *)
+let classify_pr_create_recovery output =
+  if pr_create_failure_already_exists output then
+    Some "pr_already_exists"
+  else if pr_create_failure_may_have_created_pr output then
+    Some "pr_create_transient_failure"
+  else
+    None
+
 type gh_exec_result =
   { status : Unix.process_status
   ; output : string
@@ -185,7 +215,10 @@ let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
     && Env_config_keeper.KeeperSandbox.hard_mode ()
   then
     let status, output =
-      Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+        ~raw_source:(quote_argv argv)
+        ~summary:"keeper tool gh brokered"
+        ~env ~cwd ~timeout_sec argv
     in
     { status; output; via = "brokered" }
   else if meta.sandbox_profile = Docker then
@@ -203,7 +236,10 @@ let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
         { status = Unix.WEXITED 1; output = msg; via = "docker" }
   else
     let status, output =
-      Process_eio.run_argv_with_status ~env ~cwd ~timeout_sec argv
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+        ~raw_source:(quote_argv argv)
+        ~summary:"keeper tool gh host"
+        ~env ~cwd ~timeout_sec argv
     in
     { status; output; via = "host" }
 
@@ -263,24 +299,25 @@ let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
           let result_ok = status_ok result.status in
           let recovered =
             match recover_pr_create with
-            | Some (repo, head)
-              when (not result_ok)
-                   && pr_create_failure_may_have_created_pr result.output ->
-                let recovery =
-                  run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec
-                    (build_pr_view_recovery_argv ~repo ~head)
-                in
-                if status_ok recovery.status then Some recovery else None
+            | Some (repo, head) when not result_ok -> (
+                match classify_pr_create_recovery result.output with
+                | None -> None
+                | Some reason ->
+                    let recovery =
+                      run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec
+                        (build_pr_view_recovery_argv ~repo ~head)
+                    in
+                    if status_ok recovery.status then Some (recovery, reason)
+                    else None)
             | _ -> None
           in
           (match recovered with
-           | Some recovery ->
+           | Some (recovery, reason) ->
                output_json ~ok:true ~tool ~operation ~meta ~binding ~state
                  ~cwd ~via:recovery.via ~output:recovery.output
                  ~extra_fields:
                    [
-                     ( "recovered_from_error",
-                       `String "pr_create_transient_failure" );
+                     "recovered_from_error", `String reason;
                      "original_ok", `Bool false;
                      "original_output", `String result.output;
                      "recovery_tool", `String "gh pr view";
@@ -329,7 +366,7 @@ let handle_keeper_pr_create ~(config : Coord.config) ~(meta : keeper_meta)
         [
           "ok", `Bool false;
           "error", `String "preset_insufficient";
-          "reason", `String "keeper_pr_create requires delivery, coding, or full preset";
+          "reason", `String "keeper_pr_create requires research, delivery, coding, or full preset";
         ])
   else
     run_gh ~tool:"keeper_pr_create" ~operation:"pr_create" ~config ~meta
@@ -344,6 +381,8 @@ module For_testing = struct
   let draft_request_allowed = draft_request_allowed
   let pr_create_failure_may_have_created_pr =
     pr_create_failure_may_have_created_pr
+  let pr_create_failure_already_exists = pr_create_failure_already_exists
+  let classify_pr_create_recovery = classify_pr_create_recovery
 
   let quote_argv = quote_argv
   let mutation_preset_ok = mutation_preset_ok

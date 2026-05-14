@@ -1,11 +1,13 @@
 ---
 status: reference
-last_verified: 2026-05-01
+last_verified: 2026-05-14
 code_refs:
   - lib/masc_oas_bridge.ml
-  - lib/oas_worker.ml
+  - lib/worker_oas.ml
   - lib/verifier_oas.ml
   - lib/memory_oas_bridge.ml
+  - lib/keeper/keeper_context_core.ml
+  - lib/keeper/keeper_memory_policy.ml
 ---
 
 # OAS-MASC Boundary Contract
@@ -34,6 +36,7 @@ consumer → MASC-MCP (coordination/orchestration) → OAS (agent runtime)
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | room, board, workflow, policies, operator surfaces |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, tool dispatch, auth/join/policy semantics |
 | 컨텍스트 축약 | `Context_reducer` | 어떤 전략을 언제 적용할지 결정 |
+| ContextOverflow retry | overflow detection, structured error, standalone/keeper compact retry | 최종 overflow 결과를 keeper state, receipt, operator surfaces에 attribution |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 custom event로 publish할지 정의, SSE/dashboard에 연결 |
 | 장기 메모리 프리미티브 | `Memory.t` tiers | institutional memory, pg/jsonl backends, room/task/social semantics |
 | 조율 상태 | 없음 | room, tasks, team sessions, governance, social runtime |
@@ -51,12 +54,25 @@ OAS  ──does not know──→ MASC
 
 ## Config Ownership
 
-- `config/cascade.json`은 **MASC runtime contract**다.
-- cascade schema, parsing, label semantics, selection policy의 owner는 MASC다.
-- MASC는 repo-level default와 keeper별 `cascade_name` override를 해석해 concrete provider/model 후보를 고른다.
-- OAS는 MASC가 선택한 concrete provider/model config를 실행하는 단일-provider runtime으로 남는다.
+- `config/cascade.toml`은 **MASC runtime contract**다. On-disk
+  `cascade.json`은 retired compatibility input이며 더 이상 생성/소비하지 않는다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
+- MASC owns keeper-facing logical runtime policy: named cascade/profile,
+  required capabilities, tool visibility, health/capacity gates, and
+  operator-facing lane/status projections.
+- OAS owns concrete provider/model identity and execution. MASC must not branch
+  on vendor/model literals or surface concrete provider/model ids in keeper
+  runtime products; compatibility fields are redacted to `runtime`, `null`, or
+  empty collections at MASC boundaries.
+- OAS provider catalog / capability manifest / pricing override는 generic
+  provider runtime contract다. MASC may pass logical runtime intent and
+  capability requirements into those OAS contracts, but OAS must not learn MASC routes,
+  keeper phases, tier-groups, board/governance semantics, or dashboard policy.
+- `provider/model-free` in MASC means MASC policy code routes by logical use,
+  declared capability, profile order, health, capacity, and receipt state; it
+  does not branch on vendor/model literals. Provider/model ids remain
+  OAS-owned runtime data, not MASC product data.
 - 따라서 checked-in repo defaults는 review-stable pinning이 중요할 때 explicit `provider:model_id`를 쓰고, adapter default 자체를 계약으로 삼을 때만 `provider:auto`를 쓴다.
-- legacy `allowed_providers` keeper TOML/meta fields는 compatibility input일 뿐이며, active runtime policy로 취급하지 않는다.
+- legacy `allowed_providers` keeper TOML/meta fields는 더 이상 허용하지 않으며 load/parse boundary에서 reject한다.
 - persisted legacy keeper meta tool-policy fields are scrubbed into canonical `tool_access` on read; direct `meta_of_json` callers must use canonical keeper meta keys.
 
 ## Current Integration Status
@@ -64,13 +80,14 @@ OAS  ──does not know──→ MASC
 | Area | Status | Notes |
 |------|--------|-------|
 | Context compaction | Partial complete | `context_compact_oas.ml`는 OAS `Context_reducer`를 사용한다. MASC 전체 context system이 OAS `Context.t`로 통합된 것은 아니다. |
+| ContextOverflow retry ownership | Complete for keeper hot path | Keeper dispatch keeps `auto_context_overflow_retry=true`, so OAS owns transcript mutation, emergency compaction, and retry. If OAS still returns structured `ContextOverflow`, MASC records the typed blocker and terminal receipt without compacting checkpoints or re-dispatching the agent turn. |
 | Event bus bridge | Complete for current native/custom flow | `oas_event_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
-| Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
+| Checkpoint integration | Mostly complete, sidecar debt remains | OAS checkpoint is used in shared worker/runtime paths. New keeper checkpoint writes keep continuity state out of `working_context`: `patch_checkpoint_last_assistant` strips visible `[STATE]`, stores replay metadata on the assistant message, and clears `Checkpoint.working_context`. Compatibility readers still accept legacy structured sidecars, and feature-flagged autonomous/resilience/multimodal adapters may store neutral sidecar metadata in `working_context`. |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
 | Team-session swarm | Removed | `lib/team_session/` module purged; MASC no longer owns a session orchestration surface. OAS Swarm Runner is the sole substrate; consumers drive swarm runs via OAS primitives directly. |
-| Provider selection ownership | MASC-owned | MASC resolves `cascade_name` and selects the concrete provider/model; legacy `allowed_providers` inputs are ignored |
+| Provider/model identity ownership | OAS-owned | MASC resolves logical `cascade_name` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. Legacy `allowed_providers` inputs are rejected |
 
 ## Boundary Audit Snapshot
 
@@ -79,15 +96,119 @@ OAS  ──does not know──→ MASC
 | `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
 | `lib/context_compact_oas.ml` | Acceptable but lossy | Runtime compaction delegates to OAS, but message-importance heuristics still depend on MASC text markers |
 | `lib/memory_oas_bridge.ml` | Acceptable | Consumer-side adapter; imperative seeding removed in RFC-MASC-004 Phase 2, hook-first injection is now the sole path |
-| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Boundary violation | Keeper still owns duplicate runtime state via `working_context` and relies on raw text markers such as `[STATE]` |
+| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Mostly correct with adapter sidecar debt | Keeper no longer stores continuity runtime state in checkpoint `working_context` on new writes; replay state is assistant-message metadata plus sidecar-file fallback. Remaining debt is limited to MASC adapter sidecars (`autonomous_meta`, `resilience_meta`, `multimodal_artifacts`/`workspace_meta`) and legacy `[STATE]` parse compatibility. |
 
 ## Open Structural Gaps
 
-- keeper runtime still uses a MASC-owned `working_context` wrapper around OAS context/checkpoint primitives
-- keeper continuity still leaks domain semantics through raw message text (`[STATE]`, goal/memory markers)
+- keeper runtime still has a small MASC-owned `working_context` facade around OAS context/checkpoint primitives for token observation, checkpoint loading, and adapter compatibility; this facade must remain read-only with respect to OAS-owned runtime transcript state.
+- keeper continuity no longer writes new `[STATE]` replay state into checkpoint `working_context`, but prompt/fallback paths still understand raw message text markers (`[STATE]`, goal/memory markers) for compatibility and recovery.
 - `memory_oas_bridge.ml` imperative seeding fully removed (RFC-MASC-004 Phase 2-3); hook-first is the sole path
 - runtime-health signaling still relies on a narrow boolean `resource_check` callback instead of a structured probe
 - proof-store and `oas-runtime` filesystem layout must stay behind thin adapters instead of being reconstructed ad hoc
+- provider/model ownership still has historical debug and lower-level
+  compatibility leakage in MASC-side code. New keeper runtime manifest rows,
+  `/runtime-trace` projections, and product summaries should stay
+  capability/lane/status based and redact raw provider/model identifiers.
+  No-tool-capable runtime errors should report required tools, candidate
+  counts, and rejection reasons without naming configured providers. Keeper
+  runtime/social status surfaces should keep legacy model-label keys null
+  rather than resolving provider/model display labels. Runtime trust,
+  composite execution, keeper status detail, and keeper FSM helper projections
+  should preserve only non-identifying cascade/tool/sandbox signals and return
+  null or empty collections for selected model/provider identity fields. Keeper
+  execution receipt JSON and operator-broadcast payloads should preserve legacy
+  compatibility keys but keep provider/model identity values null. Keeper
+  decision-log and metrics snapshot JSONL projections should preserve
+  non-identifying cascade/tool/usage/timing evidence while keeping model,
+  provider, configured-label, and candidate-model fields null or empty.
+  Dashboard normalizers and product UI should not resurrect concrete
+  model/provider labels from older payloads; they should show cascade lane,
+  outcome, attempt, fallback, tool, sandbox, and runtime-trust evidence instead.
+  Governance/board dashboard adapters should likewise keep judge/approval
+  runtime evidence while nulling or hiding `model_used` and `selected_model`.
+  Model-inference and cost/latency API projections may keep legacy field names
+  such as `model_id`, `provider`, `agent`, `matrix.providers`, and
+  `matrix.models` for client compatibility, but values must be redacted runtime
+  lane labels or `null`, not concrete OAS provider/model identities. Keeper cost
+  and decision dashboards must not display raw `model_used`. SSE journal text
+  and operator digest normalizers follow the same redaction rule.
+  Governance judge API/status records, operator-judgment records, keeper detail
+  metric windows, and handoff summaries should preserve runtime status and
+  transition counts while keeping concrete `model_used`, `to_model`, and
+  model-breakdown labels null or neutral. Operator control snapshots follow
+  the same rule for keeper rows and context snapshots. Keeper approval queue
+  dashboard rows, audit rows, and resolution broadcasts keep `selected_model`
+  as a compatibility key only and emit `null`. Autoresearch cycle JSON and
+  attribution evidence keep `model_used` as a compatibility key only and emit
+  `null`. Legacy keeper `models` inputs are rejected at TOML/meta parse
+  boundaries rather than decoded into a neutral runtime label.
+  Channel Gate turn stats follow the same rule: keeper response parsing keeps
+  duration/token counts and collapses the legacy model slot to `runtime`, while
+  outbound wire JSON emits `model_used: null`.
+  Dashboard harness wake-payload telemetry and Yjs keeper updates keep the
+  legacy `model_id` key but emit the neutral `runtime` lane.
+  The OAS dashboard telemetry bridge accepts provider/model compatibility
+  fields at ingress, but normalizes samples, provider-error counters, filters,
+  and SSE/REST projections to the neutral `runtime` lane before MASC stores
+  them.
+  Operator pending-confirm runtime metadata keeps `model_used` as a
+  compatibility key only and emits `null` at the boundary.
+  Keeper detail provider-health projections, keeper execution memory context,
+  keeper turn-complete SSE, and keeper turn-completed event payloads retain
+  operational status/usage fields while redacting provider/model identity
+  fields to `null`.
+  Keeper meta JSON keeps the legacy `last_model_used` key but writes it as an
+  empty string so new persisted meta does not carry concrete provider/model
+  labels.
+  Cost ledger JSONL keeps status diagnostics but redacts persisted `provider`
+  and `model` values to the neutral `runtime` lane. MASC no longer estimates
+  provider/model pricing locally or emits `cost_pricing_model` /
+  `cost_pricing_catalog` compatibility fields; `cost_usd` is trusted only when
+  OAS reports it, otherwise the row is marked `oas_cost_unreported`.
+  No-tool provider rejection records now carry only non-identifying rejection
+  reasons in the MASC structured error type; legacy payloads with
+  provider/model-shaped fields still parse, but those identities are not
+  re-emitted.
+  Cascade attempt-liveness observer metrics keep the historical `provider`
+  label key for dashboard compatibility but emit the neutral `runtime` lane;
+  liveness budget history also uses a single neutral runtime candidate key
+  instead of retaining concrete provider/model keys.
+  Provider-error and OAS-run-timeout Prometheus counters follow the same
+  projection rule: they retain error kind, cascade, capacity scope, and timeout
+  source, but the historical `provider` label value is the neutral `runtime`
+  lane rather than a concrete provider/model identity.
+  The typed `Provider_error` contract itself is also runtime-lane scoped:
+  variants no longer store provider/model identifiers, and legacy JSON keys
+  such as `provider`, `affected`, and `model_name` emit neutral `runtime`
+  values only.
+  Cascade catalog runtime probe JSON and provider-health probe metric labels
+  keep status/error/profile evidence but redact provider kind, model id,
+  model string, endpoint, and metric provider/model labels to neutral runtime
+  values.
+  Cascade legacy observations and attempt/fallback audit rows now store
+  runtime-lane candidate identities, and keeper turn-driver fallback/cooldown
+  logs use runtime labels instead of concrete provider/model labels.
+  Keeper cascade bookkeeping uses `Cascade_runtime_candidate` for health,
+  capacity, probe, ordering, and timeout decisions so `Keeper_turn_driver` no
+  longer exposes public `Provider_config.t` timeout helpers or directly
+  inspects provider kind, endpoint, or model id in the keeper loop.
+  Keeper liveness/pre-skip helpers now accept only neutral label-to-runtime-URL
+  resolvers; label parsing and provider config access stay behind
+  `Cascade_runtime_candidate`.
+  Keeper usage-trust classification now accepts the OAS-derived cache
+  capability signal instead of a provider-kind value; provider kind remains
+  confined to the OAS telemetry bridge and provider resolver.
+  Keeper turn-context label filtering no longer parses configured labels into
+  `Provider_config.t`; model-id compatibility checks are delegated to
+  `Cascade_runtime_candidate`.
+  Keeper OAS hook public helpers no longer accept provider-kind arguments;
+  typed provider evidence is consumed only inside telemetry bridge helpers.
+  `Keeper_turn_driver.mli` also no longer re-exports the full
+  `Cascade_oas_runner`, provider-attempt FSM APIs, or config/preflight helpers
+  from `Cascade_error_classify`; provider/model-shaped helpers stay behind
+  lower-level OAS boundary modules instead of the keeper facade.
+  The stricter OAS-owned provider/model migration is tracked in
+  <https://github.com/jeong-sik/masc-mcp/issues/15028>.
 
 ## Delivery-Contract Split
 
@@ -99,6 +220,8 @@ OAS  ──does not know──→ MASC
 
 These are the next changes that are generic enough to propose upstream:
 
+- generic provider catalog / model capability / pricing manifest contracts for
+  broad cloud APIs and non-interactive CLI/subscriber runtimes
 - harness case/result/verdict/repair-directive primitives that MASC evaluators can reuse
 - richer swarm `agent_entry` metadata so `planned_worker` routing and telemetry survive end to end
 - structured runtime-health probe callback to replace the current boolean `resource_check`
@@ -112,9 +235,9 @@ These stay in MASC:
 ## Priority Order
 
 1. **P1 — keeper runtime state ownership**
-   - shrink the MASC-owned `working_context` role until OAS owns runtime context/checkpoint state
+   - keep new continuity state out of checkpoint `working_context`; reduce or externalize the remaining adapter sidecars when their feature-flagged owners grow stable storage
 2. **P2 — marker/text leakage**
-   - reduce dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
+   - reduce remaining prompt/fallback dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
 3. **P3 — team-session bridge fidelity** — Resolved (2026-04, team_session module purged; OAS Swarm Runner is sole substrate)
    - MASC team-session surface removed; coordination needs served via board posts + keeper FSM, swarm runs driven through OAS directly
 4. **P4 — memory bridge hardening** — Resolved (2026-04-13, PR #6795 Phase 1 + Phase 2)
@@ -137,11 +260,12 @@ Use this checklist when reviewing boundary-touching PRs:
 1. **OAS가 MASC를 새로 알게 되는가?**
    - generic runtime/harness primitive가 아니라 room/task/governance/session semantics가 OAS public contract로 새어 나오면 안 된다.
 2. **MASC core가 provider/model 세부를 새로 배우는가?**
-   - model ID, vendor, token/cost detail은 OAS-facing adapter/bridge에 머물러야 한다.
+   - model ID, vendor, token/cost detail은 config 또는 OAS-facing adapter/bridge에 머물러야 한다.
+   - routing/policy code가 vendor/model literal로 분기하면 provider/model-free 위반이다.
 3. **문서 truth가 코드 truth와 일치하는가?**
    - 특히 cascade labels, runtime-health semantics, boundary-audit snapshot은 구현과 SSOT 문서가 함께 갱신되어야 한다.
 4. **Checked-in cascade labels are explicit enough for stable review**
-   - repository-default `config/cascade.json` entries should pin explicit `provider:model_id` labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
+   - repository-default `config/cascade.toml` entries should pin explicit provider/model labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
 
 ## Boundary Rules for Future Work
 

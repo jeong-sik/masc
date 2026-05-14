@@ -206,6 +206,38 @@ function ConfigRow({
   `
 }
 
+function isRepoFallbackSource(source: string): boolean {
+  return source === 'cwd' || source === 'exe_relative'
+}
+
+function sameResolvedPath(left: DashboardConfigResolutionItem, right: DashboardConfigResolutionItem): boolean {
+  return normalizePath(left.path) === normalizePath(right.path)
+}
+
+function ConfigTopologySummary({
+  resolution,
+}: {
+  resolution: DashboardConfigResolution
+}) {
+  const authoringMatchesRuntime = sameResolvedPath(resolution.cascade_authoring, resolution.cascade)
+  const repoFallbackActive = isRepoFallbackSource(resolution.config_root.source)
+
+  return html`
+    <div class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <${StatusChip} tone="neutral" uppercase=${false}>TOML-only<//>
+        <${StatusChip} tone=${authoringMatchesRuntime ? 'ok' : 'warn'} uppercase=${false}>
+          ${authoringMatchesRuntime ? 'authoring=runtime' : 'authoring/runtime split'}
+        <//>
+        <${StatusChip} tone=${repoFallbackActive ? 'warn' : 'neutral'} uppercase=${false}>
+          ${repoFallbackActive ? 'repo config active' : 'repo seed not active'}
+        <//>
+        <span class="text-xs text-[var(--color-fg-muted)]">cascade.toml source follows the resolved config root</span>
+      </div>
+    </div>
+  `
+}
+
 function WarningBlock({
   title,
   warnings,
@@ -526,10 +558,6 @@ export function ConfigResolutionPanel({
 
   return html`
     <${Card} title="설정 경로" class="section mb-4">
-      <div class="mb-4 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-        서버가 실제로 해석한 config root와 runtime/data root를 함께 보여줍니다. cascade는 human-authored cascade.toml과 runtime cascade.json을 분리해 보여주며, 현재 실행이 바라보는 경로와 체크인된 seed config는 다를 수 있습니다.
-      </div>
-
       ${resolution
         ? html`
             <div class="mb-6">
@@ -538,6 +566,8 @@ export function ConfigResolutionPanel({
                 <${StatusChip} tone="neutral" uppercase=${false}>${sourceLabel(resolution.config_root.source)}<//>
                 <span class="text-xs text-[var(--color-fg-muted)]">resolved config root</span>
               </div>
+
+              <${ConfigTopologySummary} resolution=${resolution} />
 
               <div class="mb-4">
                 <${WarningBlock} title="config warnings" warnings=${resolution.warnings} />
@@ -558,7 +588,7 @@ export function ConfigResolutionPanel({
                   rootSource=${rootSource}
                 />
                 <${ConfigRow}
-                  label="cascade runtime"
+                  label="cascade source"
                   item=${resolution.cascade}
                   rootPath=${rootPath}
                   rootSource=${rootSource}
@@ -595,6 +625,11 @@ export function ConfigResolutionPanel({
                 ${runtimeResolution.source_mismatch
                   ? html`
                       <${StatusChip} tone="bad">source mismatch<//>
+                    `
+                  : null}
+                ${runtimeResolution.server_workspace_mismatch
+                  ? html`
+                      <${StatusChip} tone="warn">server/workspace mismatch<//>
                     `
                   : null}
               </div>

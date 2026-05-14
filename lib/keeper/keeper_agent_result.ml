@@ -32,7 +32,7 @@ type run_result =
   ; model_used : string
   ; prompt_metrics : prompt_metrics
   ; ctx_composition : ctx_composition_metrics
-  ; cascade_observation : Oas_worker.cascade_observation option
+  ; cascade_observation : Cascade_legacy_runner.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
@@ -40,10 +40,10 @@ type run_result =
   ; tools_used : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Agent_sdk.Checkpoint.t option
-  ; proof : Agent_sdk.Cdal_proof.t option
+  ; proof : Masc_mcp_cdal_runtime.Cdal_proof.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
-  ; stop_reason : Oas_worker.stop_reason
+  ; stop_reason : Cascade_runner.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
@@ -52,50 +52,9 @@ let nonempty_trimmed raw =
   let trimmed = String.trim raw in
   if trimmed = "" then None else Some trimmed
 
-let surface_model_used (result : run_result) : string =
-  let attempt_surface_model (attempt : Oas_worker.cascade_attempt) =
-    match Option.bind attempt.model_label nonempty_trimmed with
-    | Some label -> Some label
-    | None -> nonempty_trimmed attempt.model_id
-  in
-  let observation_surface_model (obs : Oas_worker.cascade_observation) =
-    match
-      obs.attempts
-      |> List.rev
-      |> List.find_map attempt_surface_model
-    with
-    | Some model -> Some model
-    | None -> (
-        match Option.bind obs.selected_model nonempty_trimmed with
-        | Some model -> Some model
-        | None -> Option.bind obs.primary_model nonempty_trimmed)
-  in
-  match Option.bind result.cascade_observation observation_surface_model with
-  | Some model -> model
-  | None -> Option.value ~default:"" (nonempty_trimmed result.model_used)
+let runtime_lane_label = "runtime"
 
-let surface_resolved_model_id (result : run_result) : string =
-  (* Always prefer the concrete resolved model_id over any cascade label.
-     The final attempt's model_id is authoritative — cascade attempts are
-     recorded in order, so [List.rev |> find_map] picks the last attempt
-     that actually ran. Falls back to selected/primary observation fields
-     when attempts are unavailable, then to the raw provider-reported
-     [model_used]. See #9953. *)
-  let attempt_resolved_id (attempt : Oas_worker.cascade_attempt) =
-    nonempty_trimmed attempt.model_id
-  in
-  let observation_resolved_id (obs : Oas_worker.cascade_observation) =
-    match
-      obs.attempts
-      |> List.rev
-      |> List.find_map attempt_resolved_id
-    with
-    | Some model -> Some model
-    | None -> (
-        match Option.bind obs.selected_model nonempty_trimmed with
-        | Some model -> Some model
-        | None -> Option.bind obs.primary_model nonempty_trimmed)
-  in
-  match Option.bind result.cascade_observation observation_resolved_id with
-  | Some model -> model
-  | None -> Option.value ~default:"" (nonempty_trimmed result.model_used)
+let surface_model_used (_result : run_result) : string = runtime_lane_label
+
+let surface_resolved_model_id (_result : run_result) : string =
+  runtime_lane_label

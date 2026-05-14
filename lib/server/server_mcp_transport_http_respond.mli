@@ -97,7 +97,7 @@ val respond_sse_rate_limited :
   origin:string ->
   session_id:string ->
   protocol_version:string ->
-  reason:string ->
+  reason:Sse_reject_reason.t ->
   retry_after_s:float ->
   Httpun.Reqd.t ->
   unit

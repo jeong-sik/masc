@@ -72,7 +72,7 @@ let evidence_of_cycle (state : Autoresearch.loop_state)
       ("score_before", `Float record.score_before);
       ("score_after", `Float record.score_after);
       ("delta", `Float record.delta);
-      ("model_used", `String record.model_used);
+      ("model_used", `Null);
       ("elapsed_ms", `Int record.elapsed_ms);
       ("lower_is_better", `Bool state.lower_is_better);
       ( "target_score",

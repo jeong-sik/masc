@@ -182,7 +182,7 @@ let prepare_run_context
     match checkpoint_hygiene.save_error with
     | Some detail ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_run_context_failures
+        Keeper_metrics.metric_keeper_run_context_failures
         ~labels:[("keeper", meta.name)]
         ();
       Log.Keeper.error
@@ -195,11 +195,11 @@ let prepare_run_context
     | None -> None
   in
   (let decision =
-     Option.value
-       ~default:
-         (Keeper_compact_policy.compaction_decision_to_string
-            checkpoint_hygiene.decision)
-       checkpoint_hygiene.trigger
+     match checkpoint_hygiene.trigger with
+     | Some trigger -> Compaction_trigger.to_human trigger
+     | None ->
+       Keeper_compact_policy.compaction_decision_to_string
+         checkpoint_hygiene.decision
    in
    let before_ratio =
      if max_context <= 0 then 0.0

@@ -175,42 +175,21 @@ describe('dev-token bootstrap', () => {
     expect(calls[1]?.[0]).toBe('/mcp')
   }, 60_000)
 
-  it('replaces a borrowed loopback token when the default dashboard actor is active', async () => {
-    getStoredToken.mockReturnValue('borrowed-codex-token')
+  it('keeps a manual loopback token when the default dashboard actor is active', async () => {
+    getStoredToken.mockReturnValue('manual-token')
     getStoredTokenMeta.mockReturnValue({
       source: 'manual',
       actor: null,
       scope: null,
     })
-    fetchWithTimeout
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          token: 'loopback-dev-token',
-          actor: 'dashboard',
-          scope: 'admin',
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response('{}', { status: 200, headers: { 'Mcp-Session-Id': 'sess-borrowed' } }),
-      )
-      .mockResolvedValueOnce(new Response('', { status: 202 }))
-      .mockResolvedValueOnce(
-        new Response('data: {"result":{"content":[{"type":"text","text":"ok"}]}}\n', { status: 200 }),
-      )
+    setupMcpSessionMocks('sess-manual-kept')
 
     const { callMcpTool } = await import('./mcp')
     await callMcpTool('masc_status', {})
 
-    expect(setStoredToken).toHaveBeenCalledWith('loopback-dev-token', {
-      source: 'dev',
-      actor: 'dashboard',
-      scope: 'admin',
-    })
+    expect(setStoredToken).not.toHaveBeenCalled()
     const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit]>
-    expect(calls[0]?.[0]).toBe('/api/v1/dashboard/dev-token')
+    expect(calls[0]?.[0]).toBe('/mcp')
   }, 60_000)
 
   it('keeps manual tokens for non-default dashboard actors', async () => {

@@ -17,11 +17,14 @@
 \*   1. Normal path: [classify_event] (no failure parameter)
 \*      handles progress / signals / idle / quiet.
 \*   2. Failure path: [derive_failure_state] in
-\*      [keeper_social_model_magentic_ledger_v1.ml:204] constructs the
-\*      [Failure_observed] event directly and bypasses [classify_event].
-\*      (Function name is the stable identifier; line number verified
-\*      against main 2026-04-28 in sibling refresh #11641 / #11645 /
-\*      #11647 / Cycle 43.)
+\*      [keeper_social_model.ml] (which dispatches to
+\*      [Keeper_social_model_registry.derive_failure_state]) constructs
+\*      the [Failure_observed] event directly and bypasses
+\*      [classify_event].
+\*      (Cited by symbol, not line — iter 64 N-2.a; converted in the
+\*      iter 85 scattered-singles line-ref sweep, which also picked up
+\*      the rename of keeper_social_model_magentic_ledger_v1.ml →
+\*      keeper_social_model.ml + keeper_social_model_registry.ml.)
 \*
 \* Both topologies reach [Stalled] on failure, so end-state behaviour
 \* matches.  However, the spec's "failure dominates progress" property is
@@ -86,6 +89,25 @@ Next ==
             NextPhase(phase,
                 ClassifyEvent(progress, reactive, goals, idle, failure, phase))
 
+\* ── Bug Model: Stalled Without Cause ────────────────────────
+\* Models a regression where the phase is incorrectly set to "stalled"
+\* without an active goal or failure observed.
+\* SHOULD violate StalledNeedsGoalOrFailure.
+
+BugStalledWithoutCause ==
+    /\ phase' = "stalled"
+    /\ has_progress_evidence' = FALSE
+    /\ has_reactive_signal' = FALSE
+    /\ has_active_goals' = FALSE
+    /\ idle_long' = TRUE
+    /\ failure_observed' = FALSE
+
+NextBuggy ==
+    \/ Next
+    \/ BugStalledWithoutCause
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
@@ -136,5 +158,8 @@ StalledStickyWithGoal ==
 
 QuietWhenNoDrivers ==
     [][QuietWhenNoDriversAction]_vars
+
+(* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)
+StalledNeedsGoalOrFailureMustHold == StalledNeedsGoalOrFailure
 
 =============================================================================

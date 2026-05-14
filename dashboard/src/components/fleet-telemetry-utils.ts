@@ -1,11 +1,10 @@
-import type { TelemetrySourceSummary, ToolQualityResponse } from '../api/dashboard'
+import type { DashboardExecutionTrustResponse, TelemetrySourceSummary, ToolQualityResponse } from '../api/dashboard'
 import type { DashboardNamespaceTruthResponse } from '../types'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
 import type { Keeper } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
 import {
   keeperActivityDisplay,
-  keeperDisplayModel,
   type KeeperActivitySource,
 } from '../lib/keeper-runtime-display'
 
@@ -52,6 +51,8 @@ export interface FleetRow {
   effective_sandbox_image: string | null
   decision_required: boolean
   budget_source: 'override' | 'override_invalid' | 'env' | null
+  provider_health_status: 'healthy' | 'degraded' | 'unhealthy' | null
+  provider_health_label: string | null
 }
 
 export interface FleetTelemetryState {
@@ -59,6 +60,7 @@ export interface FleetTelemetryState {
   error: string | null
   warnings: string[]
   rows: FleetRow[]
+  execution_trust: DashboardExecutionTrustResponse | null
   tool_quality: ToolQualityResponse
   telemetry_sources: TelemetrySourceSummary[]
   total_telemetry_entries: number
@@ -83,6 +85,7 @@ export function emptyState(): FleetTelemetryState {
     error: null,
     warnings: [],
     rows: [],
+    execution_trust: null,
     tool_quality: EMPTY_TOOL_QUALITY,
     telemetry_sources: [],
     total_telemetry_entries: 0,
@@ -135,15 +138,8 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
   return items
 }
 
-function keeperMetricsWindowModel(keeper: Keeper): string | null {
-  const primary = keeper.metrics_window?.primary_model
-  return typeof primary === 'string' ? normalizeModelText(primary) : null
-}
-
-function keeperModel(keeper: Keeper): string {
-  return normalizeModelText(keeperDisplayModel(keeper)?.value)
-    ?? keeperMetricsWindowModel(keeper)
-    ?? 'unknown'
+function keeperModel(_keeper: Keeper): string {
+  return 'runtime'
 }
 
 function latestCascadeMetric(keeper: Keeper) {
@@ -176,15 +172,11 @@ function keeperCascadeLabel(keeper: Keeper): string | null {
 function keeperProviderLabel(keeper: Keeper): string | null {
   const summary = keeper.trust?.execution_summary ?? null
   const latest = latestCascadeMetric(keeper)
-  const selected =
-    normalizeModelText(summary?.provider_selected_model)
-    ?? normalizeModelText(latest?.cascade_selected_model)
-    ?? normalizeModelText(latest?.model_used)
   const outcome = normalizeText(summary?.cascade_outcome) ?? normalizeText(latest?.cascade_outcome)
   const attempts = summary?.provider_attempt_count ?? latest?.cascade_attempt_count ?? null
   const fallback = summary?.provider_fallback_applied ?? latest?.fallback_applied ?? null
   const parts = [
-    selected ?? outcome,
+    outcome,
     typeof attempts === 'number' ? `${attempts} attempts` : null,
     fallback === true ? 'fallback' : null,
   ].filter((part): part is string => part != null && part.trim() !== '')
@@ -194,15 +186,12 @@ function keeperProviderLabel(keeper: Keeper): string | null {
 function keeperFallbackLabel(keeper: Keeper): string | null {
   const latest = latestCascadeMetric(keeper)
   if (!latest || latest.fallback_applied !== true) return null
-  const from = normalizeModelText(latest.fallback_from)
-  const to = normalizeModelText(latest.fallback_to) ?? normalizeModelText(latest.model_used)
   const reason = normalizeText(latest.fallback_reason)
   const hops =
     typeof latest.fallback_hops === 'number' && latest.fallback_hops > 0
       ? `${latest.fallback_hops} hops`
       : null
-  const route = from && to ? `${from} -> ${to}` : to ?? from ?? 'observed'
-  return [route, reason, hops].filter((part): part is string => part != null).join(' · ')
+  return ['fallback', reason, hops].filter((part): part is string => part != null).join(' · ')
 }
 
 function keeperLastLatencyMs(keeper: Keeper): number {
@@ -211,6 +200,15 @@ function keeperLastLatencyMs(keeper: Keeper): number {
   }
   const lastMetric = keeper.metrics_series?.[keeper.metrics_series.length - 1]
   return lastMetric?.latency_ms ?? 0
+}
+
+export function healthStatusColor(status: string | undefined): string {
+  switch (status) {
+    case 'healthy': return 'var(--good)'
+    case 'degraded': return 'var(--amber-bright)'
+    case 'unhealthy': return 'var(--color-status-bad)'
+    default: return 'var(--color-fg-disabled)'
+  }
 }
 
 export function successClass(rate: number | null): string {
@@ -458,6 +456,8 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
                     ? 'override_invalid'
                     : 'override')
                 : 'env',
+            provider_health_status: null,
+            provider_health_label: null,
           }
         })
       : []
@@ -577,6 +577,18 @@ export function sourceDetail(source: TelemetrySourceSummary): string {
   if (source.health) {
     parts.push(source.stale_reason ? `${source.health}: ${source.stale_reason}` : source.health)
   }
+  if (typeof source.freshness_slo_s === 'number' && Number.isFinite(source.freshness_slo_s)) {
+    parts.push(`SLO ${formatElapsedCompact(source.freshness_slo_s)}`)
+  }
+  if (source.producer) {
+    parts.push(`producer ${source.producer}`)
+  }
+  if (source.durable_store) {
+    parts.push(`store ${source.durable_store}`)
+  }
+  if (source.dashboard_surface) {
+    parts.push(`surface ${source.dashboard_surface}`)
+  }
 
   return parts.join(' · ')
 }
@@ -622,7 +634,7 @@ export function buildRuntimeWarnings(rows: FleetRow[]): string[] {
   const admissionBlocked = rows.filter(row => row.runtime_blocker_class === 'admission_queue_wait_timeout')
   if (admissionBlocked.length > 0) {
     warnings.push(
-      `${admissionBlocked.length} keepers are blocked in the admission queue; tool telemetry can look stale because turns never reached tool execution.`,
+      `${admissionBlocked.length} keepers are blocked in the keeper admission FIFO; tool telemetry can look stale because turns never reached tool execution.`,
     )
   }
 
@@ -671,9 +683,29 @@ export function toolSummary(row: FleetRow): { label: string; title: string } {
   }
 }
 
-export function summaryCounts(rows: FleetRow[]) {
+export interface FleetSummaryCounts {
+  live: number
+  toolCovered: number
+  toolTelemetryCovered: number
+  toolActive: number
+  toolQuiet: number
+  toolUnknown: number
+  hot: number
+  warn: number
+  stale: number
+  blocked: number
+}
+
+export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
   const live = rows.filter(row => row.keepalive_running).length
-  const toolCovered = rows.filter(row => row.tool_calls > 0 || row.recent_tools.length > 0).length
+  const toolActive = rows.filter(row => row.tool_calls > 0 || row.recent_tools.length > 0).length
+  const toolQuiet = rows.filter(row =>
+    row.tool_activity_known
+    && row.tool_calls <= 0
+    && row.recent_tools.length === 0,
+  ).length
+  const toolTelemetryCovered = rows.filter(row => row.tool_activity_known).length
+  const toolUnknown = Math.max(0, rows.length - toolTelemetryCovered)
   const hot = rows.filter(row => row.keepalive_running && row.context_ratio >= PRESSURE_HOT_RATIO).length
   const warn = rows.filter(row =>
     row.keepalive_running
@@ -697,5 +729,27 @@ export function summaryCounts(rows: FleetRow[]) {
     && typeof row.runtime_blocker_class === 'string'
     && row.runtime_blocker_class.trim() !== '',
   ).length
-  return { live, toolCovered, hot, warn, stale, blocked }
+  return {
+    live,
+    // Back-compat alias: coverage means "tool telemetry is known", not active usage.
+    toolCovered: toolTelemetryCovered,
+    toolTelemetryCovered,
+    toolActive,
+    toolQuiet,
+    toolUnknown,
+    hot,
+    warn,
+    stale,
+    blocked,
+  }
+}
+
+export function toolTelemetryCoverageDetail(counts: FleetSummaryCounts, totalRows: number): string {
+  const total = Math.max(0, totalRows)
+  return [
+    `도구 telemetry 확인 ${counts.toolTelemetryCovered}/${total}`,
+    `활동 ${counts.toolActive}`,
+    `기록 없음 ${counts.toolQuiet}`,
+    `미확인 ${counts.toolUnknown}`,
+  ].join(' · ')
 }

@@ -213,7 +213,11 @@ let history_bucket_of_block
       | Agent_sdk.Types.Assistant | Agent_sdk.Types.System ->
           "history_assistant_text"
       | Agent_sdk.Types.Tool -> "history_tool_result")
-  | _ -> "history_other"
+  | Agent_sdk.Types.Thinking _ -> "history_thinking"
+  | Agent_sdk.Types.RedactedThinking _ -> "history_redacted_thinking"
+  | Agent_sdk.Types.Image _ -> "history_image"
+  | Agent_sdk.Types.Document _ -> "history_document"
+  | Agent_sdk.Types.Audio _ -> "history_audio"
 
 let build_ctx_composition_metrics
     ~(system_prompt : string)

@@ -57,13 +57,14 @@ type bench_sample = {
 (** {1 JSON envelope helpers} *)
 
 val json_error : string -> string
-(** [json_error message] returns a JSON-serialised error
-    envelope: [{"status": "error", "message": "..."}]. *)
+(** Alias for {!Tool_args.error_response}.  Kept for compatibility with
+    sibling [Tool_local_runtime_*] modules that consume this surface via
+    [include]; new code should call {!Tool_args.error_response}
+    directly. *)
 
 val json_ok : (string * Yojson.Safe.t) list -> string
-(** [json_ok fields] returns [{"status": "ok", ...fields}] as a
-    JSON-serialised string.  [fields] is prepended-after the
-    canonical status field. *)
+(** Alias for {!Tool_args.ok_response}.  Same compatibility rationale as
+    {!json_error}. *)
 
 val int_opt_to_json : int option -> Yojson.Safe.t
 val string_opt_to_json : string option -> Yojson.Safe.t

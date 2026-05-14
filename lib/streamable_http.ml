@@ -15,7 +15,7 @@ type session = {
   created_at: float;
   mutable last_seen: float [@atomic];
   transport: transport;
-  mutable subscriptions: string list;
+  subscriptions: string list;
 }
 
 type response_mode =

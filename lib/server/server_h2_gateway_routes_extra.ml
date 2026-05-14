@@ -6,7 +6,7 @@ open Server_h2_gateway_helpers
 
 (* Dispatch board, governance, voice, karma, and static asset routes.
    Returns [true] if the route was handled, [false] otherwise. *)
-let dispatch ~h2_reqd ~httpun_request ~cors ~path
+let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
   match httpun_meth, path with
@@ -36,6 +36,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
       let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
       let voter = board_voter_query httpun_request in
+      let blind_votes = bool_query_param httpun_request "blind_votes" ~default:false in
       let posts =
         Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
           ~exclude_automation ?author_filter ~limit:base_fetch ()
@@ -55,13 +56,15 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
           ~voter
       in
       let reactions_for = board_reactions_lookup reaction_rows in
+      let contributor_quality_for = board_contributor_quality_lookup ?config () in
       let posts_json = List.map (fun (p : Board.post) ->
         let author = Board.Agent_id.to_string p.author in
         let post_id = Board.Post_id.to_string p.id in
         let current_vote = board_current_vote_for_post ~voter ~post_id in
         let reactions = reactions_for (Board.Reaction_post, post_id) in
-        board_post_dashboard_json ?current_vote ~reactions
-          ~author_karma:(get_karma author) p
+        let contributor_quality = contributor_quality_for author in
+        board_post_dashboard_json ~blind_votes ?current_vote ~reactions
+          ?contributor_quality ~author_karma:(get_karma author) p
       ) paged in
       let json = `Assoc [
         ("posts", `List posts_json);
@@ -99,27 +102,15 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
       true
 
-  | `GET, p
-    when String.starts_with ~prefix:"/api/v1/board/" p
-         && String.length p > 14 ->
-      let post_id = String.sub p 14 (String.length p - 14) in
-      let format = Option.value ~default:"nested" (query_param httpun_request "format") in
-      let voter = board_voter_query httpun_request in
-      let (status, body) =
-        board_post_detail_json ~include_moderation:false ~voter
-          ~response_format:format ~post_id
+  | `GET, "/api/v1/board/sub-boards" ->
+      let sub_boards = Board_dispatch.list_sub_boards () in
+      let json =
+        `Assoc
+          [
+            ( "sub_boards",
+              `List (List.map Board.sub_board_to_yojson sub_boards) );
+          ]
       in
-      h2_respond_json h2_reqd body ~status ~extra_headers:cors;
-      true
-
-  | `GET, "/api/v1/karma" ->
-      let karma_list = Board_dispatch.get_all_karma () in
-      let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
-      let json = `Assoc [
-        ("karma", `List (List.map (fun (agent, k) ->
-          `Assoc [("agent", `String agent); ("karma", `Int k)]
-        ) sorted));
-      ] in
       h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
       true
 
@@ -134,19 +125,53 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
         |> clamp ~min_v:1 ~max_v:5000
       in
       let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-      let totals = Board_dispatch.get_all_karma () |> List.sort (fun (_, a) (_, b) -> compare b a) in
-      let json =
-        `Assoc [
-          ("events",
-           `List (List.map Board.karma_event_to_yojson events));
-          ("count", `Int (List.length events));
-          ("scoring_rule", `String "up=+1,down=0");
-          ("totals",
-           `List (List.map (fun (agent_name, k) ->
-               `Assoc [("agent", `String agent_name); ("karma", `Int k)])
-             totals));
-        ]
+      let totals =
+        Board_dispatch.get_all_karma ()
+        |> List.sort (fun (_, a) (_, b) -> compare b a)
       in
+      let json =
+        `Assoc
+          [
+            ("events", `List (List.map Board.karma_event_to_yojson events));
+            ("count", `Int (List.length events));
+            ("scoring_rule", `String "up=+1,down=0");
+            ( "totals",
+              `List
+                (List.map
+                   (fun (agent_name, k) ->
+                     `Assoc
+                       [ ("agent", `String agent_name); ("karma", `Int k) ])
+                   totals) );
+          ]
+      in
+      h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
+      true
+
+  | `GET, p
+    when String.starts_with ~prefix:"/api/v1/board/" p
+         && String.length p > 14 ->
+      let post_id = String.sub p 14 (String.length p - 14) in
+      let format = Option.value ~default:"nested" (query_param httpun_request "format") in
+      let voter = board_voter_query httpun_request in
+      let blind_votes =
+        bool_query_param httpun_request "blind_votes" ~default:false
+      in
+      let (status, body) =
+        board_post_detail_json ~include_moderation:false ~blind_votes ~voter
+          ~config
+          ~response_format:format ~post_id
+      in
+      h2_respond_json h2_reqd body ~status ~extra_headers:cors;
+      true
+
+  | `GET, "/api/v1/karma" ->
+      let karma_list = Board_dispatch.get_all_karma () in
+      let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
+      let json = `Assoc [
+        ("karma", `List (List.map (fun (agent, k) ->
+          `Assoc [("agent", `String agent); ("karma", `Int k)]
+        ) sorted));
+      ] in
       h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors;
       true
 

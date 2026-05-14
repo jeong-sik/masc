@@ -39,7 +39,7 @@ let path_is_masc_worktree path =
 let run_argv_line (argv : string list) : string option =
   let output =
     Masc_exec.Exec_gate.run_argv
-      ~actor:"coord/git"
+      ~actor:(Masc_exec.Agent_id.of_string "coord/git")
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"coord_git argv"
       ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
@@ -59,7 +59,7 @@ let run_argv_exit
     (argv : string list) : int =
   match
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"coord/git"
+      ~actor:(Masc_exec.Agent_id.of_string "coord/git")
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"coord_git argv"
       ~timeout_sec
@@ -71,7 +71,7 @@ let run_argv_exit
 
 let run_argv_lines (argv : string list) : string list =
   Masc_exec.Exec_gate.run_argv
-    ~actor:"coord/git"
+    ~actor:(Masc_exec.Agent_id.of_string "coord/git")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"coord_git argv"
     ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec

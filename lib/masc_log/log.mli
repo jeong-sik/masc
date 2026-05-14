@@ -68,28 +68,56 @@ val info : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val warn : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val error : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 
-val legacy_stderr : ?level:level -> ?module_name:string -> string -> unit
-(** Mirror a legacy stderr line into the dashboard log ring. *)
+(** Mirror source kinds carried on every [Ring.entry]. *)
+type source =
+  | Structured
+  | Legacy_stderr
+  | Legacy_traceln
+  | Client_tool_host
 
-val legacy_traceln : ?level:level -> ?module_name:string -> string -> unit
-(** Mirror a legacy [Eio.traceln]-style line into the dashboard log ring. *)
+val source_to_string : source -> string
+(** Canonical lowercase wire label for a {!source}.  The dashboard schema
+    in [dashboard/src/api/schemas/logs.ts] reads this back via
+    [source_of_string]. *)
+
+val legacy_stderr : level:level -> ?module_name:string -> string -> unit
+(** Mirror a stderr line into the dashboard log ring.  [~level] is
+    required as of RFC-0079; the prior [?level] option backed a
+    string-prefix classifier ([infer_legacy_level]) that has been removed. *)
+
+val legacy_traceln : level:level -> ?module_name:string -> string -> unit
+(** Mirror an [Eio.traceln]-style line into the dashboard log ring.
+    [~level] required (see [legacy_stderr]). *)
 
 (** In-memory ring buffer exposed for dashboard log viewer routes. *)
 module Ring : sig
+  (** RFC-0079: typed entry.  Wire format keeps [level] and [source] as
+      their canonical strings (see {!level_to_string} / {!source_to_string});
+      the dashboard schema in [dashboard/src/api/schemas/logs.ts] mirrors
+      that wire format.  Pre-RFC-0079 fields [raw_level] /
+      [normalized_level] / [legacy_classified] are gone — they only ever
+      carried the pre-typed mirror's classifier state. *)
   type entry = {
     seq : int;
     ts : string;
-    level : string;
-    raw_level : string;
-    normalized_level : string;
-    source : string;
-    legacy_classified : bool;
+    level : level;
+    source : source;
     module_name : string;
     keeper_name : string option;
     turn_id : int option;
     message : string;
     details : Yojson.Safe.t;
   }
+
+  exception Entry_decode_error of string
+  (** Raised by {!entry_of_json} on missing or ill-typed fields.  The
+      file-fold boundary ([load_from_file]) catches this on historical
+      JSONL files that were written before the typed encoder.  Every
+      other call site lets it propagate. *)
+
+  val source_of_string : string -> source
+  (** Inverse of {!source_to_string}.  Raises {!Entry_decode_error} on
+      unknown labels. *)
 
   val recent :
     ?limit:int ->
@@ -101,7 +129,12 @@ module Ring : sig
     entry list
 
   val entry_to_json : entry -> Yojson.Safe.t
+  val entry_of_json : Yojson.Safe.t -> entry
   val to_json : entry list -> Yojson.Safe.t
+  val summary_json : unit -> Yojson.Safe.t
+  (** Cheap operator summary for [/health].  It exposes ring counters,
+      latest metadata, and file-sink state without raw log message text or
+      [details] payloads. *)
 
   val init_file_sink : string -> unit
   (** Initialize file-based log persistence. Loads previous entries from disk

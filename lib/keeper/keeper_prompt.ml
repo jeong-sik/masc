@@ -30,7 +30,7 @@ let missing_critical_prompt_anchors prompt =
       if String_util.contains_substring prompt needle then None else Some name)
     critical_prompt_anchors
 
-let critical_prompt_recovery_block =
+let critical_prompt_recovery_block_fallback =
   String.concat "\n"
     [ "<continuity>";
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
@@ -42,6 +42,36 @@ let critical_prompt_recovery_block =
       "Recovery guard: act from the configured base path and active runtime tool schema; do not invent paths, repos, PRs, tasks, or tools.";
       "</world>" ]
 
+(* Recovery fallback content normally lives at
+   config/prompts/keeper.recovery_block.md so operators can edit it with the
+   other prompts. Keep the in-code fallback because this guard must still work
+   when prompt file loading is exactly what degraded.
+
+   The registry version is trusted only when it carries all required anchors:
+   an operator who accidentally edits out [<continuity>] or [PR merge rules]
+   would otherwise produce a non-empty block that [ensure_critical_prompt_anchors]
+   appends without restoring the missing safeguard — a silent regression vs the
+   previous hardcoded path. Drift triggers the existing prompt failure counter
+   plus a warn so the operator hears about it. *)
+let critical_prompt_recovery_block () =
+  let from_registry =
+    String.trim (Prompt_registry.get_prompt Keeper_prompt_names.recovery_block)
+  in
+  if String.equal from_registry "" then critical_prompt_recovery_block_fallback
+  else
+    match missing_critical_prompt_anchors from_registry with
+    | [] -> from_registry
+    | missing ->
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_prompt_failures
+          ~labels:[("prompt", "keeper.recovery_block.anchors")]
+          ();
+        Log.Keeper.warn
+          "critical_prompt_recovery_block: registry text missing anchors (%s); \
+           using in-code fallback to preserve safeguards"
+          (String.concat "," missing);
+        critical_prompt_recovery_block_fallback
+
 let state_block_output_guard_text =
   "Output guard: this turn uses runtime-managed continuity. Do not output raw [STATE] or [/STATE] blocks in visible text; the runtime will synthesize and persist state metadata when needed."
 
@@ -50,14 +80,14 @@ let ensure_critical_prompt_anchors prompt =
   | [] -> prompt
   | missing ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_prompt_failures
+        Keeper_metrics.metric_keeper_prompt_failures
         ~labels:[("prompt", "critical_prompt_anchors")]
         ();
       Log.Keeper.warn
         "build_keeper_system_prompt: critical prompt anchors missing (%s); \
          appending recovery guard"
         (String.concat "," missing);
-      prompt ^ "\n\n" ^ critical_prompt_recovery_block
+      prompt ^ "\n\n" ^ critical_prompt_recovery_block ()
 
 (** Format an *allowlist* for prompt rendering.  An empty allowlist means
     the gate is OFF (any account-accessible repo is permitted), so we
@@ -109,7 +139,7 @@ let render_world_prompt ~git_clone_policy_loaded ~allowed_orgs ~denied_repos :
   | Ok rendered -> rendered
   | Error msg ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_prompt_failures
+        Keeper_metrics.metric_keeper_prompt_failures
         ~labels:[("prompt", Keeper_prompt_names.world)]
         ();
       Log.Keeper.warn
@@ -118,9 +148,38 @@ let render_world_prompt ~git_clone_policy_loaded ~allowed_orgs ~denied_repos :
         msg;
       Prompt_registry.get_prompt Keeper_prompt_names.world
 
-let behavior_prompt_block name ~fallback =
-  Option.value (Keeper_prompt_external.get name) ~default:fallback
-  |> String.trim
+let behavior_prompt_block name =
+  match Keeper_prompt_external.get name with
+  | Some content -> String.trim content
+  | None ->
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_prompt_failures
+        ~labels:[("prompt", "behavior/" ^ name)]
+        ();
+      Log.Keeper.warn
+        "build_keeper_system_prompt: behavior prompt %s missing; \
+         rendering config-drift marker instead of generic in-source behavior"
+        name;
+      Printf.sprintf
+        "Behavior prompt config drift: missing config/prompts/behavior/%s.md. \
+         Preserve the keeper's configured goal, persona, and runtime policy; \
+         ask the operator to restore the missing behavior prompt file."
+        name
+
+let missing_personality_field field =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_prompt_failures
+    ~labels:[("prompt", "personality/" ^ field)]
+    ();
+  Log.Keeper.warn
+    "build_keeper_system_prompt: personality field %s is empty; rendering \
+     config-drift marker instead of generic in-source self-model text"
+    field;
+  Printf.sprintf
+    "Personality config drift: empty %s field. Preserve the keeper's \
+     configured goal, persona, and runtime policy; ask the operator to \
+     restore this self-model field."
+    field
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
@@ -133,47 +192,34 @@ let build_keeper_system_prompt
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
       ~mid_goal_opt:(Some mid_goal) ~long_goal_opt:(Some long_goal)
   in
-  (* Tier C C-5a: profile_policy is the first behavior block migrated
-     out of OCaml source.  The .md file lives at
-     [<prompts_dir>/behavior/profile_policy.md] and is read once per
-     process via [Keeper_prompt_external.get].  The original literal
-     is kept as a fallback so a missing/unreadable file does not
-     brick keepers — instead the loader emits a WARN and we use the
-     in-source string.  Subsequent C-5b PRs migrate the remaining
-     blocks in this function. *)
-  let profile_policy =
-    behavior_prompt_block "profile_policy"
-      ~fallback:
-        "Maintain high standard of reasoning, factual grounding, and clear communication."
-  in
-  let continuity_contract =
-    behavior_prompt_block "continuity_contract"
-      ~fallback:
-        "Continuity and any end-of-reply STATE formatting requirements apply unless a more specific turn-level mode or output guard disables them.\n\
-         When <direct_reply_mode> is present, follow it instead: do not emit SKILL:, SKILL_REASON:, or [STATE]."
-  in
+  (* Behavior prompt blocks live under
+     [<prompts_dir>/behavior/<name>.md] and are read once per process via
+     [Keeper_prompt_external.get]. Missing/unreadable files no longer inject
+     generic in-source behavior text: they produce an operator-visible drift
+     marker so the prompt tells the keeper that config is incomplete instead
+     of silently changing persona policy. *)
+  let profile_policy = behavior_prompt_block "profile_policy" in
+  let continuity_contract = behavior_prompt_block "continuity_contract" in
   (* Layer 2 PR-B (commit 7): three normalize_self_model_text calls
-     consolidated through [Keeper_personality_io.to_prompt_form]. The
-     fallback strings below are the same; only the trim+truncate path
-     is centralised so a future cap change (Layer 3 RFC integration)
-     touches one location instead of three. *)
+     consolidated through [Keeper_personality_io.to_prompt_form]. Blank fields
+     now render config-drift markers instead of generic self-model text. *)
   let rendered =
     Keeper_personality_io.to_prompt_form
       ~max_bytes:Keeper_config.prompt_render_max_bytes
       { will; needs; desires; instructions = "" }
   in
   let will =
-    if rendered.will = "" then "Maintain coherent identity and goal continuity."
+    if rendered.will = "" then missing_personality_field "will"
     else rendered.will
   in
   let needs =
     if rendered.needs = "" then
-      "Reliable context continuity, factual grounding, and explicit next steps."
+      missing_personality_field "needs"
     else rendered.needs
   in
   let desires =
     if rendered.desires = "" then
-      "Make progress that is observable and useful to the user."
+      missing_personality_field "desires"
     else rendered.desires
   in
   let custom =

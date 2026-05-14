@@ -18,14 +18,19 @@ let all_lits_opt (args : Shell_ir.arg list) : string list option =
   go [] args
 
 let head_cap (bin : Bin.t) (args : Shell_ir.arg list) : Capability.t =
-  if String.equal (Bin.to_string bin) "git" then
-    match all_lits_opt args with
-    | Some lit_argv ->
-      (match Git_op.of_argv ("git" :: lit_argv) with
-       | Ok git_op -> Capability.Git git_op
-       | Error (`Unknown_subcmd _) -> Capability.Exec_bin (bin, args))
-    | None -> Capability.Exec_bin (bin, args)
-  else
+  (* Typed dispatch on [Bin.kind].  No [String.equal] on the binary name —
+     the only way to add a new fast-path is to extend [Bin.kind] and add
+     an arm here, which the compiler will demand. *)
+  match Bin.kind bin with
+  | `Git ->
+    (match all_lits_opt args with
+     | Some lit_argv ->
+       (match Git_op.of_argv ("git" :: lit_argv) with
+        | Ok git_op -> Capability.Git git_op
+        | Error (`Unknown_subcmd _) -> Capability.Exec_bin (bin, args))
+     | None -> Capability.Exec_bin (bin, args))
+  | `Docker | `Curl | `Ssh
+  | `Other_audited | `Safe_bin | `Privileged_bin ->
     Capability.Exec_bin (bin, args)
 
 let redirect_cap = function

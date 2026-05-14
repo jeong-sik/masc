@@ -27,6 +27,16 @@ val classify_batch_root_cause_for_test :
   Keeper_registry.failure_reason list -> batch_root_cause
 (** Test-only view of the batch root-cause classifier. *)
 
+val should_trigger_noop_failure_loop_for_test :
+  noop_count:int ->
+  noop_threshold:int ->
+  started_at:float ->
+  last_completed_turn_ended_at:float option ->
+  bool
+(** Test-only view of the no-op watchdog gate.  A persisted
+    [consecutive_noop_count] only triggers a no-op failure-loop kill
+    after the current keeper fiber has completed a turn. *)
+
 val reset_batch_terminations_for_test : unit -> unit
 (** Test-only reset for fleet batch termination history. *)
 

@@ -1,9 +1,9 @@
 (** Issue #8575: SSOT for the [event] string emitted by
-    {!Oas_events.publish_keeper_lifecycle}.
+    {!Cascade_events.publish_keeper_lifecycle}.
 
     The supervisor and keepalive together emit eleven distinct event
     names through that function. The docstring on
-    [Oas_events.publish_keeper_lifecycle] previously listed only five
+    [Cascade_events.publish_keeper_lifecycle] previously listed only five
     of them, so operators reading the doc subscribed to the
     phase-derived events ([started] / [stopped] / [crashed] /
     [restarted] / [dead]) and silently missed the cleanup /
@@ -86,7 +86,7 @@ let all_event_names : string list =
     This sum type unifies the two pre-existing typed vocabularies
     ([t] for the 6 custom verbs, [Keeper_state_machine.phase] for the
     4 phase-derived names) so the wire string is computed inside
-    [Oas_events.publish_keeper_lifecycle] from a fully-typed argument.
+    [Cascade_events.publish_keeper_lifecycle] from a fully-typed argument.
     A typo at the call site is now a build error.
 
     Note: importing [Keeper_state_machine] here breaks the

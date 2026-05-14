@@ -25,24 +25,24 @@ let test_lifecycle_callback_metric_name () =
   Alcotest.(check string)
     "lifecycle callback failures counter has the documented series name"
     "masc_keeper_lifecycle_callback_failures_total"
-    P.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
 
 let test_event_bus_drain_metric_name () =
   Alcotest.(check string)
     "event-bus drain counter has the documented series name"
     "masc_keeper_event_bus_drain_total"
-    P.metric_keeper_event_bus_drain
+    Masc_mcp.Keeper_metrics.metric_keeper_event_bus_drain
 
 (* ── Counter mechanics — labels distinct and isolated ────── *)
 
 let read_lifecycle_failure ~callback =
   P.metric_value_or_zero
-    P.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[("callback", callback)] ()
 
 let read_keeper_hook_failure ~keeper ~callback =
   P.metric_value_or_zero
-    P.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[("keeper", keeper); ("callback", callback)] ()
 
 let test_lifecycle_callback_label_isolation () =
@@ -50,7 +50,7 @@ let test_lifecycle_callback_label_isolation () =
   let cb_b = "on_handoff_started" in
   let a_before = read_lifecycle_failure ~callback:cb_a in
   let b_before = read_lifecycle_failure ~callback:cb_b in
-  P.inc_counter P.metric_keeper_lifecycle_callback_failures
+  P.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[("callback", cb_a)] ();
   let a_after = read_lifecycle_failure ~callback:cb_a in
   let b_after = read_lifecycle_failure ~callback:cb_b in
@@ -66,7 +66,7 @@ let test_keeper_hook_label_shape_is_isolated () =
   let callback = "post_tool_log_write" in
   let keeper_before = read_keeper_hook_failure ~keeper ~callback in
   let lifecycle_before = read_lifecycle_failure ~callback in
-  P.inc_counter P.metric_keeper_lifecycle_callback_failures
+  P.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
     ~labels:[("keeper", keeper); ("callback", callback)] ();
   let keeper_after = read_keeper_hook_failure ~keeper ~callback in
   let lifecycle_after = read_lifecycle_failure ~callback in
@@ -79,7 +79,7 @@ let test_keeper_hook_label_shape_is_isolated () =
 
 let read_drain ~site ~outcome =
   P.metric_value_or_zero
-    P.metric_keeper_event_bus_drain
+    Masc_mcp.Keeper_metrics.metric_keeper_event_bus_drain
     ~labels:[("site", site); ("outcome", outcome)] ()
 
 let test_drain_site_label_isolation () =
@@ -88,7 +88,7 @@ let test_drain_site_label_isolation () =
   let outcome = "empty" in
   let x_before = read_drain ~site:site_x ~outcome in
   let y_before = read_drain ~site:site_y ~outcome in
-  P.inc_counter P.metric_keeper_event_bus_drain
+  P.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_event_bus_drain
     ~labels:[("site", site_x); ("outcome", outcome)] ();
   let x_after = read_drain ~site:site_x ~outcome in
   let y_after = read_drain ~site:site_y ~outcome in
@@ -103,7 +103,7 @@ let test_drain_outcome_label_distinction () =
   let site = "test_outcome_isolation" in
   let drained_before = read_drain ~site ~outcome:"drained" in
   let empty_before = read_drain ~site ~outcome:"empty" in
-  P.inc_counter P.metric_keeper_event_bus_drain
+  P.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_event_bus_drain
     ~labels:[("site", site); ("outcome", "drained")] ();
   let drained_after = read_drain ~site ~outcome:"drained" in
   let empty_after = read_drain ~site ~outcome:"empty" in
@@ -133,10 +133,12 @@ let test_documented_callback_label_vocabulary () =
       "on_tool_executed";
       "on_error";
       "on_tool_error";
+      "work_discovery_nudge";
+      "keeper_lifecycle_hook";
     ]
   in
   List.iter (fun label ->
-    P.inc_counter P.metric_keeper_lifecycle_callback_failures
+    P.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
       ~labels:[("callback", label)] ();
     let v = read_lifecycle_failure ~callback:label in
     Alcotest.(check bool)
@@ -149,7 +151,7 @@ let test_documented_drain_outcome_vocabulary () =
   let documented_outcomes = ["drained"; "empty"] in
   let site = "vocab_check" in
   List.iter (fun outcome ->
-    P.inc_counter P.metric_keeper_event_bus_drain
+    P.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_event_bus_drain
       ~labels:[("site", site); ("outcome", outcome)] ();
     let v = read_drain ~site ~outcome in
     Alcotest.(check bool)

@@ -29,10 +29,16 @@ include Backend_types
 (** {1 FileSystem Backend (Eio)} *)
 
 module FileSystem = struct
+  (** Number of striped locks for write serialisation.
+      64 stripes means up to 64 concurrent writers on disjoint keys,
+      reducing lock contention from O(K) keeper serialisation to
+      O(K/64) average wait. *)
+  let num_stripes = 64
+
   type t = {
     config: config;
     fs: Eio.Fs.dir_ty Eio.Path.t;
-    mutex: Eio.Mutex.t;
+    mutexes: Eio.Mutex.t array;
     key_index: (string, unit) Hashtbl.t;
     key_index_mu: Mutex.t;
     (** Domain-safe mutex for [key_index].
@@ -42,6 +48,9 @@ module FileSystem = struct
     mutable key_index_promise: unit Eio.Promise.or_exn option;
     clock: float Eio.Time.clock_ty Eio.Resource.t option;
   }
+
+  let stripe_for_key t key =
+    t.mutexes.(Hashtbl.hash key mod Array.length t.mutexes)
 
   (** {2 Mutex contention observers}
 
@@ -80,7 +89,8 @@ module FileSystem = struct
       released, so they cannot extend the critical section even if
       the underlying Prometheus implementation contends on its own
       mutex. *)
-  let with_observed_mutex ~op t f =
+  let with_observed_mutex ~op ~key t f =
+    let mutex = stripe_for_key t key in
     let started = Time_compat.now () in
     let acquired = ref false in
     let acquire_seconds = ref 0.0 in
@@ -93,7 +103,7 @@ module FileSystem = struct
         notify_mutex_observer ~kind:"held" !mutex_held_observer
           ~op ~seconds:!held_seconds)
       (fun () ->
-        Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
           let acquired_at = Time_compat.now () in
           acquired := true;
           acquire_seconds := acquired_at -. started;
@@ -115,7 +125,7 @@ module FileSystem = struct
     {
       config;
       fs = path;
-      mutex = Eio.Mutex.create ();
+      mutexes = Array.init num_stripes (fun _ -> Eio.Mutex.create ());
       key_index = Hashtbl.create 256;
       key_index_mu = Mutex.create ();
       key_index_promise = None;
@@ -158,11 +168,17 @@ module FileSystem = struct
 
   (** {2 Key Validation} *)
 
+  let atomic_tmp_suffix = ".tmp-atomic"
+
+  let is_atomic_tmp_key key = String.ends_with ~suffix:atomic_tmp_suffix key
+
   let validate_key key =
     if String.length key = 0 then
       Error (InvalidKey "Empty key not allowed")
     else if String.contains key '\x00' then
       Error (InvalidKey "NUL byte not allowed")
+    else if is_atomic_tmp_key key then
+      Error (InvalidKey "Reserved atomic temp key suffix")
     else if String.contains key '/' then
       Error (InvalidKey "Slash not allowed (use ':' as separator)")
     else if key.[0] = ':' then
@@ -305,7 +321,7 @@ module FileSystem = struct
       The mutex inside [t] already serialises writers against each
       other; this change adds atomicity against concurrent readers. *)
   let set t key value =
-    with_observed_mutex ~op:"set" t (fun () ->
+    with_observed_mutex ~op:"set" ~key t (fun () ->
       match validate_key key with
       | Error e -> Error e
       | Ok safe_key ->
@@ -314,7 +330,7 @@ module FileSystem = struct
           in
           let path = Eio.Path.(t.fs / path_part) in
           let tmp_path =
-            Eio.Path.(t.fs / (path_part ^ ".tmp-atomic"))
+            Eio.Path.(t.fs / (path_part ^ atomic_tmp_suffix))
           in
           try
             _ensure_parent_dir ~log_errors:true path;
@@ -334,7 +350,7 @@ module FileSystem = struct
 
   (** Delete key *)
   let delete t key =
-    with_observed_mutex ~op:"delete" t (fun () ->
+    with_observed_mutex ~op:"delete" ~key t (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->
@@ -367,8 +383,9 @@ module FileSystem = struct
                  Eio.Path.(path / name) acc)
              acc
     | `Regular_file ->
-        if requested_prefix = ""
-           || starts_with ~prefix:requested_prefix logical_prefix
+        if (not (is_atomic_tmp_key logical_prefix))
+           && (requested_prefix = ""
+               || starts_with ~prefix:requested_prefix logical_prefix)
         then
           logical_prefix :: acc
         else
@@ -547,7 +564,7 @@ module FileSystem = struct
   let set_if_not_exists t key value =
     (* Compact Protocol v4: Compress before saving *)
     let compressed = _compress value in
-    with_observed_mutex ~op:"set_if_not_exists" t (fun () ->
+    with_observed_mutex ~op:"set_if_not_exists" ~key t (fun () ->
       match key_to_path t key with
       | Error e -> Error e
       | Ok path ->
@@ -555,7 +572,7 @@ module FileSystem = struct
             String.map (function ':' -> '/' | c -> c) key
           in
           let tmp_path =
-            Eio.Path.(t.fs / (path_part ^ ".tmp-atomic"))
+            Eio.Path.(t.fs / (path_part ^ atomic_tmp_suffix))
           in
           let cleanup_tmp () =
             try Eio.Path.unlink tmp_path
@@ -674,7 +691,9 @@ module FileSystem = struct
                    | Ok () -> Ok true
                    | Error e -> Error e))
          | Error _ -> Ok false)
-    | Error e -> Error e
+    | Error
+        (( NotFound _ | IOError _ | InvalidKey _ | ConnectionFailed _
+         | BackendNotSupported _ ) as e) -> Error e
 
   let release_lock t ~key ~owner =
     let lock_key = "locks:" ^ key in
@@ -687,7 +706,9 @@ module FileSystem = struct
               | Error _ -> Ok false)
          | _ -> Ok false)  (* Not owner or invalid *)
     | Error (NotFound _) -> Ok true  (* Already released *)
-    | Error e -> Error e
+    | Error
+        (( AlreadyExists _ | IOError _ | InvalidKey _ | ConnectionFailed _
+         | BackendNotSupported _ ) as e) -> Error e
 
   let extend_lock t ~key ~owner ~ttl_seconds =
     let lock_key = "locks:" ^ key in

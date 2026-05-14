@@ -280,6 +280,31 @@ let () =
                        true
                      with Not_found -> false)
               | Ok () -> fail "should reject unknown template variable");
+          test_case "restore_overrides counts rejected entries" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir:_ ->
+              let labels = [ ("prompt", "override_restore") ] in
+              let before =
+                Lib.Prometheus.metric_value_or_zero
+                  Masc_mcp.Keeper_metrics.metric_keeper_prompt_failures
+                  ~labels
+                  ()
+              in
+              let masc_dir = Filename.concat dir ".masc" in
+              Unix.mkdir masc_dir 0o755;
+              write_file
+                (Filename.concat masc_dir "prompt_overrides.json")
+                {|{"keeper.deliberation":"Keeper {{unknown}}"}|};
+              Prompt_registry.restore_overrides dir;
+              check (float 0.0001) "restore rejection counted"
+                (before +. 1.0)
+                (Lib.Prometheus.metric_value_or_zero
+                   Masc_mcp.Keeper_metrics.metric_keeper_prompt_failures
+                   ~labels
+                   ());
+              check string "invalid override not applied"
+                (fixture "keeper.deliberation")
+                (Prompt_registry.get_prompt "keeper.deliberation"));
         ] );
       ( "integration",
         [

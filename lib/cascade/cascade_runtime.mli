@@ -36,6 +36,8 @@ val models_of_cascade_name_result :
   Keeper_cascade_profile.runtime_name -> (string list, string) result
 val models_of_cascade_name :
   Keeper_cascade_profile.runtime_name -> string list
+val max_output_tokens_ceiling_of_cascade_name :
+  Keeper_cascade_profile.runtime_name -> int option
 val resolve_named_providers_result :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
@@ -63,9 +65,31 @@ val resolve_named_providers :
   cascade_name:Keeper_cascade_profile.runtime_name ->
   unit ->
   Llm_provider.Provider_config.t list
-val resolve_providers_from_model_strings :
-  ?provider_filter:string list ->
-  ?require_tool_choice_support:bool ->
-  ?require_tool_support:bool ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  string list -> Llm_provider.Provider_config.t list
+
+(** Point-in-time capacity for local LLM endpoints.
+    All [process_*] counts reflect this OAS process only. Other clients
+    sharing the same server are not visible. *)
+type local_capacity = {
+  total : int;
+  process_active : int;
+  process_available : int;
+  process_queue_length : int;
+  all_discovered : bool;
+  endpoints_found : int;
+}
+
+val local_capacity_for_selections :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  string list ->
+  local_capacity
+(** Query local endpoint capacity for named cascade selections.
+
+    Selections are resolved through the TOML catalog into typed provider
+    candidates. Direct model-string parsing is intentionally not a fallback.
+
+    Resolution always uses the process-global active catalog (via
+    [Cascade_catalog_runtime.resolve_named_providers] →
+    [lookup_active_profile]); path-scoped override is not supported here.
+    A previous [?config_path] argument was silently discarded — removed
+    to avoid the footgun of an override that pretended to apply. *)

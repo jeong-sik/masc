@@ -166,7 +166,11 @@ let handle_inbound ~dispatch (msg : inbound_message) =
         ~duration_ms:0
         (match e with
          | Duplicate_message _ -> Channel_gate_metrics.Duplicate
-         | _ ->
+         | Empty_content
+         | Content_too_long _
+         | Empty_keeper_name
+         | Empty_channel_user_id
+         | Empty_idempotency_key ->
              Channel_gate_metrics.Validation_error
                (validation_error_to_string e));
       Error (Validation e)

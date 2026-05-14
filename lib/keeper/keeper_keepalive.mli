@@ -119,7 +119,7 @@ val force_released_marker_count_for_test : unit -> int
 (** Test-only: inject a marker without touching semaphores, so marker-retention
     behavior can be exercised without creating a double-release path. *)
 val add_force_released_marker_for_test :
-  label:string ->
+  label:Keeper_turn_slot.slot_pool ->
   keeper_name:string ->
   acquisition_id:int ->
   marked_at:float ->

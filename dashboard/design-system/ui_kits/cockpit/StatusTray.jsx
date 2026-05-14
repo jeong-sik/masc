@@ -10,7 +10,7 @@
    Lives in bottom-left so it doesn't fight the FocusToggle (bottom-right)
    or the Composer (which is hidden in focus mode anyway). */
 
-const { useState: _stUseState, useEffect: _stUseEffect, useRef: _stUseRef } = React;
+const { useState: _stUseState, useEffect: _stUseEffect, useRef: _stUseRef, useMemo: _stUseMemo } = React;
 
 function _useTrayPop() {
   const [open, setOpen] = _stUseState(null); // 'kpi' | 'life' | 'ticker' | 'keepers' | null
@@ -31,13 +31,44 @@ function _useTrayPop() {
   return [open, setOpen, ref];
 }
 
-function _kpiSpotlight(D) {
+// Count events + keepers in a single pass each. The previous version
+// iterated `events` and `keepers` four times and used `Array.filter` for
+// pure counts; this version is allocation-free and easier to extend.
+function _statusCounts(D) {
   const evs = (D && D.events) || [];
-  const fails = evs.filter(e => e.kind === "fail").length;
-  const cascades = evs.filter(e => e.kind === "cascade").length;
-  if (fails >= 3) return { l: "Fails", v: fails, t: "err",  u: "/47", urgent: true };
-  if (cascades >= 2) return { l: "Cascade", v: cascades, t: "info", u: "@step" };
-  return { l: "tps", v: "1.24", t: "brass", u: "tps" };
+  let fails = 0;
+  let cascades = 0;
+  for (const e of evs) {
+    if (!e) continue;
+    if (e.kind === "fail") fails++;
+    else if (e.kind === "cascade") cascades++;
+  }
+  const keepers = (D && D.keepers) || [];
+  let active = 0;
+  let stalled = 0;
+  for (const k of keepers) {
+    if (!k) continue;
+    if (k.status !== "idle") active++;
+    if (k.status === "stalled") stalled++;
+  }
+  return {
+    fails,
+    cascades,
+    evCount: evs.length,
+    lastEvent: evs.length > 0 ? evs[evs.length - 1] : null,
+    keepersTotal: keepers.length,
+    active,
+    stalled,
+  };
+}
+
+// Pick the dot to spotlight in the KPI slot. Only the urgent paths
+// have real meaning today; for the calm path we expose the raw event
+// count rather than a fabricated TPS number.
+function _kpiSpotlight(counts) {
+  if (counts.fails >= 3) return { l: "fails", v: counts.fails, t: "err", u: "", urgent: true };
+  if (counts.cascades >= 2) return { l: "cascade", v: counts.cascades, t: "info", u: "" };
+  return { l: "events", v: counts.evCount, t: "brass", u: "" };
 }
 
 function StatusTray() {
@@ -45,12 +76,13 @@ function StatusTray() {
   const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{trayHidden:false}, ()=>{}]);
   const hidden = !!cs.trayHidden;
   const [open, setOpen, ref] = _useTrayPop();
-  const spot = _kpiSpotlight(D);
-  const events = (D.events || []).slice(-1)[0];
-  const evCount = (D.events || []).length;
-  const keepers = (D.keepers || []);
-  const activeK = keepers.filter(k => k.status !== "idle").length;
-  const stalled = keepers.filter(k => k.status === "stalled").length;
+  const counts = _stUseMemo(() => _statusCounts(D), [D.events, D.keepers]);
+  const spot = _kpiSpotlight(counts);
+  const events = counts.lastEvent;
+  const evCount = counts.evCount;
+  const keepers = D.keepers || [];
+  const activeK = counts.active;
+  const stalled = counts.stalled;
 
   if (hidden) return null;
 

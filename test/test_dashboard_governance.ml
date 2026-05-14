@@ -23,6 +23,18 @@ let cleanup_dir dir =
   in
   rm dir
 
+let string_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  if len_sub > len_s then false
+  else
+    let rec loop i =
+      if i + len_sub > len_s then false
+      else if String.sub s i len_sub = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
 let iso8601_of_unix ts =
   Masc_domain.iso8601_of_unix_seconds ts
 
@@ -221,8 +233,8 @@ let test_runtime_status_and_judgments_are_live () =
         (judge |> member "judge_online" |> to_bool);
       check string "judge status is online" "online"
         (judge |> member "status" |> to_string);
-      check string "judge model uses runtime" "llama:qwen3.5"
-        (judge |> member "model_used" |> to_string);
+      check bool "judge model is redacted" true
+        (judge |> member "model_used" = `Null);
       let judgments = json |> member "judgments" |> to_list in
       check int "legacy judgment surfaced" 1 (List.length judgments);
       let first = List.hd judgments in
@@ -362,6 +374,145 @@ let test_dashboard_surfaces_compute_telemetry () =
       check string "dashboard exposes compute reason" "timeout"
         (judge |> member "last_compute_reason" |> to_string))
 
+let test_parse_governance_response_requires_guardrail_state () =
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ( "items",
+            `List
+              [
+                `Assoc
+                  [
+                    ("kind", `String "agent_health");
+                    ("id", `String "dreamer");
+                    ("summary", `String "dreamer is stuck");
+                    ("confidence", `Float 0.9);
+                    ("evidence_refs", `List []);
+                  ];
+              ] );
+        ])
+  in
+  match
+    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+      ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
+  with
+  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+      check bool "reason names guardrail_state" true
+        (string_contains reason "missing guardrail_state")
+  | Error (Lib.Dashboard_governance_judge.Lenient_fallback _) ->
+      fail "expected structural error, got lenient fallback"
+  | Ok _ -> fail "missing guardrail_state must fail closed"
+
+let test_parse_governance_response_preserves_guardrail_state () =
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ( "items",
+            `List
+              [
+                `Assoc
+                  [
+                    ("kind", `String "agent_health");
+                    ("id", `String "dreamer");
+                    ("summary", `String "dreamer is stuck");
+                    ("confidence", `Float 0.9);
+                    ("evidence_refs", `List [ `String "agent:dreamer" ]);
+                    ( "guardrail_state",
+                      `Assoc
+                        [
+                          ("requires_human_gate", `Bool true);
+                          ("pending_confirm_token", `String "confirm-1");
+                          ("ready_to_execute", `Bool false);
+                        ] );
+                  ];
+              ] );
+        ])
+  in
+  match
+    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+      ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
+  with
+  | Error _ -> fail "valid guardrail_state should parse"
+  | Ok [ judgment ] ->
+      let open Yojson.Safe.Util in
+      let guardrail = judgment |> member "guardrail_state" in
+      check bool "requires_human_gate preserved" true
+        (guardrail |> member "requires_human_gate" |> to_bool);
+      check string "pending_confirm_token preserved" "confirm-1"
+        (guardrail |> member "pending_confirm_token" |> to_string);
+      check bool "ready_to_execute preserved" false
+        (guardrail |> member "ready_to_execute" |> to_bool)
+  | Ok rows -> fail (Printf.sprintf "expected one row, got %d" (List.length rows))
+
+let test_parse_governance_response_requires_guardrail_fields () =
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ( "items",
+            `List
+              [
+                `Assoc
+                  [
+                    ("kind", `String "agent_health");
+                    ("id", `String "dreamer");
+                    ("summary", `String "dreamer is stuck");
+                    ("confidence", `Float 0.9);
+                    ("evidence_refs", `List [ `String "agent:dreamer" ]);
+                    ( "guardrail_state",
+                      `Assoc
+                        [
+                          ("requires_human_gate", `Bool true);
+                          ("ready_to_execute", `Bool false);
+                        ] );
+                  ];
+              ] );
+        ])
+  in
+  match
+    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+      ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
+  with
+  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+      check bool "reason names missing field" true
+        (string_contains reason "missing guardrail_state.pending_confirm_token")
+  | Error (Lib.Dashboard_governance_judge.Lenient_fallback _) ->
+      fail "expected structural error, got lenient fallback"
+  | Ok _ -> fail "incomplete guardrail_state must fail closed"
+
+let test_parse_governance_response_requires_items_array () =
+  let raw = "{\"judgments\": []}" in
+  match
+    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+      ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
+  with
+  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+      check bool "reason names items array" true
+        (string_contains reason "items array")
+  | Error (Lib.Dashboard_governance_judge.Lenient_fallback _) ->
+      fail "expected structural error, got lenient fallback"
+  | Ok _ -> fail "missing items array must fail closed"
+
+let test_parse_governance_response_rejects_unparseable_recovered_block () =
+  let raw = "prefix {\"items\": [} suffix" in
+  match
+    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+      ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
+  with
+  | Error (Lib.Dashboard_governance_judge.Lenient_fallback recovered) ->
+      check bool "fallback keeps recovered fragment" true
+        (string_contains recovered "items")
+  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+      fail ("expected lenient fallback, got structural error: " ^ reason)
+  | Ok _ -> fail "unparseable recovered JSON must stay lenient fallback"
+
 let test_refresh_failure_keeps_fresh_cache_online () =
   let dir = test_dir () in
   Fun.protect
@@ -398,7 +549,7 @@ let test_refresh_failure_keeps_fresh_cache_online () =
         status.cached_judgments_visible;
       check (option string) "last_error recorded"
         (Some "Execution timed out after 60.0s") status.last_error;
-      check (option string) "model preserved" (Some "glm:test")
+      check (option string) "model redacted" None
         status.model_used)
 
 let test_refresh_failure_marks_expired_cache_offline () =
@@ -430,6 +581,59 @@ let test_refresh_failure_marks_expired_cache_offline () =
         status.cached_judgments_visible;
       check (option string) "last_error recorded"
         (Some "Execution timed out after 60.0s") status.last_error)
+
+let test_refresh_failure_marks_judge_output_invalid () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let message =
+        "Governance judge returned structurally invalid response \
+         (item agent_health:dreamer missing guardrail_state)"
+      in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- true;
+        st.judge_online <- false;
+        st.last_error <- None;
+        Lib.Dashboard_governance_judge.mark_refresh_failure
+          ~now_ts:now st ~message);
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check string "runtime status is offline" "offline" status.status;
+      check (option string) "degraded_reason is judge_output_invalid"
+        (Some "judge_output_invalid") status.degraded_reason;
+      check (option string) "last_error recorded" (Some message)
+        status.last_error)
+
+let test_refresh_failure_marks_invalid_json_as_judge_output_invalid () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let message = "Governance judge returned invalid JSON: malformed items" in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- true;
+        st.judge_online <- false;
+        st.last_error <- None;
+        Lib.Dashboard_governance_judge.mark_refresh_failure
+          ~now_ts:now st ~message);
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+      in
+      check string "runtime status is offline" "offline" status.status;
+      check (option string) "degraded_reason is judge_output_invalid"
+        (Some "judge_output_invalid") status.degraded_reason;
+      check (option string) "last_error recorded" (Some message)
+        status.last_error)
 
 let test_refresh_once_skips_fresh_cached_result () =
   let dir = test_dir () in
@@ -465,6 +669,7 @@ let test_refresh_once_skips_fresh_cached_result () =
             legacy_message = "unused";
             tool_name = name;
             duration_ms = 0.0;
+            failure_class = None;
           })
         ~base_path:dir
         ~build_facts:(fun () ->
@@ -635,6 +840,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
             ~tool_name:"masc_code_delete"
             ~input:(`Assoc [ ("path", `String "/tmp/danger") ])
             ~risk_level:Lib.Keeper_approval_queue.Critical
+            ~selected_model:"openai:gpt-5.4"
             ()
         in
         decision_result := Some decision);
@@ -656,6 +862,8 @@ let test_dashboard_exposes_keeper_approval_queue () =
         (approval |> member "tool_name" |> to_string);
       check string "approval risk level" "critical"
         (approval |> member "risk_level" |> to_string);
+      check bool "approval selected model is redacted" true
+        (approval |> member "selected_model" = `Null);
       check string "approval preview"
         {|{"path":"/tmp/danger"}|}
         (approval |> member "input_preview" |> to_string);
@@ -773,10 +981,24 @@ let () =
             test_runtime_timestamps_fallback_to_unix_values;
           test_case "dashboard surfaces compute telemetry" `Quick
             test_dashboard_surfaces_compute_telemetry;
+          test_case "parser requires guardrail_state" `Quick
+            test_parse_governance_response_requires_guardrail_state;
+          test_case "parser preserves guardrail_state" `Quick
+            test_parse_governance_response_preserves_guardrail_state;
+          test_case "parser requires guardrail fields" `Quick
+            test_parse_governance_response_requires_guardrail_fields;
+          test_case "parser requires items array" `Quick
+            test_parse_governance_response_requires_items_array;
+          test_case "parser rejects unparseable recovered block" `Quick
+            test_parse_governance_response_rejects_unparseable_recovered_block;
           test_case "refresh failure keeps fresh cache online" `Quick
             test_refresh_failure_keeps_fresh_cache_online;
           test_case "refresh failure marks expired cache offline" `Quick
             test_refresh_failure_marks_expired_cache_offline;
+          test_case "refresh failure marks judge output invalid" `Quick
+            test_refresh_failure_marks_judge_output_invalid;
+          test_case "refresh failure marks invalid JSON invalid" `Quick
+            test_refresh_failure_marks_invalid_json_as_judge_output_invalid;
           test_case "refresh_once skips fresh cached result" `Quick
             test_refresh_once_skips_fresh_cached_result;
           test_case "backoff runtime status is structured" `Quick

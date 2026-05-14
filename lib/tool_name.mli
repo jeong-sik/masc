@@ -1,4 +1,3 @@
-
 (** Compile-time verified tool name identifiers.
 
     Use [of_string] at MCP/JSON parse boundaries only.
@@ -20,6 +19,11 @@ module Keeper : sig
     | Board_post
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote
     | Broadcast
     | Code_read
@@ -31,6 +35,7 @@ module Keeper : sig
     | Library_read
     | Library_search
     | Memory_search
+    | Memory_write
     | Pr_create
     | Pr_list
     | Pr_review_comment
@@ -98,6 +103,11 @@ module Masc : sig
     | Board_reaction
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote
     | Broadcast
     | Cancel_task
@@ -157,6 +167,7 @@ module Masc : sig
     | Tool_revoke
     | Transition
     | Update_priority
+    | Web_fetch
     | Web_search
     | Who
     | Workflow_guide
@@ -212,7 +223,6 @@ type t =
 val to_string : t -> string
 val of_string : string -> t option
 val pp : Stdlib.Format.formatter -> t -> unit
-
 val is_keeper : t -> bool
 val is_masc : t -> bool
 val is_masc_keeper : t -> bool

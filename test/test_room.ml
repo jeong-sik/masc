@@ -4,6 +4,8 @@ module Types = Masc_domain
 
 open Masc_mcp
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 (* UTF-8 emoji helpers: ✅ is E2 9C 85, ⚠ is E2 9A A0, 🔒 is F0 9F 94 92, 🔓 is F0 9F 94 93 *)
 
 (* Helper for substring check - define early *)
@@ -19,8 +21,50 @@ let str_contains s substring =
     in
     check 0
 
-let contains_check result = String.sub result 0 3 = "\xE2\x9C\x85"  (* ✅ *)
-let contains_warning result = String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
+let starts_with s prefix =
+  let len_s = String.length s in
+  let len_prefix = String.length prefix in
+  len_s >= len_prefix && String.sub s 0 len_prefix = prefix
+
+let contains_any haystack needles =
+  List.exists (str_contains haystack) needles
+
+let has_legacy_result_prefix prefix result = starts_with result prefix
+
+let contains_problem_result result =
+  let lower = String.lowercase_ascii result in
+  has_legacy_result_prefix "\xE2\x9D\x8C" result
+  || contains_any lower
+       [ "error:"
+       ; "[taskerror]"
+       ; "[agenterror]"
+       ; "[systemerror]"
+       ; "not found"
+       ; "notfound"
+       ; "not initialized"
+       ; "notinitialized"
+       ; "not joined"
+       ; "notjoined"
+       ; "invalid"
+       ; "invalidstate"
+       ; "empty"
+       ; "too long"
+       ; "blocked"
+       ; "already claimed"
+       ; "cannot"
+       ; "rejected"
+       ; "was not in the namespace"
+       ; "requires"
+       ]
+
+let contains_check result =
+  has_legacy_result_prefix "\xE2\x9C\x85" result
+  || (String.trim result <> "" && not (contains_problem_result result))
+
+let contains_warning result =
+  has_legacy_result_prefix "\xE2\x9A\xA0" result || contains_problem_result result
+
+let contains_error = contains_problem_result
 
 let backlog_recovery_path config =
   Coord.backlog_path config ^ ".last-good"
@@ -187,9 +231,15 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
    with
    | Ok _ -> ()
    | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err));
+  let terminal_tasks = Coord.list_tasks ~include_done:true config in
+  Alcotest.(check bool)
+    "terminal task is done before invariant"
+    true
+    (str_contains terminal_tasks "task-001"
+     && str_contains (String.lowercase_ascii terminal_tasks) "done");
   Alcotest.(check (option string))
-    "assignee has stale current_task before invariant"
-    (Some "task-001")
+    "assignee current_task already cleared before invariant"
+    None
     (current_task_for "nick0cave");
 
   let stale_message =
@@ -406,8 +456,6 @@ let test_event_log () =
 (* ============================================================ *)
 (* Edge Case & Error Case Tests                                  *)
 (* ============================================================ *)
-
-let contains_error result = String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
 
 let transition_done_r config ~agent_name ~task_id ~notes =
   Coord.transition_task_r config ~agent_name ~task_id
@@ -765,7 +813,9 @@ let test_event_log_on_claim_done () =
 (* Heartbeat & Zombie Detection Tests                           *)
 (* ============================================================ *)
 
-let contains_heartbeat result = String.sub result 0 4 = "\xF0\x9F\x92\x93"  (* 💓 *)
+let contains_heartbeat result =
+  has_legacy_result_prefix "\xF0\x9F\x92\x93" result
+  || str_contains (String.lowercase_ascii result) "heartbeat updated"
 
 let test_heartbeat_updates_lastseen () =
   with_test_env (fun config ->
@@ -864,6 +914,60 @@ let test_release_stale_claims_skips_invalid_backlog () =
     Alcotest.(check (list (pair string string))) "no stale claims released" [] released
   )
 
+(* RFC-0034.d: release_stale_claims must clear the assignee's
+   on-disk current_task mirror so the agent file no longer points at
+   a backlog task that has been forced back to Todo. *)
+let agent_current_task config ~agent_name =
+  let agents = Coord.get_all_agents config in
+  match List.find_opt (fun (a : Masc_domain.agent) -> a.name = agent_name) agents with
+  | Some agent -> agent.current_task
+  | None -> None
+
+(* Use pre-formed nicknames so the assignee written into the backlog
+   by [Coord.claim_task] matches the [<nickname>.json] agent file. The
+   production board issue (RFC-0034.d §1) was reported with nicknames
+   (e.g. nick0cave), so this models the actual desync surface. *)
+let stale_nick = "claude-stale-fox"
+let other_nick = "claude-other-bear"
+
+let test_release_stale_claims_clears_agent_current_task () =
+  with_test_env (fun config ->
+    let _ = Coord.join config ~agent_name:stale_nick ~capabilities:[] () in
+    let _ = Coord.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
+    (* claim_task does not mirror current_task on the agent file —
+       transition/start does — so set the mirror explicitly to model
+       a keeper that progressed to InProgress before going stale. *)
+    Coord.update_local_agent_state config ~agent_name:stale_nick
+      (fun agent -> { agent with current_task = Some "task-001" });
+    Alcotest.(check (option string)) "precondition: agent.current_task set"
+      (Some "task-001") (agent_current_task config ~agent_name:stale_nick);
+    (* ttl_seconds:0.0 forces the just-recorded claim to be stale. *)
+    let released = Coord.release_stale_claims config ~ttl_seconds:0.0 in
+    Alcotest.(check (list (pair string string)))
+      "task-001 released against assignee" [("task-001", stale_nick)] released;
+    Alcotest.(check (option string)) "agent.current_task cleared" None
+      (agent_current_task config ~agent_name:stale_nick)
+  )
+
+(* Spec: agent A claimed task X, then its on-disk pointer moved to a
+   different task Y (e.g. a fresh claim under a different lock window).
+   When the stale sweep releases X, A's [current_task] must remain
+   [Some Y] — only the task-X-specific pointer gets cleared. *)
+let test_release_stale_claims_preserves_other_agent_task () =
+  with_test_env (fun config ->
+    let _ = Coord.join config ~agent_name:other_nick ~capabilities:[] () in
+    let _ = Coord.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:other_nick ~task_id:"task-001" in
+    Coord.update_local_agent_state config ~agent_name:other_nick
+      (fun agent -> { agent with current_task = Some "task-999" });
+    let released = Coord.release_stale_claims config ~ttl_seconds:0.0 in
+    Alcotest.(check (list (pair string string)))
+      "task-001 released from backlog" [("task-001", other_nick)] released;
+    Alcotest.(check (option string)) "agent kept its newer current_task"
+      (Some "task-999") (agent_current_task config ~agent_name:other_nick)
+  )
+
 
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
@@ -888,9 +992,15 @@ let test_get_agents_status () =
 
 let test_cleanup_zombies_empty () =
   with_test_env (fun config ->
-    (* Cleanup with no zombies *)
+    (* Cleanup with no zombies returns a structured result *)
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "cleanup result" true (String.length result > 0)
+    let has_result =
+      match result with
+      | Coord.No_agents_dir -> true
+      | Coord.No_zombies -> true
+      | Coord.Cleaned _ -> true
+    in
+    Alcotest.(check bool) "cleanup result" true has_result
   )
 
 (** Return ISO8601 timestamp offset by seconds from now *)
@@ -919,8 +1029,11 @@ let test_cleanup_zombies_detects_regular () =
     (* Create a regular agent idle for 10 minutes (> 300s threshold) *)
     make_stale_agent config ~name:"stale-regular-agent" ~age_seconds:700.0;
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "regular zombie detected"
-      true (str_contains result "stale-regular-agent")
+    let found = match result with
+      | Coord.Cleaned { names; _ } -> List.mem "stale-regular-agent" names
+      | _ -> false
+    in
+    Alcotest.(check bool) "regular zombie detected" true found
   )
 
 let test_cleanup_zombies_detects_keeper () =
@@ -928,8 +1041,11 @@ let test_cleanup_zombies_detects_keeper () =
     (* Create a keeper agent idle for 2 hours (> 3600s keeper threshold) *)
     make_stale_agent config ~name:"keeper-longplay-agent" ~age_seconds:7200.0;
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "keeper zombie detected after keeper threshold"
-      true (str_contains result "keeper-longplay-agent")
+    let found = match result with
+      | Coord.Cleaned { names; _ } -> List.mem "keeper-longplay-agent" names
+      | _ -> false
+    in
+    Alcotest.(check bool) "keeper zombie detected after keeper threshold" true found
   )
 
 let test_cleanup_zombies_spares_recent_keeper () =
@@ -937,8 +1053,11 @@ let test_cleanup_zombies_spares_recent_keeper () =
     (* Create a keeper agent idle for 10 minutes (< 3600s keeper threshold) *)
     make_stale_agent config ~name:"keeper-active-agent" ~age_seconds:600.0;
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "recent keeper spared"
-      true (not (str_contains result "keeper-active-agent"))
+    let spared = match result with
+      | Coord.Cleaned { names; _ } -> not (List.mem "keeper-active-agent" names)
+      | _ -> true
+    in
+    Alcotest.(check bool) "recent keeper spared" true spared
   )
 
 let test_cleanup_zombies_spares_type_keeper () =
@@ -950,8 +1069,11 @@ let test_cleanup_zombies_spares_type_keeper () =
       ~name:"regular-keeper-runtime"
       ~age_seconds:600.0;
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "agent_type=keeper spared below keeper threshold"
-      true (not (str_contains result "regular-keeper-runtime"))
+    let spared = match result with
+      | Coord.Cleaned { names; _ } -> not (List.mem "regular-keeper-runtime" names)
+      | _ -> true
+    in
+    Alcotest.(check bool) "agent_type=keeper spared below keeper threshold" true spared
   )
 
 let test_cleanup_zombies_removes_broken_agent_file () =
@@ -1387,7 +1509,11 @@ let test_cleanup_zombies_releases_tasks () =
     Coord.write_json config agent_file updated_json;
     (* Run cleanup — should remove zombie agent AND release its tasks *)
     let result = Coord.cleanup_zombies config in
-    Alcotest.(check bool) "cleanup ran" true (String.length result > 0);
+    Alcotest.(check bool) "cleanup ran" true
+      (match result with
+       | Coord.No_agents_dir -> true
+       | Coord.No_zombies -> true
+       | Coord.Cleaned _ -> true);
     (* Verify task is released (back to Todo) *)
     let tasks = Coord.list_tasks config in
     Alcotest.(check bool) "task released to todo" true
@@ -1784,6 +1910,10 @@ let () =
         test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid;
       Alcotest.test_case "release stale claims skips invalid backlog" `Quick
         test_release_stale_claims_skips_invalid_backlog;
+      Alcotest.test_case "release stale claims clears agent current_task" `Quick
+        test_release_stale_claims_clears_agent_current_task;
+      Alcotest.test_case "release stale claims preserves other agent task" `Quick
+        test_release_stale_claims_preserves_other_agent_task;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;

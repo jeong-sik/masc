@@ -103,13 +103,14 @@ val execute_tool_eio :
   Mcp_server.server_state ->
   name:string ->
   arguments:Yojson.Safe.t ->
-  bool * string
+  Tool_result.t
 (** Routes [(name, arguments)] to the matching tool tag
     via {!Tool_dispatch.lookup_tag} and runs the handler.
-    Returns [(success, message)] where [message] is a
-    JSON-encoded response body (the wrapper layer
+    Returns a structured {!Tool_result.t} carrying success
+    flag, typed payload, tool name, elapsed duration, and
+    failure classification.  The wrapper layer
     {!Mcp_server_eio_call_tool.handle_call_tool_eio}
-    composes the final JSON-RPC envelope around it).
+    composes the final JSON-RPC envelope around it.
 
     Side effects on the request scope:
     - Refreshes [Eio_context.set_switch] / [set_clock] so

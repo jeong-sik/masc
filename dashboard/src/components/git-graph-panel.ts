@@ -4,10 +4,11 @@ import { GitBranch, RefreshCw } from 'lucide-preact'
 import { EmptyState, ErrorRecoverable, LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
 import { TimeAgo } from './common/time-ago'
-import { GitGraphView } from './git-graph-view'
+import { GitGraphView, findGitGraphRefMatches } from './git-graph-view'
 import { StatTile } from './common/stat-tile'
 import { fetchRepositoriesList, type Repository } from '../api/repositories'
 import type { GitGraphResponse } from '../api/git-graph'
+import { replaceRoute, route } from '../router'
 import {
   cancelGitGraphRefresh,
   gitGraphResource,
@@ -42,10 +43,26 @@ function shortRef(value: string | null): string {
   return value.length > 10 ? value.slice(0, 10) : value
 }
 
+function cleanRouteFocusParam(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+function clearGitGraphRouteFocus(): void {
+  const params: Record<string, string> = {
+    ...route.value.params,
+    section: 'repositories',
+    view: 'graph',
+  }
+  delete params.pr
+  delete params.ref
+  replaceRoute('workspace', params)
+}
+
 export function compactGitGraphPath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
   const parts = normalized.split('/').filter(Boolean)
-  if (parts.length <= 2) return normalized || 'workspace'
+  if (parts.length <= 2) return normalized || '(no path)'
   return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 
@@ -155,9 +172,74 @@ function GitGraphContextStrip({ model }: { readonly model: GitGraphContextModel 
   `
 }
 
+function GitGraphRouteFocusPanel({ graph }: { readonly graph: GitGraphResponse }) {
+  const params = route.value.params as Record<string, string | undefined>
+  const prId = cleanRouteFocusParam(params.pr)
+  const gitRef = cleanRouteFocusParam(params.ref)
+  if (!prId && !gitRef) return null
+
+  const matches = gitRef ? findGitGraphRefMatches(graph, gitRef).slice(0, 3) : []
+  const matchLabel = gitRef
+    ? matches.length > 0
+      ? `${matches.length} node match${matches.length === 1 ? '' : 'es'}`
+      : 'no graph node matched'
+    : null
+
+  return html`
+    <section
+      class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      data-testid="git-graph-route-focus"
+      aria-label="Git graph route focus"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+            ROUTE FOCUS
+          </div>
+          <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
+            ${prId ? html`
+              <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                PR ${prId}
+              </span>
+              <span class="text-2xs text-[var(--color-fg-muted)]">route received</span>
+            ` : null}
+            ${gitRef ? html`
+              <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+                REF ${gitRef}
+              </span>
+              <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${matchLabel}</span>
+            ` : null}
+          </div>
+          ${matches.length > 0 ? html`
+            <ol class="mt-2 grid gap-1">
+              ${matches.map(node => html`
+                <li key=${node.id} class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <span class="min-w-0 truncate font-mono text-[var(--color-fg-primary)]">${node.label}</span>
+                  <span class="font-mono uppercase text-[var(--color-fg-muted)]">${node.kind}</span>
+                  ${node.branch ? html`<span class="min-w-0 truncate font-mono text-[var(--color-fg-muted)]">branch ${node.branch}</span>` : null}
+                  ${node.sha ? html`<span class="font-mono text-[var(--color-fg-muted)]">${shortRef(node.sha)}</span>` : null}
+                </li>
+              `)}
+            </ol>
+          ` : null}
+        </div>
+        <button
+          type="button"
+          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          onClick=${clearGitGraphRouteFocus}
+        >
+          CLEAR
+        </button>
+      </div>
+    </section>
+  `
+}
+
 export function GitGraphPanel() {
   const state = gitGraphResource.state.value
   const graph = state.data
+  const routeParams = route.value.params as Record<string, string | undefined>
+  const focusedGitRef = cleanRouteFocusParam(routeParams.ref)
   const [repositories, setRepositories] = useState<ReadonlyArray<Repository>>([])
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null)
   const [repositoryError, setRepositoryError] = useState<string | null>(null)
@@ -303,6 +385,7 @@ export function GitGraphPanel() {
       </div>
 
       <${GitGraphContextStrip} model=${context} />
+      <${GitGraphRouteFocusPanel} graph=${graph} />
 
       ${graph.warnings.length > 0 ? html`
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-soft)] px-3 py-2 text-sm text-[var(--warn-bright)]">
@@ -310,7 +393,7 @@ export function GitGraphPanel() {
         </div>
       ` : null}
 
-      <${GitGraphView} graph=${graph} />
+      <${GitGraphView} graph=${graph} focusRef=${focusedGitRef} />
     </section>
   `
 }

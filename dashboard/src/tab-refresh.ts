@@ -49,6 +49,11 @@ async function refreshDoctorSurface(): Promise<void> {
   await refreshDoctor()
 }
 
+async function refreshSurfaceReadinessSurface(): Promise<void> {
+  const { refreshSurfaceReadiness } = await import('./components/surface-readiness-panel')
+  await refreshSurfaceReadiness()
+}
+
 async function refreshCascadeInspectorSurface(): Promise<void> {
   const { refreshCascadeInspector } = await import('./components/cascade-inspector')
   await refreshCascadeInspector()
@@ -68,6 +73,7 @@ type RefreshTask =
   | 'harness'
   | 'toolQuality'
   | 'inspector'
+  | 'surfaceReadiness'
   | 'cascadeInspector'
   | 'operatorSnapshot'
   | 'operatorRoomDigest'
@@ -81,7 +87,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         return ['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph']
       }
       if (routeState.params.section === 'journey') {
-        return ['execution', 'missionSnapshot']
+        return ['execution']
       }
       if (routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
@@ -105,6 +111,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
     case 'command':
       if (routeState.params.view === 'inspector') {
         return ['inspector']
+      }
+      if (routeState.params.view === 'surfaces') {
+        return ['surfaceReadiness']
       }
       return ['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest']
     case 'workspace':
@@ -156,6 +165,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
     void refreshServerConfigSurface()
     void refreshDoctorSurface()
   },
+  surfaceReadiness: () => { void refreshSurfaceReadinessSurface() },
   cascadeInspector: () => { void refreshCascadeInspectorSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },

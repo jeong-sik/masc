@@ -3,6 +3,7 @@ import {
   COALESCE_WINDOW_MS,
   RETENTION_MS,
   clearTraces,
+  filterTraceEventsByReplay,
   keeperTraceState,
   pushTrace,
   tracesByKeeper,
@@ -20,6 +21,30 @@ afterEach(() => {
 describe('keeper-trace-store', () => {
   it('starts empty', () => {
     expect(keeperTraceState.value.events).toHaveLength(0)
+  })
+
+  it('filters trace events at the replay cursor', () => {
+    pushTrace({
+      id: 'old',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'old-thread',
+      line: 12,
+    })
+    pushTrace({
+      id: 'new',
+      tsMs: 2000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'new-thread',
+      line: 13,
+    })
+
+    expect(filterTraceEventsByReplay(keeperTraceState.value.events, null).map(e => e.id))
+      .toEqual(['old', 'new'])
+    expect(filterTraceEventsByReplay(keeperTraceState.value.events, 1500).map(e => e.id))
+      .toEqual(['old'])
   })
 
   it('appends a single event with count=1', () => {
@@ -126,6 +151,75 @@ describe('keeper-trace-store', () => {
     })
     expect(keeperTraceState.value.events).toHaveLength(2)
     expect(keeperTraceState.value.events.map(e => e.keeperName)).toEqual(['scholar', 'moth'])
+  })
+
+  it('does NOT coalesce anchored-thread events for different file lines within the window', () => {
+    pushTrace({
+      id: 'a-1',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'th-1',
+      filePath: 'runtime.ts',
+      line: 12,
+    })
+    pushTrace({
+      id: 'a-2',
+      tsMs: 1010,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'th-2',
+      filePath: 'worker.ts',
+      line: 12,
+    })
+    pushTrace({
+      id: 'a-3',
+      tsMs: 1020,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'th-3',
+      filePath: 'runtime.ts',
+      line: 20,
+    })
+
+    expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['a-1', 'a-2', 'a-3'])
+    expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
+  })
+
+  it('does NOT coalesce activity events for different file lines within the window', () => {
+    pushTrace({
+      id: 'activity-1',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'activity-event',
+      eventId: 'evt-1',
+      filePath: 'runtime.ts',
+      line: 12,
+      surface: 'Goal',
+    })
+    pushTrace({
+      id: 'activity-2',
+      tsMs: 1010,
+      keeperName: 'scholar',
+      source: 'activity-event',
+      eventId: 'evt-2',
+      filePath: 'worker.ts',
+      line: 12,
+      surface: 'Task',
+    })
+    pushTrace({
+      id: 'activity-3',
+      tsMs: 1020,
+      keeperName: 'scholar',
+      source: 'activity-event',
+      eventId: 'evt-3',
+      filePath: 'runtime.ts',
+      line: 20,
+      surface: 'Log',
+    })
+
+    expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['activity-1', 'activity-2', 'activity-3'])
+    expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
   })
 
   it('inserts out-of-order events into ascending tsMs position', () => {
@@ -360,6 +454,16 @@ describe('keeper-trace-store', () => {
       decisionId: 'dec-1',
       semanticOutcome: 'success',
     })
+    pushTrace({
+      id: 'e-1',
+      tsMs: 1400,
+      keeperName: 'scholar',
+      source: 'activity-event',
+      eventId: 'evt-1',
+      filePath: 'runtime.ts',
+      line: 9,
+      surface: 'Goal',
+    })
 
     for (const event of keeperTraceState.value.events) {
       // Compile-time exhaustive narrowing.
@@ -378,6 +482,12 @@ describe('keeper-trace-store', () => {
         case 'decision-log':
           expect(event.decisionId).toBe('dec-1')
           expect(event.semanticOutcome).toBe('success')
+          break
+        case 'activity-event':
+          expect(event.eventId).toBe('evt-1')
+          expect(event.filePath).toBe('runtime.ts')
+          expect(event.line).toBe(9)
+          expect(event.surface).toBe('Goal')
           break
       }
     }

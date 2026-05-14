@@ -1,13 +1,13 @@
 (* test/test_oas_error_kind_counter.ml
 
-   #9933: verify that [Oas_worker_named.sdk_error_of_masc_internal_error]
+   #9933: verify that [Keeper_turn_driver.sdk_error_of_masc_internal_error]
    emits [masc_oas_error_total{kind}] once per constructed error so
    Grafana can alert on per-kind rates without parsing the
    free-form BDI blocker string.  Exercises all 9 variants of
    [masc_internal_error] (the single production source of
    [masc_oas_error] payloads). *)
 
-module OWN = Masc_mcp.Oas_worker_named
+module OWN = Masc_mcp.Keeper_turn_driver
 module Prom = Masc_mcp.Prometheus
 
 let typed_cascade_name = OWN.cascade_name_of_string
@@ -38,6 +38,9 @@ let test_oas_timeout_budget_kind () =
            keeper_turn_timeout_sec = 1200.0;
            estimated_input_tokens = 2519;
            source = "adaptive_estimated_input_tokens";
+           remaining_turn_budget_sec = Some 300.0;
+           min_required_sec = 15.0;
+           phase = "test_phase";
          })
   in
   Alcotest.(check (float 0.0001))
@@ -59,7 +62,7 @@ let test_turn_timeout_kind () =
 
 let test_cascade_exhausted_kind () =
   let kind = "cascade_exhausted" in
-  let cascade_name = "big_three" in
+  let cascade_name = "primary" in
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
@@ -71,13 +74,13 @@ let test_cascade_exhausted_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "cascade_exhausted{cascade_name=big_three} counter +1"
+    "cascade_exhausted{cascade_name=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
 let test_resumable_cli_session_kind () =
   let kind = "resumable_cli_session" in
-  let cascade_name = "big_three" in
+  let cascade_name = "primary" in
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
@@ -89,7 +92,7 @@ let test_resumable_cli_session_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "resumable_cli_session{cascade_name=big_three} counter +1"
+    "resumable_cli_session{cascade_name=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -132,16 +135,8 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =
           [
-            {
-              OWN.provider_label = "codex_cli:codex";
-              provider_kind = "codex_cli";
-              reason = "codex_keeper_bound_actor_required";
-            };
-            {
-              OWN.provider_label = "kimi_cli:kimi";
-              provider_kind = "kimi_cli";
-              reason = "tool_lane_unsupported";
-            };
+            { OWN.reason = "codex_keeper_bound_actor_required" };
+            { OWN.reason = "tool_lane_unsupported" };
           ];
       }
   in
@@ -152,11 +147,22 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
     [ "keeper_bash"; "masc_worktree_create" ]
     (json |> member "required_tool_names" |> to_list
      |> List.map to_string);
-  Alcotest.(check string)
-    "first rejected provider serialized"
-    "codex_cli:codex"
-    (json |> member "provider_rejections" |> index 0
-     |> member "provider_label" |> to_string);
+  Alcotest.(check int)
+    "configured candidate count serialized"
+    2
+    (json |> member "configured_candidate_count" |> to_int);
+  Alcotest.(check int)
+    "rejected candidate count serialized"
+    2
+    (json |> member "rejected_candidate_count" |> to_int);
+  Alcotest.(check (list string))
+    "rejection reasons serialized without provider identity"
+    [ "codex_keeper_bound_actor_required"; "tool_lane_unsupported" ]
+    (json |> member "rejection_reasons" |> to_list |> List.map to_string);
+  Alcotest.(check bool)
+    "provider rejection identities omitted"
+    true
+    (json |> member "provider_rejections" = `Null);
   let err = OWN.sdk_error_of_masc_internal_error payload in
   match OWN.classify_masc_internal_error err with
   | Some parsed -> (
@@ -164,11 +170,56 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
       | Some summary ->
           Alcotest.(check bool) "summary names missing worktree tool" true
             (contains_substring summary "masc_worktree_create");
-          Alcotest.(check bool) "summary names rejected codex provider" true
+          Alcotest.(check bool) "summary names rejection reason" true
             (contains_substring summary
-               "codex_cli:codex:codex_keeper_bound_actor_required")
+               "codex_keeper_bound_actor_required");
+          Alcotest.(check bool) "summary omits rejected provider identity" false
+            (contains_substring summary "codex_cli:codex")
       | None -> Alcotest.fail "expected no-tool summary")
   | None -> Alcotest.fail "expected no-tool error round-trip"
+
+let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
+  let legacy_json =
+    `Assoc
+      [
+        ("kind", `String "no_tool_capable_provider");
+        ("cascade_name", `String "tool_required");
+        ("configured_labels", `List [ `String "codex"; `String "kimi" ]);
+        ("required_tool_names", `List [ `String "keeper_bash" ]);
+        ( "provider_rejections",
+          `List
+            [
+              `Assoc
+                [
+                  ("provider_label", `String "codex_cli:codex");
+                  ("provider_kind", `String "codex_cli");
+                  ("reason", `String "codex_keeper_bound_actor_required");
+                ];
+            ] );
+      ]
+  in
+  let raw = "[masc_oas_error] " ^ Yojson.Safe.to_string legacy_json in
+  match OWN.classify_masc_internal_error_of_string raw with
+  | None -> Alcotest.fail "expected legacy no-tool payload to parse"
+  | Some parsed -> (
+      let redacted = OWN.masc_internal_error_to_json parsed in
+      let open Yojson.Safe.Util in
+      Alcotest.(check bool)
+        "legacy provider_rejections not re-emitted"
+        true
+        (redacted |> member "provider_rejections" = `Null);
+      Alcotest.(check (list string))
+        "legacy rejection reason survives"
+        [ "codex_keeper_bound_actor_required" ]
+        (redacted |> member "rejection_reasons" |> to_list
+         |> List.map to_string);
+      match OWN.summary_of_masc_internal_error parsed with
+      | None -> Alcotest.fail "expected legacy no-tool summary"
+      | Some summary ->
+          Alcotest.(check bool)
+            "legacy summary omits rejected provider identity"
+            false
+            (contains_substring summary "codex_cli:codex"))
 
 let test_accept_rejected_kind () =
   let kind = "accept_rejected" in
@@ -189,7 +240,7 @@ let test_accept_rejected_kind () =
 
 let test_admission_queue_timeout_kind () =
   let kind = "admission_queue_timeout" in
-  let cascade_name = "big_three" in
+  let cascade_name = "primary" in
   let before = counter_for ~cascade_name kind in
   let _ =
     OWN.sdk_error_of_masc_internal_error
@@ -201,7 +252,7 @@ let test_admission_queue_timeout_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "admission_queue_timeout{cascade_name=big_three} counter +1"
+    "admission_queue_timeout{cascade_name=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -366,8 +417,12 @@ let () =
       ( "structured_payload_13344",
         [
           Alcotest.test_case
-            "no_tool_capable_provider names tools and rejected providers"
+            "no_tool_capable_provider names tools and rejection reasons"
             `Quick
             test_no_tool_capable_provider_payload_names_tools_and_rejections;
+          Alcotest.test_case
+            "legacy no_tool_capable_provider rejection identities redact"
+            `Quick
+            test_no_tool_capable_provider_legacy_rejections_are_redacted;
         ] );
     ]

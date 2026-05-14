@@ -62,7 +62,7 @@ let parse_record (json : Yojson.Safe.t)
       |> List.filter_map (fun (field, is_missing) ->
         if is_missing then Some field else None)
     in
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "parsing")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
     Error
       (Printf.sprintf "missing required field(s): %s"
          (String.concat ", " missing))
@@ -180,6 +180,7 @@ let restore ~base_path : int =
            duration_ms = r.duration_ms;
            data = `Null;
            legacy_message = "";
+           failure_class = None;
          } in
          Tool_metrics.record result;
          Stdlib.incr count

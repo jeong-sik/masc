@@ -206,7 +206,7 @@ export function KeeperCheckpointPanel({
         <div class="text-2xs text-[var(--color-fg-muted)]">
           current OAS checkpoint와 OAS snapshot history만 노출합니다.
           ${inventory && inventory.legacy_shadow_count > 0
-            ? html`<span class="block mt-1 text-[var(--color-status-warn)]">legacy shadow ${inventory.legacy_shadow_count}개는 picker에서 제외됩니다.</span>`
+            ? html`<span class="block mt-1 text-[var(--color-status-warn)]">retired shadow ${inventory.legacy_shadow_count}개는 picker에서 제외됩니다.</span>`
             : null}
         </div>
         <div class="flex items-center gap-2">
@@ -458,7 +458,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
     <div class="md:col-span-2">
       <${PanelCard} title="생성 계보">
         <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
-          성공한 핸드오프에서 keeper 상태 전이를 추적합니다. 계보 telemetry 는 append-only 이며 최신 rollover 가 먼저 표시되어 동일한 keeper identity 가 새 trace 로 이어졌는지 설명합니다.
+          최신 rollover가 위에 표시됩니다 (append-only).
         </div>
 
         ${latestEntry

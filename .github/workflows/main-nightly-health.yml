@@ -44,7 +44,7 @@ jobs:
 
       - name: Open or update tracking issue on failure
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const title = '[main-health] Doc truth check failing on main';
@@ -112,7 +112,7 @@ jobs:
 
       - name: Open or update tracking issue on failure
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const title = '[main-health] dune build @install failing on main';

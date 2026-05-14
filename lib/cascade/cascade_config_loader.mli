@@ -1,4 +1,4 @@
-(** JSON config loading with mtime-based hot-reload.
+(** Cascade catalog source loading with mtime-based hot-reload.
 
     @since 0.59.0
     @since 0.92.0 extracted from Cascade_config
@@ -6,13 +6,25 @@
     @stability Internal
     @since 0.93.1 *)
 
-(** Load and cache a raw JSON config file.
-    Cached with mtime-based hot-reload. When a sibling [cascade.toml] exists,
-    it is validated/materialized first and this loader then reads the
-    generated [cascade.json]. *)
-val load_json : string -> (Yojson.Safe.t, string) result
+(** Load and cache the cascade catalog source.
 
-(** Drop the cached JSON entry for one [cascade.json] path.
+    Despite returning [Yojson.Safe.t] for backward compatibility with the
+    JSON-shaped consumers (which still walk the value via
+    [Yojson.Safe.Util]), this function does not read any JSON from disk.
+    The on-disk source is [cascade.toml]; it is parsed by [Otoml] and
+    rendered to an in-memory [Yojson.Safe.t] view by
+    [Cascade_toml_materializer]. The cache is keyed by the resolved
+    source-path mtime.
+
+    @since RFC-0058 §9 Phase 9.3 renamed from [load_json] — no on-disk
+    JSON is read or written. *)
+val load_catalog_source : string -> (Yojson.Safe.t, string) result
+
+(** Same as {!load_catalog_source}, but suppresses TOML source-read
+    trace / race telemetry for high-frequency diagnostic polling. *)
+val load_catalog_source_for_diagnostics : string -> (Yojson.Safe.t, string) result
+
+(** Drop the cached entry for one cascade source path.
 
     Intended for in-process editors/tests that overwrite the file and need
     the next read to bypass the previous mtime cache entry immediately.
@@ -43,118 +55,20 @@ type weighted_entry = {
       MCP HTTP headers).  Idiomatic pairing: CLI runtime primary +
       direct-API secondary, e.g.
       [{ model = "gemini_cli:auto"; secondary = Some "gemini-api:gemini-3-flash" }].
-      [None] = legacy single-track entry.
+      [None] = single-track entry.
 
-      JSON key: ["secondary"] inside the per-entry object.  Whitespace
-      is trimmed.  An empty or whitespace-only string is treated as
-      absent (the loader yields [None]); the loader does not reject
-      such input as malformed.  Unknown / invalid provider schemes in
-      [secondary] are not detected at parse time — the resolver
-      surfaces them as a normal provider-not-found error when
-      fallback fires. *)
+      Unknown / invalid provider schemes in [secondary] are surfaced by
+      the resolver as normal provider-not-found errors when fallback
+      fires. *)
   secondary_supports_tool_choice: bool option;
   (** Per-entry capability override for [secondary], analogous to
       [supports_tool_choice].  [None] when [secondary] is [None] or
       when no explicit override is declared. *)
 }
 
-(** Catalog metadata for one named cascade profile discovered from
-    [cascade.json].
-
-    A profile enters the catalog when it declares at least one
-    recognized cascade schema key such as ["{name}_models"],
-    ["{name}_temperature"], ["{name}_strategy"], etc. This keeps
-    profile discovery aligned with the loader's typed schema instead of
-    duplicating ad-hoc JSON-key parsing at call sites. *)
-type catalog_entry = {
-  name : string;
-  keeper_assignable : bool;
-  (** Whether the profile may be assigned to keepers. Defaults to [true]
-      when ["{name}_keeper_assignable"] is absent. *)
-  fallback_cascade : string option;
-  (** Optional declarative escalation hint. When set, the cascade
-      rotation logic prefers this name as the immediate next cascade
-      after a recoverable cascade failure (single-provider profiles
-      otherwise have no internal escalation path).
-
-      JSON key: ["{name}_fallback_cascade"]. The loader does not
-      validate that the target profile exists; consumers are expected
-      to drop the hint when it does not match a live catalog entry.
-
-      @since 0.174.0 *)
-  required_capability_profile : Cascade_capability_profile.profile option;
-  (** Optional declarative capability requirement (RFC-0027).  When
-      set, the validator (PR-3) checks that every model entry in this
-      cascade satisfies the named profile via
-      {!Cascade_capability_profile.provider_satisfies_profile}.
-
-      JSON key: ["{name}_required_capability_profile"], string-typed.
-      Unknown profile names cause [load_catalog] to return [Error _]
-      (no silent fallback — fail-closed per memory rule
-      [feedback_keeper_runtime_fail_closed_for_unknown_permissive_default]).
-
-      @since RFC-0027 PR-2 *)
-}
-
 (** Deprecated logical route keys must not be treated as concrete catalog
-    profiles, even if legacy JSON still contains ["{name}_models"] keys. *)
+    profiles. *)
 val is_deprecated_logical_profile_name : string -> bool
-
-(** Load the cascade catalog from [config_path].
-
-    Discovery is schema-driven: a profile is included when the JSON
-    contains at least one recognized per-cascade key for that [name].
-    The optional metadata key ["{name}_keeper_assignable"] marks
-    system-only profiles that should remain editable/visible but must
-    not appear in keeper-assignment UIs.
-
-    On a successful load this also walks the fallback graph and emits
-    [masc_cascade_fallback_cycle_detected_total] + a WARN log for each
-    cycle discovered (see {!detect_fallback_cycles}).
-
-    Returns [Error _] when the file cannot be read or parsed. *)
-val load_catalog :
-  config_path:string ->
-  (catalog_entry list, string) result
-
-(** Pure helper: walk the [fallback_cascade] graph and return every
-    cycle as a list of cascade names in traversal order (entry point
-    first).  Cycles are deduplicated up to rotation so [A→B→A] and
-    [B→A→B] are reported once.
-
-    Cycles are silent failures: when every participant depends on a
-    stalled provider the cascade rotation never escapes the loop.
-    {!load_catalog} calls this automatically and surfaces results
-    through Prometheus + log; this function is exposed so tests and
-    CI gates can assert "no cycles in catalog" without re-walking the
-    JSON. *)
-val detect_fallback_cycles :
-  catalog_entry list -> string list list
-
-(** Load a named model list from a JSON config file.
-
-    The JSON file maps ["{name}_models"] keys to string arrays.
-    Results are cached and hot-reloaded when the file mtime changes.
-    Returns an empty list when the file is missing or the key is absent. *)
-val load_profile :
-  config_path:string ->
-  name:string ->
-  string list
-
-(** Like {!load_profile} but preserves weight information.
-
-    Supports two JSON formats in the model array:
-    - Plain strings: [{"model": s, "weight": 1}]
-    - Objects: [{"model": "provider:id", "weight": 50}]
-
-    When all weights are 1, the caller should treat the list as unweighted
-    (preserving backward-compatible fixed ordering).
-
-    @since 0.137.0 *)
-val load_profile_weighted :
-  config_path:string ->
-  name:string ->
-  weighted_entry list
 
 (** Per-cascade inference parameter overrides. *)
 type inference_params = {
@@ -174,7 +88,7 @@ type inference_params = {
       mapping happens downstream in OAS. *)
 }
 
-(** Resolve inference parameters from cascade.json.
+(** Resolve inference parameters from the in-memory cascade view.
 
     Resolution order:
     1. ["{name}_temperature"] / ["{name}_max_tokens"] /
@@ -187,7 +101,7 @@ type inference_params = {
 val resolve_inference_params :
   config_path:string -> name:string -> inference_params
 
-(** Resolve per-cascade API key env var overrides from cascade.json.
+(** Resolve per-cascade API key env var overrides from the in-memory cascade view.
 
     Resolution order:
     1. ["{name}_api_key_env"] from [config_path]
@@ -244,7 +158,7 @@ type strategy_config = {
       inner array is a tier of provider keys (matched against the
       [model] field in [{name}_models]); outer order is tier order
       (tier 0 = highest priority).  Example JSON:
-      [\[\["ollama:qwen3-coder:30b"\], \["gemini_cli:gemini-2.5-flash"\]\]].
+      [\[\["ollama:qwen3-coder:30b"\], \["gemini_cli:gemini-3-flash-preview"\]\]].
       @since 0.9.7 *)
 
   sticky_ttl_ms : int option;
@@ -289,4 +203,7 @@ type strategy_config = {
 }
 
 val resolve_strategy_config :
+  config_path:string -> name:string -> strategy_config
+
+val resolve_strategy_config_for_diagnostics :
   config_path:string -> name:string -> strategy_config

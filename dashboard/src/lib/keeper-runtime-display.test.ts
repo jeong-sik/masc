@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { KEEPER_RUNTIME_BLOCKER_CLASSES } from '../types'
 import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import {
   keeperActivityDisplay,
@@ -99,17 +100,17 @@ describe('keeperDisplayStatus', () => {
 })
 
 describe('keeperDisplayModel', () => {
-  it('keeps CLI/provider runtime labels intact for active auto profiles', () => {
+  it('redacts active runtime labels', () => {
     expect(
       keeperDisplayModel({
         active_model_label: 'claude_code:auto',
         active_model: 'claude',
         model: 'claude',
       }),
-    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+    ).toBeNull()
   })
 
-  it('keeps active runtime labels ahead of metrics-series fallback', () => {
+  it('does not fall back to metrics-series model labels', () => {
     expect(
       keeperDisplayModel({
         active_model: 'claude_code:auto',
@@ -118,20 +119,20 @@ describe('keeperDisplayModel', () => {
           { model_used: 'anthropic:claude-sonnet-4-6' },
         ],
       }),
-    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+    ).toBeNull()
   })
 
-  it('skips placeholder model sentinels before falling back to active runtime labels', () => {
+  it('redacts even non-placeholder legacy labels', () => {
     expect(
       keeperDisplayModel({
         last_model_used: 'unknown',
         active_model: 'claude_code:auto',
         model: 'claude',
       }),
-    ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
+    ).toBeNull()
   })
 
-  it('skips expanded exact placeholders without hiding provider auto labels', () => {
+  it('redacts provider auto labels and primary model labels', () => {
     expect(
       keeperDisplayModel({
         last_model_used_label: 'default',
@@ -139,10 +140,10 @@ describe('keeperDisplayModel', () => {
         active_model_label: 'codex_cli:auto',
         primary_model: 'openai:gpt-5.4',
       }),
-    ).toEqual({ label: '현재 모델', value: 'codex_cli:auto' })
+    ).toBeNull()
   })
 
-  it('uses the latest metrics model when structured runtime model is absent', () => {
+  it('redacts metrics-only model labels', () => {
     expect(
       keeperDisplayModel({
         metrics_series: [
@@ -150,7 +151,7 @@ describe('keeperDisplayModel', () => {
           { model_used: 'anthropic:claude-sonnet-4-6' },
         ],
       }),
-    ).toEqual({ label: '최근 모델', value: 'anthropic:claude-sonnet-4-6' })
+    ).toBeNull()
   })
 })
 
@@ -162,6 +163,24 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe(
       '필수 도구 미충족',
     )
+  })
+
+  it('labels the 9 RFC-0062 SDK blocker variants', () => {
+    expect(keeperRuntimeBlockerLabel('sdk_max_turns_exceeded')).toBe('SDK 최대 턴 초과')
+    expect(keeperRuntimeBlockerLabel('sdk_token_budget_exceeded')).toBe('SDK 토큰 예산 초과')
+    expect(keeperRuntimeBlockerLabel('sdk_cost_budget_exceeded')).toBe('SDK 비용 예산 초과')
+    expect(keeperRuntimeBlockerLabel('sdk_unrecognized_stop_reason')).toBe('SDK 미식별 정지 사유')
+    expect(keeperRuntimeBlockerLabel('sdk_idle_detected')).toBe('SDK Idle 감지')
+    expect(keeperRuntimeBlockerLabel('sdk_tool_retry_exhausted')).toBe('SDK 도구 재시도 소진')
+    expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')
+    expect(keeperRuntimeBlockerLabel('sdk_tripwire_violation')).toBe('SDK Tripwire 위반')
+    expect(keeperRuntimeBlockerLabel('sdk_exit_condition_met')).toBe('SDK 종료 조건 충족')
+  })
+
+  it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {
+    for (const cls of KEEPER_RUNTIME_BLOCKER_CLASSES) {
+      expect(keeperRuntimeBlockerLabel(cls), `missing label for ${cls}`).not.toBeNull()
+    }
   })
 })
 
@@ -184,6 +203,15 @@ describe('keeperRuntimeBlockerHint', () => {
     ).toBe('액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.')
   })
 
+  it('explains admission queue waits as keeper FIFO waits, not OAS waits', () => {
+    expect(
+      keeperRuntimeBlockerHint(makeKeeper({
+        runtime_blocker_class: 'admission_queue_wait_timeout',
+        runtime_blocker_summary: 'admission_queue_wait_timeout',
+      })),
+    ).toBe('Keeper admission FIFO 대기 시간이 초과되었습니다.')
+  })
+
   const registryBlockerHintCases: Array<[KeeperRuntimeBlockerClass, string]> = [
     [
       'stale_termination_storm',
@@ -200,6 +228,26 @@ describe('keeperRuntimeBlockerHint', () => {
     [
       'exception',
       'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.',
+    ],
+    [
+      'awaiting_operator',
+      '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.',
+    ],
+    [
+      'awaiting_sandbox_egress',
+      '샌드박스 네트워크 또는 push egress 정책 때문에 keeper가 진행하지 못하고 있습니다.',
+    ],
+    [
+      'supervisor_paused',
+      'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.',
+    ],
+    [
+      'synthetic_stall',
+      '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물을 재확인해야 합니다.',
+    ],
+    [
+      'self_imposed_idle',
+      'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.',
     ],
   ]
 

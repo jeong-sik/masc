@@ -1,7 +1,7 @@
 (* Approval_context — runtime state record. *)
 
 type t = {
-  actor : string;
+  actor : Agent_id.t;
   session_id : string;
   worktree_root : string;
   now : float;

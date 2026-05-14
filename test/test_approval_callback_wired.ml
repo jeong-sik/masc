@@ -20,7 +20,7 @@
        callback (with_approval, or threads ~approval to a helper that
        does). Missing wiring → fail-open, the exact bug #7883.
     4. Structural: every MASC call site of
-       [Oas_worker.run_named] / [Oas_worker_named.run_named*] passes
+       [Keeper_turn_driver.run_named] / [Keeper_turn_driver.run_named*] passes
        [~approval:...].
 
     Detection is grep-based on source. False positives are acceptable
@@ -135,16 +135,16 @@ let file_matches path pattern =
 (** Each MASC source file that calls [Agent_sdk.Builder.build_safe] must
     also install an approval callback. We express this as: the file
     contains "with_approval" OR threads the caller-supplied
-    [?approval] into a helper that does (e.g. oas_worker_exec wires
+    [?approval] into a helper that does (e.g. cascade_runner wires
     the optional approval field into the Builder). *)
 let builder_sites = [
   (* Worker OAS Builder — issue #8232 path. *)
   ( "lib/worker_oas.ml",
     "Agent_sdk.Builder.build_safe",
     "Agent_sdk.Builder.with_approval" );
-  (* Oas_worker_exec Builder — run_named pipeline. This file wires
+  (* Cascade_runner Builder — run_named pipeline. This file wires
      config.approval into the builder directly. *)
-  ( "lib/oas_worker_exec.ml",
+  ( "lib/cascade/cascade_runner.ml",
     "Agent_sdk.Builder.build_safe",
     "Agent_sdk.Builder.with_approval" );
 ]
@@ -168,8 +168,8 @@ let test_builder_sites_wire_approval () =
         true (file_contains path approval_marker))
     builder_sites
 
-(** Every MASC call site of [Oas_worker.run_named] or
-    [Oas_worker_named.run_named*] must pass [~approval:...]. The
+(** Every MASC call site of [Keeper_turn_driver.run_named] or
+    [Keeper_turn_driver.run_named*] must pass [~approval:...]. The
     regex matches any argument value so callers may install
     auto_approve, reject_by_default, or a governance callback. *)
 let run_named_sites = [
@@ -200,6 +200,34 @@ let test_run_named_sites_pass_approval () =
         true (file_matches path "~approval:"))
     run_named_sites
 
+let test_keeper_dispatch_enables_oas_overflow_retry () =
+  let root = repo_root () in
+  let rel_path = "lib/keeper/keeper_agent_run.ml" in
+  let path = Filename.concat root rel_path in
+  let source = read_file path in
+  let marker = "Keeper_turn_driver.run_named" in
+  let flag = "~oas_auto_context_overflow_retry:true" in
+  let rec search pos =
+    try
+      let idx = Str.search_forward (Str.regexp_string marker) source pos in
+      let len = min 3000 (String.length source - idx) in
+      let dispatch_block = String.sub source idx len in
+      if
+        try
+          ignore
+            (Str.search_forward (Str.regexp_string flag) dispatch_block 0);
+          true
+        with Not_found -> false
+      then true
+      else search (idx + String.length marker)
+    with Not_found -> false
+  in
+  Alcotest.(check bool)
+    (Printf.sprintf
+       "%s: keeper dispatch must keep OAS overflow auto-retry enabled"
+       rel_path)
+    true (search 0)
+
 (* ── Suite ──────────────────────────────────────────────────────── *)
 
 let () =
@@ -220,5 +248,8 @@ let () =
             `Quick test_builder_sites_wire_approval;
           Alcotest.test_case "run_named call sites pass ~approval"
             `Quick test_run_named_sites_pass_approval;
+          Alcotest.test_case
+            "keeper dispatch enables OAS overflow auto-retry"
+            `Quick test_keeper_dispatch_enables_oas_overflow_retry;
         ] );
     ]

@@ -26,50 +26,36 @@ let contains_casefold haystack needle =
   String.length needle = 0
   || String_util.contains_substring_ci haystack needle
 
-type tool_failure_class =
-  | Workflow_rejection
-  | Policy_rejection
-  | Runtime_failure
+(* Failure classification delegates to [Tool_result] — the SSOT closed-sum
+   type with compiler-enforced exhaustive handling at every match site.
+   See {!Tool_result.tool_failure_class} for the 4 constructors.
 
-let tool_failure_class_to_string = function
-  | Workflow_rejection -> "workflow_rejection"
-  | Policy_rejection -> "policy_rejection"
-  | Runtime_failure -> "runtime_failure"
-
-(* #10975: tool-call failure severity classification.
-
-   Without this, every [success=false] result downstream is logged
-   at [Log.Error], including normal policy/workflow rejections like
-   [awaiting_approval] (governance critical-risk pending),
-   [Join required] (keeper called masc_transition before masc_join),
-   [egress_blocked] (network policy denial), and [path_outside_sandbox]
-   (sandbox boundary).  Single 24h window: 41 such events at ERROR, polluting
-   alert ROC, supervisor escape-valve heuristics (#10887 SP cohort
-   detection counts ERROR rate), and the dashboard red counter that
-   operators use to triage genuine system errors.
-
-   Classify the current untyped message boundary into a stable semantic
-   class first, then map class -> severity and telemetry. Anything unknown
-   stays [Runtime_failure] / ERROR. *)
-let classify_tool_failure_class error_detail =
-  let detail = Option.value ~default:"" error_detail in
-  if contains_casefold detail "awaiting_approval"
-     || contains_casefold detail "join required"
-  then Workflow_rejection
+   Local heuristic for classifying failure messages at the MCP protocol
+   level where only the message string is available (not a [Tool_result.t]).
+   Mirrors the logic that was in [Tool_result.classify_from_dispatch_failure]
+   before it was made internal in Phase 2. *)
+let classify_failure_message (message : string) : Tool_result.tool_failure_class =
+  if contains_casefold message "awaiting_approval"
+     || contains_casefold message "join required"
+  then Tool_result.Workflow_rejection
   else if
-    contains_casefold detail "egress_blocked"
-    || contains_casefold detail "path_outside_sandbox"
-  then Policy_rejection
-  else Runtime_failure
-
-let log_level_of_tool_failure_class = function
-  | Workflow_rejection | Policy_rejection -> Log.Warn
-  | Runtime_failure -> Log.Error
-
-let classify_tool_failure_severity error_detail : Log.level =
-  error_detail
-  |> classify_tool_failure_class
-  |> log_level_of_tool_failure_class
+    contains_casefold message "egress_blocked"
+    || contains_casefold message "path_outside_sandbox"
+  then Tool_result.Policy_rejection
+  else if contains_casefold message "Tool timed out" then
+    Tool_result.Runtime_failure
+  else if
+    contains_casefold message "timeout"
+    || contains_casefold message "temporary"
+    || contains_casefold message "temporarily"
+    || contains_casefold message "econn"
+    || contains_casefold message "connection"
+    || contains_casefold message "unavailable"
+    || contains_casefold message "rate limit"
+    || contains_casefold message "502"
+    || contains_casefold message "503"
+  then Tool_result.Transient_error
+  else Tool_result.Runtime_failure
 
 let parse_status_from_message ~success ~message =
   if not success then
@@ -115,6 +101,64 @@ let quality_from_result ~success ~message ~attempts =
       ("passed", `Bool false);
       ("issues", `List [issue]);
     ]
+
+let activity_preview_string value =
+  value
+  |> Safe_ops.sanitize_text_utf8
+  |> Observability_redact.redact_preview
+  |> Safe_ops.sanitize_text_utf8
+
+let activity_plain_string value = Safe_ops.sanitize_text_utf8 value
+
+let activity_tool_called_payload ~tool_name ~success ~duration_ms ~source
+    ?error_detail ?tool_args_preview arguments =
+  let activity_string_field key =
+    match Safe_ops.json_string_opt key arguments with
+    | Some value ->
+        let preview = activity_preview_string value in
+        if String.trim preview <> "" then Some (key, `String preview) else None
+    | None -> None
+  in
+  let activity_int_field key =
+    match Safe_ops.json_int_opt key arguments with
+    | Some value -> Some (key, `Int value)
+    | None -> None
+  in
+  `Assoc
+    ([
+       ("tool_name", `String (activity_plain_string tool_name));
+       ("success", `Bool success);
+       ("duration_ms", `Int duration_ms);
+       ("source", `String (activity_plain_string source));
+       ( "error",
+         match error_detail with
+         | Some e -> `String (activity_plain_string e)
+         | None -> `Null );
+       ( "tool_args_preview",
+         match tool_args_preview with
+         | Some preview -> `String (activity_plain_string preview)
+         | None -> `Null );
+     ]
+     @ List.filter_map activity_string_field
+         [
+           "cmd";
+           "task_id";
+           "repo";
+           "path";
+           "message";
+           "branch";
+           "branch_name";
+           "title";
+           "session_id";
+           "operation_id";
+           "verification_id";
+         ]
+     @ List.filter_map activity_int_field [ "pr_number"; "issue_number" ])
+  |> Safe_ops.sanitize_json_utf8
+
+module For_testing = struct
+  let activity_tool_called_payload = activity_tool_called_payload
+end
 
 let nonempty_string_opt = function
   | Some value ->
@@ -185,11 +229,7 @@ let runtime_mcp_keeper_log_context_of_entry
   let trace_id =
     Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id
   in
-  let model =
-    let last_model_used = String.trim entry.meta.runtime.usage.last_model_used in
-    if last_model_used <> "" then last_model_used
-    else String.trim entry.meta.cascade_name
-  in
+  let model = "runtime" in
   let session_id =
     match json_nonempty_string_opt "session_id" arguments with
     | Some _ as session_id -> session_id
@@ -251,7 +291,7 @@ let runtime_mcp_keeper_log_context_of_entry
     visible_tool_count = Some (List.length allowed_tool_names);
     required_tools = Some required_tools;
     missing_required_tools = Some missing_required_tools;
-    cascade_profile = Some entry.meta.cascade_name;
+    cascade_profile = Some (Keeper_types.cascade_name_of_meta entry.meta);
   }
 
 let runtime_mcp_keeper_error_preview message =
@@ -483,20 +523,8 @@ let record_runtime_mcp_keeper_tool_trace
 let read_only_retry_limit () =
   Env_config.Tools.readonly_retry_limit
 
-let is_retryable_message message =
-  (* Tool-level timeouts must not be retried — retrying a 30s timeout
-     causes 60-90s total wait time, amplifying the original issue. *)
-  if contains_casefold message "Tool timed out" then false
-  else
-  contains_casefold message "timeout" ||
-  contains_casefold message "temporary" ||
-  contains_casefold message "temporarily" ||
-  contains_casefold message "econn" ||
-  contains_casefold message "connection" ||
-  contains_casefold message "unavailable" ||
-  contains_casefold message "rate limit" ||
-  contains_casefold message "502" ||
-  contains_casefold message "503"
+let is_retryable_failure message =
+  Tool_result.is_retryable (classify_failure_message message)
 
 let read_only_retry_wait ~attempt =
   let attempt = float_of_int attempt in
@@ -509,16 +537,17 @@ let call_tool_with_readonly_retry
     () =
   let max_attempts = read_only_retry_limit () in
   let rec loop attempt =
-    let (success, message) =
-      run_tool ()
-    in
+    let result = run_tool () in
+    let success = result.Tool_result.success in
     if
       success
       || attempt >= max_attempts
       || not is_read_only
-      || not (is_retryable_message message)
+      || (match Tool_result.failure_class result with
+          | Some cls -> not (Tool_result.is_retryable cls)
+          | None -> false)
     then
-      (success, message, attempt)
+      (result, attempt)
     else (
       Eio.Time.sleep clock (read_only_retry_wait ~attempt);
       loop (attempt + 1))
@@ -680,29 +709,31 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
              with Eio.Time.Timeout ->
                local_timeout_hit := true;
                Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
-               (false,
-                let source =
-                  match source_env with
-                  | Some source -> Printf.sprintf " (timeout source: %s)" source
-                  | None -> ""
-                in
-                Printf.sprintf "Tool timed out after %.0fs: %s%s"
-                  timeout_sec name source))
+               let source =
+                 match source_env with
+                 | Some source -> Printf.sprintf " (timeout source: %s)" source
+                 | None -> ""
+               in
+               Tool_result.error ~tool_name:name ~start_time
+                 (Printf.sprintf "Tool timed out after %.0fs: %s%s"
+                    timeout_sec name source))
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        (* Never let a tool exception crash the MCP server. *)
        let err = Printexc.to_string exn in
        let trace = Printexc.get_backtrace () in
        let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-         (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+         Tool_result.error ~tool_name:name ~start_time
+           (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
        else
          (Log.Mcp.error "tools/call crashed: %s" err_detail;
-          false, Printf.sprintf "Internal error: %s" err_detail)
+          Tool_result.error ~tool_name:name ~start_time
+            (Printf.sprintf "Internal error: %s" err_detail))
     in
     if !local_timeout_hit then timeout_hit := true;
     result
   in
-  let (success, message, attempts) =
+  let (result, attempts) =
     if is_read_only then
       call_tool_with_readonly_retry
         ~clock
@@ -710,8 +741,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ~is_read_only
         ()
     else
-      let (success, message) = execute_with_timeout () in
-      (success, message, 1)
+      (execute_with_timeout (), 1)
+  in
+  let success = result.Tool_result.success
+  and message = Tool_result.message result
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
@@ -769,14 +802,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
   if not success then (
-    let failure_class = classify_tool_failure_class error_detail in
-    Log.Mcp.emit (log_level_of_tool_failure_class failure_class)
+    let failure_class =
+      match Tool_result.failure_class result with
+      | Some cls -> cls
+      | None -> Tool_result.Runtime_failure
+    in
+    Log.Mcp.emit (Tool_result.log_level_of_failure_class failure_class)
       ~details:
         (`Assoc
           [
             ("event_family", `String "tool_call_failure");
             ( "failure_class",
-              `String (tool_failure_class_to_string failure_class) );
+              `String (Tool_result.tool_failure_class_to_string failure_class) );
             ("tool_name", `String name);
             ("phase", `String "failure");
             ("request_id", `String jsonrpc_id_str);
@@ -887,48 +924,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   Tool_registry.record_call_if_known ~source ?assignment_id:called_assignment_id_opt
     ~tool_name:name ~success ~duration_ms ();
 
-  let tool_args_preview =
-    Observability_redact.redact_tool_input ~tool_name:name arguments
-  in
-  let activity_string_field key =
-    match Safe_ops.json_string_opt key arguments with
-    | Some value when String.trim value <> "" ->
-        Some (key, `String (Observability_redact.redact_preview value))
-    | _ -> None
-  in
-  let activity_int_field key =
-    match Safe_ops.json_int_opt key arguments with
-    | Some value -> Some (key, `Int value)
-    | None -> None
-  in
   let activity_payload =
-    `Assoc
-      ([
-         ("tool_name", `String name);
-         ("success", `Bool success);
-         ("duration_ms", `Int duration_ms);
-         ("source", `String (Tool_registry.string_of_source source));
-         ("error", match error_detail with Some e -> `String e | None -> `Null);
-         ( "tool_args_preview",
-           match tool_args_preview with
-           | Some preview -> `String preview
-           | None -> `Null );
-       ]
-       @ List.filter_map activity_string_field
-           [
-             "cmd";
-             "task_id";
-             "repo";
-             "path";
-             "message";
-             "branch";
-             "branch_name";
-             "title";
-             "session_id";
-             "operation_id";
-             "verification_id";
-           ]
-       @ List.filter_map activity_int_field [ "pr_number"; "issue_number" ])
+    let tool_args_preview =
+      Observability_redact.redact_tool_input ~tool_name:name arguments
+    in
+    activity_tool_called_payload
+      ~tool_name:name
+      ~success
+      ~duration_ms
+      ~source:(Tool_registry.string_of_source source)
+      ?error_detail
+      ?tool_args_preview
+      arguments
   in
 
   (* Emit activity graph event for tool call — enables real-time dashboard tracking *)

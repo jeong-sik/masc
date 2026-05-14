@@ -57,11 +57,11 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
 
 - **Run activity store substrate**
   - `src/components/ide/run-activity-store.ts` adds a typed ACTIVITY THIS RUN event store with run scoping, newest-first ordering, keeper grouping, and capped visible history.
-  - `src/components/ide/ide-activity-mock.ts` now consumes the store instead of embedding activity ordering and keeper hue mapping directly in the renderer.
+  - `src/components/ide/ide-activity-panel.ts` now consumes the store instead of embedding activity ordering and keeper hue mapping directly in the renderer, and surfaces live/stale/offline refresh state for the activity API.
 
 - **IDE INTERJECT store substrate**
   - `src/components/ide/interject-store.ts` adds typed active-keeper/message state for the INTERJECT rail and explicit availability reasons for Send/Approve/Pause/Drain actions.
-  - `src/components/ide/ide-interject-mock.ts` now consumes the store and `keeper-actions.ts` dispatch boundary instead of rendering a disabled placeholder form.
+  - `src/components/ide/ide-interject.ts` now consumes the store and `keeper-actions.ts` dispatch boundary instead of rendering a disabled placeholder form.
 
 - **IDE code document store substrate**
   - `src/components/ide/code-document-store.ts` adds a typed read-only source document store with file/language metadata, CRLF normalization, line lookup, and bounded line parsing.

@@ -8,7 +8,26 @@ open Masc_domain
 let mcp_session_action_enum_strings =
   [ "get"; "create"; "list"; "cleanup"; "remove" ]
 
-let schemas : tool_schema list = [
+(* RFC-0057 PR-2c: masc_approval_pending, masc_approval_get, masc_spawn
+   moved to codegen (Tool_descriptors_gen via Tool_schemas_misc.schemas).
+   masc_mcp_session remains here because its [action] enum is locked
+   to [mcp_session_action_enum_strings] above by the SSOT regression
+   test; codegen needs a shared enum source RFC before it can swap.
+
+   The three codegen-emitted tools are re-included in this list so
+   downstream consumers (Tool_dispatch.mcp_context_required_set,
+   Keeper_tool_policy.is_keeper_mcp_context_required) that read
+   Tool_schemas_inline.schemas continue to see all inline_infra
+   tools. *)
+let _codegen_inline_infra_names =
+  [ "masc_approval_pending"; "masc_approval_get"; "masc_spawn" ]
+
+let _inline_infra_from_codegen =
+  List.filter
+    (fun (s : tool_schema) -> List.mem s.name _codegen_inline_infra_names)
+    Tool_schemas_misc.schemas
+
+let schemas : tool_schema list = _inline_infra_from_codegen @ [
   (* masc_mcp_session *)
   {
     name = "masc_mcp_session";
@@ -35,76 +54,6 @@ Pair with masc_subscription to receive session-scoped event notifications.";
         ]);
       ]);
       ("required", `List [`String "action"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-  (* masc_cancellation, masc_subscription, masc_progress,
-     masc_governance_set removed: pruned from surfaces *)
-
-  (* masc_approval_pending *)
-  {
-    name = "masc_approval_pending";
-    description = "Keeper-safe read-only view of the pending HITL approval queue. \
-Use this to detect whether any approvals are waiting before asking an operator or using an admin-only detail/resolve path.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-  (* masc_approval_get *)
-  {
-    name = "masc_approval_get";
-    description = "Operator/admin-only detail view. Fetch one pending HITL approval by id, including the full input JSON. \
-Use after finding an approval id in the dashboard or pending approval queue when the preview is insufficient for an operator decision. \
-Requires the same privileged approval surface as resolving an approval.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Pending approval id, for example appr_abc123def456");
-        ]);
-      ]);
-      ("required", `List [`String "id"]);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-
-  (* masc_spawn *)
-  {
-    name = "masc_spawn";
-    description = "Spawn an agent process (claude, gemini, codex, or llama) to execute a task. \
-Use when you need another agent to work in parallel on a subtask. \
-For llama, provide model explicitly. Pair with masc_add_task to create the task first.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent to spawn: 'claude', 'gemini', 'codex', or custom command");
-        ]);
-        ("model", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Explicit model id. Required when agent_name='llama'.");
-        ]);
-        ("prompt", `Assoc [
-          ("type", `String "string");
-          ("description", `String "The task/prompt to send to the agent");
-        ]);
-        ("timeout_seconds", `Assoc [
-          ("type", `String "integer");
-          ("default", `Int 300);
-          ("description", `String "Max execution time in seconds (default: 300)");
-        ]);
-        ("working_dir", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Working directory for the agent (optional)");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "prompt"]);
       ("additionalProperties", `Bool false);
     ];
   };

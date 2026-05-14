@@ -1,0 +1,27 @@
+# OCaml "Spec navigation" line-ref baseline — transient grandfather list
+# for scripts/audit-ocaml-spec-nav-line-refs.sh.  Each non-comment line:
+# "<repo-relative-path>:<symbol>".
+#
+# STATUS: empty.  iter 72 R-1.a (#14944) introduced the validator with
+# seven grandfathered `[symbol] (~line N)` citations whose line numbers
+# had drifted +29 .. +424; their fix-PRs merged:
+#   keeper_failure_circuit_breaker.ml  — iter 70 #14939 (predates this file)
+#   keeper_approval_queue.ml ×3        — iter 71 N-2.e #14943
+#   keeper_execution_receipt.ml:append — iter 73 N-2.g #14946
+#   keeper_memory_policy.ml ×3         — iter 73 N-2.f #14946
+# iter 74 R-1.b drained the lines, so the validator now enforces zero
+# OCaml-docstring line-ref drift.  Keep this file: the CI step still
+# passes `--baseline <this file>` and the `--baseline` flag works for
+# any future transient grandfathering — add a "<path>:<symbol>" line
+# here, reference the fix-PR in this comment, and remove it once that
+# PR merges (same convention as the ocaml-phase-count baseline).
+#
+# iter 95 R-1.c (#15004) widened the scanner from `grep -oE` (line-
+# oriented) to awk whole-file scan + bounded multi-line match + comment-
+# boundary filter; it surfaced one previously hidden citation
+# (`keeper_unified_turn.ml [run_keeper_cycle]`, -803 drift), which
+# iter 94 #15002 had already drained on origin/main minutes earlier.
+# iter 96 R-1.d (this PR) drains the transient baseline line that
+# #15004 had to keep while #15002 was OPEN.  STATUS returns to empty,
+# zero OCaml-docstring line-ref drift across all five baseline chains
+# (R-1.a -> R-1.b -> R-1.c -> R-1.d).

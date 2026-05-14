@@ -1,9 +1,9 @@
 ---
 status: reference
-last_verified: 2026-04-23
+last_verified: 2026-05-12
 code_refs:
   - docs/
-  - docs/_audit/2026-04-17-doc-classification.md
+  - docs/audit/2026-04-17-doc-classification.md
 ---
 
 # Appendix A: Existing Documentation Index

@@ -23,8 +23,9 @@
 #   Each [Eio.Net.accept ~sw] callsite must, within the next
 #   [WINDOW_LINES] lines, contain:
 #     1. [Eio.Switch.run] (per-connection switch), AND
-#     2. [Switch.on_release] OR [Eio.Flow.close] (explicit FD close
-#        when the per-connection switch releases).
+#     2. [Switch.on_release] OR [Eio.Flow.close] OR the local
+#        [on_connection_release] helper (explicit FD close when the
+#        per-connection switch releases).
 #
 #   Either marker absent => the accept site is leaking the FD when
 #   the handler exits.
@@ -60,7 +61,7 @@ while IFS= read -r hit; do
   has_close=0
   printf '%s\n' "$window" | grep -q 'Eio\.Switch\.run' && has_switch_run=1
   printf '%s\n' "$window" \
-    | grep -qE 'Switch\.on_release|Eio\.Flow\.close|Eio\.Resource\.close' \
+    | grep -qE 'Switch\.on_release|Eio\.Flow\.close|Eio\.Resource\.close|on_connection_release' \
       && has_close=1
 
   if [ "$has_switch_run" -ne 1 ] || [ "$has_close" -ne 1 ]; then

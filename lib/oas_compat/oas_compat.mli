@@ -145,9 +145,15 @@ module Metrics : sig
     ?on_cache_hit:(model_id:string -> unit) ->
     ?on_cache_miss:(model_id:string -> unit) ->
     ?on_request_start:(model_id:string -> unit) ->
-    ?on_request_end:(model_id:string -> latency_ms:int -> unit) ->
+    ?on_request_end:(model_id:string -> latency_ms:int option -> unit) ->
     ?on_error:(model_id:string -> error:string -> unit) ->
     ?on_http_status:(provider:string -> model_id:string -> status:int -> unit) ->
+    ?on_circuit_state:
+      (provider:string ->
+       model_id:string ->
+       provider_key:string ->
+       state:Llm_provider.Metrics.circuit_state ->
+       unit) ->
     ?on_capability_drop:(model_id:string -> field:string -> unit) ->
     ?on_retry:(provider:string -> model_id:string -> attempt:int -> unit) ->
     ?on_token_usage:
@@ -155,6 +161,14 @@ module Metrics : sig
        model_id:string ->
        input_tokens:int ->
        output_tokens:int ->
+       unit) ->
+    ?on_streaming_first_chunk:
+      (provider:string -> model_id:string -> ttfrc_ms:float -> unit) ->
+    ?on_streaming_chunk:
+      (provider:string ->
+       model_id:string ->
+       chunk_index:int ->
+       inter_chunk_ms:float ->
        unit) ->
     unit ->
     Llm_provider.Metrics.t

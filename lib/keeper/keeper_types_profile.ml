@@ -46,8 +46,7 @@ let sandbox_profile_to_string = function
 
 let reserved_cascade_names =
   List.sort_uniq String.compare
-    (Keeper_cascade_profile.known_cascades
-     @ phase_routing_cascade_names
+    (phase_routing_cascade_names
      @ [ tool_use_strict_cascade_name ])
 
 (** Parse a sandbox profile string. Canonical values are ["local"] and
@@ -549,8 +548,8 @@ let personas_root_opt () =
   | Sys_error _ -> None
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_profile_load_failures
-        ~labels:[("site", "personas_root")]
+        Keeper_metrics.metric_keeper_profile_load_failures
+        ~labels:[("site", Profile_load_failure_site.(to_label Personas_root))]
         ();
       Log.Keeper.warn "personas_root_opt unexpected: %s" (Printexc.to_string exn);
       None
@@ -564,8 +563,8 @@ let persona_profile_path_opt name =
     | Sys_error _ -> []
     | exn ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_profile_load_failures
-          ~labels:[("site", "personas_dirs_resolve")]
+          Keeper_metrics.metric_keeper_profile_load_failures
+          ~labels:[("site", Profile_load_failure_site.(to_label Personas_dirs_resolve))]
           ();
         Log.Keeper.warn "personas_dirs unexpected: %s" (Printexc.to_string exn);
         []
@@ -767,40 +766,27 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         match str "cascade_name" with
         | None -> Ok ()
         | Some raw ->
+            let raw_normalized = String.trim raw |> String.lowercase_ascii in
             let normalized =
               Keeper_cascade_profile.normalize_declared_name raw
               |> String.lowercase_ascii
             in
-            if List.mem normalized reserved_cascade_names then Ok ()
+            if List.mem raw_normalized reserved_cascade_names
+               || List.mem normalized reserved_cascade_names
+            then Ok ()
             else
-              (* #10259: don't collapse to the reserved list when only the
-                 strict materializer fails — fall back to top-level TOML
-                 section names so operator-defined cascades stay valid. *)
-              match
-                Keeper_cascade_profile.catalog_names_with_toml_fallback ()
-              with
-              | Ok (catalog, source) ->
+              match Keeper_cascade_profile.catalog_names_for_validation () with
+              | Ok catalog ->
                   let all_valid =
                     List.sort_uniq String.compare
                       (reserved_cascade_names @ catalog)
                   in
-                  let suffix =
-                    match source with
-                    | Keeper_cascade_profile.Live_catalog -> ""
-                    | Keeper_cascade_profile.Toml_section_fallback
-                        { catalog_error } ->
-                        Printf.sprintf
-                          " [degraded toml-section fallback; live \
-                           catalog unavailable: %s]"
-                          catalog_error
-                  in
                   if not (List.mem normalized all_valid) then
                     Error
                       (Printf.sprintf
-                         "invalid cascade_name '%s' (known: %s)%s"
+                         "invalid cascade_name '%s' (known: %s)"
                          raw
-                         (String.concat ", " all_valid)
-                         suffix)
+                         (String.concat ", " all_valid))
                   (* #10388: keeper_assignable=false cascades must reject
                      at config-load to avoid runtime reconcile failures. *)
                   else if Keeper_cascade_profile.is_system_only_cascade normalized
@@ -1179,7 +1165,7 @@ let merge_keeper_profile_defaults
     always_approve = prefer overlay.always_approve base.always_approve;
     social_model = prefer overlay.social_model base.social_model;
     cascade_name = prefer overlay.cascade_name base.cascade_name;
-    models = prefer overlay.models base.models;
+    models = None;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
     max_turns_per_call_scheduled_autonomous =
       prefer overlay.max_turns_per_call_scheduled_autonomous
@@ -1264,8 +1250,8 @@ let log_toml_skip_once ~file ~error =
   else begin
     Hashtbl.add logged_toml_skip key ();
     Prometheus.inc_counter
-      Prometheus.metric_keeper_profile_load_failures
-      ~labels:[("site", "toml_skip")]
+      Keeper_metrics.metric_keeper_profile_load_failures
+      ~labels:[("site", Profile_load_failure_site.(to_label Toml_skip))]
       ();
     Log.Keeper.warn "toml_loader: skipping %s: %s" file error;
     true
@@ -1405,10 +1391,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 cascade_name =
                   normalize_cascade_name_opt
                     (Safe_ops.json_string_opt "cascade_name" keeper_json);
-                models =
-                  (match Safe_ops.json_string_list "models" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
+                models = None;
                 (* oas_env lives only in keeper TOML, not persona JSON —
                    persona profiles are a design-time artifact whereas
                    transport env is an ops-time toggle. *)
@@ -1711,7 +1694,7 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
     (match keeper_toml_path_opt name with
      | Some _ ->
        Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
-       Prometheus.inc_counter Prometheus.metric_keeper_toml_invalid
+       Prometheus.inc_counter Keeper_metrics.metric_keeper_toml_invalid
          ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
          ()
      | None -> ());
@@ -1754,8 +1737,8 @@ let keeper_default_source_snapshot name : keeper_default_source_snapshot =
           { source_kind = Some "toml"; defaults }
       | Error e ->
           Prometheus.inc_counter
-            Prometheus.metric_keeper_profile_load_failures
-            ~labels:[("site", "toml_fallback")]
+            Keeper_metrics.metric_keeper_profile_load_failures
+            ~labels:[("site", Profile_load_failure_site.(to_label Toml_fallback))]
             ();
           Log.Keeper.warn
             "toml config for %s failed (%s), falling back to persona"
@@ -1783,8 +1766,8 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name : st
     | Sys_error _ -> []
     | exn ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_profile_load_failures
-          ~labels:[("site", "load_persona_extended")]
+          Keeper_metrics.metric_keeper_profile_load_failures
+          ~labels:[("site", Profile_load_failure_site.(to_label Load_persona_extended))]
           ();
         Log.Keeper.warn "load_persona_extended personas_dirs unexpected: %s"
           (Printexc.to_string exn);
@@ -1799,8 +1782,8 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name : st
         match Safe_ops.read_file_safe path with
         | Error msg ->
           Prometheus.inc_counter
-            Prometheus.metric_keeper_profile_load_failures
-            ~labels:[("site", "agent_md_read")]
+            Keeper_metrics.metric_keeper_profile_load_failures
+            ~labels:[("site", Profile_load_failure_site.(to_label Agent_md_read))]
             ();
           Log.Keeper.warn "[load_agent_md] failed to read %s: %s" path msg;
           None
@@ -1879,8 +1862,8 @@ let list_persona_summaries () : persona_summary list =
     | Sys_error _ -> []
     | exn ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_profile_load_failures
-          ~labels:[("site", "list_persona_summaries")]
+          Keeper_metrics.metric_keeper_profile_load_failures
+          ~labels:[("site", Profile_load_failure_site.(to_label List_persona_summaries))]
           ();
         Log.Keeper.warn "list_persona_summaries personas_dirs unexpected: %s"
           (Printexc.to_string exn);

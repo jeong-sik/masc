@@ -153,6 +153,101 @@ describe('oas-runtime-store', () => {
     })
   })
 
+  it('hydrates runtime artifact and evidence refs from OAS events', () => {
+    hydrateOasRuntimeFromTelemetryEntries([
+      {
+        source: 'oas_event',
+        type: 'oas:runtime.artifact_attached',
+        event_type: 'runtime.artifact_attached',
+        ts_unix: 500,
+        correlation_id: 'sess-evidence',
+        run_id: 'run-evidence',
+        payload: {
+          seq: 4,
+          ts: 500,
+          kind: [
+            'Artifact_attached',
+            {
+              artifact_id: 'art-raw',
+              name: 'runtime-raw-trace-json',
+              kind: 'json',
+              mime_type: 'application/json',
+              path: '/tmp/runtime-raw-trace-json.json',
+              size_bytes: 512,
+            },
+          ],
+        },
+      },
+      {
+        source: 'oas_event',
+        type: 'oas:runtime.artifact_attached',
+        event_type: 'runtime.artifact_attached',
+        ts_unix: 510,
+        correlation_id: 'sess-evidence',
+        run_id: 'run-evidence',
+        payload: {
+          seq: 5,
+          ts: 510,
+          kind: [
+            'Artifact_attached',
+            {
+              artifact_id: 'art-evidence',
+              name: 'runtime-evidence',
+              kind: 'json',
+              mime_type: 'application/json',
+              path: '/tmp/runtime-evidence.json',
+              size_bytes: 1024,
+            },
+          ],
+        },
+      },
+      {
+        source: 'oas_event',
+        type: 'oas:runtime.session_completed',
+        event_type: 'runtime.session_completed',
+        ts_unix: 520,
+        correlation_id: 'sess-evidence',
+        run_id: 'run-evidence',
+        payload: {
+          evidence: {
+            files: [
+              { label: 'report_json', path: '/tmp/report.json' },
+              { label: 'proof_json', path: '/tmp/proof.json' },
+              { label: 'telemetry_json', path: '/tmp/runtime-telemetry-json.json' },
+            ],
+          },
+        },
+      },
+      {
+        source: 'oas_event',
+        type: 'oas:runtime.agent_completed',
+        event_type: 'runtime.agent_completed',
+        ts_unix: 530,
+        correlation_id: 'sess-evidence',
+        run_id: 'run-evidence',
+        payload: {
+          kind: [
+            'Agent_completed',
+            {
+              participant_name: 'alpha',
+              raw_trace_run_id: 'raw-run-1',
+            },
+          ],
+        },
+      },
+    ] as TelemetryEntry[])
+
+    expect(oasHealthSummary.value.totalEvents).toBe(4)
+    expect(oasHealthSummary.value.evidenceRefsCount).toBeGreaterThan(0)
+    expect(oasHealthSummary.value.artifactRefsCount).toBe(2)
+    expect(oasHealthSummary.value.rawTraceRefsCount).toBeGreaterThanOrEqual(2)
+    expect(oasHealthSummary.value.reportRefsCount).toBeGreaterThanOrEqual(1)
+    expect(oasHealthSummary.value.proofRefsCount).toBeGreaterThanOrEqual(1)
+    expect(oasHealthSummary.value.telemetryRefsCount).toBeGreaterThanOrEqual(1)
+    expect(oasHealthSummary.value.runtimeEvidenceRefsCount).toBeGreaterThanOrEqual(1)
+    expect(oasHealthSummary.value.lastEvidenceTs).toBe(530_000)
+  })
+
   it('dedupes timestamp-less events across replay/live time drift', () => {
     vi.useFakeTimers()
     try {

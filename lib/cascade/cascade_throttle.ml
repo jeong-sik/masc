@@ -64,12 +64,7 @@ let apply_op
 
 let populate (statuses : Llm_provider.Discovery.endpoint_status list) =
   let ops = List.map prepare_op statuses in
-  let rec loop () =
-    let cur = Atomic.get throttle_table in
-    let next = List.fold_left apply_op cur ops in
-    if not (Atomic.compare_and_set throttle_table cur next) then loop ()
-  in
-  loop ()
+  Lockfree_atomic.update throttle_table (fun cur -> List.fold_left apply_op cur ops)
 
 let lookup url = String_map.find_opt url (Atomic.get throttle_table)
 

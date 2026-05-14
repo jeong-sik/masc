@@ -68,6 +68,13 @@ The script is intentionally stdlib-only. CI can run it without installing
 YAML tooling because it checks explicit alert names, metric names, and
 threshold fragments from the contract.
 
+Cloud and subprocess-CLI providers do not support an auth-free bootstrap
+health probe. Catalog validation reports those candidates as
+`not_applicable` and keeps `masc_provider_actual_health_status` at `0`
+(`unknown`) without incrementing
+`masc_provider_health_probe_skipped_total`. The skipped counter is reserved
+for providers where a probe was expected but could not run.
+
 ## Apply
 
 Prometheus deployments should include

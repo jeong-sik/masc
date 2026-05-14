@@ -142,7 +142,7 @@ val json_headers : string -> string -> string -> (string * string) list
 (** {1 SSE session control} *)
 
 val check_sse_connect_guard :
-  string -> (unit, string * float) result
+  string -> (unit, Sse_reject_reason.t * float) result
 val stop_sse_session : string -> unit
 val close_all_sse_connections : unit -> unit
 

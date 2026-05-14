@@ -15,6 +15,8 @@ Prometheus / Grafana files that live alongside the masc-mcp source so deployment
 | `goal-loop-observe-metrics.contract.json` | GOAL LOOP Observe | exporter contract | `docs/observability/goal-loop-observe-metrics.md` |
 | `keeper-turn-fsm-alerts.yml` | keeper turn FSM | alerts | `docs/observability/keeper-turn-fsm-metrics.md` |
 | `keeper-turn-fsm-slo.yml` | keeper turn FSM | recording rules | `docs/observability/keeper-turn-fsm-metrics.md` |
+| `grafana-dashboard-surface-dashboard.json` | dashboard IA | Grafana dashboard | `docs/observability/dashboard-surface-metrics.md` |
+| `auth-credential-alerts.yml` | auth credential surface | alerts | `docs/observability/auth-credential-metrics.md` |
 
 ## Domains
 
@@ -32,7 +34,11 @@ signal.
 
 ### Cascade
 
-Tracks cascade-routing decisions inside `Oas_worker_named.cycle_loop`. Counters: `masc_cascade_strategy_decisions_total{cascade,strategy,kind}`, `masc_cascade_capacity_events_total{kind,key_type}`. State vocabulary: `ordered / filtered_empty / exhausted` (TLA+ `KeeperCascadeLifecycle`).
+Tracks cascade-routing decisions inside `Keeper_turn_driver.cycle_loop`. Counters: `masc_cascade_strategy_decisions_total{cascade,strategy,kind}`, `masc_cascade_capacity_events_total{kind,key_type}`. State vocabulary: `ordered / filtered_empty / exhausted` (TLA+ `KeeperCascadeLifecycle`).
+
+### Dashboard IA
+
+Tracks dashboard surface and section opens to drive RFC-0048 IA Phase 2 deletion-threshold decisions. Counters: `dashboard_surface_open_total{surface}`, `dashboard_section_open_total{surface, section, redirected_from}`. The `redirected_from` label distinguishes direct opens from redirect-driven opens (legacy bookmarks) — only direct opens count toward RFC-0048 §4.4 hide/delete thresholds. Aggregate-only, no PII. Producer code: `lib/dashboard/dashboard_nav_event.ml`, `dashboard/src/lib/nav-telemetry.ts`. CLI consumer: `scripts/dashboard-ia-usage.sh`.
 
 ### Keeper turn FSM
 
@@ -46,6 +52,14 @@ The two domains overlap *only* at `cascade_routing` — when the keeper FSM ente
 - `masc_cascade_strategy_decisions_total{kind="exhausted",cascade=...}` — cascade view
 
 Both should fire for the same turn; if only one fires the runtime path skipped a layer.
+
+### Auth credential surface
+
+Tracks the boot-time and runtime state of the bare-form keeper alias files written by `Auth.ensure_credential_alias` (PR-#10440) against the archive policy in `Auth.archive_bare_for_canonical` (PR-3b2). After PR #15112 the γ classifier distinguishes alive aliases (redirect stubs aimed at the canonical credential's UUID) from dead bares; the surface is refreshed every 60s by a periodic Eio fiber so mid-run regressions surface within one tick.
+
+Gauges: `masc_auth_bare_alias{state=alive|dead|no_bare}` — classifier counts. `state="dead" > 0` is the ping-pong regression alert hook. `masc_auth_archive_epochs` — current `.archive/<epoch>/` subdir count after the retention sweep. Counters: `masc_auth_archive_pruned_total` — cumulative epoch dirs removed. `masc_auth_bare_alias_outcome_total{outcome=alive_skip|dead_archive|absent}` — per-call dispatch flow (added by 2026-05-14 audit pass to catch transient regressions before snapshot drifts). `masc_auth_bare_alias_audit_ticks_total` — periodic fiber heartbeat; `rate(...) < 0.01` distinguishes a fiber stall (gauges stale-but-present) from a full scrape outage.
+
+Producer code: `lib/auth.ml: classify_bare_for_canonical / bare_alias_audit / prune_archive / start_bare_alias_audit_fiber`, `lib/server/server_runtime_bootstrap.ml: startup_prune_auth_archive`, `lib/server/server_bootstrap_loops.ml` wiring. Alerts: `auth-credential-alerts.yml`.
 
 ## Apply
 

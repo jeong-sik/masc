@@ -51,7 +51,7 @@ def generate_image(prompt: str, output_path: Path, size: tuple[int, int]) -> boo
 
     try:
         response = client.models.generate_content(
-            model=os.getenv("MASC_IMAGE_MODEL", "gemini-2.5-flash-image"),
+            model=os.getenv("MASC_IMAGE_MODEL", "gemini-3-flash-preview"),
             contents=full_prompt,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE", "TEXT"],

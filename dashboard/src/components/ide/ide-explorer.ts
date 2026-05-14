@@ -2,12 +2,14 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Search } from 'lucide-preact'
 import { activeKeeperName } from '../../keeper-state'
-import { type FileTreeStore, type FileTreeNode } from './file-tree-store'
-import { activeIdeFile } from './ide-shell'
+import { type FileTreeStore, type FileTreeNode, type FileTreeDiffSummary } from './file-tree-store'
+import { activeIdeFile, ideContextFocus, type IdeContextFocus } from './ide-state'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
 import { KeeperBadge } from '../keeper-badge'
+import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
+import { openIdeContextRouteLink } from './ide-context-lens'
 
 interface IdeExplorerProps {
   readonly fileTreeStore: FileTreeStore
@@ -32,6 +34,8 @@ interface ExplorerScopeLabel {
   readonly label: string
   readonly tone: ExplorerScopeTone
 }
+
+const EXPLORER_CONTEXT_LINK_LIMIT = 3
 
 function repositoryLabel(
   repositories: ReadonlyArray<Repository>,
@@ -111,6 +115,12 @@ export function IdeExplorer({
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   useEffect(() => activeIdeFile.subscribe(file => setActiveFile(file)), [])
 
+  const [contextFocus, setContextFocus] = useState(ideContextFocus.value)
+  useEffect(() => ideContextFocus.subscribe(focus => setContextFocus(focus)), [])
+
+  const [cursorOverlay, setCursorOverlay] = useState(cursorOverlaySignal.value)
+  useEffect(() => cursorOverlaySignal.subscribe(v => setCursorOverlay(v)), [])
+
   const handleRepositoryScan = async (): Promise<void> => {
     if (!onRepositoryScan || isScanningRepositories) return
     setIsScanningRepositories(true)
@@ -140,7 +150,21 @@ export function IdeExplorer({
     return visible.filter(n => n.label.toLowerCase().includes(needle))
   }, [visible, filter])
   const fileCount = filtered.filter(n => !n.hasChildren).length
+  const diffSummary = useMemo(() => store.diffSummary(), [store, tick])
   const scopeLabel = explorerScopeLabel(source, keeperName, repoList)
+
+  // Reverse map: file_path → keepers currently focused on that file
+  const keepersByFile = useMemo(() => {
+    const map = new Map<string, Array<{ readonly keeperId: string; readonly color: string; readonly focusMode: string }>>()
+    for (const [keeperId, cursor] of cursorOverlay.cursors) {
+      if (!cursor.file_path) continue
+      const entry = { keeperId, color: getKeeperColor(keeperId).cursor, focusMode: cursor.focus_mode }
+      const existing = map.get(cursor.file_path)
+      if (existing) existing.push(entry)
+      else map.set(cursor.file_path, [entry])
+    }
+    return map
+  }, [cursorOverlay])
 
   return html`
     <div
@@ -167,6 +191,7 @@ export function IdeExplorer({
           >${scopeLabel.label}</span></span>
         <span>${fileCount} FILES</span>
       </header>
+      ${diffSummary.changedFiles > 0 ? ExplorerDiffSummary(diffSummary) : null}
       ${repoList.length > 0 || onRepositoryScan ? html`
         <div
           style=${{
@@ -285,6 +310,8 @@ export function IdeExplorer({
               if (node.hasChildren) store.toggle(node.path)
               else activeIdeFile.value = node.path
             },
+            contextFocus?.file_path === node.path ? contextFocus : null,
+            keepersByFile.get(node.path),
           ))}
         </ul>
       </div>
@@ -317,7 +344,31 @@ function SourceHint(source: WorkspaceSource) {
   `
 }
 
-function TreeRow(node: FileTreeNode, expanded: boolean, selected: boolean, onClick: () => void) {
+function fileIcon(node: FileTreeNode, expanded: boolean): string {
+  if (node.hasChildren) return expanded ? '📂' : '📁'
+  const dot = node.label.lastIndexOf('.')
+  const ext = dot >= 0 ? node.label.slice(dot) : ''
+  const ICONS: Readonly<Record<string, string>> = {
+    '.ts': '🟦', '.tsx': '🟦',
+    '.js': '🟨', '.jsx': '🟨',
+    '.py': '🐍',
+    '.ml': '🐫', '.mli': '🐫',
+    '.rs': '🦀', '.go': '🔵',
+    '.json': '📋', '.md': '📝',
+    '.html': '🌐', '.css': '🎨',
+    '.toml': '⚙️', '.yaml': '⚙️', '.yml': '⚙️',
+  }
+  return ICONS[ext] ?? '📄'
+}
+
+function TreeRow(
+  node: FileTreeNode,
+  expanded: boolean,
+  selected: boolean,
+  onClick: () => void,
+  contextFocus: IdeContextFocus | null,
+  activeKeepers?: ReadonlyArray<{ readonly keeperId: string; readonly color: string; readonly focusMode: string }>,
+) {
   const indent = node.depth * 12
   const chevron = node.hasChildren ? (expanded ? '▾' : '▸') : ''
   const onKeyDown = (e: KeyboardEvent): void => {
@@ -342,11 +393,119 @@ function TreeRow(node: FileTreeNode, expanded: boolean, selected: boolean, onCli
       <span aria-hidden="true" style=${{ color: 'var(--color-fg-muted)', width: '12px', textAlign: 'center' }}>${chevron}</span>
       ${node.keeperId
         ? html`<${KeeperBadge} id=${node.keeperId} variant="sigil" size="sm" />`
-        : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px' }} />`}
+        : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px', textAlign: 'center', fontSize: '12px', lineHeight: '14px' }}>${fileIcon(node, expanded)}</span>`}
       <span class="ide-explorer-row-label">${node.label}</span>
+      ${contextFocus ? ExplorerContextChip(contextFocus) : null}
+      ${activeKeepers && activeKeepers.length > 0
+        ? html`<span
+            aria-label=${`${activeKeepers.map(k => k.keeperId).join(', ')} focusing`}
+            style=${{ display: 'inline-flex', gap: '2px', marginLeft: 'auto', flexShrink: 0 }}
+          >${activeKeepers.map(k => html`
+            <span
+              key=${k.keeperId}
+              title=${`${k.keeperId} (${k.focusMode})`}
+              style=${{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: k.color,
+                display: 'inline-block',
+              }}
+            />
+          `)}</span>`
+        : null}
       ${node.diff !== null
-        ? html`<span style=${{ color: 'var(--color-fg-muted)', font: 'var(--fs-11)' }}>${node.diff}</span>`
+        ? html`<span
+            aria-label=${`Git diff ${node.diff}`}
+            title=${`Git diff ${node.diff}`}
+            style=${{ color: 'var(--color-fg-muted)', font: 'var(--fs-11)' }}
+          >${node.diff}</span>`
         : null}
     </li>
   `
+}
+
+function ExplorerDiffSummary(summary: FileTreeDiffSummary) {
+  const parts = [
+    `${summary.changedFiles} changed`,
+    summary.additions > 0 ? `+${summary.additions}` : null,
+    summary.deletions > 0 ? `-${summary.deletions}` : null,
+    summary.binaryFiles > 0 ? `${summary.binaryFiles} bin` : null,
+  ].filter((part): part is string => part !== null)
+  return html`
+    <div
+      role="status"
+      aria-label=${`Workspace git changes: ${parts.join(', ')}`}
+      style=${{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 'var(--sp-2)',
+        minHeight: '24px',
+        padding: 'var(--sp-1) var(--sp-2)',
+        color: 'var(--color-fg-secondary)',
+        background: 'var(--color-bg-muted)',
+        border: '1px solid var(--color-border-default)',
+        borderRadius: 'var(--r-1)',
+        font: 'var(--type-eyebrow)',
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      <span>Git changes</span>
+      <span
+        style=${{
+          display: 'inline-flex',
+          gap: 'var(--sp-2)',
+          color: 'var(--color-fg-primary)',
+        }}
+      >
+        ${parts.map(part => html`<span key=${part}>${part}</span>`)}
+      </span>
+    </div>
+  `
+}
+
+function ExplorerContextChip(focus: IdeContextFocus) {
+  const line = focus.line !== undefined ? `L${focus.line}` : null
+  const routeLinks = focus.route_links ?? []
+  const visibleLinks = routeLinks.slice(0, EXPLORER_CONTEXT_LINK_LIMIT)
+  const overflowCount = Math.max(0, routeLinks.length - visibleLinks.length)
+  const stopRouteClick = (event: MouseEvent): void => {
+    event.stopPropagation()
+  }
+  const stopRouteKeyDown = (event: KeyboardEvent): void => {
+    event.stopPropagation()
+  }
+  return html`
+    <span
+      class="ide-explorer-context-chip"
+      aria-label=${explorerContextChipLabel(focus)}
+      title=${`${focus.surface} · ${focus.label}`}
+    >
+      <span>${focus.surface}</span>
+      ${line ? html`<span>${line}</span>` : null}
+      ${visibleLinks.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${(event: MouseEvent) => {
+            stopRouteClick(event)
+            openIdeContextRouteLink(link)
+          }}
+          onKeyDown=${stopRouteKeyDown}
+        >${link.label}</button>
+      `)}
+      ${overflowCount > 0 ? html`<span aria-label=${`${overflowCount} more context links`}>+${overflowCount}</span>` : null}
+    </span>
+  `
+}
+
+function explorerContextChipLabel(focus: IdeContextFocus): string {
+  const line = focus.line !== undefined ? ` line ${focus.line}` : ''
+  const links = focus.route_links?.length
+    ? `, ${focus.route_links.length} route links`
+    : ''
+  return `Focused ${focus.surface}${line}: ${focus.label}${links}`
 }

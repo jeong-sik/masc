@@ -41,8 +41,9 @@ vars ==
        ckpt_valid, ckpt_generation, ckpt_trace_id, next_trace_id >>
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
-\* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
-\* spec uses the smallest possible alphabet (3 symbols) because the
+\* OCaml side is lib/keeper/keeper_state_machine.ml (13 phases;
+\* Zombie added iter 4 #14707, terminal-terminal, not modeled here).
+\* This spec uses the smallest possible alphabet (3 symbols) because the
 \* generation-lineage contract only inspects whether the keeper is
 \* idle, actively executing, or rolling over a generation handoff.
 \*
@@ -63,8 +64,11 @@ vars ==
 \*
 \* Unmodeled here (covered in companion specs):
 \*   Failing, Overflowed, Compacting, Draining, Paused,
-\*   Stopped, Crashed, Restarting, Dead — see
+\*   Stopped, Crashed, Restarting, Dead, Zombie — see
 \*   KeeperReconcileLiveness.tla and KeeperContextLifecycle.tla.
+\*   Zombie is terminal-terminal (post-Dead, no generation events
+\*   reachable); safety surface lives in KeeperStateMachine.tla
+\*   (ZombieIsForever / ZombieRequiresTerminalFailureLatched).
 Phases == {"idle", "running", "handing_off"}
 
 SeqElems(seq) == {seq[i] : i \in 1..Len(seq)}

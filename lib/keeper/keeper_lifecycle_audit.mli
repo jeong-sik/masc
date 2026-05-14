@@ -13,7 +13,7 @@ val record :
   unit
 (** [record ~keeper_name ~event_name ~phase ~detail] appends an event to the
     per-keeper ring buffer.  Called by
-    [Oas_events.publish_keeper_lifecycle] and the supervisor's
+    [Cascade_events.publish_keeper_lifecycle] and the supervisor's
     [publish_lifecycle] helper so every lifecycle event is captured. *)
 
 val recent_json : keeper_name:string -> limit:int -> Yojson.Safe.t

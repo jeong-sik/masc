@@ -46,17 +46,10 @@ type budget = {
   (** Hard backstop on total attempt wall-clock duration. *)
 }
 
-val cloud_fast : budget
-(** [30s / 20s / 180s] — [codex_cli], [claude], [gemini] short answers. *)
-
-val cloud_thinking : budget
-(** [60s / 30s / 300s] — adaptive-reasoning models with thinking deltas. *)
-
-val local_27b : budget
-(** [120s / 60s / 900s] — [ollama_only], [llama-server] mid-size local. *)
-
-val local_70b_plus : budget
-(** [240s / 90s / 1800s] — [70B+] local backstop. *)
+val bootstrap : budget
+(** Conservative first-attempt budget used only until
+    {!Cascade_attempt_liveness_config} has recent successful samples for the
+    concrete provider/model candidate. *)
 
 (** {1 Stream chunk taxonomy}
 
@@ -182,6 +175,18 @@ type output =
   | Completed
       (** Attempt succeeded. *)
 
+(** Metric recorder — caller supplies callbacks for TTFT seconds, TBT
+    seconds, and liveness outcome observation.  [null_recorder] is the
+    default so the pure FSM stays IO-free unless a caller explicitly
+    wires metrics. *)
+type recorder = {
+  record_ttft : float -> unit;
+  record_inter_chunk : float -> unit;
+  record_liveness_outcome : failure option -> unit;
+}
+
+val null_recorder : recorder
+
 (** {1 Decision function}
 
     {b Pure}: no IO, no clock read, no allocation outside what OCaml
@@ -209,4 +214,4 @@ type output =
     ordering themselves (e.g. via a single [Lwt_stream] / [Eio.Stream]
     pulled by one consumer). *)
 
-val step : budget -> state -> event -> state * output
+val step : ?recorder:recorder -> budget -> state -> event -> state * output

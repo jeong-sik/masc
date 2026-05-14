@@ -17,6 +17,7 @@
 import { html } from 'htm/preact'
 import { KNOWN_CONNECTOR_IDS } from './connector-status'
 import { SkeletonCircle } from './common/skeleton'
+import { SurfaceCard } from './common/card'
 
 /** Pure: grid layout class for the tile row. Mirrors the real strip's
     `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` so the skeleton and the
@@ -39,8 +40,8 @@ const LINE = 'h-3 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] animate-pul
 
 function TileSkeleton() {
   return html`
-    <div
-      class="flex min-w-0 flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+    <${SurfaceCard}
+      class="flex min-w-0 flex-col gap-2 !border-[var(--color-border-default)] !bg-[var(--color-bg-surface)] !p-3"
       data-overview-skeleton-tile
     >
       <div class="flex min-w-0 items-center gap-2">
@@ -62,7 +63,7 @@ function TileSkeleton() {
       <div class="flex items-end gap-0.5" aria-hidden="true">
         ${Array.from({ length: 45 }, (_, i) => html`<span class=${BAR} data-skeleton-bar-index=${i}></span>`)}
       </div>
-    </div>
+    </${SurfaceCard}>
   `
 }
 

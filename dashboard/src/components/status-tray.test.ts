@@ -33,7 +33,7 @@ function task(id: string, status: Task['status']): Task {
 }
 
 describe('summarizeStatusTray', () => {
-  it('marks WS-only transport red when the socket is not ready', () => {
+  it('marks the client transport red when the socket is not ready', () => {
     const summary = summarizeStatusTray({
       wsOnly: true,
       sseConnected: false,
@@ -41,6 +41,8 @@ describe('summarizeStatusTray', () => {
       wsReady: false,
       wsLastEventAt: 0,
       wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: 'socket closed',
       reconnectCount: 0,
       lastDisconnectedAt: 0,
@@ -57,6 +59,34 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.transport.detail).toContain('socket closed')
   })
 
+  it('marks WS-only transport as degraded but live when SSE fallback is carrying events', () => {
+    const summary = summarizeStatusTray({
+      wsOnly: true,
+      sseConnected: true,
+      wsConnected: false,
+      wsReady: false,
+      wsLastEventAt: 0,
+      wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
+      wsSseFallbackActive: true,
+      wsSseFallbackReason: 'dashboard websocket rpc timed out: dashboard/ping',
+      wsLastError: 'dashboard websocket rpc timed out: dashboard/ping',
+      reconnectCount: 0,
+      lastDisconnectedAt: 0,
+      keepers: [],
+      staleKeeperNames: new Set(),
+      tasks: [],
+      journalEntries: [],
+      unacknowledgedErrors: 0,
+      now: NOW,
+    })
+
+    expect(summary.items.transport.tone).toBe('warn')
+    expect(summary.items.transport.value).toBe('SSE fallback')
+    expect(summary.items.transport.detail).toContain('dashboard/ping')
+  })
+
   it('rolls stale keeper, verification, and error counts into tray items', () => {
     const summary = summarizeStatusTray({
       wsOnly: false,
@@ -65,6 +95,8 @@ describe('summarizeStatusTray', () => {
       wsReady: true,
       wsLastEventAt: NOW - 1000,
       wsEventCount60s: 4,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: null,
       reconnectCount: 1,
       lastDisconnectedAt: 0,
@@ -97,6 +129,70 @@ describe('summarizeStatusTray', () => {
     })
   })
 
+  it('counts execution receipt evidence even without the top-level attention flag', () => {
+    const summary = summarizeStatusTray({
+      wsOnly: false,
+      sseConnected: true,
+      wsConnected: true,
+      wsReady: true,
+      wsLastEventAt: NOW - 1000,
+      wsEventCount60s: 4,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
+      wsLastError: null,
+      reconnectCount: 0,
+      lastDisconnectedAt: 0,
+      keepers: [
+        keeper('gamma', {
+          needs_attention: false,
+          trust: {
+            execution_summary: {
+              tool_contract_result: 'missing_required_tool_use',
+              missing_required_tools: ['keeper_bash'],
+            },
+          },
+        }),
+      ],
+      staleKeeperNames: new Set(),
+      tasks: [],
+      journalEntries: [],
+      unacknowledgedErrors: 0,
+      now: NOW,
+    })
+
+    expect(summary.counts.keeperAttention).toBe(1)
+    expect(summary.items.fleet.tone).toBe('warn')
+    expect(summary.items.fleet.detail).toBe('1 keeper need attention')
+    expect(summary.items.attention.tone).toBe('warn')
+    expect(summary.items.attention.value).toBe('1')
+  })
+
+  it('keeps the client transport green when route events are idle but heartbeat is fresh', () => {
+    const summary = summarizeStatusTray({
+      wsOnly: true,
+      sseConnected: false,
+      wsConnected: true,
+      wsReady: true,
+      wsLastEventAt: 0,
+      wsEventCount60s: 0,
+      wsLastPongAt: NOW - 2_000,
+      wsLastPongLatencyMs: 37,
+      wsLastError: null,
+      reconnectCount: 0,
+      lastDisconnectedAt: 0,
+      keepers: [],
+      staleKeeperNames: new Set(),
+      tasks: [],
+      journalEntries: [],
+      unacknowledgedErrors: 0,
+      now: NOW,
+    })
+
+    expect(summary.items.transport.tone).toBe('ok')
+    expect(summary.items.transport.value).toBe('37ms')
+    expect(summary.items.transport.detail).toContain('heartbeat pong 2s ago')
+  })
+
   it('uses the first journal entry for activity state from newest-first snapshots', () => {
     const summary = summarizeStatusTray({
       wsOnly: false,
@@ -105,6 +201,8 @@ describe('summarizeStatusTray', () => {
       wsReady: false,
       wsLastEventAt: 0,
       wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,
@@ -132,6 +230,8 @@ describe('summarizeStatusTray', () => {
       wsReady: false,
       wsLastEventAt: 0,
       wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
       wsLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,

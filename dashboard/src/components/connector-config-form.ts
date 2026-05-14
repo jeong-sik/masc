@@ -25,7 +25,9 @@ import { Checkbox } from './common/checkbox'
 import { CopyableCode } from './common/copyable-code'
 import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
+import { SurfaceCard } from './common/card'
 import { showToast } from './common/toast'
+import { authHeaders } from '../api/core'
 
 type FieldType = 'string' | 'integer' | 'number' | 'boolean' | 'unknown'
 
@@ -179,7 +181,7 @@ async function fetchCurrentValues(id: string): Promise<Record<string, string>> {
   // back to schema defaults rather than block on the prefill.
   try {
     const res = await fetch(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, {
-      headers: { Accept: 'application/json' },
+      headers: { ...authHeaders(), Accept: 'application/json' },
     })
     if (!res.ok) return {}
     const data = (await res.json()) as ConfigReadResponse
@@ -194,7 +196,7 @@ async function fetchSchema(id: string) {
   setEntry(id, { loading: true, error: null })
   try {
     const res = await fetch(`/api/v1/sidecar/schema?name=${encodeURIComponent(id)}`, {
-      headers: { Accept: 'application/json' },
+      headers: { ...authHeaders(), Accept: 'application/json' },
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = (await res.json()) as SchemaResponse
@@ -234,6 +236,7 @@ async function saveConfig(id: string) {
     const res = await fetch(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, {
       method: 'POST',
       headers: {
+        ...authHeaders(),
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
@@ -268,7 +271,7 @@ async function applyConfigChange(id: string) {
     try {
       await fetch(`/api/v1/sidecar/stop?name=${encodeURIComponent(id)}`, {
         method: 'POST',
-        headers: { Accept: 'application/json' },
+        headers: { ...authHeaders(), Accept: 'application/json' },
       })
     } catch {
       // Stop failures are non-fatal here — target might not be running.
@@ -276,7 +279,7 @@ async function applyConfigChange(id: string) {
     await new Promise(r => setTimeout(r, 800))
     const startRes = await fetch(`/api/v1/sidecar/start?name=${encodeURIComponent(id)}`, {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: { ...authHeaders(), Accept: 'application/json' },
     })
     if (!startRes.ok) throw new Error(`start HTTP ${startRes.status}`)
     showToast(`${id} 재시작 완료 — 새 config 적용됨`, 'success', 2400)
@@ -411,9 +414,9 @@ function FieldWidget({ id, field, value, revealed }: {
       `
     default:
       return html`
-        <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--color-status-warn)]">
+        <${SurfaceCard} class="!border-[var(--warn-20)] !bg-[var(--warn-10)] !px-2 !py-1 text-3xs text-[var(--color-status-warn)]">
           unsupported type — refactor BotConfig?
-        </div>
+        </${SurfaceCard}>
       `
   }
 }
@@ -430,15 +433,15 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.loading) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <${SurfaceCard} class="mt-3 !p-3" id=${`connector-config-${connectorId}`}>
         <${LoadingState}>config schema 불러오는 중...<//>
-      </div>
+      </${SurfaceCard}>
     `
   }
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} role="alert" class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
+      <${SurfaceCard} class="mt-3 !border-[var(--bad-20)] !bg-[var(--bad-10)] !p-3 text-2xs text-[var(--bad-light)]" id=${`connector-config-${connectorId}`} role="alert">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button
@@ -447,22 +450,22 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           aria-label="config schema 다시 가져오기"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
-      </div>
+      </${SurfaceCard}>
     `
   }
 
   if (entry.fields.length === 0) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <${SurfaceCard} class="mt-3 !p-3 text-2xs text-[var(--color-fg-disabled)]" id=${`connector-config-${connectorId}`}>
         schema가 비어있습니다. backend가 sidecar venv를 못 찾았을 수 있어요.
-      </div>
+      </${SurfaceCard}>
     `
   }
 
   const envBlock = buildEnvBlock(entry)
 
   return html`
-    <div id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정" class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <${SurfaceCard} class="mt-3 !p-3" id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정">
       <div class="mb-2 flex items-center justify-between">
         <div class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
@@ -542,7 +545,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               const hint = getFieldHint(field.name)
               if (hint === null) return null
               return html`
-                <div class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
+                <${SurfaceCard} class="!border-[var(--accent-20)] !bg-[var(--accent-10)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
                   <span class="mr-1" aria-hidden="true">📍</span>
                   <span>${hint.where}</span>
                   ${hint.url
@@ -555,7 +558,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                         >열기 ↗</a>
                       `
                     : null}
-                </div>
+                </${SurfaceCard}>
               `
             })()}
           </div>
@@ -570,7 +573,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           ? html`<div class="text-3xs text-[var(--color-fg-disabled)]">(필수 필드를 채우면 여기에 표시됩니다)</div>`
           : html`<${CopyableCode} command=${envBlock} ariaLabel=${`Copy ${connectorId} .env block`} />`}
       </div>
-    </div>
+      </${SurfaceCard}>
   `
 }
 

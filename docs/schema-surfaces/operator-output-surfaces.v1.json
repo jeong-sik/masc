@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "updated_at": "2026-05-14",
+  "description": "Operator-facing index of MASC runtime output, dashboard, and OAS bridge schema surfaces.",
+  "surfaces": [
+    {
+      "id": "masc.keeper_composite.http.v1",
+      "kind": "http_response",
+      "owner": "MASC",
+      "producer": "Keeper_composite_observer snapshot_to_json",
+      "consumer": ["dashboard FSM Hub", "fleet/operator views"],
+      "wire_or_artifact": "/api/v1/keepers/:name/composite response",
+      "schema_source": [
+        "lib/keeper/keeper_composite_observer.mli",
+        "dashboard/src/api/schemas/keeper-composite.ts",
+        "dashboard/docs/API_CONTRACT.md"
+      ],
+      "validator": "Valibot dashboard parser plus OCaml projection tests",
+      "tests": [
+        "dashboard/src/api/schemas/keeper-composite.test.ts",
+        "test/test_keeper_composite_observer.ml"
+      ],
+      "stability": "operator_internal",
+      "version_field": null,
+      "external_refs": [],
+      "notes": "Dashboard schema is the runtime boundary for response parsing; OCaml projection remains the producer truth."
+    },
+    {
+      "id": "masc.dashboard_sse.v1",
+      "kind": "sse_event",
+      "owner": "MASC",
+      "producer": "Server SSE publishers",
+      "consumer": ["dashboard SSE/WebSocket clients"],
+      "wire_or_artifact": "Dashboard SSE event envelope",
+      "schema_source": [
+        "dashboard/src/schemas/sse.ts",
+        "dashboard/src/types/sse.ts",
+        "docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md"
+      ],
+      "validator": "Dashboard SSE parser",
+      "tests": ["dashboard/src/schemas/sse.test.ts", "test/test_sse.ml"],
+      "stability": "operator_internal",
+      "version_field": null,
+      "external_refs": ["oas.event_bus.v1"],
+      "notes": "SSE freshness signals are not authoritative read models; consumers re-fetch authoritative snapshots."
+    },
+    {
+      "id": "masc.keeper_runtime_manifest.jsonl.v1",
+      "kind": "jsonl_artifact",
+      "owner": "MASC",
+      "producer": "Keeper_runtime_manifest",
+      "consumer": ["runtime lens", "keeper diagnostics"],
+      "wire_or_artifact": ".masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl",
+      "schema_source": ["lib/keeper/keeper_runtime_manifest.mli"],
+      "validator": "Keeper_runtime_manifest.of_json",
+      "tests": ["test/test_keeper_runtime_manifest.ml"],
+      "stability": "operator_internal",
+      "version_field": "schema_version",
+      "external_refs": ["oas.runtime_protocol.v1", "oas.event_bus.v1"],
+      "notes": "Records decision context before and during provider attempts; narrower than execution receipts."
+    },
+    {
+      "id": "masc.keeper_execution_receipt.jsonl.v1",
+      "kind": "jsonl_artifact",
+      "owner": "MASC",
+      "producer": "Keeper_execution_receipt",
+      "consumer": ["execution dashboard", "operator trust surfaces"],
+      "wire_or_artifact": ".masc/keepers/<keeper>/execution-receipts/*.jsonl",
+      "schema_source": ["lib/keeper/keeper_execution_receipt.mli"],
+      "validator": "Keeper_execution_receipt.to_json and receipt invariant tests",
+      "tests": [
+        "test/test_keeper_receipt_authoritative.ml",
+        "test/test_keeper_receipt_authoritative_matrix.ml",
+        "test/test_keeper_receipt_outcome_tla_parity.ml"
+      ],
+      "stability": "operator_internal",
+      "version_field": "schema",
+      "external_refs": ["oas.raw_trace_record.v1"],
+      "notes": "Terminal keeper turn receipt, including tool contract and cascade outcome summary."
+    },
+    {
+      "id": "masc.keeper_tool_call_log.jsonl.v1",
+      "kind": "jsonl_artifact",
+      "owner": "MASC",
+      "producer": "Keeper_tool_call_log",
+      "consumer": ["dashboard tool-call inspector", "runtime trust summaries"],
+      "wire_or_artifact": ".masc/tool_calls/YYYY-MM/DD.jsonl",
+      "schema_source": ["lib/keeper_tool_call_log.mli"],
+      "validator": "Tool-call log read_recent and redaction tests",
+      "tests": ["test/test_keeper_tool_call_log.ml"],
+      "stability": "operator_internal",
+      "version_field": null,
+      "external_refs": ["oas.raw_trace_record.v1"],
+      "notes": "Persists redacted full I/O and effective turn policy context for keeper tool calls."
+    },
+    {
+      "id": "masc.runtime_contract_projection.v1",
+      "kind": "json_schema",
+      "owner": "MASC",
+      "producer": "Keeper_runtime_contract",
+      "consumer": ["execution receipt", "tool-call log", "runtime trust"],
+      "wire_or_artifact": "Runtime contract JSON projection",
+      "schema_source": ["lib/keeper/keeper_runtime_contract.mli"],
+      "validator": "Runtime contract projection tests through tool-call logging",
+      "tests": ["test/test_keeper_tool_call_log.ml"],
+      "stability": "operator_internal",
+      "version_field": null,
+      "external_refs": [],
+      "notes": "Redacts provider/model to the neutral runtime lane while preserving operator policy context."
+    },
+    {
+      "id": "masc.mcp_openapi_tool_schema.v1",
+      "kind": "tool_schema",
+      "owner": "MASC",
+      "producer": "MCP tool schema registry and OpenAPI generator",
+      "consumer": ["MCP clients", "REST/OpenAPI clients", "dashboard authoring tools"],
+      "wire_or_artifact": "MCP tools/list and /api/v1/openapi.json",
+      "schema_source": [
+        "lib/keeper/keeper_schema.mli",
+        "lib/tool_schema_dsl.mli",
+        "docs/spec/09-server-transport.md"
+      ],
+      "validator": "Tool inventory and OpenAPI smoke tests",
+      "tests": ["test/test_mcp_tool_matrix.ml", "test/test_openapi_api_e2e.ml"],
+      "stability": "evolving",
+      "version_field": "MCP protocolVersion",
+      "external_refs": [],
+      "notes": "OpenAPI is generated from REST-bound MCP tools; per-tool output schemas are not uniformly versioned in v1."
+    },
+    {
+      "id": "masc.oas_bridge_events.v1",
+      "kind": "event_bus",
+      "owner": "MASC",
+      "producer": "Cascade/OAS event bridge",
+      "consumer": ["dashboard SSE bridge", "OAS event subscribers"],
+      "wire_or_artifact": "OAS Custom events relayed into MASC surfaces",
+      "schema_source": [
+        "lib/cascade/cascade_event_bridge.mli",
+        "docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md"
+      ],
+      "validator": "OAS integration bridge tests",
+      "tests": ["test/test_oas_integration.ml"],
+      "stability": "operator_internal",
+      "version_field": null,
+      "external_refs": ["oas.event_bus.v1", "oas.runtime_protocol.v1"],
+      "notes": "MASC domain events stay MASC-owned and correlate with OAS via bridge payloads."
+    }
+  ]
+}

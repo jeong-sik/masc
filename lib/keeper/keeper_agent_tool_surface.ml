@@ -37,9 +37,94 @@ let tool_requirement_to_yojson = function
   | Optional -> `String "optional"
   | No_tools -> `String "none"
 
+(* Closed sum type for turn_lane.  Two producers emit values:
+   - keeper_run_tools.ml:963-973 emits the five per-turn lanes
+     (text_only, tool_required, tool_optional, tool_disabled, retry).
+   - keeper_turn_helpers.pre_dispatch_tool_surface emits the
+     [Lane_pre_dispatch] placeholder before the per-turn lane logic
+     runs.
+   No [@@deriving tla] because the module-level all_symbols binding
+   is reserved for tool_surface_class (a future RFC spec extension
+   can add TurnLaneSet and lift this). *)
+type turn_lane =
+  | Lane_pre_dispatch
+  | Lane_text_only
+  | Lane_tool_required
+  | Lane_tool_optional
+  | Lane_tool_disabled
+  | Lane_retry
+
+let turn_lane_to_string = function
+  | Lane_pre_dispatch -> "pre_dispatch"
+  | Lane_text_only -> "text_only"
+  | Lane_tool_required -> "tool_required"
+  | Lane_tool_optional -> "tool_optional"
+  | Lane_tool_disabled -> "tool_disabled"
+  | Lane_retry -> "retry"
+
+let turn_lane_of_string = function
+  | "pre_dispatch" -> Some Lane_pre_dispatch
+  | "text_only" -> Some Lane_text_only
+  | "tool_required" -> Some Lane_tool_required
+  | "tool_optional" -> Some Lane_tool_optional
+  | "tool_disabled" -> Some Lane_tool_disabled
+  | "retry" -> Some Lane_retry
+  | _ -> None
+
+let turn_lane_to_yojson lane = `String (turn_lane_to_string lane)
+
+(* Closed sum type for tool-surface selection mode.  See .mli for
+   rationale (avoids name collision with Keeper_skill_routing and
+   Keeper_alerting, each of which owns its own selection_mode). *)
+type tool_selection_mode =
+  | Selection_deterministic_plus_llm_hint
+  | Selection_core_plus_prefilter_plus_discovered
+
+let tool_selection_mode_to_string = function
+  | Selection_deterministic_plus_llm_hint -> "deterministic_plus_llm_hint"
+  | Selection_core_plus_prefilter_plus_discovered ->
+    "core_plus_prefilter_plus_discovered"
+
+let tool_selection_mode_of_string = function
+  | "deterministic_plus_llm_hint" -> Some Selection_deterministic_plus_llm_hint
+  | "core_plus_prefilter_plus_discovered" ->
+    Some Selection_core_plus_prefilter_plus_discovered
+  | _ -> None
+
+let tool_selection_mode_to_yojson m =
+  `String (tool_selection_mode_to_string m)
+
+
+(* Closed sum type for tool_surface_class.  Mirrors RFC-0065 §3.2.2
+   KeeperToolSurface SurfaceClassSet so the correspondence harness can
+   drop the hand-pinned label list.  [@tla.symbol "…"] fixes the wire
+   representation across JSON, Prometheus labels, dashboard surface,
+   and the .tla catalog. *)
+type tool_surface_class =
+  | Surface_none [@tla.symbol "none"]
+  | Surface_public_only [@tla.symbol "public_only"]
+  | Surface_mixed [@tla.symbol "mixed"]
+[@@deriving tla]
+
+(* [@tla.symbol] is the single source of truth for the wire form:
+   - to_tla_symbol (ppx-generated) emits the symbol attached per variant
+   - all_symbols / all_states (ppx-generated) enumerate the type
+   Defining the JSON/Prometheus surface in terms of [to_tla_symbol]
+   guarantees JSON ↔ spec parity cannot drift even if a variant or its
+   symbol changes.  Addresses the SSOT concern in PR #14647 review. *)
+let tool_surface_class_to_string = to_tla_symbol
+
+let tool_surface_class_of_string raw =
+  List.find_opt
+    (fun cls -> String.equal (to_tla_symbol cls) raw)
+    all_states
+
+let tool_surface_class_to_yojson cls =
+  `String (tool_surface_class_to_string cls)
+
 type tool_surface_metrics =
-  { turn_lane : string
-  ; tool_surface_class : string
+  { turn_lane : turn_lane
+  ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
@@ -63,16 +148,16 @@ type computed_tool_surface =
   ; deterministic_prefilter_count : int
   ; discovered_count : int
   ; llm_selected_count : int
-  ; selection_mode : string
+  ; selection_mode : tool_selection_mode
   ; is_last_turn : bool
   ; is_warning_zone : bool
-  ; tool_surface_class : string
+  ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; tool_gate_requested : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
   ; missing_required_tool_names : string list
-  ; lane : string
+  ; lane : turn_lane
   ; query_text : string
   }
 
@@ -111,6 +196,7 @@ let turn_affordance_to_string = function
   | Inspect_worktree_delta -> "inspect_worktree_delta"
 
 let should_tool_gate_affordance = function
+  | Work_discovery -> false
   | Board_curation
   | Board_post_or_comment
   | Message_sweep
@@ -118,7 +204,6 @@ let should_tool_gate_affordance = function
   | Task_claim
   | Task_audit
   | Task_verify
-  | Work_discovery
   | Inspect_worktree_delta -> true
 
 let turn_affordances_require_tool_gate turn_affordances =
@@ -131,10 +216,13 @@ let turn_affordances_require_tool_gate turn_affordances =
 (* Affordance -> minimum viable tools that can satisfy that affordance.
    The list is intentionally narrow ("at least one of these is enough").
    Keepers without any matching tool cannot satisfy a [Require_tool_use]
-   contract for that affordance and must be allowed to respond with
-   text instead. *)
+   contract for that affordance and must be allowed to respond with text
+   instead. [Work_discovery] remains listed for routing/search guidance, but it
+   does not hard-gate by itself; the concrete signals inside a discovery turn
+   (claimable tasks, board activity, worktree delta) own the strict contract. *)
 let tools_for_gated_affordance = function
-  | Board_curation -> [ "keeper_board_curation_submit" ]
+  | Board_curation ->
+    [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
   | Board_post_or_comment ->
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
   | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
@@ -152,7 +240,7 @@ let tools_for_gated_affordance = function
   | Work_discovery ->
     [ "keeper_task_claim"; "masc_claim_next";
       "keeper_board_post"; "keeper_task_create"; "masc_add_task";
-      "keeper_tasks_audit" ]
+      "keeper_tasks_audit"; "keeper_board_cleanup" ]
   | Inspect_worktree_delta ->
     [ "keeper_shell"; "keeper_bash"; "masc_code_git";
       "keeper_fs_read" ]
@@ -161,7 +249,8 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
   turn_affordances
   |> List.filter_map turn_affordance_of_string
   |> List.concat_map (function
-       | Board_curation -> [ "keeper_board_curation_submit" ]
+       | Board_curation ->
+         [ "keeper_board_curation_submit" ]
        | Board_post_or_comment
        | Message_sweep
        | Reply_in_room
@@ -199,11 +288,44 @@ let turn_affordances_require_tool_gate_with_allowed
       (fun affordance ->
          if not (has_matching_tool affordance) then
            Prometheus.inc_counter
-             Prometheus.metric_keeper_required_tool_gate_suppressed_total
+             Keeper_metrics.metric_keeper_required_tool_gate_suppressed_total
              ~labels:[ ("affordance", turn_affordance_to_string affordance) ]
              ())
       gated_affordances;
   gate_requested
+
+let tool_names_for_required_gate_surface
+    ~(tool_gate_requested : bool)
+    ~(required_tool_names : string list)
+    (tool_names : string list) : string list =
+  let is_stay_silent name =
+    match Tool_name.of_string name with
+    | Some (Tool_name.Keeper Tool_name.Keeper.Stay_silent) -> true
+    | _ -> false
+  in
+  let canonical_required_tool_names =
+    required_tool_names
+    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> Keeper_types.dedupe_keep_order
+  in
+  let is_explicit_required_tool_name name =
+    List.mem
+      (Keeper_tool_disclosure.canonical_tool_name name)
+      canonical_required_tool_names
+  in
+  if not tool_gate_requested then tool_names
+  else
+    let actionable =
+      tool_names
+      |> List.filter (fun name ->
+        is_explicit_required_tool_name name
+        || (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+            && not (is_stay_silent name)))
+      |> Keeper_types.dedupe_keep_order
+    in
+    match actionable with
+    | [] -> tool_names
+    | _ :: _ -> actionable
 
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =
@@ -230,7 +352,9 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
   in
   if has_turn_affordance Board_curation turn_affordances
-     && progress_tool_available "keeper_board_curation_submit"
+     && List.exists
+          progress_tool_available
+          [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
   then
     (* Keep the curation submit tool visible, but do not force exact
        tool_choice. Several keeper cascades can use runtime MCP tools while
@@ -240,7 +364,14 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   else if (not has_current_task)
      && has_task_claim_affordance turn_affordances
      && progress_tool_available "keeper_task_claim"
-  then Agent_sdk.Types.Tool "keeper_task_claim"
+  then
+    (* Runtime MCP transports may report the correct call as
+       [mcp__masc__keeper_task_claim]. OAS exact-tool contracts compare
+       raw provider names before MASC canonicalizes them, so exact
+       [Tool "keeper_task_claim"] can reject a valid claim. Keep the
+       turn tool-required and let MASC validate the canonical observed
+       tool names after execution. *)
+    Agent_sdk.Types.Any
   else if has_turn_affordance Task_audit turn_affordances
           && progress_tool_available "keeper_tasks_audit"
   then Agent_sdk.Types.Tool "keeper_tasks_audit"
@@ -276,18 +407,60 @@ let required_tool_names_for_turn ~(current_task_required_tool_names : string lis
   | [] -> current_task_required_tool_names
   | _ :: _ -> per_call_required_tool_names
 
+let outstanding_required_tool_names ~(required_tool_names : string list)
+    ~(satisfied_tool_names : string list) =
+  let satisfied =
+    satisfied_tool_names
+    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> Keeper_types.dedupe_keep_order
+  in
+  required_tool_names
+  |> List.filter (fun name ->
+    let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+    not (List.mem canonical satisfied))
+  |> Keeper_types.dedupe_keep_order
+
+let satisfied_required_tool_names_of_outcomes
+    (calls : (string * string) list) =
+  calls
+  |> List.filter_map (fun (tool_name, outcome) ->
+    if String.equal outcome "ok"
+       && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+            tool_name
+    then Some tool_name
+    else None)
+  |> Keeper_types.dedupe_keep_order
+
 let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
   let visible_required =
     required_tool_names
-    |> List.filter (fun name ->
-      List.mem name allowed_tool_names
-      && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name)
+    |> List.filter_map (fun name ->
+      let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+      if List.mem canonical allowed_tool_names then Some canonical
+      else if List.mem name allowed_tool_names then Some name
+      else (
+        match Keeper_tool_alias.public_name_for_internal canonical with
+        | Some public when List.mem public allowed_tool_names -> Some public
+        | _ -> None))
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with
-  | [ name ] -> Agent_sdk.Types.Tool name
-  | _ :: _ -> Agent_sdk.Types.Any
+  | [ name ] when
+      not (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name) ->
+    (* Passive/read-only tools do not suffer the mutating-tool raw-name
+       satisfaction ambiguity described below. When an operator explicitly
+       requires one passive tool, exact tool_choice keeps the model from
+       satisfying the turn with an unrelated write. *)
+    Agent_sdk.Types.Tool name
+  | _ :: _ ->
+    (* Use the provider-level "some tool is required" contract here, even
+       for a single explicit required tool. Runtime MCP transports may return
+       names such as [mcp__masc__keeper_pr_create]; OAS exact-tool contracts
+       compare raw names before MASC can canonicalize them, so exact Tool(name)
+       can reject a correct call. MASC still validates the specific required
+       names after execution via [outstanding_required_tool_names]. *)
+    Agent_sdk.Types.Any
   | [] -> Agent_sdk.Types.Auto
 
 let owned_active_task_id_for_meta =
@@ -411,6 +584,7 @@ let tool_search_alias_entries =
   ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
   ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
   ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
+  ; "masc_web_fetch", "웹 페이지 가져오기 읽기 URL 페치"
   ; "masc_claim_next", "다음태스크 가져오기 할당"
   ]
 

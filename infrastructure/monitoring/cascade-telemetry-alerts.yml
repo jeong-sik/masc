@@ -1,0 +1,220 @@
+# Prometheus alerting rules for MASC cascade telemetry.
+#
+# Covers Phase 0-5 metrics from telemetry_design.md §9.3:
+#   - masc_cascade_ttfb_seconds{cascade, provider}       (Histogram)
+#   - masc_cascade_inter_chunk_seconds{cascade, provider} (Histogram)
+#   - masc_oas_inference_cost_usd{model_bucket}           (Histogram)
+#   - masc_cascade_provider_health_score{provider_key}    (Gauge)
+#   - masc_oas_context_overflow_ratio{agent_name}         (Gauge)
+#   - masc_oas_context_compaction_total{agent_name, trigger} (Counter)
+#   - masc_cascade_attempt_liveness_kill{mode,kind,cascade,provider} (Counter)
+#   - masc_cascade_attempt_liveness_observed{cascade,provider,outcome} (Counter)
+#
+# Thresholds are from telemetry_design.md §9.3 and Grafana dashboard
+# panel thresholds. Rate windows use 5m to avoid single-event noise.
+# Duration guards (for:) require persistence across two evaluation cycles.
+#
+# Label cardinality is bounded:
+#   - cascade:   bounded by cascade.json entries (< 20)
+#   - provider:  bounded by configured providers (< 10)
+#   - kind:      4 values (no_first_token, inter_chunk_idle, wall_exceeded, provider_error)
+#   - outcome:   3 values (success, kill, wire_error)
+#   - model_bucket: 8 values
+# Total series estimate < 20*10*4 + 10 + 8 + 20 = ~858.
+
+groups:
+  - name: masc_telemetry_latency
+    interval: 30s
+    rules:
+      - alert: CascadeTTFTP95Slow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, cascade, provider) (
+              rate(masc_cascade_ttfb_seconds_bucket[5m])
+            )
+          ) > 30
+        for: 10m
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: telemetry_latency
+        annotations:
+          summary: "TTFT p95 > 30s for {{ $labels.cascade }}/{{ $labels.provider }}"
+          description: |
+            Time-to-first-token p95 is {{ $value | humanizeDuration }}s
+            for cascade={{ $labels.cascade }} provider={{ $labels.provider }}.
+            This indicates slow prefill or provider queuing. Cross-check
+            with the Liveness panel — if kills are also rising, the
+            provider may be approaching its ttft_max budget.
+
+      - alert: CascadeInterChunkP95Stall
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, cascade, provider) (
+              rate(masc_cascade_inter_chunk_seconds_bucket[5m])
+            )
+          ) > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: telemetry_latency
+        annotations:
+          summary: "Inter-chunk gap p95 > 10s for {{ $labels.cascade }}/{{ $labels.provider }}"
+          description: |
+            Inter-chunk latency p95 is {{ $value | humanizeDuration }}s
+            for cascade={{ $labels.cascade }} provider={{ $labels.provider }}.
+            Decode stall or provider overload. If liveness kills with
+            kind=inter_chunk_idle are also rising, the provider is
+            hitting its inter_chunk_max budget.
+
+  - name: masc_telemetry_liveness
+    interval: 30s
+    rules:
+      - alert: CascadeLivenessKillSurge
+        expr: |
+          sum by (kind) (
+            increase(masc_cascade_attempt_liveness_kill[5m])
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: telemetry_liveness
+        annotations:
+          summary: "Liveness kills > 5/5m for kind={{ $labels.kind }}"
+          description: |
+            Liveness FSM killed {{ $value }} attempts in the last 5 minutes
+            with failure class {{ $labels.kind }}. Breakdown:
+              - no_first_token: provider never responded within ttft_max
+              - inter_chunk_idle: decode stall exceeded inter_chunk_max
+              - wall_exceeded: total attempt time exceeded wall_max
+              - provider_error: wire-level error from provider
+            Check /api/v1/cascade/health for the affected providers.
+
+      - alert: CascadeKillRateHigh
+        expr: |
+          sum by (cascade) (
+            increase(masc_cascade_attempt_liveness_kill[1h])
+          )
+          /
+          sum by (cascade) (
+            increase(masc_cascade_attempt_liveness_observed[1h])
+          ) > 0.3
+        for: 15m
+        labels:
+          severity: critical
+          component: cascade
+          subsystem: telemetry_liveness
+        annotations:
+          summary: "Cascade {{ $labels.cascade }} kill rate > 30% over 1h"
+          description: |
+            More than 30% of cascade attempts for {{ $labels.cascade }}
+            are being killed by the liveness FSM. This is a systemic
+            issue — providers are either degraded or budgets are too
+            tight for the current load. Review cascade.json budgets
+            and provider health scores.
+
+  - name: masc_telemetry_health
+    interval: 30s
+    rules:
+      - alert: ProviderHealthScoreDegraded
+        expr: |
+          masc_cascade_provider_health_score < 0.3
+        for: 15m
+        labels:
+          severity: critical
+          component: cascade
+          subsystem: telemetry_health
+        annotations:
+          summary: "Provider {{ $labels.provider_key }} health score < 0.3"
+          description: |
+            Provider {{ $labels.provider_key }} composite health score is
+            {{ $value | printf "%.2f" }} (threshold: 0.3). The score is
+            computed as success_rate * speed_score * cost_score. Values
+            below 0.3 indicate persistent failure or extreme latency.
+            The cascade router should be deprioritizing this provider;
+            if not, check cascade cooldown state.
+
+      - alert: ProviderHealthScoreWarning
+        expr: |
+          masc_cascade_provider_health_score < 0.7
+          and
+          masc_cascade_provider_health_score >= 0.3
+        for: 30m
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: telemetry_health
+        annotations:
+          summary: "Provider {{ $labels.provider_key }} health score degraded ({{ $value | printf \"%.2f\" }})"
+          description: |
+            Provider {{ $labels.provider_key }} health score is
+            {{ $value | printf "%.2f" }} — below the healthy threshold
+            of 0.7 but above the critical 0.3 floor. This is an early
+            degradation signal. Cross-check TTFT and inter-chunk latency
+            for this provider.
+
+  - name: masc_telemetry_context
+    interval: 30s
+    rules:
+      - alert: ContextOverflowImminent
+        expr: |
+          masc_oas_context_overflow_ratio > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: oas
+          subsystem: telemetry_context
+        annotations:
+          summary: "Agent {{ $labels.agent_name }} context overflow > 90%"
+          description: |
+            Agent {{ $labels.agent_name }} context ratio is
+            {{ $value | printf "%.2f" }} (threshold: 0.9). Imminent
+            compaction or context overflow. If compaction rate for
+            this agent is also high, the agent may be in a
+            compaction loop — check trigger labels on
+            masc_oas_context_compaction_total.
+
+      - alert: ContextCompactionLoop
+        expr: |
+          sum by (agent_name) (
+            increase(masc_oas_context_compaction_total[10m])
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: oas
+          subsystem: telemetry_context
+        annotations:
+          summary: "Agent {{ $labels.agent_name }} compacted > 10x in 10m"
+          description: |
+            Agent {{ $labels.agent_name }} triggered {{ $value }}
+            compactions in the last 10 minutes. This suggests a
+            compaction loop — context grows faster than compaction
+            can shrink it, or proactive compaction threshold is too
+            aggressive. Check the trigger label distribution to
+            determine if overflow-driven or proactive.
+
+  - name: masc_telemetry_cost
+    interval: 30s
+    rules:
+      - alert: InferenceCostSpike
+        expr: |
+          sum(increase(masc_oas_inference_cost_usd_sum[1h]))
+          /
+          sum(increase(masc_oas_inference_cost_usd_sum[24h]))
+          * 24 > 3
+        for: 30m
+        labels:
+          severity: warning
+          component: oas
+          subsystem: telemetry_cost
+        annotations:
+          summary: "Hourly inference cost > 3x daily average"
+          description: |
+            The last hour's inference spend annualized is {{ $value | printf "%.1f" }}x
+            the trailing 24h daily average. This may indicate a
+            provider misrouting traffic to expensive models, or a
+            keeper stuck in a retry loop. Check cost breakdown by
+            model_bucket on the Grafana dashboard.

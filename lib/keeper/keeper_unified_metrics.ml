@@ -43,10 +43,10 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
 
 let cdal_mode_violations_ref_suffix = "evidence/mode_violations.json"
 
-let cdal_raw_evidence_ref_count (proof : Agent_sdk.Cdal_proof.t) : int =
+let cdal_raw_evidence_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
   List.length proof.raw_evidence_refs
 
-let cdal_violation_ref_count (proof : Agent_sdk.Cdal_proof.t) : int =
+let cdal_violation_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
   proof.raw_evidence_refs
   |> List.filter (String.ends_with ~suffix:cdal_mode_violations_ref_suffix)
   |> List.length
@@ -92,13 +92,18 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_trusted
   | Usage_untrusted of string list
 
+let runtime_lane_label = "runtime"
+
 let classify_usage_trust ~(usage_reported : bool)
     ~(usage : Agent_sdk.Types.api_usage)
     ~(model_used : string)
     ~(resolved_model_id : string)
     ~(context_max : int) : usage_trust =
-  Keeper_usage_trust.classify ~usage_reported ~usage ~model_used
-    ~resolved_model_id ~context_max
+  let _ = model_used, resolved_model_id in
+  Keeper_usage_trust.classify ~usage_reported ~usage
+    ~model_used:runtime_lane_label
+    ~resolved_model_id:runtime_lane_label
+    ~context_max
 
 (* #9953: bucket the raw [context_max] integer into a tightly
    bounded vocabulary so the Prometheus label cardinality stays
@@ -127,14 +132,17 @@ let record_context_max_observation
     ~(model_used : string)
     ~(resolved_model_id : string)
     ~(context_max : int) : unit =
+  let _ = model_used, resolved_model_id in
   Prometheus.inc_counter
-    Prometheus.metric_keeper_context_max_observed
-    ~labels:[
-      ("keeper", keeper);
-      ("model_used", model_used);
-      ("resolved_model_id", resolved_model_id);
-      ("context_max_bucket", context_max_bucket context_max);
-    ] ()
+    Keeper_metrics.metric_keeper_context_max_observed
+    ~labels:
+      [
+        ("keeper", keeper);
+        ("model_used", runtime_lane_label);
+        ("resolved_model_id", runtime_lane_label);
+        ("context_max_bucket", context_max_bucket context_max);
+      ]
+    ()
 
 (* #9943: per-keeper turn-latency bucket counter.  Buckets are
    chosen so each name a reachable operator state:
@@ -176,7 +184,7 @@ let record_turn_latency_bucket
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_latency_bucket
+    Keeper_metrics.metric_keeper_turn_latency_bucket
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ();
   let threshold = long_turn_warn_threshold_ms () in
@@ -191,8 +199,8 @@ let label_or_unknown raw =
   if trimmed = "" then "unknown" else trimmed
 
 let provider_kind_of_model_used raw =
-  let model_used = label_or_unknown raw in
-  Provider_adapter.provider_of_model_label model_used
+  let _ = raw in
+  "runtime"
 
 let record_turn_latency_by_model_bucket
     ~(keeper : string)
@@ -202,11 +210,12 @@ let record_turn_latency_by_model_bucket
     ~(cascade_profile : string)
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
-  let model_used = label_or_unknown model_used in
-  let resolved_model_id = label_or_unknown resolved_model_id in
+  let _ = model_used, resolved_model_id in
+  let model_used = runtime_lane_label in
+  let resolved_model_id = runtime_lane_label in
   let cascade_profile = label_or_unknown cascade_profile in
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_latency_by_model_bucket
+    Keeper_metrics.metric_keeper_turn_latency_by_model_bucket
     ~labels:
       [ ("keeper", label_or_unknown keeper)
       ; ("channel", label_or_unknown channel)
@@ -221,9 +230,11 @@ let record_turn_latency_by_model_bucket
 
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
-let estimate_trusted_usage_cost_usd ~usage_trusted ~model usage =
+let estimate_trusted_usage_cost_usd ~usage_trusted ~model:_ usage =
   if usage_trusted then
-    Keeper_hooks_oas.estimate_usage_cost_usd ~model usage
+    match usage.Agent_sdk.Types.cost_usd with
+    | Some cost when cost > 0.0 -> cost
+    | Some _ | None -> 0.0
   else 0.0
 
 let usage_trust_to_string = Keeper_usage_trust.to_string
@@ -249,8 +260,8 @@ let usage_trust_json_fields = Keeper_usage_trust.json_fields
    classify sites (append_metrics_snapshot, keeper_turn) serialize
    the trust into the JSONL ledger but do not bump the counter, so
    the counter rate equals the per-turn rate rather than 2–3×. *)
-let usage_trust_outcome_metric = Prometheus.metric_keeper_usage_trust
-let usage_anomaly_reason_metric = Prometheus.metric_keeper_usage_anomaly_reason
+let usage_trust_outcome_metric = Keeper_metrics.metric_keeper_usage_trust
+let usage_anomaly_reason_metric = Keeper_metrics.metric_keeper_usage_anomaly_reason
 
 let keeper_total_cost_usd_help =
   "Accumulated trusted USD cost per keeper (labels: keeper_name)"
@@ -266,24 +277,36 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
         Prometheus.inc_counter usage_anomaly_reason_metric
           ~labels:[ ("keeper", keeper_name); ("reason", reason) ] ())
       reasons;
-    Log.Keeper.warn
-      "#9959 usage_anomaly keeper=%s reasons=[%s] — upstream fix \
-       tracked in jeong-sik/oas#1181; cost accounting is suppressed \
+    let warns_operator = Keeper_usage_trust.warns_operator trust in
+    let log_usage =
+      if warns_operator then Log.Keeper.warn else Log.Keeper.info
+    in
+    log_usage
+      "#9959 usage_anomaly keeper=%s reasons=[%s] severity=%s — upstream \
+       fix tracked in jeong-sik/oas#1181; cost accounting is suppressed \
        to 0.0 for this turn by [usage_trust_is_trusted] gate."
-      keeper_name (String.concat "," reasons)
+      keeper_name
+      (String.concat "," reasons)
+      (if warns_operator then "warn" else "info")
   | Usage_missing | Usage_trusted -> ()
 
 let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
   let labels = [ ("keeper_name", keeper_name) ] in
   Prometheus.register_gauge
-    ~name:Prometheus.metric_keeper_total_cost_usd
+    ~name:Keeper_metrics.metric_keeper_total_cost_usd
     ~help:keeper_total_cost_usd_help
     ~labels
     ();
   Prometheus.set_gauge
-    Prometheus.metric_keeper_total_cost_usd
+    Keeper_metrics.metric_keeper_total_cost_usd
     ~labels
     total_cost_usd
+
+let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
+  Prometheus.set_gauge
+    Keeper_metrics.metric_keeper_idle_seconds
+    ~labels:[ ("keeper_name", keeper_name) ]
+    (float_of_int (max 0 idle_seconds))
 
 let turn_mode_to_string = function
   | Tool_use -> "tool_use"
@@ -333,24 +356,13 @@ let telemetry_reported_of_result
     (result : Keeper_agent_run.run_result) : bool =
   Option.is_some result.inference_telemetry
 
-let structurally_unmetered_provider (provider : string) : bool =
-  Provider_adapter.is_structurally_unmetered_provider provider
-
 let coverage_reason_of_result
     (result : Keeper_agent_run.run_result) : string option =
   let telemetry_reported = telemetry_reported_of_result result in
   if result.usage_reported && telemetry_reported then None
   else
-    let provider =
-      Keeper_agent_run.surface_model_used result
-      |> Keeper_hooks_oas.provider_of_model
-    in
     match result.usage_reported, telemetry_reported with
-    | false, false ->
-        if result.tool_surface.tool_requirement = Keeper_agent_tool_surface.No_tools
-           && structurally_unmetered_provider provider
-        then Some "text_only_unmetered"
-        else Some "missing_usage_and_inference"
+    | false, false -> Some "missing_usage_and_inference"
     | false, true -> Some "missing_usage"
     | true, false -> Some "missing_inference"
     | true, true -> None
@@ -501,6 +513,48 @@ let observed_triggers_of_observation
   if Option.is_some observation.worktree_change_summary then add "worktree_change";
   List.rev !triggers
 
+let normalized_work_discovery_sources (meta : keeper_meta) =
+  match meta.work_discovery_sources with
+  | None -> None
+  | Some sources ->
+      Some
+        (sources
+         |> List.map (fun source ->
+                source |> String.trim |> String.lowercase_ascii)
+         |> List.filter (fun source -> source <> ""))
+
+let work_discovery_sources_allow ~default_allowed ~matches meta =
+  match normalized_work_discovery_sources meta with
+  | None -> default_allowed
+  | Some [] -> default_allowed
+  | Some sources -> List.exists matches sources
+
+let work_discovery_allows_task_claim meta =
+  work_discovery_sources_allow ~default_allowed:true ~matches:(function
+    | "unclaimed_tasks"
+    | "claimable_tasks"
+    | "task_claim"
+    | "claim" -> true
+    | _ -> false)
+    meta
+
+let work_discovery_allows_task_audit meta =
+  work_discovery_sources_allow ~default_allowed:true ~matches:(function
+    | "stale_tasks"
+    | "failed_tasks"
+    | "task_audit"
+    | "orphan_tasks" -> true
+    | _ -> false)
+    meta
+
+let work_discovery_allows_board_cleanup meta =
+  work_discovery_sources_allow ~default_allowed:false ~matches:(function
+    | "board_cleanup"
+    | "board_curation"
+    | "zombie_board_posts" -> true
+    | _ -> false)
+    meta
+
 let observed_affordances_of_observation
     ?meta
     (observation : Keeper_world_observation.world_observation) : string list =
@@ -508,11 +562,29 @@ let observed_affordances_of_observation
   let add affordance = affordances := affordance :: !affordances in
   if observation.pending_mentions <> [] then add "reply_in_room";
   if observation.pending_board_events <> [] then add "board_post_or_comment";
-  if List.length observation.pending_board_events >= 2 then add "board_curation";
+  let source_allows_board_cleanup =
+    match meta with
+    | Some meta -> work_discovery_allows_board_cleanup meta
+    | None -> false
+  in
+  if List.length observation.pending_board_events >= 2
+     || (observation.work_discovery_due && source_allows_board_cleanup)
+  then add "board_curation";
   if observation.pending_scope_messages <> [] then add "message_sweep";
-  if observation.claimable_task_count > 0 then add "task_claim";
-  if observation.failed_task_count > 0 then add "task_audit";
-  let _ = meta in
+  let source_allows_task_claim =
+    match meta with
+    | Some meta -> work_discovery_allows_task_claim meta
+    | None -> true
+  in
+  let source_allows_task_audit =
+    match meta with
+    | Some meta -> work_discovery_allows_task_audit meta
+    | None -> true
+  in
+  if observation.claimable_task_count > 0 && source_allows_task_claim then
+    add "task_claim";
+  if observation.failed_task_count > 0 && source_allows_task_audit then
+    add "task_audit";
   if observation.pending_verification_count > 0 then
     add "task_verify";
   if observation.work_discovery_due then add "work_discovery";
@@ -549,35 +621,70 @@ let provider_context_json ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result option) =
   match result with
   | Some r ->
-      let cascade_name, selected_model, candidate_models =
+      let cascade_name =
         match r.cascade_observation with
         | Some observation ->
-            ( Keeper_cascade_profile.runtime_name_to_string
-                observation.cascade_name,
-              observation.selected_model,
-              observation.candidate_models )
-        | None ->
-            ( meta.cascade_name,
-              Some (Keeper_agent_run.surface_model_used r),
-              [] )
+            Keeper_cascade_profile.runtime_name_to_string observation.cascade_name
+        | None -> cascade_name_of_meta meta
       in
       `Assoc
         [ ("cascade_name", `String cascade_name)
-        ; ( "selected_model",
-            Json_util.string_opt_to_json selected_model )
-        ; ( "candidate_models",
-            `List (List.map (fun value -> `String value) candidate_models) )
+        ; "selected_model", `Null
+        ; "candidate_models", `List []
         ]
   | None ->
       `Assoc
-        [ ("cascade_name", `String meta.cascade_name)
+        [ ("cascade_name", `String (cascade_name_of_meta meta))
         ; ("selected_model", `Null)
-        ; ( "candidate_models",
-            `List
-              (List.map
-                 (fun value -> `String value)
-                 (Keeper_model_labels.configured_model_labels_of_meta meta)) )
+        ; "candidate_models", `List []
         ]
+
+let redacted_cascade_attempt_to_json
+    (attempt : Cascade_legacy_runner.cascade_attempt) : Yojson.Safe.t =
+  `Assoc
+    [ "attempt_index", `Int attempt.attempt_index
+    ; ( "latency_ms"
+      , match attempt.latency_ms with
+        | Some value -> `Int value
+        | None -> `Null )
+    ; ( "error"
+      , match attempt.error with
+        | Some value -> `String value
+        | None -> `Null )
+    ]
+;;
+
+let redacted_cascade_fallback_event_to_json
+    (event : Cascade_legacy_runner.cascade_fallback_event) : Yojson.Safe.t =
+  `Assoc [ "reason", `String event.reason ]
+;;
+
+let redacted_cascade_observation_to_json
+    (obs : Cascade_legacy_runner.cascade_observation) : Yojson.Safe.t =
+  let cascade_name =
+    Keeper_cascade_profile.runtime_name_to_string obs.cascade_name
+  in
+  `Assoc
+    [ "cascade_name", `String cascade_name
+    ; "strategy", Json_util.string_opt_to_json obs.strategy
+    ; "configured_labels", `List []
+    ; "candidate_models", `List []
+    ; "primary_model", `Null
+    ; "selected_model", `Null
+    ; "selected_model_raw", `Null
+    ; "selected_index", Json_util.int_opt_to_json obs.selected_index
+    ; "fallback_hops", Json_util.int_opt_to_json obs.fallback_hops
+    ; "fallback_applied", `Bool obs.fallback_applied
+    ; ( "attempts"
+      , `List (List.map redacted_cascade_attempt_to_json obs.attempts) )
+    ; ( "fallback_events"
+      , `List
+          (List.map redacted_cascade_fallback_event_to_json obs.fallback_events)
+      )
+    ; "attempt_details_available", `Bool obs.attempt_details_available
+    ; "attempt_details_source", `String obs.attempt_details_source
+    ]
+;;
 
 let tool_contract_json ~(tool_call_count : int) ~(tools_used : string list)
     (result : Keeper_agent_run.run_result option) =
@@ -728,7 +835,7 @@ let append_decision_record
         | _, Some err -> Keeper_turn_terminal.of_legacy_error_text err
         | _ -> Keeper_turn_terminal.of_code "unknown_error")
   in
-  let terminal_reason_code = terminal_reason.Keeper_turn_terminal.code in
+  let terminal_reason_code = Keeper_turn_terminal.code terminal_reason in
   let json =
     `Assoc
       ([
@@ -841,9 +948,9 @@ let append_decision_record
           | Some { proof = Some p; _ } ->
               `Assoc
                 [
-                  ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+                  ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
                   ( "result_status",
-                    Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status );
+                    Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status );
                   ("tool_trace_count", `Int (List.length p.tool_trace_refs));
                 ]
           | _ -> `Null );
@@ -880,18 +987,22 @@ let append_decision_record
                     [
                       ("cascade_name", `String cascade_name);
                       ("strategy", Json_util.string_opt_to_json co.strategy);
-                      ("primary_model", match co.primary_model with Some m -> `String m | None -> `Null);
-                      ("selected_model", match co.selected_model with Some m -> `String m | None -> `Null);
+                      ("primary_model", `Null);
+                      ("selected_model", `Null);
                       ("fallback_applied", `Bool co.fallback_applied);
                       ("fallback_hops", match co.fallback_hops with Some n -> `Int n | None -> `Int 0);
-                      ("candidate_models", `List (List.map (fun s -> `String s) co.candidate_models));
+                      ("candidate_models", `List []);
                     ]
                 | None -> []
               in
               let tool_surface_fields =
                 [
-                  ("turn_lane", `String r.tool_surface.turn_lane);
-                  ("tool_surface_class", `String r.tool_surface.tool_surface_class);
+                  ( "turn_lane"
+                  , Keeper_agent_tool_surface.turn_lane_to_yojson
+                      r.tool_surface.turn_lane );
+                  ( "tool_surface_class"
+                  , Keeper_agent_tool_surface.tool_surface_class_to_yojson
+                      r.tool_surface.tool_surface_class );
                   ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson r.tool_surface.tool_requirement);
                   ("visible_tool_count", `Int r.tool_surface.visible_tool_count);
                   ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);
@@ -922,10 +1033,10 @@ let append_decision_record
               in
                 let stop_reason_str =
                   match r.stop_reason with
-                  | Oas_worker.Completed -> "completed"
-                  | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+                  | Cascade_runner.Completed -> "completed"
+                  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
                       Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
-                  | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+                  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
                       (match tool_name with
                        | Some tool ->
                            Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
@@ -957,7 +1068,7 @@ let append_decision_record
                     [
                       ("system_fingerprint", match t.system_fingerprint with Some s -> `String s | None -> `Null);
                       ("reasoning_tokens", match t.reasoning_tokens with Some n -> `Int n | None -> `Null);
-                      ("request_latency_ms", `Int t.request_latency_ms);
+                      ("request_latency_ms", match t.request_latency_ms with Some n -> `Int n | None -> `Null);
                     ] @ timings_fields
                 | None -> []
               in
@@ -989,8 +1100,8 @@ let append_decision_record
                   @ usage_trust_json_fields usage_trust
               in
               `Assoc ([
-                ("model_used", `String surface_model_used);
-                ("resolved_model_id", `String resolved_model_id);
+                ("model_used", `Null);
+                ("resolved_model_id", `Null);
                 ("outcome", `String "success");
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
@@ -1009,15 +1120,12 @@ let append_decision_record
               (* Partial telemetry for turns without a run_result: record
                  what we know without collapsing skipped/cancelled/partial
                  outcomes into telemetry.outcome=error. *)
-              let cascade_models =
-                Keeper_model_labels.configured_model_labels_of_meta meta
-              in
               let error_category =
                 error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
-                ("cascade_name", `String meta.cascade_name);
-                ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
+                ("cascade_name", `String (cascade_name_of_meta meta));
+                ("candidate_models", `List []);
                 ( "error_category",
                   match error_category with
                   | Some category -> `String category
@@ -1038,7 +1146,7 @@ let append_decision_record
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_decision_audit_flush_failures
+        Keeper_metrics.metric_keeper_decision_audit_flush_failures
         ~labels:[("keeper", meta.name)]
         ();
       Log.Keeper.warn "append decision record failed for %s: %s"
@@ -1069,6 +1177,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      turn. Other [classify_usage_trust] call sites serialize the
      trust into JSONL but do not bump the counter. *)
   record_usage_trust ~keeper_name:meta.name ~trust:usage_trust;
+  record_keeper_idle_seconds
+    ~keeper_name:meta.name
+    ~idle_seconds:observation.idle_seconds;
   let usage_trusted = usage_trust_is_trusted usage_trust in
   let trusted_input_tokens =
     if usage_trusted then result.usage.input_tokens else 0
@@ -1079,16 +1190,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let trusted_total_tokens =
     if usage_trusted then Keeper_exec_context.total_tokens result.usage else 0
   in
-  (* Use cascade_observation.selected_model (canonical, no :latest suffix)
-     instead of parsing model strings and stripping :latest manually.
-     surface_model_used already extracts this from cascade_observation.
-     Removes L3 (Cascade_config.parse_model_strings direct call) and
-     L6 (strip_latest model ID parsing) boundary violations. See #5626. *)
-  let used_model_id = surface_model_used in
   let turn_cost =
     estimate_trusted_usage_cost_usd
       ~usage_trusted
-      ~model:used_model_id
+      ~model:surface_model_used
       result.usage
   in
   let substantive_tool_call_count =
@@ -1108,6 +1213,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
+  let has_meaningful_work =
+    has_text || has_substantive_tools || has_validated_evidence
+  in
   let rt = meta.runtime in
   let social_state : Social.social_state =
     Option.value social_state
@@ -1132,7 +1240,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       then "noop"
       else "tool_called"
     in
-    Prometheus.inc_counter Prometheus.metric_keeper_proactive_outcome
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_proactive_outcome
       ~labels:[ ("keeper", meta.name); ("outcome", outcome) ]
       ()
   end;
@@ -1149,7 +1257,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.usage.total_tokens + trusted_total_tokens;
         total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
         last_turn_ts = now_ts;
-        last_model_used = surface_model_used;
+        last_model_used = "";
         last_input_tokens = trusted_input_tokens;
         last_output_tokens = trusted_output_tokens;
         last_total_tokens = trusted_total_tokens;
@@ -1162,7 +1270,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.count_total
           + (if update_proactive_rt && is_scheduled_autonomous_cycle then 1 else 0);
         last_ts =
-          (if update_proactive_rt && is_scheduled_autonomous_cycle then now_ts
+          (if update_proactive_rt
+              && (is_scheduled_autonomous_cycle
+                  || ((is_board_reactive || is_mention_reactive)
+                      && has_meaningful_work))
+           then now_ts
            else rt.proactive_rt.last_ts);
         visible_count_total =
           rt.proactive_rt.visible_count_total
@@ -1277,8 +1389,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          dashboard into showing BLOCKED status.  The social model's
          blocker field is a protocol-level signal; runtime last_blocker
          tracks whether the keeper can make progress. *)
-      last_blocker = "";
-      last_blocker_class = None;
+      last_blocker = None;
       last_need = Option.value ~default:"" social_state.need;
     };
   } in
@@ -1367,8 +1478,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     match result.cascade_observation with
     | Some observation ->
       Keeper_cascade_profile.runtime_name_to_string
-        observation.Oas_worker.cascade_name
-    | None -> meta.cascade_name
+        observation.Cascade_legacy_runner.cascade_name
+    | None -> (cascade_name_of_meta meta)
   in
   (* #9933: same latency bucket, split by provider/model/cascade.
      This keeps the existing keeper-only counter stable while making
@@ -1381,7 +1492,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~cascade_profile
     ~latency_ms;
   Prometheus.inc_counter
-    Prometheus.metric_keeper_turn_completed
+    Keeper_metrics.metric_keeper_turn_completed
     ~labels:[("keeper_name", meta.name)]
     ();
   let snapshot =
@@ -1394,8 +1505,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("generation", `Int turn_generation);
-        ("model_used", `String surface_model_used);
-        ("resolved_model_id", `String resolved_model_id);
+        ("model_used", `Null);
+        ("resolved_model_id", `Null);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ( "timeout_budget",
@@ -1424,7 +1535,11 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("compaction_saved_tokens", `Int compaction.saved_tokens);
         ("compaction_trigger",
           match compaction.trigger with
-          | Some reason -> `String reason
+          | Some trigger -> `String (Compaction_trigger.to_label trigger)
+          | None -> `Null);
+        ("compaction_trigger_detail",
+          match compaction.trigger with
+          | Some trigger -> Compaction_trigger.to_detail_json trigger
           | None -> `Null);
         ("turn_mode", `String (turn_mode_to_string turn_mode));
         ( "scheduled_autonomous_outcome",
@@ -1452,7 +1567,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | None -> `Null );
         ("cascade",
          match result.cascade_observation with
-         | Some observation -> Oas_worker.cascade_observation_to_json observation
+         | Some observation -> redacted_cascade_observation_to_json observation
          | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
@@ -1480,11 +1595,11 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
          match result.proof with
          | Some p ->
            `Assoc [
-             ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+             ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
              ("effective_mode",
-              Agent_sdk.Execution_mode.to_yojson p.effective_execution_mode);
+              Masc_mcp_cdal_runtime.Execution_mode.to_yojson p.effective_execution_mode);
              ("result_status",
-              Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status);
+              Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status);
              ("violation_count",
               `Int (cdal_violation_ref_count p));
              ("raw_evidence_ref_count",
@@ -1497,7 +1612,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("inference_telemetry",
          match result.inference_telemetry with
          | Some t ->
-           Agent_sdk.Types.inference_telemetry_to_yojson t
+           Keeper_hooks_oas.inference_telemetry_to_runtime_json t
          | None -> `Null);
       ]
   in
@@ -1514,9 +1629,15 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
    | Some trigger
      when compaction.before_tokens > 0
        && compaction.before_tokens = compaction.after_tokens ->
+       (* Closed label set (5 values) keeps the metric cardinality bound; the
+          full numerical detail is preserved in the snapshot's
+          [compaction_trigger_detail] JSON above. *)
        Prometheus.inc_counter
-         Prometheus.metric_keeper_compaction_noop
-         ~labels:[ ("keeper", meta.name); ("trigger", trigger) ]
+         Keeper_metrics.metric_keeper_compaction_noop
+         ~labels:
+           [ ("keeper", meta.name)
+           ; ("trigger", Compaction_trigger.to_label trigger)
+           ]
          ()
    | _ -> ())
 
@@ -1538,11 +1659,15 @@ let broadcast_lifecycle_events ~(name : string)
              ("saved_tokens", `Int compaction.saved_tokens);
              ( "trigger",
                match compaction.trigger with
-               | Some reason -> `String reason
+               | Some trigger -> `String (Compaction_trigger.to_label trigger)
                | None ->
                    `String
                      (Keeper_exec_context.compaction_decision_to_string
                         compaction.decision) );
+             ( "trigger_detail",
+               match compaction.trigger with
+               | Some trigger -> Compaction_trigger.to_detail_json trigger
+               | None -> `Null );
              ("ts_unix", `Float now_ts);
            ])
      with
@@ -1550,7 +1675,7 @@ let broadcast_lifecycle_events ~(name : string)
      | exn ->
          Log.Keeper.error "compaction SSE broadcast failed: %s"
            (Printexc.to_string exn);
-         Prometheus.inc_counter Prometheus.metric_keeper_metrics_sse_failures ~labels:[("kind", "compaction")] ());
+         Prometheus.inc_counter Keeper_metrics.metric_keeper_metrics_sse_failures ~labels:[("kind", Metrics_sse_failure_kind.(to_label Compaction))] ());
   match handoff_json with
   | Some ((`Assoc _ as handoff)) ->
       let from_generation =
@@ -1578,7 +1703,7 @@ let broadcast_lifecycle_events ~(name : string)
       | exn ->
           Log.Keeper.error "handoff SSE broadcast failed: %s"
             (Printexc.to_string exn);
-          Prometheus.inc_counter Prometheus.metric_keeper_metrics_sse_failures ~labels:[("kind", "handoff")] ())
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_metrics_sse_failures ~labels:[("kind", Metrics_sse_failure_kind.(to_label Handoff))] ())
   | _ -> ()
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
@@ -1590,29 +1715,27 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   ignore is_transient; (* Param retained for caller compatibility; no longer
                           used internally after zombie-fix #5594. *)
   let now_ts = Time_compat.now () in
+  record_keeper_idle_seconds
+    ~keeper_name:meta.name
+    ~idle_seconds:observation.idle_seconds;
   let is_scheduled_autonomous_cycle =
     is_scheduled_autonomous_cycle_of_observation observation
   in
   let public_reason =
     match sdk_error with
     | Some err -> (
-        match Oas_worker_named.classify_masc_internal_error err with
-        | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
+        match Keeper_turn_driver.classify_masc_internal_error err with
+        | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
             let trimmed = String.trim detail in
             if trimmed = "" then reason else trimmed
         | Some
-            (Oas_worker_named.Oas_timeout_budget
-               {
-                 budget_sec;
-                 keeper_turn_timeout_sec;
-                 estimated_input_tokens;
-                 source;
-               }) ->
-            Printf.sprintf
-              "OAS budget timeout after %.1fs (%s, estimated input %d tokens, keeper hard cap %.1fs)"
-              budget_sec source estimated_input_tokens keeper_turn_timeout_sec
-        | Some (Oas_worker_named.No_tool_capable_provider _ as err) -> (
-            match Oas_worker_named.summary_of_masc_internal_error err with
+            (Keeper_turn_driver.Oas_timeout_budget
+               _ as err) ->
+            Option.value
+              ~default:reason
+              (Keeper_turn_driver.summary_of_masc_internal_error err)
+        | Some (Keeper_turn_driver.No_tool_capable_provider _ as err) -> (
+            match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary
             | None -> reason)
         | _ -> reason)
@@ -1623,14 +1746,14 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     &&
     match sdk_error with
     | Some err -> (
-        match Oas_worker_named.classify_masc_internal_error err with
+        match Keeper_turn_driver.classify_masc_internal_error err with
         | Some
-            (Oas_worker_named.Oas_timeout_budget _
-            | Oas_worker_named.Turn_timeout _
-            | Oas_worker_named.Admission_queue_timeout _
-            | Oas_worker_named.Admission_queue_rejected _
-            | Oas_worker_named.Resumable_cli_session _
-            | Oas_worker_named.No_tool_capable_provider _) ->
+            (Keeper_turn_driver.Oas_timeout_budget _
+            | Keeper_turn_driver.Turn_timeout _
+            | Keeper_turn_driver.Admission_queue_timeout _
+            | Keeper_turn_driver.Admission_queue_rejected _
+            | Keeper_turn_driver.Resumable_cli_session _
+            | Keeper_turn_driver.No_tool_capable_provider _) ->
             true
         | Some _ | None -> false)
     | None -> false
@@ -1639,14 +1762,14 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
      cycle outcomes so Grafana can surface fleet-wide health ratios. *)
   (match sdk_error with
    | Some err ->
-       (match Oas_worker_named.classify_masc_internal_error err with
-        | Some (Oas_worker_named.No_tool_capable_provider
+       (match Keeper_turn_driver.classify_masc_internal_error err with
+        | Some (Keeper_turn_driver.No_tool_capable_provider
 	                  { cascade_name; _ }) ->
             let cascade_name =
-              Oas_worker_named.cascade_name_to_string cascade_name
+              Keeper_turn_driver.cascade_name_to_string cascade_name
             in
             Prometheus.inc_counter
-              Prometheus.metric_keeper_no_tool_provider
+              Keeper_metrics.metric_keeper_no_tool_provider
               ~labels:
                 [ ("keeper", meta.name)
                 ; ("cascade", cascade_name)
@@ -1655,7 +1778,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | _ -> ())
    | None -> ());
   if is_scheduled_autonomous_cycle then
-    Prometheus.inc_counter Prometheus.metric_keeper_proactive_outcome
+    Prometheus.inc_counter Keeper_metrics.metric_keeper_proactive_outcome
       ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
       ();
   let preview =
@@ -1720,14 +1843,26 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
              Option.value ~default:"" state.current_intention
          | None -> meta.runtime.last_current_intention);
       last_blocker =
-        (match social_state with
-         | Some (state : Social.social_state) ->
-             Option.value ~default:"" state.blocker
-         | None -> short_preview public_reason);
-      last_blocker_class =
+        (* Merge: typed klass from sdk_error becomes authoritative;
+           detail picks up the social-state blocker text or a public-
+           reason preview as observability context.  When the SDK
+           error carries no typed mapping we refuse to fabricate a
+           class — the previous string-only stamp is the substring
+           anti-pattern this refactor closes (CLAUDE.md
+           "워크어라운드 거부 기준 #2"). *)
         (match sdk_error with
          | Some err ->
-             Keeper_status_bridge.blocker_class_of_sdk_error err
+             (match Keeper_status_bridge.blocker_class_of_sdk_error err with
+              | Some klass ->
+                  let detail =
+                    match social_state with
+                    | Some (state : Social.social_state) ->
+                        Option.value ~default:"" state.blocker
+                    | None -> short_preview public_reason
+                  in
+                  Some (Keeper_meta_contract.blocker_info_of_class
+                          ~detail klass)
+              | None -> None)
          | None -> None);
       last_need =
         (match social_state with

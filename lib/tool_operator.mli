@@ -33,10 +33,9 @@ type 'a context = {
 
 (** {1 Result} *)
 
-type tool_result = bool * string
-(** Standard MCP tool return: [(success, body_or_error)].
-    [body_or_error] is the JSON-serialised body on success or an
-    error message on failure. *)
+type tool_result = Tool_result.t
+(** Re-exported from {!Tool_result}.  RFC-0062 Phase 4c-2:
+    handlers return structured [Tool_result.t] records. *)
 
 (** {1 Dispatch} *)
 
@@ -44,7 +43,7 @@ val dispatch :
   float Eio.Time.clock_ty context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 (** [dispatch ctx ~name ~args] dispatches the named MCP tool call.
     Returns [None] for unrecognised names so callers can fall
     through to other dispatchers.

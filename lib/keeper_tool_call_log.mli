@@ -102,6 +102,11 @@ val init : ?cluster_name:string -> base_path:string -> unit -> unit
 val store_dir : unit -> string option
 (** [store_dir ()] returns the initialized durable store directory, if any. *)
 
+val current_log_path : unit -> string option
+(** [current_log_path ()] returns today's JSONL file path for the initialized
+    durable store, if any. The file may not exist yet when no tool call has
+    been appended today. *)
+
 val configured_masc_root : unit -> string option
 (** [configured_masc_root ()] returns the cluster-aware MASC root passed to
     [init], even if the store failed to open. Runtime sidecars use this to
@@ -143,8 +148,9 @@ val log_call :
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
-    Output is truncated to 4000 bytes. [model] records which LLM generated
-    the tool call. Turn-policy fields ([lane], [tool_choice],
+    Output is truncated to 4000 bytes. [model] is a compatibility input only;
+    non-empty values are redacted to the neutral runtime lane. [cascade_profile]
+    is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
     selection context. [result_bytes] is the original output size before
     any truncation. [truncated_to] is present when Tool_output_validation

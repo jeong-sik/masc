@@ -17,6 +17,8 @@ import type {
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardExecutionResponse,
+  DashboardBootstrapResponse,
+  DashboardBootstrapSliceError,
   DashboardMemoryResponse,
   DashboardPlanningResponse,
   DashboardConfigResolution,
@@ -30,7 +32,7 @@ import type {
   DashboardCoordinationFsmSnapshot,
   DashboardCoordinationFsmViolation,
 } from './types'
-import { fetchDashboardShell } from './api/dashboard-hot'
+import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-hot'
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import {
@@ -49,6 +51,9 @@ import { FetchScheduler } from './lib/fetch-scheduler'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { timeBoardRequest } from './board-metrics'
+import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
+import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
+import { hydrateGoalTreeSnapshot } from './goal-tree-state'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionQueueItem,
@@ -175,6 +180,14 @@ export const oasTotalLlmCalls = signal(0)
 export const oasTotalErrors = signal(0)
 export const oasLastLlmCallTs = signal<number | null>(null)
 export const oasLastErrorTs = signal<number | null>(null)
+export const oasEvidenceRefsCount = signal(0)
+export const oasArtifactRefsCount = signal(0)
+export const oasRawTraceRefsCount = signal(0)
+export const oasReportRefsCount = signal(0)
+export const oasProofRefsCount = signal(0)
+export const oasTelemetryRefsCount = signal(0)
+export const oasRuntimeEvidenceRefsCount = signal(0)
+export const oasLastEvidenceTs = signal<number | null>(null)
 
 export function resetOasRuntimeSignals(): void {
   oasAgentEventsRing.clear()
@@ -189,6 +202,14 @@ export function resetOasRuntimeSignals(): void {
   oasTotalErrors.value = 0
   oasLastLlmCallTs.value = null
   oasLastErrorTs.value = null
+  oasEvidenceRefsCount.value = 0
+  oasArtifactRefsCount.value = 0
+  oasRawTraceRefsCount.value = 0
+  oasReportRefsCount.value = 0
+  oasProofRefsCount.value = 0
+  oasTelemetryRefsCount.value = 0
+  oasRuntimeEvidenceRefsCount.value = 0
+  oasLastEvidenceTs.value = null
 }
 
 export function noteOasReplayWindow(input: {
@@ -283,6 +304,46 @@ export function recordOasError(tsMs: number): void {
   oasLastErrorTs.value = Math.max(oasLastErrorTs.value ?? 0, tsMs)
 }
 
+export function recordOasEvidenceRefs(input: {
+  evidenceRefsCount?: number
+  artifactRefsCount?: number
+  rawTraceRefsCount?: number
+  reportRefsCount?: number
+  proofRefsCount?: number
+  telemetryRefsCount?: number
+  runtimeEvidenceRefsCount?: number
+  tsMs?: number | null
+}): void {
+  const evidenceRefsCount = Math.max(0, Math.floor(input.evidenceRefsCount ?? 0))
+  const artifactRefsCount = Math.max(0, Math.floor(input.artifactRefsCount ?? 0))
+  const rawTraceRefsCount = Math.max(0, Math.floor(input.rawTraceRefsCount ?? 0))
+  const reportRefsCount = Math.max(0, Math.floor(input.reportRefsCount ?? 0))
+  const proofRefsCount = Math.max(0, Math.floor(input.proofRefsCount ?? 0))
+  const telemetryRefsCount = Math.max(0, Math.floor(input.telemetryRefsCount ?? 0))
+  const runtimeEvidenceRefsCount = Math.max(0, Math.floor(input.runtimeEvidenceRefsCount ?? 0))
+  if (
+    evidenceRefsCount
+    + artifactRefsCount
+    + rawTraceRefsCount
+    + reportRefsCount
+    + proofRefsCount
+    + telemetryRefsCount
+    + runtimeEvidenceRefsCount === 0
+  ) {
+    return
+  }
+  oasEvidenceRefsCount.value += evidenceRefsCount
+  oasArtifactRefsCount.value += artifactRefsCount
+  oasRawTraceRefsCount.value += rawTraceRefsCount
+  oasReportRefsCount.value += reportRefsCount
+  oasProofRefsCount.value += proofRefsCount
+  oasTelemetryRefsCount.value += telemetryRefsCount
+  oasRuntimeEvidenceRefsCount.value += runtimeEvidenceRefsCount
+  if (typeof input.tsMs === 'number' && Number.isFinite(input.tsMs)) {
+    oasLastEvidenceTs.value = Math.max(oasLastEvidenceTs.value ?? 0, input.tsMs)
+  }
+}
+
 export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
   const next = new Map<string, OasKeeperSnapshot>(oasKeeperSnapshots.value)
   next.set(snapshot.keeper_name, snapshot)
@@ -317,6 +378,14 @@ export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() =>
   totalErrors: oasTotalErrors.value,
   lastLlmCallTs: oasLastLlmCallTs.value,
   lastErrorTs: oasLastErrorTs.value,
+  evidenceRefsCount: oasEvidenceRefsCount.value,
+  artifactRefsCount: oasArtifactRefsCount.value,
+  rawTraceRefsCount: oasRawTraceRefsCount.value,
+  reportRefsCount: oasReportRefsCount.value,
+  proofRefsCount: oasProofRefsCount.value,
+  telemetryRefsCount: oasTelemetryRefsCount.value,
+  runtimeEvidenceRefsCount: oasRuntimeEvidenceRefsCount.value,
+  lastEvidenceTs: oasLastEvidenceTs.value,
 }))
 
 // --- Loading flags ---
@@ -456,12 +525,58 @@ export function invalidateDashboardCache(): void {
   // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
 }
 
+function bootstrapSliceError(slice: unknown): slice is DashboardBootstrapSliceError {
+  return isRecord(slice) && typeof slice.error === 'string'
+}
+
+async function refreshDashboardFallback(opts?: RefreshOptions): Promise<void> {
+  await Promise.all([refreshShell(opts), refreshExecution(opts)])
+}
+
+function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
+  if (!data.shell || bootstrapSliceError(data.shell)) {
+    throw new Error('dashboard bootstrap shell slice unavailable')
+  }
+  if (!data.execution || bootstrapSliceError(data.execution)) {
+    throw new Error('dashboard bootstrap execution slice unavailable')
+  }
+
+  hydrateShellSnapshot(data.shell, { light: true })
+  hydrateExecutionSnapshot(data.execution)
+
+  if (data.planning && !bootstrapSliceError(data.planning)) {
+    hydratePlanningSnapshot(data.planning)
+  }
+  if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)) {
+    const normalized = normalizeNamespaceTruth(data.namespace_truth)
+    namespaceTruth.value = normalized
+    namespaceTruthError.value = null
+    namespaceTruthInitializing.value = false
+    serverStatus.value = mergeServerStatus(
+      serverStatus.value,
+      normalized.root.status ?? null,
+    )
+  }
+  if (data.goals && !bootstrapSliceError(data.goals)) {
+    hydrateGoalTreeSnapshot(data.goals)
+  }
+}
+
 export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   if (inflightDashboardRefresh) return inflightDashboardRefresh
   dashboardLoading.value = true
   inflightDashboardRefresh = (async () => {
     try {
-      await Promise.all([refreshShell(opts), refreshExecution(opts)])
+      executionLoading.value = true
+      executionError.value = null
+      try {
+        hydrateDashboardBootstrap(await fetchDashboardBootstrap())
+      } catch (bootstrapErr) {
+        console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
+        await refreshDashboardFallback(opts)
+      } finally {
+        executionLoading.value = false
+      }
     } catch (err) {
       console.warn('[Dashboard] refresh error:', err)
     } finally {

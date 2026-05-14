@@ -660,6 +660,8 @@ type message = {
   mention: string option; [@default None]
   timestamp: string;
   trace_context: string option; [@default None]
+  expires_at: float option; [@default None]
+  relevance: string; [@default "medium"]
 } [@@deriving yojson { strict = false }, show]
 
 (** Coord state *)

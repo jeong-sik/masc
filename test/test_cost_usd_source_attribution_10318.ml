@@ -2,41 +2,41 @@
 
     Pre-fix [costs.jsonl] showed 100% [cost_usd=0] across 1697
     entries.  Each silent path (untrusted usage, missing usage,
-    pricing catalog miss, structurally-unmetered provider, actual
+    OAS cost omission, structurally-unmetered runtime, actual
     zero-token call) collapsed to the same [0.0] field with no
     way for an operator to distinguish "tracking is broken" from
-    "this provider is free" from "this model is missing from the
-    pricing catalog".  Without that distinction the operator
+    "this runtime is unmetered" from "OAS did not report cost".
+    Without that distinction the operator
     can't pick the right next action: A (audit) vs C (pricing
     SSOT) vs E (cross-link to #9959) all need different evidence.
 
     These tests pin
-    [Keeper_hooks_oas.classify_cost_usd_source]'s 6-way
+    [Keeper_hooks_oas.classify_cost_usd_source]'s bounded
     classification:
 
     | path                | source string         |
     |---------------------|-----------------------|
     | usage_missing       | missing_usage         |
     | not usage_trusted   | untrusted_usage       |
-    | structurally_unmetered_provider | unmetered_provider |
+    | structurally_unmetered runtime | unmetered_provider |
     | trusted + cost > 0  | computed              |
-    | trusted + 0 + no catalog entry | pricing_catalog_miss |
-    | trusted + 0 + catalog hit | zero_token_call |
+    | trusted + tokens + 0 cost | oas_cost_unreported |
+    | trusted + 0 cost and not free | oas_cost_unreported |
 
     Precedence is fixed (top-down) so a missing-usage call on a
     pricing-known model still labels [missing_usage], not
-    [pricing_catalog_miss] — the upstream gate is the more
+    [oas_cost_unreported] — the upstream gate is the more
     actionable failure mode. *)
 
 open Alcotest
 
 module H = Masc_mcp.Keeper_hooks_oas
 
-let check_source ~msg ~usage_missing ~usage_trusted ~provider ~model
+let check_source ~msg ~usage_missing ~usage_trusted ~runtime_unmetered
     ~cost_usd expected =
   let actual =
-    H.classify_cost_usd_source ~usage_missing ~usage_trusted ~provider
-      ~model ~cost_usd
+    H.classify_cost_usd_source ~usage_missing ~usage_trusted
+      ~runtime_unmetered ~cost_usd
   in
   check string msg expected actual
 
@@ -50,7 +50,7 @@ let test_missing_usage_wins_over_everything () =
   check_source
     ~msg:"missing_usage even with priced model + positive cost"
     ~usage_missing:true ~usage_trusted:false
-    ~provider:"openai" ~model:"gpt-5-mini"
+    ~runtime_unmetered:false
     ~cost_usd:0.42
     "missing_usage"
 
@@ -58,7 +58,7 @@ let test_untrusted_wins_over_unmetered_and_catalog () =
   check_source
     ~msg:"untrusted_usage wins over unmetered_provider"
     ~usage_missing:false ~usage_trusted:false
-    ~provider:"ollama" ~model:"llama3"
+    ~runtime_unmetered:true
     ~cost_usd:0.0
     "untrusted_usage"
 
@@ -66,11 +66,11 @@ let test_untrusted_wins_over_unmetered_and_catalog () =
 
 let test_unmetered_provider_when_trusted () =
   (* ollama is structurally unmetered; trusted+0 should label as
-     [unmetered_provider], NOT [pricing_catalog_miss]. *)
+     [unmetered_provider], without MASC inspecting provider/model pricing. *)
   check_source
     ~msg:"trusted ollama => unmetered_provider"
     ~usage_missing:false ~usage_trusted:true
-    ~provider:"ollama" ~model:"llama3"
+    ~runtime_unmetered:true
     ~cost_usd:0.0
     "unmetered_provider"
 
@@ -78,42 +78,28 @@ let test_computed_when_trusted_and_positive () =
   check_source
     ~msg:"trusted + paid + cost > 0 => computed"
     ~usage_missing:false ~usage_trusted:true
-    ~provider:"openai" ~model:"gpt-5-mini"
+    ~runtime_unmetered:false
     ~cost_usd:0.0042
     "computed"
 
-let test_pricing_catalog_miss_for_unknown_model () =
-  (* Trusted call on a paid provider whose model is NOT in the
-     pricing catalog. cost=0 falls through to [pricing_catalog_miss]
-     — the actionable signal that says "add upstream OAS entry". *)
+let test_oas_cost_unreported_for_zero_cost_tokens () =
+  (* Trusted call with tokens but no positive OAS-reported cost falls
+     through to [oas_cost_unreported]. MASC must not inspect a local
+     provider/model pricing catalog to guess why. *)
   check_source
-    ~msg:"unknown model on paid provider => pricing_catalog_miss"
+    ~msg:"trusted tokens without OAS cost => oas_cost_unreported"
     ~usage_missing:false ~usage_trusted:true
-    ~provider:"openai"
-    ~model:"this-model-is-not-in-the-pricing-catalog-10318"
+    ~runtime_unmetered:false
     ~cost_usd:0.0
-    "pricing_catalog_miss"
+    "oas_cost_unreported"
 
-let test_unresolved_model_alias_for_auto_alias () =
-  (* The OAS catalog may carry zero-price fallback entries for selector
-     aliases, but "auto" is not a billable model id. Treating it as
-     free or a real catalog miss would hide missing canonical telemetry. *)
+let test_preview_runtime_without_oas_cost_is_unreported () =
   check_source
-    ~msg:"auto alias on paid provider => unresolved_model_alias"
+    ~msg:"preview runtime without OAS cost => oas_cost_unreported"
     ~usage_missing:false ~usage_trusted:true
-    ~provider:"openai"
-    ~model:"auto"
+    ~runtime_unmetered:false
     ~cost_usd:0.0
-    "unresolved_model_alias"
-
-let test_known_unpriced_model_for_codex_spark () =
-  check_source
-    ~msg:"codex spark preview => known_unpriced_model"
-    ~usage_missing:false ~usage_trusted:true
-    ~provider:"openai"
-    ~model:"gpt-5.3-codex-spark"
-    ~cost_usd:0.0
-    "known_unpriced_model"
+    "oas_cost_unreported"
 
 (* --- counter wiring (only non-computed sources tick) ------------- *)
 
@@ -132,20 +118,20 @@ let test_record_emit_skips_computed () =
     (counter_for "computed")
 
 let test_record_emit_increments_named_source () =
-  let before = counter_for "pricing_catalog_miss" in
-  H.record_cost_emit_source "pricing_catalog_miss";
+  let before = counter_for "oas_cost_unreported" in
+  H.record_cost_emit_source "oas_cost_unreported";
   check (float 0.0001)
-    "pricing_catalog_miss +1"
+    "oas_cost_unreported +1"
     (before +. 1.0)
-    (counter_for "pricing_catalog_miss")
+    (counter_for "oas_cost_unreported")
 
 let test_counter_isolation_between_sources () =
-  (* Bumping pricing_catalog_miss must NOT move missing_usage.
+  (* Bumping oas_cost_unreported must NOT move missing_usage.
      Each source has its own series so dashboards split cleanly. *)
   let other_before = counter_for "missing_usage" in
-  H.record_cost_emit_source "pricing_catalog_miss";
+  H.record_cost_emit_source "oas_cost_unreported";
   check (float 0.0001)
-    "missing_usage unchanged when pricing_catalog_miss bumps"
+    "missing_usage unchanged when oas_cost_unreported bumps"
     other_before
     (counter_for "missing_usage")
 
@@ -166,12 +152,10 @@ let () =
             test_unmetered_provider_when_trusted;
           test_case "computed when trusted and positive" `Quick
             test_computed_when_trusted_and_positive;
-          test_case "pricing_catalog_miss for unknown model" `Quick
-            test_pricing_catalog_miss_for_unknown_model;
-          test_case "unresolved_model_alias for auto alias" `Quick
-            test_unresolved_model_alias_for_auto_alias;
-          test_case "known_unpriced_model for codex spark" `Quick
-            test_known_unpriced_model_for_codex_spark;
+          test_case "OAS cost unreported for token usage" `Quick
+            test_oas_cost_unreported_for_zero_cost_tokens;
+          test_case "preview runtime without OAS cost" `Quick
+            test_preview_runtime_without_oas_cost_is_unreported;
         ] );
       ( "counter",
         [

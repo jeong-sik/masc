@@ -150,9 +150,6 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
 
   return html`
     <${Card} title="활동 히트맵" testId="activity_heatmap">
-      <div class="mb-2">
-        <p class="text-sm text-[var(--color-fg-muted)]">필터링된 전체 이벤트를 기준으로 요일별, 시간대별 활동 밀도를 보여줍니다.</p>
-      </div>
       <div ref=${containerRef} class="relative overflow-x-auto bg-[var(--color-bg-surface)] rounded-[var(--r-1)] p-3 contain-content">
         <canvas ref=${canvasRef} class="block" role="img" aria-label="요일별 시간대별 활동 밀도 히트맵" />
         ${tooltip

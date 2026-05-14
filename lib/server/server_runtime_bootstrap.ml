@@ -13,8 +13,8 @@ let clear_retired_pg_envs () =
     (fun key ->
       match Sys.getenv_opt key |> Env_config_core.trim_opt with
       | Some _ ->
-          Log.Server.warn
-            "Ignoring retired PG runtime env %s; filesystem-only bootstrap is enforced."
+          Log.Server.info
+            "Clearing retired PG runtime env %s; filesystem-only bootstrap is enforced."
             key;
           Unix.putenv key ""
       | None -> Unix.putenv key "")
@@ -29,32 +29,6 @@ let force_jsonl_fallback_env () =
   close_out oc;
   Unix.putenv "OAS_GEMINI_ADMIN_POLICY" policy_path
 
-
-let () =
-  Prometheus.register_counter
-    ~name:"masc_mcp_audit_no_construct_path_total"
-    ~help:
-      "Boot-time provider × MCP-config-construct audit \
-       (PR-Mp3b / Leak 12): a cascade entry references a provider \
-       with no auto-construct path for the MCP config JSON. The \
-       CLI subprocess starts and the LLM responds, but every \
-       keeper_*/masc_* tool call fails with 'tool not in session's \
-       tool registry'. Labels: provider. Non-zero at boot means an \
-       operator should either remove the provider from the cascade \
-       or add an auto-construct entry."
-    ()
-
-let () =
-  Prometheus.register_counter
-    ~name:"masc_mcp_audit_default_off_total"
-    ~help:
-      "Boot-time provider × MCP-config-construct audit \
-       (PR-Mp3b / Leak 12): a provider has an auto-construct path \
-       but its env flag defaults to off (e.g. codex_cli + \
-       MASC_SYNC_CODEX_MCP_CONFIG=false). Operator must opt in or \
-       the keeper will fail tool calls on this lane. Labels: \
-       provider, env_flag."
-    ()
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()
@@ -232,11 +206,15 @@ let bootstrap_base_path_config_root ~base_path =
              config_root source
        | None ->
            ensure_config_root_scaffold config_root;
+           (* RFC-0058 §9.3: cascade.toml is the only cascade source.
+              [""] is the smallest valid TOML document — a document
+              with no tables and no keys; the materializer parses it
+              and renders an empty in-memory catalog. *)
            let cascade_path =
-             Filename.concat config_root Config_dir_resolver.cascade_json_filename
+             Filename.concat config_root Config_dir_resolver.cascade_toml_filename
            in
            if not (Sys.file_exists cascade_path) then
-             Fs_compat.save_file cascade_path "{}";
+             Fs_compat.save_file cascade_path "";
            Log.Server.warn
              "bootstrapped minimal base-path config root without versioned source: %s"
              config_root);
@@ -289,7 +267,7 @@ let record_tool_policy_init_failure ~base_path msg =
     ~labels:[("base_path", base_path)]
     ();
   Prometheus.inc_counter Prometheus.metric_error_events
-    ~labels:[("type", "missing_config")]
+    ~labels:[("type", Error_event_type.(to_label Missing_config))]
     ();
   Log.Server.error "Fatal tool policy config load failure: %s" msg
 
@@ -629,94 +607,6 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
       (List.length missings) (List.length orphans)
   end
 
-let audit_provider_mcp_config_paths (_state : Mcp_server.server_state) =
-  (* PR-Mp3b (Leak 12): on every boot, walk every cascade catalog
-     entry's model strings, extract provider names, and run the SSOT
-     audit (Keeper_mcp_provider_audit) over the deduplicated set.
-
-     Read-only.  Emits one log line per audited provider with a
-     grep-friendly tag plus two Prometheus counters for the failure
-     buckets.  Fail-soft: if the cascade catalog is unloadable the
-     hook logs and returns; cascade load problems surface through
-     other validators (Cascade_catalog_validator) and are not this
-     hook's job to fix. *)
-  let cascade_names =
-    try Keeper_cascade_profile.catalog_names ()
-    with exn ->
-      Log.Misc.warn
-        "[mcp_audit:catalog_load_failed] exn=%s"
-        (Printexc.to_string exn);
-      []
-  in
-  if cascade_names = [] then
-    Log.Misc.info "[mcp_audit:skip] no cascade profiles loaded"
-  else begin
-    let providers =
-      List.concat_map
-        (fun name ->
-          try
-            Cascade_runtime.models_of_cascade_name
-              (Keeper_cascade_profile.Runtime_name name)
-            |> List.filter_map Cascade_runtime.provider_name_of_label
-          with exn ->
-            Log.Misc.warn
-              "[mcp_audit:cascade_models_failed] cascade=%s exn=%s"
-              name (Printexc.to_string exn);
-            [])
-        cascade_names
-      |> List.sort_uniq String.compare
-    in
-    if providers = [] then
-      Log.Misc.info
-        "[mcp_audit:skip] no provider labels resolved from %d cascades"
-        (List.length cascade_names)
-    else begin
-      let results =
-        Keeper_mcp_provider_audit.audit_providers providers
-      in
-      let active, no_path, http_api =
-        Keeper_mcp_provider_audit.partition results
-      in
-      List.iter (fun r ->
-        Log.Misc.info "%s"
-          (Keeper_mcp_provider_audit.format_log_line r);
-        match r.Keeper_mcp_provider_audit.construct with
-        | Auto_construct_active
-            { default_when_unset = false; env_flag; _ } ->
-            Log.Misc.warn
-              "[mcp_audit:default_off] provider=%s env_flag=%s — \
-               operator must set %s=true for this lane to emit MCP \
-               config"
-              r.provider env_flag env_flag;
-            Prometheus.inc_counter
-              "masc_mcp_audit_default_off_total"
-              ~labels:[("provider", r.provider);
-                       ("env_flag", env_flag)] ()
-        | _ -> ())
-        active;
-      List.iter (fun r ->
-        Log.Misc.warn "%s"
-          (Keeper_mcp_provider_audit.format_log_line r);
-        Prometheus.inc_counter
-          "masc_mcp_audit_no_construct_path_total"
-          ~labels:[("provider", r.Keeper_mcp_provider_audit.provider)]
-          ())
-        no_path;
-      List.iter (fun r ->
-        Log.Misc.info "%s"
-          (Keeper_mcp_provider_audit.format_log_line r))
-        http_api;
-      Log.Misc.info
-        "[mcp_audit:summary] cascades=%d providers=%d active=%d \
-         no_construct_path=%d http_api=%d"
-        (List.length cascade_names)
-        (List.length providers)
-        (List.length active)
-        (List.length no_path)
-        (List.length http_api)
-    end
-  end
-
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   (* Promote legacy room/keeper state before Coord.init seeds fresh root files.
      Otherwise state.json/backlog.json can be created in the destination first
@@ -728,7 +618,6 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   migrate_legacy_keeper_dirs_blocking state;
   let (_init_msg : string) = Coord.init state.room_config ~agent_name:None in
   audit_keeper_egress_policies state;
-  audit_provider_mcp_config_paths state;
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let sync_admin_token_env (state : Mcp_server.server_state) =
@@ -1169,6 +1058,29 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
               keeper_name agent_name
               (Masc_domain.masc_error_to_string err))
     keeper_names keeper_agent_names;
+  (* Post-sweep audit: surface the ping-pong outcome as a positive
+     boot signal. Before the γ fix (PR #15112) every keeper logged
+     a WARN "archived credential ..." line and operators could only
+     detect regressions by counting WARN lines. Now we emit a single
+     structured INFO so the steady-state ("alive_aliases=N dead=0")
+     is visible on every boot; a non-zero [dead_bares] is the canary
+     for ping-pong regression. *)
+  (* [Auth.bare_alias_audit] mirrors the result into the
+     [masc_auth_bare_alias{state=...}] gauges so the boot signal
+     stays surfaced on every Prometheus scrape. The INFO line below
+     is the one-shot boot log mirror; the WARN that follows is the
+     regression canary. *)
+  let audit =
+    Auth.bare_alias_audit ~base_path ~canonical_names:keeper_agent_names
+  in
+  Log.Server.info
+    "startup bare alias audit: alive_aliases=%d dead_bares=%d no_bares=%d"
+    audit.alive_aliases audit.dead_bares audit.no_bares;
+  if audit.dead_bares > 0 then
+    Log.Server.warn
+      "startup bare alias audit: dead_bares=%d (ping-pong regression \
+       candidate; see PR #15112 γ guard)"
+      audit.dead_bares;
   let rotation_outcomes =
     Auth.rotate_shared_tokens_for_agents base_path
       ~agent_names:keeper_agent_names
@@ -1226,7 +1138,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
     begin
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
     Log.Misc.error "required prompt files missing: %s"
       (missing_prompt_files
       |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
@@ -1235,7 +1147,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
   if invalid_prompt_templates <> [] then
     begin
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "missing_config")] ();
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
     Log.Misc.error "prompt templates use unknown variables: %s"
       (invalid_prompt_templates
       |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
@@ -1346,6 +1258,42 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
      Log.Misc.warn "startup checkpoint prune failed: %s (next boot retries)"
        (Printexc.to_string exn))
 
+let startup_prune_auth_archive (state : Mcp_server.server_state) =
+  (try
+     let days =
+       Safe_ops.get_env_int_logged
+         "MASC_AUTH_ARCHIVE_RETENTION_DAYS"
+         ~default:30
+     in
+     let min_keep =
+       Safe_ops.get_env_int_logged
+         "MASC_AUTH_ARCHIVE_MIN_KEEP"
+         ~default:20
+     in
+     let kept, pruned =
+       Auth.prune_archive
+         ~base_path:state.room_config.base_path
+         ~retention_days:days
+         ~min_keep
+     in
+     Prometheus.set_gauge Prometheus.metric_auth_archive_epochs
+       (float_of_int kept);
+     if pruned > 0 then (
+       Prometheus.inc_counter Prometheus.metric_auth_archive_pruned_total
+         ~delta:(float_of_int pruned)
+         ();
+       Log.Misc.info
+         "startup auth archive prune: pruned=%d kept=%d (retention=%dd \
+          min_keep=%d)"
+         pruned kept days min_keep)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Misc.warn
+       "startup auth archive prune failed: %s (next boot retries; disk \
+        impact bounded by retention)"
+       (Printexc.to_string exn))
+
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
   (try
      let traces_dir =
@@ -1414,20 +1362,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
      quick_stat does not walk the heap, so the call cost stays
      bounded next to the request path. *)
   Gc_sampler.run ~sw ~clock ~interval:30.0;
-  let refresh_llama_endpoints () =
-    try
-      let llama_endpoints =
-        Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ()
-      in
-      Log.Server.info "[MASC] Llama endpoints: %s"
-        (String.concat ", " llama_endpoints)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Server.warn "llama endpoint refresh skipped during startup: %s"
-        (Printexc.to_string exn)
-  in
-
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
@@ -1455,7 +1389,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
 
   (* 2. All init in background fiber — protected so failures don't kill HTTP *)
   Eio.Fiber.fork ~sw (fun () ->
-    refresh_llama_endpoints ();
     let governance_level = Env_config_core.governance_level () in
     let init_state_blocking () =
       let t0 = Eio.Time.now clock in
@@ -1466,14 +1399,20 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          the default noop sink instead of the Prometheus-backed one. *)
       Llm_metric_bridge.install ();
       Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
+      (* #13885: install backend mutex observers from the top-level
+         masc_mcp layer.  Backend/coord sub-libraries cannot depend on
+         Prometheus without creating dependency cycles, but the global
+         observer refs can be wired before any FileSystem backend writes. *)
+      Backend_mutex_metrics.install ();
+      Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_*)";
       (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
          any subsequent structured emits) into the masc-mcp log ring so
          they land in ~/.masc/logs/system_log_*.jsonl alongside
          masc-mcp's own records.  Without this, OAS's structured Log
          global sink registry is empty and every Log.info inside
          agent_sdk is a silent drop. *)
-      Oas_log_bridge.install ();
-      Log.Server.info "Oas_log_bridge installed (agent_sdk.Log -> masc structured log)";
+      Agent_sdk_log_bridge.install ();
+      Log.Server.info "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in
@@ -1569,13 +1508,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           if deleted > 0 then
             Prometheus.inc_counter
               Prometheus.metric_fs_atomic_orphans_cleaned
-              ~labels:[ ("size_class", "empty") ]
+              ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label Empty)) ]
               ~delta:(float_of_int deleted)
               ();
           if preserved > 0 then
             Prometheus.inc_counter
               Prometheus.metric_fs_atomic_orphans_cleaned
-              ~labels:[ ("size_class", "with_data") ]
+              ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label With_data)) ]
               ~delta:(float_of_int preserved)
               ();
           if deleted + preserved > 0 then
@@ -1666,18 +1605,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         [
           ("restore_sessions", fun () -> restore_persisted_sessions state);
           ("reconcile_active_agents", fun () -> reconcile_active_agents_gauge state);
-          ( "recover_running_sessions",
-            fun () ->
-              match state.Mcp_server.proc_mgr, state.Mcp_server.net with
-              | None, _ ->
-                  Log.Server.warn
-                    "skipping session recovery: process_mgr not available"
-              | Some _process_mgr, None ->
-                  Log.Server.warn
-                    "skipping session recovery: net not available"
-              | Some _process_mgr, Some _net ->
-                  (* Team_session_engine_eio removed — skip recovery *)
-                  ignore (sw, clock, state.Mcp_server.room_config) );
           ("prompt_bootstrap", fun () -> bootstrap_prompt_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
           ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);
@@ -1691,6 +1618,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("jsonl_prune", fun () -> startup_prune_jsonl state);
           ( "keeper_checkpoint_prune",
             fun () -> startup_prune_keeper_checkpoints state );
+          ( "auth_archive_prune",
+            fun () -> startup_prune_auth_archive state );
           (* keeper_bootstrap removed: keeper_autoboot subsystem in
              start_keeper_loops handles this in a dedicated fiber,
              avoiding bootstrap contention with dashboard refresh loops. *)
@@ -1729,9 +1658,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           try Yojson.Safe.from_string args_json
           with Yojson.Json_error _ -> `Assoc []
         in
-        let (success, result_str) =
+        let result =
           Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state
             ~name:tool_name ~arguments
+        in
+        let success = result.Tool_result.success
+        and result_str = Tool_result.message result
         in
         if not success then
           Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"

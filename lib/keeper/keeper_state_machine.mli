@@ -1,7 +1,15 @@
 (** Keeper State Machine — Deterministic Core (RFC-0002).
 
-    This module defines the 12-state keeper lifecycle as a pure state machine.
+    This module defines the 13-state keeper lifecycle as a pure state machine.
     All functions are deterministic: no I/O, no clock reads, no mutable state.
+
+    Phase count history:
+      - 11 phases at RFC-0002 Phase 1 introduction (#5229, 2026-04-05)
+      - +1 → 12 when [Overflowed] was added (MASC-1, 2026-04)
+      - +1 → 13 when [Zombie] was added (#14707, /loop iter 4)
+    Single Source of Truth (SSOT) is the [type phase] declaration below;
+    spec doc counts are
+    cross-checked by [scripts/audit-tla-phase-count.sh] (R-H-1.c #14874).
 
     Architecture:
     - Layer 3 (NonDet Shell): measurements captured via [Keeper_measurement]
@@ -123,14 +131,15 @@ type auto_rule_summary = {
     These are the ONLY inputs to the deterministic state machine.
     Non-deterministic measurements become typed events at the boundary.
 
-    {2 Post-turn lifecycle contract (implicit invariant)}
+    {2 Paired lifecycle event contract}
 
     [Compaction_started] / [Handoff_started] / their matching
-    [_completed] / [_failed] events MUST be dispatched only from
-    {!Keeper_post_turn.apply_post_turn_lifecycle}, which runs
-    synchronously at the tail of a keeper turn (inside
-    [Keeper_unified_turn.run_unified_turn] or the legacy
-    [Keeper_turn] path).
+    [_completed] / [_failed] events MUST be dispatched with an explicit
+    lifecycle origin through {!Keeper_registry}. Normal turn-owned events
+    use [Post_turn_lifecycle], which runs synchronously at the tail of a
+    keeper turn (inside [Keeper_unified_turn.run_unified_turn] or the
+    legacy [Keeper_turn] path). Manual compaction uses the narrower
+    [Operator_compact] origin for compaction events only.
 
     The keepalive loop ({!Keeper_keepalive.run_heartbeat_loop}) does
     NOT explicitly gate dispatch on [phase]. It relies on the
@@ -147,11 +156,9 @@ type auto_rule_summary = {
     [NoDrainTransition] / [GhostDispatch] actions are the exact
     counterexamples TLC will find.
 
-    If a future change needs to emit these events from outside
-    [apply_post_turn_lifecycle], add an explicit phase gate to the
-    keepalive dispatch site (roughly: [phase_allows_dispatch] reading
-    [Keeper_registry.get] before [run_unified_turn]) and re-verify
-    the TLA+ spec against the new code path. *)
+    If a future change needs another origin for these events, add it to
+    the registry origin guard and re-verify the TLA+ spec against the new
+    code path. *)
 type event =
   | Heartbeat_ok
   | Heartbeat_failed of { consecutive : int; max_allowed : int }
@@ -164,15 +171,15 @@ type event =
       auto_rules : auto_rule_summary;
     }
   | Compaction_started
-    (** Emit ONLY from {!Keeper_post_turn.apply_post_turn_lifecycle}.
-        See the post-turn lifecycle contract above. *)
+    (** Emit only through the registry lifecycle origin guard. See the
+        paired lifecycle contract above. *)
   | Compaction_completed of { before_tokens : int; after_tokens : int }
     (** Must fire in the same turn as the matching [Compaction_started]. *)
   | Compaction_failed of { reason : string }
     (** Must fire in the same turn as the matching [Compaction_started]. *)
   | Handoff_started
-    (** Emit ONLY from {!Keeper_post_turn.apply_post_turn_lifecycle}.
-        See the post-turn lifecycle contract above. *)
+    (** Emit only through the registry lifecycle origin guard. See the
+        paired lifecycle contract above. *)
   | Handoff_completed of { new_trace_id : string; generation : int }
     (** Must fire in the same turn as the matching [Handoff_started]. *)
   | Handoff_failed of { reason : string }
@@ -266,6 +273,12 @@ type transition_result = {
 type transition_error =
   | Terminal_state of { current : phase; attempted_event : string }
   | Invalid_transition of { from_phase : phase; to_phase : phase; reason : string }
+  | Precondition_violation of { event : string; reason : string }
+        (** Event was dispatched at a phase/conditions state that the TLA+
+            spec's corresponding action would not enable.  Used to surface
+            silent state-machine corruption caused by mis-ordered callers.
+            See [docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md]
+            (iter 9 #14730) for the systematic gap analysis and R-A-9. *)
 
 val transition_error_to_string : transition_error -> string
 

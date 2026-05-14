@@ -293,6 +293,22 @@ let touch path =
   let oc = open_out path in
   close_out oc
 
+let json_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let node_by_path path nodes =
+  match
+    List.find_opt
+      (fun node ->
+        match json_field "path" node with
+        | Some (`String p) -> p = path
+        | _ -> false)
+      nodes
+  with
+  | Some node -> node
+  | None -> Alcotest.fail ("missing tree node " ^ path)
+
 let test_scan_dir_respects_max_nodes () =
   with_temp_dir "wide-tree" (fun dir ->
     for i = 1 to 80 do
@@ -300,6 +316,58 @@ let test_scan_dir_respects_max_nodes () =
     done;
     let nodes = W.scan_dir ~base:dir ~depth:0 ~max_depth:1 ~max_nodes:25 [] dir in
     Alcotest.(check int) "node cap" 25 (List.length nodes))
+
+let test_scan_dir_attaches_file_diff_badges () =
+  with_temp_dir "diff-tree" (fun dir ->
+    let src = Filename.concat dir "src" in
+    Unix.mkdir src 0o700;
+    touch (Filename.concat src "main.ml");
+    touch (Filename.concat src "unchanged.ml");
+    let diff_by_path = Hashtbl.create 4 in
+    Hashtbl.add diff_by_path "src/main.ml" "+3 -1";
+    let nodes =
+      W.scan_dir ~diff_by_path ~base:dir ~depth:0 ~max_depth:2
+        ~max_nodes:25 [] dir
+    in
+    let src_node = node_by_path "src" nodes in
+    let main_node = node_by_path "src/main.ml" nodes in
+    let unchanged_node = node_by_path "src/unchanged.ml" nodes in
+    (match json_field "diff" src_node with
+     | Some `Null -> ()
+     | _ -> Alcotest.fail "directory diff badge should stay null");
+    (match json_field "diff" main_node with
+     | Some (`String badge) ->
+       Alcotest.(check string) "file diff badge" "+3 -1" badge
+     | _ -> Alcotest.fail "changed file should carry diff badge");
+    (match json_field "diff" unchanged_node with
+     | Some `Null -> ()
+     | _ -> Alcotest.fail "unchanged file diff badge should stay null"))
+
+let test_parse_git_numstat_line_added_deleted () =
+  match W.For_testing.parse_git_numstat_line "3\t1\tsrc/main.ml" with
+  | Some (path, badge) ->
+    Alcotest.(check string) "path" "src/main.ml" path;
+    Alcotest.(check string) "badge" "+3 -1" badge
+  | None -> Alcotest.fail "expected parsed numstat line"
+
+let test_parse_git_numstat_line_deleted_only () =
+  match W.For_testing.parse_git_numstat_line "0\t2\tlib/old.ml" with
+  | Some (path, badge) ->
+    Alcotest.(check string) "path" "lib/old.ml" path;
+    Alcotest.(check string) "badge" "-2" badge
+  | None -> Alcotest.fail "expected deleted-only numstat line"
+
+let test_parse_git_numstat_line_binary () =
+  match W.For_testing.parse_git_numstat_line "-\t-\tassets/logo.png" with
+  | Some (path, badge) ->
+    Alcotest.(check string) "path" "assets/logo.png" path;
+    Alcotest.(check string) "badge" "bin" badge
+  | None -> Alcotest.fail "expected binary numstat line"
+
+let test_parse_git_numstat_line_zero_change_is_ignored () =
+  match W.For_testing.parse_git_numstat_line "0\t0\tREADME.md" with
+  | None -> ()
+  | Some _ -> Alcotest.fail "zero-change numstat line should be ignored"
 
 let test_tree_node_limit_default () =
   Alcotest.(check int) "default" 750 (W.tree_node_limit_of_query None)
@@ -531,6 +599,7 @@ let () =
         ] )
     ; ( "scan_dir"
       , [ Alcotest.test_case "respects max node cap" `Quick test_scan_dir_respects_max_nodes
+        ; Alcotest.test_case "attaches file diff badges" `Quick test_scan_dir_attaches_file_diff_badges
         ; Alcotest.test_case "limit default" `Quick test_tree_node_limit_default
         ; Alcotest.test_case "limit invalid falls back" `Quick test_tree_node_limit_invalid_falls_back
         ; Alcotest.test_case "limit clamps low" `Quick test_tree_node_limit_clamps_low
@@ -555,6 +624,15 @@ let () =
             test_workspace_failure_observer_bounds_site_label
         ; Alcotest.test_case "failure observer re-raises cancel" `Quick
             test_workspace_failure_observer_reraises_cancelled
+        ] )
+    ; ( "git_numstat"
+      , [ Alcotest.test_case "added and deleted" `Quick
+            test_parse_git_numstat_line_added_deleted
+        ; Alcotest.test_case "deleted only" `Quick
+            test_parse_git_numstat_line_deleted_only
+        ; Alcotest.test_case "binary" `Quick test_parse_git_numstat_line_binary
+        ; Alcotest.test_case "zero change ignored" `Quick
+            test_parse_git_numstat_line_zero_change_is_ignored
         ] )
     ; ( "valid_git_ref"
       , [ Alcotest.test_case "main"              `Quick test_valid_ref_main

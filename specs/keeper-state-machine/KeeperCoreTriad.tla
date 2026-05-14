@@ -23,14 +23,25 @@
 \*          lib/keeper/keeper_unified_turn.ml (turn lifecycle)
 \*
 \* OCaml mapping:
-\*   phase              <-> Keeper_state_machine.phase (12-phase OCaml type
+\*   phase              <-> Keeper_state_machine.phase (13-phase OCaml type
 \*                          projected to a 7-symbol triad alphabet; see the
-\*                          canonical mapping in the TypeOK preamble below)
+\*                          canonical mapping in the TypeOK preamble below.
+\*                          Zombie added iter 4 #14707 is terminal post-Dead
+\*                          (outside the turn cycle) and collapses into the
+\*                          7-phase projection's "Stable" symbol — same arm
+\*                          as Offline / Paused / Stopped / Crashed /
+\*                          Restarting / Dead.  See KeeperCompositeLifecycle
+\*                          Comment A for the canonical 13->7 mapping
+\*                          (referred to as "Terminal" shorthand earlier in
+\*                          some prose; the projection symbol is "Stable").)
 \*   effective_cascade  <-> Keeper_cascade_routing.select_cascade result
 \*   provider_ceiling   <-> Oas_model_resolve.resolve_max_cascade_context
 \*   requested_max_tokens <-> Cascade_inference.resolve_max_tokens
 \*
-\* (The canonical 12->7 phase mapping lives next to TypeOK on line ~89.
+\* (The canonical 13->7 phase mapping lives next to PhaseSet in this file
+\*  (KeeperCompositeLifecycle Comment A is the SSOT).  Pre-Zombie this
+\*  was "12->7"; iter 4 #14707 added Zombie which folds into the "Stable"
+\*  symbol via the iter 51 #14865 mapping update.
 \*  An earlier version of this preamble carried a separate "Phase
 \*  simplification (12 -> 7)" mapping that classified HandingOff / Paused /
 \*  Restarting differently from the canonical one.  Removed in #8970 to
@@ -88,8 +99,9 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 \* ── Type Invariant ───────────────────────────────────────
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
-\* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
-\* spec collapses the 12 phases into a 7-symbol "core triad" alphabet
+\* OCaml side is lib/keeper/keeper_state_machine.ml (13 phases;
+\* Zombie added iter 4 #14707).  This spec collapses the 12 non-Zombie
+\* phases into a 7-symbol "core triad" alphabet
 \* because the triad invariants only depend on running/failure/
 \* compaction signals, not on the full keeper lifecycle. Mapping:
 \*
@@ -99,10 +111,18 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 \*   "Compacting"  ↔ Compacting
 \*   "HandingOff"  ↔ HandingOff
 \*   "Draining"    ↔ Draining
-\*   "Terminal"    ↔ Offline | Paused | Stopped | Crashed | Restarting | Dead
+\*   "Terminal"    ↔ Offline | Paused | Stopped | Crashed | Restarting | Dead | Zombie
+\*
+\* Zombie (added iter 4 #14707) is terminal-terminal: reached only
+\* post-Dead when supervisor cleanup latches a never-cleared failure
+\* (see ZombieIsForever / ZombieRequiresTerminalFailureLatched in
+\* KeeperStateMachine.tla).  Collapsed into "Terminal" because the
+\* core triad invariants do not distinguish Dead from Zombie — both
+\* are terminal-with-no-progress for the running/failure/compaction
+\* axes this spec tracks.
 \*
 \* Unmodeled here (covered in companion specs):
-\*   none
+\*   none (all 13 OCaml phases are represented in the 7-symbol triad)
 Phases == {"Running", "Failing", "Overflowed", "Compacting", "HandingOff", "Draining", "Terminal"}
 TurnStatuses == {"idle", "selecting", "executing", "retrying", "done"}
 Cascades == {BaseCascade, "local_recovery", "local_only", "none"}
@@ -357,20 +377,61 @@ Next ==
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
 \* ── Safety Invariants ────────────────────────────────────
+\*
+\* CASCADE NAME ABSTRACTION (S1/S2/S3-buffer)
+\* ----------------------------------------
+\* The string literals "none", "local_recovery", and "local_only" used below
+\* are SPEC-LEVEL CANONICAL ROLE NAMES, not literal OCaml return values.
+\*
+\* On the OCaml side (`lib/keeper/keeper_cascade_routing.ml` +
+\* `lib/cascade/cascade_routes.ml`), cascade names are resolved through a
+\* typed `logical_use` enum (`Phase_recovery`, `Phase_buffer`) and a
+\* prioritised resolution chain in `cascade_name_for_use`:
+\*   (a) operator-supplied `routes.<key>` binding, if its target exists
+\*       in the live catalog;
+\*   (b) first catalog entry name (the boot-time default profile);
+\*   (c) `route_spec.aliases` first element, or the route key — *only*
+\*       when the catalog is empty (a state boot validation rejects).
+\* The literal string produced at runtime depends on operator catalog and
+\* routes (RFC-0058 declarative route mapping); only the *default empty
+\* catalog* boot path produces the literal strings written below.
+\*
+\* The invariants below are written as TLA+ string equalities, but those
+\* literals should be read as canonical *role identifiers* — they stand
+\* in for the typed `logical_use` role that production resolves through
+\* the chain above:
+\*   - "none"           ↔ "no cascade is active for this turn"
+\*   - "local_recovery" ↔ `Phase_recovery` role
+\*   - "local_only"     ↔ `Phase_buffer` role
+\* TLC still compares strings; the *semantic* claim is role identity.
+\* See `docs/tla-audit/kct-c3-terminal-cascade-contract-gap-2026-05-12.md`
+\* and `docs/tla-audit/kct-s2s3-failing-buffer-cascade-alignment-2026-05-12.md`
+\* (the latter lands via PR #14787) for the production indirection
+\* analysis.
 
-\* S1: Terminal phase never has an active cascade
+\* S1: Terminal phase never has an active cascade.
+\* OCaml note: `select_cascade` returns `base_cascade` for terminal phases
+\* (paper contract gap — caller graph upstream-gates the call so the value
+\* is unreachable in production).  See C-3 audit memo above.
 NoTerminalCascade ==
     phase = "Terminal" => effective_cascade = "none"
 
-\* S2: Cascade selection in Failing phase must yield local_recovery.
+\* S2: Cascade selection in Failing phase must yield the Phase_recovery role.
 \* Note: if a keeper transitions to Failing MID-TURN, the already-selected
 \* cascade remains — cascade is chosen at turn start, not re-evaluated.
 \* This invariant checks the selection action, not the runtime state.
+\* OCaml: `Failing -> Keeper_config.local_recovery_cascade_name`, which
+\* resolves through `Phase_recovery` route — string match only in the
+\* default catalog.  See S2/S3 audit memo above.
 FailingUsesRecovery ==
     (phase = "Failing" /\ turn_status = "selecting"
      /\ effective_cascade /= "none") =>
         effective_cascade = "local_recovery"
 
+\* S3 (buffer): Cascade selection in buffer-operation phases must yield
+\* the Phase_buffer role.  OCaml:
+\* `Compacting | HandingOff -> Keeper_config.local_only_cascade_name`,
+\* which resolves through `Phase_buffer` route.  See S2/S3 audit memo.
 BufferOpsUseLocalOnly ==
     (phase \in {"Compacting", "HandingOff"} /\ turn_status = "selecting"
      /\ effective_cascade /= "none") =>
@@ -388,7 +449,22 @@ SideEffectContainment ==
     \* i.e., if side_effect is TRUE, outcome is never plain "error"
     \* it must be "partial_commit" instead
 
-\* S5: Active turn has a cascade selected
+\* S5: Active turn has a cascade selected.
+\*
+\* Cascade-name abstraction: `"none"` here is the SPEC-LEVEL EMPTY-ROLE
+\* SENTINEL — it asserts "no cascade is selected", not a literal string
+\* match against an OCaml return value.  The OCaml side has no literal
+\* "none" — `select_cascade` always returns a real cascade name (even for
+\* terminal phases — see `docs/tla-audit/kct-c3-terminal-cascade-contract
+\* -gap-2026-05-12.md`); the empty-role assertion is preserved
+\* STRUCTURALLY by the caller graph upstream gating the call for non-
+\* active turn_status values.
+\*
+\* The invariant therefore captures a structural property: the dispatch
+\* table in `lib/keeper/keeper_cascade_routing.ml` returns a non-empty
+\* cascade name for all phases that can co-occur with
+\* turn_status in {selecting, executing, retrying}, namely
+\* {Running, Failing, Compacting, HandingOff}.
 PhaseDecisionConsistency ==
     turn_status \in {"selecting", "executing", "retrying"} =>
         effective_cascade /= "none"

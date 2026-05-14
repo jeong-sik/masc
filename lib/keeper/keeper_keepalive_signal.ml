@@ -296,7 +296,7 @@ let wakeup_relevant_keeper_for_board_signal
           (match wake_reason with
            | None ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_board_signal_no_wake_total
+               Keeper_metrics.metric_keeper_board_signal_no_wake_total
                ~labels:[
                  ("keeper", meta.name);
                  ("kind", signal_kind_label);
@@ -333,12 +333,17 @@ let wakeup_relevant_keeper_for_board_signal
          wake_meta meta reason;
          Eio_guard.yield_step yield_meter);
   if dropped > 0 then begin
+    (* Counter tracks wakeups dropped by the cap, not capped events; under
+       high fanout [dropped] can be >1 per signal, so add the actual amount
+       (not a fixed 1) to keep BOARD-CAPPED accurate on the compact dashboard. *)
     Prometheus.inc_counter
-      Prometheus.metric_keeper_keepalive_signal_failures
-      ~labels:[("keeper", "aggregate"); ("site", "board_capped")]
+      Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
+      ~labels:[("kind", signal_kind_label)]
+      ~delta:(float_of_int dropped)
       ();
-    Log.Keeper.warn
-      "board signal wakeup capped: dropped=%d post=%s generic_limit=%d total_limit=%d"
+    Log.Keeper.info
+      "board signal wakeup capped by configured fanout: dropped=%d post=%s \
+       generic_limit=%d total_limit=%d"
       dropped
       signal.post_id
       board_reactive_generic_wakeup_limit
@@ -426,7 +431,7 @@ let dispatch_keepalive_event_with_audit
      | Ok _ -> ()
      | Error err ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_keepalive_signal_failures
+           Keeper_metrics.metric_keeper_keepalive_signal_failures
            ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
            ();
          Log.Keeper.warn

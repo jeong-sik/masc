@@ -81,7 +81,7 @@ let seed_keeper_meta_exn config keeper_name ~goal =
             ("agent_name", `String (Keeper_types.keeper_agent_name keeper_name));
             ("trace_id", `String trace_id);
             ("goal", `String goal);
-            ("cascade_name", `String Keeper_config.default_cascade_name);
+            ("cascade_name", `String (Keeper_config.default_cascade_name ()));
             ("sandbox_profile", `String "local");
             ("network_mode", `String "inherit");
           ])
@@ -292,6 +292,7 @@ let test_keeper_sandbox_status_exposes_local_summary () =
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
       Keeper_registry.clear ();
+      Masc_mcp.Config_dir_resolver.reset ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -478,6 +479,7 @@ let test_playground_repo_status_refreshes_cached_git_metadata () =
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
       Keeper_registry.clear ();
+      Masc_mcp.Keeper_turn_livelock.reset_for_tests ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -566,7 +568,7 @@ let test_playground_repo_status_refreshes_cached_git_metadata () =
       Alcotest.(check string) "cache context preserved" "clone"
         (repo |> member "last_action" |> to_string);
       Alcotest.(check bool) "status is observed live" true
-        (repo |> member "observed_at" |> to_string |> contains_substring "T");
+        (contains_substring (repo |> member "observed_at" |> to_string) "T");
       Alcotest.(check bool) "unix observation timestamp is numeric" true
         (match repo |> member "observed_at_unix" with
          | `Float _ | `Int _ -> true
@@ -686,6 +688,9 @@ let test_keeper_sandbox_status_fleet_includes_configured_keeper () =
          sandbox_profile = \"local\"\n\
          proactive_enabled = false\n\
          autoboot_enabled = false\n";
+      with_env "MASC_CONFIG_DIR" (Filename.concat (Coord.masc_root_dir config) "config")
+      @@ fun () ->
+      Masc_mcp.Config_dir_resolver.reset ();
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1364,14 +1369,22 @@ let test_keeper_up_resumes_auto_paused_keeper () =
           runtime =
             {
               meta.runtime with
-              last_blocker = blocker_text;
-              last_blocker_class = Some Keeper_types.Turn_timeout;
+              last_blocker =
+                Some (Keeper_types.blocker_info_of_class
+                        ~detail:blocker_text Keeper_types.Turn_timeout);
             };
         }
       in
       (match Keeper_types.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> Alcotest.fail ("paused meta write failed: " ^ err));
+      ignore
+        (Masc_mcp.Keeper_turn_livelock.guard_and_record_turn_start
+           ~keeper:keeper_name
+           ~turn_id:11
+           ~max_attempts:3
+           ~stuck_after_sec:1800.0
+           ());
       let ok, body =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
           ~args:
@@ -1390,10 +1403,11 @@ let test_keeper_up_resumes_auto_paused_keeper () =
       Alcotest.(check bool) "meta paused false" false resumed.paused;
       Alcotest.(check bool) "auto resume delay cleared" true
         (Option.is_none resumed.auto_resume_after_sec);
-      Alcotest.(check string) "runtime blocker cleared" ""
-        resumed.runtime.last_blocker;
-      Alcotest.(check bool) "runtime blocker class cleared" true
-        (Option.is_none resumed.runtime.last_blocker_class))
+      Alcotest.(check bool) "runtime blocker cleared" true
+        (Option.is_none resumed.runtime.last_blocker);
+      Alcotest.(check bool) "keeper_up resume clears livelock state" true
+        (Option.is_none
+           (Masc_mcp.Keeper_turn_livelock.current_state ~keeper:keeper_name)))
 
 let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
   Eio_main.run @@ fun env ->
@@ -1436,8 +1450,15 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
           runtime =
             {
               meta.runtime with
-              last_blocker = blocker_text;
-              last_blocker_class = None;
+              (* Pre-refactor this test stamped only [last_blocker = blocker_text]
+                 with [last_blocker_class = None] and relied on the substring
+                 [blocker_class_of_string] matcher to recover the typed class.
+                 After the unified [blocker_info] migration the typed class is
+                 the only authoritative source — set it directly. *)
+              last_blocker =
+                Some (Keeper_types.blocker_info_of_class
+                        ~detail:blocker_text
+                        Keeper_types.Ambiguous_post_commit_timeout);
             };
         }
       in
@@ -1462,8 +1483,10 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
       Alcotest.(check bool) "meta remains paused" true still_paused.paused;
       Alcotest.(check bool) "auto resume delay preserved" true
         (Option.is_some still_paused.auto_resume_after_sec);
-      Alcotest.(check string) "runtime blocker preserved" blocker_text
-        still_paused.runtime.last_blocker)
+      (match still_paused.runtime.last_blocker with
+       | Some info ->
+         Alcotest.(check string) "runtime blocker preserved" blocker_text info.detail
+       | None -> Alcotest.fail "runtime blocker should be preserved"))
 
 let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
   Eio_main.run @@ fun env ->
@@ -1511,8 +1534,9 @@ let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
           runtime =
             {
               meta.runtime with
-              last_blocker = blocker_text;
-              last_blocker_class = Some Keeper_types.Turn_timeout;
+              last_blocker =
+                Some (Keeper_types.blocker_info_of_class
+                        ~detail:blocker_text Keeper_types.Turn_timeout);
             };
         }
       in
@@ -1549,8 +1573,10 @@ let test_keeper_up_keeps_paused_keeper_with_pending_approval () =
       Alcotest.(check bool) "meta remains paused" true still_paused.paused;
       Alcotest.(check bool) "auto resume delay preserved" true
         (Option.is_some still_paused.auto_resume_after_sec);
-      Alcotest.(check string) "runtime blocker preserved" blocker_text
-        still_paused.runtime.last_blocker)
+      (match still_paused.runtime.last_blocker with
+       | Some info ->
+         Alcotest.(check string) "runtime blocker preserved" blocker_text info.detail
+       | None -> Alcotest.fail "runtime blocker should be preserved"))
 
 let test_keeper_status_defaults_name_to_caller () =
   Eio_main.run @@ fun env ->
@@ -1995,7 +2021,7 @@ let test_keeper_status_exposes_model_observability () =
             ( "cascade",
               `Assoc
                 [
-                  ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
+                  ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
                   ( "configured_labels",
                     `List [ `String "llama:auto"; `String "glm:auto" ] );
                   ( "candidate_models",
@@ -2046,32 +2072,27 @@ let test_keeper_status_exposes_model_observability () =
       let status_dump = Yojson.Safe.pretty_to_string status_json in
       Alcotest.(check (option string))
         ("cascade name surfaced\n" ^ status_dump)
-        (Some Masc_mcp.Keeper_config.default_cascade_name)
+        (Some Masc_mcp.(Keeper_config.default_cascade_name ()))
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "recent turn observation true" true
         (observability |> member "recent_turn_observation" |> to_bool);
-      Alcotest.(check (list string)) "configured labels surfaced"
-        [ "llama:auto"; "glm:auto" ]
+      Alcotest.(check (list string)) "configured labels omitted" []
         (observability |> member "configured_labels" |> to_list
        |> List.map to_string);
-      Alcotest.(check (list string)) "resolved candidates surfaced"
-        [
-          "llama:qwen3.5-35b-a3b-ud-q8-xl";
-          "llama:qwen3.5-3b-a3b-ud-q8-xl";
-        ]
+      Alcotest.(check (list string)) "resolved candidates omitted" []
         (observability |> member "resolved_candidates" |> to_list
        |> List.map to_string);
       Alcotest.(check (option string))
-        ("selected model surfaced\n" ^ status_dump)
-        (Some "llama:qwen3.5-3b-a3b-ud-q8-xl")
+        ("selected model omitted\n" ^ status_dump)
+        None
         (observability |> member "selected_model" |> to_string_option);
       Alcotest.(check string) "attempt summary surfaced"
-        "2 attempt(s); fallback after 1 hop(s); selected candidate 2/2."
+        "2 attempt(s); fallback after 1 hop(s); selected candidate index 2."
         (observability |> member "attempt_summary" |> member "summary"
        |> to_string);
-      Alcotest.(check string) "runtime scope local" "local"
+      Alcotest.(check bool) "runtime provider scope omitted" true
         (observability |> member "runtime_contract" |> member "provider_scope"
-       |> to_string);
+        = `Null);
       Alcotest.(check bool) "runtime contract unverified" false
         (observability |> member "runtime_contract" |> member "verified"
        |> to_bool);
@@ -2149,9 +2170,6 @@ let test_keeper_status_ignores_stale_cascade_observation () =
         | Ok None -> Alcotest.fail "keeper meta missing after up"
         | Error err -> Alcotest.fail ("meta read failed: " ^ err)
       in
-      let current_labels =
-        Keeper_model_labels.configured_model_labels_of_meta meta
-      in
       let stale_selected_model = "stale:old-path" in
       Dated_jsonl.append
         (Keeper_types.keeper_metrics_store config keeper_name)
@@ -2194,28 +2212,27 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       let open Yojson.Safe.Util in
       let observability = status_json |> member "model_observability" in
       let status_dump = Yojson.Safe.pretty_to_string status_json in
-      let sorted_strings = List.sort String.compare in
       Alcotest.(check (option string))
         ("current cascade name wins over stale metrics\n" ^ status_dump)
-        (Some meta.cascade_name)
+        (Some (Keeper_types.cascade_name_of_meta meta))
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "stale observation ignored" false
         (observability |> member "recent_turn_observation" |> to_bool);
       Alcotest.(check (list string))
-        "configured labels come from current meta"
-        (sorted_strings current_labels)
+        "configured labels omitted"
+        []
         (observability |> member "configured_labels" |> to_list
-       |> List.map to_string |> sorted_strings);
+       |> List.map to_string);
       Alcotest.(check (list string))
-        "resolved candidates fall back to current config"
-        (sorted_strings current_labels)
+        "resolved candidates omitted"
+        []
         (observability |> member "resolved_candidates" |> to_list
-       |> List.map to_string |> sorted_strings);
+       |> List.map to_string);
       Alcotest.(check bool) "stale selected model not surfaced" true
         (observability |> member "selected_model" |> to_string_option
        <> Some stale_selected_model);
       Alcotest.(check string) "attempt summary resets to current config"
-        "No recent cascade observation for current keeper config. Showing configured labels only."
+        "No recent cascade observation for current keeper config."
         (observability |> member "attempt_summary" |> member "summary"
        |> to_string))
 
@@ -2784,10 +2801,12 @@ proactive_enabled = true
       Alcotest.(check bool) "unknown active goal rejected" false ok;
       Alcotest.(check bool) "unknown active goal names surfaced" true
         (contains_substring msg "goal-missing");
+      let meta = read_keeper_meta_exn config keeper_name in
       let mutated =
         {
           meta with
           proactive = { meta.proactive with enabled = false };
+          autoboot_enabled = false;
           runtime =
             { meta.runtime with
               usage =
@@ -2811,6 +2830,7 @@ proactive_enabled = true
       (match Masc_mcp.Keeper_types.write_meta config mutated with
       | Ok () -> ()
       | Error err -> Alcotest.fail ("meta write failed: " ^ err));
+      Keeper_keepalive.stop_keepalive keeper_name;
       let status, json =
         Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
       in
@@ -2839,17 +2859,17 @@ proactive_enabled = true
       Alcotest.(check string) "default source kind" "toml"
         (json |> member "sources" |> member "default_source_kind" |> to_string);
       Alcotest.(check string) "selected cascade name"
-        Masc_mcp.Keeper_config.default_cascade_name
+        Masc_mcp.(Keeper_config.default_cascade_name ())
         (json |> member "execution" |> member "selected_cascade_name"
        |> to_string);
       Alcotest.(check string) "selected cascade canonical"
-        Masc_mcp.Keeper_config.default_cascade_name
+        Masc_mcp.(Keeper_config.default_cascade_name ())
         (json |> member "execution" |> member "selected_cascade_canonical"
        |> to_string);
       let expected_default_models =
         Masc_mcp.Cascade_runtime.models_of_cascade_name
           (Masc_mcp.Keeper_cascade_profile.Runtime_name
-             Masc_mcp.Keeper_config.default_cascade_name)
+             Masc_mcp.(Keeper_config.default_cascade_name ()))
       in
       Alcotest.(check (list string)) "selected cascade models use default profile"
         expected_default_models
@@ -2861,20 +2881,13 @@ proactive_enabled = true
         "turn_budget_heuristic"
         (json |> member "execution" |> member "per_provider_timeout_mode"
        |> to_string);
-      Alcotest.(check string) "cascade catalog source kind" "json"
+      Alcotest.(check string) "cascade catalog source kind" "toml"
         (json |> member "sources" |> member "cascade_catalog_source_kind"
        |> to_string);
       Alcotest.(check string) "cascade catalog source path"
-        (Filename.concat config_dir "cascade.json")
+        (Filename.concat config_dir "cascade.toml")
         (json |> member "sources" |> member "cascade_catalog_source_path"
        |> to_string);
-      Alcotest.(check string) "cascade runtime json path"
-        (Filename.concat config_dir "cascade.json")
-        (json |> member "sources" |> member "cascade_runtime_json_path"
-       |> to_string);
-      Alcotest.(check bool) "cascade runtime json editable" true
-        (json |> member "sources" |> member "cascade_runtime_json_editable"
-       |> to_bool);
       Alcotest.(check string) "active config root" config_dir
         (json |> member "sources" |> member "active_config_root" |> to_string);
       Alcotest.(check string) "active config root source" "env"
@@ -2938,6 +2951,39 @@ proactive_enabled = true
       Alcotest.(check (option (float 0.001))) "last output tokens per sec surfaced"
         (Some 20.0)
         (json |> member "metrics" |> member "last_output_tokens_per_sec" |> to_float_option);
+      let zero_latency_base = read_keeper_meta_exn config keeper_name in
+      let zero_latency_meta =
+        {
+          zero_latency_base with
+          runtime =
+            {
+              zero_latency_base.runtime with
+              usage =
+                {
+                  zero_latency_base.runtime.usage with
+                  last_latency_ms = 0;
+                };
+            };
+          updated_at = Masc_domain.now_iso ();
+        }
+      in
+      (match Masc_mcp.Keeper_types.write_meta config zero_latency_meta with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail ("zero latency meta write failed: " ^ err));
+      let zero_status, zero_json =
+        Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
+      in
+      Alcotest.(check bool) "zero latency config found" true (zero_status = `OK);
+      Alcotest.(check bool) "zero latency surfaced as missing" true
+        (zero_json |> member "metrics" |> member "last_latency_ms" = `Null);
+      Alcotest.(check (option (float 0.001))) "zero latency total tps missing"
+        None
+        (zero_json |> member "metrics" |> member "last_total_tokens_per_sec"
+       |> to_float_option);
+      Alcotest.(check (option (float 0.001))) "zero latency output tps missing"
+        None
+        (zero_json |> member "metrics" |> member "last_output_tokens_per_sec"
+       |> to_float_option);
       (* Prompt source depends on runtime bootstrap and any restored overrides;
          accepted values come from Prompt_registry.resolve_prompt_unlocked. *)
       let prompt_source =
@@ -2961,8 +3007,7 @@ proactive_enabled = true
             Alcotest.fail ("keeper meta reload failed before stale write: " ^ err)
       in
       let stale_meta =
-        { stale_base with
-          cascade_name = "vendor_mix_balanced";
+        { (Keeper_types.set_cascade_name "vendor_mix_balanced" stale_base) with
           updated_at = Masc_domain.now_iso ();
         }
       in
@@ -2978,7 +3023,7 @@ proactive_enabled = true
         (stale_json |> member "execution" |> member "selected_cascade_name"
        |> to_string);
       Alcotest.(check string) "stale cascade falls back to live default"
-        Masc_mcp.Keeper_config.default_cascade_name
+        Masc_mcp.(Keeper_config.default_cascade_name ())
         (stale_json |> member "execution" |> member "selected_cascade_canonical"
        |> to_string);
       Alcotest.(check (list string)) "stale cascade models use live default"

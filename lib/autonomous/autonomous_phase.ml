@@ -130,10 +130,18 @@ module Transition = struct
   let to_string : type a b. (a, b) t -> string =
    fun t -> to_tla_symbol (to_tag t)
 
-  (* The pair match enumerates the same 19 valid edges as the GADT.
-     Constructor-name disambiguation: [Tag_*] are outer (phase) tags
-     visible by parent-scope lookup; [T_*] are this sub-module's
-     transition tags. Pattern names are unambiguous. *)
+  (* The pair match enumerates all 8x8 = 64 (tag, tag) pairs so the
+     compiler flags any new [tag] variant. The 19 valid edges mirror
+     the GADT constructors above; the 45 forbidden edges are now
+     explicit per "from" axis instead of being absorbed by a single
+     [_, _ -> false] catch-all. Adding a 9th phase tag would silently
+     inherit "no transitions" under the catch-all, masking missing
+     edges; with this enumeration the compiler forces every new tag
+     to be considered against every existing tag.
+     Same FSM Sparse Match anti-pattern as PRs #14716, #14790, #14806,
+     #14810, #14812. Constructor-name disambiguation: [Tag_*] are outer
+     (phase) tags visible by parent-scope lookup; [T_*] are this
+     sub-module's transition tags. *)
   let can_transition ~from_ ~to_ =
     match (any_to_tag from_, any_to_tag to_) with
     | Tag_idle, Tag_perceiving -> true
@@ -155,5 +163,28 @@ module Transition = struct
     | Tag_adapting, Tag_planning -> true
     | Tag_adapting, Tag_idle -> true
     | Tag_adapting, Tag_perceiving -> true
-    | _, _ -> false
+    | Tag_idle,
+        (Tag_idle | Tag_intending | Tag_planning | Tag_executing
+        | Tag_verifying | Tag_reflecting)
+    | Tag_perceiving,
+        (Tag_perceiving | Tag_planning | Tag_executing | Tag_verifying
+        | Tag_reflecting | Tag_adapting)
+    | Tag_intending,
+        (Tag_perceiving | Tag_intending | Tag_executing | Tag_verifying
+        | Tag_reflecting | Tag_adapting)
+    | Tag_planning,
+        (Tag_idle | Tag_perceiving | Tag_planning | Tag_verifying
+        | Tag_reflecting | Tag_adapting)
+    | Tag_executing,
+        (Tag_perceiving | Tag_intending | Tag_planning | Tag_executing
+        | Tag_reflecting)
+    | Tag_verifying,
+        (Tag_idle | Tag_perceiving | Tag_intending | Tag_planning
+        | Tag_executing | Tag_verifying)
+    | Tag_reflecting,
+        (Tag_perceiving | Tag_intending | Tag_executing | Tag_verifying
+        | Tag_reflecting)
+    | Tag_adapting,
+        (Tag_intending | Tag_executing | Tag_verifying | Tag_reflecting
+        | Tag_adapting) -> false
 end

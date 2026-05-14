@@ -62,8 +62,13 @@ val int_opt_field :
 val inspect :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
+  ?workspace_discovery:bool ->
   ?repo_name:string ->
   ?repo:string ->
   ?default_branch:string ->
   unit ->
   Yojson.Safe.t
+(** [workspace_discovery] controls whether a missing sandbox clone scans the
+    workspace for a matching source checkout. It defaults to [true] for
+    preflight/actionable flows. Dashboard fleet read models can pass [false]
+    to avoid an expensive recursive workspace scan per keeper row. *)

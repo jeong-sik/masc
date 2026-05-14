@@ -16,8 +16,7 @@ let resolve_auto_model_id = Cascade_model_resolve.resolve_auto_model_id
 let parse_custom_model = Cascade_model_resolve.parse_custom_model
 
 (* Config loader *)
-let load_json = Cascade_config_loader.load_json
-let load_profile = Cascade_config_loader.load_profile
+let load_catalog_source = Cascade_config_loader.load_catalog_source
 
 type inference_params = Cascade_config_loader.inference_params = {
   temperature: float option;
@@ -157,22 +156,13 @@ let moonshot_base_url_env = "KIMI_BASE_URL"
 let moonshot_api_key_env = "KIMI_API_KEY_SB"
 let moonshot_default_base_url = "https://api.moonshot.ai/v1"
 
-(* #9953: Resolve Kimi max_context from the OAS capabilities SSOT.
-
-   Prior code hard-coded [256_000] here, which drifted from the
-   OAS [Capabilities.kimi_capabilities.max_context_tokens] value
-   of [262_144] (the canonical 256 KiB binary context window).
-   Same-label [kimi] turns therefore recorded two different
-   [context_max] values depending on which config builder ran —
-   one symptom of the 3-way [claude_code:auto] drift documented
-   in the issue.
+(* #9953: Resolve Kimi max_context from OAS runtime binding truth.
 
    Resolution order:
    1. Per-model capabilities override ({!Capabilities.for_model_id}
       resolved id) — allows future per-variant overrides to take
       effect without touching this file.
-   2. Provider-level [kimi_capabilities.max_context_tokens] from
-      the OAS SSOT.
+   2. Provider-level capability exposed by [Provider_runtime_binding].
    3. Registry entry default (safety net for exotic configs).
 *)
 let resolve_kimi_max_context resolved_model_id =
@@ -185,11 +175,14 @@ let resolve_kimi_max_context resolved_model_id =
   match from_model with
   | Some n -> n
   | None ->
-    (match Capabilities.kimi_capabilities.max_context_tokens with
+    (match
+       Option.bind
+         (Agent_sdk.Provider_runtime_binding.find kimi_provider_name)
+         (fun binding ->
+            binding.Agent_sdk.Provider_runtime_binding.capabilities.max_context_tokens)
+     with
      | Some n -> n
      | None ->
-       (* OAS SSOT has always populated this; fall through to
-          registry entry only if OAS removes the field. *)
        (match Provider_registry.find (Provider_registry.default ())
                 kimi_provider_name with
         | Some entry -> entry.Provider_registry.max_context
@@ -273,14 +266,14 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
      inject provider-specific discovery so routing stays isolated by
      endpoint (e.g. ollama:auto must not pick up llama-server models). *)
   let discover =
-    match provider_name with
-    | "ollama" ->
-        Some
-          (fun () ->
-            Llm_provider.Discovery.first_discovered_model_id_for_url
-              defaults.base_url)
-    | "llama" -> Some Llm_provider.Discovery.first_discovered_model_id
-    | _ -> None
+    if String.equal provider_name Provider_adapter.cn_ollama then
+      Some
+        (fun () ->
+          Llm_provider.Discovery.first_discovered_model_id_for_url
+            defaults.base_url)
+    else if String.equal provider_name Provider_adapter.cn_llama then
+      Some Llm_provider.Discovery.first_discovered_model_id
+    else None
   in
   let model_resolution =
     resolve_auto_model ?discover provider_name
@@ -288,7 +281,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
   in
   let resolved_model_id = model_resolution.resolved_model_id in
   let base_url =
-    if provider_name = "llama" then
+    if String.equal provider_name Provider_adapter.cn_llama then
       (* Route to the endpoint that has this model; round-robin fallback *)
       match Llm_provider.Discovery.endpoint_for_model resolved_model_id with
       | Some url -> url
@@ -356,7 +349,7 @@ let parse_model_string
   | _ ->
   (* Kind classification goes through [Provider_kind_resolver] — a sum-typed
      resolver that consults Provider_registry as SSOT and never flattens
-     unknown specs to [OpenAI_compat]. This keeps ["gemini:gemini-2.5-flash"]
+     unknown specs to [OpenAI_compat]. This keeps ["gemini:gemini-3-flash-preview"]
      from being misclassified by any downstream substring heuristic
      (issue #8159). *)
     match Provider_kind_resolver.resolve s with
@@ -377,28 +370,25 @@ let parse_model_string
                   ?keep_alive ?num_ctx
                   ~provider_name ~model_id entry)
 
-(** Parse a {!Cascade_config_loader.weighted_entry} into a
-    {!Llm_provider.Provider_config.t}, forwarding the entry's
-    [supports_tool_choice] override. The [weight] is not part of the
-    Provider_config; it drives cascade ordering separately. *)
-let parse_weighted_entry
-    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
-    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
-    ?system_prompt ?(api_key_env_overrides = [])
-    ?keep_alive ?num_ctx
-    (entry : Cascade_config_loader.weighted_entry)
-  : Llm_provider.Provider_config.t option =
-  parse_model_string ~temperature ~max_tokens ?system_prompt
-    ~api_key_env_overrides
-    ?supports_tool_choice_override:entry.supports_tool_choice
-    ?keep_alive ?num_ctx
-    entry.model
+(* RFC-0058 iter 21 cleanup: the plain [parse_weighted_entry] that
+   returned a silent [None] was removed.  All callers migrated to
+   [parse_weighted_entry_with_drop_metric] in iter 14 — the wrapper
+   that delegates to [parse_weighted_entry_diag] and ticks the iter-6
+   candidate-drop counter on rejection.  The plain function was
+   external-API-exported with zero external callers (audit at iter 14).
+   Removed in iter 21 to prevent regression to silent-None paths in
+   future code. *)
 
 (** Categorised diagnostic for a failed weighted-entry parse. *)
 type weighted_entry_drop =
   | Drop_unregistered_scheme of { model : string; scheme : string }
   | Drop_unavailable_scheme of { model : string; scheme : string }
   | Drop_invalid_syntax of string
+
+let weighted_entry_drop_reason_label = function
+  | Drop_unregistered_scheme _ -> "unregistered_scheme"
+  | Drop_unavailable_scheme _ -> "unavailable_scheme"
+  | Drop_invalid_syntax _ -> "invalid_syntax"
 
 (** Parse a weighted entry, distinguishing why it was rejected (unregistered
     scheme, unavailable scheme, invalid syntax). Used by
@@ -442,6 +432,37 @@ let parse_weighted_entry_diag
             ?supports_tool_choice_override:entry.supports_tool_choice
             ?keep_alive ?num_ctx
             ~provider_name ~model_id reg_entry)
+
+(** Resolve-path wrapper around {!parse_weighted_entry_diag} that
+    returns an [option] AND ticks the iter-6
+    [Cascade_metrics.on_profile_candidate_drop] counter on drop.
+    Replaces the iter-21-removed [parse_weighted_entry] which
+    silently swallowed the drop reason: the resolve path surfaced
+    drops only as [providers = []] downstream with no WHY.  Use
+    when a [cascade] context exists, so the drop rate is observable
+    per cascade alongside the validation-time
+    [profile_candidate_drop] counter. *)
+let parse_weighted_entry_with_drop_metric
+    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
+    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
+    ?system_prompt ?(api_key_env_overrides = [])
+    ?keep_alive ?num_ctx
+    ~cascade
+    (entry : Cascade_config_loader.weighted_entry)
+  : Llm_provider.Provider_config.t option =
+  match
+    parse_weighted_entry_diag
+      ~temperature ~max_tokens ?system_prompt
+      ~api_key_env_overrides
+      ?keep_alive ?num_ctx
+      entry
+  with
+  | Ok cfg -> Some cfg
+  | Error drop ->
+    Cascade_metrics.on_profile_candidate_drop
+      ~cascade
+      ~reason:(weighted_entry_drop_reason_label drop);
+    None
 
 (** Expand provider:auto specs that map to multiple models.
     "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
@@ -517,7 +538,7 @@ let expand_weighted_auto_entries
 
 (** Parse a list of weighted entries, dropping ones that cannot produce a
     provider config. Load-time drops are logged once per call with
-    categorised reasons so upstream drift (e.g. a cascade.json entry
+    categorised reasons so upstream drift (e.g. a cascade.toml entry
     referencing an unregistered provider scheme due to library/binary
     version skew) surfaces as ERROR rather than silently filtering away.
 
@@ -555,7 +576,7 @@ let parse_weighted_entries
   (if unregistered <> [] then
      Log.Misc.error
        "%s: dropped %d entry/entries referencing unregistered provider \
-        scheme(s): [%s]. Likely library/binary drift or cascade.json typo \
+        scheme(s): [%s]. Likely library/binary drift or cascade.toml typo \
         — rebuild or fix the config entry."
        label (List.length unregistered) (render_drops unregistered));
   (if invalid <> [] then
@@ -606,20 +627,8 @@ let parse_model_string_result
       Ok (make_registry_config ~temperature ~max_tokens ?system_prompt
             ~provider_name ~model_id entry)
 
-let parse_model_strings
-    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
-    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
-    ?system_prompt ?(api_key_env_overrides = [])
-    (strs : string list) : Llm_provider.Provider_config.t list =
-  let expanded = expand_auto_models strs in
-  List.filter_map
-    (parse_model_string ~temperature ~max_tokens ?system_prompt
-       ~api_key_env_overrides)
-    expanded
-
 (* Health filtering (extracted to Cascade_health_filter) *)
 let is_local_provider = Cascade_health_filter.is_local_provider
-let filter_healthy = Cascade_health_filter.filter_healthy
 let filter_healthy_strict = Cascade_health_filter.filter_healthy_strict
 let health_filter_rejection_to_string = Cascade_health_filter.health_filter_rejection_to_string
 type health_filter_rejection = Cascade_health_filter.health_filter_rejection =
@@ -658,7 +667,12 @@ let resolve_label_context (label : string) : int option =
     (match Llm_provider.Discovery.context_for_model model_id with
      | Some (_url, ctx) -> Some ctx
      | None ->
-       (* Fallback: round-robin endpoint (backward compat for "auto" etc.) *)
+       (* Fallback: round-robin endpoint (backward compat for "auto" etc.).
+          Iter 29 telemetry: requested model_id was not located on any
+          registered endpoint — silently routing to whatever
+          [current_llama_endpoint] happens to be.  Tick a counter so
+          operators can alert on the silent intent loss. *)
+       Cascade_metrics.on_llama_model_not_discovered ();
        let url = Llm_provider.Provider_registry.current_llama_endpoint () in
        if url = "" then None
        else Llm_provider.Discovery.discovered_context_for_url url)
@@ -789,6 +803,7 @@ let provider_key_of_model_string s =
 let order_weighted_entries
     ?(rand_int = weighted_random_int)
     ?rotation_scope
+    ?cascade
     (entries : Cascade_config_loader.weighted_entry list) =
   let entries = maybe_rotate_weighted_entries ?rotation_scope entries in
   let entries = expand_weighted_auto_entries ?rotation_scope entries in
@@ -812,44 +827,231 @@ let order_weighted_entries
         (fun (e : Cascade_config_loader.weighted_entry) -> e.weight > 0)
         health_adjusted
     in
-    let effective = if active = [] then entries else active in
+    let effective =
+      if active = [] then (
+        (* Fail-open: every provider has been cooled by the health
+           tracker, but we still serve on the unfiltered list rather
+           than failing closed.  Emit a counter so operators can
+           alert on this state — see iter 18 commit + iter 12's
+           [on_provider_filter_widening] for the structural parallel.
+           Counter only ticks when the caller supplied [~cascade];
+           internal cascade_config callers without a cascade context
+           stay silent until they're audited individually. *)
+        Option.iter
+          (fun cascade ->
+            Cascade_metrics.on_ordering_health_widening ~cascade)
+          cascade;
+        entries)
+      else active
+    in
     weighted_shuffle ~rand_int effective
+
+let normalize_decl_provider_id provider_id =
+  String.trim provider_id
+  |> String.lowercase_ascii
+  |> String.map (fun c -> if c = '-' then '_' else c)
+
+let json_assoc_opt key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let json_string_member key json =
+  match json_assoc_opt key json with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let materialized_provider_json json provider_id =
+  match
+    Option.bind (json_assoc_opt "providers" json) (fun providers_json ->
+        json_assoc_opt provider_id providers_json)
+  with
+  | Some _ as provider_json -> provider_json
+  | None -> None
+
+let materialized_provider_protocol json provider_id =
+  match materialized_provider_json json provider_id with
+  | Some provider_json -> json_string_member "protocol" provider_json
+  | None -> None
+
+let materialized_provider_endpoint json provider_id =
+  match materialized_provider_json json provider_id with
+  | Some provider_json -> json_string_member "endpoint" provider_json
+  | None -> None
+
+let direct_provider_cascade_prefix provider_id =
+  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
+  | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
+  | None ->
+    Provider_adapter.resolve_adapter_by_cascade_prefix
+      (normalize_decl_provider_id provider_id)
+    |> Option.map Provider_adapter.cascade_prefix_of_adapter
+
+let registry_provider_prefix provider_id =
+  match Llm_provider.Provider_registry.find default_registry provider_id with
+  | Some _ -> Some provider_id
+  | None ->
+    let normalized = normalize_decl_provider_id provider_id in
+    (match Llm_provider.Provider_registry.find default_registry normalized with
+     | Some _ -> Some normalized
+     | None -> None)
+
+let openai_compatible_custom_model json provider_id api_name =
+  match materialized_provider_endpoint json provider_id with
+  | Some endpoint when String.trim endpoint <> "" ->
+    Some (Printf.sprintf "custom:%s@%s" api_name (String.trim endpoint))
+  | _ -> None
+
+let materialized_member_model_string json provider_id api_name =
+  match direct_provider_cascade_prefix provider_id with
+  | Some prefix -> Some (Printf.sprintf "%s:%s" prefix api_name)
+  | None ->
+    (match registry_provider_prefix provider_id with
+     | Some prefix -> Some (Printf.sprintf "%s:%s" prefix api_name)
+     | None ->
+       let protocol =
+         materialized_provider_protocol json provider_id
+         |> Option.map (fun protocol -> String.trim protocol |> String.lowercase_ascii)
+       in
+       match protocol with
+       | Some "openai-http" -> openai_compatible_custom_model json provider_id api_name
+       | Some protocol ->
+         Provider_adapter.cascade_prefix_of_declarative_protocol protocol
+         |> Option.map (fun prefix -> Printf.sprintf "%s:%s" prefix api_name)
+       | None -> None)
+
+let json_string_list_member key json =
+  match json_assoc_opt key json with
+  | Some (`List values) ->
+    values
+    |> List.filter_map (function
+         | `String value -> Some value
+         | _ -> None)
+  | _ -> []
+
+let materialized_model_api_name json model_id =
+  match
+    Option.bind (json_assoc_opt "models" json) (fun models_json ->
+        json_assoc_opt model_id models_json)
+  with
+  | Some model_json -> (
+    match json_string_member "api-name" model_json with
+    | Some _ as api_name -> api_name
+    | None -> json_string_member "api_name" model_json)
+  | None -> None
+
+let weighted_entry_of_materialized_member json member =
+  match String.split_on_char '.' (String.trim member) with
+  | provider_id :: model_id :: _ -> (
+      match materialized_model_api_name json model_id with
+      | Some api_name -> (
+        match materialized_member_model_string json provider_id api_name with
+        | Some model ->
+          Some
+            {
+              Cascade_config_loader.model = model;
+              weight = 1;
+              supports_tool_choice = None;
+              secondary = None;
+              secondary_supports_tool_choice = None;
+            }
+        | None -> None)
+      | None -> None)
+  | _ -> None
+
+let materialized_tier_members json tier_name =
+  match
+    Option.bind (json_assoc_opt "tier" json) (fun tiers_json ->
+        json_assoc_opt tier_name tiers_json)
+  with
+  | Some tier_json -> json_string_list_member "members" tier_json
+  | None -> []
+
+let materialized_tier_group_tiers json group_name =
+  match
+    Option.bind (json_assoc_opt "tier-group" json) (fun groups_json ->
+        json_assoc_opt group_name groups_json)
+  with
+  | Some group_json -> json_string_list_member "tiers" group_json
+  | None -> []
+
+let configured_weighted_entries_from_materialized_json json ~name =
+  let trimmed = String.trim name in
+  let candidates =
+    if String.starts_with ~prefix:"tier-group." trimmed
+       || String.starts_with ~prefix:"tier." trimmed
+    then [ trimmed ]
+    else [ trimmed; "tier-group." ^ trimmed; "tier." ^ trimmed ]
+  in
+  let resolve_profile profile_name =
+    if String.starts_with ~prefix:"tier-group." profile_name then
+      let group_name =
+        String.sub profile_name 11 (String.length profile_name - 11)
+      in
+      Some
+        (materialized_tier_group_tiers json group_name
+         |> List.concat_map (materialized_tier_members json)
+         |> List.filter_map (weighted_entry_of_materialized_member json))
+    else if String.starts_with ~prefix:"tier." profile_name then
+      let tier_name =
+        String.sub profile_name 5 (String.length profile_name - 5)
+      in
+      Some
+        (materialized_tier_members json tier_name
+         |> List.filter_map (weighted_entry_of_materialized_member json))
+    else None
+  in
+  match
+    candidates
+    |> List.find_map (fun candidate ->
+           match resolve_profile candidate with
+           | Some (_ :: _ as entries) -> Some entries
+           | Some [] | None -> None)
+  with
+  | Some entries -> entries
+  | None -> []
 
 let resolve_model_strings_traced_with
     ~rand_int ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
-    (* Probe load_json before delegating to load_profile_weighted so we
-       can distinguish a load failure (Load_failed source) from a
-       successful-but-empty profile (Hardcoded_defaults source).  The
-       load is cached, so the subsequent call inside
-       load_profile_weighted is a cache hit. *)
-    (match Cascade_config_loader.load_json path with
+    (match Cascade_config_loader.load_catalog_source path with
      | Error msg -> (defaults, Load_failed msg)
-     | Ok _ ->
-    let from_file_weighted =
-      Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
-    if from_file_weighted <> [] then
-      let ordered = order_weighted_entries ~rand_int from_file_weighted in
-      let models = List.map
-          (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
-      (models, Named)
-    else
-      let fallback_profile =
-        Cascade_routes.cascade_name_for_use
-          ~config_path:path
-          Cascade_routes.Keeper_turn
-      in
-      let fallback_weighted =
-        Cascade_config_loader.load_profile_weighted
-          ~config_path:path ~name:fallback_profile in
-      if fallback_weighted <> [] then
-        let ordered = order_weighted_entries ~rand_int fallback_weighted in
-        let models = List.map
-            (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
-            ordered in
-        (models, Default_fallback)
-      else (defaults, Hardcoded_defaults))
+     | Ok json ->
+       let from_file_weighted =
+         configured_weighted_entries_from_materialized_json json ~name
+       in
+       if from_file_weighted <> [] then
+         let ordered =
+           order_weighted_entries ~rand_int ~cascade:name from_file_weighted
+         in
+         let models =
+           List.map
+             (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
+             ordered
+         in
+         (models, Named)
+       else
+         let fallback_profile =
+           Cascade_routes.cascade_name_for_use
+             ~config_path:path
+             Cascade_routes.Keeper_turn
+         in
+         let fallback_weighted =
+           configured_weighted_entries_from_materialized_json
+             json ~name:fallback_profile
+         in
+         if fallback_weighted <> [] then
+           let ordered =
+             order_weighted_entries
+               ~rand_int ~cascade:fallback_profile fallback_weighted
+           in
+           let models =
+             List.map
+               (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
+               ordered
+           in
+           (models, Default_fallback)
+         else (defaults, Hardcoded_defaults))
   | None -> (defaults, Hardcoded_defaults)
 
 let resolve_model_strings_traced ?config_path ~name ~defaults () =
@@ -971,9 +1173,7 @@ let selection_trace_of_weighted_entries
 let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
-    (* Phase 2b: same probe pattern as resolve_model_strings_traced_with —
-       distinguish a load fault from operator-intended absence. *)
-    (match Cascade_config_loader.load_json path with
+    (match Cascade_config_loader.load_catalog_source path with
      | Error msg ->
        let candidates =
          List.map (fun m ->
@@ -983,11 +1183,11 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
            defaults
        in
        (defaults, { candidates; source = Load_failed msg })
-     | Ok _ ->
+     | Ok json ->
     let from_file_weighted =
-      Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
+      configured_weighted_entries_from_materialized_json json ~name in
     if from_file_weighted <> [] then
-      let ordered = order_weighted_entries from_file_weighted in
+      let ordered = order_weighted_entries ~cascade:name from_file_weighted in
       let models = List.map
           (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
       let candidates = List.map candidate_info_of_weighted ordered in
@@ -999,10 +1199,12 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
           Cascade_routes.Keeper_turn
       in
       let fallback_weighted =
-        Cascade_config_loader.load_profile_weighted
-          ~config_path:path ~name:fallback_profile in
+        configured_weighted_entries_from_materialized_json json
+          ~name:fallback_profile in
       if fallback_weighted <> [] then
-        let ordered = order_weighted_entries fallback_weighted in
+        let ordered =
+          order_weighted_entries ~cascade:fallback_profile fallback_weighted
+        in
         let models = List.map
             (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
         let candidates = List.map candidate_info_of_weighted ordered in
@@ -1027,13 +1229,19 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
     (defaults, { candidates; source = Hardcoded_defaults })
 
 let dedupe_stable (items : string list) =
-  let rec loop seen acc = function
+  (* Stable dedupe (first occurrence wins, ordering preserved).
+     Previous impl scanned a growing [seen] list via [List.mem] per
+     item — O(N^2).  Use a Hashtbl for membership while keeping a
+     list for the ordered output: O(N) total. *)
+  let seen = Hashtbl.create (List.length items) in
+  let rec loop acc = function
     | [] -> List.rev acc
+    | item :: rest when Hashtbl.mem seen item -> loop acc rest
     | item :: rest ->
-      if List.mem item seen then loop seen acc rest
-      else loop (item :: seen) (item :: acc) rest
+        Hashtbl.replace seen item ();
+        loop (item :: acc) rest
   in
-  loop [] [] items
+  loop [] items
 
 let expand_model_strings_for_execution ?rotation_scope (items : string list) =
   items
@@ -1066,6 +1274,7 @@ let apply_provider_filter ~provider_filter ~label providers =
     in
     let filtered = List.filter matches providers in
     if filtered = [] then (
+      Cascade_metrics.on_provider_filter_widening ~cascade:label;
       Log.warn ~ctx:"CascadeConfig"
         "provider_filter matched no providers (%s); \
          falling back to unfiltered (filter=[%s] providers=[%s])"
@@ -1096,71 +1305,6 @@ let apply_provider_filter_strict ~provider_filter ~label providers =
            })
     else Ok filtered
 
-(* ── Local Capacity Query ──────────────────────────────── *)
-
-type local_capacity = {
-  total : int;
-  process_active : int;
-  process_available : int;
-  process_queue_length : int;
-  all_discovered : bool;
-  endpoints_found : int;
-}
-
-let empty_capacity = {
-  total = 0; process_active = 0; process_available = 0;
-  process_queue_length = 0; all_discovered = true; endpoints_found = 0;
-}
-
-let local_capacity_for_selections ~sw ~net ?config_path selections =
-  (* 1. Resolve each selection through the same path as complete_named *)
-  let model_strings =
-    selections
-    |> List.concat_map (fun s ->
-         resolve_model_strings ?config_path ~name:s ~defaults:[s] ())
-    |> expand_model_strings_for_execution
-    |> List.sort_uniq String.compare
-  in
-  (* 2. Parse to provider configs *)
-  let providers = parse_model_strings model_strings in
-  (* 3. Filter to local providers *)
-  let local_urls =
-    providers
-    |> List.filter is_local_provider
-    |> List.map (fun (cfg : Llm_provider.Provider_config.t) -> cfg.base_url)
-    |> List.sort_uniq String.compare
-  in
-  if local_urls = [] then
-    empty_capacity
-  else begin
-    (* 4. Probe endpoints not yet in throttle table (cold start) *)
-    let need_probe =
-      List.filter (fun url -> Cascade_throttle.lookup url = None) local_urls
-    in
-    if need_probe <> [] then begin
-      let statuses = Llm_provider.Discovery.discover ~sw ~net ~endpoints:need_probe in
-      Cascade_throttle.populate statuses
-    end;
-    (* 5. Aggregate capacity from throttle table *)
-    let infos =
-      List.filter_map (fun url -> Cascade_throttle.capacity url) local_urls
-    in
-    match infos with
-    | [] -> empty_capacity
-    | _ ->
-      List.fold_left (fun acc (info : Cascade_throttle.capacity_info) ->
-        { total = acc.total + info.total;
-          process_active = acc.process_active + info.process_active;
-          process_available = acc.process_available + info.process_available;
-          process_queue_length = acc.process_queue_length + info.process_queue_length;
-          all_discovered = acc.all_discovered
-            && info.source = Llm_provider.Provider_throttle.Discovered;
-          endpoints_found = acc.endpoints_found + 1;
-        })
-        { empty_capacity with all_discovered = true }
-        infos
-  end
-
 (* ── Pluggable strategy resolution (since 0.9.6) ─────── *)
 
 (* One-time warning per (cascade name, raw value) pair so misspelled
@@ -1189,26 +1333,14 @@ let warn_invalid_priority_tier ~name ~msg ~fallback_kind =
   end
 
 let default_strategy_kind ?config_path ~name () =
-  match config_path with
-  | None -> Cascade_strategy.Failover
-  | Some path ->
-    (match Cascade_config_loader.load_catalog ~config_path:path with
-     | Ok entries ->
-       (match
-          List.find_opt
-            (fun (entry : Cascade_config_loader.catalog_entry) ->
-               String.equal entry.name name)
-            entries
-        with
-        | Some entry when entry.keeper_assignable ->
-            Cascade_strategy.Round_robin
-        | _ -> Cascade_strategy.Failover)
-     | Error _ -> Cascade_strategy.Failover)
+  let (_ : string option) = config_path in
+  let (_ : string) = name in
+  Cascade_strategy.Failover
 
 let parse_kind_or_default ~name ~default_kind = function
   | None -> default_kind
   | Some raw ->
-    match Cascade_strategy.parse_kind raw with
+    match Cascade_strategy.parse_config_kind raw with
     | Ok k -> k
     | Error msg ->
       warn_unknown_strategy ~name ~raw ~msg ~fallback_kind:default_kind;
@@ -1241,21 +1373,19 @@ let model_ids_of_specs (specs : string list) : string list =
   |> List.sort_uniq String.compare
 
 let normalize_priority_tiers ~config_path ~name raw_tiers =
-  (* Phase 2c: probe load_json before delegating so that an unreadable
-     cascade.toml/json surfaces as a load-failure error instead of the
+  (* Probe the active TOML before resolving declarative candidates so an
+     unreadable cascade.toml surfaces as a load-failure error instead of the
      generic "no configured models" message — the latter mis-leads
-     operators into thinking the profile is empty when the file is
-     actually broken.  Mirrors the probe pattern in
-     resolve_model_strings_traced_with / _with_trace (PR #11361). *)
-  match Cascade_config_loader.load_json config_path with
+     operators into thinking the profile is empty when the file is broken. *)
+  match Cascade_config_loader.load_catalog_source config_path with
   | Error msg ->
       Error
         (Printf.sprintf
            "priority_tier validation skipped: cascade config load failed: %s"
            msg)
-  | Ok _ ->
+  | Ok json ->
   let configured_model_ids =
-    Cascade_config_loader.load_profile_weighted ~config_path ~name
+    configured_weighted_entries_from_materialized_json json ~name
     |> List.map (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
     |> model_ids_of_specs
   in
@@ -1309,10 +1439,19 @@ let resolve_strategy ?config_path ~name () =
       | _ -> (parsed_kind, [])
     in
     let sticky_ttl_ms =
+      (* Enumerate every [Cascade_strategy.kind] variant so the compiler
+         flags any new strategy added here. [sticky_ttl_ms] is only
+         meaningful for [Sticky]; the six other strategies today produce
+         0 (no TTL applicable). A future strategy that *also* needs a
+         per-attempt TTL (e.g. [Hash_sticky], [Affinity]) would inherit
+         "no TTL" silently under the previous [_, _ -> 0] catch-all. *)
       match kind, cfg.sticky_ttl_ms with
       | Cascade_strategy.Sticky, Some n -> n
       | Cascade_strategy.Sticky, None -> Cascade_strategy.default_sticky_ttl_ms
-      | _, _ -> 0
+      | ( Cascade_strategy.Failover | Cascade_strategy.Capacity_aware
+        | Cascade_strategy.Weighted_random
+        | Cascade_strategy.Circuit_breaker_cycling
+        | Cascade_strategy.Priority_tier | Cascade_strategy.Round_robin ), _ -> 0
     in
     let defaults = Cascade_strategy.default_scoring_params in
     let scoring = {

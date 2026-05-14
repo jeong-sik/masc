@@ -12,32 +12,24 @@
     Configurable via [ZAI_AUTO_MODELS] env var (comma-separated).
     Default: [\["glm-5.1"; "glm-5-turbo"; "glm-4.7"; "glm-4.7-flashx"\]]. *)
 val glm_auto_models : unit -> string list
+
 val glm_coding_auto_models : unit -> string list
 
-(** Ordered Gemini CLI candidates for [gemini_cli:auto].
-    Configurable via [MASC_GEMINI_CLI_AUTO_MODELS] (comma-separated).
-    When unset, [GEMINI_DEFAULT_MODEL] narrows the list to that single
-    model for backward-compatible explicit override semantics. *)
-val gemini_cli_auto_models : unit -> string list
+(** {2 Removed in RFC-0058 Phase 5.3a}
 
-(** Ordered Codex CLI candidates for [codex_cli:auto].
-    Configurable via [MASC_CODEX_CLI_AUTO_MODELS] (comma-separated).
-    Defaults to a light-to-heavy generation order (5.1 -> 5.4),
-    including mini/spark variants. *)
-val codex_cli_auto_models : unit -> string list
+    The per-provider [gemini_cli_auto_models], [codex_cli_auto_models],
+    [claude_code_auto_models], and [kimi_cli_auto_models] thin wrappers
+    have been deleted. They were unused in production — every routing
+    call went through {!Provider_adapter.auto_models_for_cascade_prefix}
+    directly. Hardcoded provider names were a §2.4 "code knows provider
+    names" violation. Callers that need a specific provider's auto list
+    use the generic API; per-provider env-override behaviour
+    ([MASC_<PROVIDER>_AUTO_MODELS]) remains intact and is now exercised
+    against the generic path in [test/test_cascade_model_resolve.ml]. *)
 
-(** Ordered Claude Code candidates for [claude_code:auto].
-    Configurable via [MASC_CLAUDE_CODE_AUTO_MODELS] (comma-separated).
-    Defaults to [["auto"]] so the user's Claude Code default remains in
-    control unless an operator opts into model rotation. *)
-val claude_code_auto_models : unit -> string list
-
-(** Ordered Kimi CLI candidates for [kimi_cli:auto].
-    Configurable via [MASC_KIMI_CLI_AUTO_MODELS] (comma-separated).
-    Defaults to [["kimi-for-coding"]]. *)
-val kimi_cli_auto_models : unit -> string list
-
-type model_selector = Concrete of string | Auto
+type model_selector =
+  | Concrete of string
+  | Auto
 
 val model_selector_of_string : string -> model_selector
 
@@ -49,16 +41,21 @@ type model_resolution_provenance =
   | Discovery
   | Unresolved_auto
 
-type model_resolution = {
-  requested_model_id : string;
-  resolved_model_id : string;
-  provenance : model_resolution_provenance;
-}
+type model_resolution =
+  { requested_model_id : string
+  ; resolved_model_id : string
+  ; provenance : model_resolution_provenance
+  }
 
-val resolve_glm_model :
-  ?getenv:(string -> string option) -> model_selector -> model_resolution
-val resolve_glm_coding_model :
-  ?getenv:(string -> string option) -> model_selector -> model_resolution
+val resolve_glm_model
+  :  ?getenv:(string -> string option)
+  -> model_selector
+  -> model_resolution
+
+val resolve_glm_coding_model
+  :  ?getenv:(string -> string option)
+  -> model_selector
+  -> model_resolution
 
 (** Resolve a GLM model alias to the concrete API model ID.
     - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or ["glm-5.1"]
@@ -67,17 +64,19 @@ val resolve_glm_coding_model :
     - ["vision"] -> ["glm-4.6v"]
     - Concrete IDs pass through unchanged. *)
 val resolve_glm_model_id : string -> string
+
 val resolve_glm_coding_model_id : string -> string
 
 (** Resolve "auto" and aliases to concrete model IDs for any provider.
     Cloud providers resolve aliases; local providers (llama, ollama) resolve
     "auto" via {!Llm_provider.Discovery.first_discovered_model_id}. *)
-val resolve_auto_model :
-  ?getenv:(string -> string option) ->
-  ?discover:(unit -> string option) ->
-  string ->
-  model_selector ->
-  model_resolution
+val resolve_auto_model
+  :  ?getenv:(string -> string option)
+  -> ?discover:(unit -> string option)
+  -> string
+  -> model_selector
+  -> model_resolution
+
 val resolve_auto_model_id : string -> string -> string
 
 (** Parse a "model@url" custom model spec.

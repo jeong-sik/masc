@@ -38,6 +38,7 @@ type pending_approval =
   ; goal_id : string option
   ; goal_ids : string list
   ; runtime_contract : Yojson.Safe.t option
+  (* Legacy/internal OAS model hint. Public approval JSON redacts this field. *)
   ; selected_model : string option
   ; disposition : string option
   ; disposition_reason : string option
@@ -175,6 +176,12 @@ module For_testing : sig
 end
 
 (** {1 Submit & await} *)
+
+val default_noncritical_approval_timeout_s : float
+(** Default operator wait used by [submit_and_await] for non-critical
+    approvals. OAS/cascade bridge deadlines that wrap keeper execution must
+    not be shorter than this, otherwise a valid HITL wait is misclassified as
+    provider idleness. *)
 
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.

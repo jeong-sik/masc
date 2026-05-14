@@ -106,7 +106,7 @@ let test_default_shard_names () =
     (List.mem "governance" defaults);
   Alcotest.(check bool) "coding in defaults" true
     (List.mem "coding" defaults);
-  Alcotest.(check bool) "autoresearch in defaults" true
+  Alcotest.(check bool) "autoresearch opt-in" false
     (List.mem "autoresearch" defaults);
   Alcotest.(check bool) "weather removed from defaults" false
     (List.mem "weather" defaults);
@@ -578,8 +578,8 @@ let () =
         Alcotest.(check bool) "has search findings" true has_search);
       Alcotest.test_case "in defaults" `Quick (fun () ->
         let defaults = Tool_shard.default_shard_names in
-        Alcotest.(check bool) "autoresearch in defaults"
-          true (List.mem "autoresearch" defaults));
+        Alcotest.(check bool) "autoresearch opt-in"
+          false (List.mem "autoresearch" defaults));
     ]);
     ("default_shard_names", [
       Alcotest.test_case "defaults" `Quick test_default_shard_names;

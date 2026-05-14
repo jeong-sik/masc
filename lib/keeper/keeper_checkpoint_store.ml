@@ -55,8 +55,8 @@ let prune ~(session_dir : string) ~(keep : int) : int =
          Log.Keeper.warn "checkpoint cleanup failed for %s: %s"
            path (Printexc.to_string exn);
          Prometheus.inc_counter
-           Prometheus.metric_keeper_checkpoint_failures
-           ~labels:[("keeper", "aggregate"); ("operation", "cleanup")]
+           Keeper_metrics.metric_keeper_checkpoint_failures
+           ~labels:[("keeper", "aggregate"); ("operation", Checkpoint_failure_operation.(to_label Cleanup))]
            ()))
       to_remove;
     List.length to_remove
@@ -90,8 +90,8 @@ let save
   | Error msg ->
     Log.Keeper.warn "save_checkpoint failed for %s: %s" path msg;
     Prometheus.inc_counter
-      Prometheus.metric_keeper_checkpoint_failures
-      ~labels:[("site", "save")]
+      Keeper_metrics.metric_keeper_checkpoint_failures
+      ~labels:[("site", Checkpoint_store_failure_site.(to_label Save))]
       ()
 
 (* ================================================================ *)
@@ -133,8 +133,8 @@ let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
        Log.Keeper.warn "malformed checkpoint ignored in %s: %s"
          path (Printexc.to_string exn);
        Prometheus.inc_counter
-         Prometheus.metric_keeper_checkpoint_failures
-         ~labels:[("keeper", "aggregate"); ("operation", "malformed_load")]
+         Keeper_metrics.metric_keeper_checkpoint_failures
+         ~labels:[("keeper", "aggregate"); ("operation", Checkpoint_failure_operation.(to_label Malformed_load))]
          ();
        None)
 
@@ -195,8 +195,8 @@ let prune_oas_history ~(session_dir : string) : unit =
              Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
                path (Printexc.to_string exn);
              Prometheus.inc_counter
-               Prometheus.metric_keeper_checkpoint_failures
-               ~labels:[("site", "oas_cleanup")]
+               Keeper_metrics.metric_keeper_checkpoint_failures
+               ~labels:[("site", Checkpoint_store_failure_site.(to_label Oas_cleanup))]
                ())
 
 let hardlink_oas_history_from_canonical
@@ -237,8 +237,8 @@ let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : u
   | Error msg ->
     Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg;
     Prometheus.inc_counter
-      Prometheus.metric_keeper_checkpoint_failures
-      ~labels:[("site", "oas_save")]
+      Keeper_metrics.metric_keeper_checkpoint_failures
+      ~labels:[("site", Checkpoint_store_failure_site.(to_label Oas_save))]
       ()
 
 let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string list)
@@ -256,8 +256,8 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
             Log.Keeper.warn "OAS snapshot delete failed for %s: %s"
               path (Printexc.to_string exn);
             Prometheus.inc_counter
-              Prometheus.metric_keeper_checkpoint_failures
-              ~labels:[("site", "oas_delete")]
+              Keeper_metrics.metric_keeper_checkpoint_failures
+              ~labels:[("site", Checkpoint_store_failure_site.(to_label Oas_delete))]
               ();
             (deleted, snapshot_id :: missing))
       else
@@ -279,8 +279,8 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
            Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
              ckpt.session_id (Printexc.to_string exn);
            Prometheus.inc_counter
-             Prometheus.metric_keeper_checkpoint_failures
-             ~labels:[("site", "oas_archive_fallback")]
+             Keeper_metrics.metric_keeper_checkpoint_failures
+             ~labels:[("site", Checkpoint_store_failure_site.(to_label Oas_archive_fallback))]
              ());
       Ok ()
     | Error msg -> Error msg
@@ -300,8 +300,8 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
                       Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
                         ckpt.session_id (Printexc.to_string exn);
                       Prometheus.inc_counter
-                        Prometheus.metric_keeper_checkpoint_failures
-                        ~labels:[("site", "oas_archive_primary")]
+                        Keeper_metrics.metric_keeper_checkpoint_failures
+                        ~labels:[("site", Checkpoint_store_failure_site.(to_label Oas_archive_primary))]
                         ());
                  Ok ()
              | Error err -> Error (Agent_sdk.Error.to_string err))

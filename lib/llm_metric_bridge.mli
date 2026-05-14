@@ -25,13 +25,17 @@ val emit_http_status :
     below 1ms are recorded as 1ms so fast calls still produce a non-zero
     histogram sum; non-positive inputs also increment
     [masc_llm_provider_request_latency_clamped_total] so sentinel or missing
-    durations remain visible.
+    durations remain visible.  [?provider] is optional because the OAS
+    [on_request_end] callback currently carries only [model_id]; when omitted,
+    the bridge uses the provider most recently observed for that model from
+    adjacent OAS callbacks such as [on_http_status].
 
     Called by both the global sink built in {!make_sink} and any
     per-call OAS [Metrics.t] literal that wants to forward
     [on_request_end] (e.g. cascade observation captures).  Single
     source of truth for the label shape. *)
-val emit_request_latency : model_id:string -> latency_ms:int -> unit
+val emit_request_latency :
+  ?provider:string -> model_id:string -> latency_ms:int -> unit -> unit
 
 (** Emit a capability drop observation to the Prometheus counter. *)
 val emit_capability_drop : model_id:string -> field:string -> unit
@@ -44,6 +48,12 @@ val emit_cache_miss : model_id:string -> unit
 val emit_request_start : model_id:string -> unit
 val emit_error : model_id:string -> error:string -> unit
 val emit_retry : provider:string -> model_id:string -> attempt:int -> unit
+val emit_circuit_state :
+  provider:string ->
+  model_id:string ->
+  provider_key:string ->
+  state:Llm_provider.Metrics.circuit_state ->
+  unit
 val emit_token_usage :
   provider:string ->
   model_id:string ->
@@ -51,15 +61,26 @@ val emit_token_usage :
   output_tokens:int ->
   unit
 
+(** Emit streaming first-response-chunk and inter-chunk observations from OAS
+    streaming metrics callbacks. Labels are [provider] and [model]. *)
+val emit_streaming_first_chunk :
+  provider:string -> model_id:string -> ttfrc_ms:float -> unit
+
+val emit_streaming_chunk :
+  provider:string ->
+  model_id:string ->
+  chunk_index:int ->
+  inter_chunk_ms:float ->
+  unit
+
 (** Canonical metric name for the §7.3.2 unified fallback counter. *)
 val fallback_triggered_metric : string
 
 (** Emit a fallback observation to the unified counter.
-    [kind] enumerates the fallback class (cross_cascade | cascade_empty |
-    capability_drop | cli_unsupported | provider_error_fallback | …);
-    [detail] carries the specific reason within the kind. Detail counters
-    (capability_drops, cross_cascade_fallback) remain for per-class
-    drill-down — this is the single numerator across all classes. *)
+    [kind] enumerates the fallback class (cascade_empty | capability_drop |
+    cli_unsupported | provider_error_fallback | …); [detail] carries the
+    specific reason within the kind. This is the single numerator across all
+    fallback classes. *)
 val emit_fallback_triggered : kind:string -> detail:string -> unit
 
 (** Construct the OAS Metrics.t sink without installing it.  Useful

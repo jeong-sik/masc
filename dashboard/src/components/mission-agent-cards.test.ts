@@ -155,7 +155,7 @@ describe('mission keeper runtime helpers', () => {
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '대화 모델 experimental_v99 미인식 · bdi_speech_v1로 대체 중',
+      '대화 런타임 설정 확인 필요',
     )
   })
 })

@@ -24,8 +24,9 @@ let check_error_kind name expected actual =
   check string name expected (Metrics.error_kind_to_string actual)
 
 let test_error_kind_round_trip () =
-  let kind = Metrics.error_kind_of_string "validation" in
-  check_error_kind "round trip" "validation" kind
+  match Metrics.error_kind_of_string "validation" with
+  | Some kind -> check_error_kind "round trip" "validation" kind
+  | None -> fail "expected Ek_validation for \"validation\""
 
 let test_record_attempt_tracks_connector_diagnostics () =
   with_eio (fun () ->

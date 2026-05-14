@@ -5,11 +5,13 @@
 
 (** Emit an [episode.flush] activity payload via [Coord_hooks.activity_emit_fn].
     No-op if both [episodes] and [procedures] are zero. Logs and counts
-    non-cancel exceptions; re-raises [Eio.Cancel.Cancelled]. *)
+    non-cancel exceptions, records a telemetry coverage-gap row, and
+    re-raises [Eio.Cancel.Cancelled]. *)
 val emit_flush_activity :
   config:Coord_utils.config ->
   keeper_name:string ->
   turn:int ->
+  ?oas_turn_count:int ->
   episodes:int ->
   procedures:int ->
   ?outcome:string ->
@@ -24,6 +26,7 @@ val record_success :
   keeper_name:string ->
   memory:Agent_sdk.Memory.t ->
   turn:int ->
+  ?oas_turn_count:int ->
   trace_id:string ->
   snapshot:Keeper_memory_policy.keeper_state_snapshot ->
   unit ->
@@ -43,6 +46,7 @@ val record_failure :
   keeper_name:string ->
   memory:Agent_sdk.Memory.t ->
   turn:int ->
+  ?oas_turn_count:int ->
   trace_id:string ->
   error_kind:Memory_oas_bridge.error_kind ->
   error_message:string ->

@@ -50,6 +50,12 @@ let parse_task_contract_arg args =
   | _ -> Error "contract must be an object when provided"
 ;;
 
+(* RFC-0034.v2: per-goal task creation cap moved to
+   [Coord_task_capacity] so all 5 task creation entrypoints share the
+   same guard. Pre-RFC-0034.v2, these helpers (and the constant
+   [keeper_task_create_goal_open_limit]) lived here as introduced by
+   #13981. *)
+
 let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
     ?excluded_count ?effective_mode ?effective_goal_ids ?fallback_reason () =
   let scoped = meta.active_goal_ids <> [] in
@@ -110,9 +116,16 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
       claim_goal_scope.Keeper_runtime_contract.mode
       excluded_count
   | None ->
+    let scope_hint =
+      match claim_goal_scope.Keeper_runtime_contract.mode with
+      | "active_goal_ids" ->
+        " Global backlog may be outside this keeper's active_goal_ids or blocked by its tool policy; update the goal scope or create/link an eligible scoped task before retrying."
+      | _ -> ""
+    in
     Printf.sprintf
-      "ACTION: Stop task-checking — blocked/excluded=%d."
+      "ACTION: Stop task-checking — blocked/excluded=%d.%s"
       excluded_count
+      scope_hint
 ;;
 
 let find_task_goal_id config task_id =
@@ -150,7 +163,7 @@ let sync_keeper_meta_current_task
      | Ok () -> ()
      | Error msg ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_write_meta_failures
+         Keeper_metrics.metric_keeper_write_meta_failures
          ~labels:[("keeper", meta.name); ("phase", "claim_task_id")]
          ();
        Log.Keeper.warn
@@ -259,8 +272,21 @@ let handle_keeper_task_tool
           (match parse_task_contract_arg args with
            | Error message -> error_json message
            | Ok contract ->
+              let capacity_error =
+                let backlog = Coord.read_backlog config in
+                Coord_task_capacity.check ?goal_id backlog
+              in
+              (match capacity_error with
+               | Some error -> Coord_task_capacity.error_to_json_string error
+               | None ->
               let result =
-                Coord_task.add_task ?contract ?goal_id config ~title ~priority
+                Coord_task.add_task
+                  ?contract
+                  ?goal_id
+                  ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id)
+                  config
+                  ~title
+                  ~priority
                   ~description
               in
               Yojson.Safe.to_string
@@ -269,7 +295,7 @@ let handle_keeper_task_tool
                     "ok", `Bool true;
                     "result", `String result;
                     "goal_id", Json_util.string_opt_to_json goal_id;
-                  ])))
+                  ]))))
   | "keeper_task_claim" ->
     let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let claim_goal_scope =
@@ -287,13 +313,15 @@ let handle_keeper_task_tool
     (match result with
      | Coord.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
-       let ok, _msg =
+       let start_result =
          Tool_task.handle_transition
+           ~tool_name:"keeper_auto_start"
+           ~start_time:0.0
            { Tool_task.config; agent_name = keeper_agent_sender ~meta;
              sw = Eio_context.get_switch_opt () }
            (`Assoc ["task_id", `String task_id; "action", `String "start"])
        in
-       auto_started_ok := ok
+       auto_started_ok := start_result.Tool_result.success
      | Coord.Claim_next_no_unclaimed
      | Coord.Claim_next_no_eligible _
      | Coord.Claim_next_error _ -> ());
@@ -375,8 +403,10 @@ let handle_keeper_task_tool
     if task_id = ""
     then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
     else (
-      let ok, message =
+      let transition_result =
         Tool_task.handle_transition
+          ~tool_name:"keeper_task_done"
+          ~start_time:0.0
           {
             Tool_task.config;
             agent_name = keeper_agent_sender ~meta;
@@ -389,7 +419,7 @@ let handle_keeper_task_tool
                "notes", `String result_text;
              ])
       in
-      keeper_tool_result_json ~ok ~message)
+      keeper_tool_result_json ~ok:transition_result.Tool_result.success ~message:transition_result.Tool_result.legacy_message)
   | "keeper_task_submit_for_verification" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
@@ -401,8 +431,10 @@ let handle_keeper_task_tool
     else if pr_url = ""
     then error_json "pr_url is required. Include the PR opened for this task."
     else (
-      let ok, message =
+      let transition_result =
         Tool_task.handle_transition
+          ~tool_name:"keeper_task_submit_for_verification"
+          ~start_time:0.0
           {
             Tool_task.config;
             agent_name = keeper_agent_sender ~meta;
@@ -415,6 +447,6 @@ let handle_keeper_task_tool
                "notes", `String (notes ^ "\nPR: " ^ pr_url);
              ])
       in
-      keeper_tool_result_json ~ok ~message)
+      keeper_tool_result_json ~ok:transition_result.Tool_result.success ~message:transition_result.Tool_result.legacy_message)
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;

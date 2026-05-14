@@ -3,17 +3,15 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { KeeperBadge } from '../keeper-badge'
 import {
   createKeeperPresenceStore,
+  disconnectedSnapshot,
+  globalPresenceSnapshot,
+  LOADING_SNAPSHOT,
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
-
-const FALLBACK_PRESENCE: KeeperPresenceSnapshot = {
-  runtime_id: 'local',
-  branch: 'main',
-  supervisor: 'local',
-  connected: false,
-  entries: [],
-}
+import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
+import { focusIdeContextAnchor, type IdeContextFocus } from './ide-state'
+import { routeLinksForContext } from './ide-context-lens'
 
 interface ApiAgent {
   readonly name: string
@@ -70,17 +68,20 @@ function agentsToPresence(
   status: ApiStatus,
   worktrees: ReadonlyArray<WorktreeEntry>,
 ): KeeperPresenceSnapshot {
+  if (status.cluster === undefined || status.cluster.trim() === '') {
+    return disconnectedSnapshot('runtime_unknown')
+  }
+  if (agents.length === 0) {
+    return disconnectedSnapshot('no_agents')
+  }
   const now = Date.now()
   return {
-    runtime_id: status.cluster ?? 'local',
-    branch: status.project ?? 'main',
-    supervisor: 'local',
-    connected: agents.length > 0,
+    kind: 'live',
+    runtime_id: status.cluster,
     entries: agents.map((agent, idx) => ({
       keeper_id: agent.name,
       workspace_label: workspaceLabelForAgent(agent.name, worktrees),
-      branch: status.project ?? 'main',
-      role: agent.model ?? 'agent',
+      role: 'agent',
       status: mapAgentStatus(agent.status),
       last_seen_ms: now - idx * 1000,
     })),
@@ -135,35 +136,88 @@ async function fetchWorktreeEntries(): Promise<WorktreeEntry[]> {
   }
 }
 
-async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
+interface PresenceData {
+  readonly snapshot: KeeperPresenceSnapshot
+  readonly worktrees: ReadonlyArray<WorktreeEntry>
+}
+
+async function fetchPresence(): Promise<PresenceData> {
   try {
     const [agentsRes, statusRes, worktrees] = await Promise.all([
       fetch('/api/v1/agents?limit=20'),
       fetch('/api/v1/status'),
       fetchWorktreeEntries(),
     ])
-    if (!agentsRes.ok || !statusRes.ok) return FALLBACK_PRESENCE
+    if (!agentsRes.ok || !statusRes.ok) {
+      return { snapshot: disconnectedSnapshot('api_unavailable'), worktrees }
+    }
     const agentsData = await agentsRes.json()
     const statusData = await statusRes.json()
     const agents: ApiAgent[] = Array.isArray(agentsData.agents) ? agentsData.agents : []
-    if (agents.length === 0) return FALLBACK_PRESENCE
-    return agentsToPresence(agents, statusData as ApiStatus, worktrees)
+    const snapshot = agentsToPresence(agents, statusData as ApiStatus, worktrees)
+    return { snapshot, worktrees }
   } catch {
-    return FALLBACK_PRESENCE
+    return { snapshot: disconnectedSnapshot('fetch_failed'), worktrees: [] }
   }
 }
 
+function presenceHeader(snap: KeeperPresenceSnapshot) {
+  if (snap.kind === 'loading') {
+    return html`
+      <span style=${{ color: 'var(--color-fg-disabled)' }} aria-label="presence loading">○</span>
+      <span style=${{ fontStyle: 'italic' }}>loading…</span>
+    `
+  }
+  if (snap.kind === 'disconnected') {
+    return html`
+      <span style=${{ color: 'var(--color-status-err)' }} aria-label=${`presence disconnected: ${snap.reason}`}>○</span>
+      <span style=${{ fontStyle: 'italic' }}>disconnected (${snap.reason})</span>
+    `
+  }
+  const segments = [snap.runtime_id]
+  if (snap.branch !== undefined) segments.push(snap.branch)
+  if (snap.supervisor !== undefined) segments.push(snap.supervisor)
+  return html`
+    <span style=${{ color: 'var(--color-status-ok)' }} aria-label="presence live">●</span>
+    ${segments.map((seg, idx) => html`
+      ${idx > 0 ? html`<span>/</span>` : null}
+      <span>${seg}</span>
+    `)}
+  `
+}
+
 export function IdePresenceStrip() {
-  const presenceStore = useMemo(() => createKeeperPresenceStore(FALLBACK_PRESENCE), [])
+  const presenceStore = useMemo(() => createKeeperPresenceStore(LOADING_SNAPSHOT), [])
   const [, forceRender] = useState(0)
+  const [worktrees, setWorktrees] = useState<ReadonlyArray<WorktreeEntry>>([])
 
   useEffect(() => {
     let cancelled = false
-    fetchPresence().then(snapshot => { if (!cancelled) presenceStore.seed(snapshot) })
+    fetchPresence().then(data => {
+      if (!cancelled) {
+        presenceStore.seed(data.snapshot)
+        setWorktrees(data.worktrees)
+      }
+    })
     return () => { cancelled = true }
   }, [presenceStore])
 
-  useEffect(() => presenceStore.subscribe(() => forceRender(tick => tick + 1)), [presenceStore])
+  useEffect(() => {
+    const unsub = globalPresenceSnapshot.subscribe(() => {
+      presenceStore.seed(globalPresenceSnapshot.value)
+    })
+    return unsub
+  }, [presenceStore])
+
+  useEffect(() => {
+    const unsub = presenceStore.subscribe(() => forceRender(tick => tick + 1))
+    return unsub
+  }, [presenceStore])
+
+  useEffect(() => {
+    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
+    return unsub
+  }, [])
 
   const current = presenceStore.snapshot()
   const entries = presenceStore.entries()
@@ -180,12 +234,7 @@ export function IdePresenceStrip() {
         color: 'var(--color-fg-muted)',
       }}
     >
-      <span style=${{ color: current.connected ? 'var(--color-status-ok)' : 'var(--color-fg-disabled)' }}>●</span>
-      <span>${current.runtime_id}</span>
-      <span>/</span>
-      <span>${current.branch}</span>
-      <span>/</span>
-      <span>${current.supervisor}</span>
+      ${presenceHeader(current)}
       <ul
         style=${{
           display: 'inline-flex',
@@ -198,31 +247,120 @@ export function IdePresenceStrip() {
           overflow: 'hidden',
         }}
       >
-        ${entries.map(entry => html`<${PresenceChip} entry=${entry} />`)}
+        ${entries.map(entry => html`<${PresenceChip} entry=${entry} worktrees=${worktrees} />`)}
       </ul>
     </div>
   `
 }
 
-function PresenceChip({ entry }: { readonly entry: KeeperPresenceEntry }) {
+interface PresenceChipProps {
+  readonly entry: KeeperPresenceEntry
+  readonly worktrees: ReadonlyArray<WorktreeEntry>
+}
+
+interface PresenceContextAnchorInput {
+  readonly entry: KeeperPresenceEntry
+  readonly worktree: WorktreeEntry | null
+  readonly cursor: KeeperCursor | undefined
+}
+
+export function presenceContextAnchor({
+  entry,
+  worktree,
+  cursor,
+}: PresenceContextAnchorInput): Omit<IdeContextFocus, 'activated_at_ms'> | null {
+  if (!cursor?.file_path) return null
+  const prId = worktree?.pr_number != null ? String(worktree.pr_number) : undefined
+  const label = `${entry.keeper_id}@${entry.workspace_label}`
+  const sourceId = `presence:${entry.keeper_id}`
+  return {
+    file_path: cursor.file_path,
+    line: cursor.line,
+    surface: 'Keeper',
+    label,
+    source_id: sourceId,
+    keeper_id: entry.keeper_id,
+    route_links: routeLinksForContext({
+      filePath: cursor.file_path,
+      line: cursor.line,
+      surface: 'Keeper',
+      label,
+      sourceId,
+      prId,
+      gitRef: worktree?.branch,
+      telemetry: true,
+      telemetryQuery: entry.keeper_id,
+      keeperId: entry.keeper_id,
+    }),
+  }
+}
+
+function PresenceChip({ entry, worktrees }: PresenceChipProps) {
   const isActive = entry.status === 'active'
+  const cursor = cursorOverlaySignal.value.cursors.get(entry.keeper_id)
+  const wt = worktrees.find(w => w.branch.startsWith(entry.keeper_id + '/'))
+  const contextAnchor = presenceContextAnchor({ entry, worktree: wt ?? null, cursor })
+
+  const focusLabel = cursor?.file_path
+    ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
+    : null
+
+  const prBadge = wt?.pr_number != null && wt.pr_state != null
+    ? prLabel(wt.pr_number, wt.pr_state)
+    : null
+
+  const canNavigate = contextAnchor !== null
+  const navigate = (): void => {
+    if (contextAnchor) focusIdeContextAnchor(contextAnchor)
+  }
+  const onKeyDown = canNavigate
+    ? (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate() } }
+    : undefined
+
   return html`
     <li
-      title=${`${entry.keeper_id} · ${entry.role} · ${entry.branch}`}
-      aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}`}
+      title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}${prBadge ? ` · ${prBadge}` : ''}`}
+      aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}${focusLabel ? ` editing ${focusLabel}` : ''}`}
+      role=${canNavigate ? 'button' : undefined}
+      aria-disabled=${canNavigate ? undefined : 'true'}
+      tabIndex=${canNavigate ? 0 : undefined}
+      onClick=${canNavigate ? navigate : undefined}
+      onKeyDown=${onKeyDown}
       style=${{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 'var(--sp-1)',
-        maxWidth: '180px',
+        maxWidth: '260px',
         color: 'var(--color-fg-secondary)',
         whiteSpace: 'nowrap',
+        cursor: cursor?.file_path ? 'pointer' : 'default',
+        borderRadius: 'var(--r-1)',
+        padding: '0 var(--sp-1)',
+        transition: 'background 0.15s',
       }}
     >
       <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" beat=${isActive} />
       <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
         ${entry.keeper_id}@${entry.workspace_label}
       </span>
+      ${focusLabel ? html`
+        <span style=${{
+          color: 'var(--color-accent-fg)',
+          fontSize: 'var(--fs-10)',
+          maxWidth: '90px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}>${focusLabel}</span>
+      ` : null}
+      ${prBadge ? html`
+        <span style=${{
+          fontSize: 'var(--fs-9)',
+          padding: '0 3px',
+          borderRadius: 'var(--r-0)',
+          background: wt?.pr_state === 'open' ? 'var(--color-status-ok)' : 'var(--color-bg-muted)',
+          color: wt?.pr_state === 'open' ? 'var(--color-bg-page)' : 'var(--color-fg-muted)',
+        }}>${prBadge}</span>
+      ` : null}
       <span
         style=${{
           color: isActive ? 'var(--color-status-ok)' : 'var(--color-fg-muted)',
@@ -233,4 +371,11 @@ function PresenceChip({ entry }: { readonly entry: KeeperPresenceEntry }) {
       </span>
     </li>
   `
+}
+
+export function prLabel(prNumber: number, prState: string | null): string {
+  if (prState === 'open') return `#${prNumber}`
+  if (prState === 'closed') return `#${prNumber}✕`
+  if (prState === 'merged') return `#${prNumber}✓`
+  return `#${prNumber}`
 }

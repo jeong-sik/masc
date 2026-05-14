@@ -265,7 +265,8 @@ let cleanup t ~older_than_seconds =
       StringMap.fold (fun agent_id breaker (n, m) ->
         match breaker.state with
         | Closed when breaker.last_check < threshold -> (n + 1, m)
-        | _ -> (n, StringMap.add agent_id breaker m)
+        | Closed | Open _ | HalfOpen ->
+            (n, StringMap.add agent_id breaker m)
       ) t.breakers (0, StringMap.empty)
     in
     t.breakers <- kept;

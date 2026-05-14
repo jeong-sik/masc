@@ -28,6 +28,17 @@ let test_current_started_at_is_stable () =
   Alcotest.(check bool) "uptime monotonic" true
     (second.uptime_seconds >= first.uptime_seconds)
 
+let test_current_json_exposes_runtime_binary_identity () =
+  let current = Build_identity.current () in
+  let json = Build_identity.to_yojson current in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "executable path populated" true
+    (String.length (json |> member "executable_path" |> to_string) > 0);
+  Alcotest.(check bool) "executable dir populated" true
+    (String.length (json |> member "executable_dir" |> to_string) > 0);
+  Alcotest.(check bool) "repo_root field present" true
+    (match json |> member "repo_root" with `Null | `String _ -> true | _ -> false)
+
 let test_pick_repo_candidates_exe_first_when_distinct () =
   (* Regression for the bug where running `cd ~/me && .../masc-mcp/main_eio.exe`
      reported ~/me's commit instead of masc-mcp's. exe_dir must come first. *)
@@ -139,6 +150,8 @@ let () =
             test_resolve_commit_uses_probe_when_env_missing;
           Alcotest.test_case "current started_at stable" `Quick
             test_current_started_at_is_stable;
+          Alcotest.test_case "current JSON exposes runtime binary identity" `Quick
+            test_current_json_exposes_runtime_binary_identity;
           Alcotest.test_case
             "pick_repo_candidates exe first when distinct" `Quick
             test_pick_repo_candidates_exe_first_when_distinct;

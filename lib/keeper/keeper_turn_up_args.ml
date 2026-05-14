@@ -14,6 +14,7 @@ type parsed_args = {
   short_goal_opt : string option;
   mid_goal_opt : string option;
   long_goal_opt : string option;
+  cascade_name_opt : string option;
   policy_voice_enabled_opt : bool option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
@@ -107,6 +108,34 @@ let parse_enum_string_opt args key of_string ~allowed_values =
   | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
   | Some _ -> Error (Printf.sprintf "%s must be a string" key)
 
+let parse_cascade_name_opt args =
+  match get_string_opt args "cascade_name" with
+  | None -> Ok None
+  | Some raw ->
+      let normalized =
+        Keeper_cascade_profile.normalize_declared_name raw |> String.trim
+      in
+      if normalized = "" then Error "cascade_name must not be empty"
+      else
+        let assignable = Keeper_cascade_profile.keeper_catalog_names () in
+        if List.mem normalized assignable then Ok (Some normalized)
+        else
+          let catalog = Keeper_cascade_profile.catalog_names () in
+          if List.mem normalized catalog then
+            Error
+              (Printf.sprintf
+                 "cascade_name '%s' is system-only (keeper_assignable=false); \
+                  choose a keeper-assignable cascade"
+                 raw)
+          else
+            match
+              Cascade_runtime.models_of_cascade_name_result
+                (Keeper_cascade_profile.Runtime_name normalized)
+            with
+            | Ok _ -> Ok (Some normalized)
+            | Error detail ->
+                Error (Printf.sprintf "invalid cascade_name '%s': %s" raw detail)
+
 let resolve_tool_name_list ~preferred ~fallback =
   first_some preferred fallback
   |> Option.value ~default:[]
@@ -194,6 +223,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
+    let cascade_name_opt_res = parse_cascade_name_opt args in
     let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let voice_enabled_opt = get_bool_opt args "voice_enabled" in
@@ -250,9 +280,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in
-    match tool_denylist_opt_res with
-    | Error msg -> Error (false, msg)
-    | Ok tool_denylist_opt ->
+    match tool_denylist_opt_res, cascade_name_opt_res with
+    | Error msg, _ | _, Error msg -> Error (false, msg)
+    | Ok tool_denylist_opt, Ok cascade_name_opt ->
     Ok {
       name;
       compaction_profile_opt;
@@ -260,6 +290,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       short_goal_opt;
       mid_goal_opt;
       long_goal_opt;
+      cascade_name_opt;
       policy_voice_enabled_opt;
       allowed_paths_opt;
       active_goal_ids_opt;

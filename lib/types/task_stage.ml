@@ -10,7 +10,7 @@ type t =
   | Implement
   | Verify
   | Review
-[@@deriving show]
+[@@deriving show, eq, ord]
 
 let to_string = function
   | Decompose -> "decompose"
@@ -35,15 +35,8 @@ let of_yojson = function
 
 let all = [Decompose; Inspect; Implement; Verify; Review]
 
-let index = function
-  | Decompose -> 0
-  | Inspect -> 1
-  | Implement -> 2
-  | Verify -> 3
-  | Review -> 4
-
 let can_transition ~current ~target =
-  index target >= index current
+  compare target current >= 0
 
 let validate_transition ~current ~target =
   if can_transition ~current ~target then Ok ()

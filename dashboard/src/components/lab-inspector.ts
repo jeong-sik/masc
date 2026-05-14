@@ -114,9 +114,6 @@ export function LabInspector() {
     <div class="flex flex-col gap-4">
       <${Card} title="운영 인스펙터" class="section">
         <div class="flex flex-col gap-3">
-          <div class="text-sm leading-airy text-[var(--color-fg-primary)]">
-            피처 플래그와 서버 설정을 한 곳에서 보고, 대시보드에서 실제 자주 쓰는 운영 화면으로 빠르게 이동합니다.
-          </div>
           <div class="flex flex-wrap gap-2">
             <${InspectorTabButton} id="overview" label="개요" />
             <${InspectorTabButton} id="features" label="피처 플래그" />

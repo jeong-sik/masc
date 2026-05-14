@@ -15,7 +15,7 @@ let env_float name default =
 let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 
 let git_meta repo_path args =
-  Process_eio.run_argv_with_status ~timeout_sec:git_meta_timeout_sec
+  Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:("git -C " ^ repo_path ^ " " ^ String.concat " " args) ~summary:"git metadata query" ~timeout_sec:git_meta_timeout_sec
     ("git" :: "-C" :: repo_path :: args)
 
 let cache_update_mu = Stdlib.Mutex.create ()
@@ -29,7 +29,7 @@ let is_shallow_repo repo_path =
     match git_meta repo_path [ "rev-parse"; "--is-shallow-repository" ] with
     | Unix.WEXITED 0, output ->
         String.equal "true" (String.trim output)
-    | _ -> false
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> false
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> false
@@ -44,12 +44,12 @@ let update
     let branch =
       match git_meta repo_path [ "rev-parse"; "--abbrev-ref"; "HEAD" ] with
       | Unix.WEXITED 0, output -> String.trim output
-      | _ -> "unknown"
+      | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> "unknown"
     in
     let commit =
       match git_meta repo_path [ "log"; "--oneline"; "-1" ] with
       | Unix.WEXITED 0, output -> String.trim output
-      | _ -> ""
+      | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> ""
     in
     let ts = Printf.sprintf "%.0f" (Unix.gettimeofday ()) in
     let entry =

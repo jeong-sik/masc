@@ -138,6 +138,42 @@ let test_stale_watchdog_uses_stale_reason_without_terminal_prior () =
         (failure_reason_to_string reason)
   | None -> Alcotest.fail "expected stale reason"
 
+let test_stale_watchdog_replaces_prior_stale_timeout () =
+  let prior =
+    Stale_turn_timeout (Idle_turn { stall_seconds = 7_777.0 })
+  in
+  let kill_class =
+    In_turn_hung { active_seconds = 720.0; timeout_threshold = 600.0 }
+  in
+  match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
+  | Some reason ->
+      r "replaces stale timeout with current kill class"
+        "stale_turn_timeout(in_turn_hung(active=720s threshold=600s))"
+        (failure_reason_to_string reason)
+  | None -> Alcotest.fail "expected stale reason"
+
+let test_stale_watchdog_replaces_prior_storm_label () =
+  let prior = Stale_termination_storm { count = 13 } in
+  let kill_class = Noop_failure_loop { noop_count = 4 } in
+  match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
+  | Some reason ->
+      r "replaces old storm with current kill class"
+        "stale_turn_timeout(noop_failure_loop(noop=4))"
+        (failure_reason_to_string reason)
+  | None -> Alcotest.fail "expected stale reason"
+
+let test_stale_watchdog_replaces_prior_fleet_batch_label () =
+  let prior = Stale_fleet_batch { distinct_count = 8 } in
+  let kill_class =
+    In_turn_hung { active_seconds = 720.0; timeout_threshold = 600.0 }
+  in
+  match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
+  | Some reason ->
+      r "replaces old fleet batch with current kill class"
+        "stale_turn_timeout(in_turn_hung(active=720s threshold=600s))"
+        (failure_reason_to_string reason)
+  | None -> Alcotest.fail "expected stale reason"
+
 let root_cause_label reasons =
   reasons
   |> SW.classify_batch_root_cause_for_test
@@ -181,6 +217,56 @@ let test_batch_root_cause_mixed () =
 let test_batch_root_cause_unknown () =
   r "unknown" "unknown"
     (root_cause_label [ Heartbeat_consecutive_failures 3 ])
+
+let test_noop_failure_loop_ignores_persisted_count_before_current_turn () =
+  Alcotest.(check bool)
+    "persisted noop count alone does not kill a freshly restarted fiber"
+    false
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:3
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:None);
+  Alcotest.(check bool)
+    "previous-lifecycle completed turn does not satisfy current fiber"
+    false
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:3
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:(Some 199.0))
+
+let test_noop_failure_loop_triggers_after_current_turn () =
+  Alcotest.(check bool)
+    "current-fiber completed turn plus threshold triggers"
+    true
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:3
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:(Some 201.0));
+  Alcotest.(check bool)
+    "below threshold still does not trigger"
+    false
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:2
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:(Some 201.0))
+
+let test_noop_failure_loop_boundary_equal_timestamps () =
+  (* The gate uses [ended_at >= started_at] (inclusive).  A turn whose
+     [ct_ended_at] is exactly the fiber's [started_at] still counts as a
+     completed turn under the current fiber — covers the boundary the
+     other tests step over with [199.0]/[201.0]. *)
+  Alcotest.(check bool)
+    "ended_at = started_at satisfies the inclusive bound"
+    true
+    (SW.should_trigger_noop_failure_loop_for_test
+       ~noop_count:3
+       ~noop_threshold:3
+       ~started_at:200.0
+       ~last_completed_turn_ended_at:(Some 200.0))
 
 let () =
   Alcotest.run "stale_kill_class"
@@ -227,6 +313,12 @@ let () =
             test_stale_watchdog_preserves_terminal_failure_reason;
           Alcotest.test_case "uses stale reason without terminal prior" `Quick
             test_stale_watchdog_uses_stale_reason_without_terminal_prior;
+          Alcotest.test_case "replaces prior stale timeout" `Quick
+            test_stale_watchdog_replaces_prior_stale_timeout;
+          Alcotest.test_case "replaces prior storm label" `Quick
+            test_stale_watchdog_replaces_prior_storm_label;
+          Alcotest.test_case "replaces prior fleet batch label" `Quick
+            test_stale_watchdog_replaces_prior_fleet_batch_label;
         ] );
       ( "batch_root_cause",
         [
@@ -240,5 +332,14 @@ let () =
           Alcotest.test_case "mixed" `Quick test_batch_root_cause_mixed;
           Alcotest.test_case "unknown" `Quick
             test_batch_root_cause_unknown;
+        ] );
+      ( "noop_failure_loop_gate",
+        [
+          Alcotest.test_case "ignores persisted count before current turn" `Quick
+            test_noop_failure_loop_ignores_persisted_count_before_current_turn;
+          Alcotest.test_case "triggers after current turn" `Quick
+            test_noop_failure_loop_triggers_after_current_turn;
+          Alcotest.test_case "boundary equal timestamps" `Quick
+            test_noop_failure_loop_boundary_equal_timestamps;
         ] );
     ]

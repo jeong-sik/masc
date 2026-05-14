@@ -33,7 +33,10 @@ let payload_string field json =
 
 let is_generic_status = function
   | Unset | Active | Observed -> true
-  | _ -> false
+  | Offline | Spawned | Retired | Compacting | Handoff | Autonomy | Guardrail
+  | Todo | Claimed | In_progress | Done | Cancelled
+  | Posted | Discussed | Open | Resolved | Approved | Denied
+  | Running | Paused | Stopped | Finalized | Coord -> false
 
 (* Semantic weight multiplier by event kind.
    Completion events score high; routine lifecycle events score low. *)

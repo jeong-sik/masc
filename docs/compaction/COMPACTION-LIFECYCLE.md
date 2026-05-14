@@ -97,6 +97,9 @@ OAS strategies  →  MASC fold  →  Repair  →  Sync
 Message count is additionally bounded by
 `default_max_checkpoint_messages = 120` and per-message sub-caps
 (text chars ≤16KB, tool result chars ≤8KB, total ≤200KB).
+The same caps are applied to the pre-dispatch resume checkpoint even
+when compaction does not fire, so Agent.run never receives a raw
+between-save checkpoint payload.
 
 ## 4. Observability Surfaces
 

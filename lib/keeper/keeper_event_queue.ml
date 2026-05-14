@@ -75,6 +75,16 @@ let classify (s : stimulus) : stimulus_class =
     Unsupported
       (String.sub s.payload 0 (min 40 (String.length s.payload)))
 
+let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
+  let now = Unix.gettimeofday () in
+  let is_board_in_window s =
+    match classify s with
+    | Board_signal -> Float.abs (now -. s.arrived_at) <= window_sec
+    | _ -> false
+  in
+  let board, rest = List.partition is_board_in_window queue in
+  (sort_by_urgency board, rest)
+
 let summary (queue : t) : string =
   Printf.sprintf "%d stimulus%s pending"
     (List.length queue)

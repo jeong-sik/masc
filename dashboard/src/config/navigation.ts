@@ -20,7 +20,6 @@ type SurfaceSectionId =
   | 'runtime'
   | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
-  | 'memory-subsystems'
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -41,7 +40,7 @@ type SurfaceSectionId =
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
-type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
+export type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
 interface DashboardNavGroup {
   id: SurfaceId
@@ -60,9 +59,10 @@ interface DashboardNavItem {
   icon: DashboardSurfaceIcon
   description: string
   defaultParams?: Record<string, string>
+  hidden?: boolean
 }
 
-interface DashboardSectionNavItem {
+export interface DashboardSectionNavItem {
   id: SurfaceSectionId
   label: string
   description: string
@@ -78,6 +78,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     description: 'High-Fidelity MASC Cockpit',
     defaultTab: 'cockpit',
     tabs: ['cockpit'],
+    hidden: true,
   },
 
   {
@@ -92,9 +93,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: 'Monitor',
     icon: 'monitoring',
-    description: 'Fleet storylines, agents, runtime, and telemetry',
+    description: 'Fleet storylines and runtime telemetry',
     defaultTab: 'monitoring',
-    defaultParams: { section: 'journey' },
+    defaultParams: { section: 'runtime' },
     tabs: ['monitoring'],
   },
   {
@@ -158,59 +159,61 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
   icon: surface.icon,
   description: surface.description,
   defaultParams: surface.defaultParams,
+  hidden: surface.hidden,
 }))
+
+export const VISIBLE_DASHBOARD_NAV_ITEMS: DashboardNavItem[] =
+  DASHBOARD_NAV_ITEMS.filter(item => item.hidden !== true)
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   cockpit: [],
   monitoring: [
     {
-      id: 'journey',
-      label: 'Journey Map',
-      description: 'Task, run, contract, keeper, thinking, memory, turn, life, and cascade in one flow.',
-      params: { section: 'journey' },
-    },
-    {
-      id: 'observatory',
-      label: 'Observatory',
-      description: 'Live collaboration and investigative timelines remain drill-down surfaces.',
-      params: { section: 'observatory' },
-      hidden: true,
-    },
-    {
-      id: 'agents',
-      label: 'Agent Directory',
-      description: 'Live runtime-backed roster and process state.',
-      params: { section: 'agents' },
-    },
-    {
-      id: 'cognition',
-      label: 'Cognition',
-      description: 'Keeper BDI, token load, memory, decisions, and autoresearch loops.',
-      params: { section: 'cognition' },
-    },
-    {
       id: 'runtime',
-      label: 'Cascade',
-      description: 'Provider health, capacity, routing, cost, latency, and inspector views.',
+      label: 'Live Runtime',
+      description: 'Live cascade routing and provider health.',
       params: { section: 'runtime' },
     },
     {
+      id: 'agents',
+      label: 'Agent Observatory',
+      description: 'Live roster with fleet state capsules.',
+      params: { section: 'agents' },
+    },
+    {
       id: 'goal-loop',
-      label: 'GOAL LOOP',
-      description: 'Observe, Orient, Decide, Act, and Verify runtime status.',
+      label: 'Goal Navigator',
+      description: 'Active goals with blockers and next actions.',
       params: { section: 'goal-loop' },
     },
     {
       id: 'fleet-health',
-      label: 'Fleet Telemetry',
-      description: 'Event log, keeper comparison, tool quality, governance, and attribution signals.',
+      label: 'System Telemetry',
+      description: 'System signals for tools and governance.',
       params: { section: 'fleet-health' },
     },
     {
-      id: 'memory-subsystems',
-      label: 'Memory Subsystems',
-      description: 'Hebbian graph, episodes, and compaction state.',
-      params: { section: 'memory-subsystems' },
+      id: 'journey',
+      label: 'Journey Map',
+      description: 'Legacy execution-flow drill-down.',
+      params: { section: 'journey' },
+      hidden: true,
+    },
+    {
+      id: 'observatory',
+      label: 'Observatory',
+      description: 'Live collaboration and investigative timelines.',
+      params: { section: 'observatory' },
+      // RFC-MASC-006 Phase 2a: kept as a hidden diagnostic surface, not yet promoted to main nav.
+      // Reachable via legacy redirects (monitoring:activity, monitoring:live) and direct URL.
+      // Remove hidden:true when Phase 2b drill-down is complete.
+      hidden: true,
+    },
+    {
+      id: 'cognition',
+      label: 'Cognition',
+      description: 'Keeper cognition drill-down.',
+      params: { section: 'cognition' },
       hidden: true,
     },
   ],
@@ -405,9 +408,30 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
     next.section = defaultParamsForTab(tabId).section ?? ''
   }
 
-  delete next.surface
+  if (!(tabId === 'code' && next.section === 'ide-shell')) {
+    delete next.surface
+  }
   delete next.operation
   delete next.run_id
+
+  // Sections that use the `view` sub-param for internal navigation.
+  // For all other sections, `view` is meaningless and must not leak in from prior navigation.
+  // `repositories` / `operations` / `ide-shell` are redirect targets in
+  // `CROSS_SURFACE_SECTION_REDIRECTS` (router.ts) and `SECTION_REDIRECTS`
+  // (this file, line 332+) that carry `view` as part of the canonical destination
+  // (e.g. `monitoring:git-graph → workspace:repositories?view=graph`,
+  // `command:connectors → command:operations?view=connectors`,
+  // cockpit IDE `?mode=Split → code:ide-shell?view=split-diff`).
+  // `planning` does not gain `view` via redirect (`workspace:goals → planning`
+  // drops view); instead, direct `replaceRoute` callers pass `view: 'default'`
+  // as the canonical planning entry point (see router.test.ts replaceRoute case).
+  const SECTIONS_WITH_VIEW = new Set([
+    'fleet-health', 'runtime', 'agents', 'cognition', 'observatory',
+    'repositories', 'operations', 'ide-shell', 'planning',
+  ])
+  if (!next.section || !SECTIONS_WITH_VIEW.has(next.section)) {
+    delete next.view
+  }
 
   return next
 }

@@ -35,7 +35,7 @@ let arg_get_int ctx key default =
   Safe_ops.json_int ~default key ctx.arguments
 
 (** masc_broadcast — broadcast a message to the room *)
-let handle_broadcast (ctx : context) : tool_result option =
+let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
@@ -44,11 +44,11 @@ let handle_broadcast (ctx : context) : tool_result option =
   let message = arg_get_string ctx "message" "" in
   let trimmed = String.trim message in
   if String.equal trimmed "" then
-    Some (false, "Broadcast message cannot be empty")
+    Some (Tool_result.error ~tool_name ~start_time "Broadcast message cannot be empty")
   else
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
   if not allowed then
-    Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)
+    Some (Tool_result.error ~tool_name ~start_time (Printf.sprintf "Rate limited. %d sec remaining." wait_secs))
   else begin
     let message =
       Coord_task_cache_invariant.rewrite_broadcast_content
@@ -87,17 +87,17 @@ let handle_broadcast (ctx : context) : tool_result option =
         ignore (config, agent_name);
         Audit_log.log_broadcast config ~agent_id:agent_name
           ~message_preview:message ();
-        Some (true, broadcast_result)
+        Some (Tool_result.ok ~tool_name ~start_time broadcast_result)
   end
 
 (** masc_messages — retrieve recent messages *)
-let handle_messages (ctx : context) : tool_result option =
+let handle_messages ~tool_name ~start_time (ctx : context) : tool_result option =
   let config = ctx.config in
   let since_seq = arg_get_int ctx "since_seq" 0 in
   let limit = arg_get_int ctx "limit" 10 in
-  Some (true, Coord.get_messages config ~since_seq ~limit)
+  Some (Tool_result.ok ~tool_name ~start_time (Coord.get_messages config ~since_seq ~limit))
 
 (** masc_who — list agents currently in the room *)
-let handle_who (ctx : context) : tool_result option =
+let handle_who ~tool_name ~start_time (ctx : context) : tool_result option =
   let registry = ctx.registry in
-  Some (true, Session.status_string registry)
+  Some (Tool_result.ok ~tool_name ~start_time (Session.status_string registry))

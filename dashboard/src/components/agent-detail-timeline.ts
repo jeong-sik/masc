@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { Card } from './common/card'
+import { CollapsibleSection } from './common/collapsible'
 import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
 import { FilterChips } from './common/filter-chips'
@@ -145,7 +145,7 @@ export function AgentTimelineSection() {
   const filterActive = activeCategory !== 'all' || query.trim() !== ''
 
   return html`
-    <${Card} title="활동 타임라인 (${summary?.total_events ?? 0}건)">
+    <${CollapsibleSection} title=${`활동 타임라인 (${summary?.total_events ?? 0})`} mountWhenOpen=${true}>
       ${summary ? html`
         <div class="flex gap-1.5 flex-wrap mb-2">
           ${summary.tasks_completed > 0 ? html`<${SummaryBadge}>완료 ${summary.tasks_completed}<//>` : null}

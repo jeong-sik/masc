@@ -45,7 +45,7 @@ body.has-vp-banner { padding-top: 32px; }
 /* ═══════════ REPO SELECTOR (Topbar) ═══════════ */
 .tb-repo {
   display: inline-flex; align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   padding: 0 10px;
   height: 22px;
   border: 1px solid var(--color-border-default);
@@ -137,7 +137,7 @@ body.has-vp-banner { padding-top: 32px; }
 .tb-repo-pop .repo-row {
   display: grid;
   grid-template-columns: 14px 1fr auto auto;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   padding: 7px 8px;
   cursor: pointer;
@@ -152,7 +152,7 @@ body.has-vp-banner { padding-top: 32px; }
   grid-column: 2 / 3;
   color: var(--color-fg-muted);
   font-size: var(--fs-10);
-  margin-top: 2px;
+  margin-top: var(--sp-0h);
 }
 .tb-repo-pop .repo-row .meta {
   display: flex; gap: 6px;
@@ -175,7 +175,7 @@ body.has-vp-banner { padding-top: 32px; }
 /* ═══════════ COLLAPSIBLE WIDGETS ═══════════ */
 /* Standardize collapse affordance — chevron rotates, body hides. */
 .wx-head {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--sp-2);
   padding: 5px 10px;
   font: var(--fs-9)/1 var(--font-mono);
   text-transform: uppercase;
@@ -206,7 +206,7 @@ body.has-vp-banner { padding-top: 32px; }
   text-transform: none;
 }
 .wx-head .wx-act {
-  display: inline-flex; gap: 4px;
+  display: inline-flex; gap: var(--sp-1);
 }
 .wx-head .wx-act button {
   border: 1px solid transparent;
@@ -248,7 +248,7 @@ body.has-vp-banner { padding-top: 32px; }
 /* When KPI strip is collapsed, just keep a thin trace bar */
 .kpi.wx-collapsed { height: 22px; min-height: 22px; }
 .kpi.wx-collapsed .kpi-cell { display: none; }
-.kpi.wx-collapsed .kpi-collapse-tab { display: flex; flex: 1; padding: 0 12px; }
+.kpi.wx-collapsed .kpi-collapse-tab { display: flex; flex: 1; padding: 0 var(--sp-3); }
 
 /* KPI collapse tab — small chevron at the very left of the strip */
 .kpi-collapse-tab {
@@ -279,7 +279,7 @@ body.has-vp-banner { padding-top: 32px; }
   background: var(--scrim-strong);
   border: 1px solid var(--brass-3, #6b5022);
   color: var(--brass-1, #f0c674);
-  padding: 8px 12px;
+  padding: var(--sp-2) var(--sp-3);
   font: var(--fs-10)/1 var(--font-mono);
   letter-spacing: .12em;
   text-transform: uppercase;
@@ -440,8 +440,8 @@ body.has-vp-banner.compact-vp .cockpit-fs-fab { display: inline-block; }
 /* ═══════════ COMPOSER HISTORY ═══════════ */
 .compose-hist {
   display: flex; align-items: center;
-  gap: 8px;
-  margin: 0 8px 0 4px;
+  gap: var(--sp-2);
+  margin: 0 var(--sp-2) 0 4px;
   max-width: 380px;
   overflow: hidden;
   flex: 0 1 auto;

@@ -16,6 +16,7 @@ let keeper_suffix_shutdown = "/shutdown"
 let keeper_suffix_reset = "/reset"
 let keeper_suffix_clear = "/clear"
 let keeper_suffix_checkpoints = "/checkpoints"
+let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
 let keeper_suffix_bdi_snapshot = "/bdi-snapshot"
 
@@ -82,8 +83,17 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
 let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
     : Trajectory.trajectory_line list =
   let path = Keeper_types.keeper_internal_history_path config trace_id in
-  Fs_compat.load_jsonl path
-  |> List.filter_map internal_history_json_to_trajectory_line
+  (* Streaming filter — avoid materialising the full JSONL list when
+     only a subset of lines decode to [trajectory_line]. Output is built
+     in reverse and reversed once, matching List.filter_map ordering. *)
+  Fs_compat.fold_jsonl_lines
+    ~init:[]
+    ~f:(fun acc ~line_no:_ json ->
+      match internal_history_json_to_trajectory_line json with
+      | Some line -> line :: acc
+      | None -> acc)
+    path
+  |> List.rev
 
 let merge_keeper_trace_lines ~(config : Coord.config) ~(trace_id : string)
     (trajectory_lines : Trajectory.trajectory_line list)
@@ -250,6 +260,9 @@ let extract_keeper_name_for_suffix req_path suffix =
 let is_keeper_checkpoints_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_checkpoints
 
+let is_keeper_runtime_trace_get_path req_path =
+  keeper_path_ends_with req_path keeper_suffix_runtime_trace
+
 let trim_to_opt (value : string) =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
@@ -400,6 +413,1481 @@ let keeper_checkpoint_inventory_json
                 (List.length
                    (Keeper_checkpoint_store.list_checkpoints ~session_dir)) );
           ] )
+
+let json_int_member_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `Int value -> Some value
+  | `Intlit raw -> int_of_string_opt raw
+  | _ -> None
+
+let json_string_member_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `String value -> Some value
+  | _ -> None
+
+let json_bool_member_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `Bool value -> Some value
+  | _ -> None
+
+let json_string_list_member name json =
+  match Yojson.Safe.Util.member name json with
+  | `List values ->
+    values
+    |> List.filter_map (function
+      | `String value when String.trim value <> "" -> Some value
+      | _ -> None)
+    |> Json_util.dedupe_keep_order
+  | _ -> []
+
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+
+let take_last limit values =
+  let len = List.length values in
+  if len <= limit then values
+  else List.filteri (fun idx _ -> idx >= len - limit) values
+
+let unique_present_paths paths =
+  paths
+  |> List.filter_map (fun value ->
+       match value with
+       | Some path when String.trim path <> "" -> Some path
+       | _ -> None)
+  |> Json_util.dedupe_keep_order
+
+let linked_artifact_json ~kind path =
+  `Assoc
+    [
+      ("kind", `String kind);
+      ("path", `String path);
+      ("present", `Bool (Fs_compat.file_exists path));
+      ("file_stat", stat_json_of_path path);
+    ]
+
+let manifest_row_matches ?turn_id keeper_name trace_id
+    (row : Keeper_runtime_manifest.t) =
+  String.equal row.keeper_name keeper_name
+  && String.equal row.trace_id trace_id
+  &&
+  match turn_id with
+  | None -> true
+  | Some wanted -> row.keeper_turn_id = Some wanted
+
+type runtime_manifest_scan =
+  { path : string
+  ; limit : int
+  ; returned_rows : Keeper_runtime_manifest.t Queue.t
+  ; provider_attempt_rows : Keeper_runtime_manifest.t Queue.t
+  ; event_counts : (string, int) Hashtbl.t
+  ; mutable total_rows : int
+  ; mutable has_terminal : bool
+  ; mutable terminal_keeper_turn_ids : int list
+  ; mutable max_oas_turn_count : int option
+  ; mutable keeper_turn_ids : int list
+  ; mutable event_bus_count : int
+  ; mutable event_bus_correlation_ids : string list
+  ; mutable event_bus_run_ids : string list
+  ; mutable context_compact_started_count : int
+  ; mutable context_compacted_count : int
+  ; mutable last_compaction : Yojson.Safe.t option
+  ; mutable memory_injected_count : int
+  ; mutable memory_injected_present_count : int
+  ; mutable memory_flushed_count : int
+  ; mutable memory_flush_success_count : int
+  ; mutable memory_flush_error_count : int
+  ; mutable episodes_flushed : int
+  ; mutable procedures_flushed : int
+  ; mutable latest_tool_surface_decision : Yojson.Safe.t option
+  ; mutable latest_provider_lane_decision : Yojson.Safe.t option
+  ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
+  ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
+  ; mutable context_injected_count : int
+  ; mutable context_compacted_event_count : int
+  ; mutable provider_started_count : int
+  ; mutable provider_finished_count : int
+  ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
+  }
+
+let make_runtime_manifest_scan ~path ~limit =
+  { path
+  ; limit
+  ; returned_rows = Queue.create ()
+  ; provider_attempt_rows = Queue.create ()
+  ; event_counts = Hashtbl.create 17
+  ; total_rows = 0
+  ; has_terminal = false
+  ; terminal_keeper_turn_ids = []
+  ; max_oas_turn_count = None
+  ; keeper_turn_ids = []
+  ; event_bus_count = 0
+  ; event_bus_correlation_ids = []
+  ; event_bus_run_ids = []
+  ; context_compact_started_count = 0
+  ; context_compacted_count = 0
+  ; last_compaction = None
+  ; memory_injected_count = 0
+  ; memory_injected_present_count = 0
+  ; memory_flushed_count = 0
+  ; memory_flush_success_count = 0
+  ; memory_flush_error_count = 0
+  ; episodes_flushed = 0
+  ; procedures_flushed = 0
+  ; latest_tool_surface_decision = None
+  ; latest_provider_lane_decision = None
+  ; latest_provider_lane_row = None
+  ; latest_pre_dispatch_blocked_row = None
+  ; context_injected_count = 0
+  ; context_compacted_event_count = 0
+  ; provider_started_count = 0
+  ; provider_finished_count = 0
+  ; provider_terminal_row = None
+  }
+
+let push_bounded queue limit value =
+  if limit > 0 then (
+    Queue.push value queue;
+    if Queue.length queue > limit then ignore (Queue.pop queue))
+
+let queue_to_list queue =
+  let values = ref [] in
+  Queue.iter (fun value -> values := value :: !values) queue;
+  List.rev !values
+
+let increment_event_count scan event =
+  let key = Keeper_runtime_manifest.event_kind_to_string event in
+  let current = Option.value (Hashtbl.find_opt scan.event_counts key) ~default:0 in
+  Hashtbl.replace scan.event_counts key (current + 1)
+
+let runtime_manifest_scan_event_count scan event =
+  let key = Keeper_runtime_manifest.event_kind_to_string event in
+  Option.value (Hashtbl.find_opt scan.event_counts key) ~default:0
+
+let max_int_opt current value =
+  match current with
+  | None -> Some value
+  | Some existing -> Some (max existing value)
+
+let update_runtime_manifest_scan scan row =
+  scan.total_rows <- scan.total_rows + 1;
+  push_bounded scan.returned_rows scan.limit row;
+  increment_event_count scan row.Keeper_runtime_manifest.event;
+  (match row.Keeper_runtime_manifest.keeper_turn_id with
+   | Some value -> scan.keeper_turn_ids <- value :: scan.keeper_turn_ids
+   | None -> ());
+  (match row.Keeper_runtime_manifest.oas_turn_count with
+   | Some value -> scan.max_oas_turn_count <- max_int_opt scan.max_oas_turn_count value
+   | None -> ());
+  (match row.Keeper_runtime_manifest.event with
+   | Keeper_runtime_manifest.Turn_finished ->
+     scan.has_terminal <- true;
+     (match row.Keeper_runtime_manifest.keeper_turn_id with
+      | Some value ->
+        scan.terminal_keeper_turn_ids <- value :: scan.terminal_keeper_turn_ids
+      | None -> ())
+   | Keeper_runtime_manifest.Tool_surface_selected ->
+     scan.latest_tool_surface_decision <- Some row.Keeper_runtime_manifest.decision
+   | Keeper_runtime_manifest.Provider_lane_resolved ->
+     scan.latest_provider_lane_decision <- Some row.Keeper_runtime_manifest.decision;
+     scan.latest_provider_lane_row <- Some row
+   | Keeper_runtime_manifest.Pre_dispatch_blocked ->
+     scan.latest_pre_dispatch_blocked_row <- Some row
+   | Keeper_runtime_manifest.Context_injected ->
+     scan.context_injected_count <- scan.context_injected_count + 1
+   | Keeper_runtime_manifest.Context_compacted ->
+     scan.context_compacted_event_count <- scan.context_compacted_event_count + 1
+   | Keeper_runtime_manifest.Event_bus_correlated ->
+     let decision = row.Keeper_runtime_manifest.decision in
+     scan.event_bus_count <- scan.event_bus_count + 1;
+     (match json_string_member_opt "correlation_id" decision with
+      | Some value -> scan.event_bus_correlation_ids <- value :: scan.event_bus_correlation_ids
+      | None -> ());
+     (match json_string_member_opt "run_id" decision with
+      | Some value -> scan.event_bus_run_ids <- value :: scan.event_bus_run_ids
+      | None -> ());
+     scan.context_compact_started_count <-
+       scan.context_compact_started_count
+       + Option.value
+           (json_int_member_opt "context_compact_started_count" decision)
+           ~default:0;
+     scan.context_compacted_count <-
+       scan.context_compacted_count
+       + Option.value (json_int_member_opt "context_compacted_count" decision)
+           ~default:0;
+     (match Yojson.Safe.Util.member "last_compaction" decision with
+      | `Assoc _ as obj -> scan.last_compaction <- Some obj
+      | _ -> ())
+   | Keeper_runtime_manifest.Memory_injected ->
+     scan.memory_injected_count <- scan.memory_injected_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "injected"
+     then scan.memory_injected_present_count <- scan.memory_injected_present_count + 1
+   | Keeper_runtime_manifest.Memory_flushed ->
+     let decision = row.Keeper_runtime_manifest.decision in
+     scan.memory_flushed_count <- scan.memory_flushed_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "success"
+     then scan.memory_flush_success_count <- scan.memory_flush_success_count + 1;
+     if String.equal row.Keeper_runtime_manifest.status "error"
+     then scan.memory_flush_error_count <- scan.memory_flush_error_count + 1;
+     scan.episodes_flushed <-
+       scan.episodes_flushed
+       + Option.value (json_int_member_opt "episodes_flushed" decision) ~default:0;
+     scan.procedures_flushed <-
+       scan.procedures_flushed
+       + Option.value (json_int_member_opt "procedures_flushed" decision) ~default:0
+   | Keeper_runtime_manifest.Provider_attempt_started ->
+     scan.provider_started_count <- scan.provider_started_count + 1;
+     push_bounded scan.provider_attempt_rows scan.limit row
+   | Keeper_runtime_manifest.Provider_attempt_finished ->
+     scan.provider_finished_count <- scan.provider_finished_count + 1;
+     scan.provider_terminal_row <- Some row;
+     push_bounded scan.provider_attempt_rows scan.limit row
+   | _ -> ())
+
+let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
+  =
+  let path =
+    Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id
+  in
+  let scan = make_runtime_manifest_scan ~path ~limit in
+  Fs_compat.fold_jsonl_lines
+    ~init:()
+    ~f:(fun () ~line_no:_ json ->
+      match Keeper_runtime_manifest.of_json json with
+      | Ok row when manifest_row_matches ?turn_id keeper_name trace_id row ->
+          update_runtime_manifest_scan scan row
+      | Ok _ | Error _ -> ())
+    path;
+  scan
+
+let receipt_row_matches ?turn_id keeper_name trace_id json =
+  let keeper_matches = json_string_member_opt "keeper_name" json = Some keeper_name in
+  let trace_matches = json_string_member_opt "trace_id" json = Some trace_id in
+  let turn_matches =
+    match turn_id with
+    | None -> false
+    | Some wanted -> json_int_member_opt "turn_count" json = Some wanted
+  in
+  keeper_matches && (trace_matches || turn_matches)
+
+let read_receipt_rows ~keeper_name ~trace_id ?turn_id paths =
+  paths
+  |> List.concat_map (fun path ->
+       Fs_compat.fold_jsonl_lines
+         ~init:[]
+         ~f:(fun acc ~line_no:_ json ->
+           if receipt_row_matches ?turn_id keeper_name trace_id json then
+             json :: acc
+           else acc)
+         path
+       |> List.rev)
+
+let unique_ints values =
+  values
+  |> List.sort_uniq Int.compare
+
+let json_int_list values =
+  `List (List.map (fun value -> `Int value) values)
+
+let json_int_opt = function
+  | None -> `Null
+  | Some value -> `Int value
+
+let json_string_list values =
+  `List (List.map (fun value -> `String value) values)
+
+let event_bus_summary_json scan =
+  let correlation_ids =
+    scan.event_bus_correlation_ids
+    |> List.rev
+    |> Json_util.dedupe_keep_order
+  in
+  let run_ids =
+    scan.event_bus_run_ids |> List.rev |> Json_util.dedupe_keep_order
+  in
+  let last_compaction =
+    match scan.last_compaction with
+    | Some value -> value
+    | None -> `Null
+  in
+  `Assoc
+    [
+      ("event_bus_correlated_count", `Int scan.event_bus_count);
+      ("correlation_ids", json_string_list correlation_ids);
+      ("run_ids", json_string_list run_ids);
+      ( "context_compact_started_count",
+        `Int scan.context_compact_started_count );
+      ( "context_compacted_count",
+        `Int scan.context_compacted_count );
+      ("last_compaction", last_compaction);
+    ]
+
+let memory_summary_json scan =
+  `Assoc
+    [
+      ("memory_injected_count", `Int scan.memory_injected_count);
+      ( "memory_injected_present_count",
+        `Int scan.memory_injected_present_count );
+      ("memory_flushed_count", `Int scan.memory_flushed_count);
+      ("memory_flush_success_count", `Int scan.memory_flush_success_count);
+      ("memory_flush_error_count", `Int scan.memory_flush_error_count);
+      ("episodes_flushed", `Int scan.episodes_flushed);
+      ("procedures_flushed", `Int scan.procedures_flushed);
+    ]
+
+type runtime_lens_gap =
+  { code : string
+  ; severity : string
+  ; lane : string
+  ; detail : string option
+  }
+
+let max_int_list_opt values =
+  List.fold_left
+    (fun acc value ->
+      match acc with
+      | None -> Some value
+      | Some existing -> Some (max existing value))
+    None
+    values
+
+let selected_keeper_turn_id ?turn_id scan =
+  match turn_id with
+  | Some value -> Some value
+  | None -> max_int_list_opt scan.keeper_turn_ids
+
+let terminal_event_present_for_turn ?keeper_turn_id scan =
+  match keeper_turn_id with
+  | Some value -> List.mem value scan.terminal_keeper_turn_ids
+  | None -> scan.has_terminal
+
+let first_non_empty_string_list values =
+  match List.find_opt (fun values -> values <> []) values with
+  | Some values -> values
+  | None -> []
+
+let first_string_opt values =
+  List.find_map (fun value -> value) values
+
+let first_int_opt values =
+  List.find_map (fun value -> value) values
+
+let string_has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+
+let string_contains ~needle value =
+  let value = String.lowercase_ascii value in
+  let needle = String.lowercase_ascii needle in
+  let value_len = String.length value in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= value_len
+      && (String.equal (String.sub value idx needle_len) needle || loop (idx + 1))
+    in
+    loop 0
+
+let json_assoc_member_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `Assoc _ as value -> Some value
+  | _ -> None
+
+let json_string_value_opt = function
+  | `String value -> Some value
+  | _ -> None
+
+let tool_call_output_text_opt json =
+  match Yojson.Safe.Util.member "output" json with
+  | `String value -> Some value
+  | `Assoc _ as output -> (
+    match json_assoc_member_opt "_blob" output with
+    | Some blob -> json_string_member_opt "preview" blob
+    | None -> None)
+  | _ -> None
+
+let parse_tool_output_json_opt json =
+  match tool_call_output_text_opt json with
+  | None -> None
+  | Some output -> (
+    match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
+    | Ok parsed -> Some parsed
+    | Error _ -> None)
+
+let tool_call_runtime_contract json =
+  match json_assoc_member_opt "runtime_contract" json with
+  | Some contract -> contract
+  | None -> `Assoc []
+
+let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
+  let contract = tool_call_runtime_contract json in
+  let keeper_matches =
+    match json_string_member_opt "keeper" json with
+    | Some keeper -> String.equal keeper keeper_name
+    | None -> true
+  in
+  let trace_matches =
+    match
+      ( json_string_member_opt "trace_id" json,
+        json_string_member_opt "trace_id" contract )
+    with
+    | Some value, _ | _, Some value -> String.equal value trace_id
+    | None, None -> false
+  in
+  let turn_matches =
+    match turn_id with
+    | None -> true
+    | Some wanted ->
+      json_int_member_opt "keeper_turn_id" json = Some wanted
+      || json_int_member_opt "keeper_turn_id" contract = Some wanted
+  in
+  keeper_matches && trace_matches && turn_matches
+
+let claim_status_of_output output =
+  let result =
+    match json_string_member_opt "result" output with
+    | Some value -> String.trim value
+    | None -> ""
+  in
+  match json_assoc_member_opt "claimed_task" output with
+  | Some _ -> "claimed"
+  | None when string_has_prefix ~prefix:"No eligible tasks" result -> "no_eligible"
+  | None when string_has_prefix ~prefix:"No unclaimed tasks" result -> "no_unclaimed"
+  | None when string_has_prefix ~prefix:"Error:" result -> "error"
+  | None when result = "" -> "unknown"
+  | None -> "observed"
+
+let claim_scope_summary_absent =
+  `Assoc
+    [ ("present", `Bool false)
+    ; ("source", `String "keeper_task_claim_tool_call")
+    ; ("status", `String "not_observed")
+    ; ("result", `Null)
+    ; ("mode", `Null)
+    ; ("scoped", `Null)
+    ; ("active_goal_ids", `List [])
+    ; ("effective_goal_ids", `List [])
+    ; ("fallback_reason", `Null)
+    ; ("matched_goal_id", `Null)
+    ; ("excluded_count", `Null)
+    ; ("claimed_task_id", `Null)
+    ; ("claimed_goal_id", `Null)
+    ; ("trace_id", `Null)
+    ; ("keeper_turn_id", `Null)
+    ]
+
+let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
+  let entries = Keeper_tool_call_log.read_recent ~keeper_name ~n:200 () in
+  let matching_claim =
+    entries
+    |> List.find_opt (fun json ->
+      String.equal
+        (Option.value ~default:"" (json_string_member_opt "tool" json))
+        "keeper_task_claim"
+      && tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json)
+  in
+  match matching_claim with
+  | None -> claim_scope_summary_absent
+  | Some call ->
+    let output =
+      match parse_tool_output_json_opt call with
+      | Some (`Assoc _ as output) -> output
+      | _ -> `Assoc []
+    in
+    let claim_scope =
+      match json_assoc_member_opt "claim_scope" output with
+      | Some scope -> scope
+      | None -> `Assoc []
+    in
+    let claimed_task = json_assoc_member_opt "claimed_task" output in
+    `Assoc
+      [ ("present", `Bool true)
+      ; ("source", `String "keeper_task_claim_tool_call")
+      ; ("status", `String (claim_status_of_output output))
+      ; ("result", json_string_opt (json_string_member_opt "result" output))
+      ; ("mode", json_string_opt (json_string_member_opt "mode" claim_scope))
+      ; ( "scoped",
+          match json_bool_member_opt "scoped" claim_scope with
+          | Some value -> `Bool value
+          | None -> `Null )
+      ; ( "active_goal_ids",
+          json_string_list (json_string_list_member "active_goal_ids" claim_scope) )
+      ; ( "effective_goal_ids",
+          json_string_list
+            (json_string_list_member "effective_goal_ids" claim_scope) )
+      ; ( "fallback_reason",
+          json_string_opt (json_string_member_opt "fallback_reason" claim_scope) )
+      ; ( "matched_goal_id",
+          json_string_opt (json_string_member_opt "matched_goal_id" claim_scope) )
+      ; ( "excluded_count",
+          match json_int_member_opt "excluded_count" claim_scope with
+          | Some value -> `Int value
+          | None -> `Null )
+      ; ( "claimed_task_id",
+          match claimed_task with
+          | Some task -> json_string_opt (json_string_member_opt "task_id" task)
+          | None -> `Null )
+      ; ( "claimed_goal_id",
+          match claimed_task with
+          | Some task -> json_string_opt (json_string_member_opt "goal_id" task)
+          | None -> `Null )
+      ; ("trace_id", json_string_opt (json_string_member_opt "trace_id" call))
+      ; ( "keeper_turn_id",
+          match json_int_member_opt "keeper_turn_id" call with
+          | Some value -> `Int value
+          | None -> `Null )
+      ]
+
+let find_override_field_source field sources =
+  match Yojson.Safe.Util.member "override_field_sources" sources with
+  | `List values ->
+    List.find_opt
+      (fun value -> json_string_member_opt "field" value = Some field)
+      values
+  | _ -> None
+
+let config_drift_summary_json ~config ~keeper_name =
+  match Keeper_types.read_meta config keeper_name with
+  | Error message ->
+    `Assoc
+      [ ("present", `Bool false)
+      ; ("status", `String "read_error")
+      ; ("error", `String message)
+      ; ("has_live_override", `Bool false)
+      ; ("cascade_override", `Bool false)
+      ; ("override_fields", `List [])
+      ; ("default_cascade_name", `Null)
+      ; ("live_cascade_name", `Null)
+      ; ("active_config_root", `Null)
+      ; ("active_config_root_source", `Null)
+      ]
+  | Ok None ->
+    `Assoc
+      [ ("present", `Bool false)
+      ; ("status", `String "keeper_missing")
+      ; ("error", `Null)
+      ; ("has_live_override", `Bool false)
+      ; ("cascade_override", `Bool false)
+      ; ("override_fields", `List [])
+      ; ("default_cascade_name", `Null)
+      ; ("live_cascade_name", `Null)
+      ; ("active_config_root", `Null)
+      ; ("active_config_root_source", `Null)
+      ]
+  | Ok (Some meta) ->
+    let sources = Keeper_status_bridge.source_provenance_json config meta in
+    let override_fields = json_string_list_member "override_fields" sources in
+    let cascade_detail = find_override_field_source "model.cascade_name" sources in
+    let default_cascade_name, live_cascade_name =
+      match cascade_detail with
+      | Some detail ->
+        ( Yojson.Safe.Util.member "default_value" detail |> json_string_value_opt,
+          Yojson.Safe.Util.member "live_value" detail |> json_string_value_opt )
+      | None -> (None, None)
+    in
+    let cascade_override = Option.is_some cascade_detail in
+    `Assoc
+      [ ("present", `Bool true)
+      ; ("status", `String (if cascade_override then "drift" else "ok"))
+      ; ("error", `Null)
+      ; ( "has_live_override",
+          `Bool
+            (Option.value
+               (json_bool_member_opt "has_live_override" sources)
+               ~default:false) )
+      ; ("cascade_override", `Bool cascade_override)
+      ; ("override_fields", json_string_list override_fields)
+      ; ("default_cascade_name", json_string_opt default_cascade_name)
+      ; ("live_cascade_name", json_string_opt live_cascade_name)
+      ; ( "active_config_root",
+          json_string_opt (json_string_member_opt "active_config_root" sources) )
+      ; ( "active_config_root_source",
+          json_string_opt
+            (json_string_member_opt "active_config_root_source" sources) )
+      ; ( "default_manifest_path",
+          json_string_opt (json_string_member_opt "default_manifest_path" sources) )
+      ]
+
+let runtime_lens_tool_surface_parts scan =
+  (* sound-partial: allow absent runtime-lens decisions as empty evidence while
+     preserving explicit decision payloads when the scanner emits them. *)
+  let tool_decision =
+    match scan.latest_tool_surface_decision with
+    | Some decision -> decision
+    | None -> `Assoc []
+  in
+  (* sound-partial: allow absent lane decision as empty evidence. *)
+  let lane_decision =
+    match scan.latest_provider_lane_decision with
+    | Some decision -> decision
+    | None -> `Assoc []
+  in
+  let requested_tools =
+    json_string_list_member "requested_tool_names" lane_decision
+  in
+  let required_tools =
+    first_non_empty_string_list
+      [
+        json_string_list_member "required_tool_names" lane_decision;
+        json_string_list_member "required_tool_names" tool_decision;
+      ]
+  in
+  let materialized_tools =
+    json_string_list_member "materialized_tool_names" lane_decision
+  in
+  let missing_required_tools =
+    first_non_empty_string_list
+      [
+        json_string_list_member "missing_required_tool_names_after_lane"
+          lane_decision;
+        json_string_list_member "missing_required_tool_names" tool_decision;
+      ]
+  in
+  ( tool_decision
+  , lane_decision
+  , requested_tools
+  , required_tools
+  , materialized_tools
+  , missing_required_tools )
+
+let runtime_lens_gap_json gap =
+  `Assoc
+    [
+      ("code", `String gap.code);
+      ("severity", `String gap.severity);
+      ("lane", `String gap.lane);
+      ("detail", json_string_opt gap.detail);
+    ]
+
+let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
+  let ( _
+      , _
+      , _
+      , required_tools
+      , materialized_tools
+      , missing_required_tools )
+    =
+    runtime_lens_tool_surface_parts scan
+  in
+  let has_tool_surface =
+    runtime_manifest_scan_event_count scan
+      Keeper_runtime_manifest.Tool_surface_selected
+    > 0
+  in
+  let has_provider_lane =
+    runtime_manifest_scan_event_count scan
+      Keeper_runtime_manifest.Provider_lane_resolved
+    > 0
+  in
+  let has_context_delta =
+    scan.context_injected_count > 0
+    || scan.context_compacted_event_count > 0
+    || scan.event_bus_count > 0
+  in
+  let claim_status = json_string_member_opt "status" claim_scope in
+  let claim_mode = json_string_member_opt "mode" claim_scope in
+  let claim_excluded_count = json_int_member_opt "excluded_count" claim_scope in
+  let cascade_override =
+    Option.value
+      (json_bool_member_opt "cascade_override" config_drift)
+      ~default:false
+  in
+  let pre_dispatch_reason =
+    match scan.latest_pre_dispatch_blocked_row with
+    | Some row ->
+      first_string_opt
+        [ json_string_member_opt "reason" row.Keeper_runtime_manifest.decision
+        ; json_string_member_opt "terminal_reason_code" row.Keeper_runtime_manifest.decision
+        ; Some row.Keeper_runtime_manifest.status
+        ]
+    | None -> None
+  in
+  let add gap gaps = gap :: gaps in
+  []
+  |> (fun gaps ->
+       if scan.total_rows > 0 && not terminal_event_present then
+         add
+           { code = "missing_turn_finished"
+           ; severity = "warn"
+           ; lane = "keeper"
+           ; detail = Some "manifest has rows but no turn_finished row"
+           }
+           gaps
+       else gaps)
+  |> (fun gaps ->
+       match claim_status with
+       | Some "no_eligible" ->
+         add
+           { code = "claim_scope_no_eligible"
+           ; severity = "warn"
+           ; lane = "keeper"
+           ; detail =
+               Some
+                 (Printf.sprintf
+                    "keeper_task_claim found no eligible tasks in mode=%s excluded=%s"
+                    (Option.value claim_mode ~default:"unknown")
+                    (match claim_excluded_count with
+                     | Some value -> string_of_int value
+                     | None -> "unknown"))
+           }
+           gaps
+       | _ -> gaps)
+  |> (fun gaps ->
+       match claim_status, claim_mode with
+       | Some "no_eligible", Some "active_goal_ids" ->
+         add
+           { code = "claim_scope_global_backlog_outside_keeper"
+           ; severity = "warn"
+           ; lane = "keeper"
+           ; detail =
+               Some
+                 "active_goal_ids scope found no eligible work; global backlog may be outside this keeper or blocked by policy"
+           }
+           gaps
+       | _ -> gaps)
+  |> (fun gaps ->
+       if cascade_override then
+         add
+           { code = "keeper_cascade_override_drift"
+           ; severity = "warn"
+           ; lane = "masc_policy_cascade"
+           ; detail =
+               Some
+                 (Printf.sprintf "default=%s live=%s"
+                    (Option.value
+                       (json_string_member_opt "default_cascade_name" config_drift)
+                       ~default:"unknown")
+                    (Option.value
+                       (json_string_member_opt "live_cascade_name" config_drift)
+                       ~default:"unknown"))
+           }
+           gaps
+       else gaps)
+  |> (fun gaps ->
+       match pre_dispatch_reason with
+       | Some reason when string_contains ~needle:"no_tool_capable_provider" reason ->
+         add
+           { code = "route_tool_capability_gap"
+           ; severity = "bad"
+           ; lane = "masc_policy_cascade"
+           ; detail = Some "pre-dispatch blocked because route cannot materialize required tools"
+           }
+           gaps
+       | _ -> gaps)
+  |> (fun gaps ->
+       if missing_required_tools <> [] then
+         add
+           { code = "required_tool_not_materialized"
+           ; severity = "bad"
+           ; lane = "tool_runtime"
+           ; detail =
+               Some
+                 (Printf.sprintf "missing required tools: %s"
+                    (String.concat ", " missing_required_tools))
+           }
+           gaps
+       else gaps)
+  |> (fun gaps ->
+       if (has_tool_surface || scan.provider_started_count > 0)
+          && not has_provider_lane
+       then
+         add
+           { code = "provider_lane_unresolved"
+           ; severity = "bad"
+           ; lane = "masc_policy_cascade"
+           ; detail = Some "tool surface/provider attempt exists without provider_lane_resolved"
+           }
+           gaps
+       else gaps)
+  |> (fun gaps ->
+       if (has_tool_surface || scan.provider_started_count > 0)
+          && not has_context_delta
+       then
+         add
+           { code = "context_delta_missing"
+           ; severity = "warn"
+           ; lane = "memory_context"
+           ; detail = Some "provider turn has no context or event-bus delta rows"
+           }
+           gaps
+       else gaps)
+  |> (fun gaps ->
+       if scan.memory_injected_count > 0 && scan.memory_flushed_count = 0 then
+         add
+           { code = "memory_flush_missing"
+           ; severity = "warn"
+           ; lane = "memory_context"
+           ; detail = Some "memory was injected but no memory_flushed row was recorded"
+           }
+           gaps
+       else gaps)
+  |> (fun gaps ->
+       if required_tools <> [] && materialized_tools = []
+          && missing_required_tools = []
+       then
+         add
+           { code = "provider_lane_unresolved"
+           ; severity = "warn"
+           ; lane = "masc_policy_cascade"
+           ; detail = Some "required tools exist but provider lane materialization is unknown"
+           }
+           gaps
+       else gaps)
+  |> List.rev
+
+let runtime_lens_gap_codes_for_lane gaps lane =
+  gaps
+  |> List.filter_map (fun gap ->
+       if String.equal gap.lane lane then Some gap.code else None)
+  |> Json_util.dedupe_keep_order
+
+let runtime_lens_event_count scan event =
+  runtime_manifest_scan_event_count scan event
+
+let runtime_lens_events_json scan events =
+  events
+  |> List.filter_map (fun event ->
+       let count = runtime_lens_event_count scan event in
+       if count = 0 then None
+       else
+         Some
+           (`Assoc
+             [
+               ( "event",
+                 `String (Keeper_runtime_manifest.event_kind_to_string event) );
+               ("count", `Int count);
+             ]))
+  |> fun events -> `List events
+
+let runtime_lens_swimlane_json scan gaps ~lane ~label ~events ~terminal_status =
+  let gap_codes = runtime_lens_gap_codes_for_lane gaps lane in
+  let event_count =
+    events
+    |> List.fold_left
+         (fun total event -> total + runtime_lens_event_count scan event)
+         0
+  in
+  `Assoc
+    [
+      ("lane", `String lane);
+      ("label", `String label);
+      ("event_count", `Int event_count);
+      ("terminal_status", `String terminal_status);
+      ("gap_codes", json_string_list gap_codes);
+      ( "gap_badge",
+        match gap_codes with
+        | code :: _ -> `String code
+        | [] -> `Null );
+      ("events", runtime_lens_events_json scan events);
+    ]
+
+let runtime_lens_keeper_terminal_status ~terminal_event_present scan =
+  if terminal_event_present then "finished"
+  else if
+    runtime_lens_event_count scan Keeper_runtime_manifest.Pre_dispatch_blocked
+    > 0
+  then "blocked"
+  else if scan.total_rows = 0 then "empty"
+  else "open"
+
+let runtime_lens_provider_terminal_status scan =
+  match scan.provider_terminal_row with
+  | Some row -> row.Keeper_runtime_manifest.status
+  | None when scan.provider_started_count > scan.provider_finished_count ->
+    "unfinished"
+  | None when scan.provider_started_count = 0 -> "not_started"
+  | None -> "unknown"
+
+let runtime_lens_memory_terminal_status scan =
+  if scan.memory_flush_error_count > 0 then "memory_error"
+  else if scan.memory_flush_success_count > 0 then "flushed"
+  else if scan.memory_injected_count > 0 then "injected"
+  else if
+    scan.context_injected_count > 0
+    || scan.context_compacted_event_count > 0
+    || scan.event_bus_count > 0
+  then "context"
+  else "empty"
+
+let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
+  let ( tool_decision
+      , lane_decision
+      , requested_tools
+      , required_tools
+      , materialized_tools
+      , missing_required_tools )
+    =
+    runtime_lens_tool_surface_parts scan
+  in
+  let keeper_turn_id = selected_keeper_turn_id ?turn_id scan in
+  let terminal_event_present =
+    terminal_event_present_for_turn ?keeper_turn_id scan
+  in
+  let claim_scope = claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () in
+  let config_drift = config_drift_summary_json ~config ~keeper_name in
+  let gaps =
+    runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan
+  in
+  let has_provider_lane =
+    runtime_manifest_scan_event_count scan
+      Keeper_runtime_manifest.Provider_lane_resolved
+    > 0
+  in
+  let provider_lane_status =
+    Option.map
+      (fun row -> row.Keeper_runtime_manifest.status)
+      scan.latest_provider_lane_row
+  in
+  let tool_runtime_status =
+    if missing_required_tools <> [] then "missing_required_tool"
+    else if
+      runtime_lens_event_count scan
+        Keeper_runtime_manifest.Tool_surface_selected
+      > 0
+    then "selected"
+    else "empty"
+  in
+  `Assoc
+    [
+      ( "turn_clock",
+        `Assoc
+          [
+            ("trace_id", `String trace_id);
+            ("keeper_turn_id", json_int_opt keeper_turn_id);
+            ("max_oas_turn_count", json_int_opt scan.max_oas_turn_count);
+            ("terminal_event_present", `Bool terminal_event_present);
+            ( "terminal_event",
+              if terminal_event_present then `String "turn_finished" else `Null );
+            ("manifest_total_rows", `Int scan.total_rows);
+          ] );
+      ( "axes",
+        `Assoc
+          [
+            ( "lifecycle",
+              `Assoc
+                [
+                  ( "turn_started_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Turn_started) );
+                  ( "phase_gate_decided_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Phase_gate_decided) );
+                  ( "pre_dispatch_blocked_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Pre_dispatch_blocked) );
+                  ( "receipt_appended_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Receipt_appended) );
+                  ( "turn_finished_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Turn_finished) );
+                  ( "terminal_status",
+                    `String
+                      (runtime_lens_keeper_terminal_status
+                         ~terminal_event_present
+                         scan) );
+                ] );
+            ( "tool_surface",
+              `Assoc
+                [
+                  ("requested_tools", json_string_list requested_tools);
+                  ("required_tools", json_string_list required_tools);
+                  ("materialized_tools", json_string_list materialized_tools);
+                  ( "missing_required_tools",
+                    json_string_list missing_required_tools );
+                  ( "turn_lane",
+                    json_string_opt
+                      (json_string_member_opt "turn_lane" tool_decision) );
+                  ( "tool_surface_class",
+                    json_string_opt
+                      (json_string_member_opt "tool_surface_class"
+                         tool_decision) );
+                  ( "tool_requirement",
+                    json_string_opt
+                      (first_string_opt
+                         [
+                           json_string_member_opt "tool_requirement"
+                             tool_decision;
+                           json_string_member_opt "tool_requirement"
+                             lane_decision;
+                         ]) );
+                  ( "visible_tool_count",
+                    json_int_opt
+                      (first_int_opt
+                         [
+                           json_int_member_opt "visible_tool_count"
+                             tool_decision;
+                           json_int_member_opt "effective_tool_count"
+                             lane_decision;
+                         ]) );
+                  ( "tool_gate_enabled",
+                    match
+                      json_bool_member_opt "tool_gate_enabled" tool_decision
+                    with
+                    | Some value -> `Bool value
+                    | None -> `Null );
+                  ( "tool_surface_fallback_used",
+                    match
+                      json_bool_member_opt "tool_surface_fallback_used"
+                        tool_decision
+                    with
+                    | Some value -> `Bool value
+                    | None -> `Null );
+                  ("terminal_status", `String tool_runtime_status);
+                ] );
+            ( "provider_lane",
+              `Assoc
+                [
+                  ("resolved", `Bool has_provider_lane);
+                  ("status", json_string_opt provider_lane_status);
+                  ( "resolved_lane",
+                    json_string_opt
+                      (json_string_member_opt "resolved_lane" lane_decision)
+                  );
+                  ( "effective_tool_count",
+                    json_int_opt
+                      (json_int_member_opt "effective_tool_count"
+                         lane_decision) );
+                  ( "runtime_mcp_policy_present",
+                    match
+                      json_bool_member_opt "runtime_mcp_policy_present"
+                        lane_decision
+                    with
+                    | Some value -> `Bool value
+                    | None -> `Null );
+                  ("required_tools", json_string_list required_tools);
+                  ("materialized_tools", json_string_list materialized_tools);
+                  ( "missing_required_tools",
+                    json_string_list missing_required_tools );
+                ] );
+            ( "provider_attempt",
+              `Assoc
+                [
+                  ("started_count", `Int scan.provider_started_count);
+                  ("finished_count", `Int scan.provider_finished_count);
+                  ( "terminal_status",
+                    json_string_opt
+                      (Option.map
+                         (fun row -> row.Keeper_runtime_manifest.status)
+                         scan.provider_terminal_row) );
+                ] );
+            ("claim_scope", claim_scope);
+            ("config_drift", config_drift);
+            ( "context",
+              `Assoc
+                [
+                  ("context_injected_count", `Int scan.context_injected_count);
+                  ( "context_compacted_event_count",
+                    `Int scan.context_compacted_event_count );
+                  ( "event_bus_correlated_count",
+                    `Int scan.event_bus_count );
+                  ( "context_compact_started_count",
+                    `Int scan.context_compact_started_count );
+                  ( "context_compacted_count",
+                    `Int scan.context_compacted_count );
+                  ( "checkpoint_loaded_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Checkpoint_loaded) );
+                  ( "checkpoint_saved_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Checkpoint_saved) );
+                  ( "state_snapshot_sidecar_saved_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.State_snapshot_sidecar_saved)
+                  );
+                  ( "last_compaction",
+                    match scan.last_compaction with
+                    | Some value -> value
+                    | None -> `Null );
+                ] );
+            ("memory", memory_summary_json scan);
+          ] );
+      ( "swimlanes",
+        `Assoc
+          [
+            ( "keeper",
+              runtime_lens_swimlane_json scan gaps ~lane:"keeper"
+                ~label:"Keeper"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Turn_started;
+                    Keeper_runtime_manifest.Phase_gate_decided;
+                    Keeper_runtime_manifest.Pre_dispatch_blocked;
+                    Keeper_runtime_manifest.Receipt_appended;
+                    Keeper_runtime_manifest.Turn_finished;
+                  ]
+                ~terminal_status:
+                  (runtime_lens_keeper_terminal_status ~terminal_event_present scan)
+            );
+            ( "masc_policy_cascade",
+              runtime_lens_swimlane_json scan gaps
+                ~lane:"masc_policy_cascade" ~label:"MASC Cascade"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Cascade_routed;
+                    Keeper_runtime_manifest.Provider_lane_resolved;
+                  ]
+                ~terminal_status:
+                  (Option.value provider_lane_status
+                     ~default:
+                       (if has_provider_lane then "resolved" else "empty"))
+            );
+            ( "oas_agent",
+              runtime_lens_swimlane_json scan gaps ~lane:"oas_agent"
+                ~label:"OAS"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Checkpoint_loaded;
+                    Keeper_runtime_manifest.State_snapshot_sidecar_saved;
+                    Keeper_runtime_manifest.Checkpoint_saved;
+                  ]
+                ~terminal_status:
+                  (if
+                     runtime_lens_event_count scan
+                       Keeper_runtime_manifest.Checkpoint_saved
+                     > 0
+                   then "checkpoint_saved"
+                   else if
+                     runtime_lens_event_count scan
+                       Keeper_runtime_manifest.Checkpoint_loaded
+                     > 0
+                   then "checkpoint_loaded"
+                   else "empty") );
+            ( "provider",
+              runtime_lens_swimlane_json scan gaps ~lane:"provider"
+                ~label:"Provider"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Provider_attempt_started;
+                    Keeper_runtime_manifest.Provider_attempt_finished;
+                  ]
+                ~terminal_status:(runtime_lens_provider_terminal_status scan)
+            );
+            ( "tool_runtime",
+              runtime_lens_swimlane_json scan gaps ~lane:"tool_runtime"
+                ~label:"Tool Runtime"
+                ~events:[ Keeper_runtime_manifest.Tool_surface_selected ]
+                ~terminal_status:tool_runtime_status );
+            ( "memory_context",
+              runtime_lens_swimlane_json scan gaps ~lane:"memory_context"
+                ~label:"Memory/Context"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Context_injected;
+                    Keeper_runtime_manifest.Context_compacted;
+                    Keeper_runtime_manifest.Event_bus_correlated;
+                    Keeper_runtime_manifest.Memory_injected;
+                    Keeper_runtime_manifest.Memory_flushed;
+                  ]
+                ~terminal_status:(runtime_lens_memory_terminal_status scan) );
+          ] );
+      ("gaps", `List (List.map runtime_lens_gap_json gaps));
+    ]
+
+let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
+  let decision_string key = json_string_member_opt key row.decision in
+  `Assoc
+    [
+      ("ts", `String row.ts);
+      ("event", `String (Keeper_runtime_manifest.event_kind_to_string row.event));
+      ("cascade_name", json_string_opt row.cascade_name);
+      ("model_source", json_string_opt (decision_string "model_source"));
+      ( "resolved_model_source",
+        json_string_opt (decision_string "resolved_model_source") );
+      ("capability_source", json_string_opt (decision_string "capability_source"));
+      ("fallback_authority", json_string_opt (decision_string "fallback_authority"));
+      ( "provider_source_cascade",
+        json_string_opt (decision_string "provider_source_cascade") );
+      ("status", `String row.status);
+      ("error", json_string_opt (decision_string "error"));
+      ( "exception_kind",
+        json_string_opt (decision_string "exception_kind") );
+    ]
+
+let string_contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop idx =
+      if idx + needle_len > haystack_len then false
+      else if String.sub haystack idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+
+let runtime_trace_keeps_provider_attempt_provenance_key = function
+  | "model_source"
+  | "resolved_model_source"
+  | "capability_source"
+  | "fallback_authority"
+  | "provider_source_cascade"
+  | "terminal_model_source"
+  | "terminal_resolved_model_source"
+  | "terminal_capability_source"
+  | "terminal_fallback_authority"
+  | "terminal_provider_source_cascade" ->
+    true
+  | _ -> false
+
+let runtime_trace_redacts_provider_model_key key =
+  let key = String.lowercase_ascii key in
+  (not (runtime_trace_keeps_provider_attempt_provenance_key key))
+  &&
+  (string_contains_substring key "provider"
+   || string_contains_substring key "model"
+   || String.equal key "configured_labels")
+
+let rec runtime_trace_public_json = function
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> List.filter_map (fun (key, value) ->
+               if runtime_trace_redacts_provider_model_key key then None
+               else Some (key, runtime_trace_public_json value)))
+  | `List values -> `List (List.map runtime_trace_public_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      value
+
+let runtime_manifest_public_json row =
+  Keeper_runtime_manifest.to_json row
+  |> runtime_trace_public_json
+
+let provider_attempts_summary_json scan =
+  let attempt_rows = queue_to_list scan.provider_attempt_rows in
+  let terminal = scan.provider_terminal_row in
+  let terminal_decision_string key =
+    Option.bind terminal (fun row ->
+      json_string_member_opt key row.Keeper_runtime_manifest.decision)
+  in
+  `Assoc
+    [
+      ("started_count", `Int scan.provider_started_count);
+      ("finished_count", `Int scan.provider_finished_count);
+      ( "terminal_status",
+        json_string_opt
+          (Option.map (fun row -> row.Keeper_runtime_manifest.status) terminal) );
+      ( "terminal_model_source",
+        json_string_opt (terminal_decision_string "model_source") );
+      ( "terminal_resolved_model_source",
+        json_string_opt (terminal_decision_string "resolved_model_source") );
+      ( "terminal_capability_source",
+        json_string_opt (terminal_decision_string "capability_source") );
+      ( "terminal_fallback_authority",
+        json_string_opt (terminal_decision_string "fallback_authority") );
+      ( "terminal_provider_source_cascade",
+        json_string_opt (terminal_decision_string "provider_source_cascade") );
+      ( "terminal_error",
+        json_string_opt (terminal_decision_string "error") );
+      ( "terminal_exception_kind",
+        json_string_opt (terminal_decision_string "exception_kind") );
+      ("attempts", `List (List.map provider_attempt_row_json attempt_rows));
+    ]
+
+let turn_identity_summary_json ?turn_id scan receipts =
+  let manifest_keeper_turn_ids =
+    scan.keeper_turn_ids
+    |> List.rev
+    |> unique_ints
+  in
+  let receipt_turn_counts =
+    receipts
+    |> List.filter_map (json_int_member_opt "turn_count")
+    |> unique_ints
+  in
+  `Assoc
+    [
+      ( "requested_keeper_turn_id",
+        match turn_id with Some value -> `Int value | None -> `Null );
+      ("manifest_keeper_turn_ids", json_int_list manifest_keeper_turn_ids);
+      ("receipt_turn_counts", json_int_list receipt_turn_counts);
+      ("max_oas_turn_count", json_int_opt scan.max_oas_turn_count);
+      ( "provider_lane_resolved_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_lane_resolved) );
+      ( "provider_attempt_started_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_attempt_started) );
+      ( "provider_attempt_finished_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Provider_attempt_finished) );
+      ( "checkpoint_saved_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Checkpoint_saved) );
+      ( "event_bus_correlated_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Event_bus_correlated) );
+      ( "memory_injected_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Memory_injected) );
+      ( "memory_flushed_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Memory_flushed) );
+      ( "receipt_appended_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Receipt_appended) );
+      ( "turn_finished_count",
+        `Int
+          (runtime_manifest_scan_event_count scan
+             Keeper_runtime_manifest.Turn_finished) );
+    ]
+
+let keeper_runtime_trace_json (config : Coord.config) (name : string)
+    ?trace_id ?turn_id ?(limit = 200) ()
+    : [ `OK | `Not_found ] * Yojson.Safe.t =
+  if not (Keeper_config.validate_name name) then
+    ( `Not_found,
+      `Assoc
+        [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ] )
+  else
+    let trace_id_query =
+      match trace_id with
+      | Some value when String.trim value <> "" -> Some (String.trim value)
+      | _ -> None
+    in
+    let missing_trace_id_json =
+      `Assoc
+        [
+          ( "error",
+            `String
+              (Printf.sprintf
+                 "keeper %S not found and trace_id query param was not supplied"
+                 name) );
+        ]
+    in
+    let meta_read_failed_json msg =
+      `Assoc
+        [
+          ("error_kind", `String "keeper_meta_read_failed");
+          ( "error",
+            `String
+              (Printf.sprintf
+                 "keeper %S metadata read failed while resolving runtime trace: %s"
+                 name msg) );
+        ]
+    in
+    let effective_trace_id =
+      match trace_id_query with
+      | Some value -> Ok value
+      | None -> (
+          match Keeper_types.read_meta_resolved config name with
+          | Ok (Some (_, meta)) ->
+              Ok (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          | Ok None -> Error missing_trace_id_json
+          | Error msg -> Error (meta_read_failed_json msg))
+    in
+    match effective_trace_id with
+    | Error json -> (`Not_found, json)
+    | Ok trace_id ->
+        let limit = max 1 (min 500 limit) in
+        let manifest_scan =
+          read_runtime_manifest_scan ~config ~keeper_name:name ~trace_id
+            ?turn_id ~limit ()
+        in
+        let manifest_rows = queue_to_list manifest_scan.returned_rows in
+        let receipt_paths =
+          manifest_rows
+          |> List.map (fun row -> row.Keeper_runtime_manifest.links.receipt_path)
+          |> unique_present_paths
+        in
+        let checkpoint_paths =
+          manifest_rows
+          |> List.map (fun row -> row.Keeper_runtime_manifest.links.checkpoint_path)
+          |> unique_present_paths
+        in
+        let tool_call_log_paths =
+          manifest_rows
+          |> List.map (fun row ->
+               row.Keeper_runtime_manifest.links.tool_call_log_path)
+          |> unique_present_paths
+        in
+        let receipts =
+          read_receipt_rows ~keeper_name:name ~trace_id ?turn_id receipt_paths
+          |> take_last limit
+        in
+        let selected_turn_id = selected_keeper_turn_id ?turn_id manifest_scan in
+        let selected_terminal_event_present =
+          terminal_event_present_for_turn
+            ?keeper_turn_id:selected_turn_id
+            manifest_scan
+        in
+        let health, stale_reason =
+          if manifest_scan.total_rows = 0 then ("empty", Some "no_manifest_rows")
+          else if not selected_terminal_event_present then
+            ("incomplete", Some "missing_turn_finished")
+          else if receipts = [] then ("partial", Some "no_matching_receipt_rows")
+          else ("ok", None)
+        in
+        ( `OK,
+          `Assoc
+            [
+              ("keeper", `String name);
+              ( "trace_id",
+                `String trace_id );
+              ( "turn_id",
+                match turn_id with
+                | Some value -> `Int value
+                | None -> `Null );
+              ("manifest_path", `String manifest_scan.path);
+              ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_scan.path));
+              ("manifest_total_rows", `Int manifest_scan.total_rows);
+              ("manifest_returned_rows", `Int (List.length manifest_rows));
+              ("receipt_returned_rows", `Int (List.length receipts));
+              ( "turn_identity",
+                turn_identity_summary_json ?turn_id manifest_scan receipts );
+              ("provider_attempts", provider_attempts_summary_json manifest_scan);
+              ("event_bus", event_bus_summary_json manifest_scan);
+              ("memory", memory_summary_json manifest_scan);
+              ( "runtime_lens",
+                runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
+                  manifest_scan );
+              ("health", `String health);
+              ( "stale_reason",
+                match stale_reason with
+                | Some value -> `String value
+                | None -> `Null );
+              ( "linked_artifacts",
+                `Assoc
+                  [
+                    ( "receipts",
+                      `List
+                        (List.map
+                           (linked_artifact_json ~kind:"execution_receipt")
+                           receipt_paths) );
+                    ( "checkpoints",
+                      `List
+                        (List.map
+                           (linked_artifact_json ~kind:"oas_checkpoint")
+                           checkpoint_paths) );
+                    ( "tool_call_logs",
+                      `List
+                        (List.map
+                           (linked_artifact_json ~kind:"tool_call_log")
+                           tool_call_log_paths) );
+                  ] );
+              ( "manifest_rows",
+                `List (List.map runtime_manifest_public_json manifest_rows) );
+              ("receipts", `List (List.map runtime_trace_public_json receipts));
+            ] )
 
 let handle_keeper_checkpoints_post state req reqd body_str =
   let req_path = Http.Request.path req in
@@ -647,7 +2135,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               updated_at = Keeper_types.now_iso ();
             }
           in
-          (match Keeper_types.write_meta ~force:true config updated_meta with
+          (match Keeper_types.write_meta_with_retry config updated_meta with
            | Ok () -> ()
            | Error err ->
                Log.Keeper.warn
@@ -665,8 +2153,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             name
             (if paused then "pause" else "resume");
           Prometheus.inc_counter
-            Prometheus.metric_keeper_paused_state_persist_errors
-            ~labels:[("phase", "boot_resume_persist");
+            Keeper_metrics.metric_keeper_paused_state_persist_errors
+            ~labels:[("phase", Paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "meta_missing")]
             ()
       | Error err ->
@@ -676,8 +2164,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             (if paused then "pause" else "resume")
             err;
           Prometheus.inc_counter
-            Prometheus.metric_keeper_paused_state_persist_errors
-            ~labels:[("phase", "boot_resume_persist");
+            Keeper_metrics.metric_keeper_paused_state_persist_errors
+            ~labels:[("phase", Paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "read_meta_error")]
             ()
     in
@@ -703,8 +2191,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             "keeper %s boot: meta missing — skipping auto-resume check"
             name;
           Prometheus.inc_counter
-            Prometheus.metric_keeper_paused_state_persist_errors
-            ~labels:[("phase", "boot_resume_check");
+            Keeper_metrics.metric_keeper_paused_state_persist_errors
+            ~labels:[("phase", Paused_state_persist_phase.(to_label Boot_resume_check));
                      ("reason", "meta_missing")]
             ()
       | Error err ->
@@ -713,8 +2201,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             name
             err;
           Prometheus.inc_counter
-            Prometheus.metric_keeper_paused_state_persist_errors
-            ~labels:[("phase", "boot_resume_check");
+            Keeper_metrics.metric_keeper_paused_state_persist_errors
+            ~labels:[("phase", Paused_state_persist_phase.(to_label Boot_resume_check));
                      ("reason", "read_meta_error")]
             ()
     in
@@ -753,37 +2241,60 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           (Printf.sprintf {|{"ok":false,"error":"%s"}|} (String.escaped msg))
           reqd
     | Ok args ->
-    match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
-    | Some (true, body) when String.equal action "boot" || String.equal action "clear" ->
-        if String.equal action "boot"
-        then (
-          resume_booted_keeper_if_needed ();
-          refresh_keeper_execution_surfaces ~config ~name "started")
-        else invalidate_keeper_execution_surfaces ~config ();
-        Http.Response.json ~compress:true ~request:req
-          (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
-             (String.escaped action)
-             (String.escaped name)
-             body)
-          reqd
-    | Some (true, _body) ->
-        (match action with
-         | "shutdown" -> refresh_keeper_execution_surfaces ~config ~name "stopped"
-         | _ -> invalidate_keeper_execution_surfaces ~config ());
-        Http.Response.json ~compress:true ~request:req
-          (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
-             (String.escaped action)
-             (String.escaped name))
-          reqd
-    | Some (false, body) ->
-        Http.Response.json ~status:`Bad_request ~request:req
-          (Yojson.Safe.to_string
-             (`Assoc [("ok", `Bool false); ("error", `String body)]))
-          reqd
-    | None ->
-        Http.Response.json ~status:`Internal_server_error ~request:req
-          {|{"ok":false,"error":"dispatch returned None"}|}
-          reqd
+        let started_at = Eio.Time.now clock in
+        let duration_ms () =
+          (Eio.Time.now clock -. started_at) *. 1000.0 |> int_of_float
+        in
+        let log_lifecycle_result outcome =
+          Log.Server.info
+            "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d"
+            action name agent_name outcome (duration_ms ())
+        in
+        Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
+          action name agent_name;
+        (match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
+         | Some (true, body)
+           when String.equal action "boot" || String.equal action "clear" ->
+             if String.equal action "boot"
+             then (
+               resume_booted_keeper_if_needed ();
+               refresh_keeper_execution_surfaces ~config ~name "started")
+             else (
+               (match Keeper_registry.get_phase ~base_path:config.base_path name with
+                | Some Keeper_state_machine.Paused -> persist_keeper_paused_state true
+                | Some _ | None -> ());
+               invalidate_keeper_execution_surfaces ~config ());
+             log_lifecycle_result "ok";
+             Http.Response.json ~compress:true ~request:req
+               (Printf.sprintf
+                  {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
+                  (String.escaped action)
+                  (String.escaped name)
+                  body)
+               reqd
+         | Some (true, _body) ->
+             (match action with
+              | "shutdown" ->
+                  persist_keeper_paused_state true;
+                  refresh_keeper_execution_surfaces ~config ~name "stopped"
+              | _ -> invalidate_keeper_execution_surfaces ~config ());
+             log_lifecycle_result "ok";
+             Http.Response.json ~compress:true ~request:req
+               (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
+                  (String.escaped action)
+                  (String.escaped name))
+               reqd
+         | Some (false, body) ->
+             log_lifecycle_result "rejected";
+             Http.Response.json ~status:`Bad_request ~request:req
+               (Yojson.Safe.to_string
+                  (`Assoc [("ok", `Bool false); ("error", `String body)]))
+               reqd
+         | None ->
+             log_lifecycle_result "dispatch_none";
+             Http.Response.json ~status:`Internal_server_error ~request:req
+               {|{"ok":false,"error":"dispatch returned None"}|}
+               reqd)
 
 (** POST /api/v1/keepers/:name/directive — pause / resume / wakeup.
 
@@ -901,8 +2412,8 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                name
                err;
              Prometheus.inc_counter
-               Prometheus.metric_keeper_paused_state_persist_errors
-               ~labels:[("phase", "directive");
+               Keeper_metrics.metric_keeper_paused_state_persist_errors
+               ~labels:[("phase", Paused_state_persist_phase.(to_label Directive));
                         ("reason", "read_meta_error")]
                ();
              Http.Response.json ~status:`Internal_server_error ~request:req
@@ -918,8 +2429,8 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                action_str
                name;
              Prometheus.inc_counter
-               Prometheus.metric_keeper_paused_state_persist_errors
-               ~labels:[("phase", "directive");
+               Keeper_metrics.metric_keeper_paused_state_persist_errors
+               ~labels:[("phase", Paused_state_persist_phase.(to_label Directive));
                         ("reason", "meta_missing")]
                ();
              Http.Response.json ~status:`Not_found ~request:req
@@ -975,6 +2486,31 @@ let handle_keeper_get_subroutes state req request reqd =
         {|{"error":"keeper name is required"}|} reqd
     else
       let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.room_config name in
+      let status : Httpun.Status.t =
+        match st with `OK -> `OK | `Not_found -> `Not_found
+      in
+      Http.Response.json ~status ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
+  else if ends_with keeper_suffix_runtime_trace then
+    let name = extract_name keeper_suffix_runtime_trace in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let trace_id = Server_utils.query_param req "trace_id" in
+      let turn_id =
+        match Server_utils.query_param req "turn_id" with
+        | Some raw -> int_of_string_opt (String.trim raw)
+        | None -> None
+      in
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:200
+        |> max 1 |> min 500
+      in
+      let st, json =
+        keeper_runtime_trace_json state.Mcp_server.room_config name
+          ?trace_id ?turn_id ~limit ()
+      in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
@@ -1421,30 +2957,10 @@ let handle_keeper_get_subroutes state req request reqd =
         | Ok (Some m) ->
           let routing =
             Keeper_cascade_routing.select_cascade
-              ~base_cascade:m.cascade_name ~phase:current
+              ~base_cascade:(Keeper_types.cascade_name_of_meta m) ~phase:current
           in
-          let models =
-            Cascade_runtime.models_of_cascade_name
-              (Keeper_cascade_profile.Runtime_name routing.effective_cascade)
-          in
-          let last_model = m.runtime.usage.last_model_used in
-          let last_provider_result =
-            if last_model <> "" then Some last_model else None
-          in
-          (* Provider health derivation: mark the model that served the
-             most recent successful call [`Healthy], everything else
-             [`Unknown]. Full per-provider health tracking is tracked as
-             a follow-up — this surfaces what the runtime already knows. *)
-          let provider_health =
-            List.map (fun model ->
-              let h : Keeper_decision_audit.provider_health =
-                match last_provider_result with
-                | Some p when p = model -> `Healthy
-                | _ -> `Unknown
-              in
-              (model, h))
-              models
-          in
+          let models = [ "candidate" ] in
+          let provider_health = [] in
           (* Slot occupancy from the local runtime pool. The cascade FSM
              shares these slots across all keepers, so rendering the
              fleet-global (used, capacity) is the honest value — a
@@ -1459,24 +2975,13 @@ let handle_keeper_get_subroutes state req request reqd =
             ~provider_health
             ?slot_state
             ~effective_cascade_reason:routing.reason
-            ~models ~last_provider_result ()
+            ~models ~last_provider_result:None ()
         | _ ->
           Keeper_decision_audit.cascade_fsm_to_mermaid
-            ~models:["(unknown)"] ~last_provider_result:None ()
+            ~models:[] ~last_provider_result:None ()
       in
-      let cascade_models =
-        match meta with
-        | Ok (Some m) ->
-          Cascade_runtime.models_of_cascade_name
-            (Keeper_cascade_profile.Runtime_name m.cascade_name)
-        | _ -> ["(unknown)"]
-      in
-      let last_provider =
-        match meta with
-        | Ok (Some m) when m.runtime.usage.last_model_used <> "" ->
-          `String m.runtime.usage.last_model_used
-        | _ -> `Null
-      in
+      let cascade_models = [] in
+      let last_provider = `Null in
       (* Memory tier usage: join kind_caps (policy) with kind_counts (bank
          summary). Each kind reports used / cap so the dashboard tier
          panel can render saturation without re-reading the memory file. *)

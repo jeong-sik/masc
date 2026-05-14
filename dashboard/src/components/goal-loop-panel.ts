@@ -4,6 +4,9 @@ import { RefreshCw } from 'lucide-preact'
 import { SectionCard } from './common/card'
 import { LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
+import { Table, type TableColumn } from './common/table'
+import { Drawer } from './common/drawer'
+import { CollapsibleSection } from './common/collapsible'
 import { fetchGoalLoopStatus } from '../api/goal-loop'
 import {
   GOAL_LOOP_PHASES,
@@ -31,6 +34,65 @@ function displayValue(value: unknown): string {
   return JSON.stringify(value)
 }
 
+type MetricFormat = 'raw' | 'number' | 'percent' | 'duration_ms' | 'boolean' | 'count'
+
+interface PhaseMetricSchema {
+  key: string
+  label: string
+  format: MetricFormat
+}
+
+function formatValue(value: unknown, format: MetricFormat): string {
+  if (value === null || value === undefined || value === '') return 'n/a'
+  switch (format) {
+    case 'raw':
+      return displayValue(value)
+    case 'number':
+    case 'count':
+      if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'n/a'
+      return displayValue(value)
+    case 'percent':
+      if (typeof value === 'number' && Number.isFinite(value))
+        return `${(value * 100).toFixed(1)}%`
+      return displayValue(value)
+    case 'duration_ms':
+      if (typeof value === 'number' && Number.isFinite(value))
+        return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${value.toFixed(0)}ms`
+      return displayValue(value)
+    case 'boolean':
+      if (typeof value === 'boolean') return value ? 'yes' : 'no'
+      return displayValue(value)
+  }
+}
+
+const PHASE_SCHEMA: Record<GoalLoopPhaseName, PhaseMetricSchema[]> = {
+  observe: [
+    { key: 'critical_matches', label: 'Critical', format: 'count' },
+    { key: 'warning_matches', label: 'Warnings', format: 'count' },
+    { key: 'matched_lines', label: 'Matched', format: 'count' },
+  ],
+  orient: [
+    { key: 'critical_present', label: 'Critical', format: 'boolean' },
+    { key: 'evidence_present', label: 'Evidence', format: 'boolean' },
+    { key: 'findings_total', label: 'Findings', format: 'count' },
+  ],
+  decide: [
+    { key: 'decisions_total', label: 'Decisions', format: 'count' },
+    { key: 'p0_count', label: 'P0', format: 'count' },
+    { key: 'act_missing_count', label: 'Unlinked', format: 'count' },
+  ],
+  act: [
+    { key: 'act_linked_count', label: 'Linked', format: 'count' },
+    { key: 'act_missing_count', label: 'Unlinked', format: 'count' },
+    { key: 'decisions_total', label: 'Decisions', format: 'count' },
+  ],
+  verify: [
+    { key: 'verify_status', label: 'Status', format: 'raw' },
+    { key: 'violations', label: 'Violations', format: 'count' },
+    { key: 'post_act_verify', label: 'Post-Act', format: 'raw' },
+  ],
+}
+
 function statusChip(status: string) {
   const level = normalizeGoalLoopStatusLevel(status)
   return html`
@@ -38,21 +100,6 @@ function statusChip(status: string) {
       ${status}
     </span>
   `
-}
-
-function phaseMetricKeys(phase: GoalLoopPhaseName): string[] {
-  switch (phase) {
-    case 'observe':
-      return ['critical_matches', 'warning_matches', 'matched_lines']
-    case 'orient':
-      return ['critical_present', 'evidence_present', 'findings_total']
-    case 'decide':
-      return ['decisions_total', 'p0_count', 'act_missing_count']
-    case 'act':
-      return ['act_linked_count', 'act_missing_count', 'decisions_total']
-    case 'verify':
-      return ['verify_status', 'violations', 'post_act_verify']
-  }
 }
 
 function PhaseBlock({
@@ -75,11 +122,11 @@ function PhaseBlock({
         ${statusChip(phaseStatus)}
       </div>
       <dl class="grid grid-cols-1 gap-1 text-xs">
-        ${phaseMetricKeys(phase).map(key => html`
+        ${PHASE_SCHEMA[phase].map(({ key, label, format }) => html`
           <div class="flex min-w-0 justify-between gap-3">
-            <dt class="truncate text-[var(--color-fg-muted)]">${key}</dt>
+            <dt class="truncate text-[var(--color-fg-muted)]">${label}</dt>
             <dd class="min-w-0 truncate font-mono text-[var(--color-fg-secondary)]">
-              ${displayValue(phaseSummaryValue(status, phase, key))}
+              ${formatValue(phaseSummaryValue(status, phase, key), format)}
             </dd>
           </div>
         `)}
@@ -196,17 +243,129 @@ function VerifyEvidenceBlock({ status }: { status: GoalLoopStatusResponse }) {
   `
 }
 
+interface GoalLoopTableRow {
+  phase: GoalLoopPhaseName
+  status: string
+  metrics: PhaseMetricSchema[]
+}
+
+function GoalLoopTable({
+  status,
+  selectedPhase,
+  onSelectPhase,
+}: {
+  status: GoalLoopStatusResponse
+  selectedPhase: GoalLoopPhaseName | null
+  onSelectPhase: (phase: GoalLoopPhaseName | null) => void
+}) {
+  const rows: GoalLoopTableRow[] = GOAL_LOOP_PHASES.map((phase) => ({
+    phase,
+    status: status.phases[phase].status,
+    metrics: PHASE_SCHEMA[phase],
+  }))
+
+  const columns: TableColumn<GoalLoopTableRow>[] = [
+    {
+      key: 'phase',
+      header: 'Phase',
+      render: (row) => html`
+        <span class="font-mono text-xs font-semibold uppercase tracking-[var(--track-caps)]">
+          ${phaseLabel(row.phase)}
+        </span>
+      `,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (row) => statusChip(row.status),
+    },
+    {
+      key: 'summary',
+      header: 'Key metrics',
+      render: (row) => {
+        const m0 = row.metrics[0]
+        const m1 = row.metrics[1]
+        return html`
+          <div class="flex flex-col gap-0.5 text-xs">
+            ${m0
+              ? html`
+                  <span class="text-[var(--color-fg-muted)]">
+                    ${m0.label}:
+                    <span class="font-mono text-[var(--color-fg-secondary)]">
+                      ${formatValue(phaseSummaryValue(status, row.phase, m0.key), m0.format)}
+                    </span>
+                  </span>
+                `
+              : null}
+            ${m1
+              ? html`
+                  <span class="text-[var(--color-fg-muted)]">
+                    ${m1.label}:
+                    <span class="font-mono text-[var(--color-fg-secondary)]">
+                      ${formatValue(phaseSummaryValue(status, row.phase, m1.key), m1.format)}
+                    </span>
+                  </span>
+                `
+              : null}
+          </div>
+        `
+      },
+    },
+  ]
+
+  return html`
+    <div class="overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)]">
+      <${Table}
+        columns=${columns}
+        rows=${rows}
+        getRowId=${(row: GoalLoopTableRow) => row.phase}
+        selectedIds=${selectedPhase ? [selectedPhase] : []}
+        onSelect=${(ids: string[]) => {
+          const next = ids.length > 0 ? (ids[ids.length - 1] as GoalLoopPhaseName) : null
+          onSelectPhase(next)
+        }}
+        aria-label="Goal loop phases"
+      />
+    </div>
+  `
+}
+
+function GoalLoopDetailDrawer({
+  phase,
+  status,
+  onClose,
+}: {
+  phase: GoalLoopPhaseName | null
+  status: GoalLoopStatusResponse
+  onClose: () => void
+}) {
+  if (!phase) return null
+  return html`
+    <${Drawer}
+      open=${true}
+      onClose=${onClose}
+      title=${`${phaseLabel(phase)} Detail`}
+    >
+      <${PhaseBlock} status=${status} phase=${phase} />
+      ${phase === 'verify'
+        ? html`<div class="mt-4"><${VerifyEvidenceBlock} status=${status} /></div>`
+        : null}
+    <//>
+  `
+}
+
 export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
   const [status, setStatus] = useState<GoalLoopStatusResponse | null>(initialStatus ?? null)
   const [loading, setLoading] = useState(initialStatus === undefined)
   const [error, setError] = useState<string | null>(null)
+  const [selectedPhase, setSelectedPhase] = useState<GoalLoopPhaseName | null>(null)
 
   const refresh = useCallback(() => {
     setLoading(true)
     setError(null)
     void fetchGoalLoopStatus()
       .then(setStatus)
-      .catch(err => {
+      .catch((err) => {
         setError(err instanceof Error ? err.message : String(err))
       })
       .finally(() => setLoading(false))
@@ -264,16 +423,26 @@ export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
         `
         : null}
 
-      <div class="grid grid-cols-5 gap-3 max-[1180px]:grid-cols-3 max-[760px]:grid-cols-1">
-        ${GOAL_LOOP_PHASES.map(phase => html`<${PhaseBlock} status=${status} phase=${phase} />`)}
-      </div>
+      <${GoalLoopTable}
+        status=${status}
+        selectedPhase=${selectedPhase}
+        onSelectPhase=${setSelectedPhase}
+      />
 
-      <div class="grid grid-cols-2 gap-4 max-[980px]:grid-cols-1">
-        <${AuditCatalogBlock} status=${status} />
-        <${VerifyEvidenceBlock} status=${status} />
-      </div>
+      <${CollapsibleSection} title="Audit & Verify" open=${false}>
+        <div class="flex flex-col gap-4">
+          <${AuditCatalogBlock} status=${status} />
+          <${VerifyEvidenceBlock} status=${status} />
+        </div>
+      <//>
 
       <${NextActionBlock} status=${status} />
+
+      <${GoalLoopDetailDrawer}
+        phase=${selectedPhase}
+        status=${status}
+        onClose=${() => setSelectedPhase(null)}
+      />
     </div>
   `
 }

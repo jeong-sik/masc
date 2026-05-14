@@ -16,8 +16,8 @@ let check_bool label expected actual =
 
 let test_to_string_applied () =
   check_string "Applied carries reason"
-    "applied:tool_heavy"
-    (KCP.compaction_decision_to_string (KCP.Applied "tool_heavy"))
+    "applied:manual"
+    (KCP.compaction_decision_to_string (KCP.Applied Compaction_trigger.Manual))
 
 let test_to_string_blocked () =
   check_string "Blocked_below_thresholds"
@@ -45,7 +45,7 @@ let test_to_string_skipped_continuity_zero () =
 
 let test_applied_true_for_applied () =
   check_bool "Applied → true" true
-    (KCP.compaction_decision_applied (KCP.Applied "anything"))
+    (KCP.compaction_decision_applied (KCP.Applied Compaction_trigger.Manual))
 
 let test_applied_false_for_blocked () =
   check_bool "Blocked_below_thresholds → false" false

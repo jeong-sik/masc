@@ -35,7 +35,7 @@ import { pushTrace } from './keeper-trace-store'
  *                     verbatim, or null for in-flight)
  *
  * Why a pure function (not a stateful subscription):
- *   - The owning component (`IdeConversationRailMock`) already has the
+ *   - The owning component (`IdeConversationRail`) already has the
  *     fetched `decisions` array as a useState value. A pure mapper
  *     called from a `useEffect([decisions])` is sufficient and trivially
  *     testable.

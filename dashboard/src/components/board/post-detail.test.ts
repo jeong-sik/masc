@@ -3,9 +3,19 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
-vi.mock('../../router', () => ({
-  navigate: vi.fn(),
-}))
+const routerMock = vi.hoisted(() => {
+  const route = { value: { params: {} as Record<string, string> } }
+  const replaceRoute = vi.fn((_tab: string, params?: Record<string, string>) => {
+    route.value = { params: params ?? {} }
+  })
+  return {
+    route,
+    navigate: vi.fn(),
+    replaceRoute,
+  }
+})
+
+vi.mock('../../router', () => routerMock)
 
 vi.mock('../../keeper-message', () => ({
   stripStateBlocks: (value: string) => value,
@@ -81,13 +91,15 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { voteComment, votePost } from './board-state'
+import { detailComments, voteComment, votePost } from './board-state'
 import { toggleReaction } from '../../api/board'
 import type { BoardComment } from '../../types/core'
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  routerMock.route.value = { params: {} }
+  detailComments.value = []
 })
 
 describe('CommentThread', () => {
@@ -268,6 +280,27 @@ describe('CommentThread', () => {
     expect(screen.getByLabelText('댓글 moderation 숨김 1건')).toHaveTextContent('숨김 1')
   })
 
+  it('renders vote-blind comment scores as hidden until voting', () => {
+    const comments = [
+      {
+        id: 'c1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'agent',
+        content: 'review me',
+        created_at: '2026-04-02T00:00:00Z',
+        votes: null,
+        vote_balance: null,
+        vote_blind: true,
+        vote_blind_reason: 'vote_before_score',
+      },
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1' }))
+
+    expect(screen.getByLabelText('댓글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
+  })
+
   it('marks the current comment vote as pressed', () => {
     const comments = [
       {
@@ -310,6 +343,43 @@ describe('CommentThread', () => {
     await waitFor(() => {
       expect(toggleReaction).toHaveBeenCalledWith('comment', 'c1', '🚀')
     })
+  })
+
+  it('surfaces an older root comment when it is route-focused', () => {
+    const comments = Array.from({ length: 7 }, (_, index) => ({
+      id: `c${index + 1}`,
+      post_id: 'post-1',
+      parent_id: null,
+      author: 'agent',
+      content: index === 0 ? 'old focused comment' : `visible comment ${index + 1}`,
+      created_at: `2026-04-02T00:0${index}:00Z`,
+    })) as any
+
+    render(h(CommentThread, { comments, postId: 'post-1', focusedCommentId: 'c1' }))
+
+    expect(screen.getByText('old focused comment')).toBeInTheDocument()
+    expect(document.querySelector('[data-route-focused-comment="c1"]')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /이전 댓글/ })).not.toBeInTheDocument()
+  })
+
+  it('expands a busy reply branch when a hidden reply is route-focused', () => {
+    const comments = [
+      { id: 'c1', post_id: 'post-1', parent_id: null, author: 'root-agent', content: 'root comment', created_at: '2026-04-02T00:00:00Z' },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        id: `c${index + 2}`,
+        post_id: 'post-1',
+        parent_id: 'c1',
+        author: 'child-agent',
+        content: `sibling reply ${index + 1}`,
+        created_at: `2026-04-02T00:0${index + 1}:00Z`,
+      })),
+    ] as any
+
+    render(h(CommentThread, { comments, postId: 'post-1', focusedCommentId: 'c8' }))
+
+    expect(screen.getByText('sibling reply 7')).toBeInTheDocument()
+    expect(document.querySelector('[data-route-focused-comment="c8"]')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /답글 2개 더 보기/ })).not.toBeInTheDocument()
   })
 })
 
@@ -438,6 +508,11 @@ describe('PostDetail', () => {
       classification_reason: 'Direct board post without automation provenance.',
       report_count: 1,
       moderation_status: 'approved',
+      contributor_quality: {
+        score: 0.91,
+        band: 'excellent',
+        source: 'agent_reputation',
+      },
       comments: [],
     } as any
 
@@ -447,6 +522,33 @@ describe('PostDetail', () => {
     expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
     expect(screen.getByText('직접')).toBeInTheDocument()
     expect(screen.getByLabelText('게시글 moderation 승인됨 1건')).toHaveTextContent('승인됨 1')
+    expect(screen.getByLabelText('기여자 품질 91점 · 우수')).toHaveTextContent('품질 91')
+  })
+
+  it('renders contributor quality when it is the only detail badge', () => {
+    const post = {
+      id: 'post-quality',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      moderation_status: 'none',
+      contributor_quality: {
+        score: 0.42,
+        band: 'watch',
+        source: 'agent_reputation',
+      },
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByLabelText('기여자 품질 42점 · 관찰')).toHaveTextContent('품질 42')
   })
 
   it('marks the current post vote as pressed', async () => {
@@ -477,6 +579,73 @@ describe('PostDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: '▲ 추천' }))
     await waitFor(() => {
       expect(votePost).toHaveBeenCalledWith('post-1', 'up')
+    })
+  })
+
+  it('renders vote-blind post scores as hidden until voting', () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: null,
+      vote_balance: null,
+      vote_blind: true,
+      vote_blind_reason: 'vote_before_score',
+      comment_count: 0,
+      post_kind: 'direct',
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByLabelText('게시글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
+  })
+
+  it('renders and clears the board comment route focus receipt', () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 1,
+      post_kind: 'direct',
+      comments: [],
+    } as any
+    detailComments.value = [
+      {
+        id: 'comment-1',
+        post_id: 'post-1',
+        parent_id: null,
+        author: 'keeper-alpha',
+        content: 'focused route comment',
+        created_at: '2026-04-02T00:00:00Z',
+      },
+    ] as any
+    routerMock.route.value = {
+      params: { section: 'board', post: 'post-1', comment: 'comment-1', focus: 'curation' },
+    }
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByTestId('board-comment-route-focus')).toBeInTheDocument()
+    expect(screen.getByText('COMMENT comment-1')).toBeInTheDocument()
+    expect(screen.getByText('author keeper-alpha')).toBeInTheDocument()
+    expect(document.querySelector('[data-route-focused-comment="comment-1"]')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'CLEAR' }))
+
+    expect(routerMock.route.value.params).toEqual({
+      section: 'board',
+      post: 'post-1',
+      focus: 'curation',
     })
   })
 })

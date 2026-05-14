@@ -41,6 +41,8 @@ val make :
   ?procedure_limit:int ->
   ?flush_incremental:
     (memory:Agent_sdk.Memory.t -> agent_name:string -> int * int) ->
+  ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
+  ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   unit ->
   Agent_sdk.Hooks.hooks
 

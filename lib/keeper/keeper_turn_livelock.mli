@@ -57,7 +57,10 @@ val guard_and_record_turn_start :
 (** Atomically enforce a per-turn retry/age budget before recording a start.
     With [max_attempts = 3], attempts 1, 2, and 3 are started; the fourth
     start for the same [(keeper, turn_id)] is [Blocked].  Blocked starts do
-    not increment [metric_keeper_turn_starts], because no dispatch occurs. *)
+    not increment [metric_keeper_turn_starts], because no dispatch occurs.
+
+    Provider/model health is intentionally not part of this gate; concrete
+    runtime identity belongs to OAS. *)
 
 val gate_reason_kind : gate_reason -> string
 val gate_reason_to_string : gate_reason -> string
@@ -73,3 +76,9 @@ val seconds_since_first_attempt : keeper:string -> float option
 (** Reset the in-memory state.  Intended for unit tests; the live
     server resets state implicitly on process restart. *)
 val reset_for_tests : unit -> unit
+
+(** Remove the attempt state for a single keeper.  Called by the
+    supervisor when a keeper fiber is cleaned up after a crash so
+    that the next restart begins with a fresh counter rather than
+    inheriting the previous stuck turn's exhaustion. *)
+val reset_keeper_livelock : keeper:string -> unit

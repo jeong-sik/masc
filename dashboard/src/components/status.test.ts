@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
-import { sectionLabel, type StatusSection } from "./status"
+import { normalizeStatusSection, sectionLabel, type StatusSection } from "./status"
 
 describe("sectionLabel", () => {
   it.each([
@@ -8,10 +8,17 @@ describe("sectionLabel", () => {
     ["journey", "Journey"],
     ["runtime", "Runtime"],
     ["fleet-health", "Fleet Health"],
-    ["memory-subsystems", "Memory Subsystems"],
     ["cognition", "Cognition"],
     ["agents", "Agents"],
   ] as [StatusSection, string][])("maps %s to %s", (section, expected) => {
     expect(sectionLabel(section)).toBe(expected)
+  })
+})
+
+describe("normalizeStatusSection", () => {
+  it("falls back to the monitoring default section", () => {
+    expect(normalizeStatusSection("memory-subsystems")).toBe("runtime")
+    expect(normalizeStatusSection("unknown")).toBe("runtime")
+    expect(normalizeStatusSection(undefined)).toBe("runtime")
   })
 })

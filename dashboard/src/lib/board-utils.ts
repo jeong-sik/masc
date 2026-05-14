@@ -3,7 +3,7 @@
 import { navigate } from '../router'
 import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'
-import type { BoardActorIdentity } from '../types'
+import type { BoardActorIdentity, BoardContributorQuality } from '../types'
 
 /** Strip inline markdown formatting from title text (bold, italic, code). */
 export function stripInlineMarkdown(text: string): string {
@@ -48,6 +48,40 @@ export function boardActorTitle(
   const runtime = boardActorRuntimeName(authorName, identity)
   const display = boardActorDisplayName(authorName, identity)
   return runtime && runtime !== display ? `런타임 ${runtime}` : undefined
+}
+
+export function contributorQualityPercent(quality?: BoardContributorQuality | null): number | null {
+  if (!quality || !Number.isFinite(quality.score)) return null
+  return Math.max(0, Math.min(100, Math.round(quality.score * 100)))
+}
+
+export function contributorQualityBandLabel(quality?: BoardContributorQuality | null): string {
+  switch (quality?.band) {
+    case 'excellent':
+      return '우수'
+    case 'strong':
+      return '강함'
+    case 'watch':
+      return '관찰'
+    case 'low':
+      return '낮음'
+    default:
+      return '품질'
+  }
+}
+
+export function contributorQualityBadgeClass(quality?: BoardContributorQuality | null): string {
+  switch (quality?.band) {
+    case 'excellent':
+    case 'strong':
+      return 'bg-[var(--ok-10)] text-[var(--ok-fg)] border-[var(--ok-20)]'
+    case 'watch':
+      return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
+    case 'low':
+      return 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
+    default:
+      return 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
+  }
 }
 
 /** Navigate to keeper detail if author is a keeper, otherwise agent profile. */

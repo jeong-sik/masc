@@ -42,7 +42,7 @@ let write_cred ~base ~agent_name ~token_hash =
   let path = Filename.concat agents_dir (agent_name ^ ".json") in
   let json =
     Printf.sprintf
-      "{\"agent_name\":%S,\"token\":%S,\"role\":\"agent\",\"created_at\":\"2026-04-25T00:00:00Z\"}"
+      "{\"agent_name\":%S,\"token\":%S,\"role\":\"worker\",\"created_at\":\"2026-04-25T00:00:00Z\"}"
       agent_name token_hash
   in
   let oc = open_out path in

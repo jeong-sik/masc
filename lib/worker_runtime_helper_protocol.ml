@@ -72,12 +72,12 @@ let api_response_of_yojson = function
       | None -> Error "invalid api_response in worker helper payload")
 
 let proof_to_yojson =
-  option_to_yojson Agent_sdk.Cdal_proof.to_json
+  option_to_yojson Masc_mcp_cdal_runtime.Cdal_proof.to_json
 
 let proof_of_yojson = function
   | `Null -> Ok None
   | json -> (
-      match Agent_sdk.Cdal_proof.of_json json with
+      match Masc_mcp_cdal_runtime.Cdal_proof.of_json json with
       | Ok proof -> Ok (Some proof)
       | Error msg -> Error ("invalid proof in worker helper payload: " ^ msg))
 

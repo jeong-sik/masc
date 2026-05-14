@@ -35,7 +35,7 @@ type agent_overlay = {
 
 type t = {
   defaults : agent_overlay;
-  per_agent : (string * agent_overlay) list;
+  per_agent : (Agent_id.t * agent_overlay) list;
 }
 (** The whole config.  [per_agent] is an association list rather than
     a hashtable so the whole config can be compared structurally in
@@ -56,6 +56,6 @@ val empty : t
 (** [empty] has [defaults = strict_default] and no per-agent entries.
     Fail-closed bootstrap for CI and new agents. *)
 
-val lookup : t -> actor:string -> agent_overlay
+val lookup : t -> actor:Agent_id.t -> agent_overlay
 (** [lookup cfg ~actor] returns the per-agent overlay if one is
     registered for [actor]; otherwise [cfg.defaults]. *)

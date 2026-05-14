@@ -159,6 +159,63 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(summary["evidence_window_end"], "2026-05-06T00:00:00Z")
         self.assertEqual(summary["checked_at"], "2026-05-06T00:00:00Z")
 
+    def test_status_exposes_anti_stagnation_violations(self) -> None:
+        report = goal_loop_status.build_status_report(
+            observe={
+                "files": ["server.log"],
+                "total_lines": 5,
+                "matched_lines": 0,
+                "patterns": {},
+            },
+            orient={
+                "summary": {
+                    "evidence_present": 0,
+                    "critical_present": 0,
+                    "findings_total": 1,
+                },
+                "findings": [],
+            },
+            decide={
+                "decisions_total": 1,
+                "p0_count": 0,
+                "act_missing_count": 0,
+                "act_linked_count": 1,
+                "decisions": [],
+            },
+            verify={"status": "PASS", "failing_findings": []},
+            anti_stagnation={
+                "status": "critical",
+                "checked_at": "2026-05-08T00:00:00+00:00",
+                "findings_total": 1,
+                "still_present_total": 1,
+                "violations_total": 1,
+                "escalations_required": 1,
+                "violations": [
+                    {
+                        "finding_id": "CE-1",
+                        "rule_id": "week_old_escalation_required",
+                        "severity": "critical",
+                        "age_hours": 192.0,
+                        "deadline_hours": 168.0,
+                    }
+                ],
+            },
+            generated_at="2026-05-08T00:00:00+00:00",
+        )
+
+        self.assertEqual(report.overall_status, "critical")
+        anti_summary = report.phases["act"].summary["anti_stagnation"]
+        self.assertEqual(anti_summary["violations_total"], 1)
+        self.assertEqual(anti_summary["escalations_required"], 1)
+        self.assertEqual(
+            anti_summary["violations"][0]["rule_id"],
+            "week_old_escalation_required",
+        )
+        self.assertEqual(
+            report.system_health_signals["anti_stagnation"]["violations_total"],
+            1,
+        )
+
     def test_orient_audit_catalog_gap_keeps_goal_warning(self) -> None:
         report = goal_loop_status.build_status_report(
             observe={
@@ -649,6 +706,76 @@ class GoalLoopStatusTest(unittest.TestCase):
                 "provider_health_skipped"
             ],
             1,
+        )
+
+    def test_cli_accepts_anti_stagnation_json(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_dir:
+            root = Path(raw_dir)
+            decide_path = root / "decide.json"
+            verify_path = root / "verify.json"
+            anti_path = root / "anti.json"
+            decide_path.write_text(
+                json.dumps(
+                    {
+                        "decisions_total": 0,
+                        "p0_count": 0,
+                        "decisions": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verify_path.write_text(
+                json.dumps({"status": "PASS", "failing_findings": []}),
+                encoding="utf-8",
+            )
+            anti_path.write_text(
+                json.dumps(
+                    {
+                        "status": "critical",
+                        "checked_at": "2026-05-08T00:00:00+00:00",
+                        "findings_total": 1,
+                        "still_present_total": 1,
+                        "violations_total": 1,
+                        "escalations_required": 0,
+                        "violations": [
+                            {
+                                "finding_id": "NF-2",
+                                "rule_id": "still_present_requires_act",
+                                "severity": "critical",
+                                "age_hours": 4.0,
+                                "deadline_hours": 0.0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_PATH),
+                    "--decide-json",
+                    str(decide_path),
+                    "--verify-json",
+                    str(verify_path),
+                    "--anti-stagnation-json",
+                    str(anti_path),
+                    "--fail-on",
+                    "critical",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["phases"]["act"]["summary"]["anti_stagnation"]["violations"][0][
+                "rule_id"
+            ],
+            "still_present_requires_act",
         )
 
     def test_report_json_is_machine_readable(self) -> None:

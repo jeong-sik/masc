@@ -2,7 +2,7 @@
 
     Verifies that [Auth.load_raw_token] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token]. This is the data path
-    consumed by [Oas_worker_exec_transport.runtime_mcp_policy_of_tool_names]
+    consumed by [Cascade_transport.runtime_mcp_policy_of_tool_names]
     when [MASC_MCP_TOKEN] is unset (the CLI subprocess case for
     codex_cli/gemini_cli/kimi_cli that callback into masc-mcp).
 
@@ -76,11 +76,11 @@ let masc_headers
   |> require_some "masc runtime MCP server"
 
 let codex_provider_cfg () =
-  match Oas_worker_exec.resolve_provider_config_of_label "codex_cli:auto" with
+  match Cascade_runner.resolve_provider_config_of_label "codex_cli:auto" with
   | Ok cfg -> cfg
   | Error err ->
       fail
-        (Oas_worker_exec.label_resolution_error_to_string err)
+        (Cascade_runner.label_resolution_error_to_string err)
 
 let test_load_raw_token_reads_seeded_file () =
   with_temp_dir "f1-load-raw" @@ fun base_path ->
@@ -121,18 +121,18 @@ let test_codex_keeper_bound_policy_uses_per_keeper_bearer () =
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   let policy =
-    Oas_worker_exec.runtime_mcp_policy_of_tool_names ~agent_name
+    Cascade_runner.runtime_mcp_policy_of_tool_names ~agent_name
       [ "masc_transition" ]
     |> require_some "runtime_mcp_policy_of_tool_names"
   in
   check bool "actor-bound approval tool preserved" true
     (List.mem "masc_transition" policy.allowed_tool_names);
   check bool "codex can authenticate keeper-bound policy" true
-    (Oas_worker_exec.codex_cli_can_auth_keeper_bound_runtime_mcp
+    (Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp
        ~agent_name policy);
   let codex = codex_provider_cfg () in
   let codex_policy =
-    Oas_worker_exec.runtime_mcp_policy_for_provider ~provider_cfg:codex
+    Cascade_runner.runtime_mcp_policy_for_provider ~provider_cfg:codex
       ~agent_name (Some policy)
     |> require_some "runtime_mcp_policy_for_provider"
   in

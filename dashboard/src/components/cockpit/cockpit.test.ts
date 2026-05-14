@@ -29,7 +29,7 @@ describe('Cockpit command map', () => {
     expect(screen.getByTestId('world-visualizer')).toBeInTheDocument()
     expect(screen.getByTestId('cockpit-disclosure')).toBeInTheDocument()
     expect(document.querySelectorAll('[data-cockpit-plane]')).toHaveLength(5)
-    expect(document.querySelector('[data-cockpit-plane="work"]')).toHaveTextContent('1 blocked')
+    expect(document.querySelector('[data-cockpit-plane="work"]')).toHaveTextContent('2 covered')
     expect(document.querySelector('[data-cockpit-plane="ide"]')).toHaveTextContent('Source')
   })
 
@@ -42,13 +42,14 @@ describe('Cockpit command map', () => {
     expect(disclosure.querySelector('[data-cognitive-level="perceive"]')).toHaveTextContent('Route coverage')
     expect(disclosure.querySelector('[data-cognitive-level="comprehend"]')).toHaveTextContent('Plane grouping')
     expect(disclosure.querySelector('[data-cognitive-level="project"]')).toHaveTextContent('Route gaps')
-    expect(disclosure).toHaveTextContent('backend-blocked')
+    expect(disclosure).toHaveTextContent('10 routes')
+    expect(disclosure).toHaveTextContent('No backend-blocked routes')
   })
 
   it('links cockpit entries to their canonical production routes', () => {
     render(h(Cockpit, null))
 
-    const goalTree = screen.getByRole('link', { name: /Open Goal Tree in #workspace \/ planning \/ goal-tree/ })
+    const goalTree = screen.getByRole('link', { name: /Open Goal Horizon in #workspace \/ planning \/ goal-tree/ })
     expect(goalTree).toHaveAttribute('href', '#workspace?section=planning&view=goal-tree')
 
     fireEvent.click(goalTree)

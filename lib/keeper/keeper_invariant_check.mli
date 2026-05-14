@@ -33,3 +33,26 @@ val check_step_invariants :
   new_conditions:Keeper_state_machine.conditions ->
   new_restart_count:int ->
   violation list
+
+(** Check point-in-time safety invariants from a single (phase, conditions)
+    snapshot, no history required.
+
+    Subset of [check_step_invariants] covering the 5 invariants that are
+    derivable without a prev-state:
+    1. TypeOK
+    6. RunningRequiresFiber
+    7. StoppedRequiresDrain
+    8. DeadRequiresNoBudget
+    9. DerivePhaseAgreement
+
+    Suitable for periodic sweep-time scans (e.g. keeper supervisor audit).
+    The history-dependent invariants (DeadIsForever, StoppedIsForever,
+    BudgetNeverRevives, RestartCountMonotonic, TransitionMatrixAgreement)
+    require a prev-state and are intentionally excluded — use
+    [check_step_invariants] when a prev-state is available.
+
+    Returns list of violations (empty = all passed). *)
+val check_snapshot_invariants :
+  phase:Keeper_state_machine.phase ->
+  conditions:Keeper_state_machine.conditions ->
+  violation list

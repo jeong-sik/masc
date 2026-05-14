@@ -112,6 +112,7 @@ export interface DashboardRuntimeResolution {
   workspace_git_commit: string | null
   resolved_base_git_commit: string | null
   source_mismatch: boolean
+  server_workspace_mismatch: boolean
   diagnostics: DashboardRuntimeDiagnostic[]
   build: ServerBuildIdentity
   keeper_runtime: KeeperRuntimeResolved | null
@@ -132,6 +133,24 @@ export interface DashboardShellResponse {
   auth?: DashboardShellAuthSummary | null
   config_resolution?: DashboardConfigResolution | null
   runtime_resolution?: DashboardRuntimeResolution | null
+}
+
+export interface DashboardBootstrapSliceError {
+  error: string
+  slice?: string
+}
+
+export type DashboardBootstrapSlice<T> = T | DashboardBootstrapSliceError
+
+export interface DashboardBootstrapResponse {
+  served_at?: string
+  milestone?: number
+  shell?: DashboardBootstrapSlice<DashboardShellResponse>
+  execution?: DashboardBootstrapSlice<DashboardExecutionResponse>
+  planning?: DashboardBootstrapSlice<DashboardPlanningResponse>
+  namespace_truth?: DashboardBootstrapSlice<DashboardNamespaceTruthResponse>
+  goals?: DashboardBootstrapSlice<DashboardGoalsTreeResponse>
+  goal_loop_status?: DashboardBootstrapSlice<Record<string, unknown>>
 }
 
 export interface DashboardNamespaceTruthAttentionSummary {
@@ -601,6 +620,12 @@ export interface GoalKeeperTrustApprovalState {
   state?: string | null
   summary?: string | null
   pending_count?: number | null
+  pending_first?: {
+    id?: string | null
+    tool_name?: string | null
+    task_id?: string | null
+    blocker_class?: string | null
+  } | null
 }
 
 export interface GoalKeeperTrustExecutionSummary {

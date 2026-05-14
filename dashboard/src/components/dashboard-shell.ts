@@ -6,7 +6,7 @@ import type { RouteState, TabId } from '../types'
 import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
-import { dashboardWsConnected } from '../dashboard-ws-state'
+import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
@@ -104,7 +104,9 @@ function describeReconnecting(args: {
 
 export function ConnectionStatus() {
   const wsOnly = dashboardWsOnlyEnabled()
-  const isConnected = wsOnly ? dashboardWsConnected.value : connected.value
+  const isConnected = wsOnly
+    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
+    : connected.value
   const snap = missionSnapshot.value
   const attentionCount = snap?.attention_queue?.length ?? 0
   const reconn = reconnectCount.value
@@ -366,7 +368,9 @@ function dashboardRouteBoundaryKey(routeState: RouteState): string {
 
 function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const wsOnly = dashboardWsOnlyEnabled()
-  const live = wsOnly ? dashboardWsConnected.value : connected.value
+  const live = wsOnly
+    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
+    : connected.value
   const snap = missionSnapshot.value
   const sessions = snap?.sessions ?? []
   let blockers = 0
@@ -476,7 +480,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                   </div>
                 <//>
 
-                ${sections.length > 0 ? html`
+                ${sections.length > 1 ? html`
                   <div class="ml-2.5 flex flex-col gap-px border-l border-[var(--color-border-divider)] pl-2.5" role="list">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id

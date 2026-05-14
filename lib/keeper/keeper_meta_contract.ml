@@ -118,6 +118,15 @@ type blocker_class =
         batch window. This mirrors [Keeper_registry.Stale_fleet_batch] so
         keeper_meta and dashboard status can report the systemic blocker
         instead of collapsing it to a generic turn timeout. *)
+  | Sdk_max_turns_exceeded
+  | Sdk_token_budget_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_tool_retry_exhausted
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met
 
 let blocker_class_to_string = function
   | Cascade_exhausted _ -> "cascade_exhausted"
@@ -133,6 +142,15 @@ let blocker_class_to_string = function
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Stale_fleet_batch -> "stale_fleet_batch"
+  | Sdk_max_turns_exceeded -> "sdk_max_turns_exceeded"
+  | Sdk_token_budget_exceeded -> "sdk_token_budget_exceeded"
+  | Sdk_cost_budget_exceeded -> "sdk_cost_budget_exceeded"
+  | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
+  | Sdk_idle_detected -> "sdk_idle_detected"
+  | Sdk_tool_retry_exhausted -> "sdk_tool_retry_exhausted"
+  | Sdk_guardrail_violation -> "sdk_guardrail_violation"
+  | Sdk_tripwire_violation -> "sdk_tripwire_violation"
+  | Sdk_exit_condition_met -> "sdk_exit_condition_met"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -149,6 +167,15 @@ let blocker_class_of_serialized_string = function
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "stale_fleet_batch" -> Some Stale_fleet_batch
+  | "sdk_max_turns_exceeded" -> Some Sdk_max_turns_exceeded
+  | "sdk_token_budget_exceeded" -> Some Sdk_token_budget_exceeded
+  | "sdk_cost_budget_exceeded" -> Some Sdk_cost_budget_exceeded
+  | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
+  | "sdk_idle_detected" -> Some Sdk_idle_detected
+  | "sdk_tool_retry_exhausted" -> Some Sdk_tool_retry_exhausted
+  | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
+  | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
+  | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
   | _ -> None
 ;;
 
@@ -193,6 +220,70 @@ let cascade_exhaustion_reason_of_json = function
   | _ -> None
 ;;
 
+(* ── Unified blocker_info: typed klass + free-form detail ───────
+   Replaces the historic [last_blocker: string] +
+   [last_blocker_class: blocker_class option] pair.  The string-only
+   field was used by [blocker_class_of_string] (substring classifier)
+   to recover a typed class — exactly the workaround pattern called
+   out in CLAUDE.md "워크어라운드 거부 기준 #2 String/Substring
+   분류기 보강".  Making [blocker_class] the only authoritative class
+   eliminates that recovery path; [detail] carries free-form context
+   for UI / Prometheus labels (no classification semantics). *)
+type blocker_info = {
+  klass : blocker_class;
+  detail : string;
+}
+
+let blocker_info_of_class ?(detail = "") klass = { klass; detail }
+
+let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
+  let klass_payload = match info.klass with
+    | Cascade_exhausted reason ->
+      `Assoc [ "name", `String "cascade_exhausted"
+             ; "reason", cascade_exhaustion_reason_to_json reason
+             ]
+    | _ -> `String (blocker_class_to_string info.klass)
+  in
+  `Assoc
+    [ "klass", klass_payload
+    ; "detail", `String info.detail
+    ]
+;;
+
+let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
+  match json with
+  | `Null -> None
+  | `Assoc fields ->
+    let klass =
+      match List.assoc_opt "klass" fields with
+      | Some (`String s) -> blocker_class_of_serialized_string s
+      | Some (`Assoc kfields) ->
+        (match List.assoc_opt "name" kfields with
+         | Some (`String "cascade_exhausted") ->
+           let reason =
+             match List.assoc_opt "reason" kfields with
+             | Some r ->
+               (match cascade_exhaustion_reason_of_json r with
+                | Some r -> r
+                | None -> Other_detail "cascade_exhausted")
+             | None -> Other_detail "cascade_exhausted"
+           in
+           Some (Cascade_exhausted reason)
+         | Some (`String s) -> blocker_class_of_serialized_string s
+         | _ -> None)
+      | _ -> None
+    in
+    (match klass with
+     | None -> None
+     | Some klass ->
+       let detail = match List.assoc_opt "detail" fields with
+         | Some (`String s) -> s
+         | _ -> ""
+       in
+       Some { klass; detail })
+  | _ -> None
+;;
+
 type usage_metrics =
   { total_turns : int
   ; total_input_tokens : int
@@ -229,8 +320,7 @@ type agent_runtime_state =
   ; last_social_transition_reason : string
   ; last_active_desire : string
   ; last_current_intention : string
-  ; last_blocker : string
-  ; last_blocker_class : blocker_class option
+  ; last_blocker : blocker_info option
   ; last_need : string
   }
 
@@ -244,8 +334,8 @@ type keeper_meta =
   ; mid_goal : string
   ; long_goal : string
   ; social_model : string
-  ; cascade_name : string
   ; models : string list
+  ; cascade_ref : Cascade_ref.cascade_ref option
   ; will : string
   ; needs : string
   ; desires : string
@@ -309,6 +399,20 @@ type keeper_meta =
   ; oas_env : (string * string) list
   ; meta_version : int
   }
+
+let cascade_name_of_meta (m : keeper_meta) : string =
+  match m.cascade_ref with
+  | Some ref_ when not (String.equal ref_.Cascade_ref.group "") ->
+    ref_.Cascade_ref.group
+  | _ -> (Keeper_config.default_cascade_name ())
+;;
+
+let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
+  let cascade_ref =
+    Some Cascade_ref.{ group = name; item = None }
+  in
+  { m with cascade_ref }
+;;
 
 let proactive_cycle_outcome_to_string = function
   | Proactive_never_started -> "never_started"

@@ -40,6 +40,34 @@ let write_file path content =
   mkdir_p (Filename.dirname path);
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let minimal_live_cascade_toml =
+  {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[tier.primary_profile]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.primary_profile]
+tiers = ["primary_profile"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.primary_profile"
+|}
+
 let with_fake_docker script f =
   with_temp_dir "config-doctor-docker" @@ fun dir ->
   let docker_path = Filename.concat dir "docker" in
@@ -99,6 +127,16 @@ let contains_substring ~needle s =
 let list_contains_substring ~needle values =
   List.exists (contains_substring ~needle) values
 
+let with_config_dir config_root f =
+  let reset () =
+    Config_dir_resolver.reset ();
+    Cascade_catalog_runtime.reset_cache_for_tests ()
+  in
+  with_env "MASC_BASE_PATH" "" @@ fun () ->
+  with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
+  reset ();
+  Fun.protect ~finally:reset f
+
 let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
   Config_doctor.
     {
@@ -112,8 +150,12 @@ let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
       repo_config_fallback_enabled = false;
     }
 
-let initialize_config_root ?(cascade_json="{}") root =
-  write_file (Filename.concat root "cascade.json") cascade_json;
+(* RFC-0058 §9: cascade.toml is the only on-disk cascade source.  The
+   default [""] is the smallest valid TOML document — a document with
+   no tables or keys — which the materializer renders to an empty
+   catalog ("no presets configured" baseline). *)
+let initialize_config_root ?(cascade_toml="") root =
+  write_file (Filename.concat root "cascade.toml") cascade_toml;
   mkdir_p (Filename.concat root "personas")
 
 let test_invalid_explicit_config_dir () =
@@ -163,6 +205,29 @@ let test_initialized_local_base_config () =
   check bool "keeper runtime optional" false report.keeper_runtime_toml_present;
   check (list string) "no warnings" [] report.warnings
 
+let test_initialized_config_without_cascade_toml_errors () =
+  with_temp_dir "config-doctor-no-cascade" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  mkdir_p (Filename.concat config_root "personas");
+  let report =
+    Config_doctor.analyze_with
+      (make_inputs ~cwd:dir ~base_path_input:base_path ())
+  in
+  check string "init_state" "initialized"
+    (init_state report.init_state);
+  check string "status" "error" (status report.status);
+  check bool "warning mentions missing cascade.toml" true
+    (list_contains_substring ~needle:"cascade.toml" report.warnings);
+  check bool "next action bootstraps missing cascade.toml" true
+    (list_contains_substring
+       ~needle:"Create or bootstrap cascade.toml"
+       report.next_actions);
+  check bool "next action avoids broken preset wording" false
+    (list_contains_substring
+       ~needle:"broken cascade preset entries"
+       report.next_actions)
+
 let test_shadowed_explicit_config_dir () =
   with_temp_dir "config-doctor-shadowed" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -180,80 +245,6 @@ let test_shadowed_explicit_config_dir () =
   check string "status" "warn" (status report.status);
   check string "active root" (canonical_path explicit_root) report.active_config_root;
   check bool "local base initialized" true report.local_base_config_initialized
-
-let test_broken_cascade_catalog_surfaces_errors () =
-  with_temp_dir "config-doctor-cascade-bad" @@ fun dir ->
-  let base_path = Filename.concat dir "base" in
-  let config_root = Filename.concat base_path ".masc/config" in
-  initialize_config_root
-    ~cascade_json:{|{
-  "bad_provider_models": [
-    "__nonexistent_provider_sentinel__:fake-model"
-  ],
-  "bad_strategy_models": [
-    "claude_code:claude-haiku-4-5-20251001"
-  ],
-  "bad_strategy_strategy": "priority_tier",
-  "bad_strategy_tiers": [
-    ["codex_cli:auto"]
-  ]
-}|}
-    config_root;
-  let report =
-    Config_doctor.analyze_with
-      (make_inputs ~cwd:dir ~base_path_input:base_path ())
-  in
-  check string "status escalates to error" "error" (status report.status);
-  check bool "catalog summary warning present" true
-    (list_contains_substring
-       ~needle:"Cascade catalog check scanned 2 preset(s): 2 error, 0 warn."
-       report.warnings);
-  check bool "invalid provider warning present" true
-    (list_contains_substring
-       ~needle:"Cascade preset bad_provider has 1 hard-invalid model spec"
-       report.warnings);
-  check bool "priority_tier collapse warning present" true
-    (list_contains_substring
-       ~needle:
-         "Cascade preset bad_strategy uses priority_tier, but every tier collapses after model-id normalization"
-       report.warnings);
-  check bool "next action mentions doctor rerun" true
-    (list_contains_substring
-       ~needle:"Rerun `masc-mcp doctor config` after editing cascade.json."
-       report.next_actions)
-
-let test_non_runtime_required_cascade_catalog_warns () =
-  with_temp_dir "config-doctor-cascade-warn" @@ fun dir ->
-  let base_path = Filename.concat dir "base" in
-  let config_root = Filename.concat base_path ".masc/config" in
-  initialize_config_root
-    ~cascade_json:{|{
-  "default_models": [
-    "claude_code:claude-haiku-4-5-20251001"
-  ],
-  "default_strategy": "priority_tier",
-  "default_tiers": [
-    ["claude_code:claude-haiku-4-5-20251001"],
-    ["gemini_cli:not-configured-here"]
-  ],
-  "manual_trial_models": [
-    "claude_code:claude-haiku-4-5-20251001"
-  ]
-}|}
-    config_root;
-  let report =
-    Config_doctor.analyze_with
-      (make_inputs ~cwd:dir ~base_path_input:base_path ())
-  in
-  check string "status downgrades to warn" "warn" (status report.status);
-  check bool "catalog summary warning present" true
-    (list_contains_substring
-       ~needle:"Cascade catalog check scanned 2 preset(s): 0 error, 1 warn."
-       report.warnings);
-  check bool "priority_tier degradation detail surfaced" true
-    (list_contains_substring
-       ~needle:"uses priority_tier, but 1/2 tier(s) collapse after model-id normalization"
-       report.warnings)
 
 let fake_docker_missing_image_script =
   "#!/bin/sh\n\
@@ -278,8 +269,53 @@ let test_analyze_live_surfaces_sandbox_preflight_failure () =
   with_temp_dir "config-doctor-sandbox-preflight" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
   let config_root = Filename.concat base_path ".masc/config" in
-  initialize_config_root config_root;
+  initialize_config_root
+    ~cascade_toml:{|[providers.codex_cli]
+display-name = "OpenAI Codex CLI"
+protocol = "openai-http"
+command = "codex"
+is-non-interactive = true
+
+[providers.codex_cli.credentials]
+type = "env"
+key = "OPENAI_API_KEY"
+
+[models.codex-spark]
+api-name = "gpt-5.3-codex-spark"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.codex-spark.capabilities]
+supports-native-streaming = true
+supports-response-format-json = true
+
+[codex_cli.codex-spark]
+is-default = true
+max-concurrent = 1
+
+[tier.coding_plan_primary]
+members = ["codex_cli.codex-spark"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["coding_plan_primary"]
+strategy = "priority_tier"
+fallback = false
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+
+[routes.tool_required]
+target = "tier-group.coding_plan"
+|}
+    config_root;
+  with_config_dir config_root @@ fun () ->
+  with_env "OPENAI_API_KEY" "test" @@ fun () ->
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:Config_dir_resolver.reset @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
@@ -315,6 +351,83 @@ let test_analyze_live_surfaces_sandbox_preflight_failure () =
          | `Null -> false
          | _ -> true)
 
+let test_analyze_live_errors_on_tool_required_route_without_forced_tool_provider () =
+  with_temp_dir "config-doctor-tool-route" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  initialize_config_root
+    ~cascade_toml:{|[providers.glm-coding]
+display-name = "Zhipu GLM Coding"
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+[models.glm-5-1]
+api-name = "glm-5.1"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-5-1.capabilities]
+supports-native-streaming = true
+supports-response-format-json = true
+
+[glm-coding.glm-5-1]
+is-default = true
+max-concurrent = 1
+
+[tier.coding_plan_primary]
+members = ["glm-coding.glm-5-1"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["coding_plan_primary"]
+strategy = "priority_tier"
+fallback = false
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+
+[routes.tool_required]
+target = "tier-group.coding_plan"
+|}
+    config_root;
+  with_config_dir config_root @@ fun () ->
+  with_env "ZAI_API_KEY" "test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs ~proc_mgr ->
+  let report =
+    Config_doctor.analyze_live
+      ~sw ~net ~clock ~fs ~proc_mgr
+      ~base_path_input:base_path
+      ~default_base_path:base_path
+      ()
+  in
+  check string "status escalates to error" "error" (status report.status);
+  check bool "keeper route tool warning present" true
+    (list_contains_substring
+       ~needle:"Tool-required cascade route keeper_turn targets tier-group.coding_plan"
+       report.warnings);
+  check bool "tool route tool warning present" true
+    (list_contains_substring
+       ~needle:"Tool-required cascade route tool_required targets tier-group.coding_plan"
+       report.warnings);
+  check bool "forced tool-use reason present" true
+    (list_contains_substring
+       ~needle:"needs inline tool_choice or runtime MCP"
+       report.warnings);
+  check bool "no-tool terminal hint present" true
+    (list_contains_substring
+       ~needle:"no_tool_capable_provider"
+       report.warnings);
+  check bool "next action points at tool-capable route" true
+    (list_contains_substring
+       ~needle:"Route keeper_turn/tool_required to at least one provider"
+       report.next_actions)
+
 let () =
   run "config_doctor"
     [
@@ -325,13 +438,15 @@ let () =
              test_missing_init_without_explicit_config;
            test_case "initialized local base config" `Quick
              test_initialized_local_base_config;
-          test_case "shadowed explicit config dir" `Quick
-          test_shadowed_explicit_config_dir;
-           test_case "broken cascade catalog surfaces errors" `Quick
-             test_broken_cascade_catalog_surfaces_errors;
-           test_case "non-runtime-required cascade catalog warns" `Quick
-             test_non_runtime_required_cascade_catalog_warns;
+           test_case "initialized config without cascade.toml errors"
+             `Quick
+             test_initialized_config_without_cascade_toml_errors;
+           test_case "shadowed explicit config dir" `Quick
+             test_shadowed_explicit_config_dir;
            test_case "analyze_live surfaces sandbox preflight failure"
              `Quick test_analyze_live_surfaces_sandbox_preflight_failure;
+           test_case "analyze_live errors on tool-required route without forced tool provider"
+             `Quick
+             test_analyze_live_errors_on_tool_required_route_without_forced_tool_provider;
          ]);
     ]

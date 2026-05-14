@@ -11,6 +11,7 @@
 #   - dry-run by default; --apply required to actually remove
 #   - skips dirty worktrees (uncommitted or staged changes)
 #   - skips worktrees containing nested worktrees (.worktrees/ inside)
+#   - skips worktrees referenced by tmux, running processes, or launchd plists
 #   - never uses --force
 #   - leaves the branch in place (only removes the worktree directory)
 #
@@ -34,6 +35,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/worktree-cleanup-guards.sh"
+
 if ! [[ "$DAYS" =~ ^[0-9]+$ ]]; then
   echo "--days must be a non-negative integer (got: $DAYS)" >&2
   exit 2
@@ -47,6 +51,7 @@ CUTOFF_TS=$(( $(date +%s) - DAYS * 86400 ))
 stale=0
 dirty=0
 nested=0
+active=0
 removed=0
 skipped=0
 
@@ -87,6 +92,12 @@ while read -r wt_path; do
     continue
   fi
 
+  if worktree_cleanup_is_runtime_referenced "$wt_path"; then
+    echo "ACTIVE  $wt_path — skipped (referenced by tmux/process/launchd)"
+    active=$((active+1))
+    continue
+  fi
+
   age_days=$(( ( $(date +%s) - last_ts ) / 86400 ))
   stale=$((stale+1))
 
@@ -106,9 +117,9 @@ done < <(git worktree list --porcelain | awk '/^worktree /{print $2}')
 if [ "$APPLY" -eq 1 ]; then
   git worktree prune
   echo ""
-  echo "Summary (--days $DAYS --apply): stale=$stale removed=$removed dirty=$dirty nested=$nested skipped=$skipped"
+  echo "Summary (--days $DAYS --apply): stale=$stale removed=$removed dirty=$dirty nested=$nested active=$active skipped=$skipped"
 else
   echo ""
-  echo "Summary (--days $DAYS dry-run): stale=$stale dirty=$dirty nested=$nested skipped=$skipped"
+  echo "Summary (--days $DAYS dry-run): stale=$stale dirty=$dirty nested=$nested active=$active skipped=$skipped"
   echo "Pass --apply to remove the listed candidates."
 fi

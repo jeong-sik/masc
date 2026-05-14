@@ -25,7 +25,8 @@ type hook_accumulator =
   ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
-  ; mutable receipt_tool_contract_result : string
+  ; mutable receipt_tool_contract_result :
+      Keeper_execution_receipt.tool_contract_result
   }
 
 (** Immutable snapshot of hook outputs after OAS execution completes. *)
@@ -39,7 +40,8 @@ type hook_outputs =
   ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
-  ; out_receipt_tool_contract_result : string
+  ; out_receipt_tool_contract_result :
+      Keeper_execution_receipt.tool_contract_result
   }
 
 val freeze : hook_accumulator -> hook_outputs
@@ -50,8 +52,8 @@ type tool_search_hit_partition =
   ; filtered_by_policy : int
   }
 
-val partition_tool_search_hits :
-     core:string list
+val partition_tool_search_hits
+  :  core:string list
   -> core_always:string list
   -> allowed:string list
   -> retrieved:(string * float) list
@@ -65,7 +67,7 @@ val partition_tool_search_hits :
     at the OAS call site. *)
 type agent_setup =
   { tools : Agent_sdk.Tool.t list
-  (** Release resources owned by the prepared keeper tool bundle.
+    (** Release resources owned by the prepared keeper tool bundle.
       Callers should invoke this once after the turn consumes the setup,
       on both success and exception paths.  Implementations must be
       idempotent and should not raise; callers defensively catch and log
@@ -81,8 +83,8 @@ type agent_setup =
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
-  ; receipt_stop_reason_ref : string option ref
-  ; receipt_cascade_observation_ref : Oas_worker.cascade_observation option ref
+  ; receipt_stop_reason_ref : Cascade_runner.stop_reason option ref
+  ; receipt_cascade_observation_ref : Cascade_legacy_runner.cascade_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref
@@ -91,8 +93,8 @@ type agent_setup =
   ; actual_keeper_tool_names_ref : string list ref
   }
 
-val prepare_agent_setup :
-     config:Coord.config
+val prepare_agent_setup
+  :  config:Coord.config
   -> meta:Keeper_types.keeper_meta
   -> ctx_work:working_context
   -> session:Keeper_types.session_context
@@ -116,8 +118,11 @@ val prepare_agent_setup :
   -> gemini_mcp_disabled:bool
   -> approval_mode_effective:string option
   -> approval_mode_derived:bool
+  -> ?actionable_signal:bool
   -> ?max_cost_usd:float
   -> trajectory_acc:Trajectory.accumulator option
   -> tool_overlay:Agent_sdk.Tool_op.t ref option
+  -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
+  -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> unit
   -> (agent_setup, Agent_sdk.Error.sdk_error) result

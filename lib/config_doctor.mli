@@ -134,9 +134,13 @@ val analyze_live :
     + Initialise [Process_eio] with the resolved base path.
     + Run [Keeper_sandbox_runtime.docker_preflight] (10 s timeout).
     + Live cascade catalog validation (when reachable).
+    + Verify [keeper_turn] / [tool_required] routes can produce at
+      least one forced required-tool provider (inline [tool_choice] or
+      runtime MCP).
     + Combine into a final {!status} via the cascading severity
       ladder (Invalid_env / Missing_init -> Error; serving stale
-      catalog -> Error; partial catalog -> Warn; etc.).
+      catalog -> Error; tool-required route dead -> Error; partial
+      catalog -> Warn; etc.).
 
     Side-effecting (Process_eio init, Docker probe, file reads)
     but does not mutate persistent state. *)

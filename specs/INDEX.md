@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-05T14:52:32Z (HEAD: 9f878eba7c)
+Generated: 2026-05-14T02:58:24Z (HEAD: b1f8f26fc4)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 89 |
-| Manual specs | 89 |
+| Total .tla files | 95 |
+| Manual specs | 95 |
 | TTrace (auto-generated) | 0 |
 | Directories | 18 |
-| Total .cfg files | 179 |
-| Buggy .cfg (bug-model pair) | 87 |
+| Total .cfg files | 198 |
+| Buggy .cfg (bug-model pair) | 101 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -43,7 +43,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | AutonomousLoop.tla | AutonomousLoop | manual | 2 | 1 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning, inv:AutoTickReadOnly} buggy={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning, inv:AutoTickReadOnly} | 11f25e8d37df |
 | AutonomousPhase.tla | AutonomousPhase | manual | 2 | 1 | clean={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} buggy={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} | 54e3dc0e6baa |
 
-### specs/boundary (18 specs)
+### specs/boundary (19 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -65,18 +65,20 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperTurnTerminal.tla | KeeperTurnTerminal | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 2b0b7b1f3445 |
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:DockerImpliesDockerVia} buggy={inv:DockerImpliesDockerVia} | 6faab1e68083 |
 | ToolCallContract.tla | ToolCallContract | manual | 2 | 1 | clean={inv:Safety} buggy={inv:NeverDropSilently} | 61eda23b1997 |
+| TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:OasBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | 0790cfbf9572 |
 
-### specs/bug-models (23 specs)
+### specs/bug-models (24 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| AmbiguousPartialCommit.tla | AmbiguousPartialCommit | manual | 1 | 0 | clean={inv:TypeOK, inv:Safety} | 214a39eeabf5 |
+| AmbiguousPartialCommit.tla | AmbiguousPartialCommit | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety} buggy={inv:TypeOK, inv:MutationsNeverOrphanMustHold} | d716bce3e094 |
 | AmbiguousPartialCommitBug.tla | AmbiguousPartialCommitBug | manual | 1 | 1 | buggy={inv:TypeOK, inv:Safety} | 40c4f7406ba8 |
 | AtomicFileWrite.tla | AtomicFileWrite | manual | 2 | 1 | clean={inv:ReaderNeverSeesEmpty} buggy={inv:ReaderNeverSeesEmpty} | 95f772ef7488 |
 | AuthIdentityFSM.tla | AuthIdentityFSM | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 55256576bd84 |
-| CascadeCrossFallback.tla | CascadeCrossFallback | manual | 2 | 1 | clean={inv:TypeOK, inv:AtMostOneCrossCascadePerTurn, inv:PromotionRequiresExhaustion, inv:PromotionFrozenAfterFinish} buggy={inv:TypeOK, inv:AtMostOneCrossCascadePerTurn} | b3f6de56fd84 |
+| CascadeCrossFallback.tla | CascadeCrossFallback | manual | 2 | 1 | clean={inv:TypeOK, inv:AtMostOneCrossCascadePerTurn, inv:PromotionRequiresExhaustion, inv:PromotionFrozenAfterFinish} buggy={inv:TypeOK, inv:AtMostOneCrossCascadePerTurn} | b32ff3fbc755 |
 | CascadeExhaustion.tla | CascadeExhaustion | manual | 2 | 1 | clean={inv:TypeOK, inv:ExhaustionSafetyLastOk} buggy={inv:TypeOK, inv:ExhaustionDiagnosticConsistency} | 20f49d7b2536 |
 | CascadeLiveness.tla | CascadeLiveness | manual | 3 | 1 | clean={inv:TypeOK, inv:SlotCapacity, inv:SlotNonNeg, inv:NoPhantomSlots, inv:AdmittedOK} buggy={inv:TypeOK, inv:NoPhantomSlots} liveness={inv:TypeOK, inv:SlotCapacity, inv:SlotNonNeg, inv:NoPhantomSlots, inv:AdmittedOK} | 47df51e8fce8 |
+| CooperativeDrainYield.tla | CooperativeDrainYield | manual | 2 | 1 | clean={inv:TypeOK, inv:NoStarvation} buggy={inv:TypeOK, inv:NoStarvation} | d3828a38e496 |
 | DashboardCacheStampede.tla | DashboardCacheStampede | manual | 2 | 1 | clean={inv:TypeOK, inv:NoZombieSlot} buggy={inv:TypeOK, inv:NoZombieSlot} | ab492d475875 |
 | DiscoveryCacheTTL.tla | DiscoveryCacheTTL | manual | 2 | 1 | clean={inv:TypeOK, inv:ConsistentRead} buggy={inv:TypeOK, inv:ConsistentRead} | 67b6a98c6628 |
 | DispatchCoverage.tla | DispatchCoverage | manual | 2 | 1 | clean={inv:TypeOK, inv:DataFsmConsistent, inv:PhaseConsistent, inv:NeverStuckFailing} buggy={inv:TypeOK, inv:DataFsmConsistent, inv:PhaseConsistent, inv:NeverStuckFailing} | 27f7463c8e91 |
@@ -112,39 +114,43 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 |------|--------|------|-----|-------|-------------------------|---------------|
 | ContractClosure.tla | ContractClosure | manual | 2 | 1 | clean={inv:TypeOK, inv:ClosureIntegrity, prop:VerdictUnblocksFsm} buggy={inv:ClosureIntegrity} | d4121bf6a81c |
 
-### specs/keeper-state-machine (29 specs)
+### specs/keeper-state-machine (33 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| KeeperAdmissionLiveness.tla | KeeperAdmissionLiveness | manual | 3 | 2 | clean={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} buggy-2={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} buggy={inv:TypeOK, inv:RateRespect, inv:TokensInRange, inv:QueueWellFormed, inv:TokenInflightConservation} | d0de975d7f83 |
-| KeeperApprovalQueue.tla | KeeperApprovalQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | a18102f83db7 |
-| KeeperCascadeLifecycle.tla | KeeperCascadeLifecycle | manual | 2 | 1 | clean={inv:Safety, prop:TryingEventuallyTerminates, prop:FinalizingEventuallyClears} buggy={inv:CascadeSelectionRequiresMeasurement} | e305638eb658 |
+| KeeperApprovalQueue.tla | KeeperApprovalQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 36bb593bbcf3 |
+| KeeperCascadeAttemptFSM.tla | KeeperCascadeAttemptFSM | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 4767786000c2 |
+| KeeperCascadeLifecycle.tla | KeeperCascadeLifecycle | manual | 2 | 1 | clean={inv:Safety, prop:TryingEventuallyTerminates, prop:FinalizingEventuallyClears} buggy={inv:CascadeSelectionRequiresMeasurement} | e7ab388ffd93 |
+| KeeperCascadeRouting.tla | KeeperCascadeRouting | manual | 2 | 1 | clean={inv:TypeOK, inv:KeeperNeverBlockedByCascade, inv:TurnProceedsIfHealthyItemExists, inv:NoGroupCycle, inv:HealthStateConsistent, inv:FallbackCountBounded, inv:SelectedItemInPath} buggy={inv:TypeOK, inv:KeeperNeverBlockedByCascade, inv:TurnProceedsIfHealthyItemExists, inv:NoGroupCycle, inv:HealthStateConsistent, inv:FallbackCountBounded, inv:SelectedItemInPath} | b2bdc9d76d73 |
 | KeeperCircuitBreaker.tla | KeeperCircuitBreaker | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:TripOnlyWithStreak} | 1d4d87f2bb68 |
-| KeeperCompactionLifecycle.tla | KeeperCompactionLifecycle | manual | 2 | 1 | clean={inv:Safety, prop:OverflowEventuallyLeavesOverflow, prop:CompactingEventuallyStops} buggy={inv:CompactingAlignsAll} | ae32b2f6ae60 |
-| KeeperCompositeLifecycle.tla | KeeperCompositeLifecycle | manual | 3 | 2 | clean={inv:SafetyInvariant, prop:EventualMeasurementResolves, prop:RecoveryEventuallyCompletes, prop:OverflowedEventuallyResolves} buggy-cascade={inv:NoCascadeBeforeMeasurement} buggy-compaction={inv:CompactionAtomicity, inv:PhaseTurnAlignment} | 40f62be554b0 |
-| KeeperConditionsGovernPhase.tla | KeeperConditionsGovernPhase | manual | 2 | 1 | clean={inv:Safety, prop:HandoffEventuallyAcknowledged} buggy={inv:TypeOK, prop:HandoffEventuallyAcknowledged} | 191c247c0f8c |
-| KeeperContextLifecycle.tla | KeeperContextLifecycle | manual | 3 | 1 | clean={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction, prop:CompactionProgress, prop:EventualTurnCompletion, prop:AllKeepersTerminate} buggy={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} ci={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} | e7d6cf456c70 |
-| KeeperCoreTriad.tla | KeeperCoreTriad | manual | 2 | 1 | clean={inv:SafetyInvariant, prop:RunningEventuallyCompletes CapabilityNeverDeadlocks} buggy={inv:SafetyInvariant} | f2385a52bc7f |
-| KeeperCounterCausality.tla | KeeperCounterCausality | manual | 2 | 1 | clean={inv:Safety} buggy={inv:CausePresentWhenCounted} | 531942a050de |
-| KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 3 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} cap2={inv:TypeOK, inv:ToolSetNeverEmpty, inv:RecoveryFloorMaintained, prop:FailingEventuallyRecovers} | 1fa85b795cb7 |
-| KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | c9d0a52acb27 |
-| KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | baf45bee2716 |
-| KeeperGenerationLineage.tla | KeeperGenerationLineage | manual | 2 | 1 | clean={inv:TypeOK, inv:CurrentTraceIsolation, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage, prop:HandoffEventuallyResolves} buggy={inv:TypeOK, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage} | b43e50f9ae3e |
-| KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | d9e4664cfd0c |
-| KeeperLaunchPending.tla | KeeperLaunchPending | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | abe8ee3b89cf |
-| KeeperMemoryLifecycle.tla | KeeperMemoryLifecycle | manual | 2 | 1 | clean={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} buggy={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} | 821cd485dadf |
-| KeeperOASAdvanced.tla | KeeperOASAdvanced | manual | 2 | 1 | clean={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:CommittedSideEffectsRequireContinueGate, prop:StrictStopPreemption, prop:EventualTermination} buggy={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:StrictStopPreemption, prop:EventualTermination} | f8cc8eaeef07 |
-| KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | c53dded69dc1 |
-| KeeperReactionLiveness.tla | KeeperReactionLiveness | manual | 2 | 1 | clean={inv:Safety, prop:BoardEnqueueLeadsToReceipt, prop:VerificationLeadsToReaction, prop:GoalVerificationLeadsToResolution, prop:TaskTransitionLeadsToReceipt, prop:CursorAdvancementRequiresAck} buggy={inv:TypeOK, prop:BoardEnqueueLeadsToReceipt} | 6d49d1fb3824 |
-| KeeperReconcileLiveness.tla | KeeperReconcileLiveness | manual | 2 | 1 | clean={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness, prop:CompactingResolves, prop:HandoffResolves, prop:DrainingResolves} buggy={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness} | aa277b6b2c6a |
-| KeeperSocialModelMagenticLedger.tla | KeeperSocialModelMagenticLedger | manual | 1 | 0 | clean={inv:TypeOK, inv:ClassifyTypeOK, inv:StalledNeedsGoalOrFailure, prop:ProgressDominates, prop:ReactiveDominatesIdleTimeout, prop:StalledStickyWithGoal, prop:QuietWhenNoDrivers} | bfad61cdd67c |
-| KeeperStateMachine.tla | KeeperStateMachine | manual | 2 | 1 | clean={inv:TypeOK, prop:DeadIsForever, prop:StoppedIsForever, prop:BudgetNeverRevives, prop:RestartCountMonotonic, prop:RunningRequiresFiber, prop:StoppedRequiresDrain, prop:DeadRequiresNoBudget, prop:OfflineRequiresLaunchPending, prop:FailingResolves, prop:CrashedRestartsEventually, prop:DrainingResolves, prop:CompactingResolves, prop:HandoffResolves, prop:CompactionClearsOverflow, prop:OverflowedResolves} overflow-buggy={inv:TypeOK, prop:BuggyCompactionClearsOverflow} | 95c6a63e10d6 |
-| KeeperTaskAcquisition.tla | KeeperTaskAcquisition | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | dacc5ab9bbfc |
-| KeeperTraceSpec.tla | KeeperTraceSpec | manual | 1 | 0 | clean={inv:TypeOK, inv:RunningRequiresFiber, inv:OfflineRequiresLaunchPending, inv:StoppedRequiresDrain, inv:DeadRequiresNoBudget, inv:DerivePhaseAgreement, prop:RestartCountMonotonic, prop:BudgetNeverRevives, prop:TransitionMatrixAgreement} | 12ceda9758f0 |
-| KeeperTurnCycle.tla | KeeperTurnCycle | manual | 1 | 0 | clean={inv:TypeOK, inv:Safety, prop:Liveness} | 5edbfd9dcab8 |
-| KeeperTurnSlot.tla | KeeperTurnSlot | manual | 2 | 1 | clean={inv:Safety} buggy={inv:RetryPhaseRequiresReleased} | f75c324a95fe |
-| KeeperWorkPipeline.tla | KeeperWorkPipeline | manual | 1 | 0 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent, inv:NoForcePush, inv:ReviewBeforeSubmit, prop:EventualCompletion, prop:NoOrphanWorkspace} | ab03a79d78e6 |
-| OperatorPauseBroadcast.tla | OperatorPauseBroadcast | manual | 2 | 1 | clean={inv:TypeOK, inv:EmittedBeforeResolved, prop:PauseLeadsToBroadcast, prop:OperatorPauseEverHandled} buggy={inv:TypeOK, prop:PauseLeadsToBroadcast} | 2ef619cbcd73 |
+| KeeperCompactionLifecycle.tla | KeeperCompactionLifecycle | manual | 2 | 1 | clean={inv:Safety, prop:OverflowEventuallyLeavesOverflow, prop:CompactingEventuallyStops} buggy={inv:CompactingAlignsAll} | d05b75d81e11 |
+| KeeperCompositeLifecycle.tla | KeeperCompositeLifecycle | manual | 6 | 5 | clean={inv:SafetyInvariant, inv:NoMidFlightTransitionToHandingOff, prop:EventualMeasurementResolves, prop:RecoveryEventuallyCompletes, prop:OverflowedEventuallyResolves} buggy-attempt={inv:ToolSurfaceFeedsAttempt} buggy-cascade={inv:NoCascadeBeforeMeasurement} buggy-compaction={inv:CompactionAtomicity, inv:PhaseTurnAlignment} buggy-mid-flight-handoff={inv:NoMidFlightTransitionToHandingOff} buggy-post-turn={inv:PostTurnConsumesAttempt} | b581c5d9272b |
+| KeeperConditionsGovernPhase.tla | KeeperConditionsGovernPhase | manual | 2 | 1 | clean={inv:Safety, prop:HandoffEventuallyAcknowledged} buggy={inv:TypeOK, prop:HandoffEventuallyAcknowledged} | a7ffe94f2ecd |
+| KeeperContextLifecycle.tla | KeeperContextLifecycle | manual | 4 | 2 | clean={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction, prop:CompactionProgress, prop:EventualTurnCompletion, prop:AllKeepersTerminate} buggy={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} ci-buggy={inv:ContextIsolation, inv:ResumeIdentity} ci={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} | 1160fd29094d |
+| KeeperCoreTriad.tla | KeeperCoreTriad | manual | 2 | 1 | clean={inv:SafetyInvariant, prop:RunningEventuallyCompletes CapabilityNeverDeadlocks} buggy={inv:SafetyInvariant} | 578800364440 |
+| KeeperCounterCausality.tla | KeeperCounterCausality | manual | 2 | 1 | clean={inv:Safety} buggy={inv:CausePresentWhenCounted} | 409306c73de0 |
+| KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} | aaa933f7e5ba |
+| KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | 69416fba4415 |
+| KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | c2c464472dca |
+| KeeperGenerationLineage.tla | KeeperGenerationLineage | manual | 2 | 1 | clean={inv:TypeOK, inv:CurrentTraceIsolation, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage, prop:HandoffEventuallyResolves} buggy={inv:TypeOK, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage} | bc957a36caf6 |
+| KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 127b595d597d |
+| KeeperLaunchPending.tla | KeeperLaunchPending | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | b40572292792 |
+| KeeperMemoryLifecycle.tla | KeeperMemoryLifecycle | manual | 2 | 1 | clean={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} buggy={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} | fcd73975045a |
+| KeeperOASAdvanced.tla | KeeperOASAdvanced | manual | 2 | 1 | clean={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:CommittedSideEffectsRequireContinueGate, prop:StrictStopPreemption, prop:EventualTermination} buggy={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:StrictStopPreemption, prop:EventualTermination} | 010a182b7a8b |
+| KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 7ac6ec2c5bf3 |
+| KeeperPostTurnOrchestration.tla | KeeperPostTurnOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | ab6ddffa2dc3 |
+| KeeperReactionLiveness.tla | KeeperReactionLiveness | manual | 2 | 1 | clean={inv:Safety, prop:BoardEnqueueLeadsToReceipt, prop:VerificationLeadsToReaction, prop:GoalVerificationLeadsToResolution, prop:TaskTransitionLeadsToReceipt, prop:CursorAdvancementRequiresAck} buggy={inv:TypeOK, prop:BoardEnqueueLeadsToReceipt} | 353fe806cd4a |
+| KeeperReconcileLiveness.tla | KeeperReconcileLiveness | manual | 2 | 1 | clean={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness, prop:CompactingResolves, prop:HandoffResolves, prop:DrainingResolves} buggy={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness} | 62638a411215 |
+| KeeperRolloverDecision.tla | KeeperRolloverDecision | manual | 2 | 1 | clean={inv:SignalGateOverflowOnly} buggy={inv:SignalGateOverflowOnly} | eb2aa357aa35 |
+| KeeperSocialModelMagenticLedger.tla | KeeperSocialModelMagenticLedger | manual | 2 | 1 | clean={inv:TypeOK, inv:ClassifyTypeOK, inv:StalledNeedsGoalOrFailure, prop:ProgressDominates, prop:ReactiveDominatesIdleTimeout, prop:StalledStickyWithGoal, prop:QuietWhenNoDrivers} buggy={inv:StalledNeedsGoalOrFailureMustHold} | 1dd4fa238ae4 |
+| KeeperStateMachine.tla | KeeperStateMachine | manual | 3 | 2 | clean={inv:TypeOK, prop:DeadIsForever, prop:StoppedIsForever, prop:ZombieIsForever, prop:BudgetNeverRevives, prop:RestartCountMonotonic, prop:RunningRequiresFiber, prop:StoppedRequiresDrain, prop:DeadRequiresNoBudget, prop:OfflineRequiresLaunchPending, prop:ZombieRequiresTerminalFailureLatched, prop:FailingResolves, prop:CrashedRestartsEventually, prop:DrainingResolves, prop:CompactingResolves, prop:HandoffResolves, prop:CompactionClearsOverflow, prop:OverflowedResolves} buggy={inv:TypeOK} overflow-buggy={inv:TypeOK} | 40501dfd5d9d |
+| KeeperTaskAcquisition.tla | KeeperTaskAcquisition | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | b95151d42a81 |
+| KeeperToolSurface.tla | KeeperToolSurface | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | de956772c1dc |
+| KeeperTraceSpec.tla | KeeperTraceSpec | manual | 2 | 1 | clean={inv:TypeOK, inv:RunningRequiresFiber, inv:OfflineRequiresLaunchPending, inv:StoppedRequiresDrain, inv:DeadRequiresNoBudget, inv:DerivePhaseAgreement, prop:RestartCountMonotonic, prop:BudgetNeverRevives, prop:TransitionMatrixAgreement} buggy={inv:TypeOK, inv:DerivePhaseAgreementMustHold} | 733248761720 |
+| KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | 1cd52d4f7998 |
+| KeeperTurnSlot.tla | KeeperTurnSlot | manual | 2 | 1 | clean={inv:Safety} buggy={inv:RetryPhaseRequiresReleased} | 6c970f9002bd |
+| KeeperWorkPipeline.tla | KeeperWorkPipeline | manual | 1 | 0 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent, inv:NoForcePush, inv:ReviewBeforeSubmit, prop:EventualCompletion, prop:NoOrphanWorkspace} | 1b85e3e4ba20 |
+| OperatorPauseBroadcast.tla | OperatorPauseBroadcast | manual | 2 | 1 | clean={inv:TypeOK, inv:EmittedBeforeResolved, prop:PauseLeadsToBroadcast, prop:OperatorPauseEverHandled} buggy={inv:TypeOK, prop:PauseLeadsToBroadcast} | 8c678dba2425 |
 
 ### specs/keeper-turn-fsm (1 specs)
 

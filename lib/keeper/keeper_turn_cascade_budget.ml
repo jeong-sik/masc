@@ -1,5 +1,5 @@
 (* Keeper_turn_cascade_budget — cascade execution types, fail-open rotation,
-   OAS timeout budget resolution, context overflow recovery, keeper pause/resume
+   OAS timeout budget resolution, context overflow observation, keeper pause/resume
    sync, partial-commit continue gate, and context budget resolution.
 
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
@@ -7,11 +7,6 @@
 open Keeper_types
 open Keeper_exec_context
 module EC = Keeper_error_classify
-
-(* Absolute floor for context overflow retry when the API does not report
-   the actual token limit.  Prevents retrying with an unreasonably small
-   context window. *)
-let fallback_context_overflow_floor_tokens = 4096
 
 type cascade_execution = {
   cascade_name : Keeper_cascade_profile.runtime_name;
@@ -21,31 +16,81 @@ type cascade_execution = {
   max_tokens : int;
 }
 
+let public_profile_name name =
+  let name = String.trim name in
+  let tier_group_prefix = "tier-group." in
+  let tier_prefix = "tier." in
+  if String.starts_with ~prefix:tier_group_prefix name then
+    String.sub name (String.length tier_group_prefix)
+      (String.length name - String.length tier_group_prefix)
+  else if String.starts_with ~prefix:tier_prefix name then
+    String.sub name (String.length tier_prefix)
+      (String.length name - String.length tier_prefix)
+  else name
+
 let fail_open_rotation_cascades_from_catalog
+    ?(excluded_targets : string list = [])
     ~(catalog_names : string list)
-    ~(keeper_assignable : string list) =
+    ~(keeper_assignable : string list)
+    () =
   if catalog_names = [] then None
   else
-    let is_reserved_recovery name =
-      String.equal name Keeper_config.default_cascade_name
-      || String.equal name Keeper_config.local_recovery_cascade_name
+    let excluded_targets =
+      excluded_targets |> List.map public_profile_name |> dedupe_keep_order
+    in
+    let is_reserved_default name =
+      String.equal name (Keeper_config.default_cascade_name ())
     in
     let is_keeper_assignable name =
       List.exists (String.equal name) keeper_assignable
     in
+    let is_excluded name =
+      List.exists (String.equal (public_profile_name name)) excluded_targets
+    in
     match
       catalog_names
       |> List.filter (fun name ->
-             is_reserved_recovery name || is_keeper_assignable name)
+             (is_reserved_default name || is_keeper_assignable name)
+             && not (is_excluded name))
       |> dedupe_keep_order
     with
     | [] -> None
     | candidates -> Some candidates
 
+let keeper_fail_open_route_uses =
+  [
+    Keeper_cascade_profile.Keeper_turn;
+    Keeper_cascade_profile.Phase_recovery;
+    Keeper_cascade_profile.Phase_buffer;
+    Keeper_cascade_profile.Tool_required;
+  ]
+
+let is_keeper_fail_open_route_use use =
+  List.exists (( = ) use) keeper_fail_open_route_uses
+
+let route_target_for_use use =
+  try Some (Keeper_cascade_profile.cascade_name_for_use use |> public_profile_name)
+  with Failure _ -> None
+
+let active_fail_open_excluded_route_targets () =
+  let keeper_route_targets =
+    keeper_fail_open_route_uses
+    |> List.filter_map route_target_for_use
+    |> dedupe_keep_order
+  in
+  Cascade_routes.all_logical_uses
+  |> List.filter (fun use -> not (is_keeper_fail_open_route_use use))
+  |> List.filter_map route_target_for_use
+  |> List.filter (fun target ->
+         not (List.exists (String.equal target) keeper_route_targets))
+  |> dedupe_keep_order
+
 let active_fail_open_rotation_cascades () =
   fail_open_rotation_cascades_from_catalog
+    ~excluded_targets:(active_fail_open_excluded_route_targets ())
     ~catalog_names:(Keeper_cascade_profile.catalog_names ())
     ~keeper_assignable:(Keeper_cascade_profile.keeper_catalog_names ())
+    ()
 
 let next_fail_open_cascade_for_turn
     ?rotation_cascades
@@ -56,6 +101,12 @@ let next_fail_open_cascade_for_turn
     (err : Agent_sdk.Error.sdk_error) : EC.degraded_retry option =
   let fallback_hint =
     Keeper_cascade_profile.fallback_cascade_for effective_cascade
+  in
+  let rotation_cascades =
+    match tool_requirement, rotation_cascades with
+    | Keeper_agent_tool_surface.Required, Some candidates ->
+      Some (dedupe_keep_order (Keeper_config.default_cascade_name () :: candidates))
+    | _ -> rotation_cascades
   in
   EC.degraded_rotation_after_recoverable_error
     ?rotation_cascades
@@ -306,9 +357,25 @@ let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
 
 let degraded_retry_bypasses_slot_phase_guard
     (err : Agent_sdk.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Oas_timeout_budget _) -> true
-  | _ -> false
+  (* Enumerate every [masc_internal_error] variant plus [None] so the
+     compiler flags any new constructor here. The old [_ -> false] silently
+     extended the "not a budget exhaustion" set whenever a new error class
+     was added to Cascade_error_classify, which is exactly the wrong default
+     for a guard that decides whether to bypass slot-phase admission. *)
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
+  | Some
+      ( Keeper_turn_driver.Cascade_exhausted _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.No_tool_capable_provider _
+      | Keeper_turn_driver.Accept_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
+      | Keeper_turn_driver.Ambiguous_post_commit _ )
+  | None ->
+    false
 
 let reclassify_oas_timeout_for_attempt
     ~(timeout_budget : oas_timeout_budget_resolution option)
@@ -316,14 +383,18 @@ let reclassify_oas_timeout_for_attempt
   match err, timeout_budget with
   | Agent_sdk.Error.Api (Timeout { message }), Some timeout_budget
     when EC.is_structural_oas_timeout_message message ->
-      Oas_worker_named.sdk_error_of_masc_internal_error
-        (Oas_worker_named.Oas_timeout_budget
+      Keeper_turn_driver.sdk_error_of_masc_internal_error
+        (Keeper_turn_driver.Oas_timeout_budget
            {
              budget_sec = timeout_budget.effective_timeout_sec;
              keeper_turn_timeout_sec =
                timeout_budget.keeper_turn_timeout_sec;
              estimated_input_tokens = timeout_budget.estimated_input_tokens;
              source = timeout_budget.source;
+             remaining_turn_budget_sec =
+               Some timeout_budget.remaining_turn_budget_sec;
+             min_required_sec = min_oas_timeout_budget_sec;
+             phase = "cascade_attempt_watchdog";
            })
   | _ -> err
 
@@ -391,26 +462,37 @@ let next_fail_open_cascade_for_turn_with_budget
       then Degraded_retry_allowed retry
       else Degraded_retry_budget_exhausted retry
 
-type overflow_retry_plan = {
-  retry_max_context : int;
-  retry_generation : int;
-  compaction : compaction_event;
-}
-
 type turn_event_bus_overflow = {
   estimated_tokens : int;
   limit_tokens : int;
 }
 
+type turn_event_bus_compaction = {
+  before_tokens : int;
+  after_tokens : int;
+  tokens_freed : int;
+  phase_hint : string;
+}
+
 type turn_event_bus_summary = {
   correlation_id : string option;
+  run_id : string option;
+  caused_by : string option;
   overflow_imminent : turn_event_bus_overflow option;
+  context_compact_started_count : int;
+  context_compacted_count : int;
+  last_compaction : turn_event_bus_compaction option;
 }
 
 let empty_turn_event_bus_summary =
   {
     correlation_id = None;
+    run_id = None;
+    caused_by = None;
     overflow_imminent = None;
+    context_compact_started_count = 0;
+    context_compacted_count = 0;
+    last_compaction = None;
   }
 
 let merge_turn_event_bus_summary
@@ -421,71 +503,27 @@ let merge_turn_event_bus_summary
       (match left.correlation_id with
        | Some _ -> left.correlation_id
        | None -> right.correlation_id);
+    run_id =
+      (match left.run_id with
+       | Some _ -> left.run_id
+       | None -> right.run_id);
+    caused_by =
+      (match left.caused_by with
+       | Some _ -> left.caused_by
+       | None -> right.caused_by);
     overflow_imminent =
       (match right.overflow_imminent with
        | Some _ -> right.overflow_imminent
        | None -> left.overflow_imminent);
+    context_compact_started_count =
+      left.context_compact_started_count + right.context_compact_started_count;
+    context_compacted_count =
+      left.context_compacted_count + right.context_compacted_count;
+    last_compaction =
+      (match right.last_compaction with
+       | Some _ -> right.last_compaction
+       | None -> left.last_compaction);
   }
-
-(** Recover from context overflow by compacting and reducing max_context.
-
-    Extracts the token limit directly from the structured [ContextOverflow]
-    error instead of re-parsing stringified error messages.
-    No local token-budget math -- OAS owns context budgeting.
-    MASC only decides whether to compact and retry.
-
-    @boundary-contract
-    - MASC owns: "compact & retry?" decision (at most once per turn),
-      extracting the limit from OAS structured errors, generation tracking.
-    - OAS owns: context overflow detection, ContextOverflow/TokenBudgetExceeded
-      error emission, checkpoint compaction algorithm, token budget enforcement.
-    - Neither may: MASC must not invent token limits or run its own budget
-      math; OAS must not auto-retry on overflow (MASC needs to decide). *)
-let recover_context_overflow_retry
-    ~(meta : keeper_meta)
-    ~(base_dir : string)
-    ~(max_cascade_context : int)
-    ~(error : Agent_sdk.Error.sdk_error) : overflow_retry_plan option =
-  let actual_limit =
-    match error with
-    | Agent_sdk.Error.Api (ContextOverflow { limit = Some limit; _ }) -> limit
-    | Agent_sdk.Error.Agent (TokenBudgetExceeded { limit; _ }) -> limit
-    | _ ->
-      (* Overflow detected but limit not available -- use 80% of cascade max
-         as a conservative fallback, with an absolute floor. *)
-      max fallback_context_overflow_floor_tokens (max_cascade_context * 4 / 5)
-  in
-  let retry_max_context =
-    if max_cascade_context <= 0 then actual_limit
-    else min max_cascade_context actual_limit
-  in
-  let model = Keeper_exec_context.checkpoint_model_of_meta meta in
-  match
-    Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
-      ~base_dir ~meta ~model
-      ~primary_model_max_tokens:retry_max_context
-  with
-  | Some recovery ->
-      Log.Keeper.warn
-        "%s: context overflow retry -- compacted checkpoint (%d->%d tokens, max_context=%d, generation=%d)"
-        meta.name recovery.compaction.before_tokens
-        recovery.compaction.after_tokens
-        retry_max_context recovery.turn_generation;
-      Some
-        {
-          retry_max_context;
-          retry_generation = recovery.turn_generation;
-          compaction = recovery.compaction;
-        }
-  | None ->
-      Prometheus.inc_counter
-        Prometheus.metric_keeper_checkpoint_failures
-        ~labels:[("keeper", meta.name); ("phase", "overflow_recovery_unavailable")]
-        ();
-      Log.Keeper.warn
-        "%s: context overflow detected but checkpoint recovery unavailable: %s"
-        meta.name (short_preview (Agent_sdk.Error.to_string error));
-      None
 
 let summarize_turn_event_bus
     (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =
@@ -496,22 +534,53 @@ let summarize_turn_event_bus
         | Some _ -> acc.correlation_id
         | None -> Some evt.meta.correlation_id
       in
+      let run_id =
+        match acc.run_id with
+        | Some _ -> acc.run_id
+        | None -> Some evt.meta.run_id
+      in
+      let caused_by =
+        match acc.caused_by with
+        | Some _ -> acc.caused_by
+        | None -> evt.meta.caused_by
+      in
+      let acc = { acc with correlation_id; run_id; caused_by } in
       match evt.payload with
       | Agent_sdk.Event_bus.ContextOverflowImminent
           { estimated_tokens; limit_tokens; _ } ->
           {
-            correlation_id;
+            acc with
             overflow_imminent =
               Some { estimated_tokens; limit_tokens };
           }
-      | _ -> { acc with correlation_id })
+      | Agent_sdk.Event_bus.ContextCompactStarted _ ->
+          {
+            acc with
+            context_compact_started_count =
+              acc.context_compact_started_count + 1;
+          }
+      | Agent_sdk.Event_bus.ContextCompacted
+          { before_tokens; after_tokens; phase; _ } ->
+          {
+            acc with
+            context_compacted_count = acc.context_compacted_count + 1;
+            last_compaction =
+              Some
+                {
+                  before_tokens;
+                  after_tokens;
+                  tokens_freed = max 0 (before_tokens - after_tokens);
+                  phase_hint = phase;
+                };
+          }
+      | _ -> acc)
     empty_turn_event_bus_summary
     events
 
 let context_overflow_event_of_error
     ~(fallback_tokens : int)
     ?(turn_event_bus : turn_event_bus_summary =
-      { correlation_id = None; overflow_imminent = None })
+      empty_turn_event_bus_summary)
     (err : Agent_sdk.Error.sdk_error) : Keeper_state_machine.event =
   match turn_event_bus.overflow_imminent with
   | Some { estimated_tokens; limit_tokens } ->
@@ -572,7 +641,7 @@ let pause_keeper_for_overflow
    | Ok () -> ()
    | Error err when is_version_conflict_error err ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_write_meta_failures
+         Keeper_metrics.metric_keeper_write_meta_failures
          ~labels:[("keeper", meta.name); ("phase", "overflow_pause_cas_race")]
          ();
        Log.Keeper.warn
@@ -580,7 +649,7 @@ let pause_keeper_for_overflow
          meta.name err
    | Error err ->
        Prometheus.inc_counter
-         Prometheus.metric_keeper_write_meta_failures
+         Keeper_metrics.metric_keeper_write_meta_failures
          ~labels:[("keeper", meta.name); ("phase", "overflow_pause")]
          ();
        Log.Keeper.error
@@ -634,7 +703,7 @@ let sync_keeper_paused_state
   with
   | Error err ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_write_meta_failures
+        Keeper_metrics.metric_keeper_write_meta_failures
         ~labels:[("keeper", meta.name);
                  ("phase",
                   if paused then "pause_sync" else "resume_sync")]
@@ -816,8 +885,8 @@ let post_turn_resilience_handles
        | exn -> Error (Printexc.to_string exn))
     with
     | Error detail ->
-        Prometheus.inc_counter Prometheus.metric_keeper_oas_execution_errors
-          ~labels:[("keeper", meta.name); ("phase", "resilience_audit_store")]
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_execution_errors
+          ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Resilience_audit_store))]
           ();
         Log.Keeper.error
           "keeper:%s resilience audit store unavailable; execution disabled: %s"
@@ -877,8 +946,8 @@ let enqueue_partial_commit_continue_gate
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
                meta.name err);
              Prometheus.inc_counter
-               Prometheus.metric_keeper_cascade_sync_failures
-               ~labels:[("keeper", meta.name); ("site", "resume_sync")]
+               Keeper_metrics.metric_keeper_cascade_sync_failures
+               ~labels:[("keeper", meta.name); ("site", Cascade_sync_failure_site.(to_label Resume_sync))]
                ()
       | Agent_sdk.Hooks.Reject reason ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
@@ -894,8 +963,8 @@ let enqueue_partial_commit_continue_gate
                "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
                meta.name err reason);
              Prometheus.inc_counter
-               Prometheus.metric_keeper_cascade_sync_failures
-               ~labels:[("keeper", meta.name); ("site", "pause_sync")]
+               Keeper_metrics.metric_keeper_cascade_sync_failures
+               ~labels:[("keeper", meta.name); ("site", Cascade_sync_failure_site.(to_label Pause_sync))]
                ())
     ()
 

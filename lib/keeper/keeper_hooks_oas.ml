@@ -22,32 +22,137 @@
 let keeper_denied_tools =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
 
+let label_keeper = "keeper"
+let label_callback = "callback"
+let label_tool = "tool"
+let label_source = "source"
+let label_alias = "alias"
+let label_surface = "surface"
+let label_shape = "shape"
+let label_model = "model"
+let label_provider = "provider"
+let label_provider_kind = "provider_kind"
+let label_status = "status"
+let label_site = "site"
+let label_reason = "reason"
+let label_outcome = "outcome"
+let label_severity = "severity"
+let label_decision = "decision"
+let label_stop_reason = "stop_reason"
+let label_keeper_name = "keeper_name"
+let label_channel = "channel"
+let key_agent = "agent"
+let key_task_id = "task_id"
+let key_input_tokens = "input_tokens"
+let key_output_tokens = "output_tokens"
+let key_cost_usd = "cost_usd"
+let key_cost_status = "cost_status"
+let key_cost_status_reason = "cost_status_reason"
+let key_cost_usd_source = "cost_usd_source"
+let key_usage_missing = "usage_missing"
+let key_timestamp = "timestamp"
+let key_raw_input_tokens = "raw_input_tokens"
+let key_raw_output_tokens = "raw_output_tokens"
+let key_raw_cost_usd = "raw_cost_usd"
+let key_reasoning_tokens = "reasoning_tokens"
+let key_cache_n = "cache_n"
+let key_prompt_per_second = "prompt_per_second"
+let key_provider_tokens_per_second = "provider_tokens_per_second"
+let key_hw_decode_tokens_per_second = "hw_decode_tokens_per_second"
+let key_peak_memory_gb = "peak_memory_gb"
+let key_request_latency_ms = "request_latency_ms"
+let key_tokens_per_second = "tokens_per_second"
+let key_status = "status"
+let key_reason = "reason"
+let key_provider = "provider"
+let key_model = "model"
+let key_source = "source"
+let key_pr_review_action = "pr_review_action"
+let key_pr_review_action_success = "pr_review_action_success"
+let key_pr_work_action = "pr_work_action"
+let key_pr_work_action_source = "pr_work_action_source"
+let key_pr_work_action_success = "pr_work_action_success"
+let key_type = "type"
+let key_turn = "turn"
+let key_model_used = "model_used"
+let key_has_state_block = "has_state_block"
+let key_tool_calls_made = "tool_calls_made"
+let key_total_turns = "total_turns"
+let key_scope = "scope"
+let key_slots = "slots"
+let key_slot_count = "slot_count"
+let key_active_slot_count = "active_slot_count"
+let key_inactive_slot_count = "inactive_slot_count"
+let key_deny_list_count = "deny_list_count"
+let key_max_cost_usd = "max_cost_usd"
+let key_ts = "ts"
+let key_ts_unix = "ts_unix"
+let key_name = "name"
+let key_generation = "generation"
+let key_active = "active"
+let key_via = "via"
+let key_route_via = "route_via"
+let key_metric_event = "metric_event"
+let key_agent_name = "agent_name"
+let key_tool_name = "tool_name"
+let key_tool_call_count = "tool_call_count"
+let key_tools_used = "tools_used"
+let key_duration_ms = "duration_ms"
+let key_channel = "channel"
+let key_error = "error"
+let callback_label_after_turn_sse_broadcast = "after_turn_sse_broadcast"
+let callback_label_post_tool_log_write = "post_tool_log_write"
+let callback_label_on_tool_executed = "on_tool_executed"
+let callback_label_on_error = "on_error"
+let callback_label_on_tool_error = "on_tool_error"
+let callback_label_pr_review_action_metrics_append = "pr_review_action_metrics_append"
+let callback_label_pr_work_action_metrics_append = "pr_work_action_metrics_append"
+let outcome_ok = "ok"
+let outcome_error = "error"
+
+
 (* [escape_field], [render_inline_skip_reason], [broadcast_tool_skipped],
    and [extract_command_from_input] now live in [Keeper_guards]. They
    are used only by the decomposed pre_tool_use guard chain, so keeping
    them there avoids a circular dependency and concentrates the
    gate-level concerns in one module. *)
 
-(** Derive a provider label from a model id.
+(** Keeper-facing telemetry uses a neutral runtime lane.  Concrete
+    provider/model identity belongs to OAS and lower-level cascade adapters. *)
+let runtime_lane_label = "runtime"
 
-    Delegates to {!Provider_adapter.provider_of_model_label}. Explicit
-    ["provider:model"] labels are trusted; bare model ids require typed OAS
-    [provider_kind] telemetry and otherwise stay ["unknown"]. *)
-let provider_of_model ?provider_kind (model : string) : string =
-  Provider_adapter.provider_of_model_label ?provider_kind model
+let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
-let provider_kind_of_telemetry
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
-  match telemetry with
-  | Some { provider_kind = Some kind; _ } -> Some kind
-  | Some _ | None -> None
+let redacts_inference_telemetry_key key =
+  match String.lowercase_ascii (String.trim key) with
+  | "provider"
+  | "provider_id"
+  | "provider_kind"
+  | "provider_name"
+  | "model"
+  | "model_id"
+  | "canonical_model_id"
+  | "default_model"
+  | "discovered_model"
+  | "system_fingerprint" -> true
+  | _ -> false
 
-let provider_of_model_with_telemetry ~model ~telemetry =
-  let provider_kind = provider_kind_of_telemetry telemetry in
-  provider_of_model ?provider_kind model
+let rec redact_inference_telemetry_json = function
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if redacts_inference_telemetry_key key then (key, `Null)
+              else (key, redact_inference_telemetry_json value))
+           fields)
+  | `List values -> `List (List.map redact_inference_telemetry_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      value
 
-let structurally_unmetered_provider provider =
-  Provider_adapter.is_structurally_unmetered_provider provider
+let inference_telemetry_to_runtime_json telemetry =
+  telemetry
+  |> Agent_sdk.Types.inference_telemetry_to_yojson
+  |> redact_inference_telemetry_json
 
 let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
   usage.input_tokens > 0
@@ -61,8 +166,35 @@ let is_keeper_board_write_tool_name tool_name =
   | None -> false
 
 let current_keeper_model meta =
-  let m = meta.Keeper_types.runtime.usage.last_model_used in
-  if m = "" then meta.Keeper_types.cascade_name else m
+  let _ = meta in
+  runtime_lane_label
+
+let stop_reason_label_end_turn = "end_turn"
+let stop_reason_label_tool_use = "tool_use"
+let stop_reason_label_max_tokens = "max_tokens"
+let stop_reason_label_stop_sequence = "stop_sequence"
+let stop_reason_label_unknown = "unknown"
+
+let stop_reason_to_label = function
+  | Agent_sdk.Types.EndTurn -> stop_reason_label_end_turn
+  | Agent_sdk.Types.StopToolUse -> stop_reason_label_tool_use
+  | Agent_sdk.Types.MaxTokens -> stop_reason_label_max_tokens
+  | Agent_sdk.Types.StopSequence -> stop_reason_label_stop_sequence
+  | Agent_sdk.Types.Unknown _ -> stop_reason_label_unknown
+
+let idle_severity_to_label = function
+  | Agent_sdk.Hooks.Idle_severity.Nudge -> "nudge"
+  | Agent_sdk.Hooks.Idle_severity.Final_warning -> "final_warning"
+  | Agent_sdk.Hooks.Idle_severity.Skip -> "skip"
+
+let idle_decision_to_label = function
+  | Agent_sdk.Hooks.Continue -> "continue"
+  | Agent_sdk.Hooks.Skip -> "skip"
+  | Agent_sdk.Hooks.Nudge _ -> "nudge"
+  | Agent_sdk.Hooks.Override _ -> "override"
+  | Agent_sdk.Hooks.ApprovalRequired -> "approval_required"
+  | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
+  | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
 
 let render_pre_tool_gate_source_hint
     (event : Keeper_guards.gate_decision_event) =
@@ -75,10 +207,13 @@ let render_pre_tool_gate_source_hint
     Printf.sprintf " source_path=%s source_line=%d"
       (Keeper_guards.escape_field path) line
 
+let tool_approval_required_tag = "[tool_approval_required]"
+
 let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
   if event.decision = Keeper_guards.Gate_approval_required then
     Printf.sprintf
-      "[tool_approval_required] tool=%s source=keeper_hook code=%s reason=%s%s"
+      "%s tool=%s source=keeper_hook code=%s reason=%s%s"
+      tool_approval_required_tag
       (Keeper_guards.escape_field event.tool_name)
       (Keeper_guards.escape_field event.reason_code)
       (Keeper_guards.escape_field event.reason_text)
@@ -103,8 +238,9 @@ let pre_tool_gate_error (event : Keeper_guards.gate_decision_event) =
   Printf.sprintf "%s:%s: %s"
     decision event.reason_code event.reason_text
 
+let min_duration_ms = 0.0
 let trajectory_duration_ms duration_ms =
-  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
+  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms min_duration_ms <= 0
   then 0
   else max 1 (int_of_float (Float.round duration_ms))
 
@@ -135,9 +271,10 @@ let record_pre_tool_gate_attempt
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
+       let callback_label_gate_tool_call_log = "gate_tool_call_log" in
        Prometheus.inc_counter
-         Prometheus.metric_keeper_lifecycle_callback_failures
-         ~labels:[("keeper", keeper_name); ("callback", "gate_tool_call_log")]
+         Keeper_metrics.metric_keeper_lifecycle_callback_failures
+         ~labels:[(label_keeper, keeper_name); (label_callback, callback_label_gate_tool_call_log)]
          ();
        Log.Keeper.warn
          "keeper:%s pre_tool_use gate tool_call log failed tool=%s err=%s"
@@ -189,15 +326,19 @@ let record_pre_tool_gate_attempt
         ~runtime_contract
         ~action_radius
         ~on_persist_error:(fun exn ->
+          let dashboard_surface_tool_stats = "/api/v1/keepers/:name/tool-stats" in
+          let stale_reason_trajectory_append = "trajectory_append_failed" in
+          let telemetry_source_trajectory = "trajectory_tool_call" in
+          let telemetry_producer_pre_tool = "keeper_hooks_oas.pre_tool_use" in
           Telemetry_coverage_gap.record
             ~masc_root:acc.Trajectory.masc_root
-            ~source:"trajectory_tool_call"
-            ~producer:"keeper_hooks_oas.pre_tool_use"
+            ~source:telemetry_source_trajectory
+            ~producer:telemetry_producer_pre_tool
             ~durable_store:
               (Trajectory.trajectory_path acc.Trajectory.masc_root
                  acc.Trajectory.keeper_name trace_id)
-            ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
-            ~stale_reason:"trajectory_append_failed"
+            ~dashboard_surface:dashboard_surface_tool_stats
+            ~stale_reason:stale_reason_trajectory_append
             ~keeper_name
             ~trace_id
             ~error:(Printexc.to_string exn)
@@ -213,30 +354,26 @@ let record_pre_tool_gate_attempt
    labels let dashboards and #9880 governance judgments distinguish
    which keeper-tool pairs are actually failing instead of reading a
    single undifferentiated marker. *)
-let tool_use_failure_metric = Prometheus.metric_keeper_tool_use_failure
+let tool_use_failure_metric = Keeper_metrics.metric_keeper_tool_use_failure
 
 let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
-    ~labels:[ ("keeper", keeper_name); ("tool", tool_name) ] ()
+    ~labels:[ (label_keeper, keeper_name); (label_tool, tool_name) ] ()
 
-(* #10083: some OAS transports (kimi_cli silent-failure and
-   CompletionContractViolation synthetic responses) emit
-   [response.model = ""].  That empty string then flows into every
-   per-model counter label in this hook (after_turn_hook_total,
-   masc_llm_inference_duration_seconds, pricing_catalog_miss_total)
-   and contaminates per-provider aggregates — one empty-model turn
-   wipes out the ability to attribute its ~50s of inference time to
-   any specific provider.  The resolve helper applies a layered
-   fallback (raw → telemetry canonical_model_id → named sentinel)
-   and emits a labelled counter so the operator can see WHICH
-   transport leaked and WHICH resolution path recovered it. *)
+(* #10083 originally patched empty [response.model] leaks by recovering a
+   canonical model id inside MASC.  The ownership boundary has since moved:
+   OAS owns concrete provider/model identity, while keeper-facing telemetry
+   records only a neutral runtime lane.  These counters remain as quality
+   signals for missing or selector-like response.model values, but their
+   labels never carry the concrete model id. *)
 let empty_response_model_metric =
   Prometheus.metric_after_turn_response_model_empty
 
 let alias_response_model_metric =
   Prometheus.metric_after_turn_response_model_alias
 
-let unknown_model_sentinel = "unknown_provider"
+let empty_response_content_metric =
+  Prometheus.metric_after_turn_response_content_empty
 
 let zero_usage : Agent_sdk.Types.api_usage =
   {
@@ -247,109 +384,158 @@ let zero_usage : Agent_sdk.Types.api_usage =
     cost_usd = None;
   }
 
-let canonical_model_id_of_telemetry ~model
+let telemetry_has_canonical_model_id
     (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
-  | Some { canonical_model_id = Some id; _ } when String.trim id <> "" ->
-      String.trim id
-  | _ -> model
+  | Some { canonical_model_id = Some id; _ } -> String.trim id <> ""
+  | Some _ | None -> false
 
-let known_provider_model_id_of_label model =
-  let trimmed = String.trim model in
-  match String.index_opt trimmed ':' with
-  | None -> None
-  | Some idx when idx <= 0 || idx >= String.length trimmed - 1 -> None
-  | Some idx ->
-      let provider = provider_of_model trimmed in
-      if String.equal provider "unknown" then None
-      else
-        Some
-          (String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
-           |> String.trim)
+let is_runtime_selector_alias model =
+  let trimmed = String.trim model |> String.lowercase_ascii in
+  let leaf =
+    match String.rindex_opt trimmed ':' with
+    | None -> trimmed
+    | Some idx when idx >= String.length trimmed - 1 -> ""
+    | Some idx ->
+        String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
+        |> String.trim
+  in
+  String.equal leaf "auto"
 
-let model_id_leaf model =
-  match known_provider_model_id_of_label model with
-  | Some id -> id
-  | None -> String.trim model
+let ms_per_second = 1000.0
 
-let is_auto_model_label model =
-  String.equal
-    (String.lowercase_ascii (model_id_leaf model))
-    "auto"
-
-let is_unresolved_pricing_label model =
-  let trimmed = String.trim model in
-  String.equal trimmed ""
-  || is_auto_model_label trimmed
-  || String.equal trimmed unknown_model_sentinel
-
-let canonical_model_id_opt
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
-  match telemetry with
-  | Some { canonical_model_id = Some id; _ } ->
-      let trimmed = String.trim id in
-      if trimmed = "" || is_auto_model_label trimmed then None
-      else Some trimmed
-  | Some _ | None -> None
-
-(* #10083: layered fallback for [response.model] empty-string leaks.
-   Non-empty raw model is returned unchanged.  When empty, we consult
-   the telemetry envelope's [canonical_model_id] (which OAS populates
-   on well-formed transports even when the completion body omits
-   [model]); if that is also missing we tag the turn
-   [unknown_model_sentinel] so downstream labels remain explicit
-   rather than becoming the ambiguous empty string.  Each fallback
-   path emits a counter so the operator can attribute leaks per
-   keeper per source. *)
+(* #10083: keep the missing/alias observability, but return the keeper-facing
+   runtime lane instead of reconstructing OAS-owned model identity. *)
 let resolve_after_turn_model ~keeper_name
     ~(response : Agent_sdk.Types.api_response) =
-  let raw_model = response.model in
-  if String.trim raw_model <> "" then
-    match canonical_model_id_opt response.telemetry with
-    | Some canonical when is_auto_model_label raw_model ->
-        Prometheus.inc_counter alias_response_model_metric
-          ~labels:
-            [
-              ("keeper", keeper_name);
-              ("alias", model_id_leaf raw_model);
-              ("source", "telemetry_canonical");
-            ]
-          ();
-        Log.Keeper.warn
-          "keeper:%s after_turn response.model alias=%s → canonical=%s"
-          keeper_name raw_model canonical;
-        canonical
-    | Some _ | None -> raw_model
-  else begin
-    let canonical = canonical_model_id_of_telemetry ~model:"" response.telemetry in
-    let resolved, source =
-      if String.trim canonical <> "" then canonical, "telemetry_resolved"
-      else unknown_model_sentinel, "unknown_sentinel"
+  let raw_model = String.trim response.model in
+  if String.equal raw_model "" then begin
+    let source =
+      let source_telemetry_resolved = "telemetry_resolved" in
+      let source_unknown_sentinel = "unknown_sentinel" in
+      if telemetry_has_canonical_model_id response.telemetry then
+        source_telemetry_resolved
+      else source_unknown_sentinel
     in
     Prometheus.inc_counter empty_response_model_metric
-      ~labels:[ ("keeper", keeper_name); ("source", source) ] ();
+      ~labels:[ (label_keeper, keeper_name); (label_source, source) ] ();
     Log.Keeper.warn
-      "keeper:%s after_turn response.model empty → fallback=%s resolved=%s"
-      keeper_name source resolved;
-    resolved
+      "keeper:%s after_turn response.model empty -> runtime_lane source=%s"
+      keeper_name source;
+    runtime_lane_label
+  end else begin
+    if is_runtime_selector_alias raw_model then (
+      let source_telemetry_canonical = "telemetry_canonical" in
+      Prometheus.inc_counter alias_response_model_metric
+        ~labels:
+          [
+            (label_keeper, keeper_name);
+            (label_alias, runtime_lane_label);
+            (label_source, source_telemetry_canonical);
+          ]
+        ();
+      Log.Keeper.warn
+        "keeper:%s after_turn response.model selector -> runtime_lane source=%s"
+        keeper_name "telemetry_canonical");
+    runtime_lane_label
   end
 
+let stop_reason_metric_label = function
+  | Agent_sdk.Types.EndTurn -> "end_turn"
+  | Agent_sdk.Types.StopToolUse -> "tool_use"
+  | Agent_sdk.Types.MaxTokens -> "max_tokens"
+  | Agent_sdk.Types.StopSequence -> "stop_sequence"
+  | Agent_sdk.Types.Unknown _ -> "unknown"
+
+let content_block_has_visible_or_tool_progress = function
+  | Agent_sdk.Types.Text text -> String.trim text <> ""
+  | Agent_sdk.Types.ToolResult { content; json; _ } ->
+      String.trim content <> "" || Option.is_some json
+  | Agent_sdk.Types.ToolUse _
+  | Agent_sdk.Types.Image _
+  | Agent_sdk.Types.Document _
+  | Agent_sdk.Types.Audio _ -> true
+  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> false
+
+let shape_empty = "empty"
+let shape_thinking_only = "thinking_only"
+let shape_blank_text = "blank_text"
+
+let response_content_empty_shape content =
+  if content = [] then shape_empty
+  else if
+    List.exists
+      (function
+        | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> true
+        | _ -> false)
+      content
+  then shape_thinking_only
+  else shape_blank_text
+
+let record_response_content_quality_metric ~keeper_name
+    (response : Agent_sdk.Types.api_response) =
+  if not (List.exists content_block_has_visible_or_tool_progress response.content)
+  then
+    Prometheus.inc_counter empty_response_content_metric
+      ~labels:
+        [
+          (label_keeper, keeper_name);
+          (label_stop_reason, stop_reason_metric_label response.stop_reason);
+          (label_shape, response_content_empty_shape response.content);
+        ]
+      ()
+
+let default_context_max = 0
 let context_max_of_telemetry
     (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
   | Some { effective_context_window = Some n; _ } when n > 0 -> n
-  | _ -> 0
+  | _ -> default_context_max
+
+type thinking_log_summary =
+  { thinking_present : bool
+  ; thinking_blocks : int
+  ; thinking_chars : int
+  ; redacted_thinking_blocks : int
+  ; thinking_kind : string
+  }
+
+let summarize_thinking_blocks content =
+  let thinking_blocks = ref 0 in
+  let thinking_chars = ref 0 in
+  let redacted_thinking_blocks = ref 0 in
+  List.iter
+    (function
+      | Agent_sdk.Types.Thinking { content; _ } ->
+          incr thinking_blocks;
+          thinking_chars := !thinking_chars + String.length content
+      | Agent_sdk.Types.RedactedThinking _ -> incr redacted_thinking_blocks
+      | _ -> ())
+    content;
+  let thinking_kind =
+    match !thinking_blocks > 0, !redacted_thinking_blocks > 0 with
+    | false, false -> "none"
+    | true, false -> "thinking"
+    | false, true -> "redacted"
+    | true, true -> "mixed"
+  in
+  { thinking_present = !thinking_blocks > 0 || !redacted_thinking_blocks > 0
+  ; thinking_blocks = !thinking_blocks
+  ; thinking_chars = !thinking_chars
+  ; redacted_thinking_blocks = !redacted_thinking_blocks
+  ; thinking_kind
+  }
 
 let classify_usage_trust ?usage ~model ~telemetry () =
+  let _ = model in
   let usage_reported, usage =
     match usage with
     | Some usage -> true, usage
     | None -> false, zero_usage
   in
-  let provider_kind = provider_kind_of_telemetry telemetry in
-  Keeper_usage_trust.classify_with_provider_kind ~provider_kind ~usage_reported ~usage
-    ~model_used:model
-    ~resolved_model_id:(canonical_model_id_of_telemetry ~model telemetry)
+  Keeper_usage_trust.classify
+    ~usage_reported ~usage ~model_used:runtime_lane_label
+    ~resolved_model_id:runtime_lane_label
     ~context_max:(context_max_of_telemetry telemetry)
 
 let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
@@ -362,153 +548,65 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
     List.iter
       (fun reason ->
          Prometheus.inc_counter
-           Prometheus.metric_keeper_usage_anomalies
-           ~labels:
-             [
-               ("keeper_name", keeper_name);
-               ("model", model);
-               ("reason", reason);
-             ]
+           Keeper_metrics.metric_keeper_usage_anomalies
+	           ~labels:
+	             [
+	               (label_keeper_name, keeper_name);
+	               (label_model, runtime_lane_label);
+	               (label_reason, reason);
+	             ]
            ())
       reasons
 
-(* #9868: use [pricing_for_model_opt] so unknown models surface as
-   [None] and get a loud catalog-miss signal instead of silently
-   returning $0. [pricing_for_model] (non-opt) collapses unknown into
-   [zero_pricing], which is the exact "Unknown -> Permissive Default"
-   anti-pattern called out in `instructions/software-development.md`
-   (OAS #555 parallel). Paid providers (openai gpt-5 family, glm
-   family) are missing from the upstream OAS catalog today, so this
-   path is the only place the miss becomes observable. *)
-let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage)
-    : float =
-  (* P1-6: distinguish two distinct "no price" paths so operators get
-     actionable signals instead of misleading "add to pricing.ml" advice.
-
-     1. Unresolved alias (model=auto, model=claude_code:auto, empty, unknown
-        sentinel): the alias was not resolved to a canonical id before this
-        call.  The root fix is ensuring telemetry always provides a
-        canonical_model_id; adding "auto" to pricing.ml is wrong.  Use INFO.
-
-     2. Genuine catalog miss (concrete model id not present in the OAS
-        Pricing catalog): operators/contributors need to add the entry.
-        Keep the existing WARN so the gap is visible. *)
-  let pricing_unresolved_alias () =
-    (* P1-6: use a distinct label value so monitoring dashboards can
-       distinguish unresolved-alias events from genuine catalog misses.
-       "(alias):<model>" in the model label maps to a different time series
-       than "<model>" so operators can filter each case independently. *)
-    Prometheus.inc_counter
-      Prometheus.metric_pricing_catalog_miss
-      ~labels:[("model", "(alias):" ^ model)] ();
-    Log.Keeper.info
-      "pricing_unresolved_alias model=%s input_tokens=%d output_tokens=%d \
-       — model label is an unresolved alias (auto / sentinel / empty); cost \
-       recorded as 0.0. Ensure telemetry provides canonical_model_id so the \
-       alias is resolved before pricing."
-      model usage.input_tokens usage.output_tokens;
-    0.0
-  in
-  let pricing_catalog_miss () =
-    Prometheus.inc_counter
-      Prometheus.metric_pricing_catalog_miss
-      ~labels:[("model", model)] ();
-    Log.Keeper.warn
-      "pricing_catalog_miss model=%s input_tokens=%d output_tokens=%d \
-       — no pricing entry in Llm_provider.Pricing catalog; cost recorded \
-       as 0.0 (not a true zero). Add the entry upstream in \
-       agent_sdk/llm_provider/pricing.ml, then bump the OAS pin."
-      model usage.input_tokens usage.output_tokens;
-    0.0
-  in
-  if is_unresolved_pricing_label model then pricing_unresolved_alias ()
-  else match Llm_provider.Pricing.pricing_for_model_opt model with
-  | Some pricing ->
-    Llm_provider.Pricing.estimate_cost ~pricing
-      ~input_tokens:usage.input_tokens
-      ~output_tokens:usage.output_tokens
-      ~cache_creation_input_tokens:usage.cache_creation_input_tokens
-      ~cache_read_input_tokens:usage.cache_read_input_tokens
-      ()
-  | None -> pricing_catalog_miss ()
-
 type cost_status =
-  | Cost_reported_or_estimated
+  | Cost_reported
   | Cost_known_free
-  | Cost_known_unpriced_model
   | Cost_no_tokens
   | Cost_usage_missing
   | Cost_usage_untrusted
-  | Cost_provider_unknown
-  | Cost_unresolved_model_alias
-  | Cost_unpriced_model
+  | Cost_runtime_unknown
+  | Cost_oas_cost_unreported
+
+let cost_label_reported = "reported"
+let cost_label_known_free = "known_free"
+let cost_label_no_tokens = "no_tokens"
+let cost_label_usage_missing = "usage_missing"
+let cost_label_usage_untrusted = "usage_untrusted"
+let cost_label_runtime_unknown = "runtime_unknown"
+let cost_label_oas_cost_unreported = "oas_cost_unreported"
+
+let cost_reason_reported = "oas_reported_cost"
+let cost_reason_known_free = "known_structurally_unmetered_or_zero_price"
+let cost_reason_no_tokens = "no_billable_tokens"
+let cost_reason_usage_missing = "usage_missing"
+let cost_reason_usage_untrusted = "usage_untrusted"
+let cost_reason_runtime_unknown = "runtime_unknown"
+let cost_reason_oas_cost_unreported = "oas_cost_unreported"
+
+let cost_source_unmetered_provider = "unmetered_provider"
+let cost_source_computed = "computed"
 
 let cost_status_to_string = function
-  | Cost_reported_or_estimated -> "priced"
-  | Cost_known_free -> "known_free"
-  | Cost_known_unpriced_model -> "known_unpriced_model"
-  | Cost_no_tokens -> "no_tokens"
-  | Cost_usage_missing -> "usage_missing"
-  | Cost_usage_untrusted -> "usage_untrusted"
-  | Cost_provider_unknown -> "provider_unknown"
-  | Cost_unresolved_model_alias -> "unresolved_model_alias"
-  | Cost_unpriced_model -> "unpriced_model"
+  | Cost_reported -> cost_label_reported
+  | Cost_known_free -> cost_label_known_free
+  | Cost_no_tokens -> cost_label_no_tokens
+  | Cost_usage_missing -> cost_label_usage_missing
+  | Cost_usage_untrusted -> cost_label_usage_untrusted
+  | Cost_runtime_unknown -> cost_label_runtime_unknown
+  | Cost_oas_cost_unreported -> cost_label_oas_cost_unreported
 
 let cost_status_reason = function
-  | Cost_reported_or_estimated ->
-      "provider_reported_or_pricing_catalog_estimate"
-  | Cost_known_free -> "known_structurally_unmetered_or_zero_price"
-  | Cost_known_unpriced_model -> "known_non_catalog_model"
-  | Cost_no_tokens -> "no_billable_tokens"
-  | Cost_usage_missing -> "usage_missing"
-  | Cost_usage_untrusted -> "usage_untrusted"
-  | Cost_provider_unknown -> "provider_unknown"
-  | Cost_unresolved_model_alias -> "model_alias_unresolved"
-  | Cost_unpriced_model -> "pricing_catalog_miss"
-
-let pricing_model_leaf model =
-  let trimmed = String.trim model in
-  match String.rindex_opt trimmed ':' with
-  | None -> trimmed
-  | Some idx ->
-      String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
-
-let is_known_non_catalog_pricing_model model =
-  match pricing_model_leaf model with
-  | "gpt-5.3-codex-spark" -> true
-  | _ -> false
-
-let pricing_model_for_ledger ~model ~telemetry =
-  match canonical_model_id_opt telemetry with
-  | Some canonical when is_auto_model_label model -> canonical
-  | Some canonical when String.trim model = "" -> canonical
-  | Some canonical when String.equal (String.trim model) unknown_model_sentinel ->
-      canonical
-  | Some _ | None -> String.trim model
-
-let model_resolution_source_for_ledger ~model ~pricing_model =
-  let trimmed = String.trim model in
-  if String.equal trimmed pricing_model then "raw"
-  else if String.equal trimmed "" then "telemetry_canonical_empty"
-  else if is_auto_model_label trimmed then "telemetry_canonical_alias"
-  else if String.equal trimmed unknown_model_sentinel then
-    "telemetry_canonical_unknown"
-  else "raw"
-
-let pricing_catalog_status ~pricing_model =
-  if is_unresolved_pricing_label pricing_model then "alias_unresolved"
-  else if is_known_non_catalog_pricing_model pricing_model then "known_unpriced"
-  else match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
-  | Some pricing
-    when pricing.input_per_million = 0.0
-         && pricing.output_per_million = 0.0 ->
-      "hit_free"
-  | Some _ -> "hit_paid"
-  | None -> "miss"
+  | Cost_reported -> cost_reason_reported
+  | Cost_known_free -> cost_reason_known_free
+  | Cost_no_tokens -> cost_reason_no_tokens
+  | Cost_usage_missing -> cost_reason_usage_missing
+  | Cost_usage_untrusted -> cost_reason_usage_untrusted
+  | Cost_runtime_unknown -> cost_reason_runtime_unknown
+  | Cost_oas_cost_unreported -> cost_reason_oas_cost_unreported
 
 let cost_status_for_event
-    ~(provider : string)
-    ~(pricing_model : string)
+    ~(runtime_unknown : bool)
+    ~(runtime_unmetered : bool)
     ~(usage_missing : bool)
     ~(usage_trusted : bool)
     ~(input_tokens : int)
@@ -516,45 +614,17 @@ let cost_status_for_event
     ~(cost_usd : float) =
   if usage_missing then Cost_usage_missing
   else if not usage_trusted then Cost_usage_untrusted
-  else if cost_usd > 0.0 then Cost_reported_or_estimated
+  else if cost_usd > 0.0 then Cost_reported
   else if input_tokens <= 0 && output_tokens <= 0 then Cost_no_tokens
-  else if structurally_unmetered_provider provider then Cost_known_free
-  else if String.equal provider "unknown" then Cost_provider_unknown
-  else if is_unresolved_pricing_label pricing_model then
-    Cost_unresolved_model_alias
-  else if is_known_non_catalog_pricing_model pricing_model then
-    Cost_known_unpriced_model
-  else
-    match Llm_provider.Pricing.pricing_for_model_opt pricing_model with
-    | Some pricing
-      when pricing.input_per_million = 0.0
-           && pricing.output_per_million = 0.0 ->
-        Cost_known_free
-    | Some _ -> Cost_reported_or_estimated
-    | None -> Cost_unpriced_model
+  else if runtime_unmetered then Cost_known_free
+  else if runtime_unknown then Cost_runtime_unknown
+  else Cost_oas_cost_unreported
 
-let cost_usd_for_usage ?provider_kind ~(model : string)
-    (usage : Agent_sdk.Types.api_usage)
-    : float =
-  let provider = provider_of_model ?provider_kind model in
+let oas_reported_cost (usage : Agent_sdk.Types.api_usage) : float =
   match usage.cost_usd with
   | Some cost when cost > 0.0 -> cost
-  | Some cost ->
-      if
-        usage_has_tokens usage
-        && not (structurally_unmetered_provider provider)
-      then
-        estimate_usage_cost_usd ~model usage
-      else
-        cost
-  | None ->
-      if
-        usage_has_tokens usage
-        && not (structurally_unmetered_provider provider)
-      then
-        estimate_usage_cost_usd ~model usage
-      else
-        0.0
+  | Some _ -> 0.0
+  | None -> 0.0
 
 type tool_execution_summary =
   { tool_name : string
@@ -566,8 +636,8 @@ type tool_execution_summary =
 let tool_execution_summary ~tool_name ~model ~success ~duration_ms :
     tool_execution_summary =
   { tool_name
-  ; provider = provider_of_model model
-  ; outcome = if success then "ok" else "error"
+  ; provider = runtime_lane_of_model model
+  ; outcome = if success then outcome_ok else outcome_error
   ; duration_ms = max 0.0 duration_ms
   }
 
@@ -576,14 +646,14 @@ let record_keeper_tool_duration_metric
     (summary : tool_execution_summary)
   : unit =
   Prometheus.observe_histogram
-    Prometheus.metric_keeper_tool_call_duration
+    Keeper_metrics.metric_keeper_tool_call_duration
     ~labels:
-      [ "keeper", keeper_name
+      [label_keeper, keeper_name
       ; "provider", summary.provider
       ; "tool", summary.tool_name
       ; "outcome", summary.outcome
       ]
-    (summary.duration_ms /. 1000.0)
+    (summary.duration_ms /. ms_per_second)
 
 (** Emit prompt/decode tokens-per-second histograms from an OAS turn
     response.  Safe to call with [telemetry = None] (no-op) and with
@@ -605,14 +675,11 @@ let record_llm_tok_s_metrics
       t.prompt_per_second, t.predicted_per_second
     | _ -> None, None
   in
-  let provider_kind_label =
-    match provider_kind_of_telemetry telemetry with
-    | Some pk -> Llm_provider.Provider_kind.to_string pk
-    | None -> "unknown"
-  in
-  let provider = provider_of_model_with_telemetry ~model ~telemetry in
+  let provider_kind_label = runtime_lane_label in
+  let _ = model in
+  let provider = runtime_lane_label in
   let labels =
-    [ "model", model
+    [ "model", runtime_lane_label
     ; "provider", provider
     ; "provider_kind", provider_kind_label
     ]
@@ -636,22 +703,24 @@ let record_llm_inference_latency_metric
     ~(model : string)
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
-  let labels = [("model", model)] in
+  let _ = model in
+  let labels = [("model", runtime_lane_label)] in
   Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
   match telemetry with
   | Some t ->
     let observed_latency_ms =
-      if t.request_latency_ms > 0 then t.request_latency_ms
-      else (
-        Prometheus.inc_counter
-          Prometheus.metric_after_turn_telemetry_zero_latency
-          ~labels ();
-        1)
+      match t.request_latency_ms with
+      | Some latency_ms when latency_ms > 0 -> latency_ms
+      | _ ->
+          Prometheus.inc_counter
+            Prometheus.metric_after_turn_telemetry_zero_latency
+            ~labels ();
+          1
     in
     Prometheus.observe_histogram
       Prometheus.metric_llm_inference_duration
       ~labels
-      (Float.of_int observed_latency_ms /. 1000.0)
+      (Float.of_int observed_latency_ms /. ms_per_second)
   | None ->
     Prometheus.inc_counter
       Prometheus.metric_after_turn_telemetry_missing
@@ -663,11 +732,18 @@ let wall_tokens_per_second
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : float option =
   match telemetry with
-  | Some t when not usage_missing && output_tokens > 0
-                && t.request_latency_ms > 0 ->
-      Some
-        (Float.of_int output_tokens
-         /. (Float.of_int t.request_latency_ms /. 1000.0))
+  | Some t when not usage_missing && output_tokens > 0 -> (
+      match t.request_latency_ms with
+      | Some request_latency_ms when request_latency_ms > 0 ->
+        let request_latency_ms = Float.of_int request_latency_ms in
+        let latency_ms =
+          match t.ttfrc_ms with
+          | Some ttfrc_ms when ttfrc_ms > 0.0 && ttfrc_ms < request_latency_ms ->
+            request_latency_ms -. ttfrc_ms
+          | _ -> request_latency_ms
+        in
+        Some (Float.of_int output_tokens /. (latency_ms /. ms_per_second))
+      | _ -> None)
   | _ -> None
 
 (** #10318: classify why [cost_usd] ended up as it did so the
@@ -679,14 +755,12 @@ let wall_tokens_per_second
     "tracking is broken" without the next concrete action.
 
     Bounded source values:
-    - [computed]              — cost > 0 written by the pricing path.
+    - [computed]              — cost > 0 reported by OAS.
     - [missing_usage]         — no usage payload from the provider.
     - [untrusted_usage]       — usage_trust gate suppressed the value.
-    - [unmetered_provider]    — local LLM (ollama, etc.); 0 by design.
-    - [pricing_catalog_miss]  — model not in
-                                [Llm_provider.Pricing] catalog;
-                                [estimate_usage_cost_usd] returned 0.
-    - [zero_token_call]       — trusted+priced but tokens=0
+    - [unmetered_provider]    — OAS/runtime explicitly marks the call free.
+    - [oas_cost_unreported]   — OAS returned tokens but no positive cost.
+    - [zero_token_call]       — trusted but tokens=0
                                 (tool-only call or empty completion). *)
 let cost_emit_source_metric = Prometheus.metric_cost_emit_zero_source
 
@@ -697,30 +771,25 @@ let () =
       "Total cost.jsonl emits where cost_usd ended up as 0.0 due to a \
        known classification path (vs an actually-zero call).  Labels: \
        source ∈ {missing_usage, untrusted_usage, unmetered_provider, \
-       unresolved_model_alias, known_unpriced_model, pricing_catalog_miss, \
-       zero_token_call}.  A high [pricing_catalog_miss] rate is the hint \
-       to add upstream OAS pricing entries; a high [untrusted_usage] rate \
-       points at the trust classifier; a high [missing_usage] rate points \
-       at the provider adapter not surfacing usage.  See #10318 and #13698."
+       oas_cost_unreported, zero_token_call}.  A high \
+       [oas_cost_unreported] rate means OAS did not annotate usage with cost; \
+       a high [untrusted_usage] rate points at the trust classifier; a high \
+       [missing_usage] rate points at the provider adapter not surfacing usage. \
+       See #10318 and #13698."
     ()
 
-let classify_cost_usd_source ~usage_missing ~usage_trusted ~provider
-    ~model ~cost_usd =
-  if usage_missing then "missing_usage"
-  else if not usage_trusted then "untrusted_usage"
-  else if structurally_unmetered_provider provider then "unmetered_provider"
-  else if cost_usd > 0.0 then "computed"
-  else if is_unresolved_pricing_label model then "unresolved_model_alias"
-  else if is_known_non_catalog_pricing_model model then "known_unpriced_model"
-  else
-    match Llm_provider.Pricing.pricing_for_model_opt model with
-    | None -> "pricing_catalog_miss"
-    | Some _ -> "zero_token_call"
+let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
+    ~cost_usd =
+  if usage_missing then cost_label_usage_missing
+  else if not usage_trusted then cost_label_usage_untrusted
+  else if runtime_unmetered then cost_source_unmetered_provider
+  else if cost_usd > 0.0 then cost_source_computed
+  else cost_label_oas_cost_unreported
 
 let record_cost_emit_source source =
-  if not (String.equal source "computed") then
+  if not (String.equal source cost_source_computed) then
     Prometheus.inc_counter cost_emit_source_metric
-      ~labels:[ ("source", source) ]
+      ~labels:[ (label_source, source) ]
       ()
 
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
@@ -777,29 +846,32 @@ let assemble_cost_event_payload
   let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
   let safe_input_tokens = if usage_trusted then input_tokens else 0 in
   let safe_output_tokens = if usage_trusted then output_tokens else 0 in
-  let provider = provider_of_model_with_telemetry ~model ~telemetry in
-  let pricing_model = pricing_model_for_ledger ~model ~telemetry in
-  (* Classify cost_status using raw cost_usd so pricing catalog
-     lookup is independent of the safe_value mask below. *)
+  let _ = model in
+  let provider = runtime_lane_label in
+  let runtime_unknown = false in
+  let runtime_unmetered = false in
+  (* Classify cost_status using raw cost_usd so OAS-reported cost is
+     considered before the safe-value mask below. *)
   let cost_status =
     cost_status_for_event
-      ~provider
-      ~pricing_model
+      ~runtime_unknown
+      ~runtime_unmetered
       ~usage_missing
       ~usage_trusted
       ~input_tokens
       ~output_tokens
       ~cost_usd
   in
+  let default_safe_cost_usd = 0.0 in
   let safe_cost_usd =
     match cost_status with
-    | Cost_reported_or_estimated -> cost_usd
-    | Cost_known_free | Cost_no_tokens -> 0.0
-    | Cost_usage_missing | Cost_usage_untrusted -> 0.0
-    | Cost_provider_unknown
-    | Cost_unresolved_model_alias
-    | Cost_known_unpriced_model
-    | Cost_unpriced_model -> 0.0
+    | Cost_reported -> cost_usd
+    | Cost_known_free
+    | Cost_no_tokens
+    | Cost_usage_missing
+    | Cost_usage_untrusted
+    | Cost_runtime_unknown
+    | Cost_oas_cost_unreported -> default_safe_cost_usd
   in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in
@@ -807,9 +879,9 @@ let assemble_cost_event_payload
     if usage_missing || usage_trusted then []
     else
       [
-        ("raw_input_tokens", `Int input_tokens);
-        ("raw_output_tokens", `Int output_tokens);
-        ("raw_cost_usd", `Float cost_usd);
+        (key_raw_input_tokens, `Int input_tokens);
+        (key_raw_output_tokens, `Int output_tokens);
+        (key_raw_cost_usd, `Float cost_usd);
       ]
   in
   let telemetry_fields = match telemetry with
@@ -823,7 +895,10 @@ let assemble_cost_event_payload
            @ float_field "hw_decode_tokens_per_second" tm.predicted_per_second
          | None -> [])
       @ float_field "peak_memory_gb" t.peak_memory_gb
-      @ [("request_latency_ms", `Int t.request_latency_ms)]
+      @ int_field "request_latency_ms"
+          (match t.request_latency_ms with
+           | Some latency_ms when latency_ms > 0 -> Some latency_ms
+           | _ -> None)
     | None -> []
   in
   let wall_tok_s_fields =
@@ -834,29 +909,24 @@ let assemble_cost_event_payload
   in
   let cost_usd_source =
     classify_cost_usd_source ~usage_missing ~usage_trusted
-      ~provider ~model:pricing_model ~cost_usd
+      ~runtime_unmetered ~cost_usd
   in
+  let source_auto_trajectory = "auto_trajectory" in
   let entry = `Assoc ([
-    ("agent", `String agent_name);
+    (key_agent, `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
-    ("provider", `String provider);
-    ("model", `String model);
-    ("input_tokens", `Int safe_input_tokens);
-    ("output_tokens", `Int safe_output_tokens);
-    ("cost_usd", `Float safe_cost_usd);
-    ("cost_status", `String cost_status_label);
-    ("cost_status_reason", `String cost_status_reason_label);
-    ("cost_pricing_model", `String pricing_model);
-    ( "cost_pricing_catalog",
-      `String (pricing_catalog_status ~pricing_model) );
-    ( "model_resolution_source",
-      `String
-        (model_resolution_source_for_ledger ~model ~pricing_model) );
+    (key_provider, `String runtime_lane_label);
+    (key_model, `String runtime_lane_label);
+    (key_input_tokens, `Int safe_input_tokens);
+    (key_output_tokens, `Int safe_output_tokens);
+    (key_cost_usd, `Float safe_cost_usd);
+    (key_cost_status, `String cost_status_label);
+    (key_cost_status_reason, `String cost_status_reason_label);
     (* #10318: self-describing reason for [cost_usd]'s value. *)
-    ("cost_usd_source", `String cost_usd_source);
-    ("usage_missing", `Bool usage_missing);
-    ("timestamp", `String (Masc_domain.now_iso ()));
-    ("source", `String "auto_trajectory");
+    (key_cost_usd_source, `String cost_usd_source);
+    (key_usage_missing, `Bool usage_missing);
+    (key_timestamp, `String (Masc_domain.now_iso ()));
+    (key_source, `String source_auto_trajectory);
   ]
   @ Keeper_usage_trust.json_fields usage_trust
   @ raw_usage_fields
@@ -892,6 +962,10 @@ let cost_event_payload
      ?telemetry
      ()).payload
 
+(** Date-split cost ledger root inside [masc_root].  See
+    [Dated_jsonl] for the [costs/YYYY-MM/DD.jsonl] layout. *)
+let costs_dated_dir masc_root = Filename.concat masc_root "costs"
+
 let emit_cost_event
     ~(masc_root : string)
     ~(agent_name : string)
@@ -904,7 +978,19 @@ let emit_cost_event
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
     () : unit =
-  let path = Filename.concat masc_root "costs.jsonl" in
+  (* Tier-A perf change: previously appended to a single unbounded
+     [masc_root/costs.jsonl] (14k lines, 7.5MB observed in [~/me/.masc]),
+     so every emit grew a hot single-writer file and the reader scanned
+     the entire blob.  Migrated to [Dated_jsonl] under
+     [masc_root/costs/YYYY-MM/DD.jsonl] — same per-day mutex registry
+     used by tracing / coverage_gap / audit appenders, so concurrent
+     keepers serialise on a per-day file rather than a single global
+     one.  Legacy [costs.jsonl] is left in place for read compatibility
+     ([Model_inference_metrics.read_cost_entries] reads both sources
+     until operators archive the legacy file). *)
+  let store =
+    Dated_jsonl.create ~base_dir:(costs_dated_dir masc_root) ()
+  in
   let assembled =
     assemble_cost_event_payload
       ~agent_name
@@ -922,23 +1008,22 @@ let emit_cost_event
     Prometheus.metric_cost_ledger_status
     ~labels:
       [
-        ("provider", assembled.provider);
-        ("status", assembled.cost_status_label);
-        ("reason", assembled.cost_status_reason_label);
+        (label_provider, assembled.provider);
+        (label_status, assembled.cost_status_label);
+        (label_reason, assembled.cost_status_reason_label);
       ]
     ();
   record_cost_emit_source assembled.cost_usd_source;
   let entry = assembled.payload in
-  let line = Yojson.Safe.to_string entry ^ "\n" in
-  (try Fs_compat.append_file path line
+  (try Dated_jsonl.append store entry
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_metric_emit_dropped
-          ~labels:[("keeper", agent_name); ("site", "cost_event_write")]
+          Keeper_metrics.metric_keeper_metric_emit_dropped
+          ~labels:[(label_keeper, agent_name); (label_site, Metric_emit_dropped_site.(to_label Cost_event_write))]
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
-          path (Printexc.to_string exn))
+          (Dated_jsonl.base_dir store) (Printexc.to_string exn))
 
 (** Build OAS hooks for a keeper agent.
 
@@ -1040,6 +1125,24 @@ let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
 
+let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
+  let allowed_tools =
+    Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
+  let decision =
+    on_idle_decision ~consecutive_idle_turns ~tool_names
+      ~allowed_tools in
+  let tools_str = match tool_names with
+    | [] -> "<none>" | names -> String.concat ", " names in
+  (match decision with
+   | Agent_sdk.Hooks.Skip ->
+     Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
+       (!meta_ref).name consecutive_idle_turns tools_str
+   | Agent_sdk.Hooks.Nudge _ ->
+     Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
+       (!meta_ref).name consecutive_idle_turns tools_str
+   | _ -> ());
+  decision
+
 let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
     (entries : Yojson.Safe.t list) : int =
   let now = Time_compat.now () in
@@ -1061,6 +1164,8 @@ type pr_review_action_metric_event = {
   comment_id : int option;
   success : bool;
   route_via : string option;
+  credential : Yojson.Safe.t option;
+  identity_attestation : Yojson.Safe.t option;
 }
 
 type pr_work_action_metric_event = {
@@ -1089,14 +1194,117 @@ let first_some a b =
 let observe_output_parse_failure ~surface ~output_bytes =
   Safe_ops.protect ~default:() (fun () ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_oas_hook_output_parse_failures
-        ~labels:[ ("surface", surface) ] ());
+        Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
+        ~labels:[ (label_surface, surface) ] ());
   Safe_ops.protect ~default:() (fun () ->
       Log.Keeper.warn
         "keeper_hooks_oas output JSON parse failed: surface=%s output_bytes=%d"
         surface output_bytes)
 
-let output_json_opt ~surface output_text =
+let find_substring_from text ~needle ~start =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then Some i
+    else if i + needle_len > text_len then None
+    else if String.sub text i needle_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop start
+
+let strip_fence_language block =
+  let block = String.trim block in
+  match String.index_opt block '\n' with
+  | None -> block
+  | Some first_line_end ->
+      let first_line =
+        String.sub block 0 first_line_end
+        |> String.trim
+        |> String.lowercase_ascii
+      in
+      let rest =
+        String.sub block (first_line_end + 1)
+          (String.length block - first_line_end - 1)
+        |> String.trim
+      in
+      if first_line = "json" || first_line = "jsonc" then rest else block
+
+let fenced_json_candidates text =
+  let fence = "```" in
+  let rec loop start acc =
+    match find_substring_from text ~needle:fence ~start with
+    | None -> List.rev acc
+    | Some open_at ->
+        let content_start = open_at + String.length fence in
+        (match find_substring_from text ~needle:fence ~start:content_start with
+         | None -> List.rev acc
+         | Some close_at ->
+             let raw =
+               String.sub text content_start (close_at - content_start)
+               |> strip_fence_language
+             in
+             let acc = if raw = "" then acc else raw :: acc in
+             loop (close_at + String.length fence) acc)
+  in
+  loop 0 []
+
+let json_close_for_open = function
+  | '{' -> Some '}'
+  | '[' -> Some ']'
+  | _ -> None
+
+let balanced_json_candidates text =
+  let len = String.length text in
+  let rec finish_candidate i in_string escaped stack =
+    if i >= len then None
+    else
+      let ch = text.[i] in
+      if in_string then
+        if escaped then finish_candidate (i + 1) true false stack
+        else
+          match ch with
+          | '\\' -> finish_candidate (i + 1) true true stack
+          | '"' -> finish_candidate (i + 1) false false stack
+          | _ -> finish_candidate (i + 1) true false stack
+      else
+        match ch with
+        | '"' -> finish_candidate (i + 1) true false stack
+        | '{' | '[' ->
+            (match json_close_for_open ch with
+             | None -> finish_candidate (i + 1) false false stack
+             | Some close ->
+                 finish_candidate (i + 1) false false (close :: stack))
+        | '}' | ']' ->
+            (match stack with
+             | close :: rest when close = ch ->
+                 if rest = [] then Some i
+                 else finish_candidate (i + 1) false false rest
+             | _ -> None)
+        | _ -> finish_candidate (i + 1) false false stack
+  in
+  let rec loop i acc =
+    if i >= len then List.rev acc
+    else
+      match json_close_for_open text.[i] with
+      | None -> loop (i + 1) acc
+      | Some expected ->
+          (match finish_candidate (i + 1) false false [ expected ] with
+           | None -> loop (i + 1) acc
+           | Some close_at ->
+               let candidate =
+                 String.sub text i (close_at - i + 1)
+                 |> String.trim
+               in
+               loop (close_at + 1) (candidate :: acc))
+  in
+  loop 0 []
+
+let parse_json_candidate ~surface candidate =
+  Safe_ops.parse_json_safe
+    ~context:("Keeper_hooks_oas." ^ surface ^ ".output.embedded")
+    candidate
+
+let output_json_opt ?(observe_failure = true) ~surface output_text =
   match
     Safe_ops.parse_json_safe
       ~context:("Keeper_hooks_oas." ^ surface ^ ".output")
@@ -1104,9 +1312,23 @@ let output_json_opt ~surface output_text =
   with
   | Ok json -> Some json
   | Error _ ->
-      observe_output_parse_failure ~surface
-        ~output_bytes:(String.length output_text);
-      None
+      let candidates =
+        fenced_json_candidates output_text @ balanced_json_candidates output_text
+      in
+      (match
+         List.find_map
+           (fun candidate ->
+              match parse_json_candidate ~surface candidate with
+              | Ok json -> Some json
+              | Error _ -> None)
+           candidates
+       with
+       | Some json -> Some json
+       | None ->
+           if observe_failure then
+             observe_output_parse_failure ~surface
+               ~output_bytes:(String.length output_text);
+           None)
 
 let normalized_route_via raw =
   let value = String.trim raw |> String.lowercase_ascii in
@@ -1301,6 +1523,11 @@ let gh_pr_review_action_of_command command =
       Some ("COMMENT", int_of_string_opt pr_number)
   | _ -> None
 
+let assoc_json_opt key json =
+  match assoc_field key json with
+  | Some (`Assoc _ as value) -> Some value
+  | _ -> None
+
 let output_success ~transport_success = function
   | Some json ->
       (match Safe_ops.json_bool_opt "ok" json with
@@ -1339,6 +1566,10 @@ let pr_review_action_metric_event_of_tool_io
       let success =
         output_success ~transport_success output_json
       in
+      let credential = Option.bind output_json (assoc_json_opt "credential") in
+      let identity_attestation =
+        Option.bind output_json (assoc_json_opt "identity_attestation")
+      in
       Option.map
         (fun action ->
            {
@@ -1354,6 +1585,8 @@ let pr_review_action_metric_event_of_tool_io
              comment_id = None;
              success;
              route_via;
+             credential;
+             identity_attestation;
            })
         (Option.bind action normalize_pr_review_action)
   | "keeper_pr_review_reply" ->
@@ -1364,6 +1597,10 @@ let pr_review_action_metric_event_of_tool_io
       in
       let success =
         output_success ~transport_success output_json
+      in
+      let credential = Option.bind output_json (assoc_json_opt "credential") in
+      let identity_attestation =
+        Option.bind output_json (assoc_json_opt "identity_attestation")
       in
       Some
         {
@@ -1384,6 +1621,8 @@ let pr_review_action_metric_event_of_tool_io
               (json_int_opt "comment_id" input);
           success;
           route_via;
+          credential;
+          identity_attestation;
         }
   | "keeper_shell" ->
       let output_json = output_json_opt ~surface:"pr_review_action" output_text in
@@ -1403,6 +1642,8 @@ let pr_review_action_metric_event_of_tool_io
              comment_id = None;
              success;
              route_via;
+             credential = None;
+             identity_attestation = None;
            })
   | _ -> None
 
@@ -1493,13 +1734,31 @@ let pr_work_actions_of_command command =
          | [] -> pr_work_actions_of_git_segment segment
          | actions -> actions)
 
+let is_pr_work_action_tool_name = function
+  | "masc_code_git"
+  | "keeper_pr_create"
+  | "keeper_shell"
+  | "keeper_bash"
+  | "masc_code_shell" -> true
+  | _ -> false
+
 let pr_work_action_metric_events_of_tool_io
     ~route_via_fallback
     ~(tool_name : string)
     ~(input : Yojson.Safe.t)
     ~(output_text : string)
     ~(transport_success : bool) =
-  let output_json = output_json_opt ~surface:"pr_work_action" output_text in
+  if not (is_pr_work_action_tool_name tool_name) then []
+  else
+  let observe_json_failure =
+    match tool_name with
+    | "keeper_shell" | "keeper_bash" | "masc_code_shell" -> false
+    | _ -> true
+  in
+  let output_json =
+    output_json_opt ~observe_failure:observe_json_failure
+      ~surface:"pr_work_action" output_text
+  in
   let route_via =
     first_some (Option.bind output_json route_via_of_json)
       route_via_fallback
@@ -1599,30 +1858,43 @@ let append_pr_review_action_metric
       let route_fields =
         match event.route_via with
         | None -> []
-        | Some via -> [("via", `String via); ("route_via", `String via)]
+        | Some via -> [(key_via, `String via); (key_route_via, `String via)]
+      in
+      let identity_fields =
+        []
+        |> (fun fields ->
+             match event.credential with
+             | None -> fields
+             | Some credential -> ("credential", credential) :: fields)
+        |> (fun fields ->
+             match event.identity_attestation with
+             | None -> fields
+             | Some attestation -> ("identity_attestation", attestation) :: fields)
+        |> List.rev
       in
       let snapshot =
         `Assoc
           ([
-             ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
-             ("ts_unix", `Float now);
-             ("channel", `String "tool_event");
-             ("metric_event", `String "keeper_pr_review_action");
-             ("name", `String meta.name);
-             ("agent_name", `String meta.agent_name);
+             (key_ts, `String (Masc_domain.iso8601_of_unix_seconds now));
+             (key_ts_unix, `Float now);
+             (key_channel, `String "tool_event");
+             (key_metric_event, `String "keeper_pr_review_action");
+             (key_name, `String meta.name);
+             (key_agent_name, `String meta.agent_name);
              ( "trace_id",
                `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
-             ("generation", `Int generation);
-             ("tool_name", `String tool_name);
-             ("pr_review_action", `String event.action);
-             ("pr_review_action_success", `Bool event.success);
-             ("tool_call_count", `Int 0);
-             ("tools_used", `List []);
+             (key_generation, `Int generation);
+             (key_tool_name, `String tool_name);
+             (key_pr_review_action, `String event.action);
+             (key_pr_review_action_success, `Bool event.success);
+             (key_tool_call_count, `Int 0);
+             (key_tools_used, `List []);
              ("pr_number", Json_util.int_opt_to_json event.pr_number);
              ("comment_id", Json_util.int_opt_to_json event.comment_id);
-             ("duration_ms", `Float duration_ms);
+             (key_duration_ms, `Float duration_ms);
            ]
-           @ route_fields)
+           @ route_fields
+           @ identity_fields)
       in
       Dated_jsonl.append store (Inference_utils.sanitize_json_utf8 snapshot)
 
@@ -1662,33 +1934,33 @@ let append_pr_work_action_metrics
            let route_fields =
              match event.route_via with
              | None -> []
-             | Some via -> [("via", `String via); ("route_via", `String via)]
+             | Some via -> [(key_via, `String via); (key_route_via, `String via)]
            in
            let snapshot =
              `Assoc
                ([
-                  ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
-                  ("ts_unix", `Float now);
-                  ("channel", `String "tool_event");
-                  ("metric_event", `String "keeper_pr_work_action");
-                  ("name", `String meta.name);
-                  ("agent_name", `String meta.agent_name);
+                  (key_ts, `String (Masc_domain.iso8601_of_unix_seconds now));
+                  (key_ts_unix, `Float now);
+                  (key_channel, `String "tool_event");
+                  (key_metric_event, `String "keeper_pr_work_action");
+                  (key_name, `String meta.name);
+                  (key_agent_name, `String meta.agent_name);
                   ( "trace_id",
                     `String
                       (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
-                  ("generation", `Int generation);
-                  ("tool_name", `String tool_name);
-                  ("pr_work_action", `String event.work_action);
-                  ("pr_work_action_source", `String event.work_source);
-                  ("pr_work_action_success", `Bool event.success);
+                  (key_generation, `Int generation);
+                  (key_tool_name, `String tool_name);
+                  (key_pr_work_action, `String event.work_action);
+                  (key_pr_work_action_source, `String event.work_source);
+                  (key_pr_work_action_success, `Bool event.success);
                   ( "pr_work_ref",
                     Json_util.string_opt_to_json event.work_ref );
                   ("pr_url", Json_util.string_opt_to_json event.pr_url);
                   ( "pr_work_command",
                     Json_util.string_opt_to_json event.command );
-                  ("tool_call_count", `Int 0);
-                  ("tools_used", `List []);
-                  ("duration_ms", `Float duration_ms);
+                  (key_tool_call_count, `Int 0);
+                  (key_tools_used, `List []);
+                  (key_duration_ms, `Float duration_ms);
                 ]
                 @ route_fields)
            in
@@ -1814,10 +2086,9 @@ let make_hooks
         let input_tok, output_tok, turn_cost_usd, usage_missing =
           match response.usage with
           | Some u when usage_trusted ->
-              let provider_kind = provider_kind_of_telemetry response.telemetry in
               ( u.input_tokens,
                 u.output_tokens,
-                cost_usd_for_usage ?provider_kind ~model u,
+                oas_reported_cost u,
                 false )
           | Some _ -> (0, 0, 0.0, false)
           | None -> (0, 0, 0.0, true)
@@ -1830,19 +2101,27 @@ let make_hooks
             | Some _ | None -> 0.0
         in
         let total_tok = input_tok + output_tok in
-        if (not usage_missing) && not usage_trusted then
-          Log.Keeper.warn
-            "keeper:%s after_turn usage telemetry untrusted model=%s resolved_model=%s reasons=%s input=%d output=%d context_max=%d"
-            meta.name model
-            (canonical_model_id_of_telemetry ~model response.telemetry)
-            (String.concat ","
-               (match Keeper_usage_trust.reasons usage_trust with
-                | [] -> [Keeper_usage_trust.to_string usage_trust]
-                | reasons -> reasons))
-            raw_input_tok raw_output_tok
-            (context_max_of_telemetry response.telemetry);
-        (* Provider prefix cache token tracking (Anthropic).
-           Non-Anthropic providers report 0 for these fields. *)
+        if (not usage_missing) && not usage_trusted then (
+          let reasons =
+            match Keeper_usage_trust.reasons usage_trust with
+            | [] -> [Keeper_usage_trust.to_string usage_trust]
+            | reasons -> reasons
+          in
+          if Keeper_usage_trust.warns_operator usage_trust then
+            Log.Keeper.warn
+              "keeper:%s after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              meta.name runtime_lane_label
+              (String.concat "," reasons)
+              raw_input_tok raw_output_tok
+              (context_max_of_telemetry response.telemetry)
+          else
+            Log.Keeper.info
+              "keeper:%s after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              meta.name runtime_lane_label
+              (String.concat "," reasons)
+              raw_input_tok raw_output_tok
+              (context_max_of_telemetry response.telemetry));
+        (* Cache-token tracking uses OAS-reported counters only. *)
         (match response.usage with
          | Some u when usage_trusted ->
            let cc = u.cache_creation_input_tokens in
@@ -1862,6 +2141,7 @@ let make_hooks
            histogram still proves the hook ran. *)
         record_llm_inference_latency_metric ~model
           ~telemetry:response.telemetry;
+        record_response_content_quality_metric ~keeper_name:meta.name response;
         let fmt_tok_s = function
           | Some v -> Printf.sprintf "%.1f" v
           | None -> "-"
@@ -1880,7 +2160,7 @@ let make_hooks
         in
         let latency_ms =
           match response.telemetry with
-          | Some t -> t.request_latency_ms
+          | Some t -> Option.value ~default:0 t.request_latency_ms
           | None -> 0
         in
         let wall_tok_s_opt =
@@ -1893,10 +2173,16 @@ let make_hooks
         let wall_tok_s = fmt_tok_s wall_tok_s_opt in
         let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
         let decode_tok_s = fmt_tok_s decode_tok_s_opt in
+        let thinking = summarize_thinking_blocks response.content in
         Log.Keeper.info
-          "keeper:%s turn=%d total_turns=%d model=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
+          "keeper:%s turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
           meta.name turn meta.runtime.usage.total_turns model total_tok
-          wall_tok_s prompt_tok_s decode_tok_s latency_ms;
+          wall_tok_s prompt_tok_s decode_tok_s latency_ms
+          thinking.thinking_present
+          thinking.thinking_blocks
+          thinking.thinking_chars
+          thinking.redacted_thinking_blocks
+          thinking.thinking_kind;
         (* Emit per-turn cost event for task attribution.
            cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with
@@ -1920,18 +2206,18 @@ let make_hooks
            Sse.broadcast
              (`Assoc
                [
-                 ("type", `String sse_turn_complete);
-                 ("name", `String meta.name);
-                 ("generation", `Int generation);
-                 ("turn", `Int turn);
-                 ("model_used", `String model);
-                 ("input_tokens", `Int input_tok);
-                 ("output_tokens", `Int output_tok);
-                 ("has_state_block", `Bool has_state_block);
-                 ("cost_usd", `Float turn_cost_usd);
-                 ("tool_calls_made", `Int !tool_call_count_ref);
-                 ("total_turns", `Int meta.runtime.usage.total_turns);
-                 ("ts_unix", `Float (Unix.gettimeofday ()));
+                 (key_type, `String sse_turn_complete);
+                 (key_name, `String meta.name);
+                 (key_generation, `Int generation);
+                 (key_turn, `Int turn);
+                 (key_model_used, `Null);
+                 (key_input_tokens, `Int input_tok);
+                 (key_output_tokens, `Int output_tok);
+                 (key_has_state_block, `Bool has_state_block);
+                 (key_cost_usd, `Float turn_cost_usd);
+                 (key_tool_calls_made, `Int !tool_call_count_ref);
+                 (key_total_turns, `Int meta.runtime.usage.total_turns);
+                 (key_ts_unix, `Float (Unix.gettimeofday ()));
                ])
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1946,8 +2232,8 @@ let make_hooks
                 bypass that counter.  Logging here makes the loss visible
                 at the producer site. *)
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
-               ~labels:[("keeper", meta.name); ("callback", "after_turn_sse_broadcast")]
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
+               ~labels:[(label_keeper, meta.name); (label_callback, callback_label_after_turn_sse_broadcast)]
                ();
              Log.Keeper.warn
                "keeper:%s turn=%d sse_turn_complete broadcast failed: %s"
@@ -1984,11 +2270,10 @@ let make_hooks
         let duration_ms =
           if hook_duration_ms > 0.0
           then hook_duration_ms
-          else (Time_compat.now () -. !tool_start_time) *. 1000.0
+          else (Time_compat.now () -. !tool_start_time) *. ms_per_second
         in
         let model =
-          let m = (!meta_ref).runtime.usage.last_model_used in
-          if m = "" then (!meta_ref).cascade_name else m
+          current_keeper_model !meta_ref
         in
         let summary =
           tool_execution_summary
@@ -2030,8 +2315,7 @@ let make_hooks
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
              ~success:(outcome = "ok") ~duration_ms
-             ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
-                     if m = "" then (!meta_ref).cascade_name else m)
+             ~model:(current_keeper_model !meta_ref)
              ?lane ?tool_choice ?thinking_enabled ?thinking_budget
              ?prompt_fingerprint
              ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
@@ -2046,8 +2330,8 @@ let make_hooks
                 downstream replay / debugging tools with gaps that look
                 identical to "no tool calls in this turn." *)
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
-               ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
+               ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_post_tool_log_write)]
                ();
              Log.Keeper.warn
                "keeper:%s tool=%s log_call write failed: %s"
@@ -2067,11 +2351,11 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
-                   ("keeper", (!meta_ref).name);
-                   ("callback", "pr_review_action_metrics_append");
+                   (label_keeper, (!meta_ref).name);
+                   (label_callback, callback_label_pr_review_action_metrics_append);
                  ]
                ();
              Log.Keeper.warn
@@ -2092,11 +2376,11 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Prometheus.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
-                   ("keeper", (!meta_ref).name);
-                   ("callback", "pr_work_action_metrics_append");
+                   (label_keeper, (!meta_ref).name);
+                   (label_callback, callback_label_pr_work_action_metrics_append);
                  ]
                ();
              Log.Keeper.warn
@@ -2177,8 +2461,8 @@ let make_hooks
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Prometheus.inc_counter
-                Prometheus.metric_keeper_lifecycle_callback_failures
-                ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_executed")]
+                Keeper_metrics.metric_keeper_lifecycle_callback_failures
+                ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_executed)]
                 ();
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
                 (!meta_ref).name tool_name (Printexc.to_string exn));
@@ -2193,32 +2477,48 @@ let make_hooks
        destructive + governance_approval) is composed with these
        non-gate hooks at the end of [make_hooks]. *)
 
+    on_stop = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.OnStop { reason; _ } ->
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_on_stop
+          ~labels:
+            [
+              (label_keeper, (!meta_ref).name);
+              (label_stop_reason, stop_reason_to_label reason);
+            ]
+          ();
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
+
     on_idle = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
-        let allowed_tools =
-          Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
+        keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names
+      | _ -> Agent_sdk.Hooks.Continue);
+
+    on_idle_escalated = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.OnIdleEscalated
+          { severity; consecutive_idle_turns; tool_names; _ } ->
         let decision =
-          on_idle_decision ~consecutive_idle_turns ~tool_names
-            ~allowed_tools in
-        let tools_str = match tool_names with
-          | [] -> "<none>" | names -> String.concat ", " names in
-        (match decision with
-         | Agent_sdk.Hooks.Skip ->
-           Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
-             (!meta_ref).name consecutive_idle_turns tools_str
-         | Agent_sdk.Hooks.Nudge _ ->
-           Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
-             (!meta_ref).name consecutive_idle_turns tools_str
-         | _ -> ());
+          keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names in
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_oas_on_idle_escalated
+          ~labels:
+            [
+              (label_keeper, (!meta_ref).name);
+              (label_severity, idle_severity_to_label severity);
+              (label_decision, idle_decision_to_label decision);
+            ]
+          ();
         decision
       | _ -> Agent_sdk.Hooks.Continue);
 
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_callback_failures
-          ~labels:[("keeper", (!meta_ref).name); ("callback", "on_error")]
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
+          ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_error)]
           ();
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
           (!meta_ref).name detail err_ctx;
@@ -2228,8 +2528,8 @@ let make_hooks
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_lifecycle_callback_failures
-          ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_error")]
+          Keeper_metrics.metric_keeper_lifecycle_callback_failures
+          ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_error)]
           ();
         Log.Keeper.error "keeper:%s tool_error: %s — %s"
           (!meta_ref).name tool_name error;
@@ -2279,12 +2579,12 @@ let hook_slot_json ?(features = []) ?(gates = []) ?(effects = [])
   in
   `Assoc
     ([
-       ("active", `Bool active);
-       ("source", `String source);
+       (key_active, `Bool active);
+       (key_source, `String source);
      ]
      @ (match reason with
        | None -> []
-       | Some value -> [ ("reason", `String value) ])
+       | Some value -> [ (key_reason, `String value) ])
      @ list_field "features" features
      @ list_field "gates" gates
      @ list_field "effects" effects)
@@ -2383,9 +2683,9 @@ let hook_introspection_json
         ~effects:[ "tool_use_failure_metric" ]
         "post_tool_use_failure";
       slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"keeper runtime has no stop hook"
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "stop_reason_metric" ]
         "on_stop";
       slot
         ~active:true
@@ -2393,9 +2693,9 @@ let hook_introspection_json
         ~features:[ "repeated_tool_nudge"; "stay_silent_skip" ]
         "on_idle";
       slot
-        ~active:false
-        ~source:"not_registered"
-        ~reason:"keeper runtime uses legacy on_idle hook"
+        ~active:true
+        ~source:"keeper_hooks_oas"
+        ~effects:[ "idle_escalation_metric" ]
         "on_idle_escalated";
       slot
         ~active:true
@@ -2444,19 +2744,19 @@ let hook_introspection_json
     List.map (fun (name, _active, json) -> (name, json)) slot_entries
   in
   `Assoc [
-    ("scope", `String "keeper_runtime_composite");
-    ("slots", `Assoc slot_assoc);
+    (key_scope, `String "keeper_runtime_composite");
+    (key_slots, `Assoc slot_assoc);
     ("slot_names", slot_names);
-    ("slot_count", `Int total_count);
-    ("active_slot_count", `Int active_count);
-    ("inactive_slot_count", `Int inactive_count);
+    (key_slot_count, `Int total_count);
+    (key_active_slot_count, `Int active_count);
+    (key_inactive_slot_count, `Int inactive_count);
     ("deny_list", denied_json);
-    ("deny_list_count", `Int (List.length keeper_denied_tools));
+    (key_deny_list_count, `Int (List.length keeper_denied_tools));
     ("destructive_check_tools", destructive_json);
     ("cost_budget",
       match max_cost_usd with
       | Some v ->
-        `Assoc [("max_cost_usd", `Float v); ("active", `Bool true)]
+        `Assoc [(key_max_cost_usd, `Float v); (key_active, `Bool true)]
       | None ->
-        `Assoc [("active", `Bool false)]);
+        `Assoc [(key_active, `Bool false)]);
   ]

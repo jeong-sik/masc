@@ -9,6 +9,7 @@ import { stripStateBlocks } from '../../keeper-message'
 import { navigate } from '../../router'
 import { messages } from '../../store'
 import type { Message } from '../../types'
+import { ComposerV2 } from './composer-v2'
 import { extractMentionTargets } from './mention-inbox'
 import { extractStateBlocks } from './state-block-messages'
 
@@ -151,6 +152,7 @@ export function MessageRoomTimeline() {
     ? selectedRoom
     : model.rooms[0]?.room ?? null
   const active = activeRoom ? model.rooms.find(room => room.room === activeRoom) ?? null : null
+  const composerRoom = activeRoom ?? 'default'
 
   return html`
     <section class="grid gap-4" aria-labelledby="message-room-timeline-heading">
@@ -187,7 +189,10 @@ export function MessageRoomTimeline() {
       </div>
 
       ${model.rooms.length === 0
-        ? html`<${EmptyState} message="메시지 타임라인이 없습니다" compact />`
+        ? html`
+            <${ComposerV2} roomId=${composerRoom} />
+            <${EmptyState} message="메시지 타임라인이 없습니다" compact />
+          `
         : html`
             <div class="flex flex-wrap gap-2" role="tablist" aria-label="Message rooms">
               ${model.rooms.map(room => html`
@@ -207,6 +212,7 @@ export function MessageRoomTimeline() {
                 </button>
               `)}
             </div>
+            <${ComposerV2} roomId=${composerRoom} />
             <section role="tabpanel" aria-label=${active ? `#${active.room} timeline` : 'Message timeline'} class="grid gap-2.5">
               ${active?.rows.map(row => html`<${TimelineMessage} key=${rowKey(row)} row=${row} />`)}
             </section>

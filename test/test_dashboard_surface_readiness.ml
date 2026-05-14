@@ -146,6 +146,93 @@ let test_live_spotcheck_keeps_script_values_as_scripts () =
            check string "live_spotcheck kind" "script"
              Yojson.Safe.Util.(ref_json |> member "kind" |> to_string))
 
+let test_cognition_readiness_uses_cognition_read_model () =
+  let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.cognition" () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match List.find_opt
+          (fun surface ->
+            Yojson.Safe.Util.(surface |> member "id" |> to_string = "monitoring.cognition"))
+          surfaces
+  with
+  | None -> fail "monitoring.cognition missing"
+  | Some surface ->
+      (match find_verification_ref surface "live_spotcheck" with
+       | None -> fail "monitoring.cognition live_spotcheck missing"
+       | Some ref_json ->
+           let open Yojson.Safe.Util in
+           check string "live_spotcheck kind" "route"
+             (ref_json |> member "kind" |> to_string);
+           check string "live_spotcheck value"
+             "/api/v1/dashboard/memory-subsystems"
+             (ref_json |> member "value" |> to_string);
+           check string "surface verification ref labels"
+             "live_spotcheck+logs+metrics"
+             (surface |> member "verification_ref_bar" |> to_string))
+
+let test_runtime_readiness_uses_cascade_health_read_model () =
+  let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.runtime" () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match List.find_opt
+          (fun surface ->
+            Yojson.Safe.Util.(surface |> member "id" |> to_string = "monitoring.runtime"))
+          surfaces
+  with
+  | None -> fail "monitoring.runtime missing"
+  | Some surface ->
+      (match find_verification_ref surface "live_spotcheck" with
+       | None -> fail "monitoring.runtime live_spotcheck missing"
+       | Some ref_json ->
+           let open Yojson.Safe.Util in
+           check string "live_spotcheck kind" "route"
+             (ref_json |> member "kind" |> to_string);
+           check string "live_spotcheck value" "/api/v1/cascade/health"
+             (ref_json |> member "value" |> to_string);
+           check string "surface verification ref labels"
+             "live_spotcheck+logs+metrics+tool"
+             (surface |> member "verification_ref_bar" |> to_string))
+
+let test_code_ide_readiness_uses_ide_presence_read_model () =
+  let json = Dashboard_surface_readiness.json ~surface_id:"code.ide-shell" () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match List.find_opt
+          (fun surface ->
+            Yojson.Safe.Util.(surface |> member "id" |> to_string = "code.ide-shell"))
+          surfaces
+  with
+  | None -> fail "code.ide-shell missing"
+  | Some surface ->
+      (match find_verification_ref surface "live_spotcheck" with
+       | None -> fail "code.ide-shell live_spotcheck missing"
+       | Some ref_json ->
+           let open Yojson.Safe.Util in
+           check string "live_spotcheck kind" "route"
+             (ref_json |> member "kind" |> to_string);
+           check string "live_spotcheck value"
+             "/api/v1/ide/presence"
+             (ref_json |> member "value" |> to_string);
+           check string "surface verification ref labels"
+             "live_spotcheck+logs+metrics"
+             (surface |> member "verification_ref_bar" |> to_string))
+
+let test_verification_ref_bar_reflects_declared_refs () =
+  let overview_json = Dashboard_surface_readiness.json ~surface_id:"overview" () in
+  let open Yojson.Safe.Util in
+  check string "single-surface ref coverage"
+    "live:1/1 logs:1/1 metrics:1/1"
+    (overview_json |> member "verification_ref_bar" |> to_string);
+  (match overview_json |> member "surfaces" |> to_list with
+   | [ surface ] ->
+       check string "surface verification ref labels"
+         "fixture+live_spotcheck+logs+metrics+tool"
+         (surface |> member "verification_ref_bar" |> to_string)
+   | _ -> fail "overview surface missing");
+  let all_json = Dashboard_surface_readiness.json () in
+  let all_refs = all_json |> member "verification_ref_bar" |> to_string in
+  check bool "aggregate refs no longer fixture constant" false
+    (String.equal all_refs "fixture+live_spotcheck");
+  check bool "aggregate refs report live coverage" true
+    (String.starts_with ~prefix:"live:" all_refs)
+
 let test_legacy_surfaces_removed_from_readiness_inventory () =
   let surfaces = load_readiness_contract () in
   let legacy_ids =
@@ -169,6 +256,8 @@ let test_legacy_surfaces_removed_from_readiness_inventory () =
       "workspace.evidence";
       "workspace.goals";
       "workspace.worktrees";
+      "workspace.collab-mvp";
+      "monitoring.memory-subsystems";
       "lab.features";
       "lab.config";
     ]
@@ -195,10 +284,10 @@ let test_hidden_diagnostic_surfaces_are_not_main_gate () =
   in
   List.iter check_hidden
     [
+      "cockpit";
+      "monitoring.journey";
       "monitoring.observatory";
-      "monitoring.memory-subsystems";
-      "workspace.collab-mvp";
-      "code.ide-shell";
+      "monitoring.cognition";
     ]
 
 let () =
@@ -214,6 +303,14 @@ let () =
             test_live_spotcheck_serializes_route_values_as_routes;
           test_case "script live spotchecks stay scripts" `Quick
             test_live_spotcheck_keeps_script_values_as_scripts;
+          test_case "cognition readiness uses cognition read model" `Quick
+            test_cognition_readiness_uses_cognition_read_model;
+          test_case "runtime readiness uses cascade health read model" `Quick
+            test_runtime_readiness_uses_cascade_health_read_model;
+          test_case "code ide readiness uses ide presence read model" `Quick
+            test_code_ide_readiness_uses_ide_presence_read_model;
+          test_case "verification ref bar reflects declared refs" `Quick
+            test_verification_ref_bar_reflects_declared_refs;
           test_case "legacy surfaces removed from readiness inventory" `Quick
             test_legacy_surfaces_removed_from_readiness_inventory;
           test_case "hidden diagnostics are not main gate" `Quick

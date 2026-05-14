@@ -144,7 +144,7 @@ let test_execute_with_outcome_policy_gate_is_failure () =
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_keeper_tool_not_allowed
+    Masc_mcp.Keeper_metrics.metric_keeper_tool_not_allowed
     ~labels:[ ("keeper", keeper); ("tool", tool); ("reason", reason) ]
     ()
 
@@ -337,13 +337,13 @@ let register_registered_dispatch_probe () =
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
       Some
-        ( true
-        , Yojson.Safe.to_string
-            (`Assoc
-              [ ("ok", `Bool true)
-              ; ("tool", `String name)
-              ; ("route", `String "registered")
-              ]) ))
+        (Masc_mcp.Tool_result.quick_ok ~tool_name:name
+           (Yojson.Safe.to_string
+              (`Assoc
+                [ ("ok", `Bool true)
+                ; ("tool", `String name)
+                ; ("route", `String "registered")
+                ]))))
 
 let test_registered_tool_dispatch_without_masc_prefix () =
   register_registered_dispatch_probe ();
@@ -354,7 +354,7 @@ let test_registered_tool_dispatch_without_masc_prefix () =
       match
         Masc_mcp.Keeper_exec_masc.handle_registered_keeper_tool
           ~config
-          ~meta
+          ~keeper_name:meta.name
           ~name:registered_dispatch_probe_tool
           ~args:(`Assoc [])
       with
@@ -437,6 +437,36 @@ let test_exec_cache_none_no_caching () =
          | `Bool true -> false
          | _ -> true))
 
+let test_exec_cache_skips_write_commands () =
+  with_exec_fixture "keeper_exec_cache_write_skip"
+    (fun ~config ~meta ~ctx_work ->
+      let cache = Masc_exec.Exec_cache.create () in
+      let run cmd =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~ctx_work ~exec_cache:(Some cache)
+          ~name:"keeper_bash"
+          ~input:(`Assoc [ ("cmd", `String cmd) ])
+          ()
+        |> Yojson.Safe.from_string
+      in
+      let touch_first = run "touch write_cache_probe" in
+      let touch_second = run "touch write_cache_probe" in
+      let redirect_first = run "echo redirected > redirected_cache_probe" in
+      let redirect_second = run "echo redirected > redirected_cache_probe" in
+      let assert_not_cached label json =
+        check bool label true
+          (match Yojson.Safe.Util.member "cached" json with
+           | `Bool true -> false
+           | _ -> true)
+      in
+      assert_not_cached "touch first not cached" touch_first;
+      assert_not_cached "touch second not cached" touch_second;
+      assert_not_cached "redirect first not cached" redirect_first;
+      assert_not_cached "redirect second not cached" redirect_second;
+      let hits, misses = Masc_exec.Exec_cache.stats cache in
+      check int "write cache hits" 0 hits;
+      check int "write cache misses" 0 misses)
+
 let test_exec_cache_stats_json () =
   let cache = Masc_exec.Exec_cache.create () in
   let json = Masc_exec.Exec_cache.to_json cache in
@@ -504,6 +534,8 @@ let () =
     ("exec_cache", [
       test_case "miss then hit" `Quick test_exec_cache_miss_then_hit;
       test_case "no cache when None" `Quick test_exec_cache_none_no_caching;
+      test_case "skips write commands" `Quick
+        test_exec_cache_skips_write_commands;
       test_case "stats json" `Quick test_exec_cache_stats_json;
     ]);
   ]

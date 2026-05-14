@@ -18,6 +18,7 @@ function getCytoscape(): Promise<typeof cytoscape> {
 // Cytoscape does not resolve CSS variables. Resolve once against :root
 // with fallback to literal hex values.
 const TOKEN_FALLBACKS: Record<string, string> = {
+  '--color-brass-1': '#d4a14a',
   '--color-bg-3': '#211e1a',
   '--color-bg-4': '#2a2621',
   '--color-line-1': '#2a2520',
@@ -31,6 +32,30 @@ const TOKEN_FALLBACKS: Record<string, string> = {
   '--color-emerald': '#22c55e',
   '--color-cyan': '#22d3ee',
   '--color-indigo': '#818cf8',
+}
+
+export interface GitGraphFocusOptions {
+  readonly focusRef?: string | null
+}
+
+function cleanGitGraphFocusValue(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed.toLowerCase() : null
+}
+
+export function gitGraphNodeMatchesRef(node: GitGraphNode, focusRef: string | null | undefined): boolean {
+  const normalizedRef = cleanGitGraphFocusValue(focusRef)
+  if (!normalizedRef) return false
+  const sha = cleanGitGraphFocusValue(node.sha)
+  if (sha && (sha === normalizedRef || sha.startsWith(normalizedRef))) return true
+  return [node.branch, node.label, node.detail].some(value => cleanGitGraphFocusValue(value) === normalizedRef)
+}
+
+export function findGitGraphRefMatches(
+  graph: GitGraphResponse,
+  focusRef: string | null | undefined,
+): ReadonlyArray<GitGraphNode> {
+  return graph.nodes.filter(node => gitGraphNodeMatchesRef(node, focusRef))
 }
 
 function resolveCssVar(token: string): string {
@@ -51,7 +76,10 @@ export function borderForStatus(status: string): string {
   return resolveCssVar('--color-line-2')
 }
 
-export function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinition[] {
+export function buildElements(
+  graph: GitGraphResponse,
+  options: GitGraphFocusOptions = {},
+): cytoscape.ElementDefinition[] {
   const agentParents = graph.agents.map(agent => ({
     data: {
       id: `agent:${agent.id}`,
@@ -62,20 +90,25 @@ export function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinit
     },
   }))
 
-  const nodes = graph.nodes.map(node => ({
-    data: {
-      ...node,
-      parent: node.agent_id ? `agent:${node.agent_id}` : undefined,
-      color: node.color ?? resolveCssVar('--color-fg-3'),
-      borderColor: borderForStatus(node.status),
-      title: node.detail ?? node.branch ?? node.sha ?? node.label,
-    },
-    classes: [
-      node.kind,
-      node.status,
-      node.conflict ? 'conflict' : '',
-    ].filter(Boolean).join(' '),
-  }))
+  const nodes = graph.nodes.map(node => {
+    const routeFocus = gitGraphNodeMatchesRef(node, options.focusRef)
+    return {
+      data: {
+        ...node,
+        parent: node.agent_id ? `agent:${node.agent_id}` : undefined,
+        color: node.color ?? resolveCssVar('--color-fg-3'),
+        borderColor: borderForStatus(node.status),
+        title: node.detail ?? node.branch ?? node.sha ?? node.label,
+        routeFocus,
+      },
+      classes: [
+        node.kind,
+        node.status,
+        node.conflict ? 'conflict' : '',
+        routeFocus ? 'route-focus' : '',
+      ].filter(Boolean).join(' '),
+    }
+  })
 
   const nodeIds = new Set<string>([
     ...agentParents.map(n => n.data.id),
@@ -139,6 +172,15 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
       },
     },
     {
+      selector: 'node.route-focus',
+      style: {
+        'border-color': resolveCssVar('--color-brass-1'),
+        'border-width': 4,
+        'overlay-color': resolveCssVar('--color-brass-1'),
+        'overlay-opacity': 0.16,
+      },
+    },
+    {
       selector: ':parent',
       style: {
         label: 'data(label)',
@@ -186,9 +228,10 @@ export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
 
 interface GitGraphViewProps {
   graph: GitGraphResponse
+  focusRef?: string | null
 }
 
-export function GitGraphView({ graph }: GitGraphViewProps) {
+export function GitGraphView({ graph, focusRef = null }: GitGraphViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const cyRef = useRef<CyCore | null>(null)
   const [loading, setLoading] = useState(true)
@@ -209,7 +252,7 @@ export function GitGraphView({ graph }: GitGraphViewProps) {
 
         const cy = cytoscapeFn({
           container,
-          elements: buildElements(graph),
+          elements: buildElements(graph, { focusRef }),
           style: stylesheet(),
           layout: {
             name: 'breadthfirst',
@@ -245,7 +288,7 @@ export function GitGraphView({ graph }: GitGraphViewProps) {
       cyRef.current?.destroy()
       cyRef.current = null
     }
-  }, [graph.generated_at, graph.nodes.length, graph.edges.length])
+  }, [focusRef, graph.generated_at, graph.nodes.length, graph.edges.length])
 
   return html`
     <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">

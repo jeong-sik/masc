@@ -8,37 +8,43 @@ function Dot({ kind = 'idle', size = 'md', beat = false, style }) {
   return <span className={`cb-dot ${kind} ${size === 'sm' ? 'sm' : size === 'lg' ? 'lg' : ''} ${beat ? 'beat' : ''}`} style={style} aria-hidden="true" />;
 }
 
-// Mini sparkline (random but seeded bars) — used in KPI + lifeline
+// Mini sparkline — renders supplied bar heights (0..100). When `data`
+// is absent we render an empty container instead of fabricating bars,
+// so missing telemetry is visible rather than hidden behind noise.
 function Spark({ data, color = 'brass', bars = 14 }) {
-  const d = data || Array.from({ length: bars }, (_, i) => 30 + Math.sin(i * 0.7) * 20 + Math.random() * 30);
+  if (!Array.isArray(data) || data.length === 0) {
+    return <span className={`spark is-${color} is-empty`} style={{ height: 16 }} aria-label="no data" data-empty="true" />;
+  }
   return (
     <span className={`spark is-${color}`} style={{ height: 16 }} aria-hidden="true">
-      {d.map((h, i) => <i key={i} style={{ height: `${Math.max(5, Math.min(100, h))}%` }} />)}
+      {data.map((h, i) => <i key={i} style={{ height: `${Math.max(5, Math.min(100, h))}%` }} />)}
     </span>
   );
 }
 
-// Lifeline-style sine+spike svg path
-function Heartbeat({ height = 32, width = 320, phase = 0 }) {
-  const points = [];
-  const segs = 60;
-  for (let i = 0; i <= segs; i++) {
-    const t = i / segs;
-    const x = t * width;
-    // mostly flat with a spike every ~12 samples
-    let y = height / 2 + Math.sin((t + phase) * 6) * 1.5;
-    const s = (i + Math.floor(phase * 60)) % 12;
-    if (s === 3) y -= height * 0.35;
-    if (s === 4) y += height * 0.4;
-    if (s === 5) y -= height * 0.15;
-    points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+// Lifeline-style svg path. Caller passes `data` (array of y-samples in
+// 0..100) plus optional `min`/`max` bounds. Without data we render a
+// dashed baseline so the indicator visibly reflects "no signal" rather
+// than animating a fake heartbeat.
+function Heartbeat({ height = 32, width = 320, data, min = 0, max = 100 }) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return (
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-label="no data" data-empty="true" focusable="false">
+        <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="var(--color-fg-muted)" strokeWidth="1" strokeDasharray="3 3" />
+      </svg>
+    );
   }
+  const span = Math.max(1, max - min);
+  const segs = data.length - 1 || 1;
+  const points = data.map((v, i) => {
+    const x = (i / segs) * width;
+    const clamped = Math.max(min, Math.min(max, v));
+    const y = height - ((clamped - min) / span) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
   return (
     <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
       <polyline points={points.join(' ')} fill="none" stroke="var(--color-accent-fg)" strokeWidth="1.2" />
-      <circle cx={width - 2} cy={height / 2} r="2" fill="var(--color-accent-fg)">
-        <animate attributeName="r" values="2;3.5;2" dur="1.4s" repeatCount="indefinite" />
-      </circle>
     </svg>
   );
 }

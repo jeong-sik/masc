@@ -56,7 +56,8 @@ vars == <<keeper_phase, turn_number, context_id, context_tokens, message_count,
 
 \* Issue #8701: explicit OCaml ↔ TLA+ mapping for the context lifecycle
 \* abstraction. SSOT for OCaml side is lib/keeper/keeper_state_machine.ml
-\* (12 phases). This spec intentionally collapses the 12 OCaml phases into
+\* (13 phases; Zombie added iter 4 #14707).  This spec intentionally
+\* collapses the 12 non-Zombie OCaml phases into
 \* a 7-symbol alphabet because the context-lifecycle invariants do not
 \* depend on transport/handoff details.
 \*
@@ -80,9 +81,20 @@ vars == <<keeper_phase, turn_number, context_id, context_tokens, message_count,
 \* table above as the authoritative abstraction function.
 \*
 \* Unmodeled here (covered in companion specs):
-\*   HandingOff, Draining, Paused, Restarting
+\*   HandingOff, Draining, Paused, Restarting, Zombie
 \* See KeeperGenerationLineage.tla for HandingOff and
 \*     KeeperReconcileLiveness.tla for Paused/Restarting/Draining.
+\* Zombie ("zombie" wire format) is terminal-terminal: it is reachable
+\* only post-Dead when supervisor cleanup latches a never-cleared
+\* failure (see ZombieIsForever / ZombieRequiresTerminalFailureLatched
+\* in KeeperStateMachine.tla, added iter 4 #14707).  No context-
+\* lifecycle events are reachable from Zombie, so it is intentionally
+\* omitted from the abstract Phases set rather than collapsed into
+\* "dead".  See iter 47 audit memo
+\* docs/tla-audit/kctxl-h1-phase-mapping-zombie-gap-2026-05-12.md
+\* for the analysis (KSM phase type carries 13 constructors; this
+\* spec projects to 7 abstract values covering 8 of the 12 non-Zombie
+\* phases — Failing|Crashed collapse into "error", others as listed).
 Phases == {"idle", "running", "compacting", "overflow_retry", "done", "error", "dead"}
 
 \* ── Initial State ────────────────────────────────────────
@@ -147,11 +159,16 @@ TurnProducesOutput(k) ==
                    ckpt_turn, ckpt_valid, resume_ctx_id, fail_count, next_ctx_id>>
 
 \* 3. Token Budget Exceeded: running -> overflow_retry
-\*    Models TokenBudgetExceeded(Input) recognised in
-\*    keeper_unified_turn.ml:318 (`is_input_overflow` pattern matcher)
-\*    and handled by the per-turn overflow path at line 455. Verified
-\*    2026-04-20: line 65 was a stale anchor predating the @since 2.256.0
-\*    extension that broadened TokenBudgetExceeded handling.
+\*    Models TokenBudgetExceeded(Input) recognised by
+\*    Keeper_error_classify.is_context_overflow (keeper_error_classify.ml —
+\*    the `Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ })
+\*    -> true` arm; this replaced the older `is_input_overflow` pattern
+\*    matcher that used to live in keeper_unified_turn.ml) and handled by
+\*    the per-turn retry loop in keeper_unified_turn.ml (the
+\*    `... when EC.is_context_overflow err ->` branch). Cited by symbol,
+\*    not line — iter 64 N-2.a, converted in the iter 85 scattered-singles
+\*    line-ref sweep (which also picked up the relocation of the predicate
+\*    out of keeper_unified_turn.ml into keeper_error_classify.ml).
 TokenBudgetExceeded(k) ==
     /\ keeper_phase[k] = "running"
     /\ context_tokens[k] > MaxTokens
@@ -191,12 +208,12 @@ CompactionCompletes(k) ==
 \* 5b. Compaction Failed: strategy returned an error — context_tokens
 \*     stay above budget, keeper transitions back to overflow_retry for
 \*     another compaction attempt.
-\*     Models keeper_state_machine.ml:402-408 Compaction_failed _ handler:
-\*     clears compaction_active but leaves context_overflow=true.
-\*     (Verified 2026-04-20: lines 383-389 were a stale anchor; that
-\*     range now holds the Turn_failed + Context_measured branches.
-\*     The Compaction_failed handler shifted ~20 lines down as new
-\*     event variants were inserted above it.)
+\*     Models keeper_state_machine.ml — update_conditions's
+\*     `| Compaction_failed _ ->` arm: clears compaction_active but leaves
+\*     context_overflow=true. Cited by symbol, not line — iter 64 N-2.a,
+\*     converted in the iter 85 scattered-singles line-ref sweep (the old
+\*     `:402-408` anchor had drifted as event variants were inserted above
+\*     the handler).
 \*     NOTE: the retry-exhaustion latch (compact_retry_exhausted → Paused)
 \*     lives in keeper_unified_turn and is not yet modelled here. Without
 \*     fairness on CompactionCompletes, TLC explores both retry and

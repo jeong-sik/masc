@@ -15,12 +15,29 @@ type outcome =
   | Dispatch_unavailable
   | Internal_error of string
 
-(** Closed wrapper for connector error-kind labels. JSON/status surfaces
-    continue to render the stable snake_case string labels. *)
-type error_kind = private Error_kind of string
+(** Connector error-kind labels. Closed set mirroring the in-module
+    producer surface: validation / keeper / dispatch_unavailable /
+    internal, plus [Ek_none] as the sentinel used by [Success] and
+    [Duplicate] outcomes (previously the empty-string [Error_kind ""]).
 
-val error_kind_of_string : string -> error_kind
+    JSON/status surfaces render via [error_kind_to_string]; wire output
+    is byte-compatible with the prior [private Error_kind of string]
+    wrapper. *)
+type error_kind =
+  | Ek_none
+  | Ek_validation
+  | Ek_keeper
+  | Ek_dispatch_unavailable
+  | Ek_internal
+
+val error_kind_of_string : string -> error_kind option
+(** Parse a wire label. [None] on unknown so JSON read paths fail
+    closed (CLAUDE.md anti-pattern #2 — Unknown → Permissive Default
+    forbidden). *)
+
 val error_kind_to_string : error_kind -> string
+(** Render to the JSON/status wire label (byte-compatible with the
+    pre-typing private-string wrapper). *)
 
 (** Per-channel statistics snapshot (immutable). *)
 type channel_stats = {

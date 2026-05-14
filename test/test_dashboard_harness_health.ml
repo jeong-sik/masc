@@ -46,7 +46,7 @@ let make_keeper_meta ?(name = "keeper-a") ?(trace_id = "trace-keeper-a") () =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
+          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
           ("last_model_used", `String "llama:auto");
         ])
   with
@@ -145,7 +145,10 @@ let test_runtime_signals_are_persisted () =
     (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
        ~message_count:88 ~token_count:32000
        ~strategies:[ "PruneToolOutputs"; "SummarizeOld" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next"
@@ -174,7 +177,10 @@ let test_runtime_window_empty_reason () =
   ignore
     (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next";
@@ -196,7 +202,10 @@ let test_runtime_since_only_window_empty_reason () =
   ignore
     (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next";
@@ -218,7 +227,10 @@ let test_runtime_until_only_window_empty_reason () =
   ignore
     (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next";
@@ -242,7 +254,10 @@ let test_runtime_stale_status () =
     (Harness.record_pre_compact_at ~timestamp:stale_timestamp
        ~keeper_name:"keeper-a" ~context_ratio:0.91 ~message_count:88
        ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
-       ~context_window:200_000 ~is_local_model:false ~trigger:"ratio(0.91>=0.85)");
+       ~context_window:200_000 ~is_local_model:false
+       ~trigger:
+         (Masc_mcp.Compaction_trigger.Ratio_threshold
+            { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric ~timestamp:stale_timestamp config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
     ~new_trace_id:"trace-keeper-a-next";
@@ -344,20 +359,20 @@ let test_outcomes_rollup_counts_gate_rejected_from_completed_turns () =
   ignore (Reg.register ~base_path:config.base_path keeper_name meta);
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
-    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+    ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
   Reg.mark_turn_gate_rejected_by_name keeper_name;
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
-    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+    ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name Reg.Cascade_done;
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_done);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
-    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+    ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state
-    ~base_path:config.base_path keeper_name Reg.Cascade_exhausted;
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_exhausted);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   let outcomes =
     Masc_mcp.Dashboard_http_keeper.compute_outcomes_rollup
@@ -415,7 +430,8 @@ let test_wake_payload_round_trip () =
   check string "keeper_name round-trip" before.keeper_name after.keeper_name;
   check string "trace_id round-trip" before.trace_id after.trace_id;
   check int "turn_index round-trip" before.turn_index after.turn_index;
-  check string "model_id round-trip" before.model_id after.model_id;
+  check string "model_id redacted before persistence" "runtime" before.model_id;
+  check string "model_id redacted after persistence" "runtime" after.model_id;
   check int "context_window round-trip"
     before.context_window after.context_window;
   check int "approx_body_bytes round-trip"

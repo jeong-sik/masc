@@ -1,6 +1,7 @@
 import { signal, effect } from '@preact/signals'
-import { activeIdeFile } from './ide-shell'
+import { activeIdeFile } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
+import { selectedTask } from '../goals/task-detail-selection'
 import {
   discoverRepositories,
   fetchRepositoriesList,
@@ -27,6 +28,10 @@ import {
   createFileTreeStore,
   type FileTreeStore,
 } from './file-tree-store'
+import {
+  fetchIdeAnnotations,
+  type IdeAnnotation,
+} from '../../api/ide'
 
 export interface IdeDataCoordinator {
   readonly documentStore: CodeDocumentStore
@@ -42,6 +47,8 @@ export interface IdeDataCoordinator {
   readonly subscribeActiveRepositoryId: (listener: () => void) => () => void
   readonly scanRepositories: () => Promise<ReadonlyArray<Repository>>
   readonly subscribeRepositories: (listener: () => void) => () => void
+  readonly annotations: () => ReadonlyArray<IdeAnnotation>
+  readonly subscribeAnnotations: (listener: () => void) => () => void
   readonly dispose: () => void
 }
 
@@ -105,6 +112,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
   const workspaceSourceSignal = signal<WorkspaceSource>({ kind: 'project' })
   const repositoriesSignal = signal<ReadonlyArray<Repository>>([])
   const activeRepositoryIdSignal = signal<string | null>(null)
+  const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
 
   let abortController = new AbortController()
 
@@ -136,6 +144,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     const filePath = activeIdeFile.value
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
+    const task = selectedTask.value
 
     // Cancel in-flight requests for previous file
     abortController.abort()
@@ -147,17 +156,25 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal }
 
-    // Load file tree
+    // Load file tree (independent of active file — needed to suggest first file)
     fetchWorkspaceTree(2, opts).then(({ nodes, source }) => {
       if (signal.aborted) return
       fileTreeStore.seed(nodes)
       workspaceSourceSignal.value = source
-      const hasCurrentFile = nodes.some(node => node.path === filePath && !node.hasChildren)
+      const hasCurrentFile =
+        filePath !== null && nodes.some(node => node.path === filePath && !node.hasChildren)
       const nextFile = hasCurrentFile ? null : firstFilePath(nodes)
       if (nextFile && nextFile !== activeIdeFile.value) {
         activeIdeFile.value = nextFile
       }
     }).catch(() => {})
+
+    // File-scoped fetches require an active file path; skip when none is selected.
+    if (filePath === null) {
+      diffRowsSignal.value = []
+      annotationsSignal.value = []
+      return
+    }
 
     // Load file content
     fetchWorkspaceFile(filePath, opts).then(response => {
@@ -170,6 +187,9 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
         })
       }
     }).catch(() => {})
+
+    // Load regions
+    documentStore.loadRegions(filePath, opts).catch(() => {})
 
     // Load blame → ownership
     fetchGitBlame(filePath, opts).then(blocks => {
@@ -191,6 +211,12 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
       if (signal.aborted) return
       diffRowsSignal.value = rows
     }).catch(() => {})
+
+    // Load annotations
+    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, opts).then(annotations => {
+      if (signal.aborted) return
+      annotationsSignal.value = annotations
+    }).catch(() => {})
   })
 
   return {
@@ -198,7 +224,8 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     ownershipStore,
     fileTreeStore,
     diffRows: () => diffRowsSignal.value,
-    subscribeDiffRows: diffRowsSignal.subscribe as (listener: () => void) => () => void,
+    subscribeDiffRows: (listener: () => void) =>
+      diffRowsSignal.subscribe(listener),
     workspaceSource: () => workspaceSourceSignal.value,
     // Wrap [Signal.subscribe] in an arrow so [this] stays bound when
     // the property is destructured by callers (the [as (listener: () =>
@@ -217,6 +244,9 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
     scanRepositories,
     subscribeRepositories: (listener: () => void) =>
       repositoriesSignal.subscribe(listener),
+    annotations: () => annotationsSignal.value,
+    subscribeAnnotations: (listener: () => void) =>
+      annotationsSignal.subscribe(listener),
     dispose: () => {
       abortController.abort()
       disposeEffect()

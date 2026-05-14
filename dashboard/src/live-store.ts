@@ -175,7 +175,7 @@ export const keeperHealthSummary: ReadonlySignal<KeeperHealthSummary> = computed
     const ratio = k.context_ratio ?? 0
     if (ratio > thresholds.critical) criticalCount++
     else if (ratio > thresholds.warn || stale.has(k.name)) warningCount++
-    return { name: k.name, ratio, stage: (k.pipeline_stage ?? 'idle') as PipelineStage }
+    return { name: k.name, ratio, stage: (k.pipeline_stage ?? 'unknown') as PipelineStage }
   }).sort((a, b) => b.ratio - a.ratio)
 
   return {

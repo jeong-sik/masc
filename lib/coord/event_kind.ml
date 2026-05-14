@@ -80,3 +80,29 @@ module Board = struct
 
   let all = [ Posted; Commented; Voted; Deleted ]
 end
+
+module Relevance = struct
+  type t =
+    | Critical
+    | High
+    | Medium
+    | Low
+    | Stale
+
+  let to_string = function
+    | Critical -> "critical"
+    | High -> "high"
+    | Medium -> "medium"
+    | Low -> "low"
+    | Stale -> "stale"
+
+  let of_string = function
+    | "critical" -> Some Critical
+    | "high" -> Some High
+    | "medium" -> Some Medium
+    | "low" -> Some Low
+    | "stale" -> Some Stale
+    | _ -> None
+
+  let all = [ Critical; High; Medium; Low; Stale ]
+end

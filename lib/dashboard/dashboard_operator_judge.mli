@@ -13,7 +13,9 @@
 
 (** Read-only snapshot of judge runtime state, returned by
     {!runtime_status} and serialized into operator pending-confirm
-    payloads. All fields are read externally. *)
+    payloads. All fields are read externally. [model_used]
+    is retained for compatibility and redacted to [None] on
+    public snapshots. *)
 type runtime_snapshot = {
   enabled : bool;
   judge_online : bool;

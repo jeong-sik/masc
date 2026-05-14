@@ -14,13 +14,17 @@ module Keeper_api = Server_dashboard_http_keeper_api
 type cascade_profile_gate = {
   valid_profiles : string list;
   invalid_profiles : (string * string list) list;
+  invalid_assignments : (string * string list) list;
 }
 
 let cascade_profile_gate () : cascade_profile_gate =
   let config_path = Cascade_runtime.cascade_config_path () in
-  let keeper_profiles =
+  let keeper_assignable_profiles =
     Keeper_cascade_profile.keeper_catalog_names ?config_path ()
     |> List.sort_uniq String.compare
+  in
+  let keeper_assignable_profile profile =
+    keeper_assignable_profiles = [] || List.mem profile keeper_assignable_profiles
   in
   let fallback_invalid_profiles =
     match config_path with
@@ -30,35 +34,86 @@ let cascade_profile_gate () : cascade_profile_gate =
           ~config_path:path
   in
   match Cascade_catalog_runtime.known_profile_names () with
-  | Ok validated_profiles ->
+  | Ok raw_validated_profiles ->
+      let validated_profiles =
+        raw_validated_profiles |> List.sort_uniq String.compare
+      in
       let invalid_profiles =
-        Cascade_catalog_runtime.invalid_profile_errors ()
+        (Cascade_catalog_runtime.invalid_profile_errors ()
+         @ fallback_invalid_profiles)
+        |> Dashboard_cascade.invalid_profiles_with_internal_names
+      in
+      let keeper_profiles =
+        raw_validated_profiles
+        |> List.filter keeper_assignable_profile
+        |> List.sort_uniq String.compare
+      in
+      let candidate_profiles =
+        if keeper_profiles = [] then validated_profiles else keeper_profiles
+      in
+      let known_internal_profiles =
+        (match config_path with
+         | None -> raw_validated_profiles
+         | Some path ->
+             Cascade_catalog_validator.discover_profiles_for_diagnostics
+               ~config_path:path)
+        |> List.sort_uniq String.compare
+      in
+      let invalid_assignments =
+        Dashboard_cascade.invalid_assignments_for_public_profiles
+          ~known_internal_profiles
+          ~invalid_profiles candidate_profiles
       in
       let valid_profiles =
-        let filtered =
-          keeper_profiles
-          |> List.filter (fun profile -> List.mem profile validated_profiles)
-        in
-        if filtered = [] then validated_profiles else filtered
+        candidate_profiles
+        |> List.filter (fun profile ->
+               List.mem profile validated_profiles
+               && not (List.mem_assoc profile invalid_assignments))
       in
-      { valid_profiles; invalid_profiles }
+      { valid_profiles; invalid_profiles; invalid_assignments }
   | Error detail ->
       Log.Keeper.warn
         "cascade_profile_gate: validated runtime snapshot unavailable: %s"
         detail;
-      let invalid_profiles = fallback_invalid_profiles in
-      let invalid_names = List.map fst invalid_profiles in
+      let invalid_profiles =
+        Dashboard_cascade.invalid_profiles_with_internal_names
+          fallback_invalid_profiles
+      in
+      let known_internal_profiles =
+        (match config_path with
+         | None -> []
+         | Some path ->
+             Cascade_catalog_validator.discover_profiles_for_diagnostics
+               ~config_path:path)
+        |> List.sort_uniq String.compare
+      in
+      let keeper_profiles =
+        known_internal_profiles
+        |> List.filter keeper_assignable_profile
+        |> List.sort_uniq String.compare
+      in
+      let candidate_profiles =
+        if keeper_profiles = [] then known_internal_profiles else keeper_profiles
+      in
+      let invalid_assignments =
+        Dashboard_cascade.invalid_assignments_for_public_profiles
+          ~known_internal_profiles ~invalid_profiles candidate_profiles
+      in
+      let invalid_names = List.map fst invalid_assignments in
       let valid_profiles =
-        keeper_profiles
+        candidate_profiles
         |> List.filter (fun profile -> not (List.mem profile invalid_names))
       in
-      { valid_profiles; invalid_profiles }
+      { valid_profiles; invalid_profiles; invalid_assignments }
 
 let available_cascade_profiles () : string list =
   (cascade_profile_gate ()).valid_profiles
 
 let invalid_cascade_profiles () : (string * string list) list =
   (cascade_profile_gate ()).invalid_profiles
+
+let invalid_cascade_assignment_profiles () : (string * string list) list =
+  (cascade_profile_gate ()).invalid_assignments
 
 let telemetry_summary_cache_key ~base_path ~masc_root =
   let digest = Digest.string (base_path ^ "\000" ^ masc_root) |> Digest.to_hex in
@@ -99,7 +154,9 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
   match Keeper_types.read_meta config name with
   | Error msg -> Error ("read_meta failed after TOML update: " ^ msg)
   | Ok (Some meta) ->
-      let updated = { meta with cascade_name; updated_at } in
+      let updated =
+        { (Keeper_types.set_cascade_name cascade_name meta) with updated_at }
+      in
       (match Keeper_types.write_meta ~force:true config updated with
        | Ok () ->
            let registered =
@@ -113,7 +170,9 @@ let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
       (match Keeper_registry.get ~base_path:config.base_path name with
        | None -> Ok false
        | Some entry ->
-           let updated = { entry.meta with cascade_name; updated_at } in
+           let updated =
+             { (Keeper_types.set_cascade_name cascade_name entry.meta) with updated_at }
+           in
            (match Keeper_types.write_meta ~force:true config updated with
             | Ok () ->
                 Keeper_registry.update_meta ~base_path:config.base_path name
@@ -469,6 +528,29 @@ let rec add_routes ~sw ~clock router =
                     (`Assoc [ ("ok", `Bool false); ("error", `String message) ]))
                  reqd)
        ) request reqd)
+  (* RFC-0049 — surface/section open counters. Aggregate Prometheus
+     counters only; the request body is discarded after increment. *)
+  |> Http.Router.post "/api/v1/dashboard/nav-event" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let result =
+             try
+               let json = Yojson.Safe.from_string body_str in
+               Dashboard_nav_event.parse_event_json json
+             with Yojson.Json_error err ->
+               Error ("invalid json: " ^ err)
+           in
+           match result with
+           | Ok event ->
+               Dashboard_nav_event.record event;
+               Http.Response.json ~request:req {|{"ok":true}|} reqd
+           | Error message ->
+               Http.Response.json ~status:`Bad_request ~request:req
+                 (Yojson.Safe.to_string
+                    (`Assoc
+                      [ ("ok", `Bool false); ("error", `String message) ]))
+                 reqd)
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/config" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Env_config_introspect.to_json () in
@@ -534,8 +616,10 @@ let rec add_routes ~sw ~clock router =
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/board" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = dashboard_memory_http_json req in
+       with_public_read (fun state req reqd ->
+         let json =
+           dashboard_memory_http_json ~config:state.Mcp_server.room_config req
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/link-previews" (fun request reqd ->
@@ -1344,12 +1428,12 @@ and add_autoresearch_routes router =
                  reqd
              | Some name, Some cascade ->
                let known = available_cascade_profiles () in
-               let invalid = invalid_cascade_profiles () in
+               let invalid = invalid_cascade_assignment_profiles () in
                (match List.assoc_opt cascade invalid with
                 | Some reasons ->
                   Http.Response.json ~status:`Conflict ~request:req
                     (Printf.sprintf
-                       {|{"ok":false,"error":"cascade %s is invalid in active cascade.json: %s"}|}
+                       {|{"ok":false,"error":"cascade %s is invalid in active cascade.toml: %s"}|}
                        (String.escaped cascade)
                        (String.escaped (String.concat " | " reasons)))
                     reqd

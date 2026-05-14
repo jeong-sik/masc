@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
+import { fireEvent } from '@testing-library/preact'
 import {
   OverlayKeeperTrace,
   TRACE_CHIP_CAP,
@@ -11,6 +12,8 @@ import {
   keeperTraceState,
   pushTrace,
 } from './keeper-trace-store'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
+import { ideContextFocus } from './ide-state'
 
 const mountedContainers: HTMLElement[] = []
 
@@ -20,13 +23,21 @@ function createContainer(): HTMLElement {
   return container
 }
 
-function pushAnchored(id: string, keeperName: string, line: number | null, tsMs: number, threadId = 'th'): void {
+function pushAnchored(
+  id: string,
+  keeperName: string,
+  line: number | null,
+  tsMs: number,
+  threadId = 'th',
+  filePath: string | null = null,
+): void {
   pushTrace({
     id,
     tsMs,
     keeperName,
     source: 'anchored-thread',
     threadId,
+    filePath,
     line,
   })
 }
@@ -52,14 +63,41 @@ function pushDecision(id: string, keeperName: string, tsMs: number): void {
   })
 }
 
+function pushActivity(
+  id: string,
+  keeperName: string,
+  line: number,
+  tsMs: number,
+  filePath = 'runtime.ts',
+  refs: Partial<Extract<KeeperTraceEventForTest, { source: 'activity-event' }>> = {},
+): void {
+  pushTrace({
+    id,
+    tsMs,
+    keeperName,
+    source: 'activity-event',
+    eventId: `evt-${id}`,
+    filePath,
+    line,
+    surface: 'Goal',
+    ...refs,
+  })
+}
+
+type KeeperTraceEventForTest = Parameters<typeof pushTrace>[0]
+
 beforeEach(() => {
   clearTraces()
+  ideContextFocus.value = null
 })
 
 afterEach(() => {
+  window.location.hash = ''
   for (const container of mountedContainers.splice(0)) {
     render(null, container)
   }
+  setIdeReplayUntilMs(null)
+  ideContextFocus.value = null
   clearTraces()
 })
 
@@ -75,16 +113,28 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
     expect(keys).toEqual(['moth@12', 'scholar@12', 'scholar@99'])
   })
 
+  it('keeps same-line trace buckets separate when file paths differ', () => {
+    pushAnchored('a', 'scholar', 12, 1000, 'th-a', 'runtime.ts')
+    pushAnchored('b', 'scholar', 12, 1100, 'th-b', 'worker.ts')
+
+    const buckets = bucketTraceEvents(keeperTraceState.value.events)
+    expect(buckets.map(b => `${b.keeperName}@${b.filePath}@${b.line}`).sort())
+      .toEqual(['scholar@runtime.ts@12', 'scholar@worker.ts@12'])
+  })
+
   it('non-anchored sources fall into the keeper-level no-line bucket', () => {
     pushBdi('a', 'scholar', 1000)
     pushDecision('b', 'scholar', 1100)
-    pushAnchored('c', 'scholar', 12, 1200)
+    pushAnchored('c', 'scholar', 12, 1200, 'th-c', 'runtime.ts')
+    pushActivity('d', 'scholar', 12, 1300)
 
     const buckets = bucketTraceEvents(keeperTraceState.value.events)
     const noLineBucket = buckets.find(b => b.line === null)
     expect(noLineBucket).toBeDefined()
     expect(noLineBucket?.events.length).toBe(2)
     expect(noLineBucket?.events.map(e => e.source).sort()).toEqual(['bdi-snapshot', 'decision-log'])
+    const lineBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
+    expect(lineBucket?.events.map(e => e.source).sort()).toEqual(['activity-event', 'anchored-thread'])
   })
 
   it('sorts events newest-first within each bucket', () => {
@@ -130,6 +180,18 @@ describe('OverlayKeeperTrace — render gating', () => {
     expect(region).not.toBeNull()
     expect(region?.getAttribute('data-overlay')).toBe('keeper-trace')
   })
+
+  it('projects buckets through the shared audit replay cursor', () => {
+    pushAnchored('old', 'scholar', 12, 1000, 'old-thread', 'runtime.ts')
+    pushAnchored('future', 'scholar', 99, 3000, 'future-thread', 'runtime.ts')
+    setIdeReplayUntilMs(1500)
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+
+    expect(container.querySelector('[data-line="12"]')).not.toBeNull()
+    expect(container.querySelector('[data-line="99"]')).toBeNull()
+  })
 })
 
 describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
@@ -146,6 +208,22 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     expect(lineLabels.some(t => t.includes('L30'))).toBe(true)
   })
 
+  it('renders sibling rows when same (keeper, line) buckets differ only by filePath', () => {
+    // Regression for PR #15162 P2: bucket key now includes filePath but the
+    // rendered row key did not, so Preact reconciliation could reuse one
+    // bucket's DOM for a sibling whose keeperName + line matched but whose
+    // filePath differed. The render must produce two distinct rows.
+    pushAnchored('a', 'scholar', 12, 1000, 'th-a', 'runtime.ts')
+    pushAnchored('b', 'scholar', 12, 1100, 'th-b', 'worker.ts')
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+    const buckets = container.querySelectorAll('[role="group"][data-keeper="scholar"][data-line="12"]')
+    expect(buckets.length).toBe(2)
+    const filePaths = Array.from(buckets).map(b => b.getAttribute('data-file')).sort()
+    expect(filePaths).toEqual(['runtime.ts', 'worker.ts'])
+  })
+
   it('caps visible chips to TRACE_CHIP_CAP and renders +N overflow', () => {
     // Push 5 events, all anchored at scholar L12 within retention.
     // None coalesce because each tsMs is > COALESCE_WINDOW_MS apart.
@@ -157,7 +235,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
 
     const bucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="12"]')
-    const chips = bucket?.querySelectorAll('li[role="img"]')
+    const chips = bucket?.querySelectorAll('.ide-trace-chip')
     expect(chips?.length).toBe(TRACE_CHIP_CAP)
 
     const overflow = bucket?.querySelector('[data-overflow]')
@@ -173,7 +251,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     const container = createContainer()
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
     const bucket = container.querySelector('[role="group"][data-keeper="scholar"]')
-    const chips = bucket?.querySelectorAll('li[role="img"]')
+    const chips = bucket?.querySelectorAll('.ide-trace-chip')
     expect(chips?.length).toBe(3)
     expect(bucket?.querySelector('[data-overflow]')).toBeNull()
   })
@@ -182,13 +260,16 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     pushAnchored('a', 'scholar', null, 1000) // no line → no-line bucket
     pushBdi('b', 'scholar', 1100)
     pushDecision('c', 'scholar', 1200)
+    pushActivity('d', 'scholar', 4, 1300)
 
     const container = createContainer()
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
-    const bucket = container.querySelector('[role="group"][data-keeper="scholar"]')
-    const chips = Array.from(bucket?.querySelectorAll('li[role="img"]') ?? [])
+    const bucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="no-line"]')
+    const chips = Array.from(bucket?.querySelectorAll('.ide-trace-chip') ?? [])
     const sources = chips.map(c => c.getAttribute('data-source'))
     expect(sources).toEqual(expect.arrayContaining(['anchored-thread', 'bdi-snapshot', 'decision-log']))
+    const lineBucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="4"]')
+    expect(lineBucket?.querySelector('.ide-trace-chip')?.getAttribute('data-source')).toBe('activity-event')
   })
 
   it('chip aria-label includes source + line + count', () => {
@@ -197,11 +278,90 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
 
     const container = createContainer()
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
-    const chip = container.querySelector('li[role="img"]')
+    const chip = container.querySelector('.ide-trace-chip')
     // The single coalesced chip should have count 2.
     expect(chip?.getAttribute('aria-label')).toContain('thread')
     expect(chip?.getAttribute('aria-label')).toContain('L42')
     expect(chip?.getAttribute('aria-label')).toContain('×2')
+  })
+
+  it('clicking a trace chip jumps the shared replay cursor and focuses IDE context', () => {
+    pushActivity('a', 'scholar', 12, 2000, 'runtime.ts', {
+      eventId: 'evt-a',
+      goalId: 'goal-runtime',
+      taskId: 'task-runtime',
+      logId: 'turn-12',
+    })
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+
+    const chip = container.querySelector<HTMLButtonElement>('.ide-trace-chip[data-event-id="a"]')
+    expect(chip).not.toBeNull()
+    fireEvent.click(chip!)
+
+    expect(ideReplayUntilMs.value).toBe(2000)
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'runtime.ts',
+      line: 12,
+      surface: 'Goal',
+      label: 'Goal activity evt-a',
+      source_id: 'trace:a',
+      keeper_id: 'scholar',
+    })
+    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+  })
+
+  it('renders operational route links for enriched activity traces', () => {
+    pushActivity('a', 'scholar', 12, 1000, 'runtime.ts', {
+      eventId: 'evt-a',
+      goalId: 'goal-runtime',
+      taskId: 'task-runtime',
+      prId: '15035',
+      gitRef: 'main',
+      logId: 'turn-12',
+      sessionId: 'sess-runtime',
+      operationId: 'op-runtime',
+      workerRunId: 'wr-runtime',
+    })
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+
+    const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-trace-route-link')]
+    expect(links.map(link => link.textContent)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+
+    fireEvent.click(links[0]!)
+    expect(window.location.hash).toBe(
+      '#code?section=ide-shell&view=source&file=runtime.ts&line=12&surface=Goal&label=Goal+activity+evt-a&source_id=trace%3Aa&keeper=scholar',
+    )
+
+    fireEvent.click(links[5]!)
+    expect(window.location.hash).toBe('#monitoring?section=runtime&view=audit&log_id=turn-12')
+
+    fireEvent.click(links[6]!)
+    expect(window.location.hash).toBe(
+      '#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-12',
+    )
+
+    fireEvent.click(links[7]!)
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
   })
 })
 

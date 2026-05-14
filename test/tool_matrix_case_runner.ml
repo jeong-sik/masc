@@ -53,8 +53,8 @@ let () =
       let fs = Eio.Stdenv.fs env in
       let net = Eio.Stdenv.net env in
       let mono_clock = Eio.Stdenv.mono_clock env in
+      Eio.Switch.run @@ fun sw ->
       let base_path, result =
-        Eio.Switch.run @@ fun sw ->
         Cases.run_case sw ~proc_mgr ~fs ~net ~mono_clock clock schema
       in
       emit_result ~base_path tool_name result;

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  fetchCascadeAuditRuns,
   fetchCascadeClientCapacityHistory,
   fetchCascadeConfig as fetchCascadeConfigFromCascade,
   fetchCascadeStrategyTrace,
@@ -50,11 +51,31 @@ describe('dashboard cascade split', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchCascadeStrategyTrace({ limit: 25, cascade: 'big_three' })
+    const result = await fetchCascadeStrategyTrace({ limit: 25, cascade: 'primary' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/strategy_trace?limit=25&cascade=big_three')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/strategy_trace?limit=25&cascade=primary')
     expect(result.events).toEqual([])
+  })
+
+  it('builds cascade audit runs query params', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        updated_at: '2026-04-22T00:00:00Z',
+        total_runs: 0,
+        audit_runs: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchCascadeAuditRuns({ limit: 10, cascade: 'keeper_unified' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/audit_runs?limit=10&cascade=keeper_unified')
+    expect(result.audit_runs).toEqual([])
   })
 
   it('posts keeper cascade updates unchanged', async () => {
@@ -66,14 +87,14 @@ describe('dashboard cascade split', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await updateKeeperCascade('sojin', 'big_three')
+    const result = await updateKeeperCascade('sojin', 'tier.ollama_cloud_primary')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keeper/cascade')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
       keeper: 'sojin',
-      cascade_name: 'big_three',
+      cascade_name: 'tier.ollama_cloud_primary',
     }))
     expect(result.ok).toBe(true)
   })
@@ -82,8 +103,6 @@ describe('dashboard cascade split', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         updated_at: '2026-04-22T00:00:00Z',
-        config_path: '/tmp/config/cascade.json',
-        source_kind: 'toml',
         source_path: '/tmp/config/cascade.toml',
         validation_status: 'validated',
         validation_errors: [],
@@ -97,13 +116,41 @@ describe('dashboard cascade split', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await updateCascadeConfigRaw('[big_three]\nmodels = ["glm-coding:auto"]\n')
+    const sourceText = [
+      '[providers.glm-coding]',
+      'protocol = "openai-http"',
+      'endpoint = "https://api.z.ai/api/coding/paas/v4"',
+      '',
+      '[models.glm-auto]',
+      'api-name = "glm-5-turbo"',
+      'max-context = 128000',
+      'tools-support = true',
+      '',
+      '[glm-coding.glm-auto]',
+      'is-default = true',
+      'max-concurrent = 2',
+      '',
+      '[tier.primary]',
+      'members = ["glm-coding.glm-auto"]',
+      'strategy = "failover"',
+      '',
+      '[tier-group.primary]',
+      'tiers = ["primary"]',
+      'strategy = "priority_tier"',
+      'fallback = true',
+      '',
+      '[routes.keeper_turn]',
+      'target = "tier-group.primary"',
+      '',
+    ].join('\n')
+
+    await updateCascadeConfigRaw(sourceText)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/config/raw')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
-      source_text: '[big_three]\nmodels = ["glm-coding:auto"]\n',
+      source_text: sourceText,
     }))
   })
 })

@@ -3,7 +3,7 @@ module Types = Masc_domain
 open Masc_mcp
 open Test_operator_control_support
 
-module CT = Masc_mcp.Cdal_types
+module CT = Cdal_types
 
 let make_review_required_verdict ?(run_id = "review-run-001") () :
     CT.contract_verdict =

@@ -1,55 +1,85 @@
-
 (** Structured tool result type for MASC
 
     Replaces the untyped [(bool * string)] return convention with a
     structured record carrying tool name, timing, and typed payload.
 
-    Backward compatible: existing handlers keep returning [(bool * string)];
-    {!wrap} converts at the dispatch boundary.
+    @since 2.95.0 *)
 
-    @since 2.95.0
-*)
+(** {1 Failure classification} *)
 
-(** Structured result from a tool invocation. *)
-type t = {
-  success : bool;
-  data : Yojson.Safe.t;
-  legacy_message : string;
-  tool_name : string;
-  duration_ms : float;
-}
+(** Closed sum type for tool failure classification.  Each constructor
+    maps to a distinct retry/log/telemetry policy; the compiler enforces
+    exhaustive handling at every match site.
 
-(** [wrap ~tool_name ~start_time raw] converts a legacy [(bool * string)]
-    tuple into a structured result.
+    @since 2.96.0 *)
+type tool_failure_class =
+  | Transient_error (** Network/timeout/rate-limit — retryable *)
+  | Policy_rejection (** Auth/permission/boundary — permanent *)
+  | Runtime_failure (** Internal error/bug — non-retryable *)
+  | Workflow_rejection (** Business rule violation — non-retryable *)
 
-    The [data] field is built by parsing the string as JSON; if parsing
-    fails, the raw string is stored as a JSON string value. The original
-    message is always preserved in [legacy_message] so legacy callers keep
-    handler prefixes such as ["Post created:\n"] after round-tripping.
+val tool_failure_class_to_string : tool_failure_class -> string
 
-    @param tool_name The MCP tool name (e.g. ["masc_status"])
-    @param start_time Wall-clock time when the handler started
-    @param raw The [(success, message)] tuple from the handler *)
+(** [Transient_error] is the only retryable class. *)
+val is_retryable : tool_failure_class -> bool
+
+(** [Runtime_failure] maps to [Error]; all others to [Warn]. *)
+val log_level_of_failure_class : tool_failure_class -> Log.level
+
+(** Classify a tool failure from an exception raised during execution.
+    Typed exception inspection — no string matching on exception messages
+    except for [Failure] where the message carries the diagnostic. *)
+val classify_from_exception : exn -> tool_failure_class
+
+(** {1 Structured result} *)
+
+(** Structured result from a tool invocation.  [failure_class] is
+    [None] on success and [Some _] on failure once classified.
+
+    @since 2.96.0 — [failure_class] field added *)
+type t =
+  { success : bool
+  ; data : Yojson.Safe.t
+  ; legacy_message : string
+  ; tool_name : string
+  ; duration_ms : float
+  ; failure_class : tool_failure_class option
+  }
+
 val structured_payload_of_message : string -> Yojson.Safe.t option
-
-val wrap : tool_name:string -> start_time:float -> (bool * string) -> t
-
-(** [to_json t] serializes to JSON for logging and observability. *)
 val to_json : t -> Yojson.Safe.t
-
-(** [message t] returns the raw human-readable legacy message body without
-    collapsing the full result into an untyped tuple. *)
 val message : t -> string
 
-(** [to_legacy_compat t] converts back to [(bool * string)] for callers
-    that have not yet migrated to the typed result interface.
+(** Accessor for the typed failure classification. *)
+val failure_class : t -> tool_failure_class option
 
-    @deprecated Prefer consuming {!t} directly.  This shim exists only
-    for the migration period; each call site should be tracked as a
-    remaining migration item.  The function is intentionally named
-    [to_legacy_compat] (not [to_legacy]) so that
-    [rg 'to_legacy_compat'] gives a precise count of un-migrated callers. *)
-val to_legacy_compat : t -> bool * string
-[@@alert legacy_tuple
-  "This function exists for migration only. \
-   Migrate the call site to use Tool_result.t directly."]
+(** {1 Handler constructors}
+
+    Direct constructors for [Tool_*.dispatch] functions to build
+    structured results without the legacy [wrap] intermediary. *)
+
+(** Successful result. [failure_class] is [None]. *)
+val ok : tool_name:string -> start_time:float -> string -> t
+
+(** Failure result.  When [failure_class] is not provided,
+    the message is classified by an internal heuristic. *)
+val error
+  :  ?failure_class:tool_failure_class option
+  -> tool_name:string
+  -> start_time:float
+  -> string
+  -> t
+
+(** Build a failure result from an exception caught during dispatch.
+    Uses {!classify_from_exception} for typed classification. *)
+val of_exn : tool_name:string -> start_time:float -> exn -> t
+
+(** {1 Test helpers}
+
+    Quick constructors for tests and one-liner handlers.
+    [duration_ms] is set to [0.0] and [tool_name] defaults to [""].
+
+    @since 2.260.0 *)
+
+val quick_ok : ?tool_name:string -> string -> t
+val quick_error : ?tool_name:string -> string -> t

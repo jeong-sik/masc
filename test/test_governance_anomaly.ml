@@ -23,6 +23,33 @@ let cleanup_tmpdir dir =
   in
   rm_rf dir
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let write_file path content =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let profile_file base_path agent_id =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat base_path ".masc")
+       "governance/baselines")
+    (agent_id ^ ".json")
+
+let anomaly_profile_drop_value reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", "governance_anomaly_profile"); ("reason", reason)]
+    ()
+
 (** Generate [count] audit entries spaced [spacing_sec] apart,
     ending at [end_ts]. All share [agent_id]. *)
 let gen_entries ~end_ts ~spacing_sec ~count ~tool_names ~outcomes ~token_counts =
@@ -229,6 +256,35 @@ let test_load_profile_missing () =
       | None -> ()
       | Some _ -> fail "expected None for missing profile")
 
+let test_load_profile_malformed_json_records_drop () =
+  let dir = make_tmpdir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmpdir dir)
+    (fun () ->
+      let reason = Safe_ops.persistence_read_drop_reason_entry_load_error in
+      let before = anomaly_profile_drop_value reason in
+      write_file (profile_file dir agent_id) "{not-json";
+      (match Governance_anomaly.load_profile ~base_path:dir ~agent_id with
+      | None -> ()
+      | Some _ -> fail "expected malformed profile to be dropped");
+      check (float 0.001) "malformed profile increments entry load error" 1.0
+        (anomaly_profile_drop_value reason -. before))
+
+let test_load_profile_invalid_payload_records_drop () =
+  let dir = make_tmpdir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmpdir dir)
+    (fun () ->
+      let reason = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = anomaly_profile_drop_value reason in
+      write_file (profile_file dir agent_id)
+        (Yojson.Safe.to_string (`Assoc [("agent_id", `String agent_id)]));
+      (match Governance_anomaly.load_profile ~base_path:dir ~agent_id with
+      | None -> ()
+      | Some _ -> fail "expected invalid profile to be dropped");
+      check (float 0.001) "invalid profile increments invalid payload" 1.0
+        (anomaly_profile_drop_value reason -. before))
+
 let test_check_agent_insufficient_entries () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -264,6 +320,10 @@ let () =
         [
           test_case "save/load profile roundtrip" `Quick test_save_load_profile_roundtrip;
           test_case "load_profile returns None when missing" `Quick test_load_profile_missing;
+          test_case "load_profile malformed json records drop" `Quick
+            test_load_profile_malformed_json_records_drop;
+          test_case "load_profile invalid payload records drop" `Quick
+            test_load_profile_invalid_payload_records_drop;
         ] );
       ( "pipeline",
         [

@@ -5,17 +5,22 @@ import {
   parseLogsResponse,
 } from './logs'
 
+// RFC-0079: backend writes a typed encoder (see lib/masc_log/log.ml
+// Ring.entry_to_json). The legacy fallback fields raw_level /
+// normalized_level / legacy_classified are gone with the string-prefix
+// classifier that produced them. dropped_entries is gone too — silent
+// per-entry skipping is now a strict schema-drift error.
+
 function validEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     seq: 42,
     ts: '2026-04-17T00:00:00Z',
     level: 'INFO',
-    raw_level: 'INFO',
-    normalized_level: 'INFO',
     source: 'structured',
-    legacy_classified: false,
     module: 'Keeper',
     message: 'booted',
+    keeper_name: null,
+    turn_id: null,
     details: null,
     ...overrides,
   }
@@ -37,60 +42,44 @@ describe('parseLogsResponse', () => {
     expect(out.entries[1]!.seq).toBe(43)
   })
 
-  it('drops individual entries that are missing required fields (lenient-per-entry)', () => {
-    // One corrupt row must not blank the whole logs panel — matches the
-    // behavior of the pre-migration decoder.
-    const out = parseLogsResponse({
-      total: 2,
-      entries: [
-        validEntry(),
-        { seq: 99, ts: '2026-04-17T00:01:00Z' /* missing message */ },
-      ],
-    })
-    expect(out.entries).toHaveLength(1)
-    expect(out.entries[0]!.seq).toBe(42)
+  it('throws on a row missing a required field instead of silently dropping it', () => {
+    expect(() =>
+      parseLogsResponse({
+        total: 2,
+        entries: [
+          validEntry(),
+          { seq: 99, ts: '2026-04-17T00:01:00Z' /* missing message/source/module/level */ },
+        ],
+      }),
+    ).toThrow(LogsSchemaDriftError)
   })
 
-  it('chains raw_level and normalized_level to level when omitted', () => {
-    const out = parseLogsResponse({
-      total: 1,
-      entries: [validEntry({
-        level: 'WARN',
-        raw_level: undefined,
-        normalized_level: undefined,
-      })],
-    })
-    expect(out.entries[0]!.raw_level).toBe('WARN')
-    expect(out.entries[0]!.normalized_level).toBe('WARN')
-  })
-
-  it('applies fallbacks for level/source/legacy_classified/module when backend omits them', () => {
-    const out = parseLogsResponse({
-      total: 1,
-      entries: [
-        {
-          seq: 1,
-          ts: '2026-04-17T00:00:00Z',
-          message: 'bare entry',
-        },
-      ],
-    })
-    expect(out.entries).toHaveLength(1)
-    expect(out.entries[0]!.level).toBe('INFO')
-    expect(out.entries[0]!.source).toBe('structured')
-    expect(out.entries[0]!.legacy_classified).toBe(false)
-    expect(out.entries[0]!.module).toBe('')
-    expect(out.entries[0]!.details).toBeNull()
-  })
-
-  it('defaults total to 0 when backend omits it', () => {
-    const out = parseLogsResponse({ entries: [] })
-    expect(out.total).toBe(0)
+  it('rejects rows that omit level (no fallback)', () => {
+    expect(() =>
+      parseLogsResponse({
+        total: 1,
+        entries: [
+          {
+            seq: 1,
+            ts: '2026-04-17T00:00:00Z',
+            source: 'structured',
+            module: '',
+            message: 'bare entry',
+          },
+        ],
+      }),
+    ).toThrow(LogsSchemaDriftError)
   })
 
   it('tolerates a non-array entries field by returning an empty list', () => {
     const out = parseLogsResponse({ total: 0, entries: null })
     expect(out.entries).toHaveLength(0)
+  })
+
+  it('throws on a payload without total', () => {
+    expect(() =>
+      parseLogsResponse({ entries: [] }),
+    ).toThrow(LogsSchemaDriftError)
   })
 
   it('throws on non-object payload', () => {

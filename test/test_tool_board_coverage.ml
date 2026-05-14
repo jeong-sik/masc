@@ -173,6 +173,11 @@ let json_member_bool json key =
   | `Bool value -> value
   | _ -> Alcotest.failf "expected bool field %s" key
 
+let json_member_null json key =
+  match Yojson.Safe.Util.member key json with
+  | `Null -> ()
+  | _ -> Alcotest.failf "expected null field %s" key
+
 let json_member_list json key =
   match Yojson.Safe.Util.member key json with
   | `List values -> values
@@ -338,6 +343,131 @@ let test_board_dashboard_json_embeds_moderation_projection () =
     (json_member_int comment_json "report_count");
   Alcotest.(check string) "comment moderation status" "flagged"
     (json_member_string comment_json "moderation_status")
+
+let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"blind-author"
+        ~content:"vote blind post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match Board_dispatch.vote ~voter:"peer" ~post_id ~direction:Board.Up with
+  | Ok _ -> ()
+  | Error e -> Alcotest.fail (Board.show_board_error e));
+  let post =
+    match Board_dispatch.get_post ~post_id with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"blind-commenter"
+        ~content:"vote blind comment" ()
+    with
+    | Ok comment -> comment
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  (match
+     Board_dispatch.vote_comment ~voter:"peer" ~comment_id
+       ~direction:Board.Up
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let comment =
+    match Board_dispatch.get_comments ~post_id with
+    | Ok (comment :: _) -> comment
+    | Ok [] -> Alcotest.fail "expected comment"
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let hidden_post_json =
+    Server_utils.board_post_dashboard_json ~blind_votes:true
+      ~current_vote:None ~author_karma:0 post
+  in
+  Alcotest.(check bool) "post vote blind" true
+    (json_member_bool hidden_post_json "vote_blind");
+  json_member_null hidden_post_json "votes";
+  json_member_null hidden_post_json "score";
+  json_member_null hidden_post_json "votes_up";
+  json_member_null hidden_post_json "votes_down";
+  Alcotest.(check string) "post blind reason" "vote_before_score"
+    (json_member_string hidden_post_json "vote_blind_reason");
+  let revealed_post_json =
+    Server_utils.board_post_dashboard_json ~blind_votes:true
+      ~current_vote:(Some Board.Up) ~author_karma:0 post
+  in
+  Alcotest.(check bool) "post vote revealed" false
+    (json_member_bool revealed_post_json "vote_blind");
+  Alcotest.(check int) "post revealed votes" 1
+    (json_member_int revealed_post_json "votes");
+  let hidden_comment_json =
+    Server_utils.board_comment_dashboard_json ~blind_votes:true
+      ~current_vote:None comment
+  in
+  Alcotest.(check bool) "comment vote blind" true
+    (json_member_bool hidden_comment_json "vote_blind");
+  json_member_null hidden_comment_json "votes";
+  json_member_null hidden_comment_json "score";
+  json_member_null hidden_comment_json "votes_up";
+  json_member_null hidden_comment_json "votes_down";
+  let revealed_comment_json =
+    Server_utils.board_comment_dashboard_json ~blind_votes:true
+      ~current_vote:(Some Board.Up) comment
+  in
+  Alcotest.(check bool) "comment vote revealed" false
+    (json_member_bool revealed_comment_json "vote_blind");
+  Alcotest.(check int) "comment revealed score" 1
+    (json_member_int revealed_comment_json "score")
+
+let test_board_dashboard_json_embeds_contributor_quality () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post =
+    match
+      Board_dispatch.create_post ~author:"quality-author"
+        ~content:"quality projection post" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let rep =
+    {
+      (Agent_reputation.default_reputation ~agent_name:"quality-author") with
+      overall_score = 0.72;
+      completion_rate = 0.8;
+      response_rate = 0.6;
+      board_posts = 3;
+      board_comments = 5;
+      accountability_score = 0.9;
+      autonomy_level = "elevated";
+      thompson_confidence = 0.7;
+    }
+  in
+  let contributor_quality =
+    Server_utils.board_contributor_quality_json rep
+  in
+  let post_json =
+    Server_utils.board_post_dashboard_json ~contributor_quality
+      ~author_karma:0 post
+  in
+  let quality =
+    match Yojson.Safe.Util.member "contributor_quality" post_json with
+    | `Assoc _ as quality -> quality
+    | _ -> Alcotest.fail "expected contributor_quality object"
+  in
+  Alcotest.(check string) "quality source" "agent_reputation"
+    (json_member_string quality "source");
+  Alcotest.(check string) "quality band" "strong"
+    (json_member_string quality "band");
+  Alcotest.(check int) "quality board posts" 3
+    (json_member_int quality "board_posts")
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
@@ -926,10 +1056,11 @@ let inline_board_dispatch ~sw ~clock name args =
   let state = Mcp_server.create_state ~base_path:_test_base_path in
   Tool_inline_dispatch_extra.dispatch ~config:state.Mcp_server.room_config
     ~agent_name:"inline-curator" ~arguments:args ~state ~sw ~clock ~name
+    ~start_time:(Unix.gettimeofday ())
 
 let require_inline_result ~sw ~clock name args =
   match inline_board_dispatch ~sw ~clock name args with
-  | Some result -> result
+  | Some result -> (result.success, Tool_result.message result)
   | None -> Alcotest.failf "%s not routed by inline board dispatch" name
 
 let test_board_curation_inline_dispatch_routes_read_and_submit () =
@@ -1416,6 +1547,10 @@ let () =
             `Quick test_board_dashboard_json_embeds_reaction_summaries;
           Alcotest.test_case "board dashboard json embeds moderation projection"
             `Quick test_board_dashboard_json_embeds_moderation_projection;
+          Alcotest.test_case "board dashboard json hides blind vote scores"
+            `Quick test_board_dashboard_json_hides_unvoted_scores_when_blind;
+          Alcotest.test_case "board dashboard json embeds contributor quality"
+            `Quick test_board_dashboard_json_embeds_contributor_quality;
           Alcotest.test_case "inline board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "inline board post author accepts matching alias"

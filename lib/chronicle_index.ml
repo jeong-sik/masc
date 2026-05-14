@@ -59,7 +59,9 @@ let find_epoch (idx : index) epoch_id =
 
 let active_epochs (idx : index) =
   List.filter (fun (s : epoch_summary) ->
-    match s.status with Chronicle_types.Active -> true | _ -> false)
+    match s.status with
+    | Chronicle_types.Active -> true
+    | Chronicle_types.Completed | Chronicle_types.Abandoned -> false)
     idx.epochs
 
 let add_or_replace_epoch (idx : index) (summary : epoch_summary) =
@@ -78,7 +80,7 @@ let active_trail_stagnation_score epochs =
     |> List.filter_map (fun (s : epoch_summary) ->
            match s.status with
            | Chronicle_types.Active -> Some (max 0.0 s.conductivity)
-           | _ -> None)
+           | Chronicle_types.Completed | Chronicle_types.Abandoned -> None)
   in
   match active_conductivities with
   | [] -> 0.0
@@ -130,7 +132,7 @@ let evaporate_active_epochs ?policy idx =
                  evaporate_conductivity ?policy ~stagnation_score
                    summary.conductivity
              }
-         | _ -> summary)
+         | Chronicle_types.Completed | Chronicle_types.Abandoned -> summary)
       idx.epochs
   in
   { idx with epochs }

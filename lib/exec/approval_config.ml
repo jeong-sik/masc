@@ -20,7 +20,7 @@ type agent_overlay = {
 
 type t = {
   defaults : agent_overlay;
-  per_agent : (string * agent_overlay) list;
+  per_agent : (Agent_id.t * agent_overlay) list;
 }
 
 let enforced_all : agent_overlay =

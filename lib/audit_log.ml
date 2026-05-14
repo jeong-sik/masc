@@ -495,7 +495,7 @@ let log_action
   let summary = audit_summary ~action ~details in
   let target = audit_target ~action ~details in
   let payload_opt = if details = `Null then None else Some details in
-  Oas_events.publish_audit_event ~id ~ts ~actor:agent_id ~kind ?target
+  Cascade_events.publish_audit_event ~id ~ts ~actor:agent_id ~kind ?target
     ~summary ~severity ?payload:payload_opt ()
 
 (** Convenience functions for common events *)

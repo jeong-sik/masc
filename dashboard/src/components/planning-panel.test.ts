@@ -1,7 +1,9 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const openTaskDetailMock = vi.hoisted(() => vi.fn())
 
 const routeSignal = signal<{ tab: string; params: Record<string, string>; postId: string | null }>({
   tab: 'workspace',
@@ -35,6 +37,9 @@ vi.mock('./goals', () => ({
 vi.mock('./goals/goal-tree', () => ({
   GoalTree: () => html`<div data-testid="goal-tree">GoalTree</div>`,
 }))
+vi.mock('./goals/task-detail-state', () => ({
+  openTaskDetail: openTaskDetailMock,
+}))
 
 import { PlanningPanel } from './planning-panel'
 
@@ -51,6 +56,7 @@ describe('PlanningPanel', () => {
     coordinationSignal.value = null
     tasksSignal.value = []
     goalsSignal.value = []
+    openTaskDetailMock.mockReset()
   })
   afterEach(() => cleanup())
 
@@ -152,6 +158,107 @@ describe('PlanningPanel', () => {
     expect(screen.getByText('오래된 태스크 점유')).toBeTruthy()
     expect(screen.getByText('Review blocked planning handoff')).toBeTruthy()
     expect(screen.getByText('@sangsu')).toBeTruthy()
+  })
+
+  it('renders route focus for goal route params', () => {
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'planning', goal: 'goal-runtime' },
+      postId: null,
+    }
+    goalsSignal.value = [
+      {
+        id: 'goal-runtime',
+        horizon: 'short',
+        title: 'Runtime context goal',
+        priority: 1,
+        status: 'active',
+        phase: 'execute',
+        created_at: '2026-05-14T00:00:00Z',
+        updated_at: '2026-05-14T00:00:00Z',
+      },
+    ]
+
+    render(html`<${PlanningPanel} />`)
+
+    const focus = screen.getByTestId('planning-route-focus')
+    expect(focus).toBeTruthy()
+    expect(focus.getAttribute('data-route-focused-goal')).toBe('goal-runtime')
+    expect(focus.textContent).toContain('ROUTE FOCUS')
+    expect(screen.getByText('GOAL goal-runtime')).toBeTruthy()
+    expect(screen.getByText('Runtime context goal')).toBeTruthy()
+    expect(screen.getByText('active')).toBeTruthy()
+  })
+
+  it('opens task detail for task route params', async () => {
+    const task = {
+      id: 'task-runtime',
+      title: 'Runtime context task',
+      status: 'claimed',
+      assignee: 'sangsu',
+      goal_id: 'goal-runtime',
+      updated_at: '2026-05-14T00:00:00Z',
+    }
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'planning', view: 'default', task: 'task-runtime' },
+      postId: null,
+    }
+    tasksSignal.value = [task]
+
+    render(html`<${PlanningPanel} />`)
+
+    const focus = screen.getByTestId('planning-route-focus')
+    expect(focus).toBeTruthy()
+    expect(focus.getAttribute('data-route-focused-task')).toBe('task-runtime')
+    expect(focus.textContent).toContain('ROUTE FOCUS')
+    expect(screen.getByText('TASK task-runtime')).toBeTruthy()
+    expect(screen.getByText('Runtime context task')).toBeTruthy()
+    expect(screen.getByText('@sangsu')).toBeTruthy()
+    await waitFor(() => {
+      expect(openTaskDetailMock).toHaveBeenCalledWith(task)
+    })
+  })
+
+  it('clears goal and task route focus while preserving other planning params', () => {
+    routeSignal.value = {
+      tab: 'workspace',
+      params: {
+        section: 'planning',
+        view: 'default',
+        focus: 'accountability-ledger',
+        goal: 'goal-runtime',
+        task: 'task-runtime',
+      },
+      postId: null,
+    }
+
+    render(html`<${PlanningPanel} />`)
+    fireEvent.click(screen.getByRole('button', { name: 'CLEAR' }))
+
+    expect(routeSignal.value.params).toEqual({
+      section: 'planning',
+      view: 'default',
+      focus: 'accountability-ledger',
+    })
+  })
+
+  it('preserves route focus params when switching planning views', () => {
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'planning', goal: 'goal-runtime', task: 'task-runtime' },
+      postId: null,
+    }
+
+    render(html`<${PlanningPanel} />`)
+    fireEvent.click(screen.getByRole('tab', { name: '백로그' }))
+
+    expect(routeSignal.value.params).toEqual({
+      section: 'planning',
+      goal: 'goal-runtime',
+      task: 'task-runtime',
+      view: 'default',
+    })
   })
 
   it('renders accountability ledger focus from route param', () => {

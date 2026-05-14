@@ -5,4 +5,6 @@
  (public_name masc_mcp.mcp_session)
  (modules mcp_session)
  (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ (flags (:standard -w +4))
  (libraries time_compat unix))

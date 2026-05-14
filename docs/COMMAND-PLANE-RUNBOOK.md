@@ -145,69 +145,51 @@ repo-synthesis는 `masc_autoresearch_cycle` 내부에서 cycle system을 통해 
 - raw escape hatch:
   - 이후 세부 조율은 `masc_dispatch_tick`, `masc_operator_digest`, command-plane truth surfaces로 내려간다.
 
-### 첫 번째 concrete example: 12-worker live harness
+### 첫 번째 concrete example: 18+ keeper fleet evidence
 
-가장 먼저 검증할 예시는 research-radar가 아니라 `synthetic live harness`다.
+가장 먼저 검증할 예시는 research-radar가 아니라 runtime truth가 남은
+keeper fleet이다. 예전 `team-session`/public `swarm` proof lane은 retired
+되었고, compatibility entrypoint는 keeper production-readiness gate를 실행한다.
 
 실행 순서:
 
-1. 로컬 OpenAI-compatible runtime endpoint를 준비하고 `LLAMA_SERVER_URL` 또는 `OAS_LOCAL_LLM_URL`로 노출한다.
-2. `anthropic-proxy` 또는 호환 local provider를 `127.0.0.1:3034`에 둔다.
-3. repo root에서 아래를 실행한다.
+1. live keeper mutation/probe를 실행해 runtime manifests, receipts,
+   checkpoints, memory rows, tool-call logs를 남긴다.
+2. repo root에서 아래를 실행한다.
 
 ```bash
 scripts/harness_agent_swarm_live.sh
 ```
 
-권장 시작 명령:
-
-```bash
-LLAMA_PRESET=qwen35-hot ~/me/scripts/llama-server.sh restart
-```
-
-hot runtime contract:
-
-- `qwen35-hot`는 `ctx=262144`를 유지한다.
-- bootstrap 단계의 외부 health check는 `/health`를 볼 수 있지만, proof/artifact 판단은 `masc_runtime_verify`만 사용한다.
-- slot 수나 ctx가 기대치보다 낮으면 자동 downgrade 없이 바로 실패한다.
-
 기본 프로파일:
 
-- 12 workers
-- lanes: `official`, `research`, `reviews`
-- roles: `discover`, `verify`, `summarize`, `audit`
-- topology: `company -> platoon -> squad`
-- operation target: single managed squad
+- 18 keepers
+- keeper별 terminal turns >= 3
+- keeper별 successful provider turns >= 3
+- receipt/checkpoint/provider-closure/memory/tool-log coverage = 100%
 
 성공 기준:
 
-- `peak_hot_slots >= 10`
-- `joined_workers = 12`
-- `current_task_bound = 12`
-- `fresh_heartbeats = 12`
-- `completed_workers = 12`
-- `final_markers_seen = 12`
-- `provider_reachable = true`
-- `actual_slots >= expected_slots`
-- `actual_ctx = expected_ctx = 262144`
-- `summary.pass = true`
+- observed keepers >= 18
+- terminal turns >= 54
+- successful provider turns >= 54
+- per-keeper evidence minimums all satisfied
+- missing linked artifacts = 0
+- `summary.status = PASS`
 
 확인 위치:
 
-- HTTP projection `GET /api/v1/command-plane/swarm?...` 는 read-model surface로 남아 있지만 canonical harness path는 아니다.
-- dashboard `Command Plane -> swarm`
+- `logs/keeper_fleet_readiness/<run-id>/summary.json`
+- `logs/keeper_fleet_readiness/<run-id>/summary.md`
+- direct gate: `scripts/keeper-production-readiness-gate.py --json ...`
 
-runtime contract 확인:
+대표 failure class:
 
-- `masc_runtime_verify(expected_model=<MODEL>, expected_slots=12, expected_ctx=262144)`
-- blocker code는 `provider_unreachable`, `provider_model_mismatch`, `slot_count_insufficient`, `ctx_mismatch` 중 하나로 고정된다.
-
-runtime blocker 예시:
-
-- `provider_unreachable`
-- `provider_model_mismatch`
-- `slot_count_insufficient`
-- `ctx_mismatch`
+- `keeper_count < expected_keepers`
+- `keeper <name> success_provider_turns < min`
+- `provider_closure_pct < 100`
+- `tool_log_coverage_pct < 100`
+- `missing_artifacts > 0`
 
 ### 최소 HTTP 예시
 

@@ -76,3 +76,28 @@ val recent : int -> Yojson.Safe.t list
 
 val event_to_json : event -> Yojson.Safe.t
 (** Serialize an event for external consumption. *)
+
+type board_agent = {
+  agent : string;
+  ctx_pressure : float option;
+  queue_depth : int option;
+  blocked_on : string option;
+  ts : float option;
+}
+(** Optional live keeper metadata used to enrich the Phase 2 O5
+    [agent_stress] board projection.  Missing fields are surfaced with
+    explicit *_source markers instead of inventing hidden data. *)
+
+val board_rows_json :
+  ?agents:board_agent list -> Yojson.Safe.t list -> Yojson.Safe.t list
+(** Project raw stress events into the O5
+    [agent_stress: {agent, budget_pressure, ctx_pressure, queue_depth,
+    blocked_on?, ts}[]] board shape. *)
+
+val dashboard_feed_json :
+  limit:int ->
+  ?agents:board_agent list ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t
+(** Build the dashboard response carrying both the existing [events] array
+    and the O5 compatibility [agent_stress] board rows. *)

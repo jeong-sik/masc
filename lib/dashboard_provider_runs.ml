@@ -75,6 +75,80 @@ let dedupe_keep_order values =
   |> List.filter_map trim_nonempty
   |> Json_util.dedupe_keep_order
 
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+
+let normalize_label value = String.trim value |> String.lowercase_ascii
+
+let binding_labels (binding : Runtime_binding.t) =
+  let id = binding.Runtime_binding.id in
+  let dashed_id = String.map (function '_' -> '-' | c -> c) id in
+  let local_aliases =
+    if String.equal id Provider_adapter.cn_llama then [ "llama.cpp"; "llamacpp" ]
+    else []
+  in
+  id :: dashed_id :: binding.Runtime_binding.aliases @ local_aliases
+  |> List.filter_map trim_nonempty
+  |> List.map normalize_label
+  |> Json_util.dedupe_keep_order
+
+let binding_endpoint_url (binding : Runtime_binding.t) =
+  trim_nonempty binding.Runtime_binding.base_url
+
+let binding_default_model_id (binding : Runtime_binding.t) =
+  Option.bind binding.Runtime_binding.default_model trim_nonempty
+
+let binding_supported_models (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.capabilities.supported_models with
+  | Some models -> dedupe_keep_order models
+  | None -> []
+
+let binding_auth_kind (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> "none"
+  | Runtime_binding.Api_key_env env -> "api_key:" ^ env
+  | Runtime_binding.Cli_cached_login -> "cli_cached_login"
+  | Runtime_binding.Oauth_cached_login -> "oauth_cached_login"
+  | Runtime_binding.Setup_token_env env -> "setup_token:" ^ env
+  | Runtime_binding.File path -> "file:" ^ path
+  | Runtime_binding.Exec command -> "exec:" ^ command
+
+let binding_base_url_is_loopback binding =
+  match binding_endpoint_url binding with
+  | None -> false
+  | Some base_url ->
+      Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+
+let binding_auth_is_no_auth (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Api_key_env _
+  | Runtime_binding.Cli_cached_login
+  | Runtime_binding.Oauth_cached_login
+  | Runtime_binding.Setup_token_env _
+  | Runtime_binding.File _
+  | Runtime_binding.Exec _ -> false
+
+let binding_runtime_kind (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.transport with
+  | Runtime_binding.Cli -> `Cli_agent
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+      if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding then
+        `Local
+      else `Direct_api
+
+let find_runtime_binding_by_candidates candidates =
+  let rec loop = function
+    | [] -> None
+    | candidate :: rest -> (
+        match trim_nonempty candidate with
+        | None -> loop rest
+        | Some label -> (
+            match Runtime_binding.find label with
+            | Some _ as binding -> binding
+            | None -> loop rest))
+  in
+  loop candidates
+
 let string_of_run_status = function
   | Queued -> "queued"
   | Running -> "running"
@@ -86,8 +160,8 @@ let run_record_to_json (run : run_record) =
     [
       ("run_id", `String run.run_id);
       ("status", `String (string_of_run_status run.status));
-      ("provider", `String run.provider);
-      ("model", `String run.model);
+      ("provider", `String "runtime");
+      ("model", `String "runtime");
       ("created_at", `String run.created_at);
       ("started_at", Json_util.string_opt_to_json run.started_at);
       ("finished_at", Json_util.string_opt_to_json run.finished_at);
@@ -151,52 +225,64 @@ let make_run_id () =
   let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
   Printf.sprintf "run-%d-%06x" ts_ms hash
 
-let model_id_of_label label =
-  match String.index_opt label ':' with
-  | Some idx when idx < String.length label - 1 ->
-      let model =
-        String.sub label (idx + 1) (String.length label - idx - 1)
-        |> String.trim
-      in
-      if String.equal model "" then None else Some model
-  | _ -> None
+type provider_auth_detail = {
+  auth_kind : string;
+  status : string;
+  available : bool;
+  supports_run : bool;
+  endpoint_url : string option;
+  note : string option;
+}
 
-(* auth_kind_for_provider and endpoint_url_for_provider removed.
-   Use Provider_adapter.auth_detail_of_provider instead. *)
+let auth_detail_of_binding binding =
+  let available = binding.Runtime_binding.available in
+  let note =
+    match binding_runtime_kind binding with
+    | `Cli_agent ->
+        Some "Cached CLI login is assumed; final validation happens at execution time."
+    | `Local | `Direct_api -> None
+  in
+  {
+    auth_kind = binding_auth_kind binding;
+    status = (if available then "configured" else "missing_auth");
+    available;
+    supports_run = available;
+    endpoint_url = binding_endpoint_url binding;
+    note;
+  }
 
-let catalog_models_for_provider provider =
-  match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when String.equal canonical_name Provider_adapter.cn_llama -> []
-  | Some _ -> (
-      match Provider_adapter.auto_models_for_provider provider with
-      | Some models -> models
-      | None -> [ "auto" ])
-  | None -> []
+let models_for_binding binding =
+  let default_model = binding_default_model_id binding in
+  match binding_supported_models binding with
+  | [] -> Option.to_list default_model
+  | models -> models
 
-let default_model_for_provider provider =
-  match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when String.equal canonical_name Provider_adapter.cn_llama -> (
-      match Provider_adapter.explicit_llama_model_id_result () with
-      | Ok model_id -> trim_nonempty model_id
-      | Error _ -> None)
-  | Some { default_model_id; _ } -> (
-      match catalog_models_for_provider provider with
-      | first :: _ when not (String.equal (String.trim first) "") && not (String.equal first "auto") -> Some first
-      | _ -> default_model_id)
-  | None -> None
+let runtime_kind_string binding =
+  match binding_runtime_kind binding with
+  | `Local -> "local"
+  | `Cli_agent -> "cli_agent"
+  | `Direct_api -> "direct_api"
 
-let candidate_models_for_provider provider =
-  catalog_models_for_provider provider
+let dashboard_kind_string binding =
+  match binding_runtime_kind binding with
+  | `Local -> "local"
+  | `Cli_agent -> "cli"
+  | `Direct_api -> "cloud"
 
-let llama_snapshot () =
+let llama_snapshot binding =
   let discovered_models, status, available, note =
-    match Tool_local_runtime_core.fetch_models_at Env_config_runtime.Llama.server_url with
+    let endpoint =
+      binding_endpoint_url binding
+      |> Option.value ~default:Env_config_runtime.Llama.server_url
+    in
+    match Tool_local_runtime_core.fetch_models_at endpoint with
     | Ok (_url, models) -> (models, "online", true, None)
     | Error message -> ([], "offline", false, Some message)
   in
+  let default_model = binding_default_model_id binding in
   let models =
     dedupe_keep_order
-      (discovered_models @ Option.to_list (default_model_for_provider "llama"))
+      (discovered_models @ Option.to_list default_model)
   in
   (* Merge OAS Discovery probe data for richer observability.
      Discovery_cache.get_cached_or_refresh is TTL-gated (30s),
@@ -220,60 +306,51 @@ let llama_snapshot () =
         healthy = ep.healthy;
       }
   in
+  let detail = auth_detail_of_binding binding in
   {
-    provider = "llama";
+    provider = binding.Runtime_binding.id;
     kind = "local";
     runtime_kind = "local";
-    auth_kind = "none";
+    auth_kind = detail.auth_kind;
     status;
     available;
     supports_single_agent_run = available && Stdlib.List.length models > 0;
-    default_model = default_model_for_provider "llama";
+    default_model;
     models;
-    source = "masc/local-runtime";
-    endpoint_url = (Provider_adapter.auth_detail_of_provider "llama").endpoint_url;
+    source = "oas/provider-runtime-binding";
+    endpoint_url = detail.endpoint_url;
     note;
     discovery;
   }
 
-(** Build snapshot for any direct-API provider.
-    Vendor-specific logic (Gemini Vertex ADC, etc.) is encapsulated
-    inside Provider_adapter.auth_detail_of_provider. *)
-let provider_snapshot_of_adapter (adapter : Provider_adapter.adapter) =
-  let provider = adapter.canonical_name in
-  let detail = Provider_adapter.auth_detail_of_provider provider in
-  let default_model = default_model_for_provider provider in
-  let kind =
-    match adapter.runtime_kind with
-    | Provider_adapter.Local -> "local"
-    | Provider_adapter.Cli_agent -> "cli"
-    | Provider_adapter.Direct_api -> "cloud"
-  in
+let provider_snapshot_of_binding binding =
+  let provider = binding.Runtime_binding.id in
+  let detail = auth_detail_of_binding binding in
+  let default_model = binding_default_model_id binding in
+  let models = models_for_binding binding in
   {
     provider;
-    kind;
-    runtime_kind = Provider_adapter.string_of_runtime_kind adapter.runtime_kind;
+    kind = dashboard_kind_string binding;
+    runtime_kind = runtime_kind_string binding;
     auth_kind = detail.auth_kind;
     status = detail.status;
     available = detail.available;
-    supports_single_agent_run = detail.supports_run && Option.is_some default_model;
+    supports_single_agent_run =
+      detail.supports_run && (Option.is_some default_model || models <> []);
     default_model;
-    models = candidate_models_for_provider provider;
-    source = "masc/provider-adapter";
+    models;
+    source = "oas/provider-runtime-binding";
     endpoint_url = detail.endpoint_url;
     note = detail.note;
     discovery = None;
   }
 
 let provider_snapshots () : provider_snapshot list =
-  let managed =
-    Provider_adapter.direct_adapters
-    |> List.filter (fun (a : Provider_adapter.adapter) ->
-         not ((=) a.runtime_kind Provider_adapter.Local)
-         && Option.is_some a.default_model_id)
-    |> List.map provider_snapshot_of_adapter
-  in
-  llama_snapshot () :: managed
+  Runtime_binding.all ()
+  |> List.map (fun binding ->
+         if String.equal binding.Runtime_binding.id "llama" then
+           llama_snapshot binding
+         else provider_snapshot_of_binding binding)
 
 let provider_snapshot_by_name name =
   provider_snapshots ()
@@ -282,10 +359,9 @@ let provider_snapshot_by_name name =
 
 let discovery_info_to_json (d : discovery_info) : (string * Yojson.Safe.t) list =
   let opt_int k = function Some n -> [(k, `Int n)] | None -> [] in
-  let opt_str k = function Some s -> [(k, `String s)] | None -> [] in
   [("discovery", `Assoc (
     [("healthy", `Bool d.healthy)]
-    @ opt_str "discovered_model" d.discovered_model
+    @ [ "discovered_model", `Null ]
     @ opt_int "ctx_size" d.ctx_size
     @ opt_int "total_slots" d.total_slots
     @ opt_int "busy_slots" d.busy_slots
@@ -293,19 +369,24 @@ let discovery_info_to_json (d : discovery_info) : (string * Yojson.Safe.t) list 
   ))]
 
 let provider_snapshot_to_json (snapshot : provider_snapshot) =
+  let runtime_lane =
+    "runtime_lane_"
+    ^ string_of_int
+        (abs (Hashtbl.hash snapshot.provider mod 1_000_000) + 1)
+  in
   let base = [
-    ("provider", `String snapshot.provider);
-    ("kind", `String snapshot.kind);
-    ("runtime_kind", `String snapshot.runtime_kind);
+    ("provider", `String runtime_lane);
+    ("kind", `String "runtime");
+    ("runtime_kind", `String "runtime");
     ("auth_kind", `String snapshot.auth_kind);
     ("status", `String snapshot.status);
     ("available", `Bool snapshot.available);
     ("supports_single_agent_run", `Bool snapshot.supports_single_agent_run);
-    ("default_model", Json_util.string_opt_to_json snapshot.default_model);
-    ("model_count", `Int (List.length snapshot.models));
-    ("models", `List (List.map (fun model -> `String model) snapshot.models));
+    ("default_model", `Null);
+    ("model_count", `Int 0);
+    ("models", `List []);
     ("source", `String snapshot.source);
-    ("endpoint_url", Json_util.string_opt_to_json snapshot.endpoint_url);
+    ("endpoint_url", `Null);
     ("note", Json_util.string_opt_to_json snapshot.note);
   ] in
   let disc = match snapshot.discovery with
@@ -356,14 +437,20 @@ let response_text_of_api_response (response : Agent_sdk.Types.api_response) =
   Agent_sdk.Types.text_of_content response.content |> String.trim
 
 let provider_label_for_model provider model =
-  match Provider_adapter.resolve_direct_adapter provider with
-  | Some adapter ->
-    Ok (Provider_adapter.cascade_prefix_of_adapter adapter ^ ":" ^ model)
+  match find_runtime_binding_by_candidates [ provider ] with
+  | Some binding ->
+      let model = String.trim model in
+      if String.equal model "" then
+        Error
+          (Printf.sprintf
+             "Missing model for dashboard single-agent provider '%s'"
+             provider)
+      else Ok (Printf.sprintf "%s:%s" binding.Runtime_binding.id model)
   | None ->
-    Error
-      (Printf.sprintf
-         "Unsupported provider '%s' for dashboard single-agent runs"
-         provider)
+      Error
+        (Printf.sprintf
+           "Unsupported provider '%s' for dashboard single-agent runs"
+           provider)
 
 let resolve_provider_run_request ~provider ~model_opt ~prompt =
   match provider_snapshot_by_name provider with
@@ -405,13 +492,16 @@ let is_label_runnable (label : string) : bool =
   match Cascade_config.parse_model_string label with
   | None -> false
   | Some _cfg ->
-    (* Extract provider prefix from label and check auth detail *)
-    match String.index_opt label ':' with
-    | None -> false
-    | Some idx ->
-      let prefix = String.sub label 0 idx |> String.trim in
-      let detail = Provider_adapter.auth_detail_of_provider prefix in
-      detail.available && detail.supports_run
+      (* Extract provider prefix and check the OAS runtime binding. *)
+      match String.index_opt label ':' with
+      | None -> false
+      | Some idx -> (
+          let prefix = String.sub label 0 idx |> String.trim in
+          match find_runtime_binding_by_candidates [ prefix ] with
+          | None -> false
+          | Some binding ->
+              let detail = auth_detail_of_binding binding in
+              detail.available && detail.supports_run)
 
 let run_system_prompt provider =
   Printf.sprintf
@@ -444,7 +534,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
           match
             Masc_oas_bridge.run_with_caller
               ~caller:Env_config_oas_bridge.Dashboard_provider_runs (fun () ->
-              Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
+              Keeper_turn_driver_wrappers.run_model_by_label ~model_label:label ~goal:prompt
                 ~system_prompt:(run_system_prompt provider)
                 ~max_turns:4
                 ~max_tokens:(Cascade_inference.resolve_max_tokens
@@ -533,8 +623,8 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
           [
             ("run_id", `String run.run_id);
             ("status", `String (string_of_run_status run.status));
-            ("provider", `String run.provider);
-            ("model", `String run.model);
+            ("provider", `String "runtime");
+            ("model", `String "runtime");
           ])
 
 let run_status_json run_id =

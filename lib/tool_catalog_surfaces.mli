@@ -23,10 +23,11 @@ val keeper_internal_tools : string list
     Exposing them on the public MCP surface would let unauthenticated
     clients invoke keeper-only operations. *)
 
-val keeper_internal_set : string list
-(** Alias of {!keeper_internal_tools}.  Kept as a separate binding
-    because some callers prefer the "set" naming for membership
-    queries (e.g. \[Tool_catalog\]). *)
+val keeper_internal_set : (string, unit) Hashtbl.t
+(** Hashtbl membership view of {!keeper_internal_tools} (#14728).
+    [set_for_surface Keeper_internal] returns the same handle so
+    callers performing membership queries hit an O(1) lookup
+    rather than O(n) [List.mem]. *)
 
 val workspace_mutating_tool_names : string list
 (** Subset of tools that mutate workspace state — used by the

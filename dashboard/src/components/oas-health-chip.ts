@@ -88,6 +88,25 @@ function describeSampleWindow(summary: Pick<OasHealthSummary,
   return `sample ${summary.replayLoadedEvents}/${summary.replayTotalMatchingEvents}`
 }
 
+function describeEvidenceDetail(summary: Pick<OasHealthSummary,
+  | 'artifactRefsCount'
+  | 'rawTraceRefsCount'
+  | 'reportRefsCount'
+  | 'proofRefsCount'
+  | 'telemetryRefsCount'
+  | 'runtimeEvidenceRefsCount'
+>): string {
+  const parts = [
+    summary.rawTraceRefsCount > 0 ? `trace ${summary.rawTraceRefsCount}` : null,
+    summary.reportRefsCount > 0 ? `report ${summary.reportRefsCount}` : null,
+    summary.proofRefsCount > 0 ? `proof ${summary.proofRefsCount}` : null,
+    summary.telemetryRefsCount > 0 ? `telemetry ${summary.telemetryRefsCount}` : null,
+    summary.runtimeEvidenceRefsCount > 0 ? `evidence ${summary.runtimeEvidenceRefsCount}` : null,
+    summary.artifactRefsCount > 0 ? `artifact ${summary.artifactRefsCount}` : null,
+  ].filter((part): part is string => part !== null)
+  return parts.length > 0 ? parts.slice(0, 3).join(' · ') : '증거 참조 없음'
+}
+
 export function OasHealthChip() {
   const summary = useComputed(() => oasHealthSummary.value)
   const recentEvents = useComputed(() => oasAgentEvents.value.slice(0, 3))
@@ -114,6 +133,10 @@ export function OasHealthChip() {
     summary.value.lastErrorTs != null
       ? `최근 ${formatLastTick(summary.value.lastErrorTs)}`
       : 'Api/agent 실패'
+  const evidenceDetail =
+    summary.value.lastEvidenceTs != null
+      ? `${describeEvidenceDetail(summary.value)} · 최근 ${formatLastTick(summary.value.lastEvidenceTs)}`
+      : describeEvidenceDetail(summary.value)
 
   return html`
     <${Card} title="OAS 런타임">
@@ -133,6 +156,12 @@ export function OasHealthChip() {
           value=${String(summary.value.totalErrors)}
           status=${summary.value.totalErrors > 0 ? 'crit' : undefined}
           delta=${{ direction: summary.value.totalErrors > 0 ? 'down' as const : 'flat' as const, text: sampleWindow ? `${errorDetail} · ${sampleWindow}` : errorDetail }}
+        />
+        <${StatTile}
+          label="증거 참조"
+          value=${String(summary.value.evidenceRefsCount)}
+          status=${summary.value.evidenceRefsCount > 0 ? 'ok' : 'warn'}
+          delta=${{ direction: summary.value.evidenceRefsCount > 0 ? 'up' as const : 'flat' as const, text: sampleWindow ? `${evidenceDetail} · ${sampleWindow}` : evidenceDetail }}
         />
         <${StatTile}
           label="에이전트 이벤트"

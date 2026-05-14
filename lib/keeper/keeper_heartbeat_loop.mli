@@ -69,6 +69,12 @@ val record_semaphore_wait_observation :
   unit ->
   unit
 
+val semaphore_wait_timeout_blocker_class :
+  Keeper_turn_slot.semaphore_wait_timeout -> blocker_class
+
+val semaphore_wait_timeout_diagnostics :
+  cascade_name:string -> Keeper_turn_slot.semaphore_wait_timeout -> string * string
+
 val oas_timeout_budget_observation_reasons : string list
 
 val record_oas_timeout_budget_observation :

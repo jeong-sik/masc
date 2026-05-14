@@ -1,5 +1,4 @@
-(** Keeper_memory_recall — cost calculation, recall scoring, auto-rules,
-    model-aware threshold adjustment, and memory evaluation.
+(** Keeper_memory_recall — recall scoring, auto-rules, and memory evaluation.
 
     Pure memory bank operations are provided by [Keeper_memory_bank]
     (included below). This module adds recall-specific logic on top. *)
@@ -9,11 +8,6 @@ open Keeper_types
 (** {1 Re-exported from Keeper_memory_bank} *)
 
 include module type of Keeper_memory_bank
-
-(** {1 Cost Calculation} *)
-
-val cost_usd_of_usage :
-  Agent_sdk.Types.api_usage -> model_id:string -> float
 
 (** {1 File Reading} *)
 
@@ -111,11 +105,7 @@ val keeper_auto_rule_eval_of_measurement :
   Keeper_measurement.measurement_snapshot ->
   keeper_auto_rule_eval
 
-(** {1 Model-Aware Threshold Adjustment} *)
-
-(** Compute threshold multipliers from OAS [Llm_provider.Model_meta] parameters.
-    Uses [context_window] and [is_local] instead of model name matching. *)
-val model_threshold_multipliers_of_model_id : string -> float * float
+(** {1 Runtime-Neutral Threshold Evaluation} *)
 
 val evaluate_keeper_auto_rules :
   meta:keeper_meta ->
@@ -125,7 +115,6 @@ val evaluate_keeper_auto_rules :
   repetition_risk:float ->
   goal_alignment:float ->
   response_alignment:float ->
-  ?model_id:string ->
   unit ->
   keeper_auto_rule_eval
 
@@ -152,7 +141,6 @@ val learned_policy_auto_rules :
   repetition_risk:float ->
   goal_alignment:float ->
   response_alignment:float ->
-  ?model_id:string ->
   unit ->
   keeper_auto_rule_eval
 

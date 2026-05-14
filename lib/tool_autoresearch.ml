@@ -436,6 +436,10 @@ let wrap_result json =
   in
   (not is_error, s)
 
+let wrap_dispatch_result ~name ~start (success, message) =
+  if success then Tool_result.ok ~tool_name:name ~start_time:start message
+  else Tool_result.error ~tool_name:name ~start_time:start message
+
 let arg_member key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
@@ -583,17 +587,18 @@ let handle_search_findings (ctx : context) args =
         ]
 
 (** Dispatch an autoresearch tool call (standard MCP pattern). *)
-let dispatch (ctx : context) ~name ~args : tool_result option =
+let dispatch (ctx : context) ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_autoresearch_start" -> Some (wrap_result (handle_start ctx args))
-  | "masc_autoresearch_status" -> Some (wrap_result (handle_status ctx args))
-  | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
-  | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))
-  | "masc_autoresearch_cycle" -> Some (wrap_result (Tool_autoresearch_cycle.handle_cycle ctx args))
+  | "masc_autoresearch_start" -> Some (wrap_dispatch_result ~name ~start (wrap_result (handle_start ctx args)))
+  | "masc_autoresearch_status" -> Some (wrap_dispatch_result ~name ~start (wrap_result (handle_status ctx args)))
+  | "masc_autoresearch_stop" -> Some (wrap_dispatch_result ~name ~start (wrap_result (handle_stop ctx args)))
+  | "masc_autoresearch_inject" -> Some (wrap_dispatch_result ~name ~start (wrap_result (handle_inject ctx args)))
+  | "masc_autoresearch_cycle" -> Some (wrap_dispatch_result ~name ~start (wrap_result (Tool_autoresearch_cycle.handle_cycle ctx args)))
   | "masc_autoresearch_record_finding" ->
-      Some (wrap_result (handle_record_finding ctx args))
+      Some (wrap_dispatch_result ~name ~start (wrap_result (handle_record_finding ctx args)))
   | "masc_autoresearch_search_findings" ->
-      Some (wrap_result (handle_search_findings ctx args))
+      Some (wrap_dispatch_result ~name ~start (wrap_result (handle_search_findings ctx args)))
   | _ -> None
 
 (* ================================================================ *)

@@ -946,6 +946,14 @@ let persist_overrides base_path =
 
 (** Restore overrides from JSON file, applying the same validation as
     [set_override] so that stale or manually-edited entries are rejected. *)
+let restore_failure_observer : (unit -> unit) ref = ref (fun () -> ())
+
+let set_restore_failure_observer observer =
+  restore_failure_observer := observer
+
+let record_override_restore_failure () =
+  !restore_failure_observer ()
+
 let restore_overrides base_path =
   let path =
     Filename.concat
@@ -964,11 +972,13 @@ let restore_overrides base_path =
               match apply_override_validated key s with
               | Ok () -> ()
               | Error reason ->
+                  record_override_restore_failure ();
                   Log.Misc.warn "prompt override restore: skipping %s: %s"
                     key reason)
           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> ()
         ) pairs
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ()
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      record_override_restore_failure ();
       Log.Misc.warn "prompt override restore failed: %s" (Printexc.to_string exn)
   end

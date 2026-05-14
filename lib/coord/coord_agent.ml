@@ -115,7 +115,10 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Masc_dom
                              Some "Cannot set inactive while a task is assigned"
                          | None, Some Masc_domain.Busy ->
                              Some "Cannot set busy without an active task"
-                         | _ -> None
+                         | Some _, Some (Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening)
+                         | Some _, None
+                         | None, Some (Masc_domain.Active | Masc_domain.Listening | Masc_domain.Inactive)
+                         | None, None -> None
                        in
                        (match invalid with
                         | Some msg -> Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg))

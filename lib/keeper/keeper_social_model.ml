@@ -101,7 +101,11 @@ let previous_state_of_meta (meta : Keeper_types.keeper_meta) =
   in
   let active_desire = nonempty_opt runtime.last_active_desire in
   let current_intention = nonempty_opt runtime.last_current_intention in
-  let blocker = nonempty_opt runtime.last_blocker in
+  let blocker =
+    match runtime.last_blocker with
+    | Some info -> nonempty_opt info.detail
+    | None -> None
+  in
   let need = nonempty_opt runtime.last_need in
   match speech_act, active_desire, current_intention, blocker, need with
   | None, None, None, None, None -> None

@@ -1,0 +1,1197 @@
+(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
+
+    Public API for running OAS agents through MASC-managed named cascade
+    profiles ([run_named])
+    or explicit model label ([run_model_by_label]), with optional MASC
+    tool bridging variants.
+
+    @since God file decomposition — extracted from oas_worker.ml *)
+
+open Result.Syntax
+
+(* Sub-module includes (God file decomposition).
+   Each sub-module is self-contained; the facade re-exports everything
+   so existing callers do not need qualification. *)
+include Cascade_oas_runner
+include Cascade_error_classify
+include Cascade_attempt_fsm
+include Keeper_turn_driver_helpers
+
+let provider_attempt_status_of_result = function
+  | Ok _ -> "provider_returned"
+  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) -> "timeout"
+  | Error _ -> "error"
+
+let provider_attempt_exception_kind_of_result = function
+  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) ->
+    Some "outer_oas_timeout"
+  | Ok _ | Error _ -> None
+
+let provider_attempt_status_and_error_of_exception = function
+  | Eio.Time.Timeout -> "timeout", "Eio.Time.Timeout"
+  | Eio.Cancel.Cancelled inner ->
+    ( "cancelled"
+    , Printf.sprintf
+        "Eio.Cancel.Cancelled(%s)"
+        (Printexc.to_string inner) )
+  | exn -> "exception", Printexc.to_string exn
+
+type provider_attempt_provenance =
+  { model_source : string
+  ; resolved_model_source : string
+  ; capability_source : string
+  ; fallback_authority : string
+  ; provider_source_cascade : string option
+  }
+
+let base_provider_attempt_provenance =
+  { model_source = "named_cascade"
+  ; resolved_model_source = "cascade_catalog_binding"
+  ; capability_source = "provider_config_from_cascade_catalog"
+  ; fallback_authority = "declared_cascade"
+  ; provider_source_cascade = None
+  }
+
+let provider_attempt_provenance_fields p =
+  let base =
+    [ ("model_source", `String p.model_source)
+    ; ("resolved_model_source", `String p.resolved_model_source)
+    ; ("capability_source", `String p.capability_source)
+    ; ("fallback_authority", `String p.fallback_authority)
+    ]
+  in
+  match p.provider_source_cascade with
+  | None -> base
+  | Some source_cascade ->
+      ("provider_source_cascade", `String source_cascade) :: base
+
+let health_error_kind label =
+  Cascade_health_tracker.error_kind_of_string label
+
+let record_candidate_health_success candidate ~latency_ms =
+  Cascade_runtime_candidate.health_keys candidate
+  |> List.iter (fun provider_key ->
+    Cascade_health_tracker.record_success
+      Cascade_health_tracker.global
+      ~provider_key
+      ~latency_ms
+      ())
+
+let record_candidate_health_rejected candidate ~reason =
+  let error_kind = health_error_kind "accept_rejected" in
+  Cascade_runtime_candidate.health_keys candidate
+  |> List.iter (fun provider_key ->
+    Cascade_health_tracker.record_rejected
+      Cascade_health_tracker.global
+      ~provider_key
+      ~error_kind
+      ~error_reason:reason
+      ())
+
+let record_candidate_health_error candidate sdk_err =
+  let error_reason = Agent_sdk.Error.to_string sdk_err in
+  let health_keys = Cascade_runtime_candidate.health_keys candidate in
+  if sdk_error_is_hard_quota sdk_err
+  then (
+    let error_kind = health_error_kind "hard_quota" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      Cascade_health_tracker.record_hard_quota
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
+  else if sdk_error_is_terminal_provider_runtime_failure sdk_err
+  then (
+    let error_kind = health_error_kind "terminal_provider_runtime_failure" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      Cascade_health_tracker.record_terminal_failure
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
+  else
+    match sdk_error_soft_rate_limited sdk_err with
+    | Some retry_after_s ->
+      let error_kind = health_error_kind "soft_rate_limited" in
+      health_keys
+      |> List.iter (fun provider_key ->
+        Cascade_health_tracker.record_soft_rate_limited
+          Cascade_health_tracker.global
+          ~provider_key
+          ?retry_after_s
+          ~error_kind
+          ~error_reason
+          ())
+    | None ->
+      let error_kind = health_error_kind "provider_error" in
+      health_keys
+      |> List.iter (fun provider_key ->
+        Cascade_health_tracker.record_failure
+          Cascade_health_tracker.global
+          ~provider_key
+          ~error_kind
+          ~error_reason
+          ())
+
+let runtime_candidate_label = "runtime"
+(* ================================================================ *)
+(* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
+(* ================================================================ *)
+
+(** Run a single Agent.run() call with MASC-driven cascade model fallback.
+
+    MASC drives the cascade FSM directly:
+    - Resolves cascade providers from cascade.toml
+    - For each provider, runs OAS with a single provider
+    - Uses Cascade_fsm.decide to determine next action on failure
+    - Cascade loop runs inside Admission_queue permit
+
+    @param accept Optional response validator. Default accepts all.
+    @since Phase 2 — MASC-driven cascade FSM *)
+let run_named
+    ~cascade_name
+    ?(keeper_name = "")
+    ~goal
+    ?provider_filter
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    ?priority
+    ?session_id
+    ?(system_prompt = "")
+    ?(tools = [])
+    ?(initial_messages = [])
+    ?(max_turns = 20)
+    ?(max_idle_turns = 3)
+    ?stream_idle_timeout_s
+    ?(temperature = Cascade_legacy_runner.default_temperature)
+    ?(max_tokens = Cascade_legacy_runner.default_max_tokens)
+    ?max_input_tokens
+    ?max_cost_usd
+    ?wait_timeout_sec
+    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?guardrails
+    ?hooks
+    ?context_reducer
+    ?memory
+    ?tool_retry_policy
+    ?(required_tool_satisfaction =
+      Agent_sdk.Completion_contract.any_tool_call_satisfies)
+    ?raw_trace
+    ?on_event
+    ?on_yield
+    ?on_resume
+    ?agent_ref
+    ?proof_ref
+    ?contract
+    ?transport
+    ?cli_transport_overrides
+    ?(allowed_paths = [])
+    ?checkpoint_sidecar
+    ?(cache_system_prompt = false)
+    ?(yield_on_tool = false)
+    ?compact_ratio
+    ?(oas_auto_context_overflow_retry = true)
+    ?checkpoint_dir
+    ?context_injector
+    ?context
+    ?slot_id
+    ?enable_thinking
+    ?approval
+    ?exit_condition
+    ?exit_condition_result
+    ?summarizer
+    ?oas_checkpoint
+    ?event_bus
+    ?runtime_manifest_context
+    ?runtime_manifest_append
+    ?(runtime_manifest_required_tool_names = [])
+    ?sw
+    ?net
+    ?per_provider_timeout_s
+    ()
+  : (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result =
+  let cascade_engine = Keeper_cascade_engine.keeper_managed in
+  match Keeper_cascade_engine.guard_keeper_hot_path cascade_engine with
+  | Error msg -> Error (Agent_sdk.Error.Internal msg)
+  | Ok () ->
+  match require_eio ?sw ?net () with
+  | Error e -> Error (eio_context_error_to_sdk_error e)
+  | Ok (sw, net) ->
+  let cascade_name =
+    Keeper_cascade_profile.normalize_declared_name cascade_name
+  in
+  let error_cascade_name = cascade_name_of_string cascade_name in
+  let runtime_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
+  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
+  (* Keeper-internal tools cannot degrade to a text-only CLI palette: the
+     model would see no callable schema and emit misleading diagnostics. *)
+  let require_tool_support =
+    require_tool_support
+    || keeper_internal_tools_require_materialized_runtime_surface
+         ~keeper_name tools
+  in
+  let configured_labels_result, candidate_cfgs_result, secondary_resolver =
+    let named_resolution =
+      Cascade_catalog_runtime
+      .resolve_named_providers_strict_with_secondary_resolver
+        ~sw ~net ?provider_filter ~cascade_name ()
+    in
+    let candidate_cfgs_result =
+      match named_resolution with
+      | Ok resolution -> Ok resolution.providers
+      | Error detail -> Error detail
+    in
+    let secondary_resolver =
+      match named_resolution with
+      | Ok resolution -> Some resolution.secondary_resolver
+      | Error _ -> None
+    in
+    ( Cascade_runtime.models_of_cascade_name_result runtime_cascade_name,
+      candidate_cfgs_result,
+      secondary_resolver )
+  in
+  (match configured_labels_result, candidate_cfgs_result with
+   | Error detail, _ | _, Error detail ->
+       Log.Misc.error "cascade %s: %s" cascade_name detail;
+       Error (cascade_catalog_error_to_sdk_error detail)
+   | Ok configured_labels, Ok candidate_cfgs ->
+  let original_candidate_cfgs = candidate_cfgs in
+  let original_candidates =
+    Cascade_runtime_candidate.of_provider_configs original_candidate_cfgs
+  in
+  let tool_filtered_candidate_cfgs =
+    filter_candidate_providers_for_tool_support
+      ~keeper_name
+      ?runtime_mcp_policy
+      ~tools
+      ~require_tool_choice_support
+      ~require_tool_support
+      ?secondary_resolver
+      ~label:cascade_name
+      candidate_cfgs
+  in
+  let candidates =
+    tool_filtered_candidate_cfgs
+    |> Cascade_runtime_candidate.of_provider_configs
+    |> List.filter
+         (fun candidate ->
+            match Cascade_runtime_candidate.first_health_cooldown candidate with
+            | None -> true
+            | Some (_provider_health_key, msg) ->
+                Log.Misc.debug
+                  "cascade %s: prefilter skipped %s (provider_key=%s cooldown: %s)"
+                  cascade_name runtime_candidate_label runtime_candidate_label msg;
+                false)
+  in
+  let provider_attempt_provenance = base_provider_attempt_provenance in
+  if candidates = [] then
+    Log.Misc.error
+      "cascade %s: no callable models available in declared cascade — \
+       candidate_count=%d require_tool_choice_support=%b require_tool_support=%b"
+      cascade_name
+      (List.length configured_labels)
+      require_tool_choice_support
+      require_tool_support;
+  match candidates with
+  | [] ->
+      let required_tool_names =
+        required_tool_names_for_no_tool_error ~runtime_mcp_policy ~tools
+      in
+      let provider_rejections =
+        provider_rejections_for_no_tool_error
+          ~keeper_name ?runtime_mcp_policy ~tools
+          ~require_tool_choice_support ~require_tool_support
+          original_candidates
+      in
+      let internal_error =
+        match
+          classify_empty_candidates
+            ~require_tool_choice_support
+            ~require_tool_support
+            ~tool_filtered_candidate_count:
+              (List.length tool_filtered_candidate_cfgs)
+        with
+        | Tool_capability_empty ->
+          No_tool_capable_provider
+            {
+              cascade_name = error_cascade_name;
+              configured_labels;
+              required_tool_names;
+              provider_rejections;
+            }
+        | Provider_unavailable ->
+          Cascade_exhausted
+            {
+              cascade_name = error_cascade_name;
+              reason = Keeper_types.No_providers_available;
+            }
+      in
+      (match runtime_manifest_context, runtime_manifest_append with
+       | Some manifest_ctx, Some append ->
+         let provider_rejection_reasons =
+           provider_rejections
+           |> List.map (fun (r : Cascade_error_classify.provider_rejection) ->
+                  r.reason)
+           |> Json_util.dedupe_keep_order
+         in
+         Keeper_runtime_manifest.make_for_context manifest_ctx
+           ~event:Keeper_runtime_manifest.Pre_dispatch_blocked
+           ~cascade_name
+           ~status:"error"
+           ~decision:
+             (`Assoc
+               (Keeper_cascade_engine.manifest_fields cascade_engine
+                @ [
+                    ("reason", `String (kind_of_masc_internal_error internal_error));
+                    ( "required_tool_names",
+                      `List
+                        (List.map
+                           (fun tool_name -> `String tool_name)
+                           required_tool_names) );
+                    ("candidate_count", `Int (List.length original_candidate_cfgs));
+                    ( "tool_filtered_candidate_count",
+                      `Int (List.length tool_filtered_candidate_cfgs) );
+                    ("health_filtered_candidate_count", `Int (List.length candidates));
+                    ( "rejected_candidate_count",
+                      `Int (List.length provider_rejections) );
+                    ( "rejection_reasons",
+                      `List
+                        (List.map
+                           (fun reason -> `String reason)
+                           provider_rejection_reasons) );
+                    ( "require_tool_choice_support",
+                      `Bool require_tool_choice_support );
+                    ("require_tool_support", `Bool require_tool_support);
+                  ]))
+           ()
+         |> append
+       | _ -> ());
+      Error
+        (sdk_error_of_masc_internal_error internal_error)
+  | _ ->
+  let candidate_count = List.length candidates in
+  let capture, _metrics =
+    Cascade_legacy_runner.cascade_metrics_for_candidates ~candidate_count ()
+  in
+  let cascade_strategy_name_ref = ref None in
+  let name = Printf.sprintf "oas-%s" cascade_name in
+  let transport_resolved = match transport with
+    | Some t -> t
+    | None -> Masc_grpc_transport.from_env ()
+  in
+  let queue_priority =
+    Option.value priority ~default:Llm_provider.Request_priority.Proactive
+  in
+  (* MASC-driven cascade FSM: try each provider, decide on failure.
+     Extracted to [Keeper_turn_driver_try_provider.run_try_provider] via
+     explicit [try_provider_ctx] record (RFC-0051 PR-3a). *)
+  let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
+    cascade_name;
+    error_cascade_name;
+    keeper_name;
+    name;
+    goal;
+    require_tool_choice_support;
+    require_tool_support;
+    priority;
+    session_id;
+    system_prompt;
+    tools;
+    initial_messages;
+    max_turns;
+    max_idle_turns;
+    stream_idle_timeout_s;
+    temperature;
+    max_tokens;
+    max_input_tokens;
+    max_cost_usd;
+    guardrails;
+    hooks;
+    context_reducer;
+    memory;
+    tool_retry_policy;
+    required_tool_satisfaction;
+    raw_trace;
+    transport_resolved;
+    cli_transport_overrides;
+    runtime_mcp_policy;
+    allowed_paths;
+    checkpoint_sidecar;
+    cache_system_prompt;
+    yield_on_tool;
+    compact_ratio;
+    oas_auto_context_overflow_retry;
+    checkpoint_dir;
+    context_injector;
+    context;
+    slot_id;
+    enable_thinking;
+    approval;
+    exit_condition;
+    exit_condition_result;
+    summarizer;
+    oas_checkpoint;
+    contract;
+    sw;
+    net;
+    on_event;
+    on_yield;
+    on_resume;
+    agent_ref;
+    proof_ref;
+    event_bus;
+    cascade_engine;
+    runtime_manifest_context;
+    runtime_manifest_append;
+    runtime_manifest_required_tool_names;
+  } in
+  let emit_runtime_manifest ?status ?decision ?oas_turn_count event =
+    match runtime_manifest_context, runtime_manifest_append with
+    | Some manifest_ctx, Some append ->
+      let decision =
+        match decision with
+        | None -> Some (`Assoc (Keeper_cascade_engine.manifest_fields cascade_engine))
+        | Some (`Assoc fields) ->
+            Some
+              (`Assoc
+                (Keeper_cascade_engine.manifest_fields cascade_engine @ fields))
+        | Some other ->
+            Some
+              (`Assoc
+                (Keeper_cascade_engine.manifest_fields cascade_engine
+                 @ [ ("decision", other) ]))
+      in
+      Keeper_runtime_manifest.make_for_context manifest_ctx ~event
+        ?oas_turn_count ~cascade_name ?status ?decision ()
+      |> append
+    | _ -> ()
+  in
+  let try_provider ?resume_checkpoint ?per_provider_timeout_s candidate =
+    Keeper_turn_driver_try_provider.run_try_provider
+      try_provider_ctx
+      ?resume_checkpoint
+      ?per_provider_timeout_s
+      candidate
+  in
+  let positive_finite_float = function
+    | value when Float.is_finite value && value > 0.0 -> Some value
+    | _ -> None
+  in
+  let health_error_kind label =
+    Cascade_health_tracker.error_kind_of_string label
+  in
+  let health_keys candidate =
+    Cascade_runtime_candidate.health_keys candidate
+    |> List.sort_uniq String.compare
+  in
+  let cost_usd_of_response (response : Agent_sdk.Types.api_response) =
+    match response.usage with
+    | Some usage -> usage.cost_usd
+    | None -> None
+  in
+  let record_candidate_success candidate ~latency_ms
+      (result : Cascade_runner.run_result) =
+    let latency_ms = positive_finite_float latency_ms in
+    let cost_usd = cost_usd_of_response result.response in
+    List.iter
+      (fun provider_key ->
+         Cascade_health_tracker.record_success
+           Cascade_health_tracker.global
+           ~provider_key
+           ?latency_ms
+           ?cost_usd
+           ())
+      (health_keys candidate)
+  in
+  let record_candidate_rejected candidate ~reason =
+    let error_kind = health_error_kind "accept_rejected" in
+    List.iter
+      (fun provider_key ->
+         Cascade_health_tracker.record_rejected
+           Cascade_health_tracker.global
+           ~provider_key
+           ~error_kind
+           ~error_reason:reason
+           ())
+      (health_keys candidate)
+  in
+  let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
+    let error_reason = Agent_sdk.Error.to_string sdk_err in
+    let error_kind =
+      sdk_error_cascade_fallback_class sdk_err
+      |> Option.value ~default:"provider_error"
+      |> health_error_kind
+    in
+    let provider_key = Cascade_runtime_candidate.health_key candidate in
+    let model_key = Cascade_runtime_candidate.model_health_key candidate in
+    if sdk_error_is_hard_quota sdk_err then
+      Cascade_health_tracker.record_hard_quota
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()
+    else if sdk_error_is_model_access_denied sdk_err then
+      Cascade_health_tracker.record_terminal_failure
+        Cascade_health_tracker.global
+        ~provider_key:model_key
+        ~error_kind
+        ~error_reason
+        ()
+    else if sdk_error_is_resumable_cli_session sdk_err
+            || sdk_error_is_terminal_provider_runtime_failure sdk_err
+    then
+      Cascade_health_tracker.record_terminal_failure
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()
+    else
+      match sdk_error_soft_rate_limited sdk_err with
+      | Some retry_after_s ->
+        Cascade_health_tracker.record_soft_rate_limited
+          Cascade_health_tracker.global
+          ~provider_key
+          ?retry_after_s
+          ~error_kind
+          ~error_reason
+          ()
+      | None ->
+        Cascade_health_tracker.record_failure
+          Cascade_health_tracker.global
+          ~provider_key
+          ~error_kind
+          ~error_reason
+          ()
+  in
+  let rec try_cascade
+      ?(on_success = fun ~provider_key:_ -> ())
+      ?resume_checkpoint ?per_provider_timeout_s remaining last_err =
+    match remaining with
+    | [] ->
+      let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
+        | Some (Llm_provider.Http_client.NetworkError { message; kind }) ->
+            if kind = Llm_provider.Http_client.Connection_refused
+               || String_util.contains_substring_ci message "connection refused" then
+              Keeper_types.Connection_refused
+            else if message_looks_like_cli_wrapped_max_turns message then
+              Keeper_types.Max_turns_exceeded
+            else
+              Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.HttpError { body; _ }) ->
+            if message_looks_like_cli_wrapped_max_turns body then
+              Keeper_types.Max_turns_exceeded
+            else
+              Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.AcceptRejected { reason = r }) ->
+            if message_looks_like_cli_wrapped_max_turns r then
+              Keeper_types.Max_turns_exceeded
+            else
+              Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.CliTransportRequired _) ->
+            Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.ProviderTerminal
+            { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
+            Keeper_types.Max_turns_exceeded
+        | Some (Llm_provider.Http_client.ProviderTerminal
+            { kind = Llm_provider.Http_client.Other _; _ }) ->
+            Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
+            let message = Cascade_fsm.to_user_message (Some err) in
+            if message_looks_like_cli_wrapped_max_turns message then
+              Keeper_types.Max_turns_exceeded
+            else
+              Keeper_types.Other_detail message
+        | None -> Keeper_types.No_providers_available
+      in
+      let observation =
+        Cascade_legacy_runner.cascade_observation_with_metrics
+          ~cascade_name:error_cascade_name
+          ?strategy:!cascade_strategy_name_ref ~configured_labels
+          ~candidate_count ~selected_model_raw:None ~capture ()
+      in
+      Cascade_legacy_runner.record_cascade ~keeper_name
+        ~cascade_name:error_cascade_name
+        ~outcome:`Failure ~observation:(Some observation) ();
+      let terminal_error =
+        match last_err with
+        | Some (Llm_provider.Http_client.NetworkError { message; _ })
+          when message_looks_like_resumable_cli_session message ->
+            sdk_error_of_masc_internal_error
+              (Resumable_cli_session
+                 {
+                   cascade_name = error_cascade_name;
+                   detail = resumable_cli_session_detail message;
+                   exit_code = resumable_cli_session_exit_code message;
+                 })
+        | Some (Llm_provider.Http_client.AcceptRejected { reason })
+          when message_looks_like_resumable_cli_session reason ->
+            sdk_error_of_masc_internal_error
+              (Resumable_cli_session
+                 {
+                   cascade_name = error_cascade_name;
+                   detail = resumable_cli_session_detail reason;
+                   exit_code = resumable_cli_session_exit_code reason;
+                 })
+        | _ ->
+            sdk_error_of_masc_internal_error
+              (Cascade_exhausted
+                 {
+                   cascade_name = error_cascade_name;
+                   reason;
+                 })
+      in
+      Error
+        terminal_error
+    | candidate :: rest ->
+      Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
+      match Cascade_runtime_candidate.first_health_cooldown candidate with
+      | Some (_blocked_health_key, msg) ->
+          Log.Misc.debug
+            "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
+            cascade_name runtime_candidate_label runtime_candidate_label msg;
+          try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s rest last_err
+      | None ->
+      let is_last = rest = [] in
+      Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name runtime_candidate_label is_last;
+      let pp_timeout =
+        Cascade_runtime_candidate.effective_attempt_timeout_s
+          ~is_last
+          ~configured_timeout_s:per_provider_timeout_s
+          candidate
+      in
+      let attempt_started_at = Unix.gettimeofday () in
+      let started_decision_fields =
+        provider_attempt_provenance_fields provider_attempt_provenance
+        @ [
+            ("is_last", `Bool is_last);
+            ( "per_provider_timeout_s",
+              match pp_timeout with
+              | None -> `Null
+              | Some timeout -> `Float timeout );
+          ]
+      in
+      emit_runtime_manifest
+        ~status:"started"
+        ~decision:(`Assoc started_decision_fields)
+        Keeper_runtime_manifest.Provider_attempt_started;
+      let provider_attempt_finished_emitted = ref false in
+      let emit_provider_attempt_finished_once
+            ~status
+            ?oas_turn_count
+            ~checkpoint_after_present
+            ~response_model:_
+            ~error
+            ?exception_kind
+            attempt_latency_ms
+        =
+        if not !provider_attempt_finished_emitted then (
+          provider_attempt_finished_emitted := true;
+          let decision_fields =
+            [
+              ("latency_ms", `Float attempt_latency_ms);
+              ("checkpoint_after_present", `Bool checkpoint_after_present);
+              ("error", error);
+            ]
+          in
+          let decision_fields =
+            provider_attempt_provenance_fields provider_attempt_provenance
+            @ decision_fields
+          in
+          let decision_fields =
+            match exception_kind with
+            | None -> decision_fields
+            | Some kind -> ("exception_kind", `String kind) :: decision_fields
+          in
+          emit_runtime_manifest
+            ~status
+            ?oas_turn_count
+            ~decision:(`Assoc decision_fields)
+            Keeper_runtime_manifest.Provider_attempt_finished)
+      in
+      let (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) =
+        Eio.Switch.run (fun provider_attempt_sw ->
+          Eio.Switch.on_release provider_attempt_sw (fun () ->
+            if not !provider_attempt_finished_emitted then
+              let attempt_latency_ms =
+                (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+              in
+              Eio.Cancel.protect (fun () ->
+                emit_provider_attempt_finished_once
+                  ~status:"cancelled"
+                  ~checkpoint_after_present:false
+                  ~response_model:`Null
+                  ~error:
+                    (`String
+                      "provider attempt scope released before completion; parent \
+                       cancellation or outer timeout interrupted the attempt")
+                  ~exception_kind:"cancelled"
+                  attempt_latency_ms));
+          match
+            try_provider
+              ?resume_checkpoint
+              ?per_provider_timeout_s:pp_timeout
+              candidate
+          with
+          | result, checkpoint_after, liveness_success_sample ->
+            let attempt_latency_ms =
+              (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+            in
+            emit_provider_attempt_finished_once
+              ~status:(provider_attempt_status_of_result result)
+              ?oas_turn_count:
+                (match result with
+                 | Ok run_result -> Some run_result.turns
+                 | Error _ -> None)
+              ~checkpoint_after_present:(Option.is_some checkpoint_after)
+              ~response_model:
+                (match result with
+                 | Ok _ -> `Null
+                 | Error _ -> `Null)
+              ~error:
+                (match result with
+                 | Ok _ -> `Null
+                 | Error sdk_err -> `String (Agent_sdk.Error.to_string sdk_err))
+              ?exception_kind:(provider_attempt_exception_kind_of_result result)
+              attempt_latency_ms;
+            result, checkpoint_after, liveness_success_sample, attempt_latency_ms
+          | exception exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            let attempt_latency_ms =
+              (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+            in
+            let status, error = provider_attempt_status_and_error_of_exception exn in
+            emit_provider_attempt_finished_once
+              ~status
+              ~checkpoint_after_present:false
+              ~response_model:`Null
+              ~error:(`String error)
+              ~exception_kind:status
+              attempt_latency_ms;
+            Printexc.raise_with_backtrace exn bt)
+      in
+      let record_accepted_liveness_sample () =
+        match liveness_success_sample with
+        | None -> ()
+        | Some (candidate_key, sample) ->
+          Cascade_attempt_liveness_config.record_success_sample
+            ~candidate_key
+            sample
+      in
+      (* Thread checkpoint forward: if this provider made progress,
+         the next provider can resume from where this one left off. *)
+      let next_resume = match checkpoint_after with
+        | Some _ -> checkpoint_after
+        | None -> resume_checkpoint
+      in
+      (* Track provider call outcome for weighted-routing health.
+         Semantics: response arrived = provider healthy (even if accept
+         logic later rejects); error = provider unhealthy.  The
+         cascade-decision branches (Accept_on_exhaustion / Try_next /
+         Exhausted) are orthogonal to provider health.
+
+         [attempt_latency_ms] is wall-clock from the moment we entered
+         [try_provider] to the moment it returned, measured even if the
+         response is later rejected by [accept] — but only the Ok+accept
+         branch feeds it to the tracker, so unhealthy providers do not
+         pollute the per-provider p50/p95.  The 200ms-timeout / 200ms-
+         success conflation that would otherwise occur is intentional
+         to avoid: a fast failure looks identical to a fast success in
+         a single number, which would mislead strategy ranking. *)
+      (match result with
+      | Ok result when accept result.response ->
+        record_accepted_liveness_sample ();
+        record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
+        (* FSM: Call_ok → Accept *)
+        let observation =
+          Cascade_legacy_runner.cascade_observation_with_metrics
+            ~cascade_name:error_cascade_name
+            ?strategy:!cascade_strategy_name_ref ~configured_labels
+            ~candidate_count ~selected_model_raw:None
+            ~capture ()
+        in
+        let result = { result with cascade_observation = Some observation } in
+        Cascade_legacy_runner.record_cascade ~keeper_name
+          ~cascade_name:error_cascade_name
+          ~outcome:`Success ~observation:(Some observation) ();
+        on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+        Ok result
+      | Ok result ->
+        (* Response arrived but failed the cascade's [accept] predicate
+           (empty body, schema gate, etc.).  Prior to 0.160.0 this
+           called [record_success] on the rationale that "the provider
+           answered"; that masked gate drift because provider health
+           stayed 100% while every call fell through to the next tier.
+           [record_rejected] behaves like a failure for cooldown /
+           weight but keeps the [Rejected] tag so the dashboard can
+           distinguish it from hard errors. *)
+        (* FSM: Accept_rejected → decide *)
+        let reason = "response rejected by accept" in
+        record_candidate_rejected candidate ~reason;
+        let outcome = Cascade_fsm.Accept_rejected
+          { response = result.response; reason } in
+        (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
+           | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
+           record_accepted_liveness_sample ();
+           record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
+           let observation =
+             Cascade_legacy_runner.cascade_observation_with_metrics
+               ~cascade_name:error_cascade_name
+               ?strategy:!cascade_strategy_name_ref ~configured_labels
+               ~candidate_count ~selected_model_raw:None
+               ~capture ()
+           in
+           let result = { result with cascade_observation = Some observation } in
+           Cascade_legacy_runner.record_cascade ~keeper_name
+             ~cascade_name:error_cascade_name
+             ~outcome:`Success ~observation:(Some observation) ();
+           on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+           Ok result
+         | Cascade_fsm.Try_next { last_err = new_err } ->
+           (* Demoted from WARN to INFO (task-239): cascade will retry the
+              next tier.  Tagged [cascade-fallback] so dashboard filters
+              can distinguish recovery-in-progress from hard failures. *)
+           record_candidate_health_rejected candidate ~reason;
+           Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next" cascade_name runtime_candidate_label reason;
+           Cascade_legacy_runner.record_fallback_event capture
+             ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label ~reason;
+           (* The rejected response is not trusted progress.  Resuming
+              from its checkpoint can turn a fallback provider into a
+              replay of the rejected empty/schema-invalid turn. *)
+           try_cascade ?resume_checkpoint rest new_err
+         | Cascade_fsm.Exhausted _ ->
+           record_candidate_health_rejected candidate ~reason;
+           let observation =
+             Cascade_legacy_runner.cascade_observation_with_metrics
+               ~cascade_name:error_cascade_name
+               ?strategy:!cascade_strategy_name_ref ~configured_labels
+               ~candidate_count ~selected_model_raw:None
+               ~capture ()
+           in
+           Cascade_legacy_runner.record_cascade ~keeper_name
+             ~cascade_name:error_cascade_name
+             ~outcome:`Rejected ~observation:(Some observation) ();
+           Log.Misc.error "cascade %s exhausted: all tiers rejected by accept predicate (last runtime=%s, reason=%s)"
+             cascade_name runtime_candidate_label reason;
+           Error
+             (sdk_error_of_masc_internal_error
+                (Accept_rejected
+                   {
+                     scope = cascade_name;
+                     model = Some runtime_candidate_label;
+                     reason;
+                   }))
+           | Cascade_fsm.Accept _resp ->
+           (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully.
+              Iter 42: tick an invariant-violation counter so this
+              never-supposed-to-fire arm becomes a hard alert if it
+              ever does.  Steady-state value is ZERO; non-zero is a
+              real FSM contract violation, not a tunable. *)
+           Cascade_metrics.on_cascade_invariant_violation ();
+           Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (runtime=%s)" cascade_name runtime_candidate_label;
+           record_accepted_liveness_sample ();
+           record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
+           let observation =
+             Cascade_legacy_runner.cascade_observation_with_metrics
+               ~cascade_name:error_cascade_name
+               ?strategy:!cascade_strategy_name_ref ~configured_labels
+               ~candidate_count ~selected_model_raw:None ~capture ()
+           in
+           let result = { result with cascade_observation = Some observation } in
+           Cascade_legacy_runner.record_cascade ~keeper_name
+             ~cascade_name:error_cascade_name
+             ~outcome:`Success ~observation:(Some observation) ();
+           on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+           Ok result)
+      | Error sdk_err ->
+        let sdk_err =
+          match
+            sdk_error_to_resumable_cli_session
+              ~cascade_name:error_cascade_name sdk_err
+          with
+          | Some err -> err
+          | None -> sdk_err
+        in
+        (* Classify deterministic non-transient failures distinctly from
+           ordinary call errors.  Hard quota (e.g. Anthropic multi-day usage
+           limit, ZAI balance 0) and Kimi CLI resumable-session conflicts do
+           not recover within the 60s [cooldown_sec]; apply an immediate long
+           cooldown so weighted_random/failover selection does not waste later
+           cascade turns on a provider that is terminal for the current runtime
+           state. *)
+        let err_str = Agent_sdk.Error.to_string sdk_err in
+        record_candidate_health_error candidate sdk_err;
+        let (_ : Provider_error.t option) =
+          emit_sdk_provider_error_metric ~cascade_name:error_cascade_name
+            ~provider:runtime_candidate_label sdk_err
+        in
+        let _ = err_str in
+        let cascade_outcome = sdk_error_to_cascade_outcome sdk_err in
+        Option.iter
+          (fun _ -> record_candidate_error candidate sdk_err)
+          cascade_outcome;
+        (* FSM: Call_err → decide.
+           Hard-quota fast-path: a hard quota is permanent for this turn —
+           every remaining tier in this declared cascade will hit the same
+           account-level limit, so retrying burns the full OAS turn budget
+           (~60min) for nothing.  Force
+           [Exhausted] regardless of [is_last] so the agent loop sees the
+           terminal error immediately.  The hard-quota cooldown recorded
+           above (line ~1760) keeps this provider deselected for future
+           turns; the fast-path only short-circuits the within-turn
+           retry. *)
+        (match cascade_outcome with
+         | Some outcome ->
+           let decision =
+             if sdk_error_is_hard_quota sdk_err then
+               let last_err = match outcome with
+                 | Cascade_fsm.Call_err e -> Some e
+                 (* Non-error provider outcomes carry no http_error to surface
+                    as the terminal cause when forcing Exhausted on hard
+                    quota.  Enumerated explicitly so a future addition to
+                    [Cascade_fsm.provider_outcome] is flagged at compile time
+                    instead of silently mapping to [None]. *)
+                 | Cascade_fsm.Call_ok _
+                 | Cascade_fsm.Accept_rejected _
+                 | Cascade_fsm.Slot_full -> None
+               in
+               Cascade_fsm.Exhausted { last_err }
+             else
+               Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome
+           in
+           (match decision with
+            | Cascade_fsm.Try_next { last_err = new_err } ->
+              (* Demoted from WARN to INFO (task-239): cascade will retry
+                 the next tier.  Tagged [cascade-fallback] so dashboards
+                 and log filters can distinguish recovery-in-progress
+                 from hard failures.  The exec layer's per-tier
+                 "agent errored" log was also demoted to DEBUG in the
+                 same change, so this INFO is the canonical per-tier
+                 signal.
+
+                 #10629: prepend a classification label so
+                 [cli_wrapped_max_turns] and [hard_quota] inside
+                 NetworkError messages stay legible at the dashboard /
+                 log-grep layer.  Pre-fix the log read "Network error:
+                 claude exited with code 1: {...subtype error_max_turns...}"
+                 which masked that this was a graceful turn-budget exit
+                 (33/day claude_code, 2.5x growth). *)
+              let class_label =
+                match sdk_error_cascade_fallback_class sdk_err with
+                | Some class_name -> Printf.sprintf "[%s] " class_name
+                | None -> ""
+              in
+              (* #10982: [max_turns] failures cost ~$2.74 mean per
+                 fallback (24h sample: 11 events / $30.20 sunk).  The
+                 cost is incurred but the result is unusable, so the
+                 next tier re-runs from scratch.  At INFO this signal
+                 was buried in normal cascade traffic and the cost
+                 dashboard never saw it.  Promote [max_turns] to WARN
+                 — still "expected, recoverable" (the cascade escape
+                 hatch worked) but visible enough that operators can
+                 correlate cost gauges with cascade traffic.
+                 [hard_quota] stays INFO for now: quota signals fire
+                 normally during ratelimits and warrant a different
+                 promotion threshold (separate issue). *)
+              if sdk_error_is_max_turns_exceeded sdk_err then
+                Log.Misc.warn
+                  "[cascade-fallback] cascade %s: %s failed (%s%s), trying \
+                   next [sunk cost; see #10982]"
+                  cascade_name runtime_candidate_label class_label
+                  (Agent_sdk.Error.to_string sdk_err)
+              else
+                Log.Misc.info
+                  "[cascade-fallback] cascade %s: %s failed (%s%s), trying next"
+                  cascade_name runtime_candidate_label class_label
+                  (Agent_sdk.Error.to_string sdk_err);
+              Cascade_legacy_runner.record_fallback_event capture
+                ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label
+                ~reason:(class_label ^ Agent_sdk.Error.to_string sdk_err);
+              let retry_resume_checkpoint =
+                if sdk_error_is_server_rejected_parse_error sdk_err then (
+                  Log.Misc.info
+                    "[cascade-fallback] cascade %s: %s server rejected the \
+                     resumed request body; dropping resume checkpoint for \
+                     next provider"
+                    cascade_name runtime_candidate_label;
+                  None)
+                else
+                  next_resume
+              in
+              try_cascade ?resume_checkpoint:retry_resume_checkpoint rest new_err
+            | Cascade_fsm.Exhausted _ ->
+              let observation =
+                Cascade_legacy_runner.cascade_observation_with_metrics
+                  ~cascade_name:error_cascade_name
+                  ?strategy:!cascade_strategy_name_ref ~configured_labels
+                  ~candidate_count ~selected_model_raw:None ~capture ()
+              in
+              Cascade_legacy_runner.record_cascade ~keeper_name
+                ~cascade_name:error_cascade_name
+                ~outcome:`Failure ~observation:(Some observation) ();
+              Log.Misc.error "cascade %s exhausted: all tiers failed (last runtime=%s, error=%s)"
+                cascade_name runtime_candidate_label (Agent_sdk.Error.to_string sdk_err);
+              Error sdk_err
+            (* [Accept] / [Accept_on_exhaustion] are reachable only from
+               [Cascade_fsm.Call_ok] / [Accept_rejected] outcomes, but this
+               branch handles a [Call_err] outcome so the FSM cannot return
+               them here.  Surface the original sdk_err and let the caller
+               see the unexpected mapping rather than silently absorbing a
+               new decision variant added to [Cascade_fsm.decision]. *)
+            | Cascade_fsm.Accept _
+            | Cascade_fsm.Accept_on_exhaustion _ -> Error sdk_err)
+         | None ->
+           (* Non-API error (agent, config, etc.) — not cascadeable *)
+           let observation =
+             Cascade_legacy_runner.cascade_observation_with_metrics
+               ~cascade_name:error_cascade_name
+               ?strategy:!cascade_strategy_name_ref ~configured_labels
+               ~candidate_count ~selected_model_raw:None ~capture ()
+           in
+           Cascade_legacy_runner.record_cascade ~keeper_name
+             ~cascade_name:error_cascade_name
+             ~outcome:`Failure ~observation:(Some observation) ();
+           Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
+             cascade_name runtime_candidate_label (Agent_sdk.Error.to_string sdk_err);
+           Error sdk_err))
+  in
+  (* Pluggable strategy + cycle/backoff wrapper (since 0.9.6).
+
+     When no [<name>_strategy] is configured in cascade.toml,
+     [Cascade_config.resolve_strategy] returns [Cascade_strategy.failover]
+     with [max_cycles = 1].  In that case [cycle_loop] invokes
+     [try_cascade] exactly once on the original [candidate_cfgs] —
+     bit-identical to the pre-strategy behaviour (linear failover). *)
+  let profile_knob_or_default ~knob ~default resolve =
+    match resolve () with
+    | Ok value -> Ok value
+    | Error detail ->
+        Log.Misc.error "cascade %s: %s" cascade_name detail;
+        Error (cascade_catalog_error_to_sdk_error detail)
+  in
+  let* strategy =
+    profile_knob_or_default ~knob:"strategy"
+      ~default:Cascade_strategy.failover
+      (fun () -> Cascade_catalog_runtime.resolve_strategy ~name:cascade_name ())
+  in
+  let strategy_name = Cascade_strategy.kind_to_string strategy.kind in
+  let () = cascade_strategy_name_ref := Some strategy_name in
+  let _ = sw, net in
+  let adapter = Cascade_runtime_candidate.strategy_adapter in
+  let signal_ctx : Cascade_strategy.signal_ctx = {
+    health = Cascade_health_tracker.global;
+    capacity = (fun _ -> None);
+    now = Unix.gettimeofday ();
+    rand_int = Random.int;
+    keeper_name;
+    cascade_name = error_cascade_name;
+  } in
+  let cycle_clock = Eio_context.get_clock_opt () in
+  let do_backoff cycle =
+    let ms = Cascade_strategy.backoff_ms strategy.cycle ~cycle in
+    if ms <= 0 then ()
+    else
+      let secs = float_of_int ms /. 1000. in
+      match cycle_clock with
+      | Some clock -> Eio.Time.sleep clock secs
+      | None ->
+        (* No Eio clock available — skip backoff rather than block the
+           thread.  Reachable only outside an Eio.Switch, which is not a
+           supported entry path for this worker; the cycle simply
+           continues without throttling. *)
+        ()
+  in
+  let cascade_exhausted_after_filter ~cycle =
+    let observation =
+      Cascade_legacy_runner.cascade_observation_with_metrics
+        ~cascade_name:error_cascade_name
+        ?strategy:!cascade_strategy_name_ref ~configured_labels
+        ~candidate_count ~selected_model_raw:None ~capture ()
+    in
+    Cascade_legacy_runner.record_cascade ~keeper_name
+      ~cascade_name:error_cascade_name
+      ~outcome:`Failure ~observation:(Some observation) ();
+    Error
+      (sdk_error_of_masc_internal_error
+         (Cascade_exhausted
+            {
+              cascade_name = error_cascade_name;
+              reason = Keeper_types.Candidates_filtered_after_cycles;
+            }))
+  in
+  let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
+    Cascade_strategy_trace.record {
+      ts = Unix.gettimeofday ();
+      cascade_name = Keeper_cascade_profile.Runtime_name cascade_name;
+      strategy = strategy_name;
+      cycle;
+      candidates_in = List.length candidates;
+      candidates_out;
+      backoff_ms;
+      kind;
+      (* trace_id is left [None] until the keeper_turn_id wired by
+         Step 0a is threaded into [try_cascade]; downstream consumers
+         (dashboard_cascade, bin/masc_trace) already render [None] as
+         a JSON [null] so producers can adopt incrementally. *)
+      trace_id = None;
+      confidence_score = None;
+    }
+  in
+  let rec cycle_loop n =
+    let ordered =
+      Cascade_strategy.order_candidates strategy
+        ~adapter ~ctx:signal_ctx ~cycle:n candidates
+    in
+    let last_cycle = n + 1 >= strategy.cycle.max_cycles in
+    match ordered with
+    | [] when last_cycle ->
+      record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
+      cascade_exhausted_after_filter ~cycle:n
+    | [] ->
+      let backoff = Cascade_strategy.backoff_ms strategy.cycle ~cycle:(n + 1) in
+      record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:backoff
+        ~kind:Filtered_empty;
+      Log.Misc.info
+        "cascade %s: cycle %d (%s) filtered all candidates, retrying"
+        cascade_name n strategy_name;
+      do_backoff (n + 1);
+      cycle_loop (n + 1)
+    | _ ->
+      record_trace ~cycle:n ~candidates_out:(List.length ordered)
+        ~backoff_ms:0 ~kind:Ordered;
+      let on_success ~provider_key =
+        Cascade_strategy.record_choice strategy ~ctx:signal_ctx ~provider_key
+      in
+      (match try_cascade ~on_success ?per_provider_timeout_s ordered None with
+       | Ok _ as ok -> ok
+       | Error _ as err when last_cycle -> err
+       | Error _ ->
+         Log.Misc.info
+           "cascade %s: cycle %d exhausted, backoff before retry (strategy=%s)"
+           cascade_name n strategy_name;
+         do_backoff (n + 1);
+         cycle_loop (n + 1))
+  in
+  let admission_cascade_name =
+    Keeper_cascade_profile.runtime_name_of_string cascade_name
+  in
+  match Admission_queue.with_permit ?wait_timeout_sec
+    ~priority:queue_priority ~keeper_name:name ~cascade_name:admission_cascade_name
+    (fun () -> cycle_loop 0) with
+  | Ok result -> result
+  | Error (`Host_resource_saturated reason) ->
+      Error
+        (sdk_error_of_masc_internal_error
+           (Admission_queue_rejected { keeper_name = name; reason })))
+
+
+module For_testing = struct
+  let checkpoint_after_attempt = checkpoint_after_attempt
+  let missing_required_tool_names_after_lane_by_name =
+    missing_required_tool_names_after_lane_by_name
+end

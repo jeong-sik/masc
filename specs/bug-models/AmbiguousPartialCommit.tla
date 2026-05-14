@@ -121,4 +121,33 @@ MutationsNeverOrphan ==
 \* Combined safety invariant.
 Safety == MutationsNeverOrphan
 
+\* ── Bug Model: Orphan Mutations ─────────────────────────────
+\* Models a regression where ProviderError incorrectly transitions to
+\* "failed" when mutations are committed, instead of "continue_gate".
+\* SHOULD violate MutationsNeverOrphan.
+\*
+\* Evidence: sangsu keeper timeout 2026-04-09 — committed mutations
+\* followed by failed turn without entering continue_gate.
+
+BugOrphanMutations ==
+    /\ turn_phase = "running"
+    /\ mutating_committed > 0
+    /\ provider_error' = "timeout"
+    /\ turn_phase' = "failed"
+    /\ UNCHANGED <<tool_calls_made, mutating_committed, retry_count, retry_performed>>
+
+NextBuggy ==
+    \/ StartTurn
+    \/ ReadOnlyToolCall
+    \/ MutatingToolCall
+    \/ TurnSuccess
+    \/ ProviderError
+    \/ BugOrphanMutations
+    \/ Done
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
+\* Invariant SHOULD be violated under SpecBuggy.
+MutationsNeverOrphanMustHold == MutationsNeverOrphan
+
 ====

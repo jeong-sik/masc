@@ -3,6 +3,38 @@
 \* Models Eio structured concurrency, OAS-local context rollback, and the
 \* critical distinction between clean fallback and committed external tool side
 \* effects that require an explicit continue gate.
+\*
+\* Runtime status (2026-05-12, iter 62 M-2.a):
+\*   This spec is PRODUCTION-READY but the OCaml runtime is NOT.  iter 61
+\*   #14911 audit confirmed via rg across all lib/ files that NONE of the
+\*   spec's distinctive concepts (external_side_effect_committed,
+\*   continue_gate_required, context_polluted, keeper_decision sum type
+\*   incl. NeedsContinueGate) appear anywhere in the codebase.  Three
+\*   OCaml modules touch the OAS surface — lib/oas_compat/, lib/keeper/
+\*   oas_execution_error_phase.ml (7-phase Prometheus label only), and
+\*   lib/keeper/keeper_oas_checkpoint.ml — but none model the bridge's
+\*   most operationally important distinction (clean Eio cancellation
+\*   rollback vs cases where an outside-world tool mutation has already
+\*   committed and the bridge MUST surface NeedsContinueGate, not
+\*   AutonomyFallback).
+\*
+\*   In particular, the bug-model fixture (CancelledAbsorbed action +
+\*   CancelledNeverAbsorbed invariant) is paired and verified — memory
+\*   reference_masc_mcp_integrated_improvement_design_audit records
+\*   "Clean 56 states / no error.  Buggy: invariant violated in 3 steps".
+\*   The runtime owes the spec; the contract is already proven.
+\*
+\*   This is the inverse of the 6th drift class (iter 49-53 spec catching
+\*   up to runtime): here the *runtime* has not caught up to the *spec*.
+\*   Implementation owner: TBD.  Two follow-ups in scope today are:
+\*     M-2.b (Oas_bridge.external_commit_witness type + threading) —
+\*       needs RFC and explicit user direction.
+\*     M-2.c (OCaml-side CancelledNeverAbsorbed test fixture) — closes
+\*       the bug-model loop on the OCaml side without runtime changes.
+\*
+\*   Full implementation gap matrix + the four M-2.{a..d} fix-PR
+\*   candidates: docs/tla-audit/koas-m1-oas-bridge-spec-vs-runtime-
+\*   2026-05-12.md (iter 61 #14911).
 
 EXTENDS Naturals, Sequences
 

@@ -1,8 +1,10 @@
 (** Per-cascade inference parameters — thin delegation to MASC Cascade_config.
 
     Previously (v2.128.0-v2.148.0) this module maintained its own JSON cache
-    and field extraction. Since OAS v0.89.1 exposes [Cascade_config.load_json]
-    and [Cascade_config.resolve_inference_params], we now delegate entirely.
+    and field extraction. Since OAS v0.89.1 exposes
+    [Cascade_config.load_catalog_source] (renamed from [load_json] in
+    RFC-0058 §9 Phase 9.3) and [Cascade_config.resolve_inference_params],
+    we now delegate entirely.
 
     Public API preserved for backward compatibility:
     - [resolve_temperature], [resolve_max_tokens] (16 call sites in MASC)
@@ -62,6 +64,18 @@ let for_cascade ~(name : string) : t =
         thinking_enabled = params.thinking_enabled;
         thinking_budget = params.thinking_budget }
   | Error detail ->
+      (* Fail-OPEN to default: cascade.toml per-cascade inference
+         params (temperature, max_tokens, thinking_enabled,
+         thinking_budget) are silently replaced with the [empty]
+         record, and downstream callers resolve to their own
+         fallbacks.  Reuse iter 10 resolve_failure counter; root
+         cause is the same [lookup_active_profile] Error path that
+         iter 10 already labels [lookup_failed].  Without the tick,
+         operators saw only the WARN log line and had no way to
+         alert on cascade.toml inference settings being silently
+         ignored. *)
+      Cascade_metrics.on_resolve_failure
+        ~cascade:name ~reason:"lookup_failed";
       Log.warn ~ctx:"cascade"
         "%s: runtime catalog inference lookup failed (%s), using empty defaults"
         name detail;
@@ -76,19 +90,61 @@ let resolve_temperature
   | Some t -> t
   | None -> fallback ()
 
-(** Resolve a max_tokens value: cascade config -> fallback. *)
+(** Cap an automatically-derived max_tokens value to the narrowest output
+    ceiling in the resolved cascade. Explicit caller-provided overrides and
+    cascade.toml values stay hard rejected by the pre-dispatch validator. *)
+let cap_auto_resolved_max_tokens ~cascade_name ~source max_tokens =
+  match Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name with
+  | Some ceiling when ceiling > 0 && max_tokens > ceiling ->
+    Log.warn ~ctx:"cascade"
+      "%s: auto-resolved max_tokens=%d from %s exceeds output ceiling=%d; \
+       using ceiling"
+      (Keeper_cascade_profile.runtime_name_to_string cascade_name)
+      max_tokens source ceiling;
+    ceiling
+  | _ -> max_tokens
+
+(** Resolve a max_tokens value: cascade config -> capped fallback. *)
 let resolve_max_tokens
     ~(cascade_name : Keeper_cascade_profile.runtime_name)
     ~(fallback : unit -> int) : int =
-  let cascade_name = Keeper_cascade_profile.runtime_name_to_string cascade_name in
-  match (for_cascade ~name:cascade_name).max_tokens with
+  let cascade_name_string =
+    Keeper_cascade_profile.runtime_name_to_string cascade_name
+  in
+  match (for_cascade ~name:cascade_name_string).max_tokens with
   | Some t -> t
-  | None -> fallback ()
+  | None ->
+    cap_auto_resolved_max_tokens ~cascade_name ~source:"fallback" (fallback ())
 
-(** Clamp max_tokens to provider ceiling.
-    Clamping > rejection: a smaller response is better than no response.
-    Mirrors TLA+ KeeperCoreTriad.CapabilityGate action. *)
-let clamp_max_tokens_to_ceiling ~(provider_ceiling : int option) (max_tokens : int) : int =
+(** Validate max_tokens against provider ceilings before dispatch. *)
+let validate_max_tokens_within_ceiling
+    ~(cascade_name : Keeper_cascade_profile.runtime_name)
+    ~(provider_ceiling : int option)
+    (max_tokens : int)
+  : (int, Cascade_error_classify.masc_internal_error) result =
+  let violation ~reason ~provider_ceiling =
+    Error
+      (Cascade_error_classify.Max_tokens_ceiling_violation
+         {
+           cascade_name;
+           requested_max_tokens = max_tokens;
+           provider_ceiling;
+           reason;
+         })
+  in
   match provider_ceiling with
-  | Some ceiling when max_tokens > ceiling -> max 1 ceiling
-  | _ -> max_tokens
+  | None ->
+    if max_tokens <= 0
+    then violation ~reason:"max_tokens_not_positive" ~provider_ceiling:0
+    else Ok max_tokens
+  | Some ceiling ->
+    if max_tokens <= 0
+    then violation ~reason:"max_tokens_not_positive" ~provider_ceiling:ceiling
+    else if ceiling <= 0
+    then violation ~reason:"provider_ceiling_not_positive" ~provider_ceiling:ceiling
+    else if max_tokens > ceiling
+    then
+      violation
+        ~reason:"requested_exceeds_provider_ceiling"
+        ~provider_ceiling:ceiling
+    else Ok max_tokens

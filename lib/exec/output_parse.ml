@@ -486,7 +486,8 @@ let try_parse ~cmd ~status ~output =
       let may_parse =
         match status with
         | Unix.WEXITED 0 -> true
-        | _ -> parser_allows_nonzero kind
+        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+            parser_allows_nonzero kind
       in
       if not may_parse then None
       else

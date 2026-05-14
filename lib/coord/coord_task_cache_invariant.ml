@@ -176,13 +176,11 @@ let stale_active_task_signal_present ~config ~from_agent ~module_name ~content =
   then false
   else match check_cache_signal ~config ~content with
   | No_cache_signal | No_terminal_task -> false
-  | stale_tasks ->
-    (match stale_tasks with
-     | Terminal_tasks stale_tasks ->
-       record_cache_desync_cleared ~config ~module_name stale_tasks
-     | Backlog_unavailable { task_ids; _ } ->
-       record_backlog_unavailable ~config ~module_name task_ids
-     | No_cache_signal | No_terminal_task -> ());
+  | Terminal_tasks stale_tasks ->
+    record_cache_desync_cleared ~config ~module_name stale_tasks;
+    true
+  | Backlog_unavailable { task_ids; _ } ->
+    record_backlog_unavailable ~config ~module_name task_ids;
     true
 ;;
 

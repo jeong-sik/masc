@@ -20,7 +20,7 @@ let get_tty () =
           if Unix.isatty Unix.stdin then
             let output =
               Masc_exec.Exec_gate.run_argv
-                ~actor:"coord/identity"
+                ~actor:(Masc_exec.Agent_id.of_string "coord/identity")
                 ~raw_source:"tty"
                 ~summary:"coord tty probe"
                 ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Coord_identity ())

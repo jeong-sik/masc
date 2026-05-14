@@ -12,6 +12,8 @@
  (public_name masc_mcp.masc_tool_blob_store)
  (wrapped false)
  (modules tool_blob_store tool_output)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
+ (flags (:standard -w +4))
  (libraries
    digestif
    digestif.c

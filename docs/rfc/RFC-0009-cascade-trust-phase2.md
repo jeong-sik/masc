@@ -6,7 +6,7 @@
 
 ## Motivation
 
-Phase 1 (#10365) gave the cascade an in-memory `trust_score` that auto-rotates away from rate-limited / persistently failing providers. Replay validation against 4044 live decisions confirmed the algorithm matches operator intent: dead cascades (ollama_only at 1% success → trust 0.000 on 99.5% of decisions), healthy cascades (big_three at 41% success → trust 2.000 ceiling).
+Phase 1 (#10365) gave the cascade an in-memory `trust_score` that auto-rotates away from rate-limited / persistently failing providers. Replay validation against 4044 live decisions confirmed the algorithm matches operator intent: dead cascades (ollama_only at 1% success → trust 0.000 on 99.5% of decisions), healthy cascades (primary at 41% success → trust 2.000 ceiling).
 
 Two gaps remain:
 

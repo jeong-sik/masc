@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
-import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
+import { VISIBLE_DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { DashboardSurfaceTabs, dashboardSurfaceTabId } from './dashboard-surface-tabs'
 
 const navigate = vi.fn()
@@ -33,7 +33,7 @@ describe('DashboardSurfaceTabs', () => {
 
   it('renders top-level surfaces as an ARIA tablist', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="code" />`,
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="code" />`,
       container,
     )
 
@@ -42,12 +42,13 @@ describe('DashboardSurfaceTabs', () => {
 
     const tabs = Array.from(container.querySelectorAll('[role="tab"]'))
     expect(tabs.map(tab => tab.textContent?.trim())).toContain('Code')
-    expect(tabs).toHaveLength(DASHBOARD_NAV_ITEMS.length)
+    expect(tabs.map(tab => tab.textContent?.trim())).not.toContain('MASC Cockpit')
+    expect(tabs).toHaveLength(VISIBLE_DASHBOARD_NAV_ITEMS.length)
   })
 
   it('marks the current surface as the selected tab', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="code" />`,
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="code" />`,
       container,
     )
 
@@ -62,7 +63,7 @@ describe('DashboardSurfaceTabs', () => {
 
   it('moves focus and activates the next surface on ArrowRight', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
       container,
     )
 
@@ -72,12 +73,12 @@ describe('DashboardSurfaceTabs', () => {
     overviewTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
 
     expect(document.activeElement).toBe(monitorTab)
-    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'journey' })
+    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'runtime' })
   })
 
   it('jumps to the last surface on End', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
       container,
     )
 
@@ -92,12 +93,38 @@ describe('DashboardSurfaceTabs', () => {
   it('passes axe with route tabs and the controlled main panel target', async () => {
     render(
       html`
-        <${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="overview" />
+        <${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />
         <main id="main-content">Overview content</main>
       `,
       container,
     )
 
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('keeps the tablist keyboard-reachable when current surface is hidden', () => {
+    // Regression for #15120: VISIBLE_DASHBOARD_NAV_ITEMS hides the cockpit
+    // surface, so when currentTab="cockpit" no item matches and the
+    // previous active-only tabIndex branch left every tab at tabIndex=-1.
+    // The roving-tabindex contract requires exactly one tabIndex=0; fall
+    // back to the first visible item so Tab navigation can still reach
+    // the tablist. aria-selected stays "false" — we must not lie about
+    // selection when nothing in [items] is actually current.
+    render(
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="cockpit" />`,
+      container,
+    )
+
+    const tabs = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'))
+    expect(tabs.length).toBeGreaterThan(0)
+
+    const tabbable = tabs.filter(tab => tab.tabIndex === 0)
+    expect(tabbable).toHaveLength(1)
+    expect(tabbable[0]).toBe(tabs[0])
+
+    for (const tab of tabs) {
+      expect(tab.getAttribute('aria-selected')).toBe('false')
+      expect(tab.hasAttribute('aria-current')).toBe(false)
+    }
   })
 })

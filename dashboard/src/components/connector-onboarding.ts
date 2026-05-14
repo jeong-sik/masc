@@ -18,6 +18,7 @@ import {
   type KnownConnectorId,
 } from './connector-status'
 import { ConnectorBulkActions } from './connector-overview-strip'
+import { SurfaceCard } from './common/card'
 
 /** Pure: map the onboarding Start button's inflight flag to the label
     the operator sees. Reference — Vercel's Deploy button transition:
@@ -45,7 +46,7 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
     }
   }
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] p-4" style=${connectorAccentStyle(connectorId)}>
+    <${SurfaceCard} class="!border-[var(--color-border-default)] !p-4" style=${connectorAccentStyle(connectorId)}>
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="flex items-center gap-2">
           <span class="text-base leading-none" aria-hidden="true">${channelIcon(connectorId)}</span>
@@ -69,7 +70,7 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
         <${CopyableCode} label="tail logs" command=${cmds.tail} variant="secondary" />
       </div>
       <${SetupGuideCard} connectorId=${connectorId} />
-    </div>
+    </${SurfaceCard}>
   `
 }
 

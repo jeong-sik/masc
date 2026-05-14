@@ -27,5 +27,10 @@ val parse_tool_usage_json : Yojson.Safe.t -> tool_stat list
 val shannon_entropy : int list -> float
 val normalized_entropy : n_categories:int -> float -> float
 val compute_diversity : available_tools:string list -> tool_stat list -> diversity_summary
+val record_underused_tool_metrics :
+  keeper_name:string ->
+  available_tools:string list ->
+  diversity_summary ->
+  unit
 val default_entropy_threshold : float
 val stats_of_registry_entries : (string * Keeper_types.tool_call_entry) list -> tool_stat list

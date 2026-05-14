@@ -1,144 +1,795 @@
-comment = "Checked-in seed for cascade authoring. Repo defaults expose exactly two profiles: big_three for keeper/workflow calls and tool_rerank for short rerank calls. Logical usage names are configured under [routes] instead of being profile names."
-
-[routes]
-keeper_turn = "big_three"
-phase_recovery = "big_three"
-phase_buffer = "big_three"
-tool_required = "big_three"
-governance_judge = "big_three"
-operator_judge = "big_three"
-cross_verifier = "big_three"
-verifier = "big_three"
-autoresearch = "big_three"
-adversarial_reviewer = "big_three"
-auto_responder = "big_three"
-routing = "big_three"
-openai_compat = "big_three"
-persona_generation = "big_three"
-provider_benchmark = "big_three"
-llm_rerank = "tool_rerank"
-simple_task = "tier_small"
-moderate_task = "tier_medium"
-complex_task = "big_three"
-
-[big_three]
-comment = "Canonical keeper/workflow profile. Keep operator-chosen providers here; code must route logical usages through [routes] instead of hardcoding extra profile names."
-models = [
-  "codex_cli:gpt-5.3-codex-spark",
-  "gemini_cli:auto",
-  "kimi_cli:kimi-for-coding",
-  { model = "glm-coding:auto", supports_tool_choice = true },
-  "claude_code:auto",
-]
-temperature = 0.2
-max_tokens = 16384
-keeper_assignable = true
-fallback_cascade = "keeper_diverse"
-
-[keeper_diverse]
-comment = "Fallback cascade for contract violation retry. Different model composition from big_three to break correlated failure."
-models = [
-  "claude_code:claude-sonnet-4-6",
-  "gemini_cli:gemini-2.5-flash",
-  "codex_cli:gpt-5.3-codex-spark",
-]
-temperature = 0.3
-max_tokens = 16384
-keeper_assignable = true
-
-[tool_rerank]
-comment = "System-only short-output profile for rerank/scoring calls."
-models = [
-  "codex_cli:gpt-5.3-codex-spark",
-  "gemini_cli:auto",
-  "kimi_cli:kimi-for-coding",
-  "glm-coding:auto",
-  "claude_code:auto",
-]
-temperature = 0.0
-max_tokens = 200
-keeper_assignable = false
-
-[tier_small]
-# Operator opt-in slot for 4B-class local models. Empty by default — every
-# route that points at "tier_small" falls through to tier_medium via
-# fallback_cascade until at least one model is uncommented below (and
-# Ollama is running locally). Keeping the profile here documents the
-# intended fallback chain rather than removing it; we'd otherwise need
-# to either rewrite every "tier_small" route or silently ignore them.
-comment = "Operator opt-in slot for 4B-class local models. Empty by default; routes fall through to tier_medium."
-# models = [
-#   "ollama:llama3.2:3b",
-#   "ollama:phi-3-mini",
-# ]
-models = []
-temperature = 0.3
-max_tokens = 1000
-keeper_assignable = false
-fallback_cascade = "tier_medium"
-
-[tier_medium]
-comment = "9B-class models for moderate tasks (extraction, reformat, medium-length generation). Falls back to big_three on exhaustion."
-models = [
-  "glm-coding:glm-4.7-flashx",
-]
-temperature = 0.2
-max_tokens = 4096
-keeper_assignable = false
-fallback_cascade = "big_three"
-
-[__safe_lane]
-# RFC-0027 PR-4: system-only baseline cascade that satisfies every
-# capability profile (tool_strict / inline_tools / lite / local).
-# All entries carry runtime MCP HTTP headers AND inline tools, so
-# any keeper-bound MCP turn or any inline-tools turn can route here
-# as last-resort fallback after upstream cascades exhaust.
+# Declarative cascade configuration (RFC-0058 v2 5-layer schema).
+# Checked-in seed. Logical usage names are configured under [routes].
 #
-# Members must remain (provider, model) pairs that:
-#   - support_runtime_mcp_http_headers = true (claude_code, kimi_cli)
-#   - or expose direct inline tools (HTTP-based glm-coding)
-# Adding gemini_cli or codex_cli here breaks the safe-lane contract.
-comment = "System-only baseline cascade. Satisfies every capability profile. Used as last-resort fallback target. Not keeper-assignable."
-models = [
-  "claude_code:auto",
-  { model = "glm-coding:auto", supports_tool_choice = true },
-  "kimi_cli:kimi-for-coding",
-]
-temperature = 0.2
-max_tokens = 16384
-keeper_assignable = false
-required_capability_profile = "tool_strict"
+# This file is the SSOT for: provider credentials, model capabilities,
+# per-binding capacity (max-concurrent) and pricing, per-use aliases,
+# tier composition, tier-group fallback chains, and route assignments.
+# Code MUST NOT hard-code provider or model names; it dispatches by
+# api_format (Messages_api / Chat_completions_api / Ollama_api) and
+# reads everything else from this file. See RFC-0058 §2.4.
 
-[local_recovery]
-# P1-2 fix: profiles may declare fallback_cascade = "local_recovery" (a
-# logical route key that resolves to the Failing-phase cascade).  The runtime
-# cascade loader looks up profile names, not route keys, so a missing
-# [local_recovery] section caused the fallback hint to be silently ignored.
-# This profile makes the name resolvable with a recovery-focused primary list,
-# then falls through to big_three on exhaustion rather than pretending the route
-# key and profile composition are identical.
-comment = "P1-2 fix: recovery profile for fallback_cascade = \"local_recovery\". Uses a curated local/CLI primary list, then falls back to big_three on exhaustion. Not keeper-assignable."
-models = [
-  "codex_cli:gpt-5.3-codex-spark",
-  "gemini_cli:auto",
-  "claude_code:auto",
-]
-temperature = 0.2
-max_tokens = 16384
-keeper_assignable = false
-fallback_cascade = "big_three"
+# ── Layer 1: Providers ──────────────────────────────────────────
 
-[tier_fast]
-comment = "Cheap+fast tool-capable cloud models for keeper turns. Bias toward latency and cost over reasoning depth. All entries support tool calling. Falls back to big_three on exhaustion."
-models = [
-  "claude_code:claude-haiku-4-5-20251001",
-  "codex_cli:gpt-5.3-codex-spark",
-  "gemini_cli:gemini-3-flash-preview",
-  "gemini_cli:gemini-3.1-flash-lite-preview",
-  { model = "glm-coding:glm-5-turbo", supports_tool_choice = true },
-  { model = "glm-coding:glm-4.7-flashx", supports_tool_choice = true },
+
+[providers.codex_cli]
+display-name = "OpenAI Codex CLI"
+protocol = "openai-cli"
+command = "codex"
+is-non-interactive = true
+
+[providers.codex_cli.credentials]
+type = "env"
+key = "OPENAI_API_KEY"
+
+[providers.codex_cli.capabilities]
+# Codex CLI's cached login cannot inject arbitrary per-request headers,
+# so keeper-bound actor tools must be bridged via argv (per-keeper auth
+# token routed through bearer_token_env_var) — see masc-mcp#10097.
+requires-per-keeper-bridging-for-bound-actor-tools = true
+identity-runtime-mcp-header-keys = ["authorization", "x-masc-agent-name", "x-masc-keeper-name"]
+argv-prompt-preflight = true
+
+[providers.gemini_cli]
+display-name = "Google Gemini CLI"
+protocol = "google-cli"
+command = "gemini"
+is-non-interactive = true
+
+[providers.gemini_cli.credentials]
+type = "env"
+key = "GEMINI_API_KEY"
+
+# Gemini CLI carries one capability — it is intended as a viable
+# bound-actor fallback target for cascades that include Codex CLI
+# (per-keeper MCP config injection is unimplemented upstream but the
+# catalog-level validator only requires "tolerates", not "natively
+# supports"; see masc-mcp#11356). All other capability flags remain at
+# their defaults (no runtime MCP HTTP headers, no anthropic caching,
+# no max-turns cap).
+#
+# NOTE (data-only until cutover): this declaration is parsed into the
+# in-memory cascade-decl config, but [Cascade_catalog_validator] still
+# reads [Provider_adapter]'s hardcoded value for this kind. Toggling
+# this line therefore does not move the validator warn surface until
+# the caller cutover lands (see #14659 bridge primitive).
+[providers.gemini_cli.capabilities]
+tolerates-bound-actor-fallback = true
+
+
+[providers.glm-coding]
+display-name = "Zhipu GLM Coding"
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+# glm-coding ships no [capabilities] sub-table — no runtime MCP HTTP
+# headers, no anthropic caching. Parser yields `capabilities = None`;
+# A.3 callers treat `None` as the conservative defaults.
+
+[providers.ollama]
+display-name = "Ollama Local"
+protocol = "ollama-http"
+endpoint = "http://127.0.0.1:11434"
+
+[providers.ollama.capabilities]
+# Local Ollama is a viable bound-actor fallback target in catalogs
+# that include Codex CLI — its HTTP surface accepts per-keeper auth
+# headers natively. All other capability flags default to false.
+
+[providers.openai_compat]
+display-name = "OpenAI-Compatible Cloud"
+protocol = "openai-http"
+endpoint = "https://ollama.com/v1"
+
+[providers.openai_compat.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+tolerates-bound-actor-fallback = true
+
+# ── Layer 2: Models ────────────────────────────────────────────
+
+[models.codex-spark]
+api-name = "gpt-5.3-codex-spark"
+max-context = 128000
+tools-support = true
+streaming = true
+
+# Capabilities mirror OAS for_model_id_static gpt-5 family
+# (openai_chat_extended_capabilities + max-output override). M2 will
+# wire OAS to read these instead of substring-on-api-name.
+[models.codex-spark.capabilities]
+max-output-tokens = 128000
+supports-parallel-tool-calls = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+supports-response-format-json = true
+
+[models.gemini-flash]
+api-name = "gemini-3-flash-preview"
+max-context = 128000
+tools-support = true
+streaming = true
+
+# Capabilities mirror OAS gemini_capabilities (matches starts_with
+# "gemini-3"). Gemini supports JSON mode natively.
+[models.gemini-flash.capabilities]
+max-output-tokens = 65000
+supports-parallel-tool-calls = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+supports-response-format-json = true
+
+[models.gemini-flash-lite]
+api-name = "gemini-3.1-flash-lite-preview"
+max-context = 128000
+tools-support = true
+streaming = true
+
+# Capabilities mirror OAS gemini_capabilities (api-name starts with
+# "gemini-3"). Lite variant shares the family's capability matrix in
+# OAS — refinement is a per-model M2 follow-up if production proves
+# different.
+[models.gemini-flash-lite.capabilities]
+max-output-tokens = 65000
+supports-parallel-tool-calls = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+supports-response-format-json = true
+
+[models.glm-5-turbo]
+api-name = "glm-5-turbo"
+max-context = 128000
+tools-support = true
+streaming = true
+
+# Capabilities mirror OAS for_model_id_static glm-5-turbo branch.
+# tool_choice unsupported in OAS but that's separate from
+# parallel_tool_calls (left false at default).
+[models.glm-5-turbo.capabilities]
+max-output-tokens = 16384
+supports-native-streaming = true
+supports-response-format-json = true
+
+[models.glm-flashx]
+api-name = "glm-4.7-flashx"
+max-context = 128000
+tools-support = true
+streaming = true
+
+# Capabilities mirror OAS for_model_id_static glm-4.7 branch — falls
+# into the "glm-4.5 || glm-4.6 || glm-4.7 || glm-5" full-text OR clause
+# (api-name "glm-4.7-flashx" does NOT match the narrower "glm-4-flash"
+# entry which expects "glm-4-flash" prefix, not "glm-4.7-flashx").
+[models.glm-flashx.capabilities]
+max-output-tokens = 128000
+supports-native-streaming = true
+supports-response-format-json = true
+
+# ── OAS for_model_id_static parity entries (RFC-0058 Phase 1) ──
+#
+# Each [models.<id>] below mirrors one OAS
+# Llm_provider.Capabilities.for_model_id_static branch using M1c
+# match-prefixes for longest-prefix-first lookup. Sole source of
+# capability values is OAS lib/llm_provider/capabilities.ml:380-740
+# (verified against origin/main 2026-05-12).
+#
+# Bindings are NOT auto-added here — these entries exist solely to
+# feed Cascade_capabilities_bridge.lookup. Provider routing remains
+# the responsibility of existing bindings + the 8 production model
+# entries above.
+
+supports-top-k = true
+supports-computer-use = true
+
+# ── OpenAI family ─────────────────────────────────
+
+[models.gpt-4-1]
+api-name = "gpt-4.1"
+match-prefixes = ["gpt-4.1"]
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[models.gpt-4-1.capabilities]
+max-output-tokens = 32000
+supports-parallel-tool-calls = true
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
+[models.gpt-4o]
+api-name = "gpt-4o"
+match-prefixes = ["gpt-4o"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.gpt-4o.capabilities]
+max-output-tokens = 16384
+supports-parallel-tool-calls = true
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
+# ── Qwen / Llama / Deepseek (OpenAI-compatible) ───
+
+[models.qwen3]
+api-name = "qwen3"
+match-prefixes = ["qwen3"]
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.qwen3.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-top-k = true
+supports-min-p = true
+
+[models.llama-4]
+api-name = "llama-4"
+match-prefixes = ["llama-4", "llama4"]
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[models.llama-4.capabilities]
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+match-prefixes = ["deepseek-v4-flash"]
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-flash.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "thinking-object"
+supports-response-format-json = true
+supports-native-streaming = true
+supports-caching = true
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+match-prefixes = ["deepseek-v4-pro"]
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "thinking-object"
+supports-response-format-json = true
+supports-native-streaming = true
+supports-caching = true
+
+# ── Mistral / Cohere / xAI ─────────────────────────
+
+[models.mistral-large]
+api-name = "mistral-large"
+match-prefixes = ["mistral-large"]
+max-context = 260000
+tools-support = true
+streaming = true
+
+[models.mistral-large.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
+[models.mistral-small]
+api-name = "mistral-small"
+match-prefixes = ["mistral-small"]
+max-context = 256000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.mistral-small.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+
+[models.command]
+api-name = "command"
+match-prefixes = ["command"]
+max-context = 256000
+tools-support = true
+streaming = true
+
+[models.command.capabilities]
+max-output-tokens = 32000
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-structured-output = true
+supports-native-streaming = true
+
+[models.grok]
+api-name = "grok"
+match-prefixes = ["grok"]
+max-context = 2000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.grok.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-structured-output = true
+supports-native-streaming = true
+supports-caching = true
+
+# ── NVIDIA Nemotron (chat_template_kwargs thinking) ──
+
+[models.nemotron]
+api-name = "nemotron"
+match-prefixes = ["nemotron", "nvidia/nemotron"]
+max-context = 131072
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.nemotron.capabilities]
+max-output-tokens = 16384
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "chat-template-kwargs"
+supports-response-format-json = true
+supports-structured-output = true
+supports-native-streaming = true
+supports-caching = true
+supports-top-k = true
+supports-min-p = true
+
+# VL variant: longest-prefix-first puts this ahead of [nemotron].
+[models.nemotron-vl]
+api-name = "nemotron-vl"
+match-prefixes = ["nemotron-vl", "nvidia/nemotron-vl"]
+max-context = 131072
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.nemotron-vl.capabilities]
+max-output-tokens = 16384
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "chat-template-kwargs"
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-caching = true
+supports-top-k = true
+supports-min-p = true
+
+# ── Gemma 4 (Visual_first modality priority elided — masc-mcp doesn't
+# encode modality_priority in cascade_model_capabilities yet) ──
+
+[models.gemma-4]
+api-name = "gemma-4"
+match-prefixes = ["gemma-4", "google/gemma-4"]
+max-context = 262144
+tools-support = true
+streaming = true
+
+[models.gemma-4.capabilities]
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+supports-seed = true
+
+# ── GLM variants (not covered by existing glm-5-turbo / glm-flashx) ──
+
+# Flash family: covers OAS "glm-4.7-flash || glm-4.5-flash || glm-4.5-air"
+# branch. Existing [models.glm-flashx] (api-name glm-4.7-flashx) keeps
+# its exact-match semantics; this entry adds prefix matching for the
+# other flash variants without disturbing the binding layer.
+[models.glm-flash-air]
+api-name = "glm-4.5-flash"
+match-prefixes = ["glm-4.7-flash", "glm-4.5-flash", "glm-4.5-air"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-flash-air.capabilities]
+max-output-tokens = 16384
+supports-response-format-json = true
+supports-native-streaming = true
+
+[models.glm-5v-turbo]
+api-name = "glm-5v-turbo"
+match-prefixes = ["glm-5v-turbo"]
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-5v-turbo.capabilities]
+max-output-tokens = 128000
+supports-extended-thinking = true
+supports-response-format-json = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+[models.glm-ocr]
+api-name = "glm-ocr"
+match-prefixes = ["glm-ocr"]
+max-context = 128000
+streaming = true
+
+[models.glm-ocr.capabilities]
+max-output-tokens = 16384
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+# glm-4.5v / glm-4.6v: vision variants (no native tool_choice per Z.AI docs)
+[models.glm-vision]
+api-name = "glm-4.5v"
+match-prefixes = ["glm-4.5v", "glm-4.6v"]
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-vision.capabilities]
+max-output-tokens = 32768
+supports-extended-thinking = true
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+[models.glm-5-code]
+api-name = "glm-5-code"
+match-prefixes = ["glm-5-code"]
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-5-code.capabilities]
+max-output-tokens = 128000
+supports-extended-thinking = true
+supports-response-format-json = true
+supports-native-streaming = true
+
+# Full-text GLM (broad OR clause): glm-4.5 / glm-4.6 / glm-4.7 / glm-5.
+# Longest-prefix-first ensures more specific entries (glm-5-turbo,
+# glm-5-code, glm-5v-turbo, glm-flash-air) win where applicable.
+[models.glm-5-text]
+api-name = "glm-5"
+match-prefixes = ["glm-4.5", "glm-4.6", "glm-4.7", "glm-5"]
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-5-text.capabilities]
+max-output-tokens = 128000
+supports-extended-thinking = true
+supports-response-format-json = true
+supports-native-streaming = true
+
+[models.glm-4-flash]
+api-name = "glm-4-flash"
+match-prefixes = ["glm-4-flash"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-4-flash.capabilities]
+max-output-tokens = 4096
+supports-native-streaming = true
+
+[models.glm-4v]
+api-name = "glm-4v"
+match-prefixes = ["glm-4v"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-4v.capabilities]
+max-output-tokens = 4096
+supports-multimodal-inputs = true
+supports-image-input = true
+supports-native-streaming = true
+
+# Broad glm-4 catch-all: lower priority than glm-4-flash / glm-4v
+# via longest-prefix-first.
+[models.glm-4]
+api-name = "glm-4"
+match-prefixes = ["glm-4"]
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.glm-4.capabilities]
+max-output-tokens = 4096
+supports-native-streaming = true
+
+# ── Layer 3: Provider×Model Bindings ───────────────────────────
+#
+# `max-concurrent` is REQUIRED (RFC-0058 §3.4). Defaults reflect
+# observed CLI/HTTP capacity ceilings — CLI providers serialize at
+# the binary level (1 concurrent invocation per credential), HTTP
+# providers tolerate small fan-out before upstream throttling.
+# `price-input` / `price-output` are USD per 1M tokens.
+
+[codex_cli.codex-spark]
+is-default = true
+max-concurrent = 1
+
+
+[gemini_cli.gemini-flash]
+is-default = true
+max-concurrent = 1
+
+[gemini_cli.gemini-flash-lite]
+is-default = false
+max-concurrent = 1
+
+[glm-coding.glm-5-turbo]
+is-default = true
+max-concurrent = 2
+
+[glm-coding.glm-flashx]
+is-default = false
+max-concurrent = 2
+
+[openai_compat.deepseek-v4-pro]
+is-default = true
+max-concurrent = 4
+
+[openai_compat.deepseek-v4-flash]
+is-default = false
+max-concurrent = 4
+
+[openai_compat.qwen3-5]
+is-default = false
+max-concurrent = 4
+
+# ── Layer 4: Aliases (per-use overrides) ───────────────────────
+#
+# Aliases give logical names to (provider, model) pairs with
+# call-site specific overrides. Code MUST reference aliases here
+# rather than raw `<provider>.<model>` pairs — that is how RFC-0058
+# §2.4 keeps vendor/model identifiers out of OCaml source.
+
+
+[codex_cli.codex-spark.for-scoring]
+max-output = 1024
+temperature = 0.1
+
+
+[codex_cli.codex-spark.for-keeper-turn]
+max-output = 32768
+
+[openai_compat.deepseek-v4-pro.for-keeper-turn]
+max-output = 32768
+
+[openai_compat.deepseek-v4-flash.for-keeper-turn]
+max-output = 32768
+
+[openai_compat.qwen3-5.for-keeper-turn]
+max-output = 32768
+
+
+# ── Layer 5: Tiers ─────────────────────────────────────────────
+
+[tier.primary]
+# Canonical keeper/workflow tier.
+members = [
+  "codex_cli.codex-spark.for-keeper-turn",
+  "glm-coding.glm-flashx",
+  "openai_compat.deepseek-v4-pro.for-keeper-turn",
+  "openai_compat.deepseek-v4-flash.for-keeper-turn",
 ]
-temperature = 0.2
-max_tokens = 8192
-keeper_assignable = true
-fallback_cascade = "big_three"
+strategy = "failover"
+
+[tier.keeper_diverse]
+# Fallback tier for contract violation retry. Different model
+# composition from primary to break correlated failure.
+members = ["gemini_cli.gemini-flash", "codex_cli.codex-spark", "openai_compat.qwen3-5.for-keeper-turn"]
+strategy = "failover"
+
+[tier.scoring]
+# System-only short-output tier for rerank/scoring calls.
+# Members are aliases (Layer 4) with reduced max-output.
+keeper-assignable = false
+members = [
+  "codex_cli.codex-spark.for-scoring",
+]
+strategy = "failover"
+
+[tier.governance]
+# System-only baseline for governance / judge calls.
+keeper-assignable = false
+members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
+strategy = "failover"
+
+[tier.tier_small]
+# Operator opt-in slot for 4B-class local models. Empty by default;
+# routes fall through to tier_medium via tier-group fallback.
+members = []
+strategy = "failover"
+
+[tier.tier_medium]
+# 9B-class cloud-coding models for moderate tasks.
+members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
+strategy = "failover"
+
+[tier.__safe_lane]
+# System-only baseline tier (RFC-0027 PR-4). Last-resort fallback
+# target that satisfies every capability profile. Not keeper-assignable.
+keeper-assignable = false
+members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
+strategy = "failover"
+
+[tier.local_recovery]
+# Recovery tier for fallback_cascade = "local_recovery".
+members = ["codex_cli.codex-spark.for-keeper-turn"]
+strategy = "failover"
+
+# ── Tier-Groups (fallback chains) ──────────────────────────────
+
+[tier-group.primary]
+tiers = ["primary", "keeper_diverse", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.tier_small]
+tiers = ["tier_small", "tier_medium", "primary"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.tier_medium]
+tiers = ["tier_medium", "primary"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.local_recovery]
+tiers = ["local_recovery", "primary"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.scoring]
+tiers = ["scoring", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+keeper-assignable = false
+
+[tier-group.governance]
+tiers = ["governance", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+keeper-assignable = false
+
+# ── Routes (logical usage → tier-group) ────────────────────────
+#
+# RFC-0058 §4 R6: route targets resolve to tier-groups, tiers,
+# bindings, or aliases (validated by `Cascade_declarative_validator`
+# rule R7). The seed below targets tier-groups exclusively because
+# routing through a tier-group keeps fallback chains explicit and
+# discourages callers from depending on a single tier without a
+# documented degradation path.
+
+[routes.keeper_turn]
+target = "tier-group.primary"
+
+[routes.phase_recovery]
+target = "tier-group.primary"
+
+[routes.phase_buffer]
+target = "tier-group.primary"
+
+[routes.tool_required]
+target = "tier-group.primary"
+
+[routes.governance_judge]
+target = "tier-group.governance"
+
+[routes.operator_judge]
+target = "tier-group.governance"
+
+[routes.cross_verifier]
+target = "tier-group.primary"
+
+[routes.verifier]
+target = "tier-group.primary"
+
+[routes.autoresearch]
+target = "tier-group.primary"
+
+[routes.adversarial_reviewer]
+target = "tier-group.primary"
+
+[routes.auto_responder]
+target = "tier-group.primary"
+
+[routes.routing]
+target = "tier-group.primary"
+
+[routes.openai_compat]
+target = "tier-group.primary"
+
+[routes.persona_generation]
+target = "tier-group.primary"
+
+[routes.provider_benchmark]
+target = "tier-group.primary"
+
+[routes.llm_rerank]
+target = "tier-group.scoring"
+
+[routes.simple_task]
+target = "tier-group.tier_small"
+
+[routes.moderate_task]
+target = "tier-group.tier_medium"
+
+[routes.complex_task]
+target = "tier-group.primary"
+
+# ── Profiles (capability requirements per route class) ─────────
+
+[profiles.tool_strict]
+required_capabilities = [
+  "runtime_mcp_tools",
+  "runtime_tool_events",
+  "runtime_mcp_http_headers",
+]
+
+[profiles.inline_tools]
+required_capabilities = ["inline_tools", "inline_tool_choice"]
+
+[profiles.lite]
+required_capabilities = ["runtime_mcp_tools", "runtime_tool_events"]
+
+[profiles.local]
+required_capabilities = []

@@ -128,7 +128,7 @@ describe('Governance surface', () => {
 
     expect(container.textContent).toContain('judge-only / 0 recent judgments')
     expect(container.textContent).toContain('Judge Status')
-    expect(container.textContent).toContain('Judge Model')
+    expect(container.textContent).toContain('Judge Runtime')
     expect(container.textContent).toContain('Live Judgment')
     expect(container.textContent).toContain('Refresh')
     expect(container.querySelector('[data-testid="governance-retired-banner"]')).toBeNull()
@@ -238,7 +238,7 @@ describe('Governance surface', () => {
     const judgeStatus = container.querySelector('[data-testid="judge-status"]')
     expect(judgeStatus).toBeTruthy()
     expect(judgeStatus?.textContent).toContain('Online')
-    expect(judgeStatus?.textContent).toContain('llama:qwen3.5')
+    expect(judgeStatus?.textContent).not.toContain('llama:qwen3.5')
   }, 20000)
 
   it('shows judge offline with error', async () => {
@@ -419,7 +419,7 @@ describe('Governance surface', () => {
     expect(empty).toBeTruthy()
     expect(empty?.textContent).toContain('AI Judge is offline')
     expect(empty?.textContent).toContain('governance-judge')
-    expect(empty?.textContent).toContain('qwen3.5:35b')
+    expect(empty?.textContent).not.toContain('qwen3.5:35b')
   }, 20000)
 
   it('renders live judge empty state with idle message when retired + judge online but no judgments', async () => {
@@ -485,7 +485,7 @@ describe('Governance surface', () => {
     expect(empty?.textContent).toContain('AI Judge is offline')
     expect(empty?.textContent).toContain('keeper is running')
     expect(empty?.textContent).toContain('governance-judge')
-    expect(empty?.textContent).toContain('qwen3.5:35b')
+    expect(empty?.textContent).not.toContain('qwen3.5:35b')
   }, 20000)
 
   it('renders keeper HITL empty state with healthy-idle context when queue is empty and judge is active', async () => {
@@ -524,4 +524,3 @@ describe('Governance surface', () => {
     expect(empty?.textContent).not.toContain('Offline')
   }, 20000)
 })
-

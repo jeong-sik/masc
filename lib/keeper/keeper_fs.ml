@@ -32,15 +32,15 @@ let ensure_dir (path : string) : string =
         with
         | Eio.Cancel.Cancelled _ as exn ->
             Prometheus.inc_counter
-              Prometheus.metric_keeper_fs_failures
-              ~labels:[("path", path); ("site", "ensure_dir_cancelled")]
+              Keeper_metrics.metric_keeper_fs_failures
+              ~labels:[("path", path); ("site", Fs_failure_site.(to_label Ensure_dir_cancelled))]
               ();
             Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
             Error (exn, Printexc.get_raw_backtrace ())
         | exn ->
             Prometheus.inc_counter
-              Prometheus.metric_keeper_fs_failures
-              ~labels:[("path", path); ("site", "ensure_dir_failed")]
+              Keeper_metrics.metric_keeper_fs_failures
+              ~labels:[("path", path); ("site", Fs_failure_site.(to_label Ensure_dir_failed))]
               ();
             Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
               path (Printexc.to_string exn);
@@ -78,8 +78,8 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
     | Ok () -> Ok ()
     | Error msg ->
         Prometheus.inc_counter
-          Prometheus.metric_keeper_fs_failures
-          ~labels:[("path", path); ("site", "save_atomic_failed")]
+          Keeper_metrics.metric_keeper_fs_failures
+          ~labels:[("path", path); ("site", Fs_failure_site.(to_label Save_atomic_failed))]
           ();
         Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
         Error msg
@@ -88,8 +88,8 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
   | exn ->
       let msg = Printexc.to_string exn in
       Prometheus.inc_counter
-        Prometheus.metric_keeper_fs_failures
-        ~labels:[("path", path); ("site", "save_atomic_raised")]
+        Keeper_metrics.metric_keeper_fs_failures
+        ~labels:[("path", path); ("site", Fs_failure_site.(to_label Save_atomic_raised))]
         ();
       Log.Keeper.warn "keeper_fs: save_atomic raised path=%s error=%s" path msg;
       Error msg

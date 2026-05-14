@@ -67,12 +67,8 @@ let keeper_list_cache_ttl_s () =
   cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0
 
 let invalidate_text_cache cache_ref =
-  let rec loop () =
-    let current = Atomic.get cache_ref in
-    let next = empty_text_cache ~generation:(current.generation + 1) in
-    if not (Atomic.compare_and_set cache_ref current next) then loop ()
-  in
-  loop ()
+  Lockfree_atomic.update cache_ref (fun current ->
+    empty_text_cache ~generation:(current.generation + 1))
 
 let invalidate_keeper_list_cache () = invalidate_text_cache _keeper_list_cache
 
@@ -321,7 +317,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
-            ("cascade_name", `String meta.cascade_name);
+            ("cascade_name", `String (Keeper_types.cascade_name_of_meta meta));
             ("created_at", `String meta.created_at);
             ("updated_at", `String meta.updated_at);
           ]
@@ -464,7 +460,11 @@ let handle_keeper_msg ctx args : tool_result =
   | Error err -> (false, err)
   | Ok name ->
       let resolved_args = with_keeper_name args name in
+      (match Turn.preflight_keeper_msg ctx resolved_args with
+      | Error err -> (false, err)
+      | Ok () ->
       let request_id = Keeper_msg_async.submit ~sw:ctx.sw
+        ~base_path:ctx.config.base_path
         ~keeper_name:name
         ~f:(fun () ->
           let ok, body = Turn.handle_keeper_msg ctx resolved_args in
@@ -480,14 +480,14 @@ let handle_keeper_msg ctx args : tool_result =
         ("status", `String "queued");
         ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
       ] in
-      (true, Yojson.Safe.to_string json)
+      (true, Yojson.Safe.to_string json))
 
-let handle_keeper_msg_result _ctx args : tool_result =
+let handle_keeper_msg_result ctx args : tool_result =
   let request_id = get_string args "request_id" "" in
   if String.equal request_id "" then
     (false, {|{"error":"request_id is required"}|})
   else
-    match Keeper_msg_async.poll request_id with
+    match Keeper_msg_async.poll ~base_path:ctx.config.base_path request_id with
     | None ->
       (false, Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
     | Some entry ->
@@ -519,15 +519,8 @@ let resolve_keeper_meta ctx args =
   | Error err -> Error (Printf.sprintf "%s" err)
 
 let default_keeper_model_label (meta : keeper_meta) =
-  match String.trim meta.runtime.usage.last_model_used with
-  | "" -> (
-      match
-        Cascade_runtime.models_of_cascade_name
-          (Keeper_cascade_profile.Runtime_name meta.cascade_name)
-      with
-      | first :: _ when not (String.equal (String.trim first) "") -> first
-      | _ -> Env_config.Local_runtime.default_model)
-  | model -> model
+  let _ = meta in
+  "runtime"
 
 let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
   let parsed =
@@ -819,6 +812,68 @@ let keeper_persona_audit_status ctx (meta : keeper_meta) =
   in
   Keeper_exec_status.keeper_surface_status ~agent_status ~diagnostic
 
+type keeper_active_goal_scope_audit = {
+  active_goal_ids : string list;
+  scoped_task_count : int;
+  scoped_open_task_count : int;
+  scoped_terminal_task_count : int;
+  global_open_task_count : int;
+  stale : bool;
+}
+
+let keeper_active_goal_scope_audit ctx (meta : keeper_meta) =
+  let active_goal_ids = meta.active_goal_ids in
+  let task_is_open (task : Masc_domain.task) =
+    not (Masc_domain.task_status_is_terminal task.task_status)
+  in
+  let tasks = Coord.get_tasks_safe ctx.config in
+  let count_open tasks =
+    List.fold_left
+      (fun acc task -> if task_is_open task then acc + 1 else acc)
+      0 tasks
+  in
+  let scoped_tasks =
+    if active_goal_ids = [] then []
+    else
+      List.filter
+        (Keeper_runtime_contract.task_is_linked_to_keeper_goals active_goal_ids)
+        tasks
+  in
+  let scoped_task_count = List.length scoped_tasks in
+  let scoped_open_task_count = count_open scoped_tasks in
+  let scoped_terminal_task_count = scoped_task_count - scoped_open_task_count in
+  let global_open_task_count = count_open tasks in
+  let stale =
+    active_goal_ids <> [] && scoped_open_task_count = 0
+    && global_open_task_count > 0
+  in
+  {
+    active_goal_ids;
+    scoped_task_count;
+    scoped_open_task_count;
+    scoped_terminal_task_count;
+    global_open_task_count;
+    stale;
+  }
+
+let keeper_active_goal_scope_audit_to_json audit =
+  `Assoc
+    [
+      ( "active_goal_ids",
+        `List (List.map (fun goal_id -> `String goal_id) audit.active_goal_ids)
+      );
+      ("scoped_task_count", `Int audit.scoped_task_count);
+      ("scoped_open_task_count", `Int audit.scoped_open_task_count);
+      ("scoped_terminal_task_count", `Int audit.scoped_terminal_task_count);
+      ("global_open_task_count", `Int audit.global_open_task_count);
+      ("stale", `Bool audit.stale);
+      ( "next_action",
+        if audit.stale then
+          `String
+            "update keeper active_goal_ids or create/link an eligible scoped task"
+        else `Null );
+    ]
+
 let keeper_persona_profile_candidates persona_name =
   let resolution = Config_dir_resolver.resolve () in
   (resolution.personas.path :: Config_dir_resolver.personas_dirs ())
@@ -925,12 +980,20 @@ let keeper_persona_audit_item ctx requested_name =
   let runtime_status =
     runtime_meta |> Option.map (keeper_persona_audit_status ctx)
   in
+  let active_goal_scope =
+    runtime_meta |> Option.map (keeper_active_goal_scope_audit ctx)
+  in
   let autoboot_enabled =
     match runtime_meta with
     | Some meta -> Some meta.autoboot_enabled
     | None -> defaults.autoboot_enabled
   in
   let paused = runtime_meta |> Option.map (fun meta -> meta.paused) in
+  let dormant_autoboot_disabled =
+    match runtime_meta, autoboot_enabled, paused, registry_entry with
+    | Some _, Some false, (Some false | None), None -> true
+    | _ -> false
+  in
   let issues =
     let add cond issue acc = if cond then issue :: acc else acc in
     []
@@ -940,13 +1003,19 @@ let keeper_persona_audit_item ctx requested_name =
          "missing_persona_profile"
     |> add (not live_meta_exists) "missing_runtime_meta"
     |> add (Option.is_some runtime_meta_error) "runtime_meta_error"
-    |> add (Option.is_some runtime_meta && Option.is_none registry_entry)
+    |> add
+         (Option.is_some runtime_meta
+          && Option.is_none registry_entry
+          && not dormant_autoboot_disabled)
          "registry_missing"
-    |> add (match autoboot_enabled with Some false -> true | _ -> false)
-         "autoboot_disabled"
     |> add (match paused with Some true -> true | _ -> false) "keeper_paused"
     |> add (match runtime_meta with Some meta when Stdlib.List.length meta.active_goal_ids = 0 -> true | _ -> false)
          "empty_active_goal_ids"
+    |> add
+         (match active_goal_scope with
+          | Some scope when scope.stale -> true
+          | _ -> false)
+         "stale_active_goal_ids"
     |> add
          (match runtime_meta, autoboot_enabled, paused, keepalive_running with
           | Some _, (Some true | None), (Some false | None), Some false -> true
@@ -986,7 +1055,14 @@ let keeper_persona_audit_item ctx requested_name =
       ("registry_present", `Bool (Option.is_some registry_entry));
       ("phase", Json_util.string_opt_to_json phase);
       ("runtime_status", Json_util.string_opt_to_json runtime_status);
+      ( "active_goal_scope",
+        match active_goal_scope with
+        | Some scope -> keeper_active_goal_scope_audit_to_json scope
+        | None -> `Null );
       ("autoboot_enabled", json_bool_opt autoboot_enabled);
+      ("dormant", `Bool dormant_autoboot_disabled);
+      ( "dormant_reason",
+        if dormant_autoboot_disabled then `String "autoboot_disabled" else `Null );
       ("paused", json_bool_opt paused);
       ("keepalive_running", json_bool_opt keepalive_running);
       ("keepalive_started_at", json_float_opt keepalive_started_at);
@@ -1006,6 +1082,18 @@ let keeper_persona_audit_summary items =
     List.fold_left (fun acc item -> if pred item then acc + 1 else acc) 0 items
   in
   let count_issue issue = count (has_issue issue) in
+  let count_bool_field field =
+    count (fun item ->
+        match Yojson.Safe.Util.member field item with
+        | `Bool true -> true
+        | _ -> false)
+  in
+  let count_autoboot_disabled =
+    count (fun item ->
+        match Yojson.Safe.Util.member "autoboot_enabled" item with
+        | `Bool false -> true
+        | _ -> false)
+  in
   let ok_count =
     count (fun item ->
         match Yojson.Safe.Util.member "ok" item with
@@ -1024,19 +1112,22 @@ let keeper_persona_audit_summary items =
       ("missing_runtime_meta", `Int (count_issue "missing_runtime_meta"));
       ("runtime_meta_error", `Int (count_issue "runtime_meta_error"));
       ("registry_missing", `Int (count_issue "registry_missing"));
-      ("autoboot_disabled", `Int (count_issue "autoboot_disabled"));
+      ("dormant_autoboot_disabled", `Int (count_bool_field "dormant"));
+      ("autoboot_disabled", `Int count_autoboot_disabled);
       ("keeper_paused", `Int (count_issue "keeper_paused"));
       ("keepalive_not_running", `Int (count_issue "keepalive_not_running"));
       ("empty_active_goal_ids", `Int (count_issue "empty_active_goal_ids"));
+      ( "stale_active_goal_ids",
+        `Int (count_issue "stale_active_goal_ids") );
     ]
 
 let handle_keeper_persona_audit ctx args : tool_result =
   let names = keeper_persona_audit_requested_names ctx args in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
   if Stdlib.List.length invalid_names > 0 then
-    error_result_typed ~code:Validation_error
+    (false, error_response_typed ~code:Validation_error
       (Printf.sprintf "invalid keeper name(s): %s"
-         (String.concat ", " invalid_names))
+         (String.concat ", " invalid_names)))
   else
     let limit = get_int args "limit" 100 |> max 0 |> min 500 in
     let include_ok = get_bool args "include_ok" true in
@@ -1236,7 +1327,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
     | name -> Some name
   in
   match Keeper_sandbox_control.parse_stop_scope container_kind_raw with
-  | Error err -> error_result_typed ~code:Validation_error err
+  | Error err -> (false, error_response_typed ~code:Validation_error err)
   | Ok scope ->
       let stop_result =
         Keeper_sandbox_control.stop_containers
@@ -1352,10 +1443,10 @@ let handle_keeper_compact ctx args : tool_result =
        "phase=unknown" precondition failure. *)
     match Keeper_registry.get ~base_path:ctx.config.base_path name with
     | None ->
-      Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
-        ~labels:[("keeper", name); ("result", "not_found")] ();
-      error_result_typed ~code:Validation_error
-        (Printf.sprintf "keeper %s is not in the registry" name)
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
+        ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Not_found))] ();
+      (false, error_response_typed ~code:Validation_error
+        (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
     let phase_before = Keeper_state_machine.phase_to_string entry.phase in
     (* Phase precondition: Overflowed, Paused, or (Running/Failing with force).
@@ -1368,12 +1459,12 @@ let handle_keeper_compact ctx args : tool_result =
       | Offline | Stopped | Dead | Zombie | Crashed | Restarting | HandingOff | Draining -> false
     in
     if not allowed then begin
-      Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
-        ~labels:[("keeper", name); ("result", "precondition")] ();
-      error_result_typed ~code:Validation_error
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
+        ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Precondition))] ();
+      (false, error_response_typed ~code:Validation_error
         (Printf.sprintf
            "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
-           name phase_before)
+           name phase_before))
     end
     else begin
       (* Dispatch FSM event *)
@@ -1390,6 +1481,7 @@ let handle_keeper_compact ctx args : tool_result =
         let max_tokens = resolve_primary_max_context (Some meta) in
         Keeper_exec_context.dispatch_keeper_phase_event
           ~config:ctx.config ~keeper_name:name
+          ~origin:Keeper_registry.Operator_compact
           Keeper_state_machine.Compaction_started;
         match
           Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
@@ -1398,11 +1490,12 @@ let handle_keeper_compact ctx args : tool_result =
         | Some recovery ->
           Keeper_exec_context.dispatch_compaction_completed
             ~config:ctx.config ~keeper_name:name
+            ~origin:Keeper_registry.Operator_compact
             ~before_tokens:recovery.compaction.before_tokens
             ~after_tokens:recovery.compaction.after_tokens;
           invalidate_status_cache name;
-          Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
-            ~labels:[("keeper", name); ("result", "ok")] ();
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
+            ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Ok))] ();
           (true,
            Yojson.Safe.to_string
              (`Assoc [
@@ -1424,11 +1517,12 @@ let handle_keeper_compact ctx args : tool_result =
              signal. *)
           Keeper_exec_context.dispatch_keeper_phase_event
             ~config:ctx.config ~keeper_name:name
+            ~origin:Keeper_registry.Operator_compact
             (Keeper_state_machine.Compaction_failed {
                reason = "no_valid_checkpoint";
             });
-          Prometheus.inc_counter Prometheus.metric_keeper_operator_compact
-            ~labels:[("keeper", name); ("result", "no_checkpoint")] ();
+          Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
+            ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label No_checkpoint))] ();
           (false,
            Printf.sprintf
              "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"
@@ -1446,16 +1540,16 @@ let handle_keeper_clear ctx args : tool_result =
   | Ok name ->
     let reason = String.trim (get_string args "reason" "") in
     if String.equal reason "" then
-      error_result_typed ~code:Validation_error
-        "reason is required for masc_keeper_clear (audit trail)"
+      (false, error_response_typed ~code:Validation_error
+        "reason is required for masc_keeper_clear (audit trail)")
     else
     (* Same registry race guard as [handle_keeper_compact]: if the keeper
        disappeared between [resolve_keeper_name] and [get], abort cleanly
        rather than silently proceed with a half-applied clear. *)
     match Keeper_registry.get ~base_path:ctx.config.base_path name with
     | None ->
-      error_result_typed ~code:Validation_error
-        (Printf.sprintf "keeper %s is not in the registry" name)
+      (false, error_response_typed ~code:Validation_error
+        (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
       let preserve_system = get_bool args "preserve_system_prompt" true in
       let phase_before = Keeper_state_machine.phase_to_string entry.phase in
@@ -1468,6 +1562,12 @@ let handle_keeper_clear ctx args : tool_result =
         match read_meta_resolved ctx.config name with
         | Ok (Some (_, meta)) -> Some meta
         | _ -> None
+      in
+      let preserve_paused_state =
+        (match entry.phase with
+         | Keeper_state_machine.Paused -> true
+         | _ -> false)
+        || Atomic.get entry.fiber_stop
       in
       let trace_id =
         match meta_for_trace with
@@ -1567,6 +1667,7 @@ let handle_keeper_clear ctx args : tool_result =
               {
                 meta with
                 continuity_summary = "";
+                paused = meta.paused || preserve_paused_state;
                 updated_at = Keeper_types.now_iso ();
                 runtime =
                   {
@@ -1595,7 +1696,7 @@ let handle_keeper_clear ctx args : tool_result =
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
         name reason preserve_system cleared_count;
-      Prometheus.inc_counter Prometheus.metric_keeper_operator_clear
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_clear
         ~labels:[("keeper", name);
                  ("preserve_system", Bool.to_string preserve_system)] ();
       (true,

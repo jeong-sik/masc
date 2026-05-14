@@ -195,10 +195,10 @@ val append_action_log :
     cascade-include of this module. *)
 
 val json_ok : (string * Yojson.Safe.t) list -> Yojson.Safe.t
-(** Builds [`Assoc] envelope with a leading
-    [("status", "ok")] field followed by [fields].  Pinned
-    because {!Operator_control} reaches it via the
-    cascade-include of this module. *)
+(** Alias for {!Tool_args.ok_assoc}.  Kept here because
+    {!Operator_control} consumes it via the cascade-include of this
+    module; new code in [lib/operator/] should call
+    {!Tool_args.ok_assoc} directly. *)
 
 val remote_client_type_of_context : 'a context -> string
 (** Classifies the [mcp_session_id] of an operator

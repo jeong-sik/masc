@@ -37,6 +37,37 @@ const payloadWithMissingToolMetrics = {
   ],
 }
 
+const payloadWithCascadeBuckets = {
+  ...payload,
+  by_cascade: [
+    {
+      name: 'local_qwen3_27b_only',
+      calls: 7,
+      success_pct: 100,
+    },
+  ],
+}
+
+const payloadWithCoverageGap = {
+  ...payload,
+  source: 'tool_call_io',
+  health: 'coverage_gap',
+  stale_reason: 'append_failed',
+  coverage_gap_count: 1,
+  coverage_gaps: [
+    {
+      schema: 'masc.telemetry_coverage_gap.v1',
+      source: 'tool_call_io',
+      producer: 'keeper_tool_call_log.append',
+      durable_store: '.masc/tool_calls',
+      dashboard_surface: '/api/v1/dashboard/tool-quality',
+      stale_reason: 'append_failed',
+      trace_id: 'trace-quality-gap',
+      error: 'disk full',
+    },
+  ],
+}
+
 function okJson<T>(body: T) {
   return {
     ok: true,
@@ -136,6 +167,40 @@ describe('ToolQualityPanel', () => {
     expect(container.textContent).toContain('m:example')
     expect(container.textContent).toContain('0.0k')
     expect(container.textContent).not.toContain('오류:')
+  })
+
+  it('renders cascade buckets separately from the redacted runtime model lane', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithCascadeBuckets))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('캐스케이드별')
+    expect(container.textContent).toContain('local_qwen3_27b_only')
+  })
+
+  it('renders tool-quality coverage gap provenance', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithCoverageGap))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('coverage gaps 1: append_failed')
+    expect(container.textContent).toContain('producer keeper_tool_call_log.append')
+    expect(container.textContent).toContain('store .masc/tool_calls')
+    expect(container.textContent).toContain('surface /api/v1/dashboard/tool-quality')
+    expect(container.textContent).toContain('trace trace-quality-gap')
+    expect(container.textContent).toContain('error disk full')
   })
 
   it('replaces a stale in-flight request with the newest refresh', async () => {

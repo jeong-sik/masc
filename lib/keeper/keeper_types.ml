@@ -23,8 +23,8 @@ let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
   | fields ->
     Error
       (Printf.sprintf
-         "legacy keeper model args removed for %s: %s. Keepers now use cascade_name and \
-          last_model_used only."
+         "legacy keeper model args removed for %s: %s. Use cascade_name; concrete \
+          provider/model identity is OAS-owned."
          tool_name
          (String.concat ", " fields))
 ;;
@@ -101,3 +101,5 @@ type session_context =
   ; session_dir : string
   ; mutable checkpoints : checkpoint list
   }
+
+let legacy_provider_filter_name = Keeper_config.legacy_provider_filter_name

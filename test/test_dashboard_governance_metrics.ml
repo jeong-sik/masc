@@ -1,6 +1,7 @@
 (** Tests for Dashboard_governance_metrics — tool rejection ring + approval queue. *)
 
 module GM = Masc_mcp.Dashboard_governance_metrics
+module P = Masc_mcp.Prometheus
 
 open Alcotest
 
@@ -64,6 +65,31 @@ let test_json_shape () =
   let window = json |> member "window_minutes" |> to_int in
   check int "window propagated" 60 window
 
+let test_record_failure_is_metric_visible () =
+  let labels =
+    [ ("callback", "dashboard_governance_tool_skipped_record") ]
+  in
+  let before =
+    P.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+      ~labels
+      ()
+  in
+  GM.record_tool_skipped_with_append_for_testing
+    ~append:(fun () -> raise (Failure "synthetic ring failure"))
+    ~keeper_name:"k1"
+    ~tool_name:"bash"
+    ~reason_code:"policy";
+  let after =
+    P.metric_value_or_zero
+      Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+      ~labels
+      ()
+  in
+  check (float 0.0001) "ring failure metric increments" (before +. 1.0) after;
+  let counts = GM.tool_rejection_counts ~now_ts:now ~window_minutes:60 () in
+  check int "failed append does not create a phantom event" 0 (List.length counts)
+
 let () =
   run "Dashboard_governance_metrics" [
     "tool_rejection_counts", [
@@ -77,5 +103,9 @@ let () =
     ];
     "json", [
       test_case "json shape" `Quick (with_fresh test_json_shape);
+    ];
+    "failure_visibility", [
+      test_case "record failure increments metric" `Quick
+        (with_fresh test_record_failure_is_metric_visible);
     ];
   ]

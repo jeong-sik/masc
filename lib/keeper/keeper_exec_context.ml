@@ -29,6 +29,8 @@ let token_count = Keeper_context_core.token_count
 let message_count = Keeper_context_core.message_count
 let context_ratio = Keeper_context_core.context_ratio
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
+let resume_checkpoint_of_context =
+  Keeper_context_core.resume_checkpoint_of_context
 let oas_context_of_context = Keeper_context_core.oas_context_of_context
 let with_max_tokens = Keeper_context_core.with_max_tokens
 let system_prompt_of_context = Keeper_context_core.system_prompt_of_context
@@ -86,7 +88,7 @@ type rollover_gate_decision = Keeper_rollover.rollover_gate_decision =
   | Skip of string
   | Go of string
 
-let blocker_indicates_overflow = Keeper_rollover.blocker_indicates_overflow
+let blocker_class_indicates_overflow = Keeper_rollover.blocker_class_indicates_overflow
 let classify_rollover_gate = Keeper_rollover.classify_rollover_gate
 
 (* ================================================================ *)
@@ -96,7 +98,7 @@ let classify_rollover_gate = Keeper_rollover.classify_rollover_gate
 let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_keeper
 
 type compaction_decision = Keeper_compact_policy.compaction_decision =
-  | Applied of string
+  | Applied of Compaction_trigger.t
   | Blocked_below_thresholds
   | Skipped_no_checkpoint
   | Skipped_continuity_reflection of {
@@ -110,8 +112,6 @@ let compaction_decision_to_string =
 let compaction_decision_applied =
   Keeper_compact_policy.compaction_decision_applied
 
-let compact_if_needed_typed = Keeper_compact_policy.compact_if_needed_typed
-let compact_if_needed = Keeper_compact_policy.compact_if_needed
 
 (* ================================================================ *)
 (* Re-export from Keeper_post_turn                                   *)
@@ -121,7 +121,7 @@ type compaction_event = Keeper_post_turn.compaction_event = {
   attempted : bool;
   applied : bool;
   failure_reason : string option;
-  trigger : string option;
+  trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
   before_tokens : int;
   after_tokens : int;
@@ -162,17 +162,22 @@ let apply_post_turn_lifecycle_with_resilience_handles =
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
-let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
+let dispatch_keeper_phase_event
+    ~(config : Coord.config)
+    ?(origin = Keeper_registry.Generic_dispatch)
+    ~keeper_name
+    event =
   match
     Keeper_registry.dispatch_event
       ~base_path:config.base_path
+      ~origin
       keeper_name
       event
   with
   | Ok _ -> ()
   | Error err ->
       Prometheus.inc_counter
-        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
         ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
         ();
       Log.Keeper.warn
@@ -194,6 +199,17 @@ let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
    profile or hand off". *)
 let compaction_outcome_metric = "masc_keeper_compaction_outcome_total"
 
+let () =
+  Prometheus.register_counter
+    ~name:compaction_outcome_metric
+    ~help:
+      "Total Compaction_completed dispatches classified by token \
+       savings. Labels: keeper, outcome (ok = saved_tokens > 0, \
+       noop = before == after or after > before). Rising noop \
+       rate is the operational signal for \"reducer has nothing \
+       to strip, switch profile or hand off\" (#9988)."
+    ()
+
 (* Observability-only: bump the outcome counter and log the warn
    when saved_tokens <= 0.  Split from [dispatch_compaction_completed]
    so unit tests can verify classification without needing a full
@@ -212,11 +228,15 @@ let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
       saved_tokens before_tokens after_tokens keeper_name
 
 let dispatch_compaction_completed
-    ~(config : Coord.config) ~keeper_name ~before_tokens ~after_tokens =
+    ~(config : Coord.config)
+    ~origin
+    ~keeper_name
+    ~before_tokens
+    ~after_tokens =
   record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
-  Prometheus.inc_counter Prometheus.metric_keeper_fsm_edge_transitions
+  Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
-  dispatch_keeper_phase_event ~config ~keeper_name
+  dispatch_keeper_phase_event ~config ~origin ~keeper_name
     (Keeper_state_machine.Compaction_completed
        { before_tokens; after_tokens })
 
@@ -226,11 +246,17 @@ let dispatch_post_turn_lifecycle_events
     (lifecycle : post_turn_lifecycle) =
   if lifecycle.compaction.attempted then
     if lifecycle.compaction.applied then
-      dispatch_compaction_completed ~config ~keeper_name
+      dispatch_compaction_completed
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
         ~before_tokens:lifecycle.compaction.before_tokens
         ~after_tokens:lifecycle.compaction.after_tokens
     else
-      dispatch_keeper_phase_event ~config ~keeper_name
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
         (Keeper_state_machine.Compaction_failed
            {
              reason =
@@ -241,7 +267,10 @@ let dispatch_post_turn_lifecycle_events
            });
   match lifecycle.handoff_attempted, lifecycle.handoff_json with
   | true, Some _json ->
-      dispatch_keeper_phase_event ~config ~keeper_name
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
         (Keeper_state_machine.Handoff_completed
            {
              generation = lifecycle.updated_meta.runtime.generation;
@@ -250,7 +279,10 @@ let dispatch_post_turn_lifecycle_events
                  lifecycle.updated_meta.runtime.trace_id;
            })
   | true, None ->
-      dispatch_keeper_phase_event ~config ~keeper_name
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
         (Keeper_state_machine.Handoff_failed
            {
              reason =
@@ -291,18 +323,17 @@ let keeper_action_kind_of_tool_names tool_names =
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
   (* provider filtering now handled by OAS cascade via ~provider_filter *)
   let configured = Keeper_model_labels.configured_model_labels_of_meta m in
-  let configured_ids =
-    try
-      Cascade_config.parse_model_strings configured
-      |> List.map (fun (c : Llm_provider.Provider_config.t) -> String.trim c.model_id)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
-  in
   match String.trim (Keeper_exec_status.active_model_of_meta m) with
   | "" -> configured
   | model ->
       let model_allowed =
         List.mem model configured
-        || List.mem model configured_ids
+        || List.exists
+             (fun label ->
+               Cascade_runtime_candidate.label_matches_runtime_id
+                 ~label
+                 ~runtime_id:model)
+             configured
       in
       if model_allowed
       then dedupe_keep_order (model :: configured)

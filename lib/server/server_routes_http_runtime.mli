@@ -117,13 +117,23 @@ val make_health_json :
     [build] / [protocol] (default + listener + supported list) /
     [transport] / [paths] / [uptime] / [sse_clients] /
     [startup] / [subsystems] / [feature_flags] / [gc] /
-    [keeper_fibers] / [keeper_config_parse_error_count] /
-    [keeper_config_parse_errors] / [keeper_config_unknown_key_count] /
-    [keeper_config_unknown_keys] / [keeper_config_schema_status] /
-    [keeper_config_schema_blocking] /
+    [keeper_fibers] / [paused_keepers] /
+    [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
+    [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
+    [keeper_config_schema_status] / [keeper_config_schema_blocking] /
     [keeper_config_schema_terminal_reason] /
     [keeper_config_operator_action_required] /
     [lazy_task_boot_guard_fires_total].
+
+    {2 paused_keepers contract}
+
+    [paused_keepers.count] and [paused_keepers.names] are the union of
+    registry-visible paused keepers and durable [.masc/keepers/*.json]
+    metas with [paused = true].  The nested [running_*] and
+    [durable_*] fields keep the two sources inspectable so a keeper
+    that has been auto-paused and removed from the live keepalive set
+    does not disappear from [/health].  [read_error_count] surfaces
+    corrupt durable meta instead of silently reporting a clean zero.
 
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}
@@ -162,6 +172,8 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val board_post_detail_json :
   include_moderation:bool ->
+  blind_votes:bool ->
+  config:Coord.config option ->
   voter:string option ->
   response_format:string ->
   post_id:string ->
@@ -170,7 +182,12 @@ val board_post_detail_json :
     [(status, json_string)] for [GET /api/v1/board/<post_id>].
     When [voter] is supplied, post/comment rows include vote state for
     that voter.  When [include_moderation] is [true], rows also include
-    operator-only moderation projection fields.
+    operator-only moderation projection fields.  When [blind_votes] is
+    [true], rows hide score fields until that voter has voted.
+    operator-only moderation projection fields.  When [config] is
+    supplied, post rows include contributor-quality projection fields.
+    When [blind_votes] is [true], rows hide score fields until that
+    voter has voted.
 
     {2 response_format values (case-insensitive, trimmed)}
 

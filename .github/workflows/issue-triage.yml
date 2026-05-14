@@ -1,0 +1,305 @@
+name: Issue Taxonomy Triage
+
+on:
+  issues:
+    types: [opened, edited, reopened, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to triage. Leave empty with scope=open to sweep open issues.
+        required: false
+        type: string
+      scope:
+        description: Sweep scope when issue_number is empty.
+        required: false
+        default: single
+        type: choice
+        options:
+          - single
+          - open
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-taxonomy-${{ github.event.issue.number || github.event.inputs.issue_number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  issue-taxonomy:
+    name: Mirror issue form taxonomy labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage issue labels
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const AREA_LABEL_BY_FORM_VALUE = new Map([
+              ['Repo coordination', 'area:coordination'],
+              ['Team session delivery', 'area:swarm-execution'],
+              ['Dashboard and read models', 'area:dashboard'],
+              ['Operator and intervention', 'area:operator'],
+              ['Transport, auth, and health', 'area:transport'],
+              ['Config and installation', 'area:config'],
+              ['CI and release automation', 'area:ci'],
+              ['Docs and onboarding', 'area:docs'],
+              ['Experimental surfaces', 'area:experimental'],
+            ]);
+
+            const TARGET_LABEL_BY_FORM_VALUE = new Map([
+              ['now', 'target:now'],
+              ['next', 'target:next'],
+              ['later', 'target:later'],
+            ]);
+
+            const LABEL_DEFINITIONS = {
+              'area:coordination': {
+                color: '1d76db',
+                description: 'Repo coordination and room/task flows',
+              },
+              'area:swarm-execution': {
+                color: '0052cc',
+                description: 'Team session delivery and supervised execution',
+              },
+              'area:dashboard': {
+                color: '0e8a16',
+                description: 'Dashboard and read-model surfaces',
+              },
+              'area:operator': {
+                color: '5319e7',
+                description: 'Operator and intervention surfaces',
+              },
+              'area:transport': {
+                color: 'd93f0b',
+                description: 'Transport, auth, health, and protocol truth',
+              },
+              'area:config': {
+                color: 'fbca04',
+                description: 'Config, install, and runtime shape',
+              },
+              'area:ci': {
+                color: 'b60205',
+                description: 'CI, release, and automation flows',
+              },
+              'area:docs': {
+                color: '006b75',
+                description: 'Docs, onboarding, and product framing',
+              },
+              'area:experimental': {
+                color: 'c5def5',
+                description: 'Experimental or research surfaces',
+              },
+              'target:now': {
+                color: 'b60205',
+                description: 'Current product-promise blocker',
+              },
+              'target:next': {
+                color: 'd4c5f9',
+                description: 'Next advanced workflow slice',
+              },
+              'target:later': {
+                color: 'ededed',
+                description: 'Visible, but deferred',
+              },
+              'product-gap': {
+                color: 'f9d0c4',
+                description: 'Code exists, but the product promise is still weak',
+              },
+              'triage-required': {
+                color: 'bfdadc',
+                description: 'Issue is missing or has an invalid planning type/area/target label set.',
+              },
+            };
+
+            function labelName(label) {
+              return typeof label === 'string' ? label : label?.name;
+            }
+
+            if (
+              ['labeled', 'unlabeled'].includes(context.payload.action) &&
+              context.actor === 'github-actions[bot]'
+            ) {
+              core.info(
+                `Skipping ${context.payload.action} event from github-actions[bot] ` +
+                `for label ${labelName(context.payload.label) || '(unknown)'}`,
+              );
+              return;
+            }
+
+            function escapeRegex(text) {
+              return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            }
+
+            function section(body, heading) {
+              const normalized = String(body || '').replace(/\r\n/g, '\n');
+              const match = new RegExp(`^###\\s+${escapeRegex(heading)}\\s*$`, 'im').exec(normalized);
+              if (!match) return '';
+              const rest = normalized.slice(match.index + match[0].length);
+              const next = rest.search(/^###\s+/m);
+              return (next === -1 ? rest : rest.slice(0, next)).trim();
+            }
+
+            function firstAnswerLine(body, heading) {
+              const answer = section(body, heading);
+              return answer
+                .split('\n')
+                .map((line) => line.trim())
+                .find((line) => line && line !== '_No response_') || '';
+            }
+
+            function checkboxChecked(body, heading) {
+              const answer = section(body, heading);
+              if (!answer) return null;
+              return /-\s*\[[xX]\]/.test(answer);
+            }
+
+            const ensuredLabels = new Set();
+
+            async function ensureLabel(name) {
+              if (ensuredLabels.has(name)) return;
+              const definition = LABEL_DEFINITIONS[name] || {
+                color: 'ededed',
+                description: 'Managed by issue taxonomy triage',
+              };
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                try {
+                  await github.rest.issues.createLabel({
+                    owner,
+                    repo,
+                    name,
+                    color: definition.color,
+                    description: definition.description,
+                  });
+                } catch (createError) {
+                  if (createError.status !== 422) throw createError;
+                  core.info(`Label already exists after concurrent creation: ${name}`);
+                }
+              }
+              ensuredLabels.add(name);
+            }
+
+            async function addLabels(issue_number, labels) {
+              const unique = [...new Set(labels)].filter(Boolean);
+              if (unique.length === 0) return;
+              for (const label of unique) await ensureLabel(label);
+              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: unique });
+            }
+
+            async function removeLabel(issue_number, label) {
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number, name: label });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            function taxonomyCounts(labels) {
+              return {
+                type: labels.filter((label) => label.startsWith('type:')).length,
+                area: labels.filter((label) => label.startsWith('area:')).length,
+                target: labels.filter((label) => label.startsWith('target:')).length,
+              };
+            }
+
+            async function triageIssue(issue_number) {
+              const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+              if (issue.pull_request) {
+                core.info(`Skipping pull request #${issue_number}`);
+                return;
+              }
+
+              const currentLabels = new Set(issue.labels.map(labelName).filter(Boolean));
+              const desiredArea = AREA_LABEL_BY_FORM_VALUE.get(firstAnswerLine(issue.body, 'Product area'));
+              const desiredTarget = TARGET_LABEL_BY_FORM_VALUE.get(firstAnswerLine(issue.body, 'Target lane'));
+              const productGap = checkboxChecked(issue.body, 'Product gap');
+
+              const labelsToRemove = [];
+              const labelsToAdd = [];
+
+              if (desiredArea) {
+                for (const label of currentLabels) {
+                  if (label.startsWith('area:') && label !== desiredArea) labelsToRemove.push(label);
+                }
+                labelsToAdd.push(desiredArea);
+              }
+
+              if (desiredTarget) {
+                for (const label of currentLabels) {
+                  if (label.startsWith('target:') && label !== desiredTarget) labelsToRemove.push(label);
+                }
+                labelsToAdd.push(desiredTarget);
+              }
+
+              if (productGap === true) {
+                labelsToAdd.push('product-gap');
+              } else if (productGap === false && currentLabels.has('product-gap')) {
+                labelsToRemove.push('product-gap');
+              }
+
+              for (const label of [...new Set(labelsToRemove)]) {
+                await removeLabel(issue_number, label);
+                currentLabels.delete(label);
+              }
+
+              await addLabels(issue_number, labelsToAdd);
+              for (const label of labelsToAdd) currentLabels.add(label);
+
+              const counts = taxonomyCounts([...currentLabels]);
+              const hasCompleteTaxonomy = counts.type === 1 && counts.area === 1 && counts.target === 1;
+              if (hasCompleteTaxonomy) {
+                if (currentLabels.has('triage-required')) {
+                  await removeLabel(issue_number, 'triage-required');
+                }
+              } else {
+                await addLabels(issue_number, ['triage-required']);
+              }
+
+              core.info(
+                `#${issue_number}: area=${desiredArea || '(unchanged)'} ` +
+                `target=${desiredTarget || '(unchanged)'} ` +
+                `product_gap=${productGap === null ? '(unchanged)' : String(productGap)} ` +
+                `counts=${JSON.stringify(counts)}`,
+              );
+            }
+
+            async function openIssueNumbers() {
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                owner,
+                repo,
+                state: 'open',
+                per_page: 100,
+              });
+              return issues
+                .filter((issue) => !issue.pull_request)
+                .map((issue) => issue.number);
+            }
+
+            const inputIssueNumber = core.getInput('issue_number');
+            const scope = core.getInput('scope') || 'single';
+            let issueNumbers = [];
+
+            if (context.payload.issue?.number) {
+              issueNumbers = [context.payload.issue.number];
+            } else if (inputIssueNumber) {
+              issueNumbers = [Number(inputIssueNumber)];
+            } else if (scope === 'open') {
+              issueNumbers = await openIssueNumbers();
+            } else {
+              core.setFailed('workflow_dispatch requires issue_number or scope=open');
+              return;
+            }
+
+            for (const issueNumber of issueNumbers) {
+              if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+                core.setFailed(`invalid issue number: ${issueNumber}`);
+                return;
+              }
+              await triageIssue(issueNumber);
+            }

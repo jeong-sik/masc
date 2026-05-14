@@ -15,6 +15,29 @@ module SMap = Map.Make(String)
 
 exception Flock_timeout of { caller : string; path : string; attempts : int }
 
+(** Observability hook fired after each [acquire_flock_retry*] attempt
+    sequence completes — once on success, once on timeout.  Wired at
+    startup ([lib/coord.ml]) to a Prometheus counter + histogram so
+    lock-contention spikes become visible without scraping logs.
+
+    [retries] is the number of failed [F_TLOCK] attempts before the
+    final outcome (0 means the first attempt succeeded).  [elapsed_s]
+    is the wall-clock time spent inside [acquire_flock_retry*]
+    excluding [openfile].  [outcome] is ["acquired"] or ["timeout"].
+
+    Default no-op; [masc_process] cannot depend on [Prometheus]
+    (sub-library boundary, would be a cycle), so emission is wired
+    from the [masc_mcp] root via this Atomic ref. *)
+let on_lock_attempt_fn :
+    (caller:string -> retries:int -> elapsed_s:float -> outcome:string -> unit)
+      Atomic.t =
+  Atomic.make (fun ~caller:_ ~retries:_ ~elapsed_s:_ ~outcome:_ -> ())
+
+let observe_lock_attempt ~caller ~retries ~started_at ~outcome =
+  let elapsed_s = max 0.0 (Time_compat.now () -. started_at) in
+  try (Atomic.get on_lock_attempt_fn) ~caller ~retries ~elapsed_s ~outcome
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+
 let rec atomic_update atomic f =
   let old_val = Atomic.get atomic in
   let new_val = f old_val in
@@ -96,9 +119,13 @@ let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
   let fd = Unix.openfile lock_path mode perm in
+  let started_at = Time_compat.now () in
   let rec acquire attempts =
-    if attempts <= 0 then
+    if attempts <= 0 then begin
+      observe_lock_attempt ~caller ~retries:max_attempts ~started_at
+        ~outcome:"timeout";
       raise (Flock_timeout { caller; path = lock_path; attempts = max_attempts })
+    end
     else
       let success =
         try
@@ -108,7 +135,11 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
         | Unix.Unix_error (Unix.EAGAIN, _, _)
         | Unix.Unix_error (Unix.EACCES, _, _) -> false
       in
-      if success then fd
+      if success then begin
+        observe_lock_attempt ~caller
+          ~retries:(max_attempts - attempts) ~started_at ~outcome:"acquired";
+        fd
+      end
       else begin
         Unix.sleepf sleep_sec;
         acquire (attempts - 1)
@@ -128,9 +159,13 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
 let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
   let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
+  let started_at = Time_compat.now () in
   let rec acquire attempts =
-    if attempts <= 0 then
+    if attempts <= 0 then begin
+      observe_lock_attempt ~caller ~retries:max_attempts ~started_at
+        ~outcome:"timeout";
       raise (Flock_timeout { caller; path = lock_path; attempts = max_attempts })
+    end
     else
       let success =
         run_blocking_lock_op (fun () ->
@@ -141,7 +176,11 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
             | Unix.Unix_error (Unix.EAGAIN, _, _)
             | Unix.Unix_error (Unix.EACCES, _, _) -> false)
       in
-      if success then fd
+      if success then begin
+        observe_lock_attempt ~caller
+          ~retries:(max_attempts - attempts) ~started_at ~outcome:"acquired";
+        fd
+      end
       else begin
         (match clock with
          | Some c -> Eio.Time.sleep c sleep_sec

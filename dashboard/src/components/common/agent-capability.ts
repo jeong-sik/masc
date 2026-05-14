@@ -121,7 +121,7 @@ const BASE_BADGE =
   'inline-flex min-w-0 max-w-full items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-elevated)]'
 
 const GLYPH_BADGE =
-  'mr-1 inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-1 font-mono text-[9px] font-semibold leading-none text-[var(--color-accent-fg)]'
+  'mr-1 inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-1 font-mono text-3xs font-semibold leading-none text-[var(--color-accent-fg)]'
 
 export function AgentCapability({
   tools,

@@ -22,8 +22,6 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = bool * string
-
 type context = {
   config: Coord.config;
   agent_name: string;
@@ -31,17 +29,20 @@ type context = {
 
 (* Handlers *)
 
-let handle_pause ctx args =
+let handle_pause ~tool_name ~start_time ctx args =
   let reason = get_string args "reason" "Manual pause" in
   Coord.pause ctx.config ~by:ctx.agent_name ~reason;
-  (true, Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
+  Tool_result.ok ~tool_name ~start_time
+    (Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
 
-let handle_resume ctx _args =
+let handle_resume ~tool_name ~start_time ctx _args =
   match Coord.resume ctx.config ~by:ctx.agent_name with
-  | `Resumed -> (true, Printf.sprintf "Resumed by %s" ctx.agent_name)
-  | `Already_running -> (true, "Default project scope is not paused")
+  | `Resumed -> Tool_result.ok ~tool_name ~start_time
+        (Printf.sprintf "Resumed by %s" ctx.agent_name)
+  | `Already_running -> Tool_result.ok ~tool_name ~start_time
+        "Default project scope is not paused"
 
-let handle_pause_status ctx _args =
+let handle_pause_status ~tool_name ~start_time ctx _args =
   let pause_state =
     if not (Coord.is_initialized ctx.config) then `Initializing
     else
@@ -92,16 +93,18 @@ let handle_pause_status ctx _args =
                 "Server is initializing; pause state is not available yet" );
           ]
   in
-  (true, Yojson.Safe.to_string payload)
+  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
 
-let schemas = Tool_schemas_control.schemas
+(* schemas removed in RFC-0057 PR-1 — masc_pause / masc_resume are emitted
+   via Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
 
 (* Dispatch function *)
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
   match name with
-  | "masc_pause" -> Some (handle_pause ctx args)
-  | "masc_resume" -> Some (handle_resume ctx args)
-  | "masc_pause_status" -> Some (handle_pause_status ctx args)
+  | "masc_pause" -> Some (handle_pause ~tool_name:name ~start_time:start ctx args)
+  | "masc_resume" -> Some (handle_resume ~tool_name:name ~start_time:start ctx args)
+  | "masc_pause_status" -> Some (handle_pause_status ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* ================================================================ *)
@@ -113,16 +116,24 @@ let tool_required_permission = function
   | "masc_pause" | "masc_resume" -> Some Masc_domain.CanBroadcast
   | _ -> None
 
+(* RFC-0057 PR-1: control tool schemas now come from
+   Tool_descriptors_gen via Tool_schemas_misc.schemas. Filter to the
+   two control tools so they register with Mod_control. *)
 let () =
+  let is_control = function
+    | "masc_pause" | "masc_resume" -> true
+    | _ -> false
+  in
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_control
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ?required_permission:(tool_required_permission s.name)
-           ()))
-    schemas
+      if is_control s.name then
+        Tool_spec.register
+          (Tool_spec.create
+             ~name:s.name
+             ~description:s.description
+             ~module_tag:Tool_dispatch.Mod_control
+             ~input_schema:s.input_schema
+             ~handler_binding:Tag_dispatch
+             ?required_permission:(tool_required_permission s.name)
+             ()))
+    Tool_schemas_misc.schemas

@@ -345,7 +345,11 @@ let rewrite_docker_host_paths_to_container
 let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
   let max_eintr_retries = 8 in
   let rec loop attempts_left =
-    let result = Process_eio.run_argv_with_status ?cwd ~timeout_sec argv in
+    let result =
+      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper shell command" ?cwd ~timeout_sec argv
+    in
     match result with
     | Unix.WEXITED 127, out
       when attempts_left > 0
@@ -550,7 +554,14 @@ let resolve_keeper_shell_read_path
         else
           Filename.concat cwd raw_path
     in
-    resolve_with_autocorrect resolved_raw_path
+    let resolver_path =
+      if raw_path = "" || Filename.is_relative raw_path then
+        Option.value ~default:resolved_raw_path
+          (project_relative_host_path ~config resolved_raw_path)
+      else
+        resolved_raw_path
+    in
+    resolve_with_autocorrect resolver_path
 
 (* Docker/sandbox infrastructure delegated to Keeper_shell_docker.
    Aliases retained for backward compatibility with callers that

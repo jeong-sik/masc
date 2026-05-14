@@ -27,7 +27,7 @@ let make_meta name =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
+          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
           ("last_model_used", `String "test-model");
         ])
   with
@@ -164,7 +164,7 @@ let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
     (float_field "p95_latency_ms" aggregate);
   match list_field "model_breakdown" aggregate with
   | [ item ] ->
-      check string "model breakdown model" "test-model"
+      check string "model breakdown redacted" "runtime"
         Yojson.Safe.Util.(item |> member "model" |> to_string);
       check (float 0.0001) "model breakdown cost" 0.5
         (float_field "cost_usd" item)

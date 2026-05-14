@@ -7,6 +7,17 @@ let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > haystack_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
 let with_worktree_config_root f =
   let cwd = Sys.getcwd () in
   let config_dir = Filename.concat cwd "config" in
@@ -36,8 +47,10 @@ let make_meta ?(last_model_used = "glm-5.1") ?(models = []) () =
           ("name", `String "keeper-llama-only-test");
           ("agent_name", `String "keeper-llama-only-test");
           ("trace_id", `String "trace-keeper-llama-only");
-          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
+          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
           ("last_model_used", `String last_model_used);
+          ("sandbox_profile", `String "local");
+          ("network_mode", `String "none");
         ])
     with
   | Ok meta -> meta
@@ -67,14 +80,33 @@ let test_matching_last_model_is_preserved_when_still_in_cascade () =
     | actual_first :: _ ->
       check string "matching model stays first" first actual_first
 
-let test_explicit_models_override_cascade_resolution () =
+let test_legacy_explicit_models_do_not_override_cascade_resolution () =
   let explicit =
     [ "ollama:qwen3.5:35b-a3b-nvfp4"; "glm-coding:glm-5.1" ]
   in
+  let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
   let labels =
     labels_for_turn (make_meta ~last_model_used:"" ~models:explicit ())
   in
-  check (list string) "explicit models are used as configured" explicit labels
+  check (list string) "legacy explicit models do not override cascade" baseline labels
+
+let test_meta_of_json_rejects_legacy_models () =
+  match
+    KT.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "keeper-llama-only-test");
+          ("agent_name", `String "keeper-llama-only-test");
+          ("trace_id", `String "trace-keeper-llama-models-drop");
+          ("models", `List [ `String "glm:glm-5.1" ]);
+          ("sandbox_profile", `String "local");
+          ("network_mode", `String "none");
+        ])
+  with
+  | Ok _ -> fail "meta_of_json should reject legacy models"
+  | Error err ->
+    check bool "legacy models rejected" true
+      (contains_substring err "models")
 
 let () =
   run "keeper_llama_only"
@@ -85,7 +117,9 @@ let () =
             test_stale_last_model_is_not_reused_outside_current_cascade;
           test_case "keeps llama pin when still allowed" `Quick
             test_matching_last_model_is_preserved_when_still_in_cascade;
-          test_case "prefers explicit models over cascade defaults" `Quick
-            test_explicit_models_override_cascade_resolution;
+          test_case "ignores legacy explicit models for runtime labels" `Quick
+            test_legacy_explicit_models_do_not_override_cascade_resolution;
+          test_case "rejects legacy models while parsing keeper meta" `Quick
+            test_meta_of_json_rejects_legacy_models;
         ] );
     ]

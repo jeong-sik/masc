@@ -189,20 +189,15 @@ let make_zero_zombie_consumer ~sw ~room_config
          cleanup_zombies I/O. See RFC #3646 M5 / #3626. *)
       Eio.Fiber.fork ~sw (fun () ->
         try
-          let status = Coord.cleanup_zombies room_config in
-          let status_trimmed = String.trim status in
-          if String.length status_trimmed > 0 then begin
-            let has_zombie_indicator =
-              try
-                String.starts_with status_trimmed ~prefix:"\xf0\x9f\xa7\x9f" ||
-                String.starts_with status_trimmed ~prefix:"Cleaned"
-              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                Log.Orchestrator.warn "zombie indicator check failed: %s" (Printexc.to_string exn);
-                false
-            in
-            if has_zombie_indicator then
-              Log.Orchestrator.info "[zombie] %s" status_trimmed
-          end;
+          let zombie_result = Coord.cleanup_zombies room_config in
+          (match zombie_result with
+           | Coord.Cleaned { count; names; _ } when count > 0 ->
+               let status =
+                 Printf.sprintf "Cleaned up %d zombie agent(s): %s"
+                   count (String.concat ", " names)
+               in
+               Log.Orchestrator.info "[zombie] %s" status
+           | _ -> ());
           let ttl = Env_config_runtime.Claim.ttl_seconds in
           (try
             let released = Coord_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl in

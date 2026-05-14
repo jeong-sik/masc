@@ -8,10 +8,12 @@
     resolves it at call time for every code path that does not
     explicitly thread [~metrics].
 
-    This module constructs the sink.  Each callback relays into
-    [Prometheus.inc_counter] on a named metric.  No other state —
-    the sink is pure forwarding, so there is no need to guard against
-    concurrent fiber access beyond what Prometheus already provides.
+    This module constructs the sink.  Most callbacks relay directly into
+    [Prometheus.inc_counter] on a named metric.  The exception is request
+    latency: OAS [on_request_end] carries [model_id] but not [provider], so
+    the bridge keeps a tiny model→provider cache from adjacent callbacks
+    ([on_http_status], [on_retry], [on_token_usage]) to label latency
+    histograms without changing the OAS API.
 
     @since 0.4.x (telemetry chain: oas#804 + oas#807) *)
 
@@ -20,7 +22,7 @@
     Label cardinality (practical upper bound as of v0.4.x):
     - [provider]: fixed enum of 6 canonical values (ollama, glm,
       glm-coding, anthropic, openai, gemini, claude_code)
-    - [model]: bounded by entries in [config/cascade.json], typically
+    - [model]: bounded by entries in [config/cascade.toml], typically
       under 10 distinct values per deployment
     - [status]: small set of HTTP codes the provider actually emits
       (usually 200, 400, 401, 429, 500, 503)
@@ -40,14 +42,55 @@ let error_by_reason_metric = Prometheus.metric_llm_provider_errors_by_reason
 let retry_metric = Prometheus.metric_llm_provider_retries
 let input_tokens_metric = Prometheus.metric_llm_provider_input_tokens
 let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
+let circuit_state_metric = Prometheus.metric_llm_provider_circuit_state
+let streaming_first_chunk_metric =
+  Prometheus.metric_llm_provider_streaming_first_chunk
+
+let streaming_inter_chunk_metric =
+  Prometheus.metric_llm_provider_streaming_inter_chunk
+
+let unknown_provider_label = "unknown"
+let provider_cache_max_entries = 256
+let provider_by_model : (string, string) Hashtbl.t = Hashtbl.create 32
+let provider_cache_mutex = Stdlib.Mutex.create ()
+
+let nonempty_or_none value =
+  let value = String.trim value in
+  if value = "" then None else Some value
+
+let remember_provider ~model_id ~provider =
+  match nonempty_or_none model_id, nonempty_or_none provider with
+  | Some model_id, Some provider ->
+    Stdlib.Mutex.protect provider_cache_mutex (fun () ->
+      if Hashtbl.length provider_by_model >= provider_cache_max_entries
+         && not (Hashtbl.mem provider_by_model model_id)
+      then Hashtbl.clear provider_by_model;
+      Hashtbl.replace provider_by_model model_id provider)
+  | _ -> ()
+
+let provider_for_latency ?provider ~model_id () =
+  match Option.bind provider nonempty_or_none with
+  | Some provider ->
+    remember_provider ~model_id ~provider;
+    provider
+  | None ->
+    let model_id = String.trim model_id in
+    if model_id = ""
+    then unknown_provider_label
+    else
+      Stdlib.Mutex.protect provider_cache_mutex (fun () ->
+        Option.value
+          ~default:unknown_provider_label
+          (Hashtbl.find_opt provider_by_model model_id))
 
 (** Emit a single HTTP status observation to the Prometheus counter.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
-    capture in [Oas_worker_cascade]) can forward [on_http_status] to the
+    capture in [Cascade_legacy_runner]) can forward [on_http_status] to the
     same counter without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_http_status ~provider ~model_id ~status =
+  remember_provider ~model_id ~provider;
   Prometheus.inc_counter http_status_metric
     ~labels:
       [
@@ -108,6 +151,7 @@ let emit_error ~model_id ~error =
     ()
 
 let emit_retry ~provider ~model_id ~attempt =
+  remember_provider ~model_id ~provider;
   Prometheus.inc_counter retry_metric
     ~labels:
       [
@@ -118,6 +162,7 @@ let emit_retry ~provider ~model_id ~attempt =
     ()
 
 let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
+  remember_provider ~model_id ~provider;
   if input_tokens > 0 then
     Prometheus.inc_counter input_tokens_metric
       ~labels:[("provider", provider); ("model", model_id)]
@@ -129,15 +174,67 @@ let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
       ~delta:(Float.of_int output_tokens)
       ()
 
+let seconds_of_ms ms =
+  if Float.is_finite ms && ms > 0.0 then Some (Float.max 0.001 (ms /. 1000.0))
+  else None
+
+let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
+  remember_provider ~model_id ~provider;
+  match seconds_of_ms ttfrc_ms with
+  | Some seconds ->
+    Otel_spans.add_event
+      ~name:"ttfrc.received"
+      ~attrs:
+        [ "gen_ai.provider.name", `String provider
+        ; "gen_ai.request.model", `String model_id
+        ; "masc.gen_ai.streaming.ttfrc_ms", `Float ttfrc_ms
+        ]
+      ();
+    Prometheus.observe_histogram streaming_first_chunk_metric
+      ~labels:[("provider", provider); ("model", model_id)]
+      seconds
+  | None -> ()
+
+let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
+  remember_provider ~model_id ~provider;
+  match seconds_of_ms inter_chunk_ms with
+  | Some seconds ->
+    Otel_spans.add_event
+      ~name:"streaming.chunk"
+      ~attrs:
+        [ "gen_ai.provider.name", `String provider
+        ; "gen_ai.request.model", `String model_id
+        ; "masc.gen_ai.streaming.chunk_index", `Int chunk_index
+        ; "masc.gen_ai.streaming.inter_chunk_ms", `Float inter_chunk_ms
+        ]
+      ();
+    Prometheus.observe_histogram streaming_inter_chunk_metric
+      ~labels:[("provider", provider); ("model", model_id)]
+      seconds
+  | None -> ()
+
+let emit_circuit_state ~provider ~model_id ~provider_key ~state =
+  remember_provider ~model_id ~provider;
+  let value =
+    Float.of_int (Llm_provider.Metrics.circuit_state_to_int state)
+  in
+  Prometheus.set_gauge circuit_state_metric
+    ~labels:
+      [
+        ("provider", provider);
+        ("model", model_id);
+        ("provider_key", provider_key);
+      ]
+    value
+
 (** Canonical metric name for the unified fallback counter (§7.3.2 Zero
-    Silent Failure). Per-class counters (capability_drops,
-    cross_cascade_fallback) remain for drill-down; this is the single
-    numerator across all classes for the dashboard panel. *)
+    Silent Failure). This is the single numerator across all fallback
+    classes for the dashboard panel. *)
 let fallback_triggered_metric = Prometheus.metric_fallback_triggered
 
 (** Emit a fallback observation to the unified counter.
-    [kind]   one of: cross_cascade | cascade_empty | capability_drop
-                   | cli_unsupported | provider_error_fallback | …
+    [kind]   one of: cascade_empty | capability_drop | cli_unsupported
+                   | provider_error_fallback | …
     [detail] free-form drill-down (rejection_reason, target provider,
              dropped field, …). Cardinality bounded by callers. *)
 let emit_fallback_triggered ~kind ~detail =
@@ -162,23 +259,27 @@ let request_latency_seconds ~latency_ms =
   let latency_ms = Stdlib.max 1 latency_ms in
   Float.of_int latency_ms /. 1000.0
 
-let emit_request_latency_clamped ~model_id ~reason =
+let emit_request_latency_clamped ~provider ~model_id ~reason =
   Prometheus.inc_counter request_latency_clamped_metric
-    ~labels:[("model", model_id); ("reason", reason)]
+    ~labels:[("provider", provider); ("model", model_id); ("reason", reason)]
     ()
 
 (** Emit a single latency observation to the Prometheus histogram.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
-    capture in [Oas_worker_cascade]) can forward [on_request_end] to the
+    capture in [Cascade_legacy_runner]) can forward [on_request_end] to the
     same histogram without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
-let emit_request_latency ~model_id ~latency_ms =
+let emit_request_latency ?provider ~model_id ~latency_ms () =
+  let provider = provider_for_latency ?provider ~model_id () in
   if latency_ms <= 0 then
-    emit_request_latency_clamped ~model_id ~reason:"non_positive_latency_ms";
+    emit_request_latency_clamped
+      ~provider
+      ~model_id
+      ~reason:"non_positive_latency_ms";
   let seconds = request_latency_seconds ~latency_ms in
   Prometheus.observe_histogram request_latency_metric
-    ~labels:[("model", model_id)] seconds
+    ~labels:[("provider", provider); ("model", model_id)] seconds
 
 (** Build the OAS Metrics.t sink.
 
@@ -190,7 +291,10 @@ let emit_request_latency ~model_id ~latency_ms =
     - [on_request_end]   → masc_llm_provider_request_latency_seconds
     - [on_error]        → masc_llm_provider_errors_total
     - [on_retry]        → masc_llm_provider_retries_total
-    - [on_token_usage]  → masc_llm_provider_{input,output}_tokens_total *)
+    - [on_circuit_state] → masc_llm_provider_circuit_state
+    - [on_token_usage]  → masc_llm_provider_{input,output}_tokens_total
+    - [on_streaming_first_chunk] → masc_llm_provider_streaming_first_chunk_seconds
+    - [on_streaming_chunk] → masc_llm_provider_streaming_inter_chunk_seconds *)
 let make_sink () : Llm_provider.Metrics.t =
   {
     on_cache_hit = emit_cache_hit;
@@ -201,13 +305,18 @@ let make_sink () : Llm_provider.Metrics.t =
         emit_http_status ~provider ~model_id ~status);
     on_request_end =
       (fun ~model_id ~latency_ms ->
-        emit_request_latency ~model_id ~latency_ms);
+        match latency_ms with
+        | Some latency_ms -> emit_request_latency ~model_id ~latency_ms ()
+        | None -> ());
     on_capability_drop =
       (fun ~model_id ~field ->
         emit_capability_drop ~model_id ~field);
     on_error = (fun ~model_id ~error -> emit_error ~model_id ~error);
     on_retry = emit_retry;
+    on_circuit_state = emit_circuit_state;
     on_token_usage = emit_token_usage;
+    on_streaming_first_chunk = emit_streaming_first_chunk;
+    on_streaming_chunk = emit_streaming_chunk;
   }
 
 (** Install the sink as the process-wide default.  Idempotent — calling

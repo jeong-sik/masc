@@ -38,17 +38,26 @@ vi.mock('../../api/repositories', () => ({
   fetchRepositoriesList: vi.fn(() => Promise.resolve([{
     id: 'masc-mcp',
     name: 'masc-mcp',
+    url: '',
     local_path: '/workspace/masc-mcp',
+    default_branch: 'main',
+    status: 'active',
+    auto_sync: false,
+    sync_interval: 300,
+    credential_id: null,
+    created_at: null,
+    updated_at: null,
   }])),
 }))
 
-vi.mock('./ide-conversation-rail-mock', () => ({
-  IdeConversationRailMock: () => null,
+vi.mock('./ide-conversation-rail', () => ({
+  IdeConversationRail: () => null,
 }))
 
-import { IdeShell } from './ide-shell'
+import { deriveIdeStatusbarModel, IdeShell } from './ide-shell'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
@@ -116,6 +125,8 @@ describe('IdeShell', () => {
     vi.unstubAllGlobals()
     window.location.hash = ''
     route.value = { tab: 'overview', params: {}, postId: null }
+    activeIdeFile.value = 'package.json'
+    ideContextFocus.value = null
     clearTraces()
   })
 
@@ -141,6 +152,227 @@ describe('IdeShell', () => {
     expect(container.textContent).toContain('Active overlays')
     expect(container.textContent).toContain('Time')
     expect(container.textContent).toContain('Approve')
+  })
+
+  it('hydrates current file and line focus from IDE route params', async () => {
+    route.value = {
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib\\runtime.ml',
+        line: '42',
+        surface: 'Task',
+        label: 'Runtime task',
+        source_id: 'task:runtime',
+        keeper: 'sangsu',
+      },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 42,
+      surface: 'Task',
+      label: 'Runtime task',
+      source_id: 'task:runtime',
+      keeper_id: 'sangsu',
+    })
+  })
+
+  it('hydrates operational route links from IDE route params', async () => {
+    route.value = {
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/runtime.ml',
+        line: '42',
+        surface: 'PR',
+        label: 'Runtime review',
+        source_id: 'trace:evt-42',
+        keeper: 'sangsu',
+        goal: 'goal-runtime',
+        task: 'task-runtime',
+        post: 'post-runtime',
+        comment: 'comment-runtime',
+        pr: '15035',
+        ref: 'main',
+        log_id: 'turn-42',
+        session_id: 'sess-runtime',
+        operation_id: 'op-runtime',
+        worker_run_id: 'wr-runtime',
+      },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ]))
+
+    const toolbarFocus = container.querySelector('[data-testid="ide-toolbar-context-focus"]')
+    expect(toolbarFocus?.getAttribute('aria-label')).toBe(
+      'Current IDE context: PR line 42, Runtime review, keeper sangsu, 10 route links',
+    )
+
+    const routeButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
+    expect(routeButtons.map(button => button.getAttribute('aria-label'))).toEqual([
+      'Open Code lib/runtime.ml:42',
+      'Open Goal goal-runtime',
+      'Open Task task-runtime',
+      'Open Board post post-runtime',
+      'Open Comment comment-runtime',
+      'Open PR 15035',
+      'Open Git main',
+      'Open Log turn-42',
+      'Open Fleet telemetry event log · session sess-runtime · operation op-runtime · worker wr-runtime · query turn-42',
+      'Open Keeper sangsu',
+    ])
+
+    fireEvent.click(routeButtons[8]!)
+    expect(window.location.hash).toBe(
+      '#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-42',
+    )
+  })
+
+  it('derives compact operational statusbar chips from IDE route context', () => {
+    const model = deriveIdeStatusbarModel({
+      activeView: 'split-diff',
+      activeLayers: new Set(['keeper-trace', 'approve']),
+      activeFilePath: 'dashboard/src/components/ide/ide-shell.ts',
+      findOpen: true,
+      terminalOpen: true,
+      railsCollapsed: true,
+      reviewFocusActive: false,
+      routeParams: {
+        surface: 'PR',
+        label: 'Runtime review',
+        line: '42',
+        goal: 'goal-runtime',
+        task: 'task-runtime',
+        post: 'post-runtime',
+        comment: 'comment-runtime',
+        pr: '15035',
+        ref: 'main',
+        log_id: 'turn-42',
+        session_id: 'sess-runtime',
+        keeper: 'sangsu',
+      },
+      repositories: [{
+        id: 'masc-mcp',
+        name: 'masc-mcp',
+        url: '',
+        local_path: '/workspace/masc-mcp',
+        default_branch: 'main',
+        status: 'active',
+        auto_sync: false,
+        sync_interval: 300,
+        credential_id: null,
+        created_at: null,
+        updated_at: null,
+      }],
+      activeRepositoryId: 'masc-mcp',
+      workspaceSource: { kind: 'repository', repoId: 'masc-mcp' },
+      dashboardConnected: true,
+    })
+
+    expect(model.workspaceLabel).toBe('masc-mcp')
+    expect(model.connectionLabel).toBe('runtime · live')
+    expect(model.connectionTone).toBe('ok')
+    expect(model.chips.map(chip => chip.label)).toEqual([
+      'SPLIT DIFF',
+      'ide/ide-shell.ts',
+      'Trace +1',
+      'terminal',
+      'find',
+      'rails hidden',
+      'PR L42 Runtime review',
+      'Goal goal-runtime',
+      'Task task-runtime',
+      'Board post-runtime',
+      'Comment comment-runtime',
+      'PR #15035',
+      'Git main',
+      'Log turn-42',
+      'Telemetry sess-runtime',
+      'Keeper sangsu',
+    ])
+  })
+
+  it('renders statusbar operational chips for the focused PR/task/log route', async () => {
+    route.value = {
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/runtime.ml',
+        line: '42',
+        surface: 'PR',
+        label: 'Runtime review',
+        source_id: 'trace:evt-42',
+        keeper: 'sangsu',
+        task: 'task-runtime',
+        pr: '15035',
+        log_id: 'turn-42',
+      },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))
+    await waitFor(() => expect(container.querySelector('[data-testid="ide-statusbar-workspace"]')?.textContent).toBe('masc-mcp'))
+
+    const statusbar = container.querySelector('[data-testid="ide-statusbar"]')
+    expect(statusbar?.getAttribute('aria-label')).toBe('IDE operational status')
+    expect(statusbar?.textContent).not.toContain('LIVE WORKSPACE')
+    const chipLabels = [
+      ...container.querySelectorAll<HTMLElement>('[data-testid^="ide-statusbar-chip-"]'),
+    ].map(chip => chip.textContent)
+    expect(chipLabels).toEqual([
+      'SOURCE',
+      'lib/runtime.ml',
+      'terminal',
+      'PR L42 Runtime review',
+      'Task task-runtime',
+      'PR #15035',
+      'Log turn-42',
+      'Telemetry turn-42',
+      'Keeper sangsu',
+    ])
+  })
+
+  it('rejects unsafe IDE route file focus params', async () => {
+    route.value = {
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: '/workspace/lib/runtime.ml',
+        line: '42',
+      },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(activeIdeFile.value).toBe('package.json')
+    expect(ideContextFocus.value).toBeNull()
   })
 
   it('renders toolbar lanes that can collapse independently on narrow screens', () => {
@@ -385,7 +617,28 @@ describe('IdeShell', () => {
 
     expect(container.textContent).toContain('BRANCH GRAPH')
     await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
-    expect(container.textContent).toContain('main')
+  })
+
+  it('keeps the right diagnostics bounded above the primary conversation rail', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const rail = container.querySelector('[data-testid="ide-right-rail"]')
+    const contextStack = container.querySelector('[data-testid="ide-right-context-stack"]')
+    const primaryRail = container.querySelector('[data-testid="ide-primary-conversation-rail"]')
+    expect(rail).not.toBeNull()
+    expect(contextStack).not.toBeNull()
+    expect(primaryRail).not.toBeNull()
+    expect(Array.from(rail?.children ?? []).map(child => child.className)).toEqual([
+      'ide-plane-context-stack',
+      'ide-plane-primary-rail',
+    ])
+    expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
   })
 
   it('hydrates collapsed IDE rails from the route', () => {

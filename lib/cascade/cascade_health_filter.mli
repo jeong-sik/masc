@@ -60,37 +60,27 @@ val is_local_provider : Llm_provider.Provider_config.t -> bool
     LM Studio, etc.) — i.e. an endpoint that does not require an API key
     and is subject to {!filter_healthy} discovery probing. *)
 
-val filter_healthy :
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  Llm_provider.Provider_config.t list ->
-  Llm_provider.Provider_config.t list
-(** Return the providers that should remain in the cascade after:
-
-    {ol
-      {- dropping cloud providers missing an [api_key] (kept all if the
-         filter would empty the list — a fail-open guard);}
-      {- if any local provider exists, refreshing the shared
-         [model_endpoints] index via [Llm_provider.Discovery.refresh_and_sync];}
-      {- when {b every} local endpoint is unhealthy and at least one
-         cloud provider exists, falling back to the cloud-only set
-         (logged at info via [Diag]).}}
-
-    The function is invoked at startup and on each cascade reload. *)
-
 val filter_healthy_strict :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   Llm_provider.Provider_config.t list ->
   (Llm_provider.Provider_config.t list, health_filter_rejection) result
-(** Strict variant of {!filter_healthy} for execution paths.
+(** Filter providers that should remain in the cascade after:
+
+    {ol
+      {- dropping cloud providers missing an [api_key];}
+      {- if any local provider exists, refreshing the shared
+         [model_endpoints] index via [Llm_provider.Discovery.refresh_and_sync];}
+      {- when {b every} local endpoint is unhealthy and at least one
+         cloud provider exists, falling back to the cloud-only set.}}
 
     Returns [Error] when:
     {ul
       {- all providers lack required API keys ([All_missing_api_key]);}
-      {- all local endpoints are unhealthy and strict mode disallows
-         automatic cloud fallback ([All_local_unhealthy]).}}
+      {- all local endpoints are unhealthy and no cloud fallback exists
+         ([All_local_unhealthy]).}}
 
-    Use this for keeper execution paths where provider drift must be
-    surfaced as a typed blocker. Use {!filter_healthy} for diagnostic
-    and startup contexts where fail-open is acceptable. *)
+    Replaces the prior fail-open [filter_healthy] variant: provider drift
+    is now surfaced as a typed blocker on every call site instead of
+    being silently dropped. The function is invoked at startup and on
+    each cascade reload as well as on the keeper execution path. *)

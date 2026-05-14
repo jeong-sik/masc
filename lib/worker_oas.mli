@@ -50,7 +50,7 @@ val run_worker_via_oas :
   tools:Agent_sdk.Tool.t list ->
   raw_trace:Agent_sdk.Raw_trace.t ->
   ?gate_config:Eval_gate.gate_config ->
-  ?contract:Agent_sdk.Risk_contract.t ->
+  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?worker_run_id:string ->
   unit ->
   (Worker_container_types.run_result, string) result
@@ -65,7 +65,7 @@ val resume_worker_via_oas :
   prompt:string ->
   tools:Agent_sdk.Tool.t list ->
   raw_trace:Agent_sdk.Raw_trace.t ->
-  ?contract:Agent_sdk.Risk_contract.t ->
+  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?worker_run_id:string ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   unit ->

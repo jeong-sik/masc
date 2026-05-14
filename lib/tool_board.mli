@@ -24,7 +24,7 @@
     Internal helpers stay private at this boundary
     ([board_list_cache] type + the cache cell, the
     [cached_board_list] adapter, [strip_state_blocks_text],
-    [tool_result] type alias, [format_ttl_remaining],
+    [format_ttl_remaining],
     [agent_lookup_hook] atomic ref,
     [resolve_board_post_kind], [format_post] /
     [format_post_compact] / [format_comment] /

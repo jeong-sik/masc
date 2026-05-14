@@ -21,8 +21,7 @@
 
 (** {1 Tool result + context} *)
 
-type tool_result = bool * string
-(** [(success, message)] dispatch return shape. *)
+type tool_result = Tool_result.t
 
 type context = {
   config : Coord.config;
@@ -74,7 +73,7 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_result.t option
 (** [dispatch ctx ~name ~args] routes by tool name.  Returns
     [None] when [name] is not [masc_agent_timeline] — caller
     treats that as "not my tool". *)

@@ -1,7 +1,7 @@
 open Alcotest
 
-module CT = Masc_mcp.Cdal_types
-module L = Masc_mcp.Labeling
+module CT = Cdal_types
+module L = Labeling
 
 (* ================================================================ *)
 (* Helpers                                                           *)

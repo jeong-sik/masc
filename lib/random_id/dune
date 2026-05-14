@@ -4,6 +4,8 @@
  (public_name masc_mcp.masc_random_id)
  (wrapped false)
  (modules random_id)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 enabled. Leaf util sublib.
+ (flags (:standard -w +4))
  (libraries
    mirage-crypto
    mirage-crypto-rng))

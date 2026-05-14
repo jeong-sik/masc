@@ -27,6 +27,8 @@ export interface SurfaceCardSummary {
   readonly toneLength: number
   readonly hasCustomClass: boolean
   readonly classNameLength: number
+  readonly hasStyle: boolean
+  readonly styleLength: number
   readonly hasTestId: boolean
   readonly testIdLength: number
   readonly contentState: CardContentState
@@ -92,7 +94,7 @@ function normalizeStatus(status: string | undefined): string {
   return status?.trim().toLowerCase() ?? ''
 }
 
-function surfaceCardClassName({
+export function surfaceCardClassName({
   variant,
   tone,
   className,
@@ -124,14 +126,17 @@ export interface SurfaceCardProps {
   class?: string
   /** Tone class: 'ok' | 'warn' | 'bad' */
   tone?: string
+  style?: string
   testId?: string
   children: ComponentChildren
+  [key: string]: unknown
 }
 
 export function summarizeSurfaceCard({
   variant = 'standard',
   class: cx,
   tone,
+  style,
   testId,
   children,
 }: SurfaceCardProps): SurfaceCardSummary {
@@ -143,6 +148,8 @@ export function summarizeSurfaceCard({
     toneLength: trimmedTextLength(tone),
     hasCustomClass: hasNonEmptyString(cx),
     classNameLength: trimmedTextLength(cx),
+    hasStyle: hasNonEmptyString(style),
+    styleLength: trimmedTextLength(style),
     hasTestId: hasNonEmptyString(testId),
     testIdLength: trimmedTextLength(testId),
     contentState: contentState(children),
@@ -153,19 +160,23 @@ export function SurfaceCard({
   variant = 'standard',
   class: cx,
   tone,
+  style,
   testId,
   children,
+  ...rest
 }: SurfaceCardProps) {
   const summary = summarizeSurfaceCard({
     variant,
     class: cx,
     tone,
+    style,
     testId,
     children,
   })
   const cls = surfaceCardClassName({ variant, tone, className: cx })
   return html`<div
     class=${cls}
+    style=${style}
     data-surface-card
     data-surface-card-variant=${summary.variant}
     data-surface-card-tone=${summary.tone}
@@ -174,10 +185,13 @@ export function SurfaceCard({
     data-surface-card-tone-length=${summary.toneLength}
     data-surface-card-has-custom-class=${summary.hasCustomClass}
     data-surface-card-class-length=${summary.classNameLength}
+    data-surface-card-has-style=${summary.hasStyle}
+    data-surface-card-style-length=${summary.styleLength}
     data-surface-card-has-test-id=${summary.hasTestId}
     data-surface-card-test-id-length=${summary.testIdLength}
     data-surface-card-content-state=${summary.contentState}
     data-testid=${testId}
+    ...${rest}
   >${children}</div>`
 }
 
@@ -194,6 +208,7 @@ export interface SectionCardProps {
   testId?: string
   'data-testid'?: string
   children: ComponentChildren
+  [key: string]: unknown
 }
 
 function statusDotClass(status?: string): string {
@@ -264,6 +279,7 @@ export function SectionCard({
   testId,
   'data-testid': dataTestId,
   children,
+  ...rest
 }: SectionCardProps) {
   // SPEC `.section-head` upgrade — SectionHead atom replaces the
   // legacy SectionHeader. The strip wants to sit flush against the
@@ -342,6 +358,7 @@ export function SectionCard({
       data-section-card-test-id-length=${summary.testIdLength}
       data-section-card-content-state=${summary.contentState}
       data-testid=${effectiveTestId}
+      ...${rest}
     >
       <${SectionHead} tail=${tail}>${sectionLabel}<//>
       <div class="${bodyPadding} flex flex-col gap-4">${children}</div>

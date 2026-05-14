@@ -87,7 +87,7 @@ let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
   let source_root = Masc_test_deps.find_project_root () in
   let fake_config_dir = Filename.concat fake_build_root "config" in
   mkdir_p fake_config_dir;
-  write_file (Filename.concat fake_config_dir "cascade.json") "{}\n";
+  write_file (Filename.concat fake_config_dir "cascade.toml") "";
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
   with_cwd fake_build_root @@ fun () ->
   match KTPC.load ~base_path:source_root with
@@ -100,6 +100,72 @@ let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
         (Printf.sprintf
            "expected config load to use base_path=%s instead of cwd=%s: %s"
            source_root fake_build_root msg)
+
+let test_load_normalizes_legacy_fs_tool_names () =
+  with_temp_dir "tool-policy-legacy-tools" @@ fun root ->
+  let config_dir = Filename.concat root "config" in
+  mkdir_p config_dir;
+  write_file
+    (Filename.concat config_dir "tool_policy.toml")
+    {|
+[groups.legacy]
+tools = ["keeper_fs_write", "keeper_fs_delete", "keeper_fs_edit"]
+
+[masc.legacy]
+tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
+
+[presets.legacy]
+groups = ["legacy"]
+masc_groups = ["legacy"]
+masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
+|};
+  match KTPC.load ~base_path:root with
+  | Error msg -> fail ("expected legacy policy config to load: " ^ msg)
+  | Ok cfg ->
+      let assert_no_legacy label tools =
+        check bool (label ^ " drops keeper_fs_write") false
+          (List.mem "keeper_fs_write" tools);
+        check bool (label ^ " drops keeper_fs_delete") false
+          (List.mem "keeper_fs_delete" tools);
+        check bool (label ^ " keeps canonical fs_edit") true
+          (List.mem "keeper_fs_edit" tools)
+      in
+      (match KTPC.resolve_group cfg "legacy" with
+      | Some tools -> assert_no_legacy "group" tools
+      | None -> fail "legacy group missing");
+      assert_no_legacy "masc groups" (KTPC.all_masc_tools cfg);
+      (match KTPC.resolve_preset cfg "legacy" () with
+      | Some (KTPC.Subset tools) -> assert_no_legacy "preset" tools
+      | Some KTPC.All_candidates -> fail "legacy preset should be explicit subset"
+      | None -> fail "legacy preset missing")
+
+let test_policy_validation_knows_static_and_oas_core_tools () =
+  check bool "keeper static tag tool is known" true
+    (KTPC.is_known_policy_tool_name "keeper_board_post");
+  check bool "keeper shell alias target is known" true
+    (KTPC.is_known_policy_tool_name "keeper_shell");
+  check bool "keeper bash alias target is known" true
+    (KTPC.is_known_policy_tool_name "keeper_bash");
+  check bool "keeper public Bash alias is known" true
+    (KTPC.is_known_policy_tool_name "Bash");
+  check bool "keeper public Read alias is known" true
+    (KTPC.is_known_policy_tool_name "Read");
+  check bool "keeper task done is known" true
+    (KTPC.is_known_policy_tool_name "keeper_task_done");
+  check bool "keeper time tool is known" true
+    (KTPC.is_known_policy_tool_name "keeper_time_now");
+  check bool "masc static tag tool is known" true
+    (KTPC.is_known_policy_tool_name "masc_status");
+  check bool "mcp-prefixed masc tool is known" true
+    (KTPC.is_known_policy_tool_name "mcp__masc__masc_status");
+  check bool "masc code git tool is known" true
+    (KTPC.is_known_policy_tool_name "masc_code_git");
+  check bool "OAS core tool is known" true
+    (KTPC.is_known_policy_tool_name "extend_turns");
+  check bool "typed task completion tool is known" true
+    (KTPC.is_known_policy_tool_name "masc_complete_task");
+  check bool "unknown tool is not known" false
+    (KTPC.is_known_policy_tool_name "__missing_tool")
 
 (* ── preset_can_satisfy tests ───────────────────────────────── *)
 
@@ -182,6 +248,10 @@ let () =
             test_load_honors_masc_config_dir_override;
           test_case "anchors resolution to base_path over cwd candidate" `Quick
             test_load_anchors_resolution_to_base_path_over_cwd_candidate;
+          test_case "normalizes legacy fs tool names" `Quick
+            test_load_normalizes_legacy_fs_tool_names;
+          test_case "policy validation accepts static and OAS core tools" `Quick
+            test_policy_validation_knows_static_and_oas_core_tools;
         ] );
       ( "preset_can_satisfy",
         [

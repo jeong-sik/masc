@@ -12,6 +12,8 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
+import { authHeaders } from '../api/core'
+import { SurfaceCard } from './common/card'
 import { SkeletonText } from './common/skeleton'
 
 interface LogResponse {
@@ -94,7 +96,7 @@ async function fetchLogs(id: string, lines: number) {
   setEntry(id, { loading: true, error: null, requestedLines: lines })
   try {
     const res = await fetch(`/api/v1/sidecar/logs?name=${encodeURIComponent(id)}&lines=${lines}`, {
-      headers: { Accept: 'application/json' },
+      headers: { ...authHeaders(), Accept: 'application/json' },
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = (await res.json()) as LogResponse
@@ -187,10 +189,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
   const hasFilter = entry.level !== 'all' || entry.keyword.trim() !== ''
 
   return html`
-    <div
-      id=${`sidecar-log-${connectorId}`}
-      class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2"
-    >
+    <${SurfaceCard} class="mt-3 !p-2" id=${`sidecar-log-${connectorId}`}>
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="min-w-0 truncate text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" title=${entry.logPath}>
           ${entry.logPath || '(log path unknown)'}
@@ -241,7 +240,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           `
         : null}
       ${entry.error
-        ? html`<div class="rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)]">${entry.error}</div>`
+        ? html`<${SurfaceCard} class="!border-[var(--bad-20)] !bg-[var(--bad-10)] !px-2 !py-1 text-2xs text-[var(--bad-light)]">${entry.error}</${SurfaceCard}>`
         : entry.loading && entry.lines.length === 0
           ? html`
               <div class="rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-2">
@@ -251,22 +250,22 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           : entry.available
             ? filtered.length === 0 && hasFilter
               ? html`
-                  <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
+                  <${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
                     필터 조건에 맞는 라인이 없습니다.
                     ${entry.lines.length > MAX_FILTER_WINDOW
                       ? ` (최근 ${MAX_FILTER_WINDOW}줄만 검색)`
                       : ''}
-                  </div>
+                  </${SurfaceCard}>
                 `
               : html`
                   <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-2 font-mono text-3xs leading-[1.4] text-[var(--color-fg-primary)]">${filtered.join('\n')}</pre>
                 `
             : html`
-                <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
+                <${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-3 text-center text-2xs text-[var(--color-fg-disabled)]">
                   오늘 날짜 로그 파일이 아직 없습니다. sidecar를 시작하면 자동 생성됩니다.
-                </div>
+                </${SurfaceCard}>
               `}
-    </div>
+    </${SurfaceCard}>
   `
 }
 

@@ -192,7 +192,7 @@ stateDiagram-v2
 2. **BuildPrompt**: `keeper_unified_prompt.build_prompt`로 keeper identity + observation을 단일 (system_prompt, user_message) 쌍으로 조립
 3. **AgentRun**: `keeper_agent_run.run_turn`이 OAS `Agent.run`에 위임. tools + hooks + context_reducer + memory 전달
 4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_oas`가 `keeper_exec_tools.execute_keeper_tool_call`로 디스패치
-5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영
+5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` Prometheus gauge로 노출
 6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle`가 compaction, handoff rollover, continuity summary를 single-writer로 처리
 7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 gate에 따라 compaction 또는 handoff rollover를 실행
 8. **MemoryWrite**: `keeper_agent_run` tail에서 memory bank note append와 episodic flush를 수행. hebbian은 task lifecycle에서만 기록
@@ -274,7 +274,7 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 2. `load_context_from_checkpoint`로 세션/컨텍스트 복원
 3. `build_keeper_system_prompt` + `build_turn_prompt` callback으로 프롬프트 구성
 4. `make_tools` (keeper tool bridge) + `make_hooks` (safety gates) 생성
-5. `Oas_worker.run_named` -> OAS `Agent.run` loop (tool calls -> hooks -> response)
+5. `Keeper_turn_driver.run_named` -> OAS `Agent.run` loop (tool calls -> hooks -> response)
 6. `persist_message` (assistant 응답 영속화)
 7. 결과 반환: `run_result { response_text, model_used, turn_count, tool_calls_made, usage, tools_used }`
 

@@ -6,8 +6,7 @@
     @since 0.59.0
     @since 0.92.0 extracted from Cascade_config *)
 
-let config_cache : (string, float * Yojson.Safe.t) Hashtbl.t =
-  Hashtbl.create 4
+let config_cache : (string, float * Yojson.Safe.t) Hashtbl.t = Hashtbl.create 4
 
 (** Stdlib Mutex — no Eio dependency. Keep the critical section limited to
     cache access so file I/O and JSON parsing do not block unrelated fibers
@@ -17,12 +16,14 @@ let config_cache_mu = Mutex.create ()
 let with_cache_lock f =
   Mutex.lock config_cache_mu;
   Fun.protect ~finally:(fun () -> Mutex.unlock config_cache_mu) f
+;;
 
 let invalidate_cache_entry path =
   with_cache_lock (fun () -> Hashtbl.remove config_cache path)
+;;
 
-(* 2026-05-05: load_catalog runs 7-10× per startup (snapshot, validation,
-   mcp_audit, dashboard cache warm-up, etc.).  Without dedup, every cycle
+(* 2026-05-05: load_catalog runs 7-10x per startup (snapshot, validation,
+   dashboard cache warm-up, etc.).  Without dedup, every cycle
    detected by [detect_fallback_cycles] re-emits the same WARN line on
    each call → ~10 cascades × 10 phases = 100+ WARN lines per startup that
    say the exact same thing.  We memo the last-warned cycle set per
@@ -38,25 +39,24 @@ let cycle_warn_mu = Mutex.create ()
 let with_cycle_warn_lock f =
   Mutex.lock cycle_warn_mu;
   Fun.protect ~finally:(fun () -> Mutex.unlock cycle_warn_mu) f
+;;
 
 let cycle_set_key (cycles : string list list) : string =
   cycles
-  |> List.map (fun cycle ->
-       cycle |> List.sort compare |> String.concat ",")
+  |> List.map (fun cycle -> cycle |> List.sort compare |> String.concat ",")
   |> List.sort compare
   |> String.concat "|"
+;;
 
-let ensure_materialized_json path =
-  match Cascade_toml_materializer.ensure_materialized_json ~config_path:path with
-  | Ok { wrote_json; _ } ->
-      if wrote_json then invalidate_cache_entry path;
-      Ok ()
-  | Error _ as err -> err
+(* RFC-0058 §9 Phase 9.2: previous [ensure_materialized_json] wrapper
+   removed — it was private (not in [.mli]) and had zero call sites.
+   In-process callers route through [load_toml_in_memory] which never
+   touches the JSON sibling on disk. *)
 
 let read_json_file path =
   let ic = open_in path in
   let content =
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> close_in_noerr ic)
       (fun () ->
          let len = in_channel_length ic in
@@ -65,476 +65,220 @@ let read_json_file path =
          Bytes.to_string buf)
   in
   Yojson.Safe.from_string content
+;;
 
-let load_json path =
-  let rec load_current () =
-    let mtime = (Unix.stat path).Unix.st_mtime in
-    match with_cache_lock (fun () ->
-        match Hashtbl.find_opt config_cache path with
-        | Some (cached_mtime, json) when Float.equal cached_mtime mtime ->
-          Some json
-        | _ -> None)
-    with
-    | Some json -> Ok json
-    | None ->
-      let json = read_json_file path in
-      let refreshed_mtime = (Unix.stat path).Unix.st_mtime in
-      if not (Float.equal refreshed_mtime mtime) then
-        load_current ()
-      else
-        (* Keep the critical section to Hashtbl access only. Any Eio-aware
-           work (traceln in particular) must run OUTSIDE the Stdlib.Mutex
-           because traceln can suspend the fiber while the lock is held,
-           blocking unrelated fibers on the domain.
-           Ref: memory/feedback_eio-traceln-outside-critical-section.md *)
-        let outcome =
-          with_cache_lock (fun () ->
-              match Hashtbl.find_opt config_cache path with
-              | Some (cached_mtime, cached_json)
-                when Float.equal cached_mtime refreshed_mtime ->
-                `Returning_cached cached_json
-              | prior ->
-                Hashtbl.replace config_cache path (refreshed_mtime, json);
-                `Installed_new (Option.map fst prior))
-        in
-        (match outcome with
-         | `Returning_cached cached_json -> Ok cached_json
-         | `Installed_new prior_mtime ->
-             (* Observability: trace first-load vs reload so operators
-                editing cascade.json can verify their change took effect.
-                Keeping this at traceln (stderr) matches existing OAS
-                convention (see Cascade_config.apply_provider_filter). *)
-             (match prior_mtime with
-              | None ->
-                  Eio.traceln
-                    "[CascadeConfig] loaded %s mtime=%.0f"
-                    path refreshed_mtime
-              | Some old_mtime ->
-                  Eio.traceln
-                    "[CascadeConfig] reloaded %s old_mtime=%.0f new_mtime=%.0f"
-                    path old_mtime refreshed_mtime);
-             Ok json)
+(* Race-aware in-memory TOML loader.
+
+   Previous design (kept here for context — do not regress to it):
+     1. render TOML → json_string
+     2. stat → mtime  (after the read)
+     3. cache (mtime, json)
+   Failure mode: between steps 1 and 2 the operator atomically replaces
+   cascade.toml.  Step 1 captured the OLD content; step 2 captured the
+   NEW mtime.  The pair (NEW_mtime, OLD_content) lands in the cache and
+   pins stale config until the NEXT mtime change — operator's reload
+   silently lost.  Also: cache lookup happened after the render, so a
+   cache hit still paid the full TOML parse + JSON parse + serialize
+   cost.
+
+   Current design:
+     1. stat → mtime_pre                         (cheap; no read)
+     2. cache lookup keyed by (path, mtime_pre)
+          HIT  → return cached JSON, skip render entirely
+          MISS → render TOML → json_string
+                 stat → mtime_post
+                 if mtime_pre = mtime_post:  cache (mtime_pre, json)
+                 else:                       race; serve fresh json
+                                             but DO NOT cache
+   The skip-cache-on-race arm bounds the staleness window to a single
+   call; the next caller re-stats and either gets the settled mtime or
+   detects another race.  Cache-hit fast path drops TOML reparse cost
+   on every steady-state load.
+
+   The mtime drift is also surfaced via
+   [Cascade_metrics.on_toml_read_race] so operators can alert on
+   pathological reload churn (e.g. a writer that fsyncs in a tight
+   loop). *)
+let load_toml_in_memory ~emit_telemetry config_path =
+  let source_state =
+    Cascade_toml_materializer.source_state ~config_path
   in
-  match ensure_materialized_json path with
-  | Error _ as err -> err
-  | Ok () ->
-      (try load_current () with
-       | Sys_error msg -> Error msg
-       | Unix.Unix_error (err, fn, arg) ->
-           Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
-       | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
-       | End_of_file -> Error "unexpected end of file")
+  let cache_key = source_state.info.source_path in
+  match source_state.source_mtime with
+  | None ->
+    (* Couldn't stat the resolved path.  Skip the pre-stat fast path
+       and let [render_toml_to_json_string] surface the real error
+       (file missing, permission denied, etc.) — its error message is
+       more actionable than what we could synthesize here. *)
+    (match Cascade_toml_materializer.render_toml_to_json_string ~config_path with
+     | Error msg -> Error msg
+     | Ok (_source, json_string) -> Ok (Yojson.Safe.from_string json_string))
+  | Some mtime_pre ->
+    let cached =
+      with_cache_lock (fun () ->
+        match Hashtbl.find_opt config_cache cache_key with
+        | Some (cached_mtime, cached_json)
+          when Float.equal cached_mtime mtime_pre ->
+          Some cached_json
+        | _ -> None)
+    in
+    (match cached with
+     | Some cached_json -> Ok cached_json
+     | None ->
+       (match Cascade_toml_materializer.render_toml_to_json_string ~config_path with
+        | Error msg -> Error msg
+        | Ok (_source, json_string) ->
+          let mtime_post =
+            try Some (Unix.stat cache_key).Unix.st_mtime with
+            | Unix.Unix_error _ | Sys_error _ -> None
+          in
+          let json = Yojson.Safe.from_string json_string in
+          (match mtime_post with
+           | Some mp when Float.equal mp mtime_pre ->
+             with_cache_lock (fun () ->
+               Hashtbl.replace config_cache cache_key (mp, json));
+            if emit_telemetry then
+              Eio.traceln
+                "[CascadeConfig] loaded TOML %s mtime=%.0f (in-memory)"
+                cache_key
+                mp;
+            Ok json
+           | Some mp ->
+             (* mtime moved between the pre-stat and the post-stat.
+                The rendered content is fresh-as-of mp but we cannot
+                prove it matches either sample, so we don't cache —
+                next call will re-stat and converge. *)
+             if emit_telemetry then begin
+               Cascade_metrics.on_toml_read_race ();
+               Log.warn
+                 ~ctx:"CascadeConfig"
+                 "TOML changed mid-read (mtime %.0f -> %.0f) for %s; \
+                  serving fresh content but skipping cache update to \
+                  force re-stat on next call"
+                 mtime_pre
+                 mp
+                 cache_key
+             end;
+             Ok json
+           | None ->
+             (* Post-stat failed (file vanished mid-read).  Treat
+                like a race so the caller re-converges next time. *)
+             if emit_telemetry then begin
+               Cascade_metrics.on_toml_read_race ();
+               Log.warn
+                 ~ctx:"CascadeConfig"
+                 "TOML disappeared mid-read after mtime=%.0f for %s; \
+                  returning in-memory render but skipping cache update"
+                 mtime_pre
+                 cache_key
+             end;
+             Ok json)))
+;;
+
+(* RFC-0058 §9 Phase 9.3: TOML is the only cascade source. The previous
+   JSON-only disk-read branch has been removed along with
+   [source_kind = Json]. All paths flow through
+   [load_toml_in_memory], which renders TOML to JSON in memory and
+   caches by source-path mtime.
+
+   Named [load_catalog_source] rather than [load_json] because no
+   on-disk JSON is read: [cascade.toml] is parsed and rendered to an
+   in-memory [Yojson.Safe.t] view for internal consumers. *)
+let load_catalog_source_impl ~emit_telemetry path =
+  try load_toml_in_memory ~emit_telemetry path with
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
+  | End_of_file ->
+    (* [Fs_compat.load_file_unix] reads [in_channel_length] first, then
+       [really_input_string len]. If the file is truncated between the
+       two calls (concurrent writer, atomic-rename mid-flight), the
+       second call raises [End_of_file]. Surface as an [Error] instead
+       of crashing the loader. *)
+    Error (Printf.sprintf "cascade source truncated mid-read: %s" path)
+;;
+
+let load_catalog_source path =
+  load_catalog_source_impl ~emit_telemetry:true path
+;;
+
+let load_catalog_source_for_diagnostics path =
+  load_catalog_source_impl ~emit_telemetry:false path
+;;
 
 (** A model entry with an optional weight for weighted cascade selection.
     Weight defaults to 1 when not specified (backward compatible).
     [secondary] is the RFC-0027 PR-9 dual-track fallback (CLI primary +
     direct-API secondary), [None] for legacy entries. *)
-type weighted_entry = {
-  model: string;
-  weight: int;
-  supports_tool_choice: bool option;
-  secondary: string option;
-  secondary_supports_tool_choice: bool option;
-}
-
-let parse_weight_field = function
-  | `Int i when i > 0 -> i
-  | `Float f when f > 0.0 ->
-    let i = int_of_float f in
-    if i > 0 && Float.equal f (float_of_int i) then i else 1
-  | _ -> 1
-
-let parse_supports_tool_choice_field = function
-  | `Bool b -> Some b
-  | _ -> None
-
-(* Trim, then treat empty / whitespace-only secondary as absent (None) —
-   identical to the field being missing.  Returning None rather than an
-   error keeps the JSON loader permissive (typed materializer is the
-   strict source of truth) and avoids producing an invalid provider
-   scheme downstream. *)
-let parse_secondary_field = function
-  | `String s ->
-    let trimmed = String.trim s in
-    if trimmed = "" then None else Some trimmed
-  | _ -> None
-
-let parse_weighted_item = function
-  | `String s ->
-    Some {
-      model = String.trim s;
-      weight = 1;
-      supports_tool_choice = None;
-      secondary = None;
-      secondary_supports_tool_choice = None;
-    }
-  | `Assoc fields ->
-    let open Yojson.Safe.Util in
-    let json = `Assoc fields in
-    (match json |> member "model" with
-     | `String s when String.trim s <> "" ->
-       let w = parse_weight_field (json |> member "weight") in
-       let stc =
-         parse_supports_tool_choice_field
-           (json |> member "supports_tool_choice")
-       in
-       let sec = parse_secondary_field (json |> member "secondary") in
-       let sec_stc =
-         match sec with
-         | None -> None  (* drop override when no secondary declared *)
-         | Some _ ->
-           parse_supports_tool_choice_field
-             (json |> member "secondary_supports_tool_choice")
-       in
-       Some {
-         model = String.trim s;
-         weight = w;
-         supports_tool_choice = stc;
-         secondary = sec;
-         secondary_supports_tool_choice = sec_stc;
-       }
-     | _ -> None)
-  | _ -> None
-
-type catalog_entry = {
-  name : string;
-  keeper_assignable : bool;
-  fallback_cascade : string option;
-  required_capability_profile : Cascade_capability_profile.profile option;
-}
-
-module StringMap = Map.Make (String)
-
-type catalog_field =
-  | Schema_field
-  | Keeper_assignable_field
-  | Fallback_cascade_field
-  | Required_capability_profile_field
-
-let catalog_key_specs =
-  [
-    ("_models", Schema_field);
-    ("_temperature", Schema_field);
-    ("_max_tokens", Schema_field);
-    ("_api_key_env", Schema_field);
-    ("_strategy", Schema_field);
-    ("_max_cycles", Schema_field);
-    ("_backoff_base_ms", Schema_field);
-    ("_backoff_cap_ms", Schema_field);
-    ("_ollama_max_concurrent", Schema_field);
-    ("_cli_max_concurrent", Schema_field);
-    ("_tiers", Schema_field);
-    ("_sticky_ttl_ms", Schema_field);
-    ("_keep_alive", Schema_field);
-    ("_num_ctx", Schema_field);
-    ("_thinking_enabled", Schema_field);
-    ("_thinking_budget", Schema_field);
-    (* Scoring parameter overrides (Weighted_random strategy) *)
-    ("_latency_baseline_ms", Schema_field);
-    ("_rate_limit_recency_window_s", Schema_field);
-    ("_rate_limit_decay_base", Schema_field);
-    ("_rate_limit_skip_after", Schema_field);
-    ("_server_error_recency_window_s", Schema_field);
-    ("_server_error_decay_base", Schema_field);
-    ("_server_error_skip_after", Schema_field);
-    ("_keeper_assignable", Keeper_assignable_field);
-    ("_fallback_cascade", Fallback_cascade_field);
-    ("_required_capability_profile", Required_capability_profile_field);
-  ]
-
-let split_catalog_key key =
-  let key_len = String.length key in
-  if key_len = 0 || key.[0] = '_' then None
-  else
-    List.find_map
-      (fun (suffix, field) ->
-        let suffix_len = String.length suffix in
-        if key_len > suffix_len
-           && String.sub key (key_len - suffix_len) suffix_len = suffix
-        then Some (String.sub key 0 (key_len - suffix_len), field)
-        else None)
-      catalog_key_specs
-
-(* [required_capability_profile] is a Result so unknown profile names
-   surface to [load_catalog] as a fail-closed [Error] instead of a
-   silent [None].  Keeping the error inside the builder lets us defer
-   the abort to entry-construction time after every key has been
-   visited, so the operator gets one consolidated error message even
-   when multiple profiles are misconfigured. *)
-type capability_profile_parse =
-  | Cp_unset
-  | Cp_set of Cascade_capability_profile.profile
-  | Cp_invalid of string
-
-type catalog_builder = {
-  has_schema_field : bool;
-  keeper_assignable : bool option;
-  fallback_cascade : string option;
-  required_capability_profile : capability_profile_parse;
-}
+type weighted_entry =
+  { model : string
+  ; weight : int
+  ; supports_tool_choice : bool option
+  ; secondary : string option
+  ; secondary_supports_tool_choice : bool option
+  }
 
 let deprecated_logical_profile_names =
-  [
-    "";
-    "default";
-    "default_models";
-    "oas-keeper_unified";
-    "coding_first";
-    "oas-coding_first";
-    "keeper_reply";
-    "keeper_unified";
-    "phase_recovery";
-    "phase_buffer";
-    (* [local_recovery] is intentionally not listed here. Operators can
+  [ ""
+  ; "default"
+  ; "default_models"
+  ; "oas-keeper_unified"
+  ; "coding_first"
+  ; "oas-coding_first"
+  ; "keeper_reply"
+  ; "keeper_unified"
+  ; "phase_recovery"
+  ; "phase_buffer"
+  ; (* [local_recovery] is intentionally not listed here. Operators can
        declare it as a concrete fallback_cascade profile, and the loader must
        keep that profile visible so fallback chains do not collapse back into
        routes.phase_recovery. *)
-    "local_only";
-    "tool_required";
-    "tool_use_strict";
-    "resilient_breaker";
-    "governance_judge";
-    "operator_judge";
-    "cross_verifier";
-    "verifier";
-    "autoresearch";
-    "adversarial_reviewer";
-    "auto_responder";
-    "routing";
-    "routing_judge";
-    "openai_compat";
-    "persona_generation";
-    "provider_benchmark";
-    "llm_rerank";
+    "local_only"
+  ; "tool_required"
+  ; "tool_use_strict"
+  ; "resilient_breaker"
+  ; "governance_judge"
+  ; "operator_judge"
+  ; "cross_verifier"
+  ; "verifier"
+  ; "autoresearch"
+  ; "adversarial_reviewer"
+  ; "auto_responder"
+  ; "routing"
+  ; "routing_judge"
+  ; "openai_compat"
+  ; "persona_generation"
+  ; "provider_benchmark"
+  ; "llm_rerank"
   ]
+;;
 
 let is_deprecated_logical_profile_name raw =
   let normalized = String.trim raw |> String.lowercase_ascii in
   List.mem normalized deprecated_logical_profile_names
-
-let empty_catalog_builder = {
-  has_schema_field = false;
-  keeper_assignable = None;
-  fallback_cascade = None;
-  required_capability_profile = Cp_unset;
-}
-
-let update_catalog_builder builder field value =
-  match field with
-  | Schema_field -> { builder with has_schema_field = true }
-  | Keeper_assignable_field ->
-      let keeper_assignable =
-        match value with
-        | `Bool b -> Some b
-        | _ -> builder.keeper_assignable
-      in
-      { builder with keeper_assignable }
-  | Fallback_cascade_field ->
-      let fallback_cascade =
-        match value with
-        | `String s ->
-            let trimmed = String.trim s in
-            if String.equal trimmed "" then None else Some trimmed
-        | _ -> builder.fallback_cascade
-      in
-      { builder with fallback_cascade }
-  | Required_capability_profile_field ->
-      let required_capability_profile =
-        match value with
-        | `String s ->
-            let trimmed = String.trim s in
-            if String.equal trimmed "" then Cp_unset
-            else
-              (match Cascade_capability_profile.profile_of_string trimmed with
-               | Some p -> Cp_set p
-               | None -> Cp_invalid trimmed)
-        | _ -> builder.required_capability_profile
-      in
-      { builder with required_capability_profile }
-
-(* Detect fallback_cascade cycles in a freshly loaded catalog.
-
-   2026-05-05 fleet-stuck root cause: the operator-side cascade.toml
-   declared [big_three.fallback_cascade = "glm_coding_plan_only"] AND
-   [glm_coding_plan_only.fallback_cascade = "big_three"].  When the
-   GLM provider stalled, both cascades escalated to each other,
-   producing a silent 600s+ timeout chain with no operator-visible
-   reason.  This helper walks the fallback graph and emits a Prometheus
-   counter + WARN log per cycle entry point so a CI test or operator
-   alert can catch the same shape before it goes live. *)
-let detect_fallback_cycles (entries : catalog_entry list) :
-    string list list =
-  let by_name =
-    List.fold_left
-      (fun acc e -> StringMap.add e.name e acc)
-      StringMap.empty entries
-  in
-  let rec walk visited current =
-    match StringMap.find_opt current by_name with
-    | None -> None
-    | Some entry ->
-      (match entry.fallback_cascade with
-       | None -> None
-       | Some next when List.mem next visited ->
-         (* Cycle: trim [visited] to start at [next]. *)
-         let rec trim = function
-           | [] -> []
-           | x :: _ as l when String.equal x next -> List.rev l
-           | _ :: rest -> trim rest
-         in
-         Some (trim (current :: visited))
-       | Some next ->
-         walk (current :: visited) next)
-  in
-  List.filter_map
-    (fun entry -> walk [] entry.name)
-    entries
-  |> (* Deduplicate cycles up to rotation: sort each cycle and keep
-        unique sets so [A→B→A] and [B→A→B] count as one. *)
-     List.fold_left
-       (fun (seen, acc) cycle ->
-         let key = String.concat "|" (List.sort compare cycle) in
-         if List.mem key seen then (seen, acc)
-         else (key :: seen, cycle :: acc))
-       ([], [])
-  |> snd
-  |> List.rev
-
-let load_catalog ~config_path =
-  match load_json config_path with
-  | Error _ as err -> err
-  | Ok (`Assoc fields) ->
-      let builders =
-        List.fold_left
-          (fun acc (key, value) ->
-            match split_catalog_key key with
-            | None -> acc
-            | Some (name, field) ->
-                let prior =
-                  match StringMap.find_opt name acc with
-                  | Some builder -> builder
-                  | None -> empty_catalog_builder
-                in
-                StringMap.add name (update_catalog_builder prior field value) acc)
-          StringMap.empty
-          fields
-      in
-      let active_builders =
-        builders
-        |> StringMap.bindings
-        |> List.filter (fun (name, builder) ->
-               builder.has_schema_field
-               && not (is_deprecated_logical_profile_name name))
-      in
-      let invalid_profile_errors =
-        List.filter_map
-          (fun (name, builder) ->
-            match builder.required_capability_profile with
-            | Cp_invalid raw ->
-                Some
-                  (Printf.sprintf
-                     "cascade %s: unknown required_capability_profile %S \
-                      (known: %s)"
-                     name raw
-                     (Cascade_capability_profile.all_profiles
-                      |> List.map Cascade_capability_profile.profile_to_string
-                      |> String.concat ", "))
-            | _ -> None)
-          active_builders
-      in
-      if invalid_profile_errors <> [] then
-        Error (String.concat "; " invalid_profile_errors)
-      else
-      let entries =
-        List.map
-          (fun (name, builder) ->
-            let required_capability_profile =
-              match builder.required_capability_profile with
-              | Cp_set p -> Some p
-              | Cp_unset -> None
-              | Cp_invalid _ -> None  (* unreachable: filtered above *)
-            in
-            {
-              name;
-              keeper_assignable =
-                Option.value builder.keeper_assignable ~default:true;
-              fallback_cascade = builder.fallback_cascade;
-              required_capability_profile;
-            })
-          active_builders
-      in
-      let cycles = detect_fallback_cycles entries in
-      let key = cycle_set_key cycles in
-      let should_warn =
-        with_cycle_warn_lock (fun () ->
-          match Hashtbl.find_opt cycle_warn_seen config_path with
-          | Some k when String.equal k key -> false
-          | _ ->
-            Hashtbl.replace cycle_warn_seen config_path key;
-            true)
-      in
-      List.iter
-        (fun cycle ->
-          let entry = match cycle with x :: _ -> x | [] -> "?" in
-          Prometheus.inc_counter
-            Prometheus.metric_cascade_fallback_cycle_detected_total
-            ~labels:[("cascade", entry)] ();
-          if should_warn then
-            Log.warn ~ctx:"CascadeConfig"
-              "fallback_cascade cycle detected at [%s]: %s — provider \
-               stalls in any participant will silently propagate through \
-               the entire loop (no escape).  Break the cycle by setting \
-               at least one fallback_cascade to a non-participating \
-               cascade (e.g. local_recovery) or removing the field."
-              entry (String.concat " → " (cycle @ [entry])))
-        cycles;
-      Ok entries
-  | Ok _ -> Ok []
-
-let load_profile_weighted ~config_path ~name =
-  let key = name ^ "_models" in
-  match load_json config_path with
-  | Error msg ->
-      (* Surface the load failure on the standard logging channel so
-         operators see it without tailing stderr. Returning the empty
-         list still lets callers fall back through the configured
-         keeper route (see [Cascade_config.resolve_model_strings_traced_with]),
-         but the elevated WARN gives observability into what would
-         otherwise be a silent permissive-default cascade. *)
-      Log.warn ~ctx:"CascadeConfig"
-        "load_profile_weighted: %s (profile=%s, path=%s)"
-        msg name config_path;
-      []
-  | Ok json ->
-    let open Yojson.Safe.Util in
-    match json |> member key with
-    | `List items -> List.filter_map parse_weighted_item items
-    | _ -> []
-
-let load_profile ~config_path ~name =
-  load_profile_weighted ~config_path ~name
-  |> List.map (fun e -> e.model)
+;;
 
 (* ── Inference parameter resolution ───────────────────── *)
 
-type inference_params = {
-  temperature: float option;
-  max_tokens: int option;
-  keep_alive: string option;
-  (** Ollama [keep_alive] override: integer seconds ("-1", "3600") or
+type inference_params =
+  { temperature : float option
+  ; max_tokens : int option
+  ; keep_alive : string option
+    (** Ollama [keep_alive] override: integer seconds ("-1", "3600") or
       duration string ("5m", "30m"). Honored only when the resolved
       provider is Ollama. *)
-  num_ctx: int option;
-  (** Ollama [num_ctx] override: per-request KV cache allocation in
+  ; num_ctx : int option
+    (** Ollama [num_ctx] override: per-request KV cache allocation in
       tokens. Honored only when the resolved provider is Ollama. *)
-  thinking_enabled: bool option;
-  thinking_budget: int option;
-  (** [thinking_budget] is a per-turn thinking token budget seed.
+  ; thinking_enabled : bool option
+  ; thinking_budget : int option
+    (** [thinking_budget] is a per-turn thinking token budget seed.
       Keeper adaptive logic may adjust this per turn based on intent
       classification and error/retry signals.  Provider-specific
       mapping (e.g. to Anthropic [budget_tokens] or DeepSeek
       [reasoning_effort]) happens downstream in OAS. *)
-}
+  }
 
 let read_float_field json key =
   let open Yojson.Safe.Util in
@@ -542,6 +286,7 @@ let read_float_field json key =
   | `Float f -> Some f
   | `Int i -> Some (float_of_int i)
   | _ -> None
+;;
 
 let read_int_field json key =
   let open Yojson.Safe.Util in
@@ -549,29 +294,39 @@ let read_int_field json key =
   | `Int i -> Some i
   | `Float f -> Some (int_of_float f)
   | _ -> None
+;;
 
 let read_string_field json key =
   let open Yojson.Safe.Util in
   match json |> member key with
   | `String s ->
-      let trimmed = String.trim s in
-      if trimmed <> "" then Some trimmed else None
+    let trimmed = String.trim s in
+    if trimmed <> "" then Some trimmed else None
   | _ -> None
+;;
 
 let read_bool_field json key =
   let open Yojson.Safe.Util in
   match json |> member key with
   | `Bool b -> Some b
   | _ -> None
+;;
 
 let resolve_inference_params ~config_path ~name =
-  match load_json config_path with
+  match load_catalog_source config_path with
   | Error msg ->
-      Log.Misc.warn "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
-        msg name config_path;
-      { temperature = None; max_tokens = None;
-        keep_alive = None; num_ctx = None;
-        thinking_enabled = None; thinking_budget = None }
+    Log.Misc.warn
+      "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
+      msg
+      name
+      config_path;
+    { temperature = None
+    ; max_tokens = None
+    ; keep_alive = None
+    ; num_ctx = None
+    ; thinking_enabled = None
+    ; thinking_budget = None
+    }
   | Ok json ->
     let temp =
       match read_float_field json (name ^ "_temperature") with
@@ -609,8 +364,14 @@ let resolve_inference_params ~config_path ~name =
          | Some n when n > 0 -> Some n
          | _ -> None)
     in
-    { temperature = temp; max_tokens = max_tok; keep_alive; num_ctx;
-      thinking_enabled; thinking_budget }
+    { temperature = temp
+    ; max_tokens = max_tok
+    ; keep_alive
+    ; num_ctx
+    ; thinking_enabled
+    ; thinking_budget
+    }
+;;
 
 (* ── Per-cascade API key env override ────────────────── *)
 
@@ -628,66 +389,72 @@ let read_api_key_env_field json key =
   let open Yojson.Safe.Util in
   match json |> member key with
   | `String s ->
-      let trimmed = String.trim s in
-      if trimmed <> "" then [("*", trimmed)] else []
+    let trimmed = String.trim s in
+    if trimmed <> "" then [ "*", trimmed ] else []
   | `Assoc pairs ->
-    List.filter_map (fun (k, v) ->
-      match v with
-      | `String s ->
-          let trimmed_s = String.trim s in
-          if trimmed_s <> "" then
-            Some (String.lowercase_ascii (String.trim k), trimmed_s)
-          else None
-      | _ -> None
-    ) pairs
+    List.filter_map
+      (fun (k, v) ->
+         match v with
+         | `String s ->
+           let trimmed_s = String.trim s in
+           if trimmed_s <> ""
+           then Some (String.lowercase_ascii (String.trim k), trimmed_s)
+           else None
+         | _ -> None)
+      pairs
   | _ -> []
+;;
 
 let resolve_api_key_env ~config_path ~name =
-  match load_json config_path with
+  match load_catalog_source config_path with
   | Error msg ->
-      Log.Misc.warn "[CascadeConfig] resolve_api_key_env: %s (name=%s, path=%s)"
-        msg name config_path;
-      []
+    Log.Misc.warn
+      "[CascadeConfig] resolve_api_key_env: %s (name=%s, path=%s)"
+      msg
+      name
+      config_path;
+    []
   | Ok json ->
-    match read_api_key_env_field json (name ^ "_api_key_env") with
-    | [] -> read_api_key_env_field json "default_api_key_env"
-    | overrides -> overrides
+    (match read_api_key_env_field json (name ^ "_api_key_env") with
+     | [] -> read_api_key_env_field json "default_api_key_env"
+     | overrides -> overrides)
+;;
 
 (* ── Per-cascade pluggable-strategy override ──────────── *)
 
-type strategy_config = {
-  kind : string option;
-  max_cycles : int option;
-  backoff_base_ms : int option;
-  backoff_cap_ms : int option;
-  ollama_max_concurrent : int option;
-  cli_max_concurrent : int option;
-  tiers : string list list option;
-  sticky_ttl_ms : int option;
-  (* ── Scoring parameter overrides (Weighted_random strategy) ── *)
-  latency_baseline_ms : float option;
-  (** Milliseconds.  Provider p50 above this value incurs a fractional
+type strategy_config =
+  { kind : string option
+  ; max_cycles : int option
+  ; backoff_base_ms : int option
+  ; backoff_cap_ms : int option
+  ; ollama_max_concurrent : int option
+  ; cli_max_concurrent : int option
+  ; tiers : string list list option
+  ; sticky_ttl_ms : int option
+  ; (* ── Scoring parameter overrides (Weighted_random strategy) ── *)
+    latency_baseline_ms : float option
+    (** Milliseconds.  Provider p50 above this value incurs a fractional
       score penalty.  When [None], falls back to
       [MASC_CASCADE_LATENCY_BASELINE_MS] env var, then default 2000.0. *)
-  rate_limit_recency_window_s : float option;
-  (** Seconds.  Lookback window for counting recent 429 events.
+  ; rate_limit_recency_window_s : float option
+    (** Seconds.  Lookback window for counting recent 429 events.
       When [None], falls back to env var, then default 60.0. *)
-  rate_limit_decay_base : float option;
-  (** Per-event decay multiplier in (0.0, 1.0).
+  ; rate_limit_decay_base : float option
+    (** Per-event decay multiplier in (0.0, 1.0).
       When [None], falls back to env var, then default 0.5. *)
-  rate_limit_skip_after : int option;
-  (** Hard-skip threshold for 429 events.
+  ; rate_limit_skip_after : int option
+    (** Hard-skip threshold for 429 events.
       When [None], falls back to env var, then default 3. *)
-  server_error_recency_window_s : float option;
-  (** Seconds.  Lookback window for counting recent 5xx events.
+  ; server_error_recency_window_s : float option
+    (** Seconds.  Lookback window for counting recent 5xx events.
       When [None], falls back to env var, then default 120.0. *)
-  server_error_decay_base : float option;
-  (** Per-event decay multiplier in (0.0, 1.0).
+  ; server_error_decay_base : float option
+    (** Per-event decay multiplier in (0.0, 1.0).
       When [None], falls back to env var, then default 0.6. *)
-  server_error_skip_after : int option;
-  (** Hard-skip threshold for 5xx events.
+  ; server_error_skip_after : int option
+    (** Hard-skip threshold for 5xx events.
       When [None], falls back to env var, then default 4. *)
-}
+  }
 
 (* Read a [string list list] from a JSON [list of list of string].
    Returns [None] when the key is missing or any element has the
@@ -700,67 +467,73 @@ let read_tiers_field json key =
   | `List outer ->
     let parse_tier = function
       | `List inner ->
-        let strs = List.filter_map (function
-            | `String s when String.trim s <> "" -> Some (String.trim s)
-            | _ -> None) inner
+        let strs =
+          List.filter_map
+            (function
+              | `String s when String.trim s <> "" -> Some (String.trim s)
+              | _ -> None)
+            inner
         in
-        if List.length strs = List.length inner && strs <> [] then Some strs
-        else None
+        if List.length strs = List.length inner && strs <> [] then Some strs else None
       | _ -> None
     in
     let tiers = List.filter_map parse_tier outer in
-    if List.length tiers = List.length outer && tiers <> [] then Some tiers
-    else None
+    if List.length tiers = List.length outer && tiers <> [] then Some tiers else None
   | _ -> None
+;;
 
-let empty_strategy_config = {
-  kind = None;
-  max_cycles = None;
-  backoff_base_ms = None;
-  backoff_cap_ms = None;
-  ollama_max_concurrent = None;
-  cli_max_concurrent = None;
-  tiers = None;
-  sticky_ttl_ms = None;
-  latency_baseline_ms = None;
-  rate_limit_recency_window_s = None;
-  rate_limit_decay_base = None;
-  rate_limit_skip_after = None;
-  server_error_recency_window_s = None;
-  server_error_decay_base = None;
-  server_error_skip_after = None;
-}
+let empty_strategy_config =
+  { kind = None
+  ; max_cycles = None
+  ; backoff_base_ms = None
+  ; backoff_cap_ms = None
+  ; ollama_max_concurrent = None
+  ; cli_max_concurrent = None
+  ; tiers = None
+  ; sticky_ttl_ms = None
+  ; latency_baseline_ms = None
+  ; rate_limit_recency_window_s = None
+  ; rate_limit_decay_base = None
+  ; rate_limit_skip_after = None
+  ; server_error_recency_window_s = None
+  ; server_error_decay_base = None
+  ; server_error_skip_after = None
+  }
+;;
 
-let resolve_strategy_config ~config_path ~name =
-  match load_json config_path with
+let resolve_strategy_config_impl ~emit_telemetry ~config_path ~name =
+  match load_catalog_source_impl ~emit_telemetry config_path with
   | Error msg ->
-      Log.Misc.warn "[CascadeConfig] resolve_strategy_config: %s (name=%s, path=%s)"
-        msg name config_path;
-      empty_strategy_config
+    Log.Misc.warn
+      "[CascadeConfig] resolve_strategy_config: %s (name=%s, path=%s)"
+      msg
+      name
+      config_path;
+    empty_strategy_config
   | Ok json ->
-    {
-      kind = read_string_field json (name ^ "_strategy");
-      max_cycles = read_int_field json (name ^ "_max_cycles");
-      backoff_base_ms = read_int_field json (name ^ "_backoff_base_ms");
-      backoff_cap_ms = read_int_field json (name ^ "_backoff_cap_ms");
-      ollama_max_concurrent =
-        read_int_field json (name ^ "_ollama_max_concurrent");
-      cli_max_concurrent =
-        read_int_field json (name ^ "_cli_max_concurrent");
-      tiers = read_tiers_field json (name ^ "_tiers");
-      sticky_ttl_ms = read_int_field json (name ^ "_sticky_ttl_ms");
-      latency_baseline_ms =
-        read_float_field json (name ^ "_latency_baseline_ms");
-      rate_limit_recency_window_s =
-        read_float_field json (name ^ "_rate_limit_recency_window_s");
-      rate_limit_decay_base =
-        read_float_field json (name ^ "_rate_limit_decay_base");
-      rate_limit_skip_after =
-        read_int_field json (name ^ "_rate_limit_skip_after");
-      server_error_recency_window_s =
-        read_float_field json (name ^ "_server_error_recency_window_s");
-      server_error_decay_base =
-        read_float_field json (name ^ "_server_error_decay_base");
-      server_error_skip_after =
-        read_int_field json (name ^ "_server_error_skip_after");
+    { kind = read_string_field json (name ^ "_strategy")
+    ; max_cycles = read_int_field json (name ^ "_max_cycles")
+    ; backoff_base_ms = read_int_field json (name ^ "_backoff_base_ms")
+    ; backoff_cap_ms = read_int_field json (name ^ "_backoff_cap_ms")
+    ; ollama_max_concurrent = read_int_field json (name ^ "_ollama_max_concurrent")
+    ; cli_max_concurrent = read_int_field json (name ^ "_cli_max_concurrent")
+    ; tiers = read_tiers_field json (name ^ "_tiers")
+    ; sticky_ttl_ms = read_int_field json (name ^ "_sticky_ttl_ms")
+    ; latency_baseline_ms = read_float_field json (name ^ "_latency_baseline_ms")
+    ; rate_limit_recency_window_s =
+        read_float_field json (name ^ "_rate_limit_recency_window_s")
+    ; rate_limit_decay_base = read_float_field json (name ^ "_rate_limit_decay_base")
+    ; rate_limit_skip_after = read_int_field json (name ^ "_rate_limit_skip_after")
+    ; server_error_recency_window_s =
+        read_float_field json (name ^ "_server_error_recency_window_s")
+    ; server_error_decay_base = read_float_field json (name ^ "_server_error_decay_base")
+    ; server_error_skip_after = read_int_field json (name ^ "_server_error_skip_after")
     }
+;;
+let resolve_strategy_config ~config_path ~name =
+  resolve_strategy_config_impl ~emit_telemetry:true ~config_path ~name
+;;
+
+let resolve_strategy_config_for_diagnostics ~config_path ~name =
+  resolve_strategy_config_impl ~emit_telemetry:false ~config_path ~name
+;;

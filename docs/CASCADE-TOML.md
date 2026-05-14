@@ -1,94 +1,127 @@
-# `cascade.toml` Manual
+# Cascade TOML
 
-Authoring guide for the checked-in cascade seed and live per-base-path config.
+`config/cascade.toml` is declarative-only. Retired flat profile tables with
+inline model lists are no longer a supported authoring format. Use the RFC-0058
+five-layer schema instead:
 
-## Start Here
+1. `[providers.<provider>]`
+2. `[models.<model>]`
+3. `[<provider>.<model>]`
+4. `[tier.<tier>]`
+5. `[tier-group.<group>]`
+6. `[routes.<logical-use>]`
 
-- Live config root: `$MASC_BASE_PATH/.masc/config/cascade.toml`
-- Repo seed/fallback: [`config/cascade.toml`](../config/cascade.toml)
-- Materialized runtime artifact: [`config/cascade.json`](../config/cascade.json)
+The runtime materializer rejects unknown top-level profile tables so old flat
+TOML fails early instead of silently producing stale catalog entries.
 
-`config/cascade.toml` is the supported human-authored source when present. The
-runtime materializes sibling `cascade.json` before loading.
+## Provider Boundary
+
+Cascade TOML is configuration data, not permission for MASC code to branch on
+provider or model literals.
+
+- MASC owns routes, profile selection, fallback, admission, health cooldown,
+  receipts, dashboard surfaces, and keeper-facing assignment policy.
+- OAS owns the generic single-provider runtime contract: provider catalog,
+  model/capability/pricing manifests, request/response adapters, and
+  non-interactive transport metadata.
+- MASC bridge/adapter code may parse provider/model labels and project
+  `cascade.toml` facts into OAS provider/capability contracts.
+- MASC core code should route by logical use, declared capability, profile
+  order, health, and capacity rather than vendor/model literals.
+
+## Minimal Example
+
+```toml
+[providers.glm-coding]
+display-name = "Zhipu GLM Coding"
+protocol = "openai-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY"
+
+[models.glm-5-turbo]
+api-name = "glm-5-turbo"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[glm-coding.glm-5-turbo]
+is-default = true
+max-concurrent = 2
+
+[tier.coding_plan]
+members = ["glm-coding.glm-5-turbo"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["coding_plan"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+```
+
+## Ollama
+
+Ollama is still a supported HTTP provider. The endpoint is data, not a
+hardcoded local-only assumption, so private configs may point it at a local
+daemon or at a compatible remote endpoint such as Ollama Cloud.
+
+```toml
+[providers.ollama]
+display-name = "Ollama HTTP"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3"
+max-context = 262144
+tools-support = true
+streaming = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[tier.local_recovery]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.local_recovery]
+tiers = ["local_recovery"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.phase_recovery]
+target = "tier-group.local_recovery"
+```
 
 ## Checked-In Seed Policy
 
-The repo seed should stay intentionally small.
+The repo seed stays intentionally small.
 
-- Keep the checked-in keeper-assignable set explicit and boring:
-  `big_three` for keeper/general turns.
-- Keep system-only lanes explicit and minimal: `tool_rerank` for short
-  rerank/scoring calls.
-- Put logical usages such as `governance_judge`, `operator_judge`,
-  `local_recovery`, `tool_use_strict`, `cross_verifier`, and `autoresearch`
-  under `[routes]`. They are route keys, not profile names.
-- Put personal experiments, vendor mixes, and machine-specific profiles in
-  live config under `$MASC_BASE_PATH/.masc/config/cascade.toml`, not in the
-  repo seed
+- Keeper-assignable default: `primary` for general turns.
+- System-only lanes: `scoring` for short rerank/scoring calls.
+- Logical usages (`governance_judge`, `cross_verifier`, etc.) go under
+  `[routes.*]`; they are route keys, not profile names.
+- Personal experiments and machine-specific profiles go in live config
+  (`$MASC_BASE_PATH/.masc/config/cascade.toml`), not the repo seed.
 
-This keeps bootstrap defaults reviewable and avoids turning repo config into a
-graveyard of personal cascade variants.
+## Validation
 
-## Seed Profiles
-
-- `big_three`: canonical keeper/workflow profile.
-- `tool_rerank`: system-only short-output profile.
-
-## Routes
-
-`[routes]` maps logical call-site names to concrete profiles:
-
-```toml
-[routes]
-governance_judge = "big_three"
-operator_judge = "big_three"
-cross_verifier = "big_three"
-llm_rerank = "tool_rerank"
-```
-
-Runtime code must use the logical route key and let config choose the concrete
-profile. Do not add a new checked-in profile just because one call site needs a
-name.
-
-The runtime validates `[routes]` against the code route registry. Unknown route
-keys are rejected as config/code drift, and route targets must name an active
-profile in the same catalog.
-
-Use `keeper_assignable = false` for profiles that must exist in the catalog but
-must not appear as normal keeper choices.
-
-## Edit Workflow
-
-1. Edit [`config/cascade.toml`](../config/cascade.toml).
-2. Materialize the runtime artifact:
+Focused local checks:
 
 ```bash
-dune exec --root . ./bin/cascade_materialize.exe -- config/cascade.json
+scripts/dune-local.sh build test/test_cascade_config_validity.exe
+scripts/dune-local.sh build test/test_cascade_declarative_parser.exe
 ```
 
-The materializer takes the runtime JSON path/candidate and uses sibling
-`cascade.toml` when present.
+Useful source references:
 
-3. Run focused checks:
-
-```bash
-dune runtest --root . test/test_cascade_config_validity.exe
-dune exec --root . ./test/test_keeper_cascade_profile.exe
-```
-
-## What Belongs In Repo vs Live Config
-
-Add a checked-in profile only when at least one of these is true:
-
-- a checked-in keeper depends on it
-- the profile has materially different model/parameter behavior from the two
-  defaults
-
-Otherwise, put it in live config or a private/local cookbook-derived setup.
-
-## Related Docs
-
-- Extended local/private examples: [`docs/CASCADE-COOKBOOK.md`](./CASCADE-COOKBOOK.md)
-- Reload semantics: [`docs/TOML-RELOAD-MATRIX.md`](./TOML-RELOAD-MATRIX.md)
-- Schema reference: [`docs/spec/14-configuration.md`](./spec/14-configuration.md)
-- Cascade design index: [`docs/cascade/README.md`](./cascade/README.md)
+- `config/cascade.toml`
+- `lib/cascade/cascade_toml_materializer.ml`
+- `lib/cascade/cascade_declarative_hotpath.ml`
+- `docs/rfc/RFC-0058-terminal-fallback-capability-exemption.md`

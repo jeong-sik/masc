@@ -7,7 +7,7 @@
     "how long were Circuit_breaker_cycling retries in the last hour?".
 
     This module captures the decision outcome of every cycle iteration
-    of {!Oas_worker_named.try_cascade} as a ring event, so the dashboard
+    of {!Keeper_turn_driver.try_cascade} as a ring event, so the dashboard
     can surface recent runtime behaviour alongside the TLA+-verified
     strategy kind.
 
@@ -37,7 +37,7 @@ type event_kind = Ordered | Filtered_empty | Exhausted
 (** One decision event.
 
     [ts] is a Unix timestamp (seconds).
-    [cascade_name] is the cascade.json profile name carried as a typed
+    [cascade_name] is the cascade.toml profile name carried as a typed
     runtime cascade identifier.
     [strategy] is {!Cascade_strategy.kind_to_string} of the active kind.
     [cycle] is 0-based, matching the [n] in [oas_worker_named.cycle_loop].

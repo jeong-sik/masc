@@ -19,6 +19,7 @@ import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, st
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { dashboardWsOnlyEnabled } from './dashboard-ws-cutover'
+import { startDashboardSseFallback } from './dashboard-transport-fallback'
 import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
@@ -41,7 +42,11 @@ import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DashboardStatusTray } from './components/status-tray'
 import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
-import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
+import {
+  DASHBOARD_NAV_ITEMS,
+  VISIBLE_DASHBOARD_NAV_ITEMS,
+  currentSectionForRoute,
+} from './config/navigation'
 import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
@@ -118,6 +123,7 @@ export function App() {
     // the WS external-subscriber path, so turning SSE off is safe when
     // operators have validated the WS channel in their environment.
     const wsOnly = dashboardWsOnlyEnabled()
+    const stopSseFallback = startDashboardSseFallback({ wsOnly })
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -197,6 +203,7 @@ export function App() {
 
     return () => {
       cancelled = true
+      stopSseFallback()
       disconnectDashboardWS()
       if (!wsOnly) {
         disconnectSSE()
@@ -271,7 +278,7 @@ export function App() {
               </div>
             </div>
 
-            <${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
+            <${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
           </div>
 
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
@@ -312,7 +319,7 @@ export function App() {
         ${compactChromeMode
           ? null
           : html`
-            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
               <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
             </aside>
           `}

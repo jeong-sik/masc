@@ -49,6 +49,11 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_docker_git_push_evidence=False,
         require_docker_pr_approve_evidence=False,
         require_docker_pr_lifecycle_evidence=False,
+        require_provider_turn_evidence=False,
+        require_checkpoint_evidence=False,
+        require_history_evidence=False,
+        require_tool_call_log_evidence=False,
+        require_persistent_work_evidence=False,
         evidence_run_id=None,
         harness_run_dir=None,
         forbid_github_identity=[],
@@ -156,7 +161,93 @@ def append_decision(root: Path, keeper: str, row: dict) -> None:
         handle.write(json.dumps(row) + "\n")
 
 
+def write_persistent_work_evidence(root: Path, keeper: str) -> None:
+    trace = f"trace-{keeper}"
+    manifest_dir = root / ".masc" / "keepers" / keeper / "runtime-manifests"
+    checkpoint_path = root / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
+    tool_log_path = root / ".masc" / "tool_calls" / "2026-05" / "15.jsonl"
+    history_path = root / ".masc" / "traces" / trace / "history.jsonl"
+    for path in (
+        manifest_dir,
+        checkpoint_path.parent,
+        tool_log_path.parent,
+        history_path.parent,
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_path.write_text('{"ok": true}\n', encoding="utf-8")
+    history_path.write_text(
+        json.dumps({"role": "assistant", "content": "persisted"}) + "\n",
+        encoding="utf-8",
+    )
+    tool_log_path.write_text(
+        json.dumps(
+            {
+                "keeper": keeper,
+                "trace_id": trace,
+                "generation": 1,
+                "keeper_turn_id": 1,
+                "tool": "keeper_bash",
+                "success": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rows = [
+        {
+            "ts": "2026-05-15T00:00:00Z",
+            "keeper_name": keeper,
+            "trace_id": trace,
+            "generation": 1,
+            "keeper_turn_id": 1,
+            "event": "provider_attempt_started",
+            "status": "started",
+            "links": {},
+        },
+        {
+            "ts": "2026-05-15T00:00:01Z",
+            "keeper_name": keeper,
+            "trace_id": trace,
+            "generation": 1,
+            "keeper_turn_id": 1,
+            "event": "provider_attempt_finished",
+            "status": "provider_returned",
+            "links": {},
+        },
+        {
+            "ts": "2026-05-15T00:00:02Z",
+            "keeper_name": keeper,
+            "trace_id": trace,
+            "generation": 1,
+            "keeper_turn_id": 1,
+            "event": "checkpoint_saved",
+            "status": "ok",
+            "links": {"checkpoint_path": str(checkpoint_path)},
+        },
+        {
+            "ts": "2026-05-15T00:00:03Z",
+            "keeper_name": keeper,
+            "trace_id": trace,
+            "generation": 1,
+            "keeper_turn_id": 1,
+            "event": "turn_finished",
+            "status": "success",
+            "links": {"tool_call_log_path": str(tool_log_path)},
+        },
+    ]
+    (manifest_dir / f"{trace}.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
 class AuditKeeperFleetReadinessTest(unittest.TestCase):
+    def test_parse_args_defaults_to_18_keepers(self):
+        args = audit.parse_args([])
+
+        self.assertEqual(args.expected_keepers, 18)
+
     def test_iter_jsonl_streams_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -740,6 +831,55 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             report["fleet_failures"], ["minimum_2_configured_keepers_got_1"]
         )
+
+    def test_require_persistent_work_evidence_fails_without_runtime_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            args = audit_args(root, expected_keepers=1)
+            args.require_persistent_work_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertFalse(keeper["provider_turn_evidence"])
+        self.assertFalse(keeper["checkpoint_evidence"])
+        self.assertFalse(keeper["history_evidence"])
+        self.assertFalse(keeper["tool_call_log_evidence"])
+        self.assertEqual(
+            keeper["failures"],
+            [
+                "provider_turn_evidence_missing",
+                "checkpoint_evidence_missing",
+                "history_evidence_missing",
+                "tool_call_log_evidence_missing",
+            ],
+        )
+
+    def test_require_persistent_work_evidence_passes_with_manifest_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            write_persistent_work_evidence(root, "alpha")
+            args = audit_args(root, expected_keepers=1)
+            args.require_persistent_work_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertTrue(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertTrue(keeper["provider_turn_evidence"])
+        self.assertTrue(keeper["checkpoint_evidence"])
+        self.assertTrue(keeper["history_evidence"])
+        self.assertTrue(keeper["tool_call_log_evidence"])
+        self.assertEqual(
+            keeper["provider_turn_evidence_refs"],
+            ["provider_turn:trace=trace-alpha:generation=1:turn=1"],
+        )
+        self.assertEqual(len(keeper["checkpoint_evidence_refs"]), 1)
+        self.assertEqual(len(keeper["history_evidence_refs"]), 1)
+        self.assertEqual(len(keeper["tool_call_log_evidence_refs"]), 1)
 
     def test_forbid_github_identity_fails_matching_keeper(self):
         with tempfile.TemporaryDirectory() as tmp:

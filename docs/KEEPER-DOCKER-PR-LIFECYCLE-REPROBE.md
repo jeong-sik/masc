@@ -116,7 +116,7 @@ Live mutation requires an explicit flag:
 ```bash
 ./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh \
   --mutate \
-  --expected-keepers 14 \
+  --expected-keepers 18 \
   --repo jeong-sik/masc-mcp \
   --board-post-id p-cdf9e0d695d723222b0e2db02f6e429b
 ```
@@ -127,7 +127,7 @@ Useful scoped runs:
 ./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh \
   --mutate \
   --keeper-names sangsu \
-  --expected-keepers 14
+  --expected-keepers 18
 
 ./scripts/harness_keeper_docker_pr_lifecycle_reprobe.sh \
   --mutate \

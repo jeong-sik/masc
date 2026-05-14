@@ -91,6 +91,7 @@ PR_CREATED_NUMBER_RE = re.compile(
 )
 GH_PR_CREATE_RE = re.compile(r"\bgh\s+pr\s+create\b", re.IGNORECASE)
 GH_HOSTS_USER_RE = re.compile(r"^\s*user:\s*['\"]?([^'\"\s#]+)")
+ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
 
 
 @dataclass
@@ -125,6 +126,10 @@ class KeeperAudit:
     docker_pr_lifecycle_action: bool
     pr_created_evidence: bool
     pr_url_evidence: bool
+    provider_turn_evidence: bool
+    checkpoint_evidence: bool
+    history_evidence: bool
+    tool_call_log_evidence: bool
     evidence_tools: list[str]
     board_post_evidence: list[str]
     web_search_evidence: list[str]
@@ -134,6 +139,10 @@ class KeeperAudit:
     docker_pr_lifecycle_evidence: list[str]
     pr_evidence_refs: list[str]
     pr_evidence_sources: list[str]
+    provider_turn_evidence_refs: list[str]
+    checkpoint_evidence_refs: list[str]
+    history_evidence_refs: list[str]
+    tool_call_log_evidence_refs: list[str]
     failures: list[str]
     warnings: list[str]
 
@@ -150,6 +159,31 @@ class PrCreationEvidence:
     @property
     def url_present(self) -> bool:
         return any(ref.startswith("https://github.com/") for ref in self.refs)
+
+
+@dataclass
+class PersistentWorkEvidence:
+    latest_ts: float | None
+    provider_turn_refs: set[str]
+    checkpoint_refs: set[str]
+    history_refs: set[str]
+    tool_call_log_refs: set[str]
+
+    @property
+    def provider_turn(self) -> bool:
+        return bool(self.provider_turn_refs)
+
+    @property
+    def checkpoint(self) -> bool:
+        return bool(self.checkpoint_refs)
+
+    @property
+    def history(self) -> bool:
+        return bool(self.history_refs)
+
+    @property
+    def tool_call_log(self) -> bool:
+        return bool(self.tool_call_log_refs)
 
 
 EvidenceWindow = tuple[float, float, str]
@@ -252,6 +286,44 @@ def iso_to_unix(raw: str | None) -> float | None:
         return datetime.fromisoformat(normalized).timestamp()
     except ValueError:
         return None
+
+
+def observed_ts(row: dict[str, Any]) -> float | None:
+    ts = numeric_field(row, "ts_unix")
+    if ts is None:
+        ts = numeric_field(row, "ts")
+    if ts is not None:
+        return ts
+    return iso_to_unix(text_field(row, "ts"))
+
+
+def status_is_error(value: Any) -> bool:
+    return isinstance(value, str) and value.lower() in ERROR_STATUSES
+
+
+def path_from_link(base_path: Path, raw: Any) -> Path | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    path = Path(raw.strip()).expanduser()
+    if not path.is_absolute():
+        path = base_path / path
+    return path
+
+
+def path_label(base_path: Path, path: Path) -> str:
+    try:
+        return path.relative_to(base_path).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def jsonl_has_object(path: Path) -> bool:
+    try:
+        for _row in iter_jsonl(path):
+            return True
+    except ValueError:
+        return False
+    return False
 
 
 def tool_preset_from_config(config: dict[str, Any]) -> str | None:
@@ -1509,6 +1581,175 @@ def scan_keeper_web_search_evidence(
     return latest_ts, evidence
 
 
+def runtime_manifest_paths(base_path: Path, name: str) -> list[Path]:
+    manifest_dir = base_path / ".masc" / "keepers" / name / "runtime-manifests"
+    if not manifest_dir.is_dir():
+        return []
+    candidates: list[tuple[float, str, Path]] = []
+    for path in manifest_dir.glob("*.jsonl"):
+        if not path.is_file():
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        candidates.append((mtime, str(path), path))
+    return [path for _mtime, _raw, path in sorted(candidates, reverse=True)]
+
+
+def row_event(row: dict[str, Any]) -> str:
+    return text_field(row, "event").lower()
+
+
+def row_links(row: dict[str, Any]) -> dict[str, Any]:
+    links = row.get("links")
+    return links if isinstance(links, dict) else {}
+
+
+def same_optional_value(expected: Any, actual: Any) -> bool:
+    if expected is None or expected == "":
+        return True
+    if actual is None or actual == "":
+        return True
+    return str(expected) == str(actual)
+
+
+def turn_ref(trace: str, generation: str, turn: str) -> str:
+    parts = [f"trace={trace}"]
+    if generation:
+        parts.append(f"generation={generation}")
+    if turn:
+        parts.append(f"turn={turn}")
+    return ":".join(parts)
+
+
+def manifest_turn_has_successful_provider(rows: list[dict[str, Any]]) -> bool:
+    has_started = any(row_event(row) == "provider_attempt_started" for row in rows)
+    has_finished = any(
+        row_event(row) == "provider_attempt_finished"
+        and not status_is_error(row.get("status"))
+        for row in rows
+    )
+    terminal_rows = [row for row in rows if row_event(row) == "turn_finished"]
+    terminal_ok = not terminal_rows or any(
+        not status_is_error(row.get("status")) for row in terminal_rows
+    )
+    return has_started and has_finished and terminal_ok
+
+
+def history_paths_for_trace(base_path: Path, trace: str) -> list[Path]:
+    trace_dir = base_path / ".masc" / "traces" / trace
+    return [trace_dir / "history.jsonl", trace_dir / "history.internal.jsonl"]
+
+
+def tool_call_log_has_matching_row(
+    path: Path,
+    *,
+    name: str,
+    trace: str,
+    generation: str,
+    turn: str,
+) -> bool:
+    try:
+        rows = iter_jsonl(path)
+        for row in rows:
+            row_keeper = row.get("keeper_name", row.get("keeper"))
+            if isinstance(row_keeper, str) and row_keeper != name:
+                continue
+            row_ids = trace_session_ids_from_row(row)
+            if row_ids and trace not in row_ids:
+                continue
+            if not same_optional_value(generation, row.get("generation")):
+                continue
+            if not same_optional_value(turn, row.get("keeper_turn_id")):
+                continue
+            return True
+    except ValueError:
+        return False
+    return False
+
+
+def scan_persistent_work_evidence(
+    base_path: Path,
+    name: str,
+    *,
+    max_silence_hours: float | None = None,
+    now: float | None = None,
+) -> PersistentWorkEvidence:
+    latest_ts: float | None = None
+    provider_turn_refs: set[str] = set()
+    checkpoint_refs: set[str] = set()
+    history_refs: set[str] = set()
+    tool_call_log_refs: set[str] = set()
+    min_ts: float | None = None
+    if max_silence_hours is not None:
+        min_ts = (time.time() if now is None else now) - (max_silence_hours * 3600.0)
+
+    turns: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for manifest in runtime_manifest_paths(base_path, name):
+        for row in iter_jsonl(manifest):
+            row_keeper = string_field(row, "keeper_name")
+            if row_keeper is not None and row_keeper != name:
+                continue
+            ts = observed_ts(row)
+            if min_ts is not None and ts is not None and ts < min_ts:
+                continue
+            if ts is not None:
+                latest_ts = ts if latest_ts is None else max(latest_ts, ts)
+            trace = string_field(row, "trace_id") or manifest.stem
+            generation_value = row.get("generation")
+            turn_value = row.get("keeper_turn_id")
+            generation = "" if generation_value is None else str(generation_value)
+            turn = "" if turn_value is None else str(turn_value)
+            row = dict(row)
+            row["_source_path"] = str(manifest)
+            turns.setdefault((trace, generation, turn), []).append(row)
+
+    for (trace, generation, turn), rows in turns.items():
+        ref = turn_ref(trace, generation, turn)
+        if manifest_turn_has_successful_provider(rows):
+            provider_turn_refs.add(f"provider_turn:{ref}")
+
+        for history_path in history_paths_for_trace(base_path, trace):
+            if history_path.is_file() and jsonl_has_object(history_path):
+                history_refs.add(f"history:{path_label(base_path, history_path)}")
+
+        for row in rows:
+            links = row_links(row)
+            if row_event(row) == "checkpoint_saved":
+                checkpoint_path = path_from_link(base_path, links.get("checkpoint_path"))
+                if checkpoint_path is not None and checkpoint_path.is_file():
+                    checkpoint_refs.add(
+                        "checkpoint:"
+                        f"{ref}:{path_label(base_path, checkpoint_path)}"
+                    )
+            if row_event(row) == "turn_finished":
+                tool_log_path = path_from_link(base_path, links.get("tool_call_log_path"))
+                if (
+                    tool_log_path is not None
+                    and tool_log_path.is_file()
+                    and tool_call_log_has_matching_row(
+                        tool_log_path,
+                        name=name,
+                        trace=trace,
+                        generation=generation,
+                        turn=turn,
+                    )
+                ):
+                    tool_call_log_refs.add(
+                        "tool_call_log:"
+                        f"{ref}:{path_label(base_path, tool_log_path)}"
+                    )
+
+    return PersistentWorkEvidence(
+        latest_ts=latest_ts,
+        provider_turn_refs=provider_turn_refs,
+        checkpoint_refs=checkpoint_refs,
+        history_refs=history_refs,
+        tool_call_log_refs=tool_call_log_refs,
+    )
+
+
 def audit_keeper(
     *,
     base_path: Path,
@@ -1528,6 +1769,10 @@ def audit_keeper(
     require_docker_pr_create_evidence: bool,
     require_docker_git_push_evidence: bool,
     require_docker_pr_approve_evidence: bool,
+    require_provider_turn_evidence: bool,
+    require_checkpoint_evidence: bool,
+    require_history_evidence: bool,
+    require_tool_call_log_evidence: bool,
     evidence_run_id: str | None,
     evidence_run_pr_numbers: set[int] | None,
     evidence_windows: list[EvidenceWindow] | None = None,
@@ -1610,6 +1855,11 @@ def audit_keeper(
         max_silence_hours=max_silence_hours,
         evidence_run_id=evidence_run_id,
     )
+    persistent_work_evidence = scan_persistent_work_evidence(
+        base_path,
+        name,
+        max_silence_hours=max_silence_hours,
+    )
     (
         board_post_ts,
         board_post_evidence,
@@ -1625,6 +1875,7 @@ def audit_keeper(
                 evidence_ts,
                 board_post_ts,
                 web_search_ts,
+                persistent_work_evidence.latest_ts,
                 runtime_turn_ts,
                 updated_ts,
             )
@@ -1674,6 +1925,10 @@ def audit_keeper(
     )
     pr_created_evidence = pr_creation_evidence.created
     pr_url_evidence = pr_creation_evidence.url_present
+    provider_turn_evidence = persistent_work_evidence.provider_turn
+    checkpoint_evidence = persistent_work_evidence.checkpoint
+    history_evidence = persistent_work_evidence.history
+    tool_call_log_evidence = persistent_work_evidence.tool_call_log
     if require_board_evidence and not board_action:
         failures.append("board_action_evidence_missing")
     if require_web_search_evidence and not web_search_action:
@@ -1710,6 +1965,14 @@ def audit_keeper(
         failures.append("docker_git_push_evidence_missing")
     if require_docker_pr_approve_evidence and not docker_pr_approve_mutation:
         failures.append("docker_pr_approve_evidence_missing")
+    if require_provider_turn_evidence and not provider_turn_evidence:
+        failures.append("provider_turn_evidence_missing")
+    if require_checkpoint_evidence and not checkpoint_evidence:
+        failures.append("checkpoint_evidence_missing")
+    if require_history_evidence and not history_evidence:
+        failures.append("history_evidence_missing")
+    if require_tool_call_log_evidence and not tool_call_log_evidence:
+        failures.append("tool_call_log_evidence_missing")
 
     return KeeperAudit(
         name=name,
@@ -1742,6 +2005,10 @@ def audit_keeper(
         docker_pr_lifecycle_action=docker_pr_lifecycle_action,
         pr_created_evidence=pr_created_evidence,
         pr_url_evidence=pr_url_evidence,
+        provider_turn_evidence=provider_turn_evidence,
+        checkpoint_evidence=checkpoint_evidence,
+        history_evidence=history_evidence,
+        tool_call_log_evidence=tool_call_log_evidence,
         evidence_tools=sorted(tools),
         board_post_evidence=sorted(board_post_evidence),
         web_search_evidence=sorted(web_search_evidence),
@@ -1751,6 +2018,14 @@ def audit_keeper(
         docker_pr_lifecycle_evidence=sorted(docker_pr_lifecycle_evidence),
         pr_evidence_refs=sorted(pr_creation_evidence.refs),
         pr_evidence_sources=sorted(pr_creation_evidence.sources),
+        provider_turn_evidence_refs=sorted(
+            persistent_work_evidence.provider_turn_refs
+        ),
+        checkpoint_evidence_refs=sorted(persistent_work_evidence.checkpoint_refs),
+        history_evidence_refs=sorted(persistent_work_evidence.history_refs),
+        tool_call_log_evidence_refs=sorted(
+            persistent_work_evidence.tool_call_log_refs
+        ),
         failures=failures,
         warnings=warnings,
     )
@@ -1804,6 +2079,20 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_docker_pr_approve_evidence=(
                 args.require_docker_pr_approve_evidence
                 or args.require_docker_pr_lifecycle_evidence
+            ),
+            require_provider_turn_evidence=(
+                args.require_provider_turn_evidence
+                or args.require_persistent_work_evidence
+            ),
+            require_checkpoint_evidence=(
+                args.require_checkpoint_evidence or args.require_persistent_work_evidence
+            ),
+            require_history_evidence=(
+                args.require_history_evidence or args.require_persistent_work_evidence
+            ),
+            require_tool_call_log_evidence=(
+                args.require_tool_call_log_evidence
+                or args.require_persistent_work_evidence
             ),
             evidence_run_id=args.evidence_run_id,
             evidence_run_pr_numbers=evidence_run_pr_numbers,
@@ -1886,6 +2175,11 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "require_docker_pr_lifecycle_evidence": (
                 args.require_docker_pr_lifecycle_evidence
             ),
+            "require_provider_turn_evidence": args.require_provider_turn_evidence,
+            "require_checkpoint_evidence": args.require_checkpoint_evidence,
+            "require_history_evidence": args.require_history_evidence,
+            "require_tool_call_log_evidence": args.require_tool_call_log_evidence,
+            "require_persistent_work_evidence": args.require_persistent_work_evidence,
             "evidence_run_id": args.evidence_run_id,
             "evidence_run_pr_numbers": sorted(evidence_run_pr_numbers),
             "harness_run_dir": getattr(args, "harness_run_dir", None),
@@ -1926,7 +2220,9 @@ def print_text(report: dict[str, Any]) -> None:
             "pr_approve={pr_approve} pr_created={pr_created} pr_url={pr_url} "
             "docker_pr_create={docker_pr_create} "
             "docker_git_push={docker_git_push} "
-            "docker_pr_approve={docker_pr_approve}".format(
+            "docker_pr_approve={docker_pr_approve} "
+            "provider_turn={provider_turn} checkpoint={checkpoint} "
+            "history={history} tool_call_log={tool_call_log}".format(
                 name=keeper["name"],
                 marker=marker,
                 preset=keeper["tool_preset"],
@@ -1950,12 +2246,24 @@ def print_text(report: dict[str, Any]) -> None:
                 docker_pr_create=str(keeper["docker_pr_create_action"]).lower(),
                 docker_git_push=str(keeper["docker_git_push_action"]).lower(),
                 docker_pr_approve=str(keeper["docker_pr_approve_mutation"]).lower(),
+                provider_turn=str(keeper["provider_turn_evidence"]).lower(),
+                checkpoint=str(keeper["checkpoint_evidence"]).lower(),
+                history=str(keeper["history_evidence"]).lower(),
+                tool_call_log=str(keeper["tool_call_log_evidence"]).lower(),
             )
         )
         for ref in keeper["pr_evidence_refs"][:5]:
             print(f"    pr_evidence: {ref}")
         for ref in keeper["web_search_evidence"][:5]:
             print(f"    web_search_evidence: {ref}")
+        for ref in keeper["provider_turn_evidence_refs"][:3]:
+            print(f"    provider_turn_evidence: {ref}")
+        for ref in keeper["checkpoint_evidence_refs"][:3]:
+            print(f"    checkpoint_evidence: {ref}")
+        for ref in keeper["history_evidence_refs"][:3]:
+            print(f"    history_evidence: {ref}")
+        for ref in keeper["tool_call_log_evidence_refs"][:3]:
+            print(f"    tool_call_log_evidence: {ref}")
         for failure in failures:
             print(f"    fail: {failure}")
         for warning in warnings:
@@ -1972,7 +2280,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--expected-keepers",
         type=int,
-        default=14,
+        default=18,
         help="Minimum configured keeper count required for fleet readiness.",
     )
     parser.add_argument("--max-silence-hours", type=float, default=2400.0)
@@ -2089,6 +2397,52 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Fail unless each keeper has direct PR create, git push, and "
             "PR APPROVE evidence with explicit Docker execution markers."
+        ),
+    )
+    parser.add_argument(
+        "--require-provider-turn-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has runtime-manifest evidence of a "
+            "successful provider attempt."
+        ),
+    )
+    parser.add_argument(
+        "--require-llm-turn-evidence",
+        action="store_true",
+        dest="require_provider_turn_evidence",
+        help="Alias for --require-provider-turn-evidence.",
+    )
+    parser.add_argument(
+        "--require-checkpoint-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has a checkpoint_saved manifest row "
+            "whose linked checkpoint file exists."
+        ),
+    )
+    parser.add_argument(
+        "--require-history-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has persisted history.jsonl or "
+            "history.internal.jsonl evidence for a manifest trace."
+        ),
+    )
+    parser.add_argument(
+        "--require-tool-call-log-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has a turn_finished manifest row whose "
+            "linked tool-call log contains a matching row."
+        ),
+    )
+    parser.add_argument(
+        "--require-persistent-work-evidence",
+        action="store_true",
+        help=(
+            "Fail unless each keeper has provider-turn, checkpoint, history, "
+            "and tool-call-log evidence."
         ),
     )
     parser.add_argument(

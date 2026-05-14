@@ -415,11 +415,33 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ^ "Use all of these tools before your final reply: "
                   ^ String.concat ", " tools
               in
+              let telemetry_feedback_text =
+                match meta.telemetry_feedback_enabled with
+                | Some true ->
+                  let window_hours =
+                    match meta.telemetry_feedback_window_hours with
+                    | Some n when n > 0 -> min n 168
+                    | _ -> 24
+                  in
+                  let window_minutes = window_hours * 60 in
+                  (try
+                     Model_inference_metrics.compute
+                       ~base_path:ctx.config.base_path
+                       ~window_minutes
+                     |> Model_inference_metrics.render_keeper_prompt_feedback
+                   with exn ->
+                     Log.Keeper.warn
+                       "%s: telemetry feedback render failed: %s"
+                       meta.name (Printexc.to_string exn);
+                     "")
+                | Some false | None -> ""
+              in
               let soft_parts = List.filter
                 (fun s -> String.trim s <> "")
                 [ continuity_text;
                   skill_route_text;
                   worktree_text;
+                  telemetry_feedback_text;
                   turn_instructions_text;
                   required_tools_text ]
               in

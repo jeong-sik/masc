@@ -38,7 +38,15 @@ vi.mock('../../api/repositories', () => ({
   fetchRepositoriesList: vi.fn(() => Promise.resolve([{
     id: 'masc-mcp',
     name: 'masc-mcp',
+    url: '',
     local_path: '/workspace/masc-mcp',
+    default_branch: 'main',
+    status: 'active',
+    auto_sync: false,
+    sync_interval: 300,
+    credential_id: null,
+    created_at: null,
+    updated_at: null,
   }])),
 }))
 
@@ -264,10 +272,27 @@ describe('IdeShell', () => {
         session_id: 'sess-runtime',
         keeper: 'sangsu',
       },
+      repositories: [{
+        id: 'masc-mcp',
+        name: 'masc-mcp',
+        url: '',
+        local_path: '/workspace/masc-mcp',
+        default_branch: 'main',
+        status: 'active',
+        auto_sync: false,
+        sync_interval: 300,
+        credential_id: null,
+        created_at: null,
+        updated_at: null,
+      }],
+      activeRepositoryId: 'masc-mcp',
+      workspaceSource: { kind: 'repository', repoId: 'masc-mcp' },
+      dashboardConnected: true,
     })
 
-    expect(model.workspaceLabel).toBe('LIVE WORKSPACE')
-    expect(model.connectionLabel).toBe('mcp · connected')
+    expect(model.workspaceLabel).toBe('masc-mcp')
+    expect(model.connectionLabel).toBe('runtime · live')
+    expect(model.connectionTone).toBe('ok')
     expect(model.chips.map(chip => chip.label)).toEqual([
       'SPLIT DIFF',
       'ide/ide-shell.ts',
@@ -310,9 +335,11 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))
+    await waitFor(() => expect(container.querySelector('[data-testid="ide-statusbar-workspace"]')?.textContent).toBe('masc-mcp'))
 
     const statusbar = container.querySelector('[data-testid="ide-statusbar"]')
     expect(statusbar?.getAttribute('aria-label')).toBe('IDE operational status')
+    expect(statusbar?.textContent).not.toContain('LIVE WORKSPACE')
     const chipLabels = [
       ...container.querySelectorAll<HTMLElement>('[data-testid^="ide-statusbar-chip-"]'),
     ].map(chip => chip.textContent)
@@ -591,6 +618,28 @@ describe('IdeShell', () => {
     expect(container.textContent).toContain('BRANCH GRAPH')
     await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
     expect(container.textContent).toContain('main')
+  })
+
+  it('keeps the right diagnostics bounded above the primary conversation rail', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const rail = container.querySelector('[data-testid="ide-right-rail"]')
+    const contextStack = container.querySelector('[data-testid="ide-right-context-stack"]')
+    const primaryRail = container.querySelector('[data-testid="ide-primary-conversation-rail"]')
+    expect(rail).not.toBeNull()
+    expect(contextStack).not.toBeNull()
+    expect(primaryRail).not.toBeNull()
+    expect(Array.from(rail?.children ?? []).map(child => child.className)).toEqual([
+      'ide-plane-context-stack',
+      'ide-plane-primary-rail',
+    ])
+    expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
   })
 
   it('hydrates collapsed IDE rails from the route', () => {

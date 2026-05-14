@@ -225,6 +225,7 @@ let cn_kimi_coding = "kimi-coding"
 let cn_glm = "glm-api"
 let cn_glm_coding_plan = "glm-coding-plan"
 let cn_openrouter = "openrouter"
+let auth_header_authorization = "Authorization"
 let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
 let kimi_coding_key_envs = [ "KIMI_CODING_API_KEY"; "KIMI_API_KEY_SB" ]
 
@@ -1633,7 +1634,7 @@ let apply_wire_overlay
               Masc_network_defaults.openai_chat_completions_path) ->
     let api_key_trimmed = String.trim provider_cfg.api_key in
     let auth_header =
-      if String.equal api_key_trimmed "" then None else Some "Authorization"
+      if String.equal api_key_trimmed "" then None else Some auth_header_authorization
     in
     let static_token =
       if String.equal api_key_trimmed "" then None else Some api_key_trimmed

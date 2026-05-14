@@ -113,3 +113,7 @@ val run_process_with_timeout :
     Exit-code mapping (signal-aware): [WEXITED code -> code],
     [WSIGNALED code -> 128 + code],
     [WSTOPPED code -> 256 + code]. *)
+
+module For_testing : sig
+  val auth_requirements_of_model_label : string -> (string list, string) result
+end

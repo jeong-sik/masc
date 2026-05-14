@@ -258,8 +258,36 @@ let mount_args (spec : Worker_execution_spec.t) =
   base_mount @ config_mount
 ;;
 
-let auth_requirements_of_model_label model_label =
+let provider_config_for_auth_check model_label =
   match Cascade_config.parse_model_string model_label with
+  | Some _ as cfg -> cfg
+  | None -> (
+    match Provider_kind_resolver.resolve model_label with
+    | Provider_kind_resolver.Registered { provider_name; model_id; _ } -> (
+      let registry = Llm_provider.Provider_registry.default () in
+      match Llm_provider.Provider_registry.find registry provider_name with
+      | None -> None
+      | Some entry ->
+        Some
+          (Llm_provider.Provider_config.make
+             ~kind:entry.defaults.kind
+             ~model_id
+             ~base_url:entry.defaults.base_url
+             ~request_path:entry.defaults.request_path
+             ()))
+    | Provider_kind_resolver.Custom_url { model_id; base_url } ->
+      Some
+        (Llm_provider.Provider_config.make
+           ~kind:Llm_provider.Provider_config.OpenAI_compat
+           ~model_id
+           ~base_url
+           ~request_path:Masc_network_defaults.openai_chat_completions_path
+           ())
+    | Provider_kind_resolver.Unknown _ -> None)
+;;
+
+let auth_requirements_of_model_label model_label =
+  match provider_config_for_auth_check model_label with
   | None -> Ok []
   | Some cfg ->
     let keys =
@@ -282,13 +310,17 @@ let auth_requirements_of_model_label model_label =
     if missing = []
     then Ok keys
     else (
-      let kind_name = provider_id_of_config cfg in
+      let provider_label = provider_id_of_config cfg in
       Error
         (Printf.sprintf
            "%s Docker workers require %s"
-           kind_name
+           provider_label
            (String.concat ", " missing)))
 ;;
+
+module For_testing = struct
+  let auth_requirements_of_model_label = auth_requirements_of_model_label
+end
 
 let missing_required_envs keys =
   keys

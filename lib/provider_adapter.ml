@@ -366,6 +366,8 @@ let default_model_id_of_binding (binding : Runtime_binding.t) =
   | Some _ as value -> value
   | None ->
     (match runtime_kind_of_binding binding with
+     | _ when binding.Runtime_binding.kind = Llm_provider.Provider_config.Kimi ->
+       Some "kimi-k2.5"
      | Local -> None
      | Cli_agent | Direct_api -> Some "auto")
 ;;
@@ -1216,6 +1218,12 @@ let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider
      | None -> Option.to_list (Llm_provider.Provider_config.default_api_key_env kind))
 ;;
 
+let auth_env_keys_of_adapter (adapter : adapter) : string list =
+  match adapter.auth_mode with
+  | Api_key env_name -> [ env_name ]
+  | No_auth | Cli_cached_login | Vertex_adc _ -> []
+;;
+
 let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.t)
   : string list
   =
@@ -1229,9 +1237,15 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
     let uri = Uri.of_string cfg.base_url in
     if Masc_network_defaults.is_loopback_host_opt (Uri.host uri)
     then []
-    else auth_env_keys_of_provider_kind cfg.kind
+    else (
+      match adapter_of_provider_config cfg with
+      | Some adapter -> auth_env_keys_of_adapter adapter
+      | None -> auth_env_keys_of_provider_kind cfg.kind)
   | Llm_provider.Provider_config.Gemini -> [ gemini_api_key_env ]
-  | _ -> auth_env_keys_of_provider_kind cfg.kind
+  | _ -> (
+    match adapter_of_provider_config cfg with
+    | Some adapter -> auth_env_keys_of_adapter adapter
+    | None -> auth_env_keys_of_provider_kind cfg.kind)
 ;;
 
 let all_auth_env_keys () : string list =

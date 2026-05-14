@@ -170,6 +170,46 @@ let test_rewrite_custom_model_label_for_container () =
   check string "loopback custom label rewritten to host alias"
     "custom:qwen-test@http://host.docker.internal:19001" rewritten
 
+let test_docker_auth_preflight_reports_openrouter_key_when_missing () =
+  with_env "OPENROUTER_API_KEY" None @@ fun () ->
+  with_env "OPENAI_API_KEY" None @@ fun () ->
+  match
+    Lib.Worker_runtime_docker.For_testing.auth_requirements_of_model_label
+      "openrouter:openai/gpt-oss-20b"
+  with
+  | Ok keys ->
+    failf "expected missing OPENROUTER_API_KEY error, got Ok [%s]"
+      (String.concat ", " keys)
+  | Error msg ->
+    check bool "uses provider label" true
+      (Astring.String.is_infix ~affix:"openrouter Docker workers require" msg);
+    check bool "mentions openrouter key" true
+      (Astring.String.is_infix ~affix:"OPENROUTER_API_KEY" msg);
+    check bool "does not collapse to OpenAI key" false
+      (Astring.String.is_infix ~affix:"OPENAI_API_KEY" msg)
+
+let test_docker_auth_preflight_uses_openrouter_key_not_openai_key () =
+  with_env "OPENROUTER_API_KEY" (Some "router-key") @@ fun () ->
+  with_env "OPENAI_API_KEY" None @@ fun () ->
+  match
+    Lib.Worker_runtime_docker.For_testing.auth_requirements_of_model_label
+      "openrouter:openai/gpt-oss-20b"
+  with
+  | Error msg -> failf "expected OPENROUTER_API_KEY to satisfy auth: %s" msg
+  | Ok keys ->
+    check (list string) "provider-specific key"
+      [ "OPENROUTER_API_KEY" ]
+      keys
+
+let test_docker_auth_preflight_skips_local_custom_openai_compat () =
+  with_env "OPENAI_API_KEY" None @@ fun () ->
+  match
+    Lib.Worker_runtime_docker.For_testing.auth_requirements_of_model_label
+      "custom:local-model@http://127.0.0.1:19001"
+  with
+  | Error msg -> failf "local custom endpoint should not require auth: %s" msg
+  | Ok keys -> check (list string) "no auth keys" [] keys
+
 let test_run_process_with_timeout_returns_124_on_timeout () =
   with_eio @@ fun env ->
   let result =
@@ -256,6 +296,15 @@ let () =
       ( "rewrites",
         [ test_case "custom loopback model label rewritten for container" `Quick
             test_rewrite_custom_model_label_for_container ] );
+      ( "docker_auth",
+        [
+          test_case "reports OpenRouter key when missing" `Quick
+            test_docker_auth_preflight_reports_openrouter_key_when_missing;
+          test_case "uses OpenRouter key instead of OpenAI key" `Quick
+            test_docker_auth_preflight_uses_openrouter_key_not_openai_key;
+          test_case "skips auth for local custom OpenAI-compatible endpoint" `Quick
+            test_docker_auth_preflight_skips_local_custom_openai_compat;
+        ] );
       ( "process_timeout",
         [ test_case "timeout maps to exit code 124" `Quick
             test_run_process_with_timeout_returns_124_on_timeout ] );

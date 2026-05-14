@@ -16,11 +16,8 @@ describe("sectionLabel", () => {
 })
 
 describe("normalizeStatusSection", () => {
-  it("maps retired memory-subsystems links to cognition", () => {
-    expect(normalizeStatusSection("memory-subsystems")).toBe("cognition")
-  })
-
   it("falls back to the monitoring default section", () => {
+    expect(normalizeStatusSection("memory-subsystems")).toBe("runtime")
     expect(normalizeStatusSection("unknown")).toBe("runtime")
     expect(normalizeStatusSection(undefined)).toBe("runtime")
   })

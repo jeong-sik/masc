@@ -96,7 +96,6 @@ code_refs:
 - `command:governance -> command:operations`
 - `command:connectors -> command:operations&view=connectors`
 - `command:inspector -> command:operations&view=inspector`
-- `monitoring:memory-subsystems -> monitoring:cognition&view=memory`
 - `connectors:connector-discord -> connectors:connector-status&connector=discord`
 - `connectors:connector-imessage -> connectors:connector-status&connector=imessage`
 - `connectors:connector-slack -> connectors:connector-status&connector=slack`

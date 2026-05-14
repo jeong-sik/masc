@@ -531,6 +531,109 @@ describe('IdeContextLens', () => {
     })
   })
 
+  it('promotes tagged activity references into routeable IDE context links', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diffRows: [],
+      events: [{
+        id: 'evt-tagged-context',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'PR #15000',
+        timestamp_ms: 400,
+        detail: [
+          'goal:goal-ide',
+          'task:task-42',
+          'board:post-1',
+          'comment:comment-1',
+          'git:abc123',
+          'log:turn-9',
+          'session:sess-9',
+          'op:op-9',
+          'wr:wr-9',
+          'line:27',
+        ].join(' '),
+        tags: ['pr:15000'],
+      }],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    expect(model.activeLineCount).toBe(1)
+    expect(model.anchors[0]).toMatchObject({
+      surface: 'PR',
+      line: 27,
+      keeper_id: 'sangsu',
+    })
+    expect(model.anchors[0]?.meta).toContain('goal goal-ide')
+    expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Code')).toMatchObject({
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/keeper/keeper_exec_ide.ml',
+        line: '27',
+        surface: 'PR',
+      },
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Telemetry')).toMatchObject({
+      tab: 'monitoring',
+      params: {
+        section: 'fleet-health',
+        view: 'event-log',
+        session_id: 'sess-9',
+        operation_id: 'op-9',
+        worker_run_id: 'wr-9',
+        q: 'turn-9',
+      },
+    })
+  })
+
+  it('prefers structured activity context over tagged fallback references', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diffRows: [],
+      events: [{
+        id: 'evt-structured-wins',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'PR #99999',
+        timestamp_ms: 400,
+        detail: 'pr:99999 log:turn-999',
+        context: {
+          file_path: 'lib/keeper/keeper_exec_ide.ml',
+          pr_id: '15000',
+          log_id: 'turn-9',
+        },
+      }],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'PR')).toMatchObject({
+      id: 'pr:15000',
+      evidence: 'PR 15000',
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Log')).toMatchObject({
+      id: 'log:turn-9',
+      evidence: 'Log turn-9',
+    })
+  })
+
   it('keeps other-file activity out of the current-file lens', () => {
     const model = deriveIdeContextLens({
       filePath: 'lib/keeper/keeper_exec_ide.ml',

@@ -184,6 +184,7 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   }
   for (const event of fileEvents) {
     const line = eventLineForFile(event, filePath ?? input.filePath)
+      ?? eventRouteRefs(event).line
     if (line !== undefined) activeLines.add(line)
   }
 
@@ -617,32 +618,35 @@ function buildAnchors(
   }
 
   for (const event of events.slice(0, 3)) {
-    const contextMeta = eventContextMeta(event)
+    const refs = eventRouteRefs(event)
+    const contextMeta = eventContextMeta(event, refs)
+    const eventLine = eventLineForFile(event, filePath) ?? refs.line
+    const eventSurface = surfaceFromEvent(event, eventSearchTextByEvent)
     anchors.push({
       id: `event-${event.id}`,
       file_path: event.context?.file_path ?? filePath,
-      surface: surfaceFromEvent(event, eventSearchTextByEvent),
+      surface: eventSurface,
       label: truncate(`${event.verb} ${event.target}`, 48),
       meta: truncate(contextMeta || event.detail || `keeper ${event.keeper_id}`, 60),
-      line: eventLineForFile(event, filePath),
+      line: eventLine,
       keeper_id: event.keeper_id,
       route_links: routeLinksForContext({
         filePath: event.context?.file_path ?? filePath,
-        line: eventLineForFile(event, filePath),
-        surface: surfaceFromEvent(event, eventSearchTextByEvent),
+        line: eventLine,
+        surface: eventSurface,
         label: truncate(event.detail || `${event.verb} ${event.target}`, 48),
         sourceId: `event-${event.id}`,
-        goalId: event.context?.goal_id,
-        taskId: event.context?.task_id,
-        boardPostId: event.context?.board_post_id,
-        commentId: event.context?.comment_id,
-        prId: event.context?.pr_id,
-        gitRef: event.context?.git_ref,
-        logId: event.context?.log_id,
-        sessionId: event.context?.session_id,
-        operationId: event.context?.operation_id,
-        workerRunId: event.context?.worker_run_id,
-        telemetryQuery: event.context?.log_id,
+        goalId: event.context?.goal_id ?? refs.goalId,
+        taskId: event.context?.task_id ?? refs.taskId,
+        boardPostId: event.context?.board_post_id ?? refs.boardPostId,
+        commentId: event.context?.comment_id ?? refs.commentId,
+        prId: event.context?.pr_id ?? refs.prId,
+        gitRef: event.context?.git_ref ?? refs.gitRef,
+        logId: event.context?.log_id ?? refs.logId,
+        sessionId: event.context?.session_id ?? refs.sessionId,
+        operationId: event.context?.operation_id ?? refs.operationId,
+        workerRunId: event.context?.worker_run_id ?? refs.workerRunId,
+        telemetryQuery: event.context?.log_id ?? refs.logId,
         keeperId: event.keeper_id,
         telemetry: true,
       }),
@@ -750,21 +754,102 @@ function diagnosticTelemetryQuery(diagnostic: IdeContextDiagnostic): string | un
   return parts.length > 0 ? parts.join(' ') : undefined
 }
 
-function eventContextMeta(event: RunActivityEvent): string {
+interface EventRouteRefs {
+  readonly line?: number
+  readonly goalId?: string
+  readonly taskId?: string
+  readonly boardPostId?: string
+  readonly commentId?: string
+  readonly prId?: string
+  readonly gitRef?: string
+  readonly logId?: string
+  readonly sessionId?: string
+  readonly operationId?: string
+  readonly workerRunId?: string
+}
+
+const REF_VALUE_PATTERN = '([A-Za-z0-9][A-Za-z0-9._/@:-]*)'
+const EVENT_REF_PATTERNS = {
+  goalId: new RegExp(`\\bgoal[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+  taskId: new RegExp(`\\btask[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+  boardPostId: new RegExp(`\\b(?:board|post)[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+  commentId: new RegExp(`\\bcomment[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+  prId: /\b(?:pr|pull[_\s-]?request)\s*[:#/]?\s*#?(\d{1,10})\b/i,
+  gitRef: new RegExp(`\\b(?:git|commit|branch|ref)[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+  logId: new RegExp(`\\b(?:log|turn)[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+  sessionId: new RegExp(`\\bsession[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+  operationId: new RegExp(`\\b(?:operation|op)[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+  workerRunId: new RegExp(`\\b(?:worker_run|worker|wr)[:#/]+${REF_VALUE_PATTERN}`, 'i'),
+} as const
+
+function eventRouteRefs(event: RunActivityEvent): EventRouteRefs {
+  const text = eventRawText(event)
+  return {
+    line: eventLineRef(text),
+    goalId: firstEventRef(text, EVENT_REF_PATTERNS.goalId),
+    taskId: firstEventRef(text, EVENT_REF_PATTERNS.taskId),
+    boardPostId: firstEventRef(text, EVENT_REF_PATTERNS.boardPostId),
+    commentId: firstEventRef(text, EVENT_REF_PATTERNS.commentId),
+    prId: firstEventRef(text, EVENT_REF_PATTERNS.prId),
+    gitRef: firstEventRef(text, EVENT_REF_PATTERNS.gitRef),
+    logId: firstEventRef(text, EVENT_REF_PATTERNS.logId),
+    sessionId: firstEventRef(text, EVENT_REF_PATTERNS.sessionId),
+    operationId: firstEventRef(text, EVENT_REF_PATTERNS.operationId),
+    workerRunId: firstEventRef(text, EVENT_REF_PATTERNS.workerRunId),
+  }
+}
+
+function eventRawText(event: RunActivityEvent): string {
+  return [
+    event.kind,
+    event.verb,
+    event.target,
+    event.detail,
+    ...(event.tags ?? []),
+  ]
+    .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
+    .join(' ')
+}
+
+function firstEventRef(text: string, pattern: RegExp): string | undefined {
+  return cleanParsedRef(pattern.exec(text)?.[1])
+}
+
+function cleanParsedRef(value: string | undefined): string | undefined {
+  const cleaned = value?.trim().replace(/[),.;\]}]+$/u, '')
+  return cleaned ? cleaned : undefined
+}
+
+function eventLineRef(text: string): number | undefined {
+  const explicit = /\b(?:line|l)[:#]+(\d{1,7})\b/i.exec(text)?.[1]
+  const compact = explicit ?? /\bL(\d{1,7})\b/.exec(text)?.[1]
+  return compact ? positiveLine(Number(compact)) : undefined
+}
+
+function eventContextMeta(event: RunActivityEvent, refs: EventRouteRefs): string {
   const context = event.context
-  if (!context) return ''
+  const goalId = context?.goal_id ?? refs.goalId
+  const taskId = context?.task_id ?? refs.taskId
+  const prId = context?.pr_id ?? refs.prId
+  const boardPostId = context?.board_post_id ?? refs.boardPostId
+  const commentId = context?.comment_id ?? refs.commentId
+  const gitRef = context?.git_ref ?? refs.gitRef
+  const logId = context?.log_id ?? refs.logId
+  const sessionId = context?.session_id ?? refs.sessionId
+  const operationId = context?.operation_id ?? refs.operationId
+  const workerRunId = context?.worker_run_id ?? refs.workerRunId
   return compactMeta([
-    context.goal_id ? `goal ${context.goal_id}` : null,
-    context.task_id ? `task ${context.task_id}` : null,
-    context.pr_id ? `PR ${context.pr_id}` : null,
-    context.board_post_id ? `board ${context.board_post_id}` : null,
-    context.comment_id ? `comment ${context.comment_id}` : null,
-    context.git_ref ? `git ${context.git_ref}` : null,
-    context.log_id ? `log ${context.log_id}` : null,
-    context.session_id ? `session ${context.session_id}` : null,
-    context.operation_id ? `operation ${context.operation_id}` : null,
-    context.worker_run_id ? `worker ${context.worker_run_id}` : null,
-    context.file_path ?? null,
+    goalId ? `goal ${goalId}` : null,
+    taskId ? `task ${taskId}` : null,
+    prId ? `PR ${prId}` : null,
+    boardPostId ? `board ${boardPostId}` : null,
+    commentId ? `comment ${commentId}` : null,
+    gitRef ? `git ${gitRef}` : null,
+    logId ? `log ${logId}` : null,
+    sessionId ? `session ${sessionId}` : null,
+    operationId ? `operation ${operationId}` : null,
+    workerRunId ? `worker ${workerRunId}` : null,
+    context?.file_path ?? null,
   ])
 }
 
